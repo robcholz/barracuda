@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-use barracuda_system_image::{flash_selected, IMAGE_OUTPUT};
+use barracuda_system_image::{deploy_selected, flash_selected, IMAGE_OUTPUT};
 use tempfile::tempdir;
 
 const CAPACITY: usize = 32 * 1024;
@@ -103,6 +103,37 @@ fn initializes_a_missing_host_flash_as_erased_before_writing_the_partition() {
     assert!(physical[RESOURCES_OFFSET + RESOURCES_SIZE..]
         .iter()
         .all(|byte| *byte == 0xff));
+}
+
+#[test]
+fn deploy_builds_then_flashes_the_selected_image() {
+    let root = tempdir().expect("temporary workspace");
+    select_host_board(root.path(), "hostc");
+    let capacity = 1024 * 1024;
+    let resources_offset = 64 * 1024;
+    let resources_size = 512 * 1024;
+    fs::write(
+        root.path()
+            .join("boards/configs/local-hostc/file-layout.yml"),
+        format!(
+            "capacity: {capacity}\nregions:\n  - name: resources\n    offset: {resources_offset}\n    size: {resources_size}\n    access: read-only\n    filesystem: fatfs\n"
+        ),
+    )
+    .expect("deploy layout");
+
+    let flashed = deploy_selected(root.path()).expect("deploy selected System image");
+
+    assert_eq!(flashed.board(), "local-hostc");
+    assert!(flashed.image().is_file());
+    assert_eq!(
+        fs::metadata(flashed.image()).expect("built image").len(),
+        resources_size as u64
+    );
+    let physical = fs::read(flashed.destination()).expect("flashed bytes");
+    assert_eq!(
+        &physical[resources_offset..resources_offset + resources_size],
+        fs::read(flashed.image()).expect("built bytes")
+    );
 }
 
 #[test]

@@ -1,23 +1,25 @@
-//! `cargo system-image` entry point.
+//! `cargo image` entry point.
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use anstream::{eprintln, println};
 use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
-use barracuda_system_image::{build_selected, flash_selected, ResourcesFilesystem};
+use barracuda_system_image::{
+    build_selected, deploy_selected, flash_selected, ResourcesFilesystem,
+};
 use clap::{Parser, Subcommand};
 
 /// Manages the selected Board's bundled Plugin resource image.
 #[derive(Debug, Parser)]
 #[command(
-    name = "cargo system-image",
-    bin_name = "cargo system-image",
+    name = "cargo image",
+    bin_name = "cargo image",
     version,
     styles = barracuda_cli_style::CLI_STYLES
 )]
 struct Cli {
-    /// System-image operation to perform.
+    /// Image operation to perform.
     #[command(subcommand)]
     command: Command,
 }
@@ -28,19 +30,49 @@ enum Command {
     Build,
     /// Flash the built image into the selected Board's `resources` partition.
     Flash,
+    /// Build and flash the selected Board's configured resource image.
+    Deploy,
 }
 
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Build => build(),
         Command::Flash => flash(),
+        Command::Deploy => deploy(),
+    }
+}
+
+fn deploy() -> ExitCode {
+    let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
+        eprintln!(
+            "{ERROR}error:{ERROR:#} image tool crate is not located below the workspace root"
+        );
+        return ExitCode::FAILURE;
+    };
+    match deploy_selected(workspace) {
+        Ok(image) => {
+            println!(
+                "{SUCCESS}✔{SUCCESS:#} Deployed {DIM}{}-byte {} resource image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} at {DIM}{:#x}{DIM:#} from `{}` to `{}`.",
+                image.size(),
+                filesystem_name(image.filesystem()),
+                image.board(),
+                image.offset(),
+                image.image().display(),
+                image.destination()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
 fn flash() -> ExitCode {
     let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
         eprintln!(
-            "{ERROR}error:{ERROR:#} system-image crate is not located below the workspace root"
+            "{ERROR}error:{ERROR:#} image tool crate is not located below the workspace root"
         );
         return ExitCode::FAILURE;
     };
@@ -67,7 +99,7 @@ fn flash() -> ExitCode {
 fn build() -> ExitCode {
     let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
         eprintln!(
-            "{ERROR}error:{ERROR:#} system-image crate is not located below the workspace root"
+            "{ERROR}error:{ERROR:#} image tool crate is not located below the workspace root"
         );
         return ExitCode::FAILURE;
     };
@@ -111,8 +143,8 @@ mod tests {
 
     #[test]
     fn command_requires_an_operation() {
-        let error = Cli::try_parse_from(["cargo system-image"])
-            .expect_err("an explicit operation is required");
+        let error =
+            Cli::try_parse_from(["cargo image"]).expect_err("an explicit operation is required");
 
         assert_eq!(
             error.kind(),
@@ -122,27 +154,32 @@ mod tests {
 
     #[test]
     fn command_accepts_build_without_parameters() {
-        assert!(Cli::try_parse_from(["cargo system-image", "build"]).is_ok());
+        assert!(Cli::try_parse_from(["cargo image", "build"]).is_ok());
     }
 
     #[test]
     fn command_accepts_flash_without_parameters() {
-        assert!(Cli::try_parse_from(["cargo system-image", "flash"]).is_ok());
+        assert!(Cli::try_parse_from(["cargo image", "flash"]).is_ok());
+    }
+
+    #[test]
+    fn command_accepts_deploy_without_parameters() {
+        assert!(Cli::try_parse_from(["cargo image", "deploy"]).is_ok());
     }
 
     #[test]
     fn command_exposes_clap_help() {
-        let error = Cli::try_parse_from(["cargo system-image", "--help"])
-            .expect_err("help exits before building");
+        let error =
+            Cli::try_parse_from(["cargo image", "--help"]).expect_err("help exits before building");
 
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
-        assert!(error.to_string().contains("Usage: cargo system-image"));
+        assert!(error.to_string().contains("Usage: cargo image"));
     }
 
     #[test]
     fn command_rejects_build_parameters() {
         for argument in ["--size", "--output"] {
-            let error = Cli::try_parse_from(["cargo system-image", "build", argument])
+            let error = Cli::try_parse_from(["cargo image", "build", argument])
                 .expect_err("build parameters are unsupported");
             assert_eq!(error.kind(), ErrorKind::UnknownArgument);
         }
@@ -151,8 +188,17 @@ mod tests {
     #[test]
     fn command_rejects_flash_parameters() {
         for argument in ["--board", "--platform", "--image"] {
-            let error = Cli::try_parse_from(["cargo system-image", "flash", argument])
+            let error = Cli::try_parse_from(["cargo image", "flash", argument])
                 .expect_err("flash parameters are unsupported");
+            assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+        }
+    }
+
+    #[test]
+    fn command_rejects_deploy_parameters() {
+        for argument in ["--board", "--platform", "--image"] {
+            let error = Cli::try_parse_from(["cargo image", "deploy", argument])
+                .expect_err("deploy parameters are unsupported");
             assert_eq!(error.kind(), ErrorKind::UnknownArgument);
         }
     }
