@@ -40,8 +40,8 @@ Use the parts required by the Plugin:
 ```text
 plugins/<plugin>/
 ├── plugin.toml
-├── filesystem/                   # optional prebuilt scoped files
-│   └── resources/                # runtime read-only files
+├── filesystem/                   # only home for bundled runtime assets
+│   └── resources/                # only supported bundled subtree today
 ├── crates/
 │   ├── plugin/
 │   │   ├── Cargo.toml
