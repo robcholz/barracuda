@@ -59,8 +59,8 @@ packages. The built-in plan installs `io`, which provides:
   After the caller closes input and queued messages are consumed, it returns
   `nil`.
 - `require("io").print(...)` converts each argument with the sandbox
-  `tostring`, joins the values with tabs, and emits one complete output
-  message.
+  `tostring`, joins the values with tabs, and appends one complete message to
+  the run's eventual completion output.
 
 Installing the IO package creates no global `io`, `input`, or `print` aliases.
 
@@ -73,9 +73,10 @@ message and apply backpressure when full.
 an Environment, packages, or any globals.
 
 The typed `Vm` capability accepts owned source and input strings. It does not
-impose a transport-derived length limit. See [action.md](action.md) for
-Workflow control and rejection behavior and [event.md](event.md) for output
-and completion.
+impose a transport-derived length limit. Starting a run returns `VmRun`: its
+`run_id` is available immediately for input and cancellation, while awaiting
+the handle returns `VmRunCompletion` with ordered output and the terminal
+outcome. See [action.md](action.md) for Workflow behavior.
 
 ## Native modules
 
@@ -158,8 +159,8 @@ Lua allocation, reallocation, garbage collection, and state destruction all
 use that allocator; dropping the Lua state returns the allocator slot to the
 pool.
 
-Exceeding the fixed per-execution Lua heap terminates the execution with a
-`vm.finished` Event whose error is `lua_memory`.
+Exceeding the fixed per-execution Lua heap completes the execution with
+`outcome: "error"` and `error: "lua_memory"`.
 `VmRuntime::with_memory_bytes` can replace the default per-slot capacity when
 constructing the runtime. The Lua heap limit does not include owned source and
 input strings, native callback objects, or Embassy task storage.

@@ -4,12 +4,12 @@ use core::task::{Poll, Waker};
 
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
-use barracuda_workflow_plugin::WorkflowService;
 use embassy_executor::Spawner;
+use futures_channel::oneshot;
 
-use crate::VmLimits;
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
 use crate::run::{ExecutionJob, execute_run};
+use crate::{VmLimits, VmRun};
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
 pub(crate) const VM_TASK_SLOTS: usize = 4;
@@ -95,7 +95,6 @@ impl RunSlot {
 
 struct RuntimeState {
     spawner: Cell<Option<Spawner>>,
-    workflow: RefCell<Option<Rc<WorkflowService>>>,
     slots: [RunSlot; VM_TASK_SLOTS],
     next_run_id: Cell<u32>,
 }
@@ -126,7 +125,6 @@ impl VmRuntime {
         Ok(Self {
             state: Rc::new(RuntimeState {
                 spawner: Cell::new(None),
-                workflow: RefCell::new(None),
                 slots: core::array::from_fn(|_index| RunSlot::new()),
                 next_run_id: Cell::new(1),
             }),
@@ -139,22 +137,16 @@ impl VmRuntime {
     /// # Errors
     ///
     /// Returns [`VmRuntimeStartError::AlreadyStarted`] when called more than once.
-    pub fn start(
-        &self,
-        spawner: Spawner,
-        workflow: Rc<WorkflowService>,
-    ) -> Result<(), VmRuntimeStartError> {
+    pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
         if self.state.spawner.get().is_some() {
             return Err(VmRuntimeStartError::AlreadyStarted);
         }
         self.state.spawner.set(Some(spawner));
-        *self.state.workflow.borrow_mut() = Some(workflow);
         Ok(())
     }
 
     pub(crate) fn stop(&self) {
         self.state.spawner.set(None);
-        *self.state.workflow.borrow_mut() = None;
         for slot in &self.state.slots {
             if slot.active.get() {
                 slot.cancelled.set(true);
@@ -170,24 +162,18 @@ impl VmRuntime {
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
         package_registry: LuaPackageRegistry,
-    ) -> Result<u32, DispatchError> {
+    ) -> Result<VmRun, DispatchError> {
         let spawner = self
             .state
             .spawner
             .get()
             .ok_or(DispatchError::RuntimeUnavailable)?;
-        let workflow = self
-            .state
-            .workflow
-            .borrow()
-            .clone()
-            .ok_or(DispatchError::RuntimeUnavailable)?;
         let memory = self.memory_pool.acquire().ok_or(DispatchError::Busy)?;
         let control = self.reserve_run()?;
         let run_id = control.run_id;
+        let (completion, result) = oneshot::channel();
         if spawner
             .spawn(vm_execution_task(ExecutionJob {
-                workflow,
                 run_id,
                 source,
                 control,
@@ -195,12 +181,13 @@ impl VmRuntime {
                 limits,
                 builtin_packages,
                 package_registry,
+                completion,
             }))
             .is_err()
         {
             return Err(DispatchError::Busy);
         }
-        Ok(run_id)
+        Ok(VmRun::new(run_id, result))
     }
 
     pub(crate) fn send_input(

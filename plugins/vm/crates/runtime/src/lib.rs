@@ -1,4 +1,4 @@
-//! Isolated Lua execution capability with Workflow Events.
+//! Isolated Lua execution capability with awaitable completion.
 #![no_std]
 
 extern crate alloc;
@@ -6,9 +6,8 @@ extern crate alloc;
 #[allow(unsafe_code)]
 #[allow(clippy::indexing_slicing)]
 mod memory;
-/// VM Workflow Event identities.
 #[allow(unsafe_code)]
-pub mod run;
+mod run;
 mod runtime;
 mod vm;
 
@@ -16,6 +15,6 @@ pub use barracuda_vm_builtin_packages::BuiltinPackages;
 pub use memory::VmMemoryPoolError;
 pub use runtime::{VmRuntime, VmRuntimeStartError};
 pub use vm::{
-    Vm, VmControlAccepted, VmError, VmInputRequest, VmLimits, VmRunAccepted, VmRunReference,
-    VmRunRequest,
+    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmRun,
+    VmRunCompletion, VmRunOutcome, VmRunReference, VmRunRequest,
 };

@@ -8,9 +8,42 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
+        },
+        "outcome": { "enum": ["success", "cancelled"] },
+        "output": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       },
-      "required": ["run_id"],
+      "required": ["run_id", "outcome", "output"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "outcome": { "const": "error" },
+        "output": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "error": {
+          "enum": [
+            "vm_create",
+            "vm_configure",
+            "lua_load",
+            "lua_runtime",
+            "unexpected_yield",
+            "lua_memory"
+          ]
+        },
+        "diagnostic": { "type": "string" }
+      },
+      "required": ["run_id", "outcome", "output", "error", "diagnostic"],
       "additionalProperties": false
     },
     {

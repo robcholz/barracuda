@@ -15,6 +15,12 @@ embassy-executor.workspace = true
 serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
 
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+serde_json = { version = "1", features = ["std"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

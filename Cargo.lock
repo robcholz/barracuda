@@ -606,8 +606,13 @@ name = "barracuda-agent-vm-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-agent-tool",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
+ "futures-lite",
  "json-validator",
  "serde",
  "serde_json",
@@ -1538,8 +1543,11 @@ dependencies = [
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
+ "critical-section",
  "embassy-executor",
+ "embassy-time",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1550,14 +1558,13 @@ dependencies = [
  "barracuda-lua",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
- "barracuda-workflow-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
+ "futures-channel",
  "getset",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 

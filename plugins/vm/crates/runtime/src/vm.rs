@@ -1,10 +1,13 @@
-use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
-use barracuda_workflow_plugin::WorkflowService;
 use embassy_executor::Spawner;
+use futures_channel::oneshot;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 
@@ -46,11 +49,76 @@ pub struct VmRunRequest {
     pub source: String,
 }
 
-/// Accepted VM execution.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub struct VmRunAccepted {
+/// Terminal state of one accepted Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmRunOutcome {
+    /// The source completed successfully.
+    Success,
+    /// The caller cancelled the execution.
+    Cancelled,
+    /// Lua creation, configuration, loading, or execution failed.
+    Error,
+}
+
+/// Stable execution failure reported after a run was accepted.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmExecutionError {
+    /// The Lua state could not be created.
+    VmCreate,
+    /// The sandbox or native packages could not be configured.
+    VmConfigure,
+    /// The source document could not be loaded.
+    LuaLoad,
+    /// The loaded source failed while running.
+    LuaRuntime,
+    /// Lua yielded for a reason not owned by the VM scheduler.
+    UnexpectedYield,
+    /// The fixed Lua heap was exhausted.
+    LuaMemory,
+}
+
+/// Complete result of one accepted Lua execution.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmRunCompletion {
     /// Runtime-generated execution identifier.
     pub run_id: u32,
+    /// Terminal execution state.
+    pub outcome: VmRunOutcome,
+    /// Complete messages emitted by `io.print(...)`, in order.
+    pub output: Vec<String>,
+    /// Stable execution failure when `outcome` is `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<VmExecutionError>,
+    /// Human-readable execution diagnostic when `outcome` is `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+}
+
+/// Awaitable handle for one accepted Lua execution.
+#[derive(CopyGetters)]
+pub struct VmRun {
+    /// Runtime-generated execution identifier available before completion.
+    #[getset(get_copy = "pub")]
+    run_id: u32,
+    completion: oneshot::Receiver<VmRunCompletion>,
+}
+
+impl VmRun {
+    pub(crate) const fn new(run_id: u32, completion: oneshot::Receiver<VmRunCompletion>) -> Self {
+        Self { run_id, completion }
+    }
+}
+
+impl Future for VmRun {
+    type Output = Result<VmRunCompletion, VmError>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.completion)
+            .poll(context)
+            .map(|result| result.map_err(|_error| VmError::RuntimeUnavailable))
+    }
 }
 
 /// Request to provide input or EOF to an active execution.
@@ -146,13 +214,9 @@ impl Vm {
         self
     }
 
-    /// Installs the task spawner and Workflow Event destination.
-    pub fn start(
-        &self,
-        spawner: Spawner,
-        workflow: Rc<WorkflowService>,
-    ) -> Result<(), VmRuntimeStartError> {
-        self.runtime.start(spawner, workflow)
+    /// Installs the task spawner after Plugin registration completes.
+    pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
+        self.runtime.start(spawner)
     }
 
     /// Stops accepting executions and cancels every active run.
@@ -160,8 +224,8 @@ impl Vm {
         self.runtime.stop();
     }
 
-    /// Starts one isolated Lua execution and returns immediately after acceptance.
-    pub fn run(&self, request: VmRunRequest) -> Result<VmRunAccepted, VmError> {
+    /// Starts one isolated Lua execution and returns its awaitable completion handle.
+    pub fn run(&self, request: VmRunRequest) -> Result<VmRun, VmError> {
         self.runtime
             .dispatch(
                 request.source,
@@ -169,7 +233,6 @@ impl Vm {
                 self.builtin_packages,
                 self.package_registry.clone(),
             )
-            .map(|run_id| VmRunAccepted { run_id })
             .map_err(VmError::from)
     }
 
