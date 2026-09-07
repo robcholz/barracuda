@@ -1,0 +1,21 @@
+[package]
+name = "barracuda-cli-style"
+version = "0.1.0"
+edition = "2021"
+description = "Shared terminal styling for Barracuda command-line tools"
+
+[dependencies]
+anstyle = "1"
+clap = { version = "4", default-features = false, features = ["color", "std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

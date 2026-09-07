@@ -6,7 +6,13 @@ use barracuda_platform_tool::{launch, sync_with_report, SyncStatus};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "cargo platform", bin_name = "cargo platform", version, about)]
+#[command(
+    name = "cargo platform",
+    bin_name = "cargo platform",
+    version,
+    about,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

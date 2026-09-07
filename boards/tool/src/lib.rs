@@ -86,7 +86,13 @@ impl SyncReport {
 
 /// Command-line interface for `cargo board`.
 #[derive(Debug, Parser)]
-#[command(name = "cargo board", bin_name = "cargo board", version, about)]
+#[command(
+    name = "cargo board",
+    bin_name = "cargo board",
+    version,
+    about,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 pub struct Cli {
     /// Board operation to perform.
     #[command(subcommand)]

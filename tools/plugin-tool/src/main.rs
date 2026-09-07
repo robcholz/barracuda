@@ -13,7 +13,13 @@ use clap::{Parser, Subcommand};
 use dialoguer::console::Term;
 
 #[derive(Debug, Parser)]
-#[command(name = "cargo plugin", bin_name = "cargo plugin", version, about)]
+#[command(
+    name = "cargo plugin",
+    bin_name = "cargo plugin",
+    version,
+    about,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

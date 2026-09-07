@@ -8,7 +8,12 @@ use clap::{Parser, Subcommand};
 
 /// Manages the selected Board's System image.
 #[derive(Debug, Parser)]
-#[command(name = "cargo system-image", bin_name = "cargo system-image", version)]
+#[command(
+    name = "cargo system-image",
+    bin_name = "cargo system-image",
+    version,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 struct Cli {
     /// System-image operation to perform.
     #[command(subcommand)]
