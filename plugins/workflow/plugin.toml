@@ -1,0 +1,3 @@
+id = "workflow"
+depends-on = []
+description = "Runs durable JSON Workflows through typed Plugin actions."

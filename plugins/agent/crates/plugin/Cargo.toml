@@ -14,6 +14,7 @@ http-client = { workspace = true, features = ["mbedtls"] }
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 barracuda-event-router.workspace = true
@@ -23,6 +24,7 @@ embassy-net.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 embedded-io-async = "0.7"
 futures-lite = "2"
+json-validator.workspace = true
 picoserve = { version = "0.19.0", default-features = false, features = ["embassy"] }
 tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
 

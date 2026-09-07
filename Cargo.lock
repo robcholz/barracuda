@@ -434,10 +434,12 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
+ "json-validator",
  "log",
  "picoserve",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -1641,6 +1643,37 @@ name = "barracuda-workflow"
 version = "0.1.0"
 dependencies = [
  "barracuda-rpc",
+ "futures-lite",
+ "getset",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-workflow-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-workflow-runtime",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-workflow-runtime"
+version = "0.1.0"
+dependencies = [
  "futures-lite",
  "getset",
  "log",

@@ -42,9 +42,9 @@ pub use service::{RuntimeBuildError, RuntimeService};
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, EmptyArgs, Resource, RiskClass, Tool, ToolConfig, ToolError,
-        ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
-        ToolResult, ToolSpec,
+        tool_metadata, Action, DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs,
+        Resource, RiskClass, Tool, ToolConfig, ToolError, ToolFuture, ToolGroup, ToolHandler,
+        ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
     };
 }
 
@@ -105,6 +105,15 @@ pub(crate) struct ToolLifecycle {
 }
 
 impl ToolLifecycle {
+    fn register_group(&self, group: ToolGroup) -> RuntimeResult<()> {
+        if let Some(tools) = self.loaded.borrow().as_ref() {
+            tools.register_group(group)?;
+        } else {
+            self.pending.borrow_mut().push(group);
+        }
+        Ok(())
+    }
+
     fn registry(&self) -> RuntimeResult<Arc<ToolRegistry>> {
         self.loaded
             .borrow()
@@ -123,10 +132,54 @@ impl ToolLifecycle {
         *self.loaded.borrow_mut() = Some(tools);
         Ok(())
     }
+
+    fn start_all(&self) -> RuntimeResult<()> {
+        self.started.set(true);
+        if let Some(tools) = self.loaded.borrow().as_ref() {
+            tools.start_all()?;
+        }
+        Ok(())
+    }
+
+    fn stop_all(&self) -> RuntimeResult<()> {
+        self.started.set(false);
+        if let Some(tools) = self.loaded.borrow().as_ref() {
+            tools.stop_all()?;
+        }
+        Ok(())
+    }
+}
+
+/// Plugin-facing registration capability for the Agent runtime's Tool Registry.
+///
+/// Groups registered before the runtime service loads durable state are installed
+/// into the same [`ToolRegistry`] that backs every Agent as soon as it is ready.
+/// The capability preserves each [`tools::Tool`]'s native awaited or detached
+/// execution semantics because it accepts the original [`ToolGroup`] directly.
+#[derive(Clone)]
+pub struct AgentToolRegistry {
+    lifecycle: Arc<ToolLifecycle>,
+}
+
+impl AgentToolRegistry {
+    fn new(lifecycle: Arc<ToolLifecycle>) -> Self {
+        Self { lifecycle }
+    }
+
+    /// Registers one Tool group with the Agent runtime's Tool Registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError::Tool`] when the loaded Tool Registry rejects the
+    /// group. Startup registrations made before durable state is loaded are
+    /// applied to that Registry during runtime initialization.
+    pub fn register_group(&self, group: ToolGroup) -> RuntimeResult<()> {
+        self.lifecycle.register_group(group)
+    }
 }
 
 pub struct AgentRuntime {
-    tool_lifecycle: Arc<ToolLifecycle>,
+    tool_registry: AgentToolRegistry,
     control: RuntimeControl,
 }
 
@@ -177,6 +230,7 @@ impl AgentRuntime {
         Resolver: Dns + 'static,
     {
         let tool_lifecycle = Arc::new(ToolLifecycle::default());
+        let tool_registry = AgentToolRegistry::new(Arc::clone(&tool_lifecycle));
         let (control, service) = RuntimeControl::new(
             filesystem,
             persistence,
@@ -188,10 +242,17 @@ impl AgentRuntime {
         Ok((
             Self {
                 control,
-                tool_lifecycle,
+                tool_registry,
             },
             service,
         ))
+    }
+
+    /// Returns the Plugin-facing capability that registers Tool groups into
+    /// this runtime's Tool Registry.
+    #[must_use]
+    pub fn tool_registry(&self) -> AgentToolRegistry {
+        self.tool_registry.clone()
     }
 
     /// Enable a registered tool.
@@ -200,7 +261,7 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError::Tool`] when the tool is not registered.
     pub fn enable_tool(&self, name: &str) -> RuntimeResult<()> {
-        self.tool_lifecycle.registry()?.enable(name)?;
+        self.tool_registry.lifecycle.registry()?.enable(name)?;
         Ok(())
     }
 
@@ -210,7 +271,7 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError::Tool`] when the tool is not registered.
     pub fn disable_tool(&self, name: &str) -> RuntimeResult<()> {
-        self.tool_lifecycle.registry()?.disable(name)?;
+        self.tool_registry.lifecycle.registry()?.disable(name)?;
         Ok(())
     }
 
@@ -223,12 +284,7 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError::Tool`] when the Tool Registry rejects the group.
     pub fn register_tool_group(&self, group: ToolGroup) -> RuntimeResult<()> {
-        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
-            tools.register_group(group)?;
-        } else {
-            self.tool_lifecycle.pending.borrow_mut().push(group);
-        }
-        Ok(())
+        self.tool_registry.register_group(group)
     }
 
     /// Start every registered tool.
@@ -237,11 +293,7 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError`] when the tool registry fails to start.
     pub fn start_all(&self) -> RuntimeResult<()> {
-        self.tool_lifecycle.started.set(true);
-        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
-            tools.start_all()?;
-        }
-        Ok(())
+        self.tool_registry.lifecycle.start_all()
     }
 
     /// Stop every registered tool.
@@ -250,11 +302,7 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError`] when the tool registry fails to stop.
     pub fn stop_all(&self) -> RuntimeResult<()> {
-        self.tool_lifecycle.started.set(false);
-        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
-            tools.stop_all()?;
-        }
-        Ok(())
+        self.tool_registry.lifecycle.stop_all()
     }
 
     /// Open a live session's long-lived event stream and control surface.
@@ -323,5 +371,149 @@ impl AgentRuntime {
     /// Ask the matching service future to shut down.
     pub async fn shutdown(&self) {
         self.control.shutdown().await;
+    }
+}
+
+#[cfg(test)]
+mod tool_registry_capability_tests {
+    use alloc::{boxed::Box, sync::Arc, vec};
+
+    use barracuda_agent_persistence::Persistence;
+    use barracuda_agent_tool::{
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolFuture,
+        ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
+    };
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::{future::block_on, StreamExt as _};
+
+    use super::{AgentToolRegistry, ToolGroup, ToolLifecycle};
+
+    const JOINED_TOOL_SCHEMA: &str = r#"{"type":"function","function":{"name":"joined","parameters":{"type":"object","properties":{},"additionalProperties":false}}}"#;
+    const BACKGROUND_TOOL_SCHEMA: &str = r#"{"type":"function","function":{"name":"background","parameters":{"type":"object","properties":{},"additionalProperties":false}}}"#;
+
+    fn empty_arguments_validator() -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator = json_validator::validator_source!(
+            r#"{"type":"object","properties":{},"additionalProperties":false}"#
+        );
+        &VALIDATOR
+    }
+
+    struct JoinedTool;
+
+    impl ToolSpec for JoinedTool {
+        fn name(&self) -> &str {
+            "joined"
+        }
+
+        fn schema(&self) -> &str {
+            JOINED_TOOL_SCHEMA
+        }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            empty_arguments_validator()
+        }
+    }
+
+    impl ToolHandler for JoinedTool {
+        type Args = EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+            Box::pin(async {
+                Ok(ToolOutput {
+                    content: "joined".into(),
+                    ok: true,
+                })
+            })
+        }
+    }
+
+    struct BackgroundTool;
+
+    impl ToolSpec for BackgroundTool {
+        fn name(&self) -> &str {
+            "background"
+        }
+
+        fn schema(&self) -> &str {
+            BACKGROUND_TOOL_SCHEMA
+        }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            empty_arguments_validator()
+        }
+    }
+
+    impl DetachedToolHandler for BackgroundTool {
+        type Args = EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> DetachedToolFuture<'a> {
+            Box::pin(async {
+                Ok(DetachedTool::new(
+                    ToolOutput {
+                        content: "accepted".into(),
+                        ok: true,
+                    },
+                    Box::pin(async {
+                        Ok(ToolOutput {
+                            content: "completed".into(),
+                            ok: true,
+                        })
+                    }),
+                ))
+            })
+        }
+    }
+
+    #[test]
+    fn startup_groups_install_into_the_runtime_registry_with_native_semantics() {
+        block_on(async {
+            let lifecycle = Arc::new(ToolLifecycle::default());
+            let capability = AgentToolRegistry::new(Arc::clone(&lifecycle));
+            capability
+                .register_group(ToolGroup::new(
+                    "dependent-plugin",
+                    true,
+                    [Tool::new(JoinedTool), Tool::from_detached(BackgroundTool)],
+                ))
+                .expect("startup Tool group registers");
+            lifecycle.start_all().expect("Tool Registry starts");
+
+            let persistence = Arc::new(
+                Persistence::new(memory_vfs().await.expect("memory VFS mounts"), "/agent")
+                    .await
+                    .expect("persistence opens"),
+            );
+            let registry = Arc::new(
+                ToolRegistry::new(persistence)
+                    .await
+                    .expect("Tool Registry loads"),
+            );
+            lifecycle
+                .install(Arc::clone(&registry))
+                .expect("startup groups install");
+
+            let mut tool_set = registry.tool_set();
+            let handle = tool_set.begin().expect("Tool projection builds");
+            let calls = vec![
+                ToolInvocation::try_new(None, "joined", "{}").expect("joined invocation"),
+                ToolInvocation::try_new(None, "background", "{}").expect("background invocation"),
+            ];
+            let (mut joined, detached) = ToolRunner::new(&handle).run(calls);
+            let mut detached = detached.expect("detached Tool keeps detached execution");
+
+            let first = joined.next().await.expect("first acceptance").1;
+            let second = joined.next().await.expect("second acceptance").1;
+            assert!(first.ok);
+            assert!(second.ok);
+            assert_eq!(
+                detached
+                    .next()
+                    .await
+                    .expect("detached completion")
+                    .1
+                    .content,
+                "completed"
+            );
+        });
     }
 }
