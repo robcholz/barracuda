@@ -53,7 +53,7 @@ let registration = actions.add_action(SendMessage)?;
 context.retain(registration);
 ```
 
-The Plugin uses a private filesystem for `workflows.json`. Its Embassy task
-restores that catalog before it starts advancing emitted executions. Removing a
-definition prevents later Events from starting it and does not cancel execution
-snapshots that already started.
+The Plugin stores its durable catalog at `/data/workflows.json` in its scoped
+filesystem. Its Embassy task restores that catalog before it starts advancing
+emitted executions. Removing a definition prevents later Events from starting
+it and does not cancel execution snapshots that already started.

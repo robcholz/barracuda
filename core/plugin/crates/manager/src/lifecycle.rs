@@ -27,7 +27,7 @@ pub enum PluginFilesystem {
     /// The Plugin has no file namespace.
     #[default]
     None,
-    /// The Plugin receives a private namespace on System's writable VFS.
+    /// The Plugin receives an isolated semantic filesystem namespace.
     Private,
 }
 
@@ -111,7 +111,7 @@ pub enum PluginError {
     #[error(transparent)]
     Capability(#[from] CapabilityError),
     /// The Plugin attempted to obtain VFS access without declaring it.
-    #[error("Plugin did not declare private filesystem access")]
+    #[error("Plugin did not declare filesystem access")]
     FilesystemNotDeclared,
     /// System did not install an Embassy task spawner for Plugin startup.
     #[error("Plugin task spawner is unavailable during startup")]
@@ -219,7 +219,7 @@ pub struct PluginRegisterContext<'a, Storage: PluginStorage> {
 }
 
 impl<Storage: PluginStorage> PluginRegisterContext<'_, Storage> {
-    /// Returns this Plugin's private VFS when it declared one.
+    /// Returns this Plugin's isolated semantic VFS when it declared one.
     ///
     /// # Errors
     ///
@@ -358,7 +358,7 @@ fn plugin_task_cancellation() -> (PluginTaskCancellation, PluginTaskToken) {
 }
 
 impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
-    /// Returns this Plugin's declared private VFS.
+    /// Returns this Plugin's declared semantic VFS.
     ///
     /// # Errors
     ///
@@ -582,8 +582,8 @@ pub enum PluginRegisterError {
     /// The queued Plugin graph contains a dependency cycle.
     #[error("Plugin dependency graph contains a cycle: {0:?}")]
     DependencyCycle(Vec<PluginId>),
-    /// The Plugin declared a private VFS but System did not install one.
-    #[error("Plugin {0} requires a private filesystem, but System did not install a VFS")]
+    /// The Plugin declared filesystem access but System did not install a VFS.
+    #[error("Plugin {0} requires a filesystem, but System did not install a VFS")]
     FilesystemUnavailable(PluginId),
     /// Plugin filesystem namespace preparation failed.
     #[error(transparent)]
