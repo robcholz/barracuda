@@ -14,11 +14,9 @@ test = false
 bench = false
 
 [dependencies]
-barracuda-event-router.workspace = true
 barracuda-system.workspace = true
 barracuda-target.workspace = true
 embassy-executor.workspace = true
-static_cell = "2.1.1"
 thiserror = { version = "2", default-features = false }
 
 [lints.rust]

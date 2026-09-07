@@ -11,12 +11,7 @@ extern crate alloc;
 
 mod resources;
 
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
 use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
-use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -31,11 +26,11 @@ use embassy_executor::Spawner;
 use embedded_storage::nor_flash::NorFlash;
 
 macro_rules! register_plugins {
-    ($manager:ident, $router:ident; $($plugin:expr),* $(,)?) => {
+    ($manager:ident; $($plugin:expr),* $(,)?) => {
         $(
             $manager.add($plugin)?;
         )*
-        $manager.register_all(&mut $router)?;
+        $manager.register_all()?;
     };
 }
 
@@ -45,17 +40,8 @@ pub use resources::SystemResourceError;
 ///
 /// Platform owns the executor-facing runners and concrete implementations;
 /// System owns the portable handles and fixed Plugin graph.
-pub struct System<
-    const N: usize,
-    const M: usize,
-    const Q: usize,
-    Region: NorFlash + Send + 'static,
-    Builtins,
-    Io,
-    const P: usize,
-> {
-    router: EventRouter<N, M, Q>,
-    plugins: PluginManager<M, BlockingAsync<Region>>,
+pub struct System<Region: NorFlash + Send + 'static, Builtins, Io, const P: usize> {
+    plugins: PluginManager<BlockingAsync<Region>>,
     _web_assets: Region,
     _remaining_partitions: Partitions<Region, P>,
     _plugin_context: PluginContext<Builtins, Io>,
@@ -71,9 +57,6 @@ pub enum SystemCreateError {
     /// The writable System partition could not be mounted as LittleFS.
     #[error(transparent)]
     Filesystem(#[from] FsError),
-    /// Event Router initialization failed.
-    #[error(transparent)]
-    Router(#[from] EventRouterCreateError),
     /// A Plugin failed during registration.
     #[error(transparent)]
     Plugin(#[from] PluginRegisterError),
@@ -85,8 +68,7 @@ pub enum SystemCreateError {
     PluginManager(#[from] PluginManagerInitError),
 }
 
-impl<const N: usize, const M: usize, const Q: usize, Region, Builtins, Io, const P: usize>
-    System<N, M, Q, Region, Builtins, Io, P>
+impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
@@ -112,10 +94,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`SystemCreateError`] when Event Router initialization or Plugin
-    /// registration or startup fails.
+    /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
     pub async fn new<Tls: ClientTls>(
-        lanes: &'static RpcLaneStorage<N, M, Q>,
         resources: TargetResources<
             PlatformResources<Tls, Partitions<Region, P>>,
             BoardHalResources<Builtins, Io>,
@@ -128,8 +108,6 @@ where
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/", backend, MountOptions::read_write()).await?;
         log::info!("mounted System filesystem");
-        let mut router = EventRouter::new(lanes).await?;
-        log::info!("initialized Event Router");
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
@@ -142,35 +120,38 @@ where
             PluginContext::from_hal(prepared.ip_stack, http_clients, prepared.board_hal);
 
         // BEGIN GENERATED PLUGINS
-        register_plugins!(plugins, router;
+        register_plugins!(plugins;
             barracuda_agent_plugin::AgentPlugin::new(&mut plugin_context),
-            barracuda_file_plugin::FilePlugin::new(&mut plugin_context),
-            barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
+            barracuda_agent_http_plugin::AgentHttpPlugin::new(&mut plugin_context),
+            barracuda_agent_imessage_gateway_plugin::AgentIMessageGatewayPlugin::new(&mut plugin_context),
+            barracuda_agent_scheduler_plugin::AgentSchedulerPlugin::new(&mut plugin_context),
+            barracuda_agent_time_plugin::AgentTimePlugin::new(&mut plugin_context),
+            barracuda_agent_vm_plugin::AgentVmPlugin::new(&mut plugin_context),
+            barracuda_agent_websearch_plugin::AgentWebsearchPlugin::new(&mut plugin_context),
+            barracuda_agent_workflow_plugin::AgentWorkflowPlugin::new(&mut plugin_context),
             barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
-            barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&mut plugin_context),
-            barracuda_imessage_bridge_plugin::ImessageBridgePlugin::new(&mut plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&mut plugin_context),
             barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&mut plugin_context),
             barracuda_imessage_qq_plugin::IMessageQQPlugin::new(&mut plugin_context),
             barracuda_imessage_telegram_plugin::IMessageTelegramPlugin::new(&mut plugin_context),
             barracuda_imessage_web_plugin::IMessageWebPlugin::new(&mut plugin_context),
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
-            barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
-            barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
-            barracuda_web_search_plugin::WebSearchPlugin::new(&mut plugin_context),
+            barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
+            barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
+            barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
+            barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS
-        plugins.start(&mut router)?;
+        plugins.start()?;
         log::info!("Barracuda System started");
 
         Ok(Self {
-            router,
             plugins,
             _web_assets: prepared.partitions.web_assets,
             _remaining_partitions: prepared.partitions.remaining,
@@ -180,29 +161,13 @@ where
 
     /// Stops every Plugin in reverse dependency order and waits for its tasks.
     ///
-    /// Consuming the System prevents its Event Router from being polled again
-    /// after shutdown. Remaining System-owned resources are released normally
-    /// when this method returns.
+    /// Remaining System-owned resources are released normally when this method
+    /// returns.
     ///
     /// # Errors
     ///
     /// Returns the first Plugin unload failure.
     pub async fn shutdown(mut self) -> Result<(), PluginUnloadError> {
-        self.plugins.shutdown(&mut self.router).await
-    }
-}
-
-impl<const N: usize, const M: usize, const Q: usize, Region, Builtins, Io, const P: usize> Future
-    for System<N, M, Q, Region, Builtins, Io, P>
-where
-    Region: NorFlash + Send + Unpin + 'static,
-    Region::Error: core::fmt::Debug,
-    Builtins: Unpin,
-    Io: Unpin,
-{
-    type Output = Result<(), RouterError>;
-
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().router).poll(context)
+        self.plugins.shutdown().await
     }
 }
