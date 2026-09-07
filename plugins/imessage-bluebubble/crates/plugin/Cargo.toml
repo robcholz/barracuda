@@ -13,6 +13,8 @@ bluebubbles = { path = "../provider" }
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
 http-client.workspace = true
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }

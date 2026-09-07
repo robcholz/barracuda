@@ -834,6 +834,8 @@ dependencies = [
  "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "bluebubbles",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "http-client",
  "log",
  "serde",
