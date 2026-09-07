@@ -1,7 +1,16 @@
 //! Plugin-facing restricted VFS namespaces.
 
-/// Cloneable file access rooted inside one Plugin's private namespace.
-///
-/// [`barracuda_vfs::ScopedVfs`] intentionally has no mount-table operations, so
-/// the Plugin receives the complete file API without receiving VFS ownership.
-pub type PluginVfs = barracuda_vfs::ScopedVfs;
+use alloc::format;
+
+use barracuda_vfs::{FsError, ScopedVfs, Vfs};
+
+use crate::PluginId;
+
+pub(crate) fn scoped_filesystem(vfs: &Vfs, plugin_id: &PluginId) -> Result<ScopedVfs, FsError> {
+    vfs.scoped_mounts([
+        ("/resources", format!("/resources/plugins/{plugin_id}")),
+        ("/data", format!("/data/plugins/{plugin_id}")),
+        ("/cache", format!("/cache/plugins/{plugin_id}")),
+        ("/media", format!("/media/plugins/{plugin_id}")),
+    ])
+}

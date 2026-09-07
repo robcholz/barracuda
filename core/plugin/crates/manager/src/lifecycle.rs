@@ -2,7 +2,6 @@
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -12,7 +11,7 @@ use core::error::Error;
 use core::fmt::{self, Debug};
 
 use barracuda_kv::Database;
-use barracuda_vfs::{FsError, Vfs};
+use barracuda_vfs::{FsError, ScopedVfs, Vfs};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -20,7 +19,7 @@ use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
 
 use crate::storage::ScopedStorage;
-use crate::{PluginStorage, PluginVfs, StorageError};
+use crate::{PluginStorage, StorageError};
 
 /// Filesystem access requested by one Plugin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -211,7 +210,7 @@ pub struct PluginRegisterContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
     storage: Storage,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
     plugin_id: &'a PluginId,
     dependencies: &'a [PluginId],
     capabilities: &'a mut CapabilityRegistry,
@@ -225,7 +224,7 @@ impl<Storage: PluginStorage> PluginRegisterContext<'_, Storage> {
     /// # Errors
     ///
     /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
-    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+    pub fn filesystem(&self) -> PluginResult<&ScopedVfs> {
         self.filesystem
             .as_ref()
             .ok_or(PluginError::FilesystemNotDeclared)
@@ -287,7 +286,7 @@ pub struct PluginStartContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
     storage: Storage,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
     dependencies: &'a [PluginId],
     capabilities: &'a CapabilityRegistry,
     task_spawner: Option<Spawner>,
@@ -364,7 +363,7 @@ impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
     /// # Errors
     ///
     /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
-    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+    pub fn filesystem(&self) -> PluginResult<&ScopedVfs> {
         self.filesystem
             .as_ref()
             .ok_or(PluginError::FilesystemNotDeclared)
@@ -552,7 +551,7 @@ struct LoadedPlugin<Storage: PluginStorage> {
     provided_capabilities: Vec<CapabilityKey>,
     retained_resources: Vec<Box<dyn Any>>,
     task_cancellations: Vec<PluginTaskCancellation>,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
 }
 
 /// Failure while registering one Plugin.
@@ -785,8 +784,7 @@ where
                     .vfs_root
                     .as_ref()
                     .ok_or_else(|| PluginRegisterError::FilesystemUnavailable(id.clone()))?;
-                let source_root = format!("/plugins/{id}");
-                Some(root.scoped(&source_root)?)
+                Some(crate::filesystem::scoped_filesystem(root, &id)?)
             }
         };
 

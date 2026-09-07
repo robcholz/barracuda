@@ -6,13 +6,13 @@ use std::boxed::Box;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use barracuda_platform_test::{
-    install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
-};
+use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin::api::{ClientFactory, PluginContext};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
+use barracuda_vfs::{MountOptions, Vfs};
+use barracuda_vfs_memfs::MemFs;
 use barracuda_workflow_plugin::{
     workflow_action_schema_inline, WorkflowActionFuture, WorkflowActionHandler,
     WorkflowActionRegistry, WorkflowActionSchema, WorkflowPlugin, WorkflowService,
@@ -74,7 +74,16 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
         let mut manager = PluginManager::open(partition)
             .await
             .expect("open Plugin storage");
-        manager.install_vfs(memory_vfs_root().await.expect("create System VFS"));
+        let mut filesystem = Vfs::new();
+        filesystem
+            .mount(
+                "/data",
+                MemFs::new().into_backend(),
+                MountOptions::read_write(),
+            )
+            .await
+            .expect("mount Plugin data volume");
+        manager.install_vfs(filesystem);
         let stack = never_embassy_stack();
         let mut plugin_context = PluginContext::new(stack, ClientFactory::plaintext(stack));
         let actions = Rc::new(RefCell::new(None));

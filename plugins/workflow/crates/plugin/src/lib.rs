@@ -11,14 +11,14 @@ use core::cell::RefCell;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
-    PluginStartContext, PluginTaskToken, PluginVfs,
+    PluginStartContext, PluginTaskToken,
 };
-use barracuda_vfs::FsError;
+use barracuda_vfs::{FsError, ScopedVfs};
 use embassy_futures::select::select;
 
 pub use barracuda_workflow_runtime::*;
 
-const WORKFLOW_CATALOG_PATH: &str = "/workflows.json";
+const WORKFLOW_CATALOG_PATH: &str = "/data/workflows.json";
 
 #[derive(Clone)]
 struct PersistedWorkflow {
@@ -29,7 +29,7 @@ struct PersistedWorkflow {
 /// Runtime control and Event-emission capability published by the Plugin.
 #[derive(Clone)]
 pub struct WorkflowService {
-    filesystem: PluginVfs,
+    filesystem: ScopedVfs,
     actions: WorkflowActionRegistry,
     control: WorkflowRuntimeControl,
     view: WorkflowRuntimeView,
@@ -38,7 +38,7 @@ pub struct WorkflowService {
 
 impl WorkflowService {
     fn new(
-        filesystem: PluginVfs,
+        filesystem: ScopedVfs,
         actions: WorkflowActionRegistry,
         control: WorkflowRuntimeControl,
         view: WorkflowRuntimeView,

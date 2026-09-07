@@ -9,9 +9,10 @@ use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
     Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
-    PluginRequirements, PluginResult, PluginStorage, PluginVfs,
+    PluginRequirements, PluginResult, PluginStorage,
 };
-use barracuda_vfs::{MountOptions, Vfs};
+use barracuda_vfs::{FsError, MountOptions, ScopedVfs, Vfs};
+use barracuda_vfs_memfs::MemFs;
 use futures_lite::future::block_on;
 
 async fn manager() -> PluginManager<MemoryPartition> {
@@ -24,18 +25,33 @@ async fn manager() -> PluginManager<MemoryPartition> {
     let mut filesystem = Vfs::new();
     filesystem
         .mount(
-            "/",
-            barracuda_vfs_memfs::MemFs::new().into_backend(),
+            "/data",
+            MemFs::new().into_backend(),
             MountOptions::read_write(),
         )
         .await
-        .expect("mount System filesystem");
+        .expect("mount Plugin data volume");
+    let resources = MemFs::new();
+    resources
+        .create_dir_all("/plugins/first")
+        .expect("create Plugin resource directory");
+    resources
+        .write_file("/plugins/first/config.json", br#"{"enabled":true}"#)
+        .expect("write Plugin resource");
+    filesystem
+        .mount(
+            "/resources",
+            resources.into_backend(),
+            MountOptions::read_only(),
+        )
+        .await
+        .expect("mount Plugin resources volume");
     manager.install_vfs(filesystem);
     manager
 }
 
 struct FilesystemPlugin<const KIND: u8> {
-    filesystem: Rc<RefCell<Option<PluginVfs>>>,
+    filesystem: Rc<RefCell<Option<ScopedVfs>>>,
 }
 
 impl<const KIND: u8> PluginDeclaration for FilesystemPlugin<KIND> {
@@ -103,12 +119,26 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
 
         let first = first.borrow().clone().unwrap();
         let second = second.borrow().clone().unwrap();
-        first.write("/state", b"first").await.unwrap();
-        second.write("/state", b"second").await.unwrap();
+        first.write("/data/state", b"first").await.unwrap();
+        second.write("/data/state", b"second").await.unwrap();
 
-        assert_eq!(first.read("/state").await.unwrap(), b"first");
-        assert_eq!(second.read("/state").await.unwrap(), b"second");
-        assert!(first.read("../second/state").await.is_err());
+        assert_eq!(first.read("/data/state").await.unwrap(), b"first");
+        assert_eq!(second.read("/data/state").await.unwrap(), b"second");
+        assert_eq!(
+            first.read("/resources/config.json").await.unwrap(),
+            br#"{"enabled":true}"#
+        );
+        assert_eq!(
+            first.write("/resources/config.json", b"{}").await,
+            Err(FsError::ReadOnly)
+        );
+        assert_eq!(
+            first.rename("/data/state", "/resources/state").await,
+            Err(FsError::CrossMount)
+        );
+        assert_eq!(first.read("/media/file").await, Err(FsError::NotMounted));
+        assert_eq!(first.read("/state").await, Err(FsError::NotMounted));
+        assert!(first.read("../second/data/state").await.is_err());
     });
 }
 
