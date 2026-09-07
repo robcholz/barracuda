@@ -20,7 +20,7 @@ pub use barracuda_lua::{Error, Lua, Package, Result};
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
     Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmRun,
-    VmRunCompletion, VmRunOutcome, VmRunReference, VmRunRequest,
+    VmRunCompletion, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest, VmRunUpdate,
 };
 
 /// Registers the VM capability and its Workflow-facing operations.

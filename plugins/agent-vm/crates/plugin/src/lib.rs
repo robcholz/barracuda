@@ -22,7 +22,7 @@ use barracuda_agent_plugin::{
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Vm, VmError, VmInputRequest, VmRunOutcome, VmRunReference, VmRunRequest,
+    Vm, VmError, VmInputRequest, VmRunOutcome, VmRunReference, VmRunRequest, VmRunUpdate,
 };
 use serde::Serialize;
 
@@ -87,16 +87,23 @@ impl DetachedToolHandler for VmRunTool {
                 },
                 true,
             )?;
-            let completion = Box::pin(async move {
-                match run.await {
-                    Ok(response) => {
-                        let ok = response.outcome == VmRunOutcome::Success;
-                        encode(&response, ok)
+            Ok(DetachedTool::with_progress(accepted, |progress| {
+                Box::pin(async move {
+                    let mut run = run;
+                    loop {
+                        match run.next_update().await {
+                            Ok(VmRunUpdate::Progress(update)) => {
+                                progress.send(encode(&update, true)?);
+                            }
+                            Ok(VmRunUpdate::Completed(response)) => {
+                                let ok = response.outcome == VmRunOutcome::Success;
+                                return encode(&response, ok);
+                            }
+                            Err(error) => return encode(&ErrorResponse { error }, false),
+                        }
                     }
-                    Err(error) => encode(&ErrorResponse { error }, false),
-                }
-            });
-            Ok(DetachedTool::new(accepted, completion))
+                })
+            }))
         })
     }
 }
@@ -157,4 +164,140 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
         ToolError::InvokeRejected(String::from("failed to encode VM Tool response"))
     })?;
     Ok(ToolOutput { content, ok })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(missing_docs)]
+
+    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::time::Duration;
+
+    use alloc::{
+        boxed::Box,
+        format,
+        rc::Rc,
+        string::{String, ToString},
+    };
+
+    use barracuda_agent_tool::{ToolDetachUpdate, ToolInvocation, ToolRunner, ToolSet};
+    use barracuda_vm_plugin::{LuaPackageRegistry, Vm, VmInputRequest, VmRunRequest};
+    use embassy_executor::{Executor, Spawner};
+    use futures_lite::StreamExt as _;
+
+    use super::vm_tool_group;
+
+    #[embassy_executor::task]
+    async fn exercise_detached_tool(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
+        let result = async {
+            let vm =
+                Rc::new(Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?);
+            vm.start(spawner).map_err(|error| error.to_string())?;
+
+            let mut tools = ToolSet::empty();
+            tools
+                .add_group(vm_tool_group(Rc::clone(&vm)))
+                .map_err(|error| error.to_string())?;
+            let handle = tools.begin().map_err(|error| error.to_string())?;
+            let invocation = ToolInvocation::try_new(
+                Some("vm-call"),
+                "vm_run",
+                &serde_json::to_string(&VmRunRequest {
+                    source: concat!(
+                        "local io = require('io'); ",
+                        "local value = io.input(); ",
+                        "io.print('detached', value)"
+                    )
+                    .into(),
+                })
+                .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let (mut joined, detached) = ToolRunner::new(&handle).run(alloc::vec![invocation]);
+            let mut detached = detached.ok_or("vm_run did not detach")?;
+
+            let accepted = joined
+                .next()
+                .await
+                .ok_or("vm_run did not return an accepted settlement")?
+                .1;
+            let accepted: serde_json::Value =
+                serde_json::from_str(&accepted.content).map_err(|error| error.to_string())?;
+            if accepted
+                .get("run_id")
+                .and_then(serde_json::Value::as_u64)
+                .is_none()
+            {
+                return Err(format!("invalid accepted settlement: {accepted}"));
+            }
+
+            let progress = detached
+                .next()
+                .await
+                .ok_or("vm_run did not report input_required")?
+                .1;
+            let ToolDetachUpdate::Progress(progress) = progress else {
+                return Err(format!("expected progress update, got: {progress:?}"));
+            };
+            let progress: serde_json::Value =
+                serde_json::from_str(&progress.content).map_err(|error| error.to_string())?;
+            if progress.get("kind").and_then(serde_json::Value::as_str) != Some("input_required")
+                || progress.get("run_id") != accepted.get("run_id")
+            {
+                return Err(format!("invalid progress update: {progress}"));
+            }
+
+            vm.input(VmInputRequest {
+                run_id: accepted
+                    .get("run_id")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|run_id| u32::try_from(run_id).ok())
+                    .ok_or("accepted settlement did not contain a valid run_id")?,
+                input: Some("result".into()),
+                eof: None,
+            })
+            .map_err(|error| error.to_string())?;
+
+            let completion = detached
+                .next()
+                .await
+                .ok_or("vm_run did not return a completion settlement")?
+                .1;
+            let ToolDetachUpdate::Completed(completion) = completion else {
+                return Err(format!("expected completion update, got: {completion:?}"));
+            };
+            let completion: serde_json::Value =
+                serde_json::from_str(&completion.content).map_err(|error| error.to_string())?;
+            if completion
+                .get("outcome")
+                .and_then(serde_json::Value::as_str)
+                != Some("success")
+                || completion.get("output") != Some(&serde_json::json!(["detached\tresult"]))
+            {
+                return Err(format!("invalid completion settlement: {completion}"));
+            }
+            Ok(())
+        }
+        .await;
+        let _ignored = completed.send(result);
+    }
+
+    #[test]
+    fn vm_run_is_a_dynamic_detached_tool() {
+        let (completed, result) = sync_channel(1);
+        std::thread::spawn(move || {
+            let executor = Box::leak(Box::new(Executor::new()));
+            executor.run(|spawner| {
+                spawner
+                    .spawn(exercise_detached_tool(spawner, completed))
+                    .expect("spawn detached VM Tool test");
+            });
+        });
+
+        result
+            .recv_timeout(Duration::from_secs(10))
+            .expect("detached VM Tool test timed out")
+            .expect("detached VM Tool test failed");
+    }
 }

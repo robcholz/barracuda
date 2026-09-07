@@ -16,5 +16,5 @@ pub use memory::VmMemoryPoolError;
 pub use runtime::{VmRuntime, VmRuntimeStartError};
 pub use vm::{
     Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmRun,
-    VmRunCompletion, VmRunOutcome, VmRunReference, VmRunRequest,
+    VmRunCompletion, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest, VmRunUpdate,
 };

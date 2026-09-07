@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "vm_run",
-    "description": "Start one isolated Lua execution in the background; its terminal result is delivered automatically.",
+    "description": "Start one isolated Lua execution in the background; input requests and the terminal result are delivered automatically.",
     "parameters": {
       "type": "object",
       "properties": {

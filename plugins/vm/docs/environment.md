@@ -74,9 +74,11 @@ an Environment, packages, or any globals.
 
 The typed `Vm` capability accepts owned source and input strings. It does not
 impose a transport-derived length limit. Starting a run returns `VmRun`: its
-`run_id` is available immediately for input and cancellation, while awaiting
-the handle returns `VmRunCompletion` with ordered output and the terminal
-outcome. See [action.md](action.md) for Workflow behavior.
+`run_id` is available immediately for input and cancellation.
+`VmRun::next_update()` reports `VmRunProgress::InputRequired` before waiting for
+input and later returns `VmRunUpdate::Completed`; directly awaiting the handle
+returns `VmRunCompletion` with ordered output and the terminal outcome. See
+[action.md](action.md) for Workflow behavior.
 
 ## Native modules
 

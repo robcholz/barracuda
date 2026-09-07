@@ -9,6 +9,7 @@ use futures_channel::oneshot;
 
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
 use crate::run::{ExecutionJob, execute_run};
+use crate::vm::vm_progress_channel;
 use crate::{VmLimits, VmRun};
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
@@ -172,6 +173,7 @@ impl VmRuntime {
         let control = self.reserve_run()?;
         let run_id = control.run_id;
         let (completion, result) = oneshot::channel();
+        let (progress, updates) = vm_progress_channel();
         if spawner
             .spawn(vm_execution_task(ExecutionJob {
                 run_id,
@@ -181,13 +183,14 @@ impl VmRuntime {
                 limits,
                 builtin_packages,
                 package_registry,
+                progress,
                 completion,
             }))
             .is_err()
         {
             return Err(DispatchError::Busy);
         }
-        Ok(VmRun::new(run_id, result))
+        Ok(VmRun::new(run_id, updates, result))
     }
 
     pub(crate) fn send_input(
@@ -282,6 +285,10 @@ impl RunControl {
             .slots
             .get(self.slot_index)
             .filter(|slot| slot.active.get() && slot.id.get() == self.run_id)
+    }
+
+    pub(crate) const fn run_id(&self) -> u32 {
+        self.run_id
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {

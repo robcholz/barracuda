@@ -1,8 +1,10 @@
+use alloc::rc::{Rc, Weak};
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
-use core::task::{Context, Poll};
+use core::task::{Context, Poll, Waker};
 
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
@@ -96,19 +98,112 @@ pub struct VmRunCompletion {
     pub diagnostic: Option<String>,
 }
 
+/// Non-terminal state change produced by an accepted Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VmRunProgress {
+    /// The execution is suspended until input or EOF is supplied.
+    InputRequired {
+        /// Runtime-generated execution identifier.
+        run_id: u32,
+    },
+}
+
+/// Next observable update from an accepted Lua execution.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum VmRunUpdate {
+    /// The execution remains active.
+    Progress(VmRunProgress),
+    /// The execution has returned and cannot produce more updates.
+    Completed(VmRunCompletion),
+}
+
 /// Awaitable handle for one accepted Lua execution.
 #[derive(CopyGetters)]
 pub struct VmRun {
     /// Runtime-generated execution identifier available before completion.
     #[getset(get_copy = "pub")]
     run_id: u32,
+    progress: VmProgressReceiver,
     completion: oneshot::Receiver<VmRunCompletion>,
 }
 
 impl VmRun {
-    pub(crate) const fn new(run_id: u32, completion: oneshot::Receiver<VmRunCompletion>) -> Self {
-        Self { run_id, completion }
+    pub(crate) const fn new(
+        run_id: u32,
+        progress: VmProgressReceiver,
+        completion: oneshot::Receiver<VmRunCompletion>,
+    ) -> Self {
+        Self {
+            run_id,
+            progress,
+            completion,
+        }
     }
+
+    /// Waits for the next progress update or terminal completion.
+    pub async fn next_update(&mut self) -> Result<VmRunUpdate, VmError> {
+        core::future::poll_fn(|context| {
+            if let Poll::Ready(progress) = self.progress.poll_next(context) {
+                return Poll::Ready(Ok(VmRunUpdate::Progress(progress)));
+            }
+            Pin::new(&mut self.completion).poll(context).map(|result| {
+                result
+                    .map(VmRunUpdate::Completed)
+                    .map_err(|_error| VmError::RuntimeUnavailable)
+            })
+        })
+        .await
+    }
+}
+
+struct VmProgressState {
+    next: RefCell<Option<VmRunProgress>>,
+    waker: RefCell<Option<Waker>>,
+}
+
+pub(crate) struct VmProgressSender {
+    state: Weak<VmProgressState>,
+}
+
+impl VmProgressSender {
+    pub(crate) fn send(&self, progress: VmRunProgress) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        *state.next.borrow_mut() = Some(progress);
+        if let Some(waker) = state.waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+}
+
+pub(crate) struct VmProgressReceiver {
+    state: Rc<VmProgressState>,
+}
+
+impl VmProgressReceiver {
+    fn poll_next(&mut self, context: &mut Context<'_>) -> Poll<VmRunProgress> {
+        if let Some(progress) = self.state.next.borrow_mut().take() {
+            return Poll::Ready(progress);
+        }
+        *self.state.waker.borrow_mut() = Some(context.waker().clone());
+        Poll::Pending
+    }
+}
+
+pub(crate) fn vm_progress_channel() -> (VmProgressSender, VmProgressReceiver) {
+    let state = Rc::new(VmProgressState {
+        next: RefCell::new(None),
+        waker: RefCell::new(None),
+    });
+    (
+        VmProgressSender {
+            state: Rc::downgrade(&state),
+        },
+        VmProgressReceiver { state },
+    )
 }
 
 impl Future for VmRun {

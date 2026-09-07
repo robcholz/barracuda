@@ -13,7 +13,8 @@ use futures_channel::oneshot;
 
 use crate::memory::VmMemoryLease;
 use crate::runtime::{RunControl, VM_YIELD_DELAY_MILLIS, VmYieldSignal};
-use crate::{VmExecutionError, VmLimits, VmRunCompletion, VmRunOutcome};
+use crate::vm::VmProgressSender;
+use crate::{VmExecutionError, VmLimits, VmRunCompletion, VmRunOutcome, VmRunProgress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ExecutionErrorKind {
@@ -60,6 +61,7 @@ pub(crate) struct ExecutionJob {
     pub(crate) limits: VmLimits,
     pub(crate) builtin_packages: BuiltinPackages,
     pub(crate) package_registry: LuaPackageRegistry,
+    pub(crate) progress: VmProgressSender,
     pub(crate) completion: oneshot::Sender<VmRunCompletion>,
 }
 
@@ -72,6 +74,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
         limits,
         builtin_packages,
         package_registry,
+        progress,
         completion,
     } = job;
     let mut output = Vec::new();
@@ -83,6 +86,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
             limits,
             builtin_packages,
             package_registry,
+            progress: &progress,
             yield_signal: VmYieldSignal::default(),
             memory: &memory,
         },
@@ -123,6 +127,7 @@ struct ExecutionSetup<'a> {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
+    progress: &'a VmProgressSender,
     yield_signal: VmYieldSignal,
     memory: &'a VmMemoryLease,
 }
@@ -160,13 +165,18 @@ async fn drive_execution(
         {
             ExecutionEvent::Output(Some(message)) => output_messages.push(message),
             ExecutionEvent::Output(None) => {}
-            ExecutionEvent::InputRequired(true) => match setup.control.next_input().await {
-                Some(input) => lua_input.send(input.as_str()).await.map_err(|error| {
-                    ExecutionError::new(ExecutionErrorKind::LuaRuntime, error.message())
-                })?,
-                None if setup.control.is_cancelled() => return Ok(()),
-                None => lua_input.close(),
-            },
+            ExecutionEvent::InputRequired(true) => {
+                setup.progress.send(VmRunProgress::InputRequired {
+                    run_id: setup.control.run_id(),
+                });
+                match setup.control.next_input().await {
+                    Some(input) => lua_input.send(input.as_str()).await.map_err(|error| {
+                        ExecutionError::new(ExecutionErrorKind::LuaRuntime, error.message())
+                    })?,
+                    None if setup.control.is_cancelled() => return Ok(()),
+                    None => lua_input.close(),
+                }
+            }
             ExecutionEvent::InputRequired(false) => lua_input.close(),
             ExecutionEvent::Complete(result) => {
                 lua_input.close();

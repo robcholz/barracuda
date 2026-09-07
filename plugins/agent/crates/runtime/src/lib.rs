@@ -380,8 +380,8 @@ mod tool_registry_capability_tests {
 
     use barracuda_agent_persistence::Persistence;
     use barracuda_agent_tool::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolFuture,
-        ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolDetachUpdate,
+        ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
     };
     use barracuda_platform_test::memory_vfs;
     use futures_lite::{future::block_on, StreamExt as _};
@@ -505,15 +505,11 @@ mod tool_registry_capability_tests {
             let second = joined.next().await.expect("second acceptance").1;
             assert!(first.ok);
             assert!(second.ok);
-            assert_eq!(
-                detached
-                    .next()
-                    .await
-                    .expect("detached completion")
-                    .1
-                    .content,
-                "completed"
-            );
+            let update = detached.next().await.expect("detached completion").1;
+            let ToolDetachUpdate::Completed(output) = update else {
+                return;
+            };
+            assert_eq!(output.content, "completed");
         });
     }
 }
