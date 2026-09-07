@@ -16,6 +16,7 @@ members = [
     "shared/*",
     "tools/plugin-tool",
     "tools/system-image",
+    "tools/net-gateway",
     "apps/barracuda-cli",
     "apps/barracuda-system",
 ]
@@ -26,6 +27,7 @@ default-members = [
 [workspace.dependencies]
 # Workspace crates
 # BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
+barracuda-platform-browser = { path = "platforms/browser" }
 barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
@@ -84,6 +86,7 @@ barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-selected = { path = "platforms/selected" }
 barracuda-platform-test = { path = "platforms/test" }
 barracuda-platform-tool = { path = "platforms/tool" }
+barracuda-net-gateway-protocol = { path = "shared/net-gateway-protocol" }
 barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }

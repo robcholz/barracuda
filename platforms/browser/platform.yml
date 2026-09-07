@@ -1,0 +1,19 @@
+name: browser
+package: barracuda-platform-browser
+crate: barracuda_platform_browser
+type: BrowserPlatform
+selection:
+  board-chips:
+    - browser
+  targets:
+    - triple: wasm32-unknown-unknown
+system-image:
+  layout:
+    driver: command
+    program: wasm-pack
+    arguments: []
+  flash:
+    driver: command
+    program: wasm-pack
+    arguments: []
+application: {}
