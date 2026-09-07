@@ -3,10 +3,14 @@
 - Plugin ID: `imessage-qq`
 - Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Provided typed capabilities: none
+- Storage: complete provider configuration under the Plugin-scoped KV key
+  `configuration`
 
-The Plugin starts without provider credentials. It requires the `IMessageGateway`
+The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/qq` for runtime configuration,
-and registers the configured QQ channel for its lifetime. See [`http.md`](http.md).
+and registers the configured QQ channel for its lifetime. Accepted configuration
+is persisted before activation and restored during Plugin registration.
+Malformed stored data fails registration. See [`http.md`](http.md).
 
 ## Portal page
 
