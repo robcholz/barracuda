@@ -25,6 +25,15 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
+    assert!(system.contains("prepared.partitions.resources.filesystem"));
+    assert!(system.contains("mod read_only_flash;"));
+    let resources_mount = std::fs::read_to_string(root.join("core/system/src/read_only_flash.rs"))?;
+    assert!(resources_mount.contains("PartitionFilesystem::FatFs"));
+    assert!(resources_mount.contains("PartitionFilesystem::LittleFs"));
+    assert!(!resources_mount.contains("detect_resources_filesystem"));
+    assert!(!resources_mount.contains("FAT_BOOT_SECTOR"));
+    assert!(system.contains("MountOptions::read_only()"));
+    assert!(system.contains("mount(\"/resources\", resources, MountOptions::read_only())"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
     assert!(system.contains("mount(\"/data\", backend, MountOptions::read_write())"));
     assert!(system.contains("$manager.register_all()"));
@@ -34,7 +43,7 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;
     assert!(resources.contains("SYSTEM_PARTITION: &str = \"system\""));
     assert!(resources.contains("KV_DATABASE_PARTITION: &str = \"kv_database\""));
-    assert!(resources.contains("WEB_ASSETS_PARTITION: &str = \"web_assets\""));
+    assert!(resources.contains("RESOURCES_PARTITION: &str = \"resources\""));
     assert!(resources.contains("take_partition("));
     assert!(!application.contains("mod selected"));
     assert!(!application.contains("SelectedPlatform::initialize"));

@@ -5,10 +5,10 @@ use std::process::ExitCode;
 
 use anstream::{eprintln, println};
 use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
-use barracuda_system_image::{build_selected, flash_selected};
+use barracuda_system_image::{build_selected, flash_selected, ResourcesFilesystem};
 use clap::{Parser, Subcommand};
 
-/// Manages the selected Board's System image.
+/// Manages the selected Board's bundled Plugin resource image.
 #[derive(Debug, Parser)]
 #[command(
     name = "cargo system-image",
@@ -24,9 +24,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Build the selected Board's System partition image.
+    /// Build the selected Board's configured resource image.
     Build,
-    /// Flash the built image into the selected Board's System partition.
+    /// Flash the built image into the selected Board's `resources` partition.
     Flash,
 }
 
@@ -47,8 +47,9 @@ fn flash() -> ExitCode {
     match flash_selected(workspace) {
         Ok(image) => {
             println!(
-                "{SUCCESS}✔{SUCCESS:#} Flashed {DIM}{}-byte system image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} at {DIM}{:#x}{DIM:#} from `{}` to `{}`.",
+                "{SUCCESS}✔{SUCCESS:#} Flashed {DIM}{}-byte {} resource image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} at {DIM}{:#x}{DIM:#} from `{}` to `{}`.",
                 image.size(),
+                filesystem_name(image.filesystem()),
                 image.board(),
                 image.offset(),
                 image.image().display(),
@@ -73,11 +74,11 @@ fn build() -> ExitCode {
     match build_selected(workspace) {
         Ok(image) => {
             println!(
-                "{SUCCESS}✔{SUCCESS:#} Built {DIM}{}-byte system image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} region at {DIM}{:#x}{DIM:#} from `{}` at `{}`.",
+                "{SUCCESS}✔{SUCCESS:#} Built {DIM}{}-byte {} resource image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} `resources` region at {DIM}{:#x}{DIM:#} from enabled Plugin resources at `{}`.",
                 image.size(),
+                filesystem_name(image.filesystem()),
                 image.board(),
                 image.offset(),
-                image.source().display(),
                 image.output().display()
             );
             ExitCode::SUCCESS
@@ -86,6 +87,13 @@ fn build() -> ExitCode {
             eprintln!("{ERROR}error:{ERROR:#} {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+const fn filesystem_name(filesystem: ResourcesFilesystem) -> &'static str {
+    match filesystem {
+        ResourcesFilesystem::FatFs => "FATFS",
+        ResourcesFilesystem::LittleFs => "LittleFS",
     }
 }
 

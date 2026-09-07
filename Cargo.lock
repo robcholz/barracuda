@@ -1430,6 +1430,7 @@ dependencies = [
  "barracuda-time-plugin",
  "barracuda-tls",
  "barracuda-vfs",
+ "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "barracuda-vm-plugin",
  "barracuda-webserver-plugin",
@@ -1440,6 +1441,8 @@ dependencies = [
  "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-storage",
  "futures-lite",
  "http-client",
@@ -1465,15 +1468,22 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-platform-config",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "clap",
+ "critical-section",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-storage",
  "esp-idf-part",
+ "fatfs",
+ "futures-lite",
  "generic-array",
  "littlefs2",
  "serde",
  "tempfile",
- "typenum",
  "yaml-peg",
 ]
 
@@ -3542,6 +3552,17 @@ name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
+
+[[package]]
+name = "fatfs"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05669f8e7e2d7badc545c513710f0eba09c2fbef683eb859fd79c46c355048e0"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "log",
+]
 
 [[package]]
 name = "ff"

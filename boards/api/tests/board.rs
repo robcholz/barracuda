@@ -20,7 +20,7 @@ fn board_api_has_no_system_storage_roles() -> Result<(), std::io::Error> {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
     )?;
-    for forbidden in ["filesystem", "web_assets", "database", "plugin"] {
+    for forbidden in ["filesystem", "resources", "database", "plugin"] {
         assert!(
             !source.contains(forbidden),
             "Board API contains System-owned storage role `{forbidden}`"
