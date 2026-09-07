@@ -52,6 +52,35 @@ pub fn mount_or_format_partition<Flash>(flash: Flash) -> Result<Backend, FsError
 where
     Flash: NorFlash + Send + 'static,
 {
+    mount_partition_with(flash, PartitionMount::MountOrFormat)
+}
+
+/// Mounts an already-formatted synchronous NOR partition as LittleFS.
+///
+/// Unlike [`mount_or_format_partition`], this never changes an invalid or
+/// blank partition. It is intended for provisioned read-only images.
+///
+/// # Errors
+///
+/// Returns [`FsError::InvalidInput`] for unsupported geometry and
+/// [`FsError::Io`] when the existing image is not mountable.
+pub fn mount_partition<Flash>(flash: Flash) -> Result<Backend, FsError>
+where
+    Flash: NorFlash + Send + 'static,
+{
+    mount_partition_with(flash, PartitionMount::Existing)
+}
+
+#[derive(Clone, Copy)]
+enum PartitionMount {
+    Existing,
+    MountOrFormat,
+}
+
+fn mount_partition_with<Flash>(flash: Flash, mount: PartitionMount) -> Result<Backend, FsError>
+where
+    Flash: NorFlash + Send + 'static,
+{
     let capacity = flash.capacity();
     let block_count = capacity
         .checked_div(Flash::ERASE_SIZE)
@@ -61,7 +90,11 @@ where
     macro_rules! mount_geometry {
         ($blocks:expr) => {{
             let storage = PartitionStorage::<Flash, U128, U8, $blocks>::new(flash)?;
-            LittleFs::mount_or_format(storage).map(LittleFs::into_backend)
+            match mount {
+                PartitionMount::Existing => LittleFs::mount(storage),
+                PartitionMount::MountOrFormat => LittleFs::mount_or_format(storage),
+            }
+            .map(LittleFs::into_backend)
         }};
     }
 

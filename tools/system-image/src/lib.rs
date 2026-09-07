@@ -1,13 +1,20 @@
-//! Host-side construction of Barracuda System partition images.
+//! Host-side construction of Barracuda resource images.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use barracuda_board_config::{parse, read_selected_board};
 use barracuda_platform_config::{resolve_board_platform, FlashDriver, LayoutDriver};
-use esp_idf_part::{Flags, PartitionTable};
+use barracuda_plugin::manifest::{parse as parse_plugin_manifest, ManifestError};
+use barracuda_vfs::{MountOptions, Vfs};
+use barracuda_vfs_fat::FatFs;
+use embedded_io::{ErrorType, SeekFrom};
+use embedded_io_async::{Read, Seek, Write};
+use esp_idf_part::{DataType, Flags, PartitionTable, SubType};
 use generic_array::typenum::{U128, U8};
 use littlefs2::driver::Storage;
 use littlefs2::fs::Filesystem;
@@ -19,23 +26,33 @@ mod flash;
 
 use flash::{FlashRequest, PlatformFlash};
 
-/// Workspace-relative source tree burned into the System partition.
-pub const IMAGE_SOURCE: &str = "image";
-/// Workspace-relative output path for the raw System partition image.
+/// Filesystem format selected by the native `resources` partition model.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum ResourcesFilesystem {
+    /// FAT12/16/32, selected according to partition capacity.
+    #[serde(rename = "fatfs")]
+    FatFs,
+    /// LittleFS over the native erase geometry.
+    #[serde(rename = "littlefs")]
+    LittleFs,
+}
+
+/// Workspace-relative output path for the raw resource image.
 pub const IMAGE_OUTPUT: &str = "target/barracuda-system.img";
 
-const IMAGE_BLOCK_SIZE: usize = 4096;
+const FAT_SECTOR_SIZE: usize = 512;
 
-/// Selected Board region assigned to the System filesystem.
+/// Selected Board region assigned to bundled read-only resources.
 #[derive(Debug, PartialEq, Eq)]
-pub struct SystemRegion {
+pub struct ResourcesRegion {
     board: String,
     offset: u64,
     size: usize,
+    filesystem: ResourcesFilesystem,
     platform_flash: PlatformFlash,
 }
 
-impl SystemRegion {
+impl ResourcesRegion {
     /// Returns the selected Board name.
     #[must_use]
     pub fn board(&self) -> &str {
@@ -48,10 +65,16 @@ impl SystemRegion {
         self.offset
     }
 
-    /// Returns the System region capacity in bytes.
+    /// Returns the resource region capacity in bytes.
     #[must_use]
     pub const fn size(&self) -> usize {
         self.size
+    }
+
+    /// Returns the filesystem format selected for this resource image.
+    #[must_use]
+    pub const fn filesystem(&self) -> ResourcesFilesystem {
+        self.filesystem
     }
 }
 
@@ -59,13 +82,13 @@ impl SystemRegion {
 #[derive(Debug, PartialEq, Eq)]
 pub struct BuiltImage {
     board: String,
-    source: PathBuf,
     output: PathBuf,
     offset: u64,
     size: usize,
+    filesystem: ResourcesFilesystem,
 }
 
-/// Description of one completed System partition flash.
+/// Description of one completed resource-image flash.
 #[derive(Debug, PartialEq, Eq)]
 pub struct FlashedImage {
     board: String,
@@ -73,6 +96,7 @@ pub struct FlashedImage {
     destination: String,
     offset: u64,
     size: usize,
+    filesystem: ResourcesFilesystem,
 }
 
 impl FlashedImage {
@@ -94,7 +118,7 @@ impl FlashedImage {
         &self.destination
     }
 
-    /// Returns the selected Board's native System-region offset or address.
+    /// Returns the selected Board's native resource-region offset or address.
     #[must_use]
     pub const fn offset(&self) -> u64 {
         self.offset
@@ -105,6 +129,12 @@ impl FlashedImage {
     pub const fn size(&self) -> usize {
         self.size
     }
+
+    /// Returns the filesystem format contained by the flashed image.
+    #[must_use]
+    pub const fn filesystem(&self) -> ResourcesFilesystem {
+        self.filesystem
+    }
 }
 
 impl BuiltImage {
@@ -114,19 +144,13 @@ impl BuiltImage {
         &self.board
     }
 
-    /// Returns the source directory used for the image.
-    #[must_use]
-    pub fn source(&self) -> &Path {
-        &self.source
-    }
-
     /// Returns the raw image output path.
     #[must_use]
     pub fn output(&self) -> &Path {
         &self.output
     }
 
-    /// Returns the selected Board's native System-region offset or address.
+    /// Returns the selected Board's native resource-region offset or address.
     #[must_use]
     pub const fn offset(&self) -> u64 {
         self.offset
@@ -137,9 +161,15 @@ impl BuiltImage {
     pub const fn size(&self) -> usize {
         self.size
     }
+
+    /// Returns the filesystem format written into the image.
+    #[must_use]
+    pub const fn filesystem(&self) -> ResourcesFilesystem {
+        self.filesystem
+    }
 }
 
-/// Failure while constructing a LittleFS partition image.
+/// Failure while constructing a resource image.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImageBuildError {
@@ -154,11 +184,22 @@ pub enum ImageBuildError {
     SourceNotDirectory(PathBuf),
     /// A source entry is neither a regular file nor a directory.
     UnsupportedEntry(PathBuf),
-    /// A source path cannot be represented by the LittleFS path contract.
+    /// A Plugin attempted to prebuild a mutable or unknown filesystem mount.
+    UnsupportedPluginFilesystemEntry(PathBuf),
+    /// A Plugin filesystem contribution has an invalid manifest.
+    PluginManifest {
+        /// Manifest path that could not be parsed.
+        path: PathBuf,
+        /// Manifest validation failure.
+        source: ManifestError,
+    },
+    /// Two bundled Plugin directories declare the same stable identity.
+    DuplicatePluginId(String),
+    /// A source path cannot be represented by the image path contract.
     InvalidPath(PathBuf),
-    /// The image capacity is too small or is not erase-block aligned.
+    /// The image capacity is incompatible with the selected filesystem.
     InvalidCapacity(usize),
-    /// LittleFS could not format or populate the image.
+    /// The selected filesystem could not format or populate the image.
     Filesystem {
         /// Image-relative path being processed.
         path: String,
@@ -172,24 +213,43 @@ impl fmt::Display for ImageBuildError {
                 write!(formatter, "failed to read `{}`: {source}", path.display())
             }
             Self::SourceNotDirectory(path) => {
-                write!(formatter, "image source is not a directory: `{}`", path.display())
+                write!(
+                    formatter,
+                    "image source is not a directory: `{}`",
+                    path.display()
+                )
             }
             Self::UnsupportedEntry(path) => write!(
                 formatter,
                 "image source contains an unsupported entry: `{}`",
                 path.display()
             ),
+            Self::UnsupportedPluginFilesystemEntry(path) => write!(
+                formatter,
+                "Plugin filesystem may prebuild only `resources`, found `{}`",
+                path.display()
+            ),
+            Self::PluginManifest { path, source } => {
+                write!(
+                    formatter,
+                    "invalid Plugin manifest `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::DuplicatePluginId(id) => {
+                write!(formatter, "more than one bundled Plugin declares ID `{id}`")
+            }
             Self::InvalidPath(path) => write!(
                 formatter,
-                "image path cannot be represented in LittleFS: `{}`",
+                "image path cannot be represented in the resource image: `{}`",
                 path.display()
             ),
             Self::InvalidCapacity(capacity) => write!(
                 formatter,
-                "image capacity {capacity} must contain at least two {IMAGE_BLOCK_SIZE}-byte erase blocks"
+                "image capacity {capacity} is unsupported by the selected resource filesystem"
             ),
             Self::Filesystem { path } => {
-                write!(formatter, "failed to populate LittleFS path `{path}`")
+                write!(formatter, "failed to populate resource image path `{path}`")
             }
         }
     }
@@ -199,33 +259,35 @@ impl std::error::Error for ImageBuildError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::SourceRead { source, .. } => Some(source),
+            Self::PluginManifest { source, .. } => Some(source),
             _ => None,
         }
     }
 }
 
-/// Builds the top-level [`IMAGE_SOURCE`] tree for the currently selected Board.
+/// Builds enabled Plugin resources for the selected Board.
 ///
 /// # Errors
 ///
 /// Returns an error when Board selection or its native layout is invalid, the
-/// source tree cannot be converted to LittleFS, or the output cannot be written.
+/// source tree cannot be converted to the selected filesystem, or the output
+/// cannot be written.
 pub fn build_selected(workspace: &Path) -> Result<BuiltImage, String> {
-    let region = selected_system_region(workspace)?;
-    let source = workspace.join(IMAGE_SOURCE);
+    let region = selected_resources_region(workspace)?;
     let output = workspace.join(IMAGE_OUTPUT);
-    let bytes = build_directory(&source, region.size).map_err(|error| error.to_string())?;
+    let bytes = build_workspace(workspace, region.size, region.filesystem)
+        .map_err(|error| error.to_string())?;
     write_image(&output, &bytes)?;
     Ok(BuiltImage {
         board: region.board,
-        source,
         output,
         offset: region.offset,
         size: region.size,
+        filesystem: region.filesystem,
     })
 }
 
-/// Flashes the built System image into the currently selected Board's System partition.
+/// Flashes the built resource image into the selected Board's `resources` partition.
 ///
 /// The selected Board determines both the native partition bounds and the
 /// internal Platform flasher. This command never rebuilds the image.
@@ -236,7 +298,7 @@ pub fn build_selected(workspace: &Path) -> Result<BuiltImage, String> {
 /// image is absent or stale, Platform configuration is invalid, or flashing
 /// fails.
 pub fn flash_selected(workspace: &Path) -> Result<FlashedImage, String> {
-    let region = selected_system_region(workspace)?;
+    let region = selected_resources_region(workspace)?;
     let image = workspace.join(IMAGE_OUTPUT);
     let destination = flash::flash(FlashRequest {
         workspace,
@@ -251,16 +313,17 @@ pub fn flash_selected(workspace: &Path) -> Result<FlashedImage, String> {
         destination,
         offset: region.offset,
         size: region.size,
+        filesystem: region.filesystem,
     })
 }
 
-/// Resolves the System region from the currently selected Board's native layout.
+/// Resolves the read-only resource region from the selected Board's native layout.
 ///
 /// # Errors
 ///
 /// Returns an error when no Board is selected, the selected bundle is invalid,
-/// or its native layout does not contain a writable System region.
-pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> {
+/// or its native layout does not contain a read-only resource region.
+pub fn selected_resources_region(workspace: &Path) -> Result<ResourcesRegion, String> {
     let board_name = read_selected_board(workspace)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| String::from("no Board selected; run `cargo board select` first"))?;
@@ -283,21 +346,23 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
         board.toolchain().map(|toolchain| toolchain.target()),
     )
     .map_err(|error| error.to_string())?;
-    let (offset, size, capacity) = match platform.system_image().layout() {
+    let (offset, size, capacity, filesystem) = match platform.system_image().layout() {
         LayoutDriver::FileRegions => {
-            let (offset, size, capacity) = file_layout_system_region(&layout)?;
-            (offset, size, Some(capacity))
+            let (offset, size, capacity, filesystem) = file_layout_resources_region(&layout)?;
+            (offset, size, Some(capacity), filesystem)
         }
         LayoutDriver::EspIdfPartitions => {
-            let (offset, size) = esp_system_region(&layout)?;
-            (offset, size, None)
+            let (offset, size, filesystem) = esp_resources_region(&layout)?;
+            (offset, size, None, filesystem)
         }
         LayoutDriver::LinkerMemory => {
-            let (offset, size) = stm32_system_region(&layout)?;
-            (offset, size, None)
+            let (offset, size, filesystem) = stm32_resources_region(&layout)?;
+            (offset, size, None, filesystem)
         }
         LayoutDriver::Command(driver) => {
-            command_system_region(workspace, platform.directory(), &layout_path, chip, driver)?
+            let (offset, size, capacity, filesystem) =
+                command_system_region(workspace, platform.directory(), &layout_path, chip, driver)?;
+            (offset, size, capacity, filesystem)
         }
     };
     let platform_flash = match platform.system_image().flash() {
@@ -321,10 +386,11 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
             driver: driver.clone(),
         },
     };
-    Ok(SystemRegion {
+    Ok(ResourcesRegion {
         board: board_name,
         offset,
         size,
+        filesystem,
         platform_flash,
     })
 }
@@ -336,6 +402,7 @@ struct CommandRegion {
     size: usize,
     #[serde(default)]
     capacity: Option<usize>,
+    filesystem: ResourcesFilesystem,
 }
 
 fn command_system_region(
@@ -344,7 +411,7 @@ fn command_system_region(
     layout: &Path,
     chip: &str,
     driver: &barracuda_platform_config::CommandDriver,
-) -> Result<(u64, usize, Option<usize>), String> {
+) -> Result<(u64, usize, Option<usize>, ResourcesFilesystem), String> {
     let command = command::prepare(
         driver,
         command::DriverContext {
@@ -371,10 +438,15 @@ fn command_system_region(
     let region = documents
         .pop()
         .ok_or_else(|| String::from("Platform layout command returned an empty document"))?;
-    Ok((region.offset, region.size, region.capacity))
+    Ok((
+        region.offset,
+        region.size,
+        region.capacity,
+        region.filesystem,
+    ))
 }
 
-/// Builds one raw LittleFS image from all files below `source`.
+/// Builds one raw resource image using the explicitly selected filesystem.
 ///
 /// Entries are traversed in lexical order, so identical source trees produce
 /// identical images. Symbolic links and special entries are rejected.
@@ -382,8 +454,12 @@ fn command_system_region(
 /// # Errors
 ///
 /// Returns [`ImageBuildError`] when the source is invalid, the capacity is not
-/// supported, or LittleFS cannot format or populate the image.
-pub fn build_directory(source: &Path, capacity: usize) -> Result<Vec<u8>, ImageBuildError> {
+/// supported, or the selected filesystem cannot format or populate the image.
+pub fn build_directory(
+    source: &Path,
+    capacity: usize,
+    filesystem: ResourcesFilesystem,
+) -> Result<Vec<u8>, ImageBuildError> {
     let metadata =
         fs::symlink_metadata(source).map_err(|source_error| ImageBuildError::SourceRead {
             path: source.to_path_buf(),
@@ -392,16 +468,105 @@ pub fn build_directory(source: &Path, capacity: usize) -> Result<Vec<u8>, ImageB
     if !metadata.is_dir() {
         return Err(ImageBuildError::SourceNotDirectory(source.to_path_buf()));
     }
-    let block_count = capacity
-        .checked_div(IMAGE_BLOCK_SIZE)
-        .filter(|count| *count >= 2 && count.saturating_mul(IMAGE_BLOCK_SIZE) == capacity)
-        .ok_or(ImageBuildError::InvalidCapacity(capacity))?;
     let mut entries = Vec::new();
-    collect_entries(source, source, &mut entries)?;
+    collect_entries(source, source, "", &mut entries)?;
+    build_entries(capacity, &entries, filesystem)
+}
+
+/// Builds a System image exclusively from enabled Plugin resources.
+///
+/// A file at `plugins/<directory>/filesystem/resources/<path>` is placed at
+/// `/plugins/<manifest-id>/<path>`. Mutable Plugin mounts are never
+/// accepted as image sources.
+///
+/// # Errors
+///
+/// Returns [`ImageBuildError`] when an image source, Plugin manifest, Plugin
+/// filesystem contribution, or image geometry is invalid.
+pub fn build_workspace(
+    workspace: &Path,
+    capacity: usize,
+    filesystem: ResourcesFilesystem,
+) -> Result<Vec<u8>, ImageBuildError> {
+    let mut entries = Vec::new();
+    collect_plugin_resources(workspace, &mut entries)?;
+    entries.sort_by(|left, right| left.path().cmp(right.path()));
+    build_entries(capacity, &entries, filesystem)
+}
+
+fn build_entries(
+    capacity: usize,
+    entries: &[SourceEntry],
+    filesystem: ResourcesFilesystem,
+) -> Result<Vec<u8>, ImageBuildError> {
+    match filesystem {
+        ResourcesFilesystem::FatFs => build_fat_entries(capacity, entries),
+        ResourcesFilesystem::LittleFs => build_littlefs_entries(capacity, entries),
+    }
+}
+
+fn build_fat_entries(capacity: usize, entries: &[SourceEntry]) -> Result<Vec<u8>, ImageBuildError> {
+    if capacity == 0 || capacity.checked_rem(FAT_SECTOR_SIZE) != Some(0) {
+        return Err(ImageBuildError::InvalidCapacity(capacity));
+    }
+    let mut image = vec![0; capacity];
+    fatfs::format_volume(
+        std::io::Cursor::new(image.as_mut_slice()),
+        fatfs::FormatVolumeOptions::new(),
+    )
+    .map_err(|_error| ImageBuildError::Filesystem {
+        path: String::from("/"),
+    })?;
+    let bytes = Arc::new(Mutex::new(image));
+    let disk = ImageDisk::new(bytes.clone());
+    futures_lite::future::block_on(async {
+        let fat = FatFs::mount(disk)
+            .await
+            .map_err(|_error| ImageBuildError::Filesystem {
+                path: String::from("/"),
+            })?;
+        let mut vfs = Vfs::new();
+        vfs.mount("/", fat.into_backend(), MountOptions::read_write())
+            .await
+            .map_err(|_error| ImageBuildError::Filesystem {
+                path: String::from("/"),
+            })?;
+        for entry in entries {
+            let path = entry.path();
+            match entry {
+                SourceEntry::Directory { .. } => vfs.create_dir_all(path).await,
+                SourceEntry::File { bytes, .. } => vfs.write(path, bytes).await,
+            }
+            .map_err(|_error| ImageBuildError::Filesystem {
+                path: path.to_owned(),
+            })?;
+        }
+        Ok::<(), ImageBuildError>(())
+    })?;
+    Arc::try_unwrap(bytes)
+        .map_err(|_bytes| ImageBuildError::Filesystem {
+            path: String::from("/"),
+        })?
+        .into_inner()
+        .map_err(|_error| ImageBuildError::Filesystem {
+            path: String::from("/"),
+        })
+}
+
+fn build_littlefs_entries(
+    capacity: usize,
+    entries: &[SourceEntry],
+) -> Result<Vec<u8>, ImageBuildError> {
+    const BLOCK_SIZE: usize = 4096;
+
+    let block_count = capacity
+        .checked_div(BLOCK_SIZE)
+        .filter(|count| *count >= 2 && count.saturating_mul(BLOCK_SIZE) == capacity)
+        .ok_or(ImageBuildError::InvalidCapacity(capacity))?;
 
     macro_rules! build_geometry {
         ($blocks:expr) => {{
-            build_with_geometry::<$blocks>(capacity, &entries)
+            build_littlefs_with_geometry::<$blocks>(capacity, entries)
         }};
     }
 
@@ -426,57 +591,7 @@ pub fn build_directory(source: &Path, capacity: usize) -> Result<Vec<u8>, ImageB
     }
 }
 
-enum SourceEntry {
-    Directory { path: String },
-    File { path: String, bytes: Vec<u8> },
-}
-
-fn collect_entries(
-    root: &Path,
-    directory: &Path,
-    entries: &mut Vec<SourceEntry>,
-) -> Result<(), ImageBuildError> {
-    let reader = fs::read_dir(directory).map_err(|source| ImageBuildError::SourceRead {
-        path: directory.to_path_buf(),
-        source,
-    })?;
-    let mut children =
-        reader
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| ImageBuildError::SourceRead {
-                path: directory.to_path_buf(),
-                source,
-            })?;
-    children.sort_by_key(fs::DirEntry::file_name);
-    for child in children {
-        let host = child.path();
-        let relative = host
-            .strip_prefix(root)
-            .map_err(|_error| ImageBuildError::InvalidPath(host.clone()))?;
-        let path = image_path(&host, relative)?;
-        let file_type = child
-            .file_type()
-            .map_err(|source| ImageBuildError::SourceRead {
-                path: host.clone(),
-                source,
-            })?;
-        if file_type.is_dir() {
-            entries.push(SourceEntry::Directory { path });
-            collect_entries(root, &host, entries)?;
-        } else if file_type.is_file() {
-            let bytes = fs::read(&host).map_err(|source| ImageBuildError::SourceRead {
-                path: host.clone(),
-                source,
-            })?;
-            entries.push(SourceEntry::File { path, bytes });
-        } else {
-            return Err(ImageBuildError::UnsupportedEntry(host));
-        }
-    }
-    Ok(())
-}
-
-fn build_with_geometry<const BLOCK_COUNT: usize>(
+fn build_littlefs_with_geometry<const BLOCK_COUNT: usize>(
     capacity: usize,
     entries: &[SourceEntry],
 ) -> Result<Vec<u8>, ImageBuildError> {
@@ -487,10 +602,8 @@ fn build_with_geometry<const BLOCK_COUNT: usize>(
     let mut current = String::from("/");
     Filesystem::mount_and_then(&mut storage, |filesystem| {
         for entry in entries {
-            let path = match entry {
-                SourceEntry::Directory { path } | SourceEntry::File { path, .. } => path,
-            };
-            current.clone_from(path);
+            let path = entry.path();
+            current.clone_from(&path.to_owned());
             let little_path = LittlePathBuf::try_from(path.as_bytes())
                 .map_err(|_error| littlefs2::io::Error::INVALID)?;
             match entry {
@@ -502,26 +615,6 @@ fn build_with_geometry<const BLOCK_COUNT: usize>(
     })
     .map_err(|_error| ImageBuildError::Filesystem { path: current })?;
     Ok(storage.into_bytes())
-}
-
-fn image_path(host: &Path, relative: &Path) -> Result<String, ImageBuildError> {
-    let mut path = String::new();
-    for component in relative.components() {
-        let Component::Normal(name) = component else {
-            return Err(ImageBuildError::InvalidPath(host.to_path_buf()));
-        };
-        let name = name
-            .to_str()
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| ImageBuildError::InvalidPath(host.to_path_buf()))?;
-        path.push('/');
-        path.push_str(name);
-    }
-    if path.is_empty() {
-        Err(ImageBuildError::InvalidPath(host.to_path_buf()))
-    } else {
-        Ok(path)
-    }
 }
 
 struct ImageStorage<const BLOCK_COUNT: usize> {
@@ -551,7 +644,7 @@ impl<const BLOCK_COUNT: usize> ImageStorage<BLOCK_COUNT> {
 impl<const BLOCK_COUNT: usize> Storage for ImageStorage<BLOCK_COUNT> {
     const READ_SIZE: usize = 1;
     const WRITE_SIZE: usize = 1;
-    const BLOCK_SIZE: usize = IMAGE_BLOCK_SIZE;
+    const BLOCK_SIZE: usize = 4096;
     const BLOCK_COUNT: usize = BLOCK_COUNT;
 
     type CACHE_SIZE = U128;
@@ -590,6 +683,303 @@ impl<const BLOCK_COUNT: usize> Storage for ImageStorage<BLOCK_COUNT> {
     }
 }
 
+enum SourceEntry {
+    Directory { path: String },
+    File { path: String, bytes: Vec<u8> },
+}
+
+impl SourceEntry {
+    fn path(&self) -> &str {
+        match self {
+            Self::Directory { path } | Self::File { path, .. } => path,
+        }
+    }
+}
+
+fn collect_entries(
+    root: &Path,
+    directory: &Path,
+    image_root: &str,
+    entries: &mut Vec<SourceEntry>,
+) -> Result<(), ImageBuildError> {
+    let reader = fs::read_dir(directory).map_err(|source| ImageBuildError::SourceRead {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    let mut children =
+        reader
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| ImageBuildError::SourceRead {
+                path: directory.to_path_buf(),
+                source,
+            })?;
+    children.sort_by_key(fs::DirEntry::file_name);
+    for child in children {
+        let host = child.path();
+        let relative = host
+            .strip_prefix(root)
+            .map_err(|_error| ImageBuildError::InvalidPath(host.clone()))?;
+        let path = image_path(&host, image_root, relative)?;
+        let file_type = child
+            .file_type()
+            .map_err(|source| ImageBuildError::SourceRead {
+                path: host.clone(),
+                source,
+            })?;
+        if file_type.is_dir() {
+            entries.push(SourceEntry::Directory { path });
+            collect_entries(root, &host, image_root, entries)?;
+        } else if file_type.is_file() {
+            let bytes = fs::read(&host).map_err(|source| ImageBuildError::SourceRead {
+                path: host.clone(),
+                source,
+            })?;
+            entries.push(SourceEntry::File { path, bytes });
+        } else {
+            return Err(ImageBuildError::UnsupportedEntry(host));
+        }
+    }
+    Ok(())
+}
+
+fn collect_plugin_resources(
+    workspace: &Path,
+    entries: &mut Vec<SourceEntry>,
+) -> Result<(), ImageBuildError> {
+    let plugins_root = workspace.join("plugins");
+    match fs::symlink_metadata(&plugins_root) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_metadata) => return Err(ImageBuildError::SourceNotDirectory(plugins_root)),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(ImageBuildError::SourceRead {
+                path: plugins_root,
+                source,
+            });
+        }
+    }
+
+    let disabled = disabled_plugins(workspace)?;
+    let mut ids = BTreeSet::new();
+    let mut has_plugins_root = false;
+    for plugin in read_directory(&plugins_root)? {
+        let file_type = plugin
+            .file_type()
+            .map_err(|source| ImageBuildError::SourceRead {
+                path: plugin.path(),
+                source,
+            })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let directory = plugin
+            .file_name()
+            .into_string()
+            .map_err(|_name| ImageBuildError::InvalidPath(plugin.path()))?;
+        if disabled.contains(&directory) {
+            continue;
+        }
+
+        let manifest_path = plugin.path().join("plugin.toml");
+        let manifest_text =
+            fs::read_to_string(&manifest_path).map_err(|source| ImageBuildError::SourceRead {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        let manifest = parse_plugin_manifest(&manifest_text).map_err(|source| {
+            ImageBuildError::PluginManifest {
+                path: manifest_path,
+                source,
+            }
+        })?;
+        let id = manifest.id();
+        if id == "." || id == ".." || id.contains('/') || id.as_bytes().contains(&0) {
+            return Err(ImageBuildError::InvalidPath(plugin.path()));
+        }
+        if !ids.insert(id.to_owned()) {
+            return Err(ImageBuildError::DuplicatePluginId(id.to_owned()));
+        }
+        if !has_plugins_root {
+            entries.push(SourceEntry::Directory {
+                path: String::from("/plugins"),
+            });
+            has_plugins_root = true;
+        }
+        let plugin_image_root = format!("/plugins/{id}");
+        entries.push(SourceEntry::Directory {
+            path: plugin_image_root.clone(),
+        });
+
+        let filesystem_root = plugin.path().join("filesystem");
+        match fs::symlink_metadata(&filesystem_root) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_metadata) => {
+                return Err(ImageBuildError::UnsupportedPluginFilesystemEntry(
+                    filesystem_root,
+                ));
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(ImageBuildError::SourceRead {
+                    path: filesystem_root,
+                    source,
+                });
+            }
+        }
+
+        let filesystem_entries = read_directory(&filesystem_root)?;
+        for entry in &filesystem_entries {
+            if entry.file_name() != "resources"
+                || !entry
+                    .file_type()
+                    .map_err(|source| ImageBuildError::SourceRead {
+                        path: entry.path(),
+                        source,
+                    })?
+                    .is_dir()
+            {
+                return Err(ImageBuildError::UnsupportedPluginFilesystemEntry(
+                    entry.path(),
+                ));
+            }
+        }
+        let Some(resources) = filesystem_entries.into_iter().next() else {
+            continue;
+        };
+        let resources_root = resources.path();
+        collect_entries(
+            &resources_root,
+            &resources_root,
+            &plugin_image_root,
+            entries,
+        )?;
+    }
+    Ok(())
+}
+
+fn read_directory(directory: &Path) -> Result<Vec<fs::DirEntry>, ImageBuildError> {
+    let reader = fs::read_dir(directory).map_err(|source| ImageBuildError::SourceRead {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    let mut entries =
+        reader
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| ImageBuildError::SourceRead {
+                path: directory.to_path_buf(),
+                source,
+            })?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    Ok(entries)
+}
+
+fn disabled_plugins(workspace: &Path) -> Result<BTreeSet<String>, ImageBuildError> {
+    let path = workspace.join(".barracuda/disabled-plugins");
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(ImageBuildError::SourceRead { path, source }),
+    };
+    Ok(contents
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(String::from)
+        .collect())
+}
+
+fn image_path(host: &Path, root: &str, relative: &Path) -> Result<String, ImageBuildError> {
+    let mut path = String::from(root);
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(ImageBuildError::InvalidPath(host.to_path_buf()));
+        };
+        let name = name
+            .to_str()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| ImageBuildError::InvalidPath(host.to_path_buf()))?;
+        path.push('/');
+        path.push_str(name);
+    }
+    if path.is_empty() {
+        Err(ImageBuildError::InvalidPath(host.to_path_buf()))
+    } else {
+        Ok(path)
+    }
+}
+
+struct ImageDisk {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    cursor: usize,
+}
+
+impl ImageDisk {
+    fn new(bytes: Arc<Mutex<Vec<u8>>>) -> Self {
+        Self { bytes, cursor: 0 }
+    }
+}
+
+impl ErrorType for ImageDisk {
+    type Error = embedded_io::ErrorKind;
+}
+
+impl Read for ImageDisk {
+    async fn read(&mut self, output: &mut [u8]) -> Result<usize, Self::Error> {
+        let bytes = self
+            .bytes
+            .lock()
+            .map_err(|_error| embedded_io::ErrorKind::Other)?;
+        let amount = output.len().min(bytes.len().saturating_sub(self.cursor));
+        output[..amount].copy_from_slice(&bytes[self.cursor..self.cursor + amount]);
+        self.cursor = self
+            .cursor
+            .checked_add(amount)
+            .ok_or(embedded_io::ErrorKind::InvalidInput)?;
+        Ok(amount)
+    }
+}
+
+impl Write for ImageDisk {
+    async fn write(&mut self, input: &[u8]) -> Result<usize, Self::Error> {
+        let mut bytes = self
+            .bytes
+            .lock()
+            .map_err(|_error| embedded_io::ErrorKind::Other)?;
+        let end = self
+            .cursor
+            .checked_add(input.len())
+            .filter(|end| *end <= bytes.len())
+            .ok_or(embedded_io::ErrorKind::InvalidInput)?;
+        bytes[self.cursor..end].copy_from_slice(input);
+        self.cursor = end;
+        Ok(input.len())
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl Seek for ImageDisk {
+    async fn seek(&mut self, position: SeekFrom) -> Result<u64, Self::Error> {
+        let capacity = self
+            .bytes
+            .lock()
+            .map_err(|_error| embedded_io::ErrorKind::Other)?
+            .len() as i128;
+        let next = match position {
+            SeekFrom::Start(offset) => Some(i128::from(offset)),
+            SeekFrom::End(offset) => capacity.checked_add(i128::from(offset)),
+            SeekFrom::Current(offset) => (self.cursor as i128).checked_add(i128::from(offset)),
+        }
+        .filter(|next| *next >= 0 && *next <= capacity)
+        .ok_or(embedded_io::ErrorKind::InvalidInput)?;
+        self.cursor =
+            usize::try_from(next).map_err(|_error| embedded_io::ErrorKind::InvalidInput)?;
+        u64::try_from(self.cursor).map_err(|_error| embedded_io::ErrorKind::InvalidInput)
+    }
+}
+
 fn read_text(path: &Path, kind: &str) -> Result<String, String> {
     fs::read_to_string(path)
         .map_err(|error| format!("failed to read {kind} `{}`: {error}", path.display()))
@@ -609,6 +999,7 @@ struct FileRegionDocument {
     offset: u64,
     size: usize,
     access: FileRegionAccess,
+    filesystem: FileRegionFilesystem,
 }
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -618,7 +1009,19 @@ enum FileRegionAccess {
     ReadWrite,
 }
 
-fn file_layout_system_region(layout: &str) -> Result<(u64, usize, usize), String> {
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum FileRegionFilesystem {
+    Raw,
+    #[serde(rename = "fatfs")]
+    FatFs,
+    #[serde(rename = "littlefs")]
+    LittleFs,
+}
+
+fn file_layout_resources_region(
+    layout: &str,
+) -> Result<(u64, usize, usize, ResourcesFilesystem), String> {
     let mut documents = yaml_peg::serde::from_str::<FileLayoutDocument>(layout)
         .map_err(|error| format!("invalid file layout: {error}"))?;
     if documents.len() != 1 {
@@ -633,24 +1036,35 @@ fn file_layout_system_region(layout: &str) -> Result<(u64, usize, usize), String
     let region = document
         .regions
         .into_iter()
-        .find(|region| region.name == "system")
-        .ok_or_else(|| String::from("selected Board native layout has no `system` region"))?;
-    if region.access != FileRegionAccess::ReadWrite {
-        return Err(String::from("selected Board `system` region is read-only"));
+        .find(|region| region.name == "resources")
+        .ok_or_else(|| String::from("selected Board native layout has no `resources` region"))?;
+    if region.access != FileRegionAccess::ReadOnly {
+        return Err(String::from(
+            "selected Board `resources` region is not read-only",
+        ));
     }
+    let filesystem = match region.filesystem {
+        FileRegionFilesystem::FatFs => ResourcesFilesystem::FatFs,
+        FileRegionFilesystem::LittleFs => ResourcesFilesystem::LittleFs,
+        FileRegionFilesystem::Raw => {
+            return Err(String::from(
+                "selected Board `resources` region has no filesystem",
+            ))
+        }
+    };
     let end = usize::try_from(region.offset)
         .ok()
         .and_then(|offset| offset.checked_add(region.size))
-        .ok_or_else(|| String::from("selected Board `system` region range overflows"))?;
+        .ok_or_else(|| String::from("selected Board `resources` region range overflows"))?;
     if end > document.capacity {
         return Err(String::from(
-            "selected Board `system` region exceeds file-layout capacity",
+            "selected Board `resources` region exceeds file-layout capacity",
         ));
     }
-    Ok((region.offset, region.size, document.capacity))
+    Ok((region.offset, region.size, document.capacity, filesystem))
 }
 
-fn esp_system_region(layout: &str) -> Result<(u64, usize), String> {
+fn esp_resources_region(layout: &str) -> Result<(u64, usize, ResourcesFilesystem), String> {
     let table = PartitionTable::try_from_str(layout)
         .map_err(|error| format!("invalid ESP partition table: {error}"))?;
     table
@@ -659,33 +1073,72 @@ fn esp_system_region(layout: &str) -> Result<(u64, usize), String> {
     let partition = table
         .partitions()
         .iter()
-        .find(|partition| partition.name() == "system")
-        .ok_or_else(|| String::from("selected Board native layout has no `system` partition"))?;
-    if partition.flags().contains(Flags::READONLY) {
+        .find(|partition| partition.name() == "resources")
+        .ok_or_else(|| String::from("selected Board native layout has no `resources` partition"))?;
+    let filesystem = match partition.subtype() {
+        SubType::Data(DataType::Fat) => ResourcesFilesystem::FatFs,
+        SubType::Data(DataType::Littlefs) => ResourcesFilesystem::LittleFs,
+        _ => {
+            return Err(String::from(
+                "selected Board `resources` partition is neither FATFS nor LittleFS",
+            ))
+        }
+    };
+    if !partition.flags().contains(Flags::READONLY) {
         return Err(String::from(
-            "selected Board `system` partition is read-only",
+            "selected Board `resources` partition is not read-only",
         ));
     }
     Ok((
         u64::from(partition.offset()),
         usize::try_from(partition.size())
-            .map_err(|_error| String::from("selected Board `system` partition is too large"))?,
+            .map_err(|_error| String::from("selected Board `resources` partition is too large"))?,
+        filesystem,
     ))
 }
 
-fn stm32_system_region(layout: &str) -> Result<(u64, usize), String> {
+fn stm32_resources_region(layout: &str) -> Result<(u64, usize, ResourcesFilesystem), String> {
     let declaration = layout
         .lines()
         .map(str::trim)
-        .find(|line| line.starts_with("SYSTEM "))
-        .ok_or_else(|| String::from("selected Board native layout has no `SYSTEM` region"))?;
+        .find(|line| line.starts_with("RESOURCES "))
+        .ok_or_else(|| String::from("selected Board native layout has no `RESOURCES` region"))?;
+    let attributes = declaration
+        .split_once(')')
+        .and_then(|(prefix, _rest)| prefix.split_once('(').map(|(_name, attributes)| attributes))
+        .ok_or_else(|| String::from("STM32 `RESOURCES` region has no access attributes"))?;
+    if attributes.contains('w') {
+        return Err(String::from(
+            "selected Board `RESOURCES` region is not read-only",
+        ));
+    }
     let offset = linker_assignment(declaration, "ORIGIN")?;
     let size = linker_assignment(declaration, "LENGTH")?;
+    let filesystem = linker_partition_filesystem(declaration)?;
     Ok((
         offset,
         usize::try_from(size)
-            .map_err(|_error| String::from("selected Board `SYSTEM` region is too large"))?,
+            .map_err(|_error| String::from("selected Board `RESOURCES` region is too large"))?,
+        filesystem,
     ))
+}
+
+fn linker_partition_filesystem(declaration: &str) -> Result<ResourcesFilesystem, String> {
+    const PREFIX: &str = "/* filesystem:";
+
+    let declaration = declaration
+        .split_once(PREFIX)
+        .map(|(_prefix, declaration)| declaration)
+        .and_then(|declaration| declaration.strip_suffix("*/"))
+        .map(str::trim)
+        .ok_or_else(|| String::from("STM32 `RESOURCES` region has no filesystem declaration"))?;
+    match declaration {
+        "fatfs" => Ok(ResourcesFilesystem::FatFs),
+        "littlefs" => Ok(ResourcesFilesystem::LittleFs),
+        other => Err(format!(
+            "STM32 `RESOURCES` region declares unsupported filesystem `{other}`"
+        )),
+    }
 }
 
 fn linker_assignment(declaration: &str, name: &str) -> Result<u64, String> {
@@ -693,9 +1146,11 @@ fn linker_assignment(declaration: &str, name: &str) -> Result<u64, String> {
         .split(',')
         .find_map(|field| {
             let (field_name, value) = field.split_once('=')?;
-            (field_name.split_whitespace().last()? == name).then_some(value.trim())
+            (field_name.split_whitespace().last()? == name)
+                .then(|| value.split_whitespace().next())
+                .flatten()
         })
-        .ok_or_else(|| format!("STM32 `SYSTEM` region has no {name} assignment"))?;
+        .ok_or_else(|| format!("STM32 `RESOURCES` region has no {name} assignment"))?;
     parse_linker_size(assignment)
 }
 

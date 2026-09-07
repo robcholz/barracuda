@@ -18,28 +18,41 @@ pub struct FileRegion {
     offset: u32,
     size: u32,
     access: FileRegionAccess,
+    filesystem: barracuda_platform::PartitionFilesystem,
 }
 
 impl FileRegion {
     /// Declares a writable file-backed image region.
     #[must_use]
-    pub const fn read_write(name: &'static str, offset: u32, size: u32) -> Self {
+    pub const fn read_write(
+        name: &'static str,
+        offset: u32,
+        size: u32,
+        filesystem: barracuda_platform::PartitionFilesystem,
+    ) -> Self {
         Self {
             name,
             offset,
             size,
             access: FileRegionAccess::ReadWrite,
+            filesystem,
         }
     }
 
     /// Declares a provisioned read-only file-backed image region.
     #[must_use]
-    pub const fn read_only(name: &'static str, offset: u32, size: u32) -> Self {
+    pub const fn read_only(
+        name: &'static str,
+        offset: u32,
+        size: u32,
+        filesystem: barracuda_platform::PartitionFilesystem,
+    ) -> Self {
         Self {
             name,
             offset,
             size,
             access: FileRegionAccess::ReadOnly,
+            filesystem,
         }
     }
 
@@ -65,6 +78,12 @@ impl FileRegion {
     #[must_use]
     pub const fn access(&self) -> FileRegionAccess {
         self.access
+    }
+
+    /// Returns the filesystem declared by the Board file-layout table.
+    #[must_use]
+    pub const fn filesystem(&self) -> barracuda_platform::PartitionFilesystem {
+        self.filesystem
     }
 }
 

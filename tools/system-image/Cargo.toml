@@ -13,8 +13,16 @@ anstream = "1"
 barracuda-board-config.workspace = true
 barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
+barracuda-plugin = { workspace = true, features = ["manifest"] }
+barracuda-vfs.workspace = true
+barracuda-vfs-fat.workspace = true
 clap = { version = "4", features = ["derive"] }
+critical-section = { version = "1", features = ["std"] }
+embedded-io = "0.7"
+embedded-io-async = "0.7"
 esp-idf-part = "0.6.0"
+fatfs = { version = "0.3", default-features = false, features = ["std", "alloc"] }
+futures-lite = "2"
 generic-array = "0.14"
 littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +32,6 @@ yaml-peg = { version = "1.0.8", features = ["serde"] }
 barracuda-vfs-littlefs.workspace = true
 embedded-storage = "0.3"
 tempfile = "3"
-typenum = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

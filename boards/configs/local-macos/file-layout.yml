@@ -4,11 +4,14 @@ regions:
     offset: 0
     size: 2097152
     access: read-write
-  - name: web_assets
+    filesystem: littlefs
+  - name: resources
     offset: 2097152
     size: 1048576
     access: read-only
+    filesystem: fatfs
   - name: kv_database
     offset: 3145728
     size: 1048576
     access: read-write
+    filesystem: raw

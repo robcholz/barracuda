@@ -7,6 +7,7 @@ use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 struct NativeRegion<'a> {
     name: &'a str,
     access: &'static str,
+    filesystem: &'static str,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -85,8 +86,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                      symbol_address(core::ptr::addr_of!({symbol}_END)),\n\
                  )?,\n\
                  Stm32RegionAccess::{},\n\
+                 barracuda_platform::PartitionFilesystem::{},\n\
              ),\n",
-            region.name, region.access,
+            region.name, region.access, region.filesystem,
         ));
     }
     generated.push_str("    ]))\n}\n");
@@ -133,7 +135,12 @@ fn native_regions(linker: &str) -> Result<Vec<NativeRegion<'_>>, Box<dyn Error>>
         } else {
             "ReadOnly"
         };
-        regions.push(NativeRegion { name, access });
+        let filesystem = memory_filesystem(linker, memory)?;
+        regions.push(NativeRegion {
+            name,
+            access,
+            filesystem,
+        });
     }
     Ok(regions)
 }
@@ -146,6 +153,21 @@ fn start_symbol(line: &str) -> Option<(&str, &str)> {
 }
 
 fn memory_attributes<'a>(linker: &'a str, memory: &str) -> Result<&'a str, Box<dyn Error>> {
+    let line = memory_declaration(linker, memory)?;
+    let remainder = line
+        .strip_prefix(memory)
+        .ok_or_else(|| format!("invalid MEMORY declaration for `{memory}`"))?;
+    let start = remainder
+        .find('(')
+        .ok_or_else(|| format!("MEMORY region `{memory}` has no native attributes"))?;
+    remainder
+        .get(start.saturating_add(1)..)
+        .and_then(|value| value.split_once(')'))
+        .map(|(attributes, _rest)| attributes)
+        .ok_or_else(|| format!("MEMORY region `{memory}` has invalid attributes").into())
+}
+
+fn memory_declaration<'a>(linker: &'a str, memory: &str) -> Result<&'a str, Box<dyn Error>> {
     for line in linker.lines().map(str::trim) {
         let Some(remainder) = line.strip_prefix(memory) else {
             continue;
@@ -157,17 +179,27 @@ fn memory_attributes<'a>(linker: &'a str, memory: &str) -> Result<&'a str, Box<d
         {
             continue;
         }
-        let start = remainder
-            .find('(')
-            .ok_or_else(|| format!("MEMORY region `{memory}` has no native attributes"))?;
-        let attributes = remainder
-            .get(start.saturating_add(1)..)
-            .and_then(|value| value.split_once(')'))
-            .map(|(attributes, _rest)| attributes)
-            .ok_or_else(|| format!("MEMORY region `{memory}` has invalid attributes"))?;
-        return Ok(attributes);
+        return Ok(line);
     }
     Err(format!("native symbol references absent MEMORY region `{memory}`").into())
+}
+
+fn memory_filesystem(linker: &str, memory: &str) -> Result<&'static str, Box<dyn Error>> {
+    const PREFIX: &str = "/* filesystem:";
+    let declaration = memory_declaration(linker, memory)?;
+    let value = declaration
+        .split_once(PREFIX)
+        .and_then(|(_prefix, value)| value.strip_suffix("*/"))
+        .map(str::trim)
+        .ok_or_else(|| format!("MEMORY region `{memory}` has no filesystem declaration"))?;
+    match value {
+        "raw" => Ok("Raw"),
+        "fatfs" => Ok("FatFs"),
+        "littlefs" => Ok("LittleFs"),
+        other => {
+            Err(format!("MEMORY region `{memory}` has unsupported filesystem `{other}`").into())
+        }
+    }
 }
 
 fn rust_symbol(name: &str) -> String {

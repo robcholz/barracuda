@@ -1,7 +1,9 @@
 //! LittleFS backend integration behavior.
 
 use barracuda_vfs::{MountOptions, OpenOptions, SeekFrom, Vfs};
-use barracuda_vfs_littlefs::{mount_or_format_partition, LittleFs, PartitionStorage};
+use barracuda_vfs_littlefs::{
+    mount_or_format_partition, mount_partition, LittleFs, PartitionStorage,
+};
 use embedded_io_async::{Read, Seek, Write};
 use embedded_storage::nor_flash::{ErrorType, NorFlash, NorFlashErrorKind, ReadNorFlash};
 use typenum::{U1, U16};
@@ -159,5 +161,24 @@ fn generic_partition_entry_mounts_the_complete_supported_region() {
             vfs.read("/state").await.unwrap(),
             b"mounted from a generic NOR partition"
         );
+    });
+}
+
+#[test]
+fn provisioned_partition_entry_mounts_without_formatting() {
+    embassy_futures::block_on(async {
+        assert!(mount_partition(MemoryFlash::new()).is_err());
+
+        let storage = Storage::new(MemoryFlash::new()).unwrap();
+        let littlefs = LittleFs::format(storage).unwrap();
+        littlefs.write_file("/resource", b"bundled").unwrap();
+        let flash = littlefs.into_storage().unwrap().into_inner();
+        let backend = mount_partition(flash).unwrap();
+        let mut vfs = Vfs::new();
+        vfs.mount("/", backend, MountOptions::read_only())
+            .await
+            .unwrap();
+
+        assert_eq!(vfs.read("/resource").await.unwrap(), b"bundled");
     });
 }

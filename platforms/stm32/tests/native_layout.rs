@@ -2,6 +2,7 @@
 
 #![allow(clippy::expect_used)]
 
+use barracuda_platform::PartitionFilesystem;
 use barracuda_platform_stm32::{
     LinkerRegion, LinkerRegionError, Stm32PartitionTable, Stm32Region, Stm32RegionAccess,
 };
@@ -23,12 +24,14 @@ fn linker_regions_remain_a_generic_named_collection() {
             LinkerRegion::try_from_addresses(0x0800_0000, 0x0800_0000, 0x0808_0000)
                 .expect("active region"),
             Stm32RegionAccess::ReadOnly,
+            PartitionFilesystem::Raw,
         ),
         Stm32Region::new(
             "future-region",
             LinkerRegion::try_from_addresses(0x0800_0000, 0x0808_0000, 0x0810_0000)
                 .expect("future region"),
             Stm32RegionAccess::ReadWrite,
+            PartitionFilesystem::FatFs,
         ),
     ]);
 
@@ -37,18 +40,17 @@ fn linker_regions_remain_a_generic_named_collection() {
         table.get("future-region").map(Stm32Region::access),
         Some(Stm32RegionAccess::ReadWrite)
     );
+    assert_eq!(
+        table.get("future-region").map(Stm32Region::filesystem),
+        Some(PartitionFilesystem::FatFs)
+    );
 }
 
 #[test]
 fn build_script_does_not_select_system_storage_roles() -> Result<(), std::io::Error> {
     let source =
         std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("build.rs"))?;
-    for forbidden in [
-        "board.storage()",
-        "filesystem()",
-        "database()",
-        "web_assets()",
-    ] {
+    for forbidden in ["board.storage()", "database()", "resources()"] {
         assert!(
             !source.contains(forbidden),
             "found business selector `{forbidden}`"

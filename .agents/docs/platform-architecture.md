@@ -132,7 +132,7 @@ pub struct PlatformResources<Tls, Partitions> {
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
-fields such as filesystem_partition, web_assets_partition, or
+fields such as filesystem_partition, resources_partition, or
 database_partition. The IP capability likewise remains `ip_stack` rather than
 web_network or database_network. TLS remains an independent `tls` capability;
 it is not hidden inside `ip_stack` or reconstructed by an HTTP consumer.
@@ -462,8 +462,10 @@ cross-platform physical partition-table format or translate one vendor's table
 into another vendor's table.
 
 Platform initialization validates the selected native layout and exposes its
-usable regions through partitions. The collection supports arbitrary entries;
-its Rust type does not grow a field for every consumer.
+usable regions through partitions. Each entry carries native access and
+on-media format metadata (`raw`, `fatfs`, or `littlefs`) copied from that
+partition-table entry. The collection supports arbitrary entries; its Rust
+type does not grow a field for every consumer.
 
 ~~~text
 PlatformResources
@@ -478,14 +480,16 @@ System assigns business meaning after taking regions from the collection:
 
 ~~~text
 partitions
-+-- region selected by System -> mount LittleFS
-+-- region selected by System -> mount read-only FATFS
++-- system region            -> mount mutable LittleFS
++-- resources region         -> mount selected read-only FATFS or LittleFS
 +-- region selected by System -> open ekv
 +-- remaining regions         -> OTA, boot state, or future consumers
 ~~~
 
-Platform does not know LittleFS, FATFS, ekv, Workflow, WebServer, Plugin
-Manager, or Plugin identities. System owns those choices and constructions.
+Platform knows the declarative on-media format because it projects the native
+partition table. It does not construct LittleFS, FATFS, ekv, Event Router,
+WebServer, Plugin Manager, or Plugin identities. System owns those
+constructions.
 
 A Plugin normally receives scoped semantic storage from System. If a product
 requires a new dedicated physical region, its native Board layout gains that
@@ -500,29 +504,36 @@ database objects are not Platform resources.
 Different filesystems retain their native APIs:
 
 - mutable runtime files use the selected LittleFS implementation;
-- provisioned read-only Web assets use the selected FAT implementation;
+- provisioned read-only Plugin resources use FATFS or LittleFS as selected by
+  the Board-native layout and built by `system-image`;
 - key/value state uses ekv over its raw writable region.
 
 Barracuda does not force LittleFS and FATFS through one universal filesystem
 trait. Their different APIs and guarantees remain visible to the System-owned
 consumer that selected them.
 
+System selects the resources backend only from the partition metadata supplied
+by Platform. It never reads image bytes or boot-sector magic to guess whether
+the partition contains FATFS or LittleFS.
+
 ~~~text
 PlatformResources::partitions
              |
              v
 System storage construction
-+-- LittleFS -> process-wide VFS and file-oriented Plugins
-+-- FATFS    -> WebServer static assets
-+-- ekv      -> Plugin Manager scoped storage
++-- LittleFS                    -> mutable `/data`
++-- FATFS or LittleFS resources -> read-only `/resources`
++-- ekv                         -> Plugin Manager persistence
 ~~~
 
-System mounts the process-wide VFS before constructing its consumers. Plugin
-Manager gives each Plugin that declares filesystem access a private namespace.
-The Workflow Plugin owns `/workflows.json` within its namespace, a single JSON
-array containing its ordered definitions. WebServer owns URL-to-asset behavior
-over the read-only FAT filesystem. Plugin Manager owns ekv namespaces and
-exposes only semantic Plugin storage.
+System mounts the process-wide VFS before constructing its consumers. The
+resource image contains each enabled Plugin's repository contribution below
+`/plugins/<id>`. System mounts that image at `/resources`, producing the global
+path `/resources/plugins/<id>`. Plugin Manager exposes that subtree as the
+Plugin's read-only logical `/resources` mount and maps writable Plugin data
+under logical `/data` to global `/data/plugins/<id>`. Concrete FATFS and
+LittleFS backends stop at System construction. Plugin Manager owns ekv
+persistence and exposes only semantic Plugin storage.
 
 ## IP and communication capabilities
 

@@ -91,6 +91,7 @@ barracuda-target = { path = "composition/selected" }
 barracuda-target-api = { path = "composition/api" }
 barracuda-tls = { path = "shared/tls" }
 barracuda-vfs = { path = "shared/vfs" }
+barracuda-vfs-fat = { path = "shared/vfs-fat" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }
 barracuda-vfs-memfs = { path = "shared/vfs-memfs" }
 http-client = { path = "shared/http-client" }

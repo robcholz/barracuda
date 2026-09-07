@@ -2,6 +2,7 @@
 
 #![allow(clippy::expect_used)]
 
+use barracuda_platform::PartitionFilesystem;
 use barracuda_platform_esp32c3::{Esp32C3RegionAccess, BOARD_ESP32C3_PARTITION_TABLE};
 
 #[test]
@@ -30,11 +31,12 @@ fn native_csv_supplies_the_complete_partition_table() {
         0x52_0000
     );
 
-    let assets = BOARD_ESP32C3_PARTITION_TABLE
-        .get("web_assets")
-        .expect("Web asset region");
-    assert_eq!(assets.name(), "web_assets");
-    assert_eq!(assets.access(), Esp32C3RegionAccess::ReadOnly);
+    let resources = BOARD_ESP32C3_PARTITION_TABLE
+        .get("resources")
+        .expect("Plugin resources region");
+    assert_eq!(resources.name(), "resources");
+    assert_eq!(resources.access(), Esp32C3RegionAccess::ReadOnly);
+    assert_eq!(resources.filesystem(), PartitionFilesystem::FatFs);
 }
 
 #[test]
@@ -45,7 +47,7 @@ fn build_script_does_not_select_system_storage_roles() -> Result<(), std::io::Er
         "board.storage()",
         "filesystem()",
         "database()",
-        "web_assets()",
+        "resources()",
     ] {
         assert!(
             !source.contains(forbidden),

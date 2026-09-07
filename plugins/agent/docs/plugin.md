@@ -5,6 +5,8 @@
 - Provided typed capabilities: `AgentToolRegistry`
 - Required typed capabilities: `WebServer` from `webserver`,
   `WorkflowActionRegistry` and `WorkflowService` from `workflow`
+- Filesystem: private; reads bundled `/resources/workflows.json`
+- Owned Components: none
 - Plugin-owned tasks: Agent runtime and `session.event` forwarding
 
 System constructs the Agent Plugin from the common `PluginContext`. During
@@ -19,6 +21,14 @@ it does not own or run either the Agent runtime or the Workflow runtime.
 Dependent Plugins may still register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
+
+At task startup, Agent reads its scoped `/resources/workflows.json` and loads
+each definition transiently through the required `WorkflowService` capability,
+after all Plugins have registered their Actions. Bundled definitions remain in
+`/resources` and are never copied into the user-created
+`/data/workflows.json` catalog. A persisted user definition with the same ID
+takes precedence. A missing or invalid resource, or a rejected definition, is
+logged and stops the Agent task before it begins driving sessions.
 
 The shared `WebServer` capability continues to own `POST /api/model-api`.
 The retained route registration is released automatically when the Agent Plugin

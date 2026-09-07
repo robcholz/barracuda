@@ -36,6 +36,7 @@ struct FileRegionDocument {
     offset: u32,
     size: u32,
     access: FileRegionAccess,
+    filesystem: FileRegionFilesystem,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -43,6 +44,14 @@ struct FileRegionDocument {
 enum FileRegionAccess {
     ReadOnly,
     ReadWrite,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FileRegionFilesystem {
+    Raw,
+    Fatfs,
+    Littlefs,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -140,8 +149,13 @@ fn render_layout(generated: &mut String, layout: FileLayoutDocument) {
             FileRegionAccess::ReadOnly => "read_only",
             FileRegionAccess::ReadWrite => "read_write",
         };
+        let filesystem = match region.filesystem {
+            FileRegionFilesystem::Raw => "Raw",
+            FileRegionFilesystem::Fatfs => "FatFs",
+            FileRegionFilesystem::Littlefs => "LittleFs",
+        };
         generated.push_str(&format!(
-            "    FileRegion::{constructor}({:?}, {}, {}),\n",
+            "    FileRegion::{constructor}({:?}, {}, {}, barracuda_platform::PartitionFilesystem::{filesystem}),\n",
             region.name, region.offset, region.size
         ));
     }

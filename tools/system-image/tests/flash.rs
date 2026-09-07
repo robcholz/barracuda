@@ -1,4 +1,4 @@
-//! Selected-Board System partition flashing.
+//! Selected-Board resource partition flashing.
 
 #![allow(clippy::expect_used)]
 
@@ -9,8 +9,8 @@ use barracuda_system_image::{flash_selected, IMAGE_OUTPUT};
 use tempfile::tempdir;
 
 const CAPACITY: usize = 32 * 1024;
-const SYSTEM_OFFSET: usize = 4 * 1024;
-const SYSTEM_SIZE: usize = 8 * 1024;
+const RESOURCES_OFFSET: usize = 4 * 1024;
+const RESOURCES_SIZE: usize = 8 * 1024;
 
 fn select_host_board(root: &Path, chip: &str) {
     let board_name = format!("local-{chip}");
@@ -32,7 +32,7 @@ fn select_host_board(root: &Path, chip: &str) {
     fs::write(
         bundle.join("file-layout.yml"),
         format!(
-            "capacity: {CAPACITY}\nregions:\n  - name: system\n    offset: {SYSTEM_OFFSET}\n    size: {SYSTEM_SIZE}\n    access: read-write\n"
+            "capacity: {CAPACITY}\nregions:\n  - name: resources\n    offset: {RESOURCES_OFFSET}\n    size: {RESOURCES_SIZE}\n    access: read-only\n    filesystem: fatfs\n"
         ),
     )
     .expect("native layout");
@@ -58,7 +58,7 @@ fn write_system_image(root: &Path, fill: u8, size: usize) {
 fn flashes_only_the_selected_partition_of_the_board_platform_file() {
     let root = tempdir().expect("temporary workspace");
     select_host_board(root.path(), "hosta");
-    write_system_image(root.path(), 0x5a, SYSTEM_SIZE);
+    write_system_image(root.path(), 0x5a, RESOURCES_SIZE);
     let flash_path = root.path().join(".state-hosta/physical.flash");
     fs::create_dir_all(flash_path.parent().expect("flash parent")).expect("state directory");
     fs::write(&flash_path, vec![0xa5; CAPACITY]).expect("physical flash");
@@ -68,17 +68,17 @@ fn flashes_only_the_selected_partition_of_the_board_platform_file() {
     assert_eq!(flashed.board(), "local-hosta");
     assert_eq!(flashed.image(), root.path().join(IMAGE_OUTPUT));
     assert_eq!(flashed.destination(), flash_path.display().to_string());
-    assert_eq!(flashed.offset(), SYSTEM_OFFSET as u64);
-    assert_eq!(flashed.size(), SYSTEM_SIZE);
+    assert_eq!(flashed.offset(), RESOURCES_OFFSET as u64);
+    assert_eq!(flashed.size(), RESOURCES_SIZE);
     let physical = fs::read(flashed.destination()).expect("flashed bytes");
-    assert_eq!(&physical[..SYSTEM_OFFSET], &vec![0xa5; SYSTEM_OFFSET]);
+    assert_eq!(&physical[..RESOURCES_OFFSET], &vec![0xa5; RESOURCES_OFFSET]);
     assert_eq!(
-        &physical[SYSTEM_OFFSET..SYSTEM_OFFSET + SYSTEM_SIZE],
-        &vec![0x5a; SYSTEM_SIZE]
+        &physical[RESOURCES_OFFSET..RESOURCES_OFFSET + RESOURCES_SIZE],
+        &vec![0x5a; RESOURCES_SIZE]
     );
     assert_eq!(
-        &physical[SYSTEM_OFFSET + SYSTEM_SIZE..],
-        &vec![0xa5; CAPACITY - SYSTEM_OFFSET - SYSTEM_SIZE]
+        &physical[RESOURCES_OFFSET + RESOURCES_SIZE..],
+        &vec![0xa5; CAPACITY - RESOURCES_OFFSET - RESOURCES_SIZE]
     );
 }
 
@@ -86,17 +86,21 @@ fn flashes_only_the_selected_partition_of_the_board_platform_file() {
 fn initializes_a_missing_host_flash_as_erased_before_writing_the_partition() {
     let root = tempdir().expect("temporary workspace");
     select_host_board(root.path(), "hostb");
-    write_system_image(root.path(), 0x36, SYSTEM_SIZE);
+    write_system_image(root.path(), 0x36, RESOURCES_SIZE);
 
     let flashed = flash_selected(root.path()).expect("flash selected System partition");
 
     let physical = fs::read(flashed.destination()).expect("flashed bytes");
     assert_eq!(physical.len(), CAPACITY);
-    assert!(physical[..SYSTEM_OFFSET].iter().all(|byte| *byte == 0xff));
-    assert!(physical[SYSTEM_OFFSET..SYSTEM_OFFSET + SYSTEM_SIZE]
+    assert!(physical[..RESOURCES_OFFSET]
         .iter()
-        .all(|byte| *byte == 0x36));
-    assert!(physical[SYSTEM_OFFSET + SYSTEM_SIZE..]
+        .all(|byte| *byte == 0xff));
+    assert!(
+        physical[RESOURCES_OFFSET..RESOURCES_OFFSET + RESOURCES_SIZE]
+            .iter()
+            .all(|byte| *byte == 0x36)
+    );
+    assert!(physical[RESOURCES_OFFSET + RESOURCES_SIZE..]
         .iter()
         .all(|byte| *byte == 0xff));
 }
@@ -105,7 +109,7 @@ fn initializes_a_missing_host_flash_as_erased_before_writing_the_partition() {
 fn rejects_an_image_that_does_not_exactly_fill_the_selected_partition() {
     let root = tempdir().expect("temporary workspace");
     select_host_board(root.path(), "hosta");
-    write_system_image(root.path(), 0x11, SYSTEM_SIZE - 1);
+    write_system_image(root.path(), 0x11, RESOURCES_SIZE - 1);
 
     let error = flash_selected(root.path()).expect_err("wrong image size must fail");
 
@@ -118,7 +122,7 @@ fn rejects_an_image_that_does_not_exactly_fill_the_selected_partition() {
 fn rejects_a_host_flash_whose_capacity_disagrees_with_the_board_layout() {
     let root = tempdir().expect("temporary workspace");
     select_host_board(root.path(), "hostb");
-    write_system_image(root.path(), 0x22, SYSTEM_SIZE);
+    write_system_image(root.path(), 0x22, RESOURCES_SIZE);
     let flash_path = root.path().join(".state-hostb/physical.flash");
     fs::create_dir_all(flash_path.parent().expect("flash parent")).expect("state directory");
     fs::write(&flash_path, vec![0x77; CAPACITY - 1]).expect("physical flash");

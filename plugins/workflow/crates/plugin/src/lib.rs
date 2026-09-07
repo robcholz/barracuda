@@ -15,6 +15,7 @@ use barracuda_plugin::manager::{
 };
 use barracuda_vfs::{FsError, ScopedVfs};
 use embassy_futures::select::select;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 
 pub use barracuda_workflow_runtime::*;
 
@@ -34,6 +35,7 @@ pub struct WorkflowService {
     control: WorkflowRuntimeControl,
     view: WorkflowRuntimeView,
     catalog: Rc<RefCell<Vec<PersistedWorkflow>>>,
+    restored: Rc<Mutex<NoopRawMutex, bool>>,
 }
 
 impl WorkflowService {
@@ -49,11 +51,14 @@ impl WorkflowService {
             control,
             view,
             catalog: Rc::new(RefCell::new(Vec::new())),
+            restored: Rc::new(Mutex::new(false)),
         }
     }
 
     /// Durably validates and loads one complete Workflow JSON document.
     pub async fn load(&self, json: &str) -> Result<(), WorkflowServiceError> {
+        let mut restored = self.restored.lock().await;
+        self.ensure_restored(&mut restored).await?;
         let definition = parse_definition(json).map_err(WorkflowServiceError::Rejected)?;
         validate_definition(&self.actions, &definition).map_err(WorkflowServiceError::Rejected)?;
         if self.control.contains(definition.id()) {
@@ -75,8 +80,22 @@ impl WorkflowService {
         Ok(())
     }
 
+    /// Validates and loads one Workflow for this boot without changing the
+    /// durable user catalog.
+    pub async fn load_transient(&self, json: &str) -> Result<(), WorkflowServiceError> {
+        let mut restored = self.restored.lock().await;
+        self.ensure_restored(&mut restored).await?;
+        let definition = parse_definition(json).map_err(WorkflowServiceError::Rejected)?;
+        validate_definition(&self.actions, &definition).map_err(WorkflowServiceError::Rejected)?;
+        self.control
+            .load(definition)
+            .map_err(|_error| WorkflowServiceError::Rejected(WorkflowControlRejection::DuplicateId))
+    }
+
     /// Durably unloads one Workflow without cancelling running snapshots.
     pub async fn unload(&self, workflow_id: &WorkflowId) -> Result<(), WorkflowServiceError> {
+        let mut restored = self.restored.lock().await;
+        self.ensure_restored(&mut restored).await?;
         if !self.control.contains(workflow_id) {
             return Err(WorkflowServiceError::Rejected(
                 WorkflowControlRejection::NotFound,
@@ -134,6 +153,19 @@ impl WorkflowService {
     }
 
     async fn restore(&self) -> Result<(), WorkflowServiceError> {
+        let mut restored = self.restored.lock().await;
+        self.ensure_restored(&mut restored).await
+    }
+
+    async fn ensure_restored(&self, restored: &mut bool) -> Result<(), WorkflowServiceError> {
+        if !*restored {
+            self.restore_catalog().await?;
+            *restored = true;
+        }
+        Ok(())
+    }
+
+    async fn restore_catalog(&self) -> Result<(), WorkflowServiceError> {
         let bytes = match self.filesystem.read(WORKFLOW_CATALOG_PATH).await {
             Ok(bytes) => bytes,
             Err(FsError::NotFound) => {
@@ -286,3 +318,97 @@ async fn workflow_task(
 #[derive(Debug, thiserror::Error)]
 #[error("Workflow runtime was not prepared during Plugin registration")]
 struct WorkflowRuntimeUnavailable;
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+    use barracuda_platform_test::memory_vfs_root;
+    use futures_lite::future::block_on;
+
+    #[test]
+    fn transient_load_before_task_start_does_not_change_the_user_catalog() {
+        block_on(async {
+            let root = memory_vfs_root().await.expect("memory filesystem");
+            let filesystem = root.scoped("/workflow").expect("scope");
+            filesystem
+                .write(
+                    WORKFLOW_CATALOG_PATH,
+                    br#"[{"id":"saved","match":{"event":"test"},"steps":[{"return":{}}]}]"#,
+                )
+                .await
+                .expect("persisted catalog");
+            let actions = WorkflowActionRegistry::new();
+            let runtime = WorkflowRuntime::new(actions.clone());
+            let service = WorkflowService::new(
+                filesystem.clone(),
+                actions,
+                runtime.control(),
+                runtime.view(),
+            );
+            service
+                .load_transient(
+                    r#"{"id":"bundled","match":{"event":"test"},"steps":[{"return":{}}]}"#,
+                )
+                .await
+                .expect("load transient definition before Workflow task starts");
+            service
+                .restore()
+                .await
+                .expect("task restoration is idempotent");
+            assert_eq!(service.definitions().len(), 2);
+            let persisted: Vec<WorkflowValue> = serde_json::from_slice(
+                &filesystem
+                    .read(WORKFLOW_CATALOG_PATH)
+                    .await
+                    .expect("catalog"),
+            )
+            .expect("valid catalog");
+            assert_eq!(persisted.len(), 1);
+            assert_eq!(persisted[0]["id"], "saved");
+        });
+    }
+
+    #[test]
+    fn persisted_user_definition_wins_over_a_transient_duplicate() {
+        block_on(async {
+            let root = memory_vfs_root().await.expect("memory filesystem");
+            let filesystem = root.scoped("/workflow-user-precedence").expect("scope");
+            let user = r#"{"id":"shared","match":{"event":"user"},"steps":[{"return":{}}]}"#;
+            filesystem
+                .write(WORKFLOW_CATALOG_PATH, alloc::format!("[{user}]").as_bytes())
+                .await
+                .expect("persisted user catalog");
+            let actions = WorkflowActionRegistry::new();
+            let runtime = WorkflowRuntime::new(actions.clone());
+            let service = WorkflowService::new(
+                filesystem.clone(),
+                actions,
+                runtime.control(),
+                runtime.view(),
+            );
+
+            let error = service
+                .load_transient(
+                    r#"{"id":"shared","match":{"event":"bundled"},"steps":[{"return":{}}]}"#,
+                )
+                .await
+                .expect_err("persisted user Workflow must keep its ID");
+
+            assert!(matches!(
+                error,
+                WorkflowServiceError::Rejected(WorkflowControlRejection::DuplicateId)
+            ));
+            assert_eq!(service.definitions().len(), 1);
+            assert_eq!(service.definitions()[0].event().as_str(), "user");
+            assert_eq!(
+                filesystem
+                    .read(WORKFLOW_CATALOG_PATH)
+                    .await
+                    .expect("user catalog"),
+                alloc::format!("[{user}]").as_bytes()
+            );
+        });
+    }
+}

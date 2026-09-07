@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-use barracuda_system_image::{build_selected, selected_system_region};
+use barracuda_system_image::{build_selected, selected_resources_region, ResourcesFilesystem};
 use tempfile::tempdir;
 
 fn select_board(root: &Path, name: &str, board: &str, artifact: &str, layout: &str) {
@@ -34,61 +34,64 @@ fn copy_platform_catalog(root: &Path) {
 }
 
 #[test]
-fn resolves_system_region_from_selected_file_layout_board() {
+fn resolves_resources_region_from_selected_file_layout_board() {
     let root = tempdir().expect("temporary workspace");
     select_board(
         root.path(),
         "local-test",
         "name: local-test\nhardware:\n  chip: macos\nnative-layout:\n  artifact: file-layout.yml\n",
         "file-layout.yml",
-        "capacity: 4194304\nregions:\n  - name: system\n    offset: 4096\n    size: 2097152\n    access: read-write\n",
+        "capacity: 4194304\nregions:\n  - name: system\n    offset: 4096\n    size: 2097152\n    access: read-write\n    filesystem: raw\n  - name: resources\n    offset: 2101248\n    size: 1048576\n    access: read-only\n    filesystem: fatfs\n",
     );
 
-    let region = selected_system_region(root.path()).expect("selected system region");
+    let region = selected_resources_region(root.path()).expect("selected resources region");
 
     assert_eq!(region.board(), "local-test");
-    assert_eq!(region.offset(), 4096);
-    assert_eq!(region.size(), 2_097_152);
+    assert_eq!(region.offset(), 2_101_248);
+    assert_eq!(region.size(), 1_048_576);
+    assert_eq!(region.filesystem(), ResourcesFilesystem::FatFs);
 }
 
 #[test]
-fn resolves_system_region_from_selected_esp_partition_table() {
+fn resolves_resources_region_from_selected_esp_partition_table() {
     let root = tempdir().expect("temporary workspace");
     select_board(
         root.path(),
         "esp-test",
         "name: esp-test\nhardware:\n  chip: esp32c6\ntoolchain:\n  target: riscv32imac-unknown-none-elf\nnative-layout:\n  artifact: partitions.csv\n",
         "partitions.csv",
-        "# Name, Type, SubType, Offset, Size, Flags\nfactory, app, factory, 0x10000, 0x100000,\nsystem, data, littlefs, 0x320000, 0x80000,\n",
+        "# Name, Type, SubType, Offset, Size, Flags\nfactory, app, factory, 0x10000, 0x100000,\nsystem, data, littlefs, 0x320000, 0x80000,\nresources, data, fat, 0x3a0000, 0x60000, readonly\n",
     );
 
-    let region = selected_system_region(root.path()).expect("selected system region");
+    let region = selected_resources_region(root.path()).expect("selected resources region");
 
-    assert_eq!(region.offset(), 0x32_0000);
-    assert_eq!(region.size(), 0x8_0000);
+    assert_eq!(region.offset(), 0x3a_0000);
+    assert_eq!(region.size(), 0x6_0000);
+    assert_eq!(region.filesystem(), ResourcesFilesystem::FatFs);
 }
 
 #[test]
-fn resolves_system_region_from_selected_stm32_linker_layout() {
+fn resolves_resources_region_from_selected_stm32_linker_layout() {
     let root = tempdir().expect("temporary workspace");
     select_board(
         root.path(),
         "stm-test",
         "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
-        "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = 0x08120000, LENGTH = 256K\n}\n",
+        "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = 0x08120000, LENGTH = 256K\n  RESOURCES (r) : ORIGIN = 0x08160000, LENGTH = 256K /* filesystem: fatfs */\n}\n",
     );
 
-    let region = selected_system_region(root.path()).expect("selected system region");
+    let region = selected_resources_region(root.path()).expect("selected resources region");
 
-    assert_eq!(region.offset(), 0x0812_0000);
+    assert_eq!(region.offset(), 0x0816_0000);
     assert_eq!(region.size(), 256 * 1024);
+    assert_eq!(region.filesystem(), ResourcesFilesystem::FatFs);
 }
 
 #[test]
-fn requires_a_selected_board_and_a_system_region() {
+fn requires_a_selected_board_and_a_resources_region() {
     let root = tempdir().expect("temporary workspace");
-    assert!(selected_system_region(root.path())
+    assert!(selected_resources_region(root.path())
         .expect_err("selection is required")
         .contains("cargo board select"));
 
@@ -99,36 +102,35 @@ fn requires_a_selected_board_and_a_system_region() {
         "file-layout.yml",
         "capacity: 4096\nregions: []\n",
     );
-    assert!(selected_system_region(root.path())
-        .expect_err("system region is required")
-        .contains("system"));
+    assert!(selected_resources_region(root.path())
+        .expect_err("resources region is required")
+        .contains("resources"));
 }
 
 #[test]
-fn builds_only_from_the_top_level_image_directory() {
+fn builds_the_selected_workspace_image() {
     let root = tempdir().expect("temporary workspace");
     select_board(
         root.path(),
         "local-test",
         "name: local-test\nhardware:\n  chip: linux\nnative-layout:\n  artifact: file-layout.yml\n",
         "file-layout.yml",
-        "capacity: 131072\nregions:\n  - name: system\n    offset: 0\n    size: 65536\n    access: read-write\n",
+        "capacity: 1048576\nregions:\n  - name: resources\n    offset: 262144\n    size: 524288\n    access: read-only\n    filesystem: littlefs\n",
     );
-    fs::create_dir(root.path().join("image")).expect("top-level image directory");
 
     let built = build_selected(root.path()).expect("build selected image");
 
-    assert_eq!(built.source(), root.path().join("image"));
     assert_eq!(
         built.output(),
         root.path().join("target/barracuda-system.img")
     );
     assert_eq!(built.board(), "local-test");
-    assert_eq!(built.offset(), 0);
-    assert_eq!(built.size(), 65_536);
+    assert_eq!(built.offset(), 262_144);
+    assert_eq!(built.size(), 524_288);
+    assert_eq!(built.filesystem(), ResourcesFilesystem::LittleFs);
     assert_eq!(
         fs::metadata(built.output()).expect("output metadata").len(),
-        65_536
+        524_288
     );
 }
 
@@ -142,7 +144,7 @@ fn rejects_mismatched_and_unsupported_board_bundles() {
         "file-layout.yml",
         "capacity: 65536\nregions: []\n",
     );
-    assert!(selected_system_region(root.path())
+    assert!(selected_resources_region(root.path())
         .expect_err("name mismatch")
         .contains("declares Board"));
 
@@ -153,7 +155,7 @@ fn rejects_mismatched_and_unsupported_board_bundles() {
         "layout.bin",
         "unused",
     );
-    assert!(selected_system_region(root.path())
+    assert!(selected_resources_region(root.path())
         .expect_err("unsupported layout")
         .contains("no Platform matches Board chip `unknown`"));
 }
@@ -169,14 +171,14 @@ fn rejects_a_board_whose_toolchain_selects_an_incompatible_platform() {
         "# Name, Type, SubType, Offset, Size, Flags\nsystem, data, littlefs, 0x320000, 0x80000,\n",
     );
 
-    let error = selected_system_region(root.path()).expect_err("Platform mismatch must fail");
+    let error = selected_resources_region(root.path()).expect_err("Platform mismatch must fail");
 
     assert!(error.contains("esp32c6"));
     assert!(error.contains("riscv32imafc-unknown-none-elf"));
 }
 
 #[test]
-fn rejects_invalid_file_layout_system_regions() {
+fn rejects_invalid_file_layout_resources_regions() {
     let root = tempdir().expect("temporary workspace");
     let board =
         "name: local-test\nhardware:\n  chip: macos\nnative-layout:\n  artifact: file-layout.yml\n";
@@ -185,36 +187,62 @@ fn rejects_invalid_file_layout_system_regions() {
         "local-test",
         board,
         "file-layout.yml",
-        "capacity: 65536\nregions:\n  - name: system\n    offset: 0\n    size: 65536\n    access: read-only\n",
+        "capacity: 65536\nregions:\n  - name: resources\n    offset: 0\n    size: 65536\n    access: read-write\n    filesystem: raw\n",
     );
-    assert!(selected_system_region(root.path())
-        .expect_err("read-only system region")
-        .contains("read-only"));
+    assert!(selected_resources_region(root.path())
+        .expect_err("writable resources region")
+        .contains("not read-only"));
 
     select_board(
         root.path(),
         "local-test",
         board,
         "file-layout.yml",
-        "capacity: 65536\nregions:\n  - name: system\n    offset: 4096\n    size: 65536\n    access: read-write\n",
+        "capacity: 65536\nregions:\n  - name: resources\n    offset: 4096\n    size: 65536\n    access: read-only\n    filesystem: fatfs\n",
     );
-    assert!(selected_system_region(root.path())
-        .expect_err("out-of-range system region")
+    assert!(selected_resources_region(root.path())
+        .expect_err("out-of-range resources region")
         .contains("exceeds"));
 }
 
 #[test]
-fn rejects_invalid_stm32_system_values() {
+fn accepts_both_supported_esp_resource_filesystems_but_requires_read_only() {
+    let root = tempdir().expect("temporary workspace");
+    let board = "name: esp-test\nhardware:\n  chip: esp32c6\ntoolchain:\n  target: riscv32imac-unknown-none-elf\nnative-layout:\n  artifact: partitions.csv\n";
+    select_board(
+        root.path(),
+        "esp-test",
+        board,
+        "partitions.csv",
+        "# Name, Type, SubType, Offset, Size, Flags\nfactory, app, factory, 0x10000, 0x100000,\nresources, data, littlefs, 0x3a0000, 0x60000, readonly\n",
+    );
+    let region = selected_resources_region(root.path()).expect("LittleFS resources partition");
+    assert_eq!(region.filesystem(), ResourcesFilesystem::LittleFs);
+
+    select_board(
+        root.path(),
+        "esp-test",
+        board,
+        "partitions.csv",
+        "# Name, Type, SubType, Offset, Size, Flags\nfactory, app, factory, 0x10000, 0x100000,\nresources, data, fat, 0x3a0000, 0x60000,\n",
+    );
+    let error =
+        selected_resources_region(root.path()).expect_err("writable FAT resources partition");
+    assert!(error.contains("not read-only"), "unexpected error: {error}");
+}
+
+#[test]
+fn rejects_invalid_stm32_resources_values() {
     let root = tempdir().expect("temporary workspace");
     select_board(
         root.path(),
         "stm-test",
         "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
-        "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = nope, LENGTH = 256K\n}\n",
+        "MEMORY\n{\n  RESOURCES (r) : ORIGIN = nope, LENGTH = 256K /* filesystem: fatfs */\n}\n",
     );
 
-    assert!(selected_system_region(root.path())
+    assert!(selected_resources_region(root.path())
         .expect_err("invalid STM32 origin")
         .contains("invalid STM32 layout value"));
 }
