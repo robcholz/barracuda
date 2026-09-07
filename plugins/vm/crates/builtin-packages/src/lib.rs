@@ -8,8 +8,11 @@ use barracuda_lua::{Environment, Lua, Result};
 
 /// Message-based input and output for sandboxed Lua states.
 pub mod io;
+/// Empty standard `os` table extended by capability Plugins.
+pub mod os;
 
 use io::{Input, Io, Output};
+use os::Os;
 
 /// Immutable installation plan for the VM-owned Lua packages.
 #[derive(Clone, Copy, Debug, Default)]
@@ -28,7 +31,10 @@ impl BuiltinPackages {
     /// executions never share input or output channels.
     pub fn install(self, lua: &mut Lua) -> Result<InstalledBuiltinPackages> {
         let (io, input, output) = Io::new();
-        Environment::new().with_package(io).install(lua)?;
+        Environment::new()
+            .with_package(io)
+            .with_package(Os)
+            .install(lua)?;
         Ok(InstalledBuiltinPackages { input, output })
     }
 }

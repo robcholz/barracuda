@@ -22,9 +22,7 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
 
         let mut run = vm
             .run(VmRunRequest {
-                source:
-                    "local io = require('io'); local name = io.input(); io.print('hello', name)"
-                        .into(),
+                source: "local name = io.read(); print('hello', name)".into(),
             })
             .map_err(|error| error.to_string())?;
         let run_id = run.run_id();
@@ -60,6 +58,66 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
         }
         if !vm.list().runs.is_empty() {
             return Err("completed VM remained in active list".into());
+        }
+
+        let completion = vm
+            .run(VmRunRequest {
+                source: "io.write('partial'); io.write(' line\\nlast')".into(),
+            })
+            .map_err(|error| error.to_string())?
+            .await
+            .map_err(|error| error.to_string())?;
+        if completion.outcome != VmRunOutcome::Success
+            || completion.output != ["partial line", "last"]
+        {
+            return Err(format!("unexpected io.write completion: {completion:?}"));
+        }
+
+        let completion = vm
+            .run(VmRunRequest {
+                source: "for _ = 1, 65 do io.write(string.rep('x', 1024)) end".into(),
+            })
+            .map_err(|error| error.to_string())?
+            .await
+            .map_err(|error| error.to_string())?;
+        if completion.outcome != VmRunOutcome::Error
+            || completion.error != Some(VmExecutionError::LuaRuntime)
+            || completion.diagnostic.as_deref() != Some("Lua output limit exceeded")
+            || completion.output.len() != 1
+            || completion.output.first().map(String::len) != Some(64 * 1024)
+        {
+            return Err(format!(
+                "unexpected output-limit completion: outcome={:?}, error={:?}, diagnostic={:?}, output lengths={:?}",
+                completion.outcome,
+                completion.error,
+                completion.diagnostic,
+                completion
+                    .output
+                    .iter()
+                    .map(String::len)
+                    .collect::<Vec<_>>()
+            ));
+        }
+
+        let completion = vm
+            .run(VmRunRequest {
+                source: "for _ = 1, 1025 do io.write('\\n') end".into(),
+            })
+            .map_err(|error| error.to_string())?
+            .await
+            .map_err(|error| error.to_string())?;
+        if completion.outcome != VmRunOutcome::Error
+            || completion.error != Some(VmExecutionError::LuaRuntime)
+            || completion.diagnostic.as_deref() != Some("Lua output limit exceeded")
+            || completion.output.len() != 1024
+        {
+            return Err(format!(
+                "unexpected output-line-limit completion: outcome={:?}, error={:?}, diagnostic={:?}, output lines={}",
+                completion.outcome,
+                completion.error,
+                completion.diagnostic,
+                completion.output.len()
+            ));
         }
 
         let run = vm

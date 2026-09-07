@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
+use embassy_time::{Duration, with_timeout};
 
 use http_client::{
     ClientFactory,
@@ -11,6 +12,11 @@ use serde::{Deserialize, Serialize};
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 const READ_BUFFER_SIZE: usize = 4 * 1024;
 const MAX_RESPONSE_BODY_BYTES: usize = 64 * 1024;
+const MAX_REQUEST_URL_BYTES: usize = 2 * 1024;
+const MAX_REQUEST_BODY_BYTES: usize = 32 * 1024;
+const MAX_REQUEST_HEADERS: usize = 32;
+const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+const REQUEST_TIMEOUT_MILLIS: u64 = 30_000;
 const WORKSPACE_CAPACITY: usize = 2;
 
 /// HTTP method supported by [`Http::request`].
@@ -72,6 +78,18 @@ pub struct HttpRequest {
 
 impl HttpRequest {
     fn validate(&self, tls: bool) -> Result<(), HttpError> {
+        let header_bytes = self.headers.iter().try_fold(0_usize, |total, header| {
+            total
+                .checked_add(header.name.len())?
+                .checked_add(header.value.len())
+        });
+        if self.url.len() > MAX_REQUEST_URL_BYTES
+            || self.body.len() > MAX_REQUEST_BODY_BYTES
+            || self.headers.len() > MAX_REQUEST_HEADERS
+            || header_bytes.is_none_or(|bytes| bytes > MAX_REQUEST_HEADER_BYTES)
+        {
+            return Err(HttpError::RequestTooLarge);
+        }
         if !self.url.starts_with("http://") && !self.url.starts_with("https://") {
             return Err(HttpError::InvalidUrl);
         }
@@ -113,9 +131,15 @@ pub enum HttpError {
     /// A request header is invalid.
     #[error("invalid header")]
     InvalidHeader,
+    /// URL, headers, or body exceed the bounded request capacity.
+    #[error("HTTP request is too large")]
+    RequestTooLarge,
     /// Both reusable HTTP workspaces are occupied.
     #[error("HTTP request capacity is busy")]
     Busy,
+    /// The complete request exceeded its deadline.
+    #[error("HTTP request timed out")]
+    Timeout,
     /// DNS, TCP, TLS, HTTP, or body reading failed.
     #[error("HTTP transport failed")]
     Transport,
@@ -125,6 +149,24 @@ pub enum HttpError {
     /// Upstream body exceeds the defensive bound.
     #[error("response body is too large")]
     ResponseTooLarge,
+}
+
+impl HttpError {
+    /// Stable machine-readable error code used by external adapters.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::InvalidUrl => "invalid_url",
+            Self::TlsNotConfigured => "tls_not_configured",
+            Self::InvalidHeader => "invalid_header",
+            Self::RequestTooLarge => "request_too_large",
+            Self::Busy => "busy",
+            Self::Timeout => "timeout",
+            Self::Transport => "transport",
+            Self::InvalidResponseText => "invalid_response_text",
+            Self::ResponseTooLarge => "response_too_large",
+        }
+    }
 }
 
 struct HttpWorkspace {
@@ -218,6 +260,15 @@ impl<T, D> Http<T, D> {
 impl<T: TcpConnect + 'static, D: Dns + 'static> Http<T, D> {
     /// Executes one buffered outbound request.
     pub async fn request(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        with_timeout(
+            Duration::from_millis(REQUEST_TIMEOUT_MILLIS),
+            self.request_inner(request),
+        )
+        .await
+        .map_err(|_timeout| HttpError::Timeout)?
+    }
+
+    async fn request_inner(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
         let mut workspace = self.workspaces.acquire()?;
         let workspace = workspace.get_mut()?;
         let (mut client, tls) = self.clients.create();
@@ -270,5 +321,86 @@ impl<T: TcpConnect + 'static, D: Dns + 'static> Http<T, D> {
             status,
             body: String::from(body),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{string::String, vec::Vec};
+
+    use super::{
+        HttpError, HttpHeader, HttpMethod, HttpRequest, MAX_REQUEST_BODY_BYTES,
+        MAX_REQUEST_HEADER_BYTES, MAX_REQUEST_HEADERS, MAX_REQUEST_URL_BYTES,
+    };
+
+    fn request() -> HttpRequest {
+        HttpRequest {
+            method: HttpMethod::Get,
+            url: String::from("https://example.com"),
+            headers: Vec::new(),
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn validates_bounded_requests() {
+        let valid = request();
+        assert_eq!(valid.validate(true), Ok(()));
+
+        let mut oversized_url = request();
+        oversized_url.url = "u".repeat(MAX_REQUEST_URL_BYTES + 1);
+        assert_eq!(
+            oversized_url.validate(true),
+            Err(HttpError::RequestTooLarge)
+        );
+
+        let mut oversized_body = request();
+        oversized_body.body = "b".repeat(MAX_REQUEST_BODY_BYTES + 1);
+        assert_eq!(
+            oversized_body.validate(true),
+            Err(HttpError::RequestTooLarge)
+        );
+
+        let mut too_many_headers = request();
+        too_many_headers.headers = (0..=MAX_REQUEST_HEADERS)
+            .map(|_| HttpHeader {
+                name: String::from("x"),
+                value: String::new(),
+            })
+            .collect();
+        assert_eq!(
+            too_many_headers.validate(true),
+            Err(HttpError::RequestTooLarge)
+        );
+
+        let mut oversized_headers = request();
+        oversized_headers.headers.push(HttpHeader {
+            name: String::from("x"),
+            value: "v".repeat(MAX_REQUEST_HEADER_BYTES),
+        });
+        assert_eq!(
+            oversized_headers.validate(true),
+            Err(HttpError::RequestTooLarge)
+        );
+    }
+
+    #[test]
+    fn distinguishes_invalid_requests_from_missing_tls() {
+        let mut invalid = request();
+        invalid.url = String::from("file:///data/value");
+        assert_eq!(invalid.validate(true), Err(HttpError::InvalidUrl));
+
+        let missing_tls = request();
+        assert_eq!(
+            missing_tls.validate(false),
+            Err(HttpError::TlsNotConfigured)
+        );
+
+        let mut invalid_header = request();
+        invalid_header.headers.push(HttpHeader {
+            name: String::from("bad:name"),
+            value: String::new(),
+        });
+        assert_eq!(invalid_header.validate(true), Err(HttpError::InvalidHeader));
     }
 }

@@ -88,7 +88,7 @@ pub struct VmRunCompletion {
     pub run_id: u32,
     /// Terminal execution state.
     pub outcome: VmRunOutcome,
-    /// Complete messages emitted by `io.print(...)`, in order.
+    /// Lines emitted through virtual standard output and error, in order.
     pub output: Vec<String>,
     /// Stable execution failure when `outcome` is `error`.
     #[serde(skip_serializing_if = "Option::is_none")]

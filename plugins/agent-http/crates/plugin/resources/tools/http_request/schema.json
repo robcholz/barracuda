@@ -7,9 +7,10 @@
       "type": "object",
       "properties": {
         "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] },
-        "url": { "type": "string", "trimmedNonEmpty": true },
+        "url": { "type": "string", "trimmedNonEmpty": true, "maxLength": 2048 },
         "headers": {
           "type": "array",
+          "maxItems": 32,
           "items": {
             "type": "object",
             "properties": {
@@ -20,7 +21,7 @@
             "additionalProperties": false
           }
         },
-        "body": { "type": "string" }
+        "body": { "type": "string", "maxLength": 32768 }
       },
       "required": ["method", "url"],
       "additionalProperties": false

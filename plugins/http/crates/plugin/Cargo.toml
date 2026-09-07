@@ -9,6 +9,7 @@ license = "Apache-2.0"
 barracuda-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embedded-io-async = "0.7"
+embassy-time.workspace = true
 http-client.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }

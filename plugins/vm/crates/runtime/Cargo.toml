@@ -8,6 +8,7 @@ license = "Apache-2.0"
 
 [features]
 default = []
+test-fixture = []
 vendored = [
     "barracuda-lua/vendored",
     "barracuda-vm-builtin-packages/vendored",

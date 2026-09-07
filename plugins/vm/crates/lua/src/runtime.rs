@@ -47,15 +47,21 @@ pub(crate) struct Task {
 static ASYNC_MARKER: u8 = 0xA5;
 static ERROR_MARKER: u8 = 0xE1;
 
-const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 17] = [
+const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 23] = [
     c"assert",
     c"error",
+    c"getmetatable",
     c"ipairs",
     c"next",
     c"pairs",
     c"pcall",
+    c"rawequal",
+    c"rawget",
+    c"rawlen",
+    c"rawset",
     c"require",
     c"select",
+    c"setmetatable",
     c"tonumber",
     c"tostring",
     c"type",
@@ -66,6 +72,17 @@ const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 17] = [
     c"utf8",
     c"_VERSION",
 ];
+
+const SANITIZE_STANDARD_LIBRARIES: &str = r#"
+local native_randomseed = math.randomseed
+native_randomseed(0, 0)
+function math.randomseed(first, second)
+    if first == nil then
+        return native_randomseed(0, 0)
+    end
+    return native_randomseed(first, second)
+end
+"#;
 
 pub struct Lua {
     raw: lunka::Lua,
@@ -267,11 +284,13 @@ impl Lua {
             let slot = lua_getextraspace(state, DEFAULT_EXTRA_SPACE).cast::<*const State>();
             slot.write(Rc::as_ptr(&shared));
         }
-        Ok(Self {
+        let mut lua = Self {
             raw,
             state: shared,
             environment,
-        })
+        };
+        lua.load(SANITIZE_STANDARD_LIBRARIES).exec()?;
+        Ok(lua)
     }
 
     /// Installs a count hook called after every `instruction_interval` Lua instructions.
@@ -392,6 +411,40 @@ impl Lua {
             lua_settop(state, main_top);
         }
         Ok(())
+    }
+
+    /// Extends a table-valued library that has already been loaded by `require`.
+    ///
+    /// This is intended for capability packages that add standard-shaped APIs
+    /// to a VM-owned library without replacing its existing state.
+    pub fn extend_loaded_lib<F>(&mut self, name: &str, configure: F) -> Result<()>
+    where
+        F: FnOnce(&mut Library<'_>) -> Result<()>,
+    {
+        let name = lua_name(name)?;
+        let main_top = self.raw.top();
+        let callback_count = self.state.callback_count();
+        unsafe {
+            lua_getfield(self.raw.as_ptr(), REGISTRY_INDEX, LOADED_TABLE.as_ptr());
+            lua_getfield(self.raw.as_ptr(), -1, name.as_ptr());
+        }
+        if self.raw.type_of(-1) != lunka::cdef::Type::Table {
+            unsafe { lua_settop(self.raw.as_ptr(), main_top) };
+            return Err(Error::runtime(alloc::format!(
+                "Lua library `{}` is not loaded as a table",
+                name.to_string_lossy()
+            )));
+        }
+        let table_index = self.raw.top();
+        let result = configure(&mut Library {
+            lua: self,
+            table_index,
+        });
+        if result.is_err() {
+            self.state.truncate_callbacks(callback_count);
+        }
+        unsafe { lua_settop(self.raw.as_ptr(), main_top) };
+        result
     }
 
     pub fn load<'lua, 'code>(&'lua mut self, code: &'code str) -> Chunk<'lua, 'code> {

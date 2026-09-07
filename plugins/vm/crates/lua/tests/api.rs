@@ -11,8 +11,9 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
             "return _G == _ENV and package == nil and io == nil and os == nil \
              and debug == nil and load == nil and loadfile == nil and dofile == nil \
              and collectgarbage == nil and warn == nil and print == nil \
-             and getmetatable == nil and setmetatable == nil \
-             and rawget == nil and rawset == nil and rawlen == nil and rawequal == nil \
+             and type(getmetatable) == 'function' and type(setmetatable) == 'function' \
+             and type(rawget) == 'function' and type(rawset) == 'function' \
+             and type(rawlen) == 'function' and type(rawequal) == 'function' \
              and not pcall(require, '_G') and not pcall(require, 'package') \
              and type(require) == 'function' and type(pcall) == 'function' \
              and type(tostring) == 'function' and type(select) == 'function'",
@@ -20,6 +21,27 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
         .eval()?;
 
     assert!(sandboxed);
+    Ok(())
+}
+
+#[test]
+fn lua_new_exposes_table_metaprogramming_without_runtime_control() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let compatible: bool = lua
+        .load(
+            "local target = {} \
+             local metatable = { __index = { inherited = 41 } } \
+             setmetatable(target, metatable) \
+             rawset(target, 'own', 1) \
+             return getmetatable(target) == metatable \
+                and target.inherited + rawget(target, 'own') == 42 \
+                and rawlen({10, 20}) == 2 \
+                and rawequal(target, target) \
+                and collectgarbage == nil",
+        )
+        .eval()?;
+
+    assert!(compatible);
     Ok(())
 }
 
@@ -43,6 +65,25 @@ fn lua_new_includes_safe_computation_standard_libraries() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn math_random_does_not_reveal_a_clock_or_native_address_seed() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let isolated: bool = lua
+        .load(
+            "local first_seed, second_seed = math.randomseed() \
+             local first = math.random() \
+             local repeated_first_seed, repeated_second_seed = math.randomseed() \
+             local repeated = math.random() \
+             return first_seed == 0 and second_seed == 0 \
+                and repeated_first_seed == 0 and repeated_second_seed == 0 \
+                and first == repeated",
+        )
+        .eval()?;
+
+    assert!(isolated);
+    Ok(())
+}
+
 struct FlagPackage {
     name: &'static str,
 }
@@ -55,9 +96,33 @@ impl Package for FlagPackage {
 
 const TEST_IO_INSTALL: &str = r##"
 local io = require("io")
+local read = io.__read
 local emit = io.__emit
+io.__read = nil
 io.__emit = nil
-function io.print(...)
+
+function io.read(...)
+    local count = select("#", ...)
+    if count > 1 then
+        error("io.read supports only one line format", 2)
+    end
+    local format = ...
+    if format ~= nil and format ~= "l" and format ~= "*l" then
+        error("io.read supports only the line format", 2)
+    end
+    return read()
+end
+
+function io.lines(...)
+    if select("#", ...) ~= 0 then
+        error("io.lines does not support files or formats", 2)
+    end
+    return function()
+        return read()
+    end
+end
+
+function print(...)
     local line = ""
     for index = 1, select("#", ...) do
         if index > 1 then
@@ -67,6 +132,8 @@ function io.print(...)
     end
     emit(line)
 end
+
+_G.io = io
 "##;
 
 struct TestIo {
@@ -79,7 +146,7 @@ impl Package for TestIo {
         let input = self.input.clone();
         let output = self.output.clone();
         lua.register_lib("io", move |package| {
-            package.register_async("input", move |(): ()| {
+            package.register_async("__read", move |(): ()| {
                 let input = input.clone();
                 async move { Some(Ok(input.recv().await.ok())) }
             })?;
@@ -150,7 +217,28 @@ fn environment_composes_external_packages_in_a_chain() -> Result<()> {
 }
 
 #[test]
-fn execution_environment_is_injected_after_sandbox_creation() -> Result<()> {
+fn packages_can_extend_an_already_loaded_library() -> Result<()> {
+    let mut lua = Lua::new()?;
+    lua.register_lib("extension_target", |library| library.set("first", 20_i64))?;
+    assert_eq!(
+        lua.load("return require('extension_target').first")
+            .eval::<i64>()?,
+        20
+    );
+
+    lua.extend_loaded_lib("extension_target", |library| library.set("second", 22_i64))?;
+
+    assert_eq!(
+        lua.load("local value = require('extension_target'); return value.first + value.second")
+            .eval::<i64>()?,
+        42
+    );
+    assert!(lua.extend_loaded_lib("missing", |_library| Ok(())).is_err());
+    Ok(())
+}
+
+#[test]
+fn standard_io_environment_is_injected_after_sandbox_creation() -> Result<()> {
     let mut lua = Lua::new()?;
     assert!(
         lua.load("return input == nil and print == nil and not pcall(require, 'io')")
@@ -160,24 +248,25 @@ fn execution_environment_is_injected_after_sandbox_creation() -> Result<()> {
     let (input, mut output) = install_test_io(&mut lua)?;
     assert!(
         lua.load(
-            "local io = require('io') \
-             return _G.io == nil \
+            "return io == require('io') \
                  and input == nil \
-                 and print == nil \
-                 and io == require('io') \
+                 and type(print) == 'function' \
+                 and io.__read == nil \
                  and io.__emit == nil \
-                 and type(io.input) == 'function' \
-                 and type(io.print) == 'function' \
-                 and io.read == nil \
+                 and io.input == nil \
+                 and io.print == nil \
+                 and type(io.read) == 'function' \
+                 and type(io.lines) == 'function' \
+                 and not pcall(io.read, '*a') \
+                 and not pcall(io.lines, 'file.lua') \
                  and io.write == nil",
         )
         .eval::<bool>()?
     );
 
     let completion = lua.run(
-        "local io = require('io'); \
-         local value = io.input(); \
-         io.print('received', value)",
+        "local value = io.read('*l'); \
+         print('received', value)",
     );
     futures_lite::future::block_on(input.send("message"))?;
     input.close();
@@ -581,6 +670,28 @@ fn exposes_typed_rust_userdata_with_methods_and_drop() -> Result<()> {
 }
 
 #[test]
+fn native_userdata_metatables_stay_private() -> Result<()> {
+    struct Resource;
+    impl UserData for Resource {}
+
+    let mut lua = Lua::new()?;
+    lua.register_with("new_resource", |lua, (): ()| {
+        Some(lua.create_userdata(Resource))
+    })?;
+
+    let protected: bool = lua
+        .load(
+            "local resource = new_resource() \
+             return getmetatable(resource) == false \
+                and not pcall(setmetatable, resource, {})",
+        )
+        .eval()?;
+
+    assert!(protected);
+    Ok(())
+}
+
+#[test]
 fn async_userdata_methods_use_the_same_lua_return_contract() -> Result<()> {
     struct Device(i64);
 
@@ -839,7 +950,7 @@ fn lua_exposes_input_output_and_execution_as_separate_flows() -> Result<()> {
     let mut lua = Lua::new()?;
     let (input, mut output) = install_test_io(&mut lua)?;
     let execution =
-        lua.run("local io = require('io'); local name = io.input(); io.print('hello', name); return 'ignored top-level value'");
+        lua.run("local name = io.read(); print('hello', name); return 'ignored top-level value'");
 
     futures_lite::future::block_on(input.send("agent"))?;
     input.close();
@@ -858,7 +969,7 @@ fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
     let mut lua = Lua::new()?;
     let (input, mut output) = install_test_io(&mut lua)?;
     let mut execution =
-        lua.run("local io = require('io'); local first = io.input(); io.print(first); local eof = io.input(); io.print(eof == nil)");
+        lua.run("local first = io.read(); print(first); local eof = io.read(); print(eof == nil)");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
@@ -885,8 +996,7 @@ fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
 fn execution_errors_do_not_discard_buffered_output() -> Result<()> {
     let mut lua = Lua::new()?;
     let (_input, mut output) = install_test_io(&mut lua)?;
-    let execution =
-        lua.run("local io = require('io'); io.print('before failure'); error('script failed')");
+    let execution = lua.run("print('before failure'); error('script failed')");
 
     let error = futures_lite::future::block_on(execution).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Runtime);
@@ -906,9 +1016,7 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
         lib.register_async("double", |value: i64| async move { Some(Ok(value * 2)) })
     })?;
     let (_input, mut output) = install_test_io(&mut lua)?;
-    let execution = lua.run(
-        "local io = require('io'); local native = require('native'); io.print(native.double(21))",
-    );
+    let execution = lua.run("local native = require('native'); print(native.double(21))");
 
     futures_lite::future::block_on(execution)?;
     assert_eq!(
@@ -922,8 +1030,7 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
 fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
     let mut lua = Lua::new()?;
     let (_input, output) = install_test_io(&mut lua)?;
-    let execution =
-        lua.run("local io = require('io'); io.print('ignored'); io.print('also ignored')");
+    let execution = lua.run("print('ignored'); print('also ignored')");
     drop(output);
 
     futures_lite::future::block_on(execution)?;
@@ -934,7 +1041,7 @@ fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
 fn dropping_execution_closes_both_data_flows() -> Result<()> {
     let mut lua = Lua::new()?;
     let (input, mut output) = install_test_io(&mut lua)?;
-    let execution = lua.run("local io = require('io'); io.input()");
+    let execution = lua.run("io.read()");
     drop(execution);
 
     let send_error = futures_lite::future::block_on(input.send("late")).unwrap_err();
@@ -959,8 +1066,7 @@ fn lua_defers_script_load_errors_to_execution() -> Result<()> {
 fn full_output_buffer_yields_until_the_host_consumes_a_message() -> Result<()> {
     let mut lua = Lua::new()?;
     let (_input, mut output) = install_test_io(&mut lua)?;
-    let mut execution =
-        lua.run("local io = require('io'); for value = 1, 17 do io.print(value) end");
+    let mut execution = lua.run("for value = 1, 17 do print(value) end");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),

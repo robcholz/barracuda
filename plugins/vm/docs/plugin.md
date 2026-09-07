@@ -20,7 +20,7 @@ The `vm.run` Workflow Action awaits that handle and returns only after the Lua
 execution finishes. VM output and terminal state are not emitted as Workflow
 Events, and input progress does not alter the Workflow Action contract. The
 Plugin owns a fixed pool of four Embassy execution slots and four
-reusable 64 KiB Lua heaps. Requests and responses use ordinary Serde values;
+reusable 96 KiB Lua heaps. Requests and responses use ordinary Serde values;
 there is no Event Router lane or transport-derived source/input limit.
 
 Dependent VM package Plugins still register require-only Lua packages through

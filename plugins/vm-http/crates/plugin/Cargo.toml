@@ -1,0 +1,39 @@
+[package]
+name = "barracuda-vm-http-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Bounded outbound HTTP adapter for Barracuda Lua VMs"
+license = "Apache-2.0"
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+barracuda-http-plugin.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-filesystem-plugin = { path = "../../../vm-filesystem/crates/plugin", features = ["test-fixture"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+barracuda-vm-time-plugin = { path = "../../../vm-time/crates/plugin", features = ["test-fixture"] }
+barracuda-vfs.workspace = true
+barracuda-vfs-memfs.workspace = true
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

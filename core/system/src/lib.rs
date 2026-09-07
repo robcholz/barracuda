@@ -160,10 +160,13 @@ where
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
+            barracuda_vm_filesystem_plugin::VmFilesystemPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
+            barracuda_vm_http_plugin::VmHttpPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
+            barracuda_vm_time_plugin::VmTimePlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
