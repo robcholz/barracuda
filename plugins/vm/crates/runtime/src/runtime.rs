@@ -1,4 +1,5 @@
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::task::{Poll, Waker};
 
@@ -10,7 +11,7 @@ use futures_channel::oneshot;
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
 use crate::run::{ExecutionJob, execute_run};
 use crate::vm::vm_progress_channel;
-use crate::{VmLimits, VmRun};
+use crate::{VmLimits, VmRun, VmRunInfo, VmRunState};
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
 pub(crate) const VM_TASK_SLOTS: usize = 4;
@@ -50,6 +51,7 @@ struct RunSlot {
     active: Cell<bool>,
     id: Cell<u32>,
     input_open: Cell<bool>,
+    waiting_for_input: Cell<bool>,
     cancelled: Cell<bool>,
     input: RefCell<Option<InputMessage>>,
     waiter: RefCell<Option<Waker>>,
@@ -61,6 +63,7 @@ impl RunSlot {
             active: Cell::new(false),
             id: Cell::new(0),
             input_open: Cell::new(false),
+            waiting_for_input: Cell::new(false),
             cancelled: Cell::new(false),
             input: RefCell::new(None),
             waiter: RefCell::new(None),
@@ -70,6 +73,7 @@ impl RunSlot {
     fn claim(&self, id: u32) {
         self.id.set(id);
         self.input_open.set(true);
+        self.waiting_for_input.set(false);
         self.cancelled.set(false);
         *self.input.borrow_mut() = None;
         *self.waiter.borrow_mut() = None;
@@ -86,6 +90,7 @@ impl RunSlot {
         if self.active.get() && self.id.get() == id {
             self.cancelled.set(true);
             self.input_open.set(false);
+            self.waiting_for_input.set(false);
             *self.input.borrow_mut() = None;
             *self.waiter.borrow_mut() = None;
             self.id.set(0);
@@ -152,6 +157,7 @@ impl VmRuntime {
             if slot.active.get() {
                 slot.cancelled.set(true);
                 slot.input_open.set(false);
+                slot.waiting_for_input.set(false);
                 slot.wake();
             }
         }
@@ -209,6 +215,7 @@ impl VmRuntime {
         }
         *queued = Some(input);
         drop(queued);
+        slot.waiting_for_input.set(false);
         slot.wake();
         Ok(())
     }
@@ -216,6 +223,7 @@ impl VmRuntime {
     pub(crate) fn close_input(&self, run_id: u32) -> Result<(), ControlError> {
         let slot = self.active_slot(run_id)?;
         slot.input_open.set(false);
+        slot.waiting_for_input.set(false);
         slot.wake();
         Ok(())
     }
@@ -224,8 +232,25 @@ impl VmRuntime {
         let slot = self.active_slot(run_id)?;
         slot.cancelled.set(true);
         slot.input_open.set(false);
+        slot.waiting_for_input.set(false);
         slot.wake();
         Ok(())
+    }
+
+    pub(crate) fn list(&self) -> Vec<VmRunInfo> {
+        self.state
+            .slots
+            .iter()
+            .filter(|slot| slot.active.get())
+            .map(|slot| VmRunInfo {
+                run_id: slot.id.get(),
+                state: if slot.waiting_for_input.get() {
+                    VmRunState::InputRequired
+                } else {
+                    VmRunState::Running
+                },
+            })
+            .collect()
     }
 
     fn active_slot(&self, run_id: u32) -> Result<&RunSlot, ControlError> {
@@ -301,14 +326,18 @@ impl RunControl {
                 return Poll::Ready(None);
             };
             if slot.cancelled.get() {
+                slot.waiting_for_input.set(false);
                 return Poll::Ready(None);
             }
             if let Some(input) = slot.input.borrow_mut().take() {
+                slot.waiting_for_input.set(false);
                 return Poll::Ready(Some(input));
             }
             if !slot.input_open.get() {
+                slot.waiting_for_input.set(false);
                 return Poll::Ready(None);
             }
+            slot.waiting_for_input.set(true);
             let mut waiter = slot.waiter.borrow_mut();
             if waiter
                 .as_ref()

@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "vm_list",
+    "description": "List active VM executions and their current states.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

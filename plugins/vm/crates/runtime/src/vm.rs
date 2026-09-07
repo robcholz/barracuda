@@ -98,6 +98,32 @@ pub struct VmRunCompletion {
     pub diagnostic: Option<String>,
 }
 
+/// Current state of one active Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmRunState {
+    /// The execution is running or cooperatively yielding.
+    Running,
+    /// The execution requires input or EOF before it can continue.
+    InputRequired,
+}
+
+/// Bounded public information about one active Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmRunInfo {
+    /// Runtime-generated execution identifier.
+    pub run_id: u32,
+    /// Current execution state.
+    pub state: VmRunState,
+}
+
+/// Snapshot of all active Lua executions.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmListResponse {
+    /// Active executions in runtime slot order.
+    pub runs: Vec<VmRunInfo>,
+}
+
 /// Non-terminal state change produced by an accepted Lua execution.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -329,6 +355,14 @@ impl Vm {
                 self.package_registry.clone(),
             )
             .map_err(VmError::from)
+    }
+
+    /// Returns a snapshot of all currently active executions.
+    #[must_use]
+    pub fn list(&self) -> VmListResponse {
+        VmListResponse {
+            runs: self.runtime.list(),
+        }
     }
 
     /// Supplies one input value or EOF to an active execution.

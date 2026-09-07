@@ -80,6 +80,10 @@ input and later returns `VmRunUpdate::Completed`; directly awaiting the handle
 returns `VmRunCompletion` with ordered output and the terminal outcome. See
 [action.md](action.md) for Workflow behavior.
 
+`Vm::list()` returns the active executions in fixed runtime-slot order. Each
+entry contains only its `run_id` and a `running` or `input_required` state;
+completed, failed, and cancelled executions are omitted.
+
 ## Native modules
 
 `require` only searches the internal preload table populated through Rust

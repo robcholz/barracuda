@@ -15,6 +15,7 @@ pub use barracuda_vm_builtin_packages::BuiltinPackages;
 pub use memory::VmMemoryPoolError;
 pub use runtime::{VmRuntime, VmRuntimeStartError};
 pub use vm::{
-    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmRun,
-    VmRunCompletion, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest, VmRunUpdate,
+    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,
+    VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
+    VmRunState, VmRunUpdate,
 };

@@ -15,8 +15,8 @@ use alloc::{
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, Tool, ToolError, ToolFuture,
-        ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolError,
+        ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
 use barracuda_plugin::api::PluginContext;
@@ -60,6 +60,7 @@ fn vm_tool_group(vm: Rc<Vm>) -> ToolGroup {
         true,
         [
             Tool::from_detached(VmRunTool { vm: Rc::clone(&vm) }),
+            Tool::new(VmListTool { vm: Rc::clone(&vm) }),
             Tool::new(VmInputTool { vm: Rc::clone(&vm) }),
             Tool::new(VmCancelTool { vm }),
         ],
@@ -115,6 +116,23 @@ struct RunAccepted {
 
 struct VmInputTool {
     vm: Rc<Vm>,
+}
+
+struct VmListTool {
+    vm: Rc<Vm>,
+}
+
+impl ToolSpec for VmListTool {
+    barracuda_agent_plugin::tools::tool_metadata!("vm_list");
+}
+
+impl ToolHandler for VmListTool {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _request: Self::Args) -> ToolFuture<'a> {
+        let response = self.vm.list();
+        Box::pin(async move { encode(&response, true) })
+    }
 }
 
 impl ToolSpec for VmInputTool {
@@ -224,13 +242,10 @@ mod tests {
                 .1;
             let accepted: serde_json::Value =
                 serde_json::from_str(&accepted.content).map_err(|error| error.to_string())?;
-            if accepted
+            let accepted_run_id = accepted
                 .get("run_id")
                 .and_then(serde_json::Value::as_u64)
-                .is_none()
-            {
-                return Err(format!("invalid accepted settlement: {accepted}"));
-            }
+                .ok_or_else(|| format!("invalid accepted settlement: {accepted}"))?;
 
             let progress = detached
                 .next()
@@ -248,11 +263,30 @@ mod tests {
                 return Err(format!("invalid progress update: {progress}"));
             }
 
+            let list = ToolInvocation::try_new(Some("vm-list-call"), "vm_list", "{}")
+                .map_err(|error| error.to_string())?;
+            let (mut listed, list_detached) = ToolRunner::new(&handle).run(alloc::vec![list]);
+            if list_detached.is_some() {
+                return Err("vm_list unexpectedly detached".into());
+            }
+            let listed = listed
+                .next()
+                .await
+                .ok_or("vm_list did not return a result")?
+                .1;
+            let listed: serde_json::Value =
+                serde_json::from_str(&listed.content).map_err(|error| error.to_string())?;
+            if listed
+                != serde_json::json!({
+                    "runs": [{"run_id": accepted_run_id, "state": "input_required"}]
+                })
+            {
+                return Err(format!("invalid vm_list result: {listed}"));
+            }
+
             vm.input(VmInputRequest {
-                run_id: accepted
-                    .get("run_id")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|run_id| u32::try_from(run_id).ok())
+                run_id: u32::try_from(accepted_run_id)
+                    .ok()
                     .ok_or("accepted settlement did not contain a valid run_id")?,
                 input: Some("result".into()),
                 eof: None,

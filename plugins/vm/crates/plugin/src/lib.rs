@@ -19,8 +19,9 @@ use barracuda_workflow_plugin::WorkflowActionRegistry;
 pub use barracuda_lua::{Error, Lua, Package, Result};
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
-    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmRun,
-    VmRunCompletion, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest, VmRunUpdate,
+    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,
+    VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
+    VmRunState, VmRunUpdate,
 };
 
 /// Registers the VM capability and its Workflow-facing operations.

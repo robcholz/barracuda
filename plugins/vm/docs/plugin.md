@@ -13,6 +13,8 @@ separate `agent-vm` adapter. Starting a run returns an awaitable `VmRun` handle
 whose identifier is available immediately. `VmRun::next_update` exposes typed
 non-terminal progress and terminal completion, while awaiting `VmRun` directly
 returns only the ordered output messages and terminal outcome.
+`Vm::list` returns a bounded snapshot of active run IDs and their current
+`running` or `input_required` state without exposing Lua source.
 
 The `vm.run` Workflow Action awaits that handle and returns only after the Lua
 execution finishes. VM output and terminal state are not emitted as Workflow

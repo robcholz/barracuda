@@ -4,10 +4,11 @@
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
-use barracuda_vm_runtime::{
-    Vm, VmExecutionError, VmInputRequest, VmRunOutcome, VmRunProgress, VmRunRequest, VmRunUpdate,
-};
 use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_vm_runtime::{
+    Vm, VmExecutionError, VmInputRequest, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunRequest,
+    VmRunState, VmRunUpdate,
+};
 use embassy_executor::{Executor, Spawner};
 
 #[embassy_executor::task]
@@ -15,6 +16,9 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
     let result = async {
         let vm = Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?;
         vm.start(spawner).map_err(|error| error.to_string())?;
+        if !vm.list().runs.is_empty() {
+            return Err("new VM runtime listed active runs".into());
+        }
 
         let mut run = vm
             .run(VmRunRequest {
@@ -27,6 +31,14 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
         let update = run.next_update().await.map_err(|error| error.to_string())?;
         if update != VmRunUpdate::Progress(VmRunProgress::InputRequired { run_id }) {
             return Err(format!("unexpected VM progress: {update:?}"));
+        }
+        if vm.list().runs
+            != [VmRunInfo {
+                run_id,
+                state: VmRunState::InputRequired,
+            }]
+        {
+            return Err(format!("unexpected active VM list: {:?}", vm.list()));
         }
         vm.input(VmInputRequest {
             run_id,
@@ -46,6 +58,9 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
         {
             return Err(format!("unexpected successful completion: {completion:?}"));
         }
+        if !vm.list().runs.is_empty() {
+            return Err("completed VM remained in active list".into());
+        }
 
         let run = vm
             .run(VmRunRequest {
@@ -53,11 +68,22 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
             })
             .map_err(|error| error.to_string())?;
         let run_id = run.run_id();
+        if vm.list().runs
+            != [VmRunInfo {
+                run_id,
+                state: VmRunState::Running,
+            }]
+        {
+            return Err(format!("unexpected running VM list: {:?}", vm.list()));
+        }
         vm.cancel(barracuda_vm_runtime::VmRunReference { run_id })
             .map_err(|error| error.to_string())?;
         let completion = run.await.map_err(|error| error.to_string())?;
         if completion.outcome != VmRunOutcome::Cancelled {
             return Err(format!("unexpected cancelled completion: {completion:?}"));
+        }
+        if !vm.list().runs.is_empty() {
+            return Err("cancelled VM remained in active list".into());
         }
 
         let completion = vm
