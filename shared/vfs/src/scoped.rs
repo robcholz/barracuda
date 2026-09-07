@@ -64,7 +64,12 @@ impl ScopedVfs {
 
     /// Opens a file with explicit options.
     pub async fn open_with(&self, path: &str, options: &OpenOptions) -> Result<File, FsError> {
-        self.vfs.open_with(&self.path(path)?, options).await
+        let path = if options.should_create() {
+            self.prepare_file_path(path).await?
+        } else {
+            self.path(path)?
+        };
+        self.vfs.open_with(&path, options).await
     }
 
     /// Reads an entire file.

@@ -11,7 +11,7 @@ use barracuda_plugin_manager::{
     Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
     PluginRequirements, PluginResult, PluginStorage,
 };
-use barracuda_vfs::{FsError, MountOptions, ScopedVfs, Vfs};
+use barracuda_vfs::{FsError, MountOptions, OpenOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use futures_lite::future::block_on;
 
@@ -119,6 +119,14 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
 
         let first = first.borrow().clone().unwrap();
         let second = second.borrow().clone().unwrap();
+        let mut create = OpenOptions::new();
+        create.write(true).create(true);
+        drop(
+            first
+                .open_with("/data/open-created", &create)
+                .await
+                .unwrap(),
+        );
         first.write("/data/state", b"first").await.unwrap();
         second.write("/data/state", b"second").await.unwrap();
 
@@ -136,8 +144,13 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
             first.rename("/data/state", "/resources/state").await,
             Err(FsError::CrossMount)
         );
+        assert_eq!(first.read("/cache/file").await, Err(FsError::NotMounted));
         assert_eq!(first.read("/media/file").await, Err(FsError::NotMounted));
         assert_eq!(first.read("/state").await, Err(FsError::NotMounted));
+        assert_eq!(
+            first.write("/state", b"root").await,
+            Err(FsError::NotMounted)
+        );
         assert!(first.read("../second/data/state").await.is_err());
     });
 }
