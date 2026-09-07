@@ -1,11 +1,11 @@
 ---
 name: design-doc
-description: Write and maintain component design docs (design.md) in this repo, and audit a crate against its design doc. Use when creating or editing a design doc, reviewing its style or tradeoffs, or checking whether code matches its doc.
+description: Write and maintain subsystem design docs (design.md) in this repo, and audit a crate against its design doc. Use when creating or editing a design doc, reviewing its style or tradeoffs, or checking whether code matches its doc.
 ---
 
 # Design Docs Aligned with Code
 
-Design docs in this repo describe a component's actual design for maintainers.
+Design docs in this repo describe a subsystem's actual design for maintainers.
 They are not marketing, not changelogs, and not code walkthroughs. A design
 doc must read as a design and match what the code actually does.
 
@@ -33,12 +33,11 @@ doc must read as a design and match what the code actually does.
 
 ## Structure
 
-A typical component design doc has: scope, an architecture boundary diagram,
+A typical design doc has: scope, an architecture boundary diagram,
 the model (types and registry), call paths (unified primitive + wrappers),
-invariants, and one section per major subsystem. Adapt to the component; do
-not force a fixed template. In-repo references for the target voice:
-core/event-router/crates/rpc/docs/design.md and
-core/event-router/crates/workflow/docs/design.md.
+invariants, and one section per major subsystem. Adapt to the subject; do not
+force a fixed template. Use `plugins/imessage-gateway/docs/design.md` as the
+in-repo reference for voice and shape.
 
 ## Doc ↔ code alignment
 
@@ -50,10 +49,8 @@ When writing or reviewing, audit the crate against the doc:
    not mention is a gap (e.g. nested-call context, registry lifecycle,
    multicast input constraints).
 3. Find cross-crate leakage:
-   - public APIs whose only purpose is another subsystem's logic (e.g. a
-     `links_to` predicate in an RPC crate for a workflow's link rule);
-   - wording from other subsystems in docs or errors ("Component unload",
-     "Event Router's executor");
+   - public APIs whose only purpose is another subsystem's logic;
+   - wording from unrelated subsystems in docs or errors;
    - dependencies outside the crate's domain.
 4. Fix leaks at the ownership boundary, not by redocumenting them. The
    subsystem's logic moves to the subsystem; the shared crate keeps only

@@ -49,7 +49,7 @@ pub fn validator(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 #[doc(hidden)]
-pub fn rpc_validator(input: TokenStream) -> TokenStream {
+pub fn validator_with_runtime(input: TokenStream) -> TokenStream {
     let input = match syn::parse::<RuntimeFileInput>(input) {
         Ok(input) => input,
         Err(error) => return error.to_compile_error().into(),
@@ -66,7 +66,7 @@ pub fn validator_source(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 #[doc(hidden)]
-pub fn rpc_validator_source(input: TokenStream) -> TokenStream {
+pub fn validator_source_with_runtime(input: TokenStream) -> TokenStream {
     let input = match syn::parse::<RuntimeSourceInput>(input) {
         Ok(input) => input,
         Err(error) => return error.to_compile_error().into(),

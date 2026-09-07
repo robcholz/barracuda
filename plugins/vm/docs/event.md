@@ -9,9 +9,7 @@ Every accepted run emits ordered events with its `run_id` and a zero-based
 {"run_id":1,"sequence":0,"chunk":"hello","message_end":true}
 ```
 
-The legacy `chunk` and `message_end` fields remain compatible with existing
-Workflow definitions, but output is no longer split at an Event Router lane
-boundary.
+`chunk` contains the complete message and `message_end` is always `true`.
 
 `vm.input_required` is emitted when Lua blocks in `io.input()`:
 

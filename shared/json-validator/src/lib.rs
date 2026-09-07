@@ -15,7 +15,9 @@ use core::fmt;
 use serde::de::{Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
 use serde_json::{value::RawValue, Value};
 
-pub use json_validator_macros::{rpc_validator, rpc_validator_source, validator, validator_source};
+pub use json_validator_macros::{
+    validator, validator_source, validator_source_with_runtime, validator_with_runtime,
+};
 
 /// Static JSON Schema source paired with its compile-time validator.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,7 +64,7 @@ macro_rules! json_schema {
                     $rest,
                 )*
             )),
-            $crate::rpc_validator!($crate; $first $(, $rest)*),
+            $crate::validator_with_runtime!($crate; $first $(, $rest)*),
         )
     };
 }
@@ -73,7 +75,7 @@ macro_rules! json_schema_inline {
     ($source:literal $(,)?) => {
         $crate::JsonSchema::from_parts(
             $source,
-            $crate::rpc_validator_source!($crate; $source),
+            $crate::validator_source_with_runtime!($crate; $source),
         )
     };
 }

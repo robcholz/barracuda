@@ -1,64 +1,33 @@
 # Async Execution Ownership
 
-This document defines which long-lived futures belong to Event Router and
-which run as owner-managed Embassy tasks. It is authoritative for async
-execution ownership across Platform, HAL, System, and Plugins. Current code
-that contradicts this boundary is migration work, not precedent.
+This document defines ownership of long-lived futures across Platform, HAL,
+System, and Plugins. Current code that contradicts these boundaries is
+migration work, not precedent.
 
 ## Core boundary
 
-Event Router executes Event Router contracts. It is not a general-purpose
-executor or a registry for arbitrary background services.
+The subsystem that defines a task's behavior also owns its lifecycle, capacity,
+failure policy, and cancellation. Long-lived work runs as an Embassy task or
+task pool started by that owner.
 
-An Event Router `Component` owns registrations and runtime work that directly
-participate in Event Router behavior. Its `run` future may advance work such
-as:
-
-- emitting Events into Event Router;
-- consuming routed Events or advancing Workflow execution;
-- serving an Event Router RPC or Agent contract whose state must be driven by
-  that Component.
-
-A long-lived future that does not directly advance one of those contracts runs
-as an Embassy task owned by the subsystem that needs it. Socket accept loops,
-HTTP connection workers, Platform network runners, peripheral Driver runners,
-and unrelated periodic service loops do not become Event Router Components.
-
-~~~text
+```text
 Embassy executor
 +-- Platform-owned tasks
 |   `-- network runner
 +-- HAL-owned tasks
 |   `-- peripheral Driver runners
 +-- System-owned tasks
-+-- Plugin-owned tasks
-|   `-- WebServer accept and connection workers
-`-- Event Router
-    +-- Event producers and consumers
-    +-- Workflow runtime
-    `-- Event Router RPC and Agent contract Components
-~~~
+`-- Plugin-owned tasks
+    +-- Workflow matching and execution
+    +-- WebServer accept and connection workers
+    +-- Scheduler due-occurrence loop
+    `-- other Plugin services
+```
 
-Event Router remains a cooperative async runtime internally, but that does not
-make it the owner of every cooperative future in the application.
-
-## Component membership test
-
-Put a runtime loop in `Component::run` only when polling that loop directly
-progresses an Event Router-visible contract.
-
-Use an owner-managed Embassy task when any of these statements is true:
-
-- the loop would still be required if Event Router were removed;
-- its primary input is a socket, device, timer, filesystem, or Driver rather
-  than an Event Router Event or call;
-- its output is an external protocol response or capability state rather than
-  an Event Router Event, Workflow transition, or RPC result;
-- placing it in Event Router merely provides somewhere to poll the future.
-
-A Component that only registers handlers may have no independent runtime loop.
-Unrelated service work must not be added to give that Component something to
-poll.
+A typed capability determines how another Plugin calls a service. A Workflow
+Action or Event determines how Workflow integrates with that service. Neither
+contract transfers execution ownership away from the subsystem that implements
+the behavior.
 
 ## Ownership table
 
@@ -67,102 +36,55 @@ poll.
 | Platform network runner | Platform | Embassy task |
 | Peripheral Driver runner | HAL composition | Embassy task |
 | WebServer accept loop | WebServer Plugin | Embassy task |
-| WebServer connection workers | WebServer Plugin | WebServer-owned Embassy task |
+| WebServer connection workers | WebServer Plugin | fixed Embassy task pool |
 | Network time synchronization | Time Plugin | cancellable Embassy task |
-| Scheduler loop that emits scheduled Events | Scheduler Component | Event Router |
-| Workflow event ingress and execution | Workflow Component | Event Router |
-| Event Router RPC adapter | Contract-owning Component | Event Router |
-| Internal service behind a typed capability | Capability provider | Embassy task when continuous work is required |
-
-The owner is the layer that defines the work's behavior and lifecycle. A
-Platform owns only Platform mechanisms; it does not spawn WebServer tasks just
-because the WebServer consumes its network handle.
-
-## Communication and execution are independent
-
-Choosing an Event Router contract or a typed capability determines how
-subsystems communicate. It does not automatically determine how their runtime
-work is scheduled.
-
-For example, WebServer provides a typed `WebServer` capability so dependent
-Plugins can register routes. The WebServer Plugin then owns an Embassy task
-that accepts connections and dispatches those registered routes. Neither the
-typed capability nor its consumers require the server loop to be an Event
-Router Component.
-
-Conversely, a Plugin may provide typed capabilities and also own an Event
-Router Component when it has separate Event Router-facing behavior. The
-Component contains only that behavior; the Plugin's other services remain in
-their owner-managed tasks.
-
-## Startup and task access
-
-The application Embassy entry owns the executor `Spawner`. Task-start access
-flows from the composition root to the layer that owns each task:
-
-~~~text
-Embassy entry / Spawner
-          |
-          +--> Platform initializes Platform tasks
-          +--> HAL composition initializes Driver tasks
-          `--> System starts System and Plugin tasks
-                         |
-                         `--> Event Router runs its Components
-~~~
+| Scheduler due-occurrence loop | Scheduler Plugin | cancellable Embassy task |
+| Workflow matching and execution | Workflow Plugin | cancellable Embassy task |
+| Continuous work behind a typed capability | Capability provider | owner-managed Embassy task |
 
 Platform and HAL start only the runners for resources they construct. System
-starts System-owned work and supplies a scoped, Embassy-backed task-start
-boundary to Plugins. A Plugin starts its tasks after the complete Plugin graph
-has registered, so typed capabilities and route registrations are present
-before external traffic is accepted.
+starts System-owned work and installs the Embassy spawner used by Plugin
+startup. Each Plugin starts its own tasks after the complete Plugin capability
+and registration graph exists.
 
-Long-lived fixed work uses `#[embassy_executor::task]` and, when required,
-statically allocated task pools. It is not converted into boxed futures so
-Event Router can poll it. Task and worker capacity belongs to the owning
-subsystem's configuration.
+## Plugin startup and cancellation
 
-Task start failure is a startup failure of the owning subsystem and propagates
-through System startup. Event Router failure and completion govern Event Router
-Components only; they do not silently become the lifecycle of independent
-servers or Drivers.
+`Plugin::register` synchronously constructs capabilities and installs retained
+registrations. `Plugin::start` synchronously spawns long-lived work through
+`PluginStartContext::task_spawner`.
 
-Each permanent Plugin task receives one manager-owned cancellation token.
-After Component cleanup succeeds, unload signals every task and waits for each
-token to be dropped before releasing capabilities and retained resources. This
-makes an immediate unload/reload safe for Embassy's fixed task pools. Startup
-failure cancels every task started by that hook immediately. Dropping Plugin
-Manager also signals all remaining task tokens. Task code races its owner loop
-with the token and must be cancellation-safe at every await point.
+Each permanent Plugin task receives one manager-owned `PluginTaskToken`. The
+task races its owner loop with `PluginTaskToken::cancelled` and remains
+cancellation-safe at every await point. Startup rollback, Plugin unload, and
+Plugin Manager teardown signal all tokens and wait for their task-side tokens
+to drop before releasing capabilities and retained resources. This makes an
+immediate unload and reload safe for Embassy's fixed task pools.
+
+Long-lived fixed work uses `#[embassy_executor::task]` and, when needed,
+statically allocated task pools. Task and worker capacity belongs to the owning
+subsystem's configuration. A spawn failure is a startup failure of that owner
+and propagates through System startup.
 
 ## Invariants
 
-- `Component::run` is reserved for Event Router-facing runtime work.
-- Event Router is never used solely as a place to poll an arbitrary future.
-- External protocol listeners and connection workers are owned by their
-  protocol subsystem.
+- The layer that defines continuous behavior owns its task and failure policy.
 - Platform and HAL runners remain with the resources they drive.
-- A task consumes handles or typed capabilities; it does not move business
-  behavior into Platform merely to obtain a `Spawner`.
-- Fixed long-lived tasks use Embassy's static task allocation and declared pool
-  sizes.
+- External protocol listeners and connection workers belong to their protocol
+  Plugin.
+- A task consumes handles or typed capabilities; business behavior does not
+  move into Platform merely to obtain a `Spawner`.
 - Plugin registration finishes before Plugin tasks accept external work.
-- Permanent Plugin tasks stop cooperatively on unload, startup rollback, or
+- Permanent Plugin tasks stop cooperatively on unload, startup rollback, and
   Plugin Manager teardown.
-- Event Router Components and owner-managed tasks have separate failure and
-  lifecycle boundaries.
 
 ## Review checklist
 
-Before loading a Component or adding a long-lived future, verify:
+Before adding a long-lived future, verify:
 
-1. What Event Router Event, Workflow, RPC, or Agent contract does polling this
-   future directly advance?
-2. Would the future still be necessary without Event Router?
-3. Which subsystem defines its behavior, capacity, and failure policy?
-4. Can that owner run it as a statically allocated Embassy task or task pool?
-5. Is Event Router being used only because it already polls futures?
-6. Does startup guarantee that dependencies and registrations exist before the
-   task begins accepting work?
-
-If question 1 has no concrete answer, the future does not belong in Event
-Router.
+1. Which subsystem defines the work's behavior, capacity, and failure policy?
+2. Which Platform, HAL, System, or Plugin lifecycle should start and stop it?
+3. Can it use a statically allocated Embassy task or task pool?
+4. Does startup guarantee that dependencies and retained registrations exist
+   before the task begins accepting work?
+5. Does cancellation release every leased worker, queue, socket, and
+   registration required for immediate reload?

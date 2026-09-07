@@ -8,9 +8,9 @@ and zero-overhead architecture. Treat current violations as migration work, not
 precedent.
 
 See [.agents/docs/plugin-communication.md](.agents/docs/plugin-communication.md)
-for guidance on choosing between Event Router contracts and typed Plugin
-capabilities, and for the required capability declaration in `plugin.md`.
+for guidance on choosing among typed Plugin capabilities, Workflow contracts,
+and Agent Tools, and for the required declarations in `plugin.md`.
 
 See [.agents/docs/execution-ownership.md](.agents/docs/execution-ownership.md)
-for the authoritative boundary between Event Router Components and
-owner-managed Embassy tasks.
+for the authoritative ownership and cancellation rules for long-lived Embassy
+tasks.

@@ -45,7 +45,7 @@ pub struct InboundReceipt {
     pub message_id: String,
 }
 
-/// Consumer of messages received from Web clients. Event Router can implement this later.
+/// Consumer of messages received from Web clients.
 pub trait InboundMessageSink: 'static {
     fn receive_message(&self, request: InboundMessage) -> InboundFuture<'_, ()>;
 

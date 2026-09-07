@@ -9,5 +9,4 @@ The Plugin registers three typed Actions with static schemas under
   binary stream.
 
 Business failures are ordinary `{"error":"<code>"}` Action responses. The
-four active-stream limit and per-stream queue backpressure remain runtime
-limits; the old 512-byte Event Router request limit is gone.
+four active-stream limit and per-stream queue backpressure are runtime limits.

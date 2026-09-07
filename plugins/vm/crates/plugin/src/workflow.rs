@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-use barracuda_vm_component::{
+use barracuda_vm_runtime::{
     Vm, VmControlAccepted, VmError, VmInputRequest, VmRunAccepted, VmRunReference, VmRunRequest,
 };
 use barracuda_workflow_plugin::{

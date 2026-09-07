@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used)]
 
 #[test]
-fn plugin_lifecycle_has_no_event_router_boundary() {
+fn plugin_lifecycle_exposes_registration_and_startup_boundaries() {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lifecycle.rs"),
     )
@@ -12,10 +12,6 @@ fn plugin_lifecycle_has_no_event_router_boundary() {
     assert!(source.contains("pub struct PluginRegisterContext"));
     assert!(!source.contains("pub struct PluginContext"));
     assert!(source.contains("pub struct PluginStartContext"));
-    assert!(!source.contains("EventRouter"));
-    assert!(!source.contains("PluginEventRouterContext"));
-    assert!(!source.contains("EventRouterRegistrar"));
-    assert!(!source.contains("component_ids"));
 }
 
 #[test]
