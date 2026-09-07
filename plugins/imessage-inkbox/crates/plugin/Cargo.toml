@@ -13,6 +13,8 @@ barracuda-captive-portal-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
 http-client.workspace = true
 inkbox = { path = "../provider" }
 log = "0.4"
