@@ -12,7 +12,7 @@ use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_skill::SkillSet;
 use barracuda_agent_tool::{Tool, ToolGroup};
 
-use self::tools::{ListSkillTool, ReadSkillTool, ReloadSkillsTool};
+use self::tools::{ListSkillTool, ReadSkillResourceTool, ReadSkillTool, ReloadSkillsTool};
 use crate::engine::{ContextProvider, ContextProviderResult};
 
 mod tools;
@@ -54,6 +54,9 @@ impl ContextProvider for SkillContextProvider {
                     skills: Arc::clone(&self.skills),
                 }),
                 Tool::new(ReadSkillTool {
+                    skills: Arc::clone(&self.skills),
+                }),
+                Tool::new(ReadSkillResourceTool {
                     skills: Arc::clone(&self.skills),
                 }),
                 Tool::new(ReloadSkillsTool {

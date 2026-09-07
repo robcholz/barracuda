@@ -6,7 +6,11 @@
 - Required typed capabilities: `WebServer` from `webserver`,
   `WorkflowActionRegistry` and `WorkflowService` from `workflow`, and
   `CaptivePortal` from `captive-portal`
-- Filesystem: private; reads bundled `/resources/workflows.json`
+- Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
+  plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
+- Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
+  skills from `/data/skills`, and shared bundled skills from
+  `/workspace/resources/skills`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
   `purpose.{root_agent,sub_agent,memory,compaction}`
 - Owned Components: none
@@ -29,6 +33,14 @@ it does not own or run either the Agent runtime or the Workflow runtime.
 Dependent Plugins may still register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
+
+The runtime scans `/data/skills` and `/workspace/resources/skills` into one
+catalog. Skill names are globally unique across both roots; their filesystem
+location has no selection priority. A duplicate aborts startup, while a failed
+runtime reload preserves the previous valid catalog. `skill_read` loads only
+the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
+UTF-8 file path relative to that unique skill directory without exposing the
+backing path to the model.
 
 At task startup, Agent reads its scoped `/resources/workflows.json` and loads
 each definition transiently through the required `WorkflowService` capability,

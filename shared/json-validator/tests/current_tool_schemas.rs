@@ -18,6 +18,7 @@ const SCHEMAS: &[Validator] = &[
     validator!("../../plugins/agent/crates/agent/resources/tools/profile_replace/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/skill_list/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/skill_read/schema.json"),
+    validator!("../../plugins/agent/crates/agent/resources/tools/skill_resource_read/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/skill_reload/schema.json"),
     validator!("../../plugins/agent/crates/multiagent/resources/tools/subagent_delete/schema.json"),
     validator!(
@@ -36,5 +37,5 @@ const SCHEMAS: &[Validator] = &[
 
 #[test]
 fn every_current_tool_schema_compiles() {
-    assert_eq!(SCHEMAS.len(), 25);
+    assert_eq!(SCHEMAS.len(), 26);
 }

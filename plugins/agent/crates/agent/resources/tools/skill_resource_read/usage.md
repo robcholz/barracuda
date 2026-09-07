@@ -1,0 +1,1 @@
+Use this after reading a skill when its instructions explicitly reference an additional text file. The path is relative to that skill and cannot address another skill or filesystem location. Continue from `next_offset` when the response is paginated.

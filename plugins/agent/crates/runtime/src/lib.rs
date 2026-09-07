@@ -57,7 +57,8 @@ pub type RuntimeResult<T> = Result<T, RuntimeError>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeStorageConfig {
     pub persistence_root: String,
-    /// Skill roots in priority order (e.g. DATA before SYSTEM). Empty means no
+    /// Skill roots forming one globally unique catalog. Root order has no
+    /// selection meaning; duplicate skill names are errors. Empty means no
     /// filesystem skills are loaded.
     pub skill_roots: Vec<String>,
 }
