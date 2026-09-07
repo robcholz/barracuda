@@ -26,8 +26,8 @@ use http_client::ClientFactory;
 use workflow::AgentWorkflowAdapter;
 
 pub use barracuda_agent_runtime::{
-    AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel, SessionEvent,
-    SessionPersistence, TurnEvent, stream, tools,
+    stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
+    SessionEvent, SessionPersistence, TurnEvent,
 };
 pub use model_api_http::SET_API_PATH;
 
@@ -94,6 +94,9 @@ impl Plugin for AgentPlugin {
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
             .map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
+        let api_configuration =
+            embassy_futures::block_on(model_api_http::load_configuration(context.storage()))?;
+        runtime.replace_api_configuration(api_configuration.clone());
         let workflow_adapter = AgentWorkflowAdapter::new(Rc::clone(&runtime));
         let action_registrations = workflow_adapter
             .register_actions(&actions)
@@ -105,7 +108,11 @@ impl Plugin for AgentPlugin {
         let route_registration = webserver
             .serve_http(
                 SET_API_PATH,
-                model_api_http::SetApiEndpoint::new(Rc::clone(&runtime)),
+                model_api_http::SetApiEndpoint::new(
+                    Rc::clone(&runtime),
+                    context.storage().clone(),
+                    api_configuration,
+                ),
             )
             .map_err(PluginError::registration)?;
         context.retain(route_registration);

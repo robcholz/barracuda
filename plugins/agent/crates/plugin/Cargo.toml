@@ -18,6 +18,7 @@ barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true
+embassy-sync.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 http-client = { workspace = true, features = ["mbedtls"] }
 log.workspace = true

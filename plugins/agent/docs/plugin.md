@@ -7,6 +7,8 @@
   `WorkflowActionRegistry` and `WorkflowService` from `workflow`, and
   `CaptivePortal` from `captive-portal`
 - Filesystem: private; reads bundled `/resources/workflows.json`
+- Storage: model API records under the Plugin-scoped KV keys `default` and
+  `purpose.{root_agent,sub_agent,memory,compaction}`
 - Owned Components: none
 - Plugin-owned tasks: Agent runtime and `session.event` forwarding
 
@@ -38,7 +40,10 @@ logged and stops the Agent task before it begins driving sessions.
 
 The shared `WebServer` capability continues to own `POST /api/model-api`.
 The retained route registration is released automatically when the Agent Plugin
-unloads.
+unloads. Accepted model configurations are atomically persisted before they
+become active. Registration restores the complete model, purpose-binding, and
+default-model snapshot before Agent work starts. Missing storage yields an empty
+configuration; malformed stored data fails Plugin registration.
 
 ## Portal page
 

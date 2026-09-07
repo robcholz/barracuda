@@ -1,31 +1,67 @@
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use core::{future::Future, pin::Pin};
 
-use barracuda_agent_runtime::{AgentRuntime, ApiPurpose};
+use barracuda_agent_runtime::{AgentRuntime, ApiPurpose, ModelApiManager};
 use barracuda_model_api::{BackendKind, InitError, ModelApiConfig};
+use barracuda_plugin::manager::{
+    PluginError, PluginResult, PluginStorage, PluginWriteTransaction, StorageError,
+};
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use serde::Deserialize;
 
 /// HTTP path accepting Agent model API configurations.
 pub const SET_API_PATH: &str = "/api/model-api";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
+const DEFAULT_STORAGE_KEY: &str = "default";
+const COMPACTION_STORAGE_KEY: &str = "purpose.compaction";
+const MEMORY_STORAGE_KEY: &str = "purpose.memory";
+const ROOT_AGENT_STORAGE_KEY: &str = "purpose.root_agent";
+const SUB_AGENT_STORAGE_KEY: &str = "purpose.sub_agent";
 
 pub(crate) struct SetApiEndpoint {
     set_api: Box<SetApiHandler>,
+    configuration: Mutex<NoopRawMutex, ModelApiManager>,
+    persistence: Box<dyn ConfigurationPersistence>,
 }
 
 type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
 
 impl SetApiEndpoint {
-    pub(crate) fn new(runtime: Rc<AgentRuntime>) -> Self {
-        Self::with_handler(move |api, purpose, default| runtime.set_api(api, purpose, default))
+    pub(crate) fn new<Storage: PluginStorage>(
+        runtime: Rc<AgentRuntime>,
+        storage: Storage,
+        configuration: ModelApiManager,
+    ) -> Self {
+        Self {
+            set_api: Box::new(move |api, purpose, default| runtime.set_api(api, purpose, default)),
+            configuration: Mutex::new(configuration),
+            persistence: Box::new(PluginConfigurationPersistence(storage)),
+        }
     }
 
+    #[cfg(test)]
     fn with_handler(
         handler: impl Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError> + 'static,
     ) -> Self {
+        Self::with_handler_and_persistence(
+            handler,
+            NoopConfigurationPersistence,
+            ModelApiManager::default(),
+        )
+    }
+
+    #[cfg(test)]
+    fn with_handler_and_persistence(
+        handler: impl Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError> + 'static,
+        persistence: impl ConfigurationPersistence + 'static,
+        configuration: ModelApiManager,
+    ) -> Self {
         Self {
             set_api: Box::new(handler),
+            configuration: Mutex::new(configuration),
+            persistence: Box::new(persistence),
         }
     }
 
@@ -49,6 +85,19 @@ impl HttpEndpoint for SetApiEndpoint {
                 log::warn!("rejected empty model API configuration request");
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             }
+            let mut current = self.configuration.lock().await;
+            let mut configuration = current.clone();
+            for request in &requests {
+                let (api, purpose, default) = request.clone().into_parts();
+                if let Err(error) = configuration.set_api(api, purpose, default) {
+                    log::warn!("rejected model API configuration for {purpose:?}: {error}");
+                    return Self::response(422, br#"{"error":"invalid_configuration"}"#);
+                }
+            }
+            if let Err(error) = self.persistence.persist(&configuration).await {
+                log::error!("failed to persist model API configuration: {error}");
+                return Self::response(500, br#"{"error":"storage"}"#);
+            }
             for request in requests {
                 let (api, purpose, default) = request.into_parts();
                 if let Err(error) = (self.set_api)(api, purpose, default) {
@@ -57,12 +106,13 @@ impl HttpEndpoint for SetApiEndpoint {
                 }
                 log::info!("configured model API for {purpose:?}, default={default}");
             }
+            *current = configuration;
             Self::response(204, b"")
         })
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetApiRequest {
     timeout_ms: u32,
@@ -76,6 +126,107 @@ struct SetApiRequest {
     base_url: alloc::string::String,
 }
 
+type PersistenceFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), ConfigurationStorageError>> + 'a>>;
+
+trait ConfigurationPersistence {
+    fn persist<'a>(&'a self, configuration: &'a ModelApiManager) -> PersistenceFuture<'a>;
+}
+
+struct PluginConfigurationPersistence<Storage>(Storage);
+
+impl<Storage: PluginStorage> ConfigurationPersistence for PluginConfigurationPersistence<Storage> {
+    fn persist<'a>(&'a self, configuration: &'a ModelApiManager) -> PersistenceFuture<'a> {
+        Box::pin(async move { persist_configuration(&self.0, configuration).await })
+    }
+}
+
+#[cfg(test)]
+struct NoopConfigurationPersistence;
+
+#[cfg(test)]
+impl ConfigurationPersistence for NoopConfigurationPersistence {
+    fn persist<'a>(&'a self, _configuration: &'a ModelApiManager) -> PersistenceFuture<'a> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ConfigurationStorageError {
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+    #[error(transparent)]
+    Codec(#[from] serde_json::Error),
+}
+
+async fn persist_configuration<Storage: PluginStorage>(
+    storage: &Storage,
+    configuration: &ModelApiManager,
+) -> Result<(), ConfigurationStorageError> {
+    let records = [
+        (DEFAULT_STORAGE_KEY, configuration.get_default_api()),
+        (
+            COMPACTION_STORAGE_KEY,
+            configuration.get_explicit_api(ApiPurpose::Compaction),
+        ),
+        (
+            MEMORY_STORAGE_KEY,
+            configuration.get_explicit_api(ApiPurpose::Memory),
+        ),
+        (
+            ROOT_AGENT_STORAGE_KEY,
+            configuration.get_explicit_api(ApiPurpose::RootAgent),
+        ),
+        (
+            SUB_AGENT_STORAGE_KEY,
+            configuration.get_explicit_api(ApiPurpose::SubAgent),
+        ),
+    ];
+    let encoded = records
+        .into_iter()
+        .map(|(key, config)| {
+            config
+                .map(|config| serde_json::to_vec(&config))
+                .transpose()
+                .map(|bytes| (key, bytes))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut transaction = storage.write_transaction().await;
+    for (key, bytes) in &encoded {
+        if let Some(bytes) = bytes {
+            transaction.write(key, bytes.as_slice()).await?;
+        }
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn load_configuration<Storage: PluginStorage>(
+    storage: &Storage,
+) -> PluginResult<ModelApiManager> {
+    let mut configuration = ModelApiManager::default();
+    for (key, purpose) in [
+        (COMPACTION_STORAGE_KEY, ApiPurpose::Compaction),
+        (MEMORY_STORAGE_KEY, ApiPurpose::Memory),
+        (ROOT_AGENT_STORAGE_KEY, ApiPurpose::RootAgent),
+        (SUB_AGENT_STORAGE_KEY, ApiPurpose::SubAgent),
+    ] {
+        if let Some(bytes) = storage.get_bytes(key).await? {
+            let api = serde_json::from_slice(&bytes).map_err(PluginError::registration)?;
+            configuration
+                .set_api(api, purpose, false)
+                .map_err(PluginError::registration)?;
+        }
+    }
+    if let Some(bytes) = storage.get_bytes(DEFAULT_STORAGE_KEY).await? {
+        let api = serde_json::from_slice(&bytes).map_err(PluginError::registration)?;
+        configuration
+            .set_default_api(api)
+            .map_err(PluginError::registration)?;
+    }
+    Ok(configuration)
+}
+
 impl SetApiRequest {
     fn into_parts(self) -> (ModelApiConfig, ApiPurpose, bool) {
         let mut api =
@@ -87,7 +238,7 @@ impl SetApiRequest {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 enum SetApiBackend {
     #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
@@ -104,7 +255,7 @@ impl From<SetApiBackend> for BackendKind {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum SetApiPurpose {
     RootAgent,
@@ -128,13 +279,83 @@ impl From<SetApiPurpose> for ApiPurpose {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use alloc::{rc::Rc, vec, vec::Vec};
+    use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
     use core::cell::RefCell;
 
     use barracuda_model_api::InitError;
+    use barracuda_platform_test::{memory_partition, MemoryPartition};
+    use barracuda_plugin::manager::{
+        Plugin, PluginDeclaration, PluginError, PluginManager, PluginRegisterContext, PluginResult,
+    };
     use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
 
     use super::{ApiPurpose, SetApiEndpoint};
+
+    struct RecordingPersistence(Rc<RefCell<Option<barracuda_agent_runtime::ModelApiManager>>>);
+
+    impl super::ConfigurationPersistence for RecordingPersistence {
+        fn persist<'a>(
+            &'a self,
+            configuration: &'a barracuda_agent_runtime::ModelApiManager,
+        ) -> super::PersistenceFuture<'a> {
+            self.0.replace(Some(configuration.clone()));
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct FailingPersistence;
+
+    impl super::ConfigurationPersistence for FailingPersistence {
+        fn persist<'a>(
+            &'a self,
+            _configuration: &'a barracuda_agent_runtime::ModelApiManager,
+        ) -> super::PersistenceFuture<'a> {
+            Box::pin(async {
+                Err(super::ConfigurationStorageError::Storage(
+                    barracuda_plugin::manager::StorageError::KeyTooLong { max: 0 },
+                ))
+            })
+        }
+    }
+
+    struct ConfigurationRoundTripPlugin {
+        configuration: barracuda_agent_runtime::ModelApiManager,
+        observed: Rc<RefCell<Option<barracuda_agent_runtime::ModelApiManager>>>,
+    }
+
+    impl PluginDeclaration for ConfigurationRoundTripPlugin {
+        const ID: &'static str = "model-configuration-round-trip";
+    }
+
+    impl Plugin for ConfigurationRoundTripPlugin {
+        fn register<Storage>(
+            &mut self,
+            context: &mut PluginRegisterContext<'_, Storage>,
+        ) -> PluginResult<()>
+        where
+            Storage: barracuda_plugin::manager::PluginStorage,
+        {
+            futures_lite::future::block_on(async {
+                super::persist_configuration(context.storage(), &self.configuration)
+                    .await
+                    .map_err(PluginError::registration)?;
+                self.observed
+                    .replace(Some(super::load_configuration(context.storage()).await?));
+                Ok(())
+            })
+        }
+    }
+
+    fn plugin_manager() -> PluginManager<MemoryPartition> {
+        futures_lite::future::block_on(async {
+            let partition = memory_partition(64 * 1024)
+                .await
+                .expect("create test database region");
+            PluginManager::open(partition)
+                .await
+                .expect("open Plugin storage")
+        })
+    }
 
     const VALID_JSON: &[u8] = br#"[
         {
@@ -185,6 +406,124 @@ mod tests {
         assert_eq!(requests[1].0.model, "memory-model");
         assert_eq!(requests[1].1, ApiPurpose::Memory);
         assert!(!requests[1].2);
+    }
+
+    #[test]
+    fn posts_persist_the_complete_accumulated_model_configuration() {
+        let persisted = Rc::new(RefCell::new(None));
+        let endpoint = SetApiEndpoint::with_handler_and_persistence(
+            |_api, _purpose, _default| Ok(()),
+            RecordingPersistence(Rc::clone(&persisted)),
+            barracuda_agent_runtime::ModelApiManager::default(),
+        );
+        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
+        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
+
+        for body in [first.as_slice(), second.as_slice()] {
+            let response = futures_lite::future::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
+            );
+            assert_eq!(response.status(), 204);
+        }
+
+        let configuration = persisted.borrow().clone().expect("persisted configuration");
+        assert_eq!(
+            configuration
+                .get_api(ApiPurpose::RootAgent)
+                .expect("root configuration")
+                .model,
+            "root"
+        );
+        assert_eq!(
+            configuration
+                .get_api(ApiPurpose::Memory)
+                .expect("memory configuration")
+                .model,
+            "memory"
+        );
+        assert_eq!(
+            configuration
+                .get_api(ApiPurpose::Compaction)
+                .expect("default configuration")
+                .model,
+            "root"
+        );
+    }
+
+    #[test]
+    fn storage_failure_does_not_activate_model_configuration() {
+        let called = Rc::new(RefCell::new(false));
+        let observed = Rc::clone(&called);
+        let endpoint = SetApiEndpoint::with_handler_and_persistence(
+            move |_api, _purpose, _default| {
+                observed.replace(true);
+                Ok(())
+            },
+            FailingPersistence,
+            barracuda_agent_runtime::ModelApiManager::default(),
+        );
+
+        let response = futures_lite::future::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, VALID_JSON.to_vec())),
+        );
+
+        assert_eq!(response.status(), 500);
+        assert_eq!(response.body(), Some(&br#"{"error":"storage"}"#[..]));
+        assert!(!*called.borrow());
+    }
+
+    #[test]
+    fn model_configuration_round_trips_through_plugin_kv() {
+        let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
+        let mut root = barracuda_model_api::ModelApiConfig::new(
+            barracuda_model_api::BackendKind::OpenAiCompatible,
+            "root-key",
+            "root",
+            "https://root.example/v1",
+        );
+        root.max_tokens = 1234;
+        configuration
+            .set_api(root, ApiPurpose::RootAgent, true)
+            .expect("set root API");
+        let memory = barracuda_model_api::ModelApiConfig::new(
+            barracuda_model_api::BackendKind::AnthropicCompatible,
+            "memory-key",
+            "memory",
+            "https://memory.example/v1",
+        );
+        configuration
+            .set_api(memory, ApiPurpose::Memory, false)
+            .expect("set memory API");
+        let observed = Rc::new(RefCell::new(None));
+        let mut manager = plugin_manager();
+
+        manager
+            .register(ConfigurationRoundTripPlugin {
+                configuration,
+                observed: Rc::clone(&observed),
+            })
+            .expect("round-trip model configuration");
+
+        let restored = observed.borrow();
+        let restored = restored.as_ref().expect("restored configuration");
+        assert_eq!(
+            restored
+                .get_explicit_api(ApiPurpose::RootAgent)
+                .expect("root binding")
+                .max_tokens,
+            1234
+        );
+        assert_eq!(
+            restored
+                .get_explicit_api(ApiPurpose::Memory)
+                .expect("memory binding")
+                .model,
+            "memory"
+        );
+        assert_eq!(
+            restored.get_default_api().expect("default API").model,
+            "root"
+        );
     }
 
     #[test]

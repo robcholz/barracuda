@@ -20,7 +20,7 @@ use http_client::embedded_nal_async::{Dns, TcpConnect};
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
     AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, IterationId, IterationLoopError,
-    Message, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
+    Message, ModelApiManager, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
 };
 use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
@@ -335,6 +335,14 @@ impl AgentRuntime {
         default: bool,
     ) -> Result<(), InitError> {
         self.control.set_api(api, purpose, default)
+    }
+
+    /// Replaces the complete model API configuration snapshot.
+    ///
+    /// This is used by the owning Plugin to restore its durable configuration
+    /// before the runtime begins serving Agent work.
+    pub fn replace_api_configuration(&self, configuration: ModelApiManager) {
+        self.control.replace_api_configuration(configuration);
     }
 
     /// Create a fresh isolated conversation session with explicit persistence.
