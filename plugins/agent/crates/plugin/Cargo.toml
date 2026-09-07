@@ -13,6 +13,7 @@ async-channel = { version = "2", default-features = false }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
 barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embassy-executor.workspace = true

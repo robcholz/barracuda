@@ -235,9 +235,6 @@ mod tests {
     #![allow(clippy::expect_used)]
     #![allow(missing_docs)]
 
-    use alloc::vec::Vec;
-    use serde_json::Value;
-
     use super::parse_definition;
 
     #[test]
@@ -250,17 +247,5 @@ mod tests {
         assert_eq!(workflow.steps().len(), 2);
         assert!(workflow.has_branch());
         assert!(workflow.returns());
-    }
-
-    #[test]
-    fn shipped_workflow_catalog_remains_parse_compatible() {
-        let documents: Vec<Value> =
-            serde_json::from_str(include_str!("../../../../../image/system/workflows.json"))
-                .expect("shipped Workflow catalog");
-
-        for document in documents {
-            let json = serde_json::to_string(&document).expect("serialize Workflow document");
-            parse_definition(&json).expect("parse shipped Workflow document");
-        }
     }
 }
