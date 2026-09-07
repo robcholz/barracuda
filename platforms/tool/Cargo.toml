@@ -5,6 +5,7 @@ edition = "2021"
 description = "Barracuda Platform workspace synchronization tool"
 
 [dependencies]
+anstream = "1"
 barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
 clap = { version = "4", features = ["derive"] }

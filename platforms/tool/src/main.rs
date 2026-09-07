@@ -2,6 +2,8 @@
 
 use std::{env, ffi::OsString, path::PathBuf, process::ExitCode};
 
+use anstream::{eprintln, println};
+use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
 use barracuda_platform_tool::{launch, sync_with_report, SyncStatus};
 use clap::{Parser, Subcommand};
 
@@ -48,13 +50,13 @@ fn main() -> ExitCode {
                     SyncStatus::Current => "Checked",
                 };
                 println!(
-                    "{action} Platform registry ({} Platforms).",
+                    "{SUCCESS}✔{SUCCESS:#} {action} {EMPHASIS}Platform{EMPHASIS:#} registry {DIM}({} Platforms){DIM:#}.",
                     report.platforms().len()
                 );
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("error: {error}");
+                eprintln!("{ERROR}error:{ERROR:#} {error}");
                 ExitCode::FAILURE
             }
         },
@@ -70,7 +72,7 @@ fn main() -> ExitCode {
                     .unwrap_or(1),
             ),
             Err(error) => {
-                eprintln!("error: {error}");
+                eprintln!("{ERROR}error:{ERROR:#} {error}");
                 ExitCode::FAILURE
             }
         },

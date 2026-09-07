@@ -7,7 +7,7 @@ use std::{
 };
 
 use anstream::{eprintln, println};
-use anstyle::{AnsiColor, Color, Style};
+use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS, WARNING};
 use barracuda_plugin_tool::{configure, info, sync_with_report, PluginInfo, SyncStatus};
 use clap::{Parser, Subcommand};
 use dialoguer::console::Term;
@@ -69,41 +69,36 @@ fn main() -> ExitCode {
             ExitCode::from(130)
         }
         Err(error) => {
-            let red = Style::new()
-                .fg_color(Some(Color::Ansi(AnsiColor::Red)))
-                .bold();
-            eprintln!("{red}error:{red:#} {error}");
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
             ExitCode::FAILURE
         }
     }
 }
 
 fn print_info(plugin: &PluginInfo) {
-    let cyan = Style::new()
-        .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
-        .bold();
-    let green = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)));
-    let yellow = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
-    let dim = Style::new().dimmed();
     let (status_style, status) = if plugin.enabled() {
-        (green, "enabled")
+        (SUCCESS, "enabled")
     } else {
-        (yellow, "disabled")
+        (WARNING, "disabled")
     };
-    println!("{cyan}{}{cyan:#}  {}", plugin.id(), plugin.description());
-    println!("  {dim}directory{dim:#}     {}", plugin.directory());
-    println!("  {dim}status{dim:#}        {status_style}{status}{status_style:#}");
-    print_list("depends on", plugin.dependencies(), &dim);
-    print_list("required by", plugin.dependents(), &dim);
+    println!(
+        "{EMPHASIS}{}{EMPHASIS:#}  {}",
+        plugin.id(),
+        plugin.description()
+    );
+    println!("  {DIM}directory{DIM:#}     {}", plugin.directory());
+    println!("  {DIM}status{DIM:#}        {status_style}{status}{status_style:#}");
+    print_list("depends on", plugin.dependencies());
+    print_list("required by", plugin.dependents());
 }
 
-fn print_list(label: &str, values: &[String], dim: &Style) {
+fn print_list(label: &str, values: &[String]) {
     let value = if values.is_empty() {
         String::from("—")
     } else {
         values.join(", ")
     };
-    println!("  {dim}{label:<13}{dim:#} {value}");
+    println!("  {DIM}{label:<13}{DIM:#} {value}");
 }
 
 fn install_interrupt_handler() -> Result<(), ctrlc::Error> {
@@ -135,24 +130,19 @@ fn is_interrupted_prompt(error: &barracuda_plugin_tool::CommandError) -> bool {
 }
 
 fn print_report(report: &barracuda_plugin_tool::SyncReport) {
-    let green = Style::new()
-        .fg_color(Some(Color::Ansi(AnsiColor::Green)))
-        .bold();
-    let yellow = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
-    let dim = Style::new().dimmed();
     let action = match report.status() {
         SyncStatus::Updated => "Synced",
         SyncStatus::Current => "Checked",
     };
-    println!("{green}✔{green:#} {action} Plugin registry");
+    println!("{SUCCESS}✔{SUCCESS:#} {action} {EMPHASIS}Plugin{EMPHASIS:#} registry");
     for plugin in report.enabled() {
-        println!("  {green}●{green:#} {plugin}");
+        println!("  {SUCCESS}●{SUCCESS:#} {plugin}");
     }
     for plugin in report.disabled() {
-        println!("  {yellow}○{yellow:#} {plugin} {dim}(disabled){dim:#}");
+        println!("  {WARNING}○{WARNING:#} {plugin} {DIM}(disabled){DIM:#}");
     }
     println!(
-        "{dim}  {} enabled, {} disabled{dim:#}",
+        "{DIM}  {} enabled, {} disabled{DIM:#}",
         report.enabled().len(),
         report.disabled().len()
     );

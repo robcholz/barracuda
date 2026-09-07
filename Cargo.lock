@@ -612,6 +612,8 @@ dependencies = [
 name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
+ "anstream",
+ "anstyle",
  "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-platform-config",
@@ -1189,6 +1191,7 @@ dependencies = [
 name = "barracuda-platform-tool"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "barracuda-cli-style",
  "barracuda-platform-config",
  "clap",
@@ -1432,6 +1435,7 @@ dependencies = [
 name = "barracuda-system-image"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-platform-config",

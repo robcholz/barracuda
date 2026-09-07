@@ -9,6 +9,7 @@ name = "barracuda-system-image"
 path = "src/main.rs"
 
 [dependencies]
+anstream = "1"
 barracuda-board-config.workspace = true
 barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
