@@ -16,7 +16,9 @@ use barracuda_plugin::manager::{
 };
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 
-pub use barracuda_lua::{Error, Lua, Package, Result};
+pub use barracuda_lua::{
+    Context, Error, Lua, MetaMethod, Package, Result, UserData, UserDataHandle, UserDataMethods,
+};
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
     Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,

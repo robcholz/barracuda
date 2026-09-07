@@ -1,0 +1,3 @@
+id = "vm-agent"
+depends-on = ["agent", "vm"]
+description = "Exposes isolated Agent asks as a require-only Lua package."

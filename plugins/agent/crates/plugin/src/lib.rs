@@ -11,9 +11,7 @@ mod bundled_workflows;
 mod model_api_http;
 mod workflow;
 
-use barracuda_agent_runtime::{
-    AgentRuntime, ModelApiFactory, RuntimeService, RuntimeStorageConfig,
-};
+use barracuda_agent_runtime::{ModelApiFactory, RuntimeService, RuntimeStorageConfig};
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
@@ -27,7 +25,10 @@ use embassy_futures::select::select;
 use http_client::ClientFactory;
 use workflow::AgentWorkflowAdapter;
 
-pub use barracuda_agent_runtime::{tools, AgentToolRegistry};
+pub use barracuda_agent_runtime::{
+    AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel, SessionEvent,
+    SessionPersistence, TurnEvent, stream, tools,
+};
 pub use model_api_http::SET_API_PATH;
 
 const PERSISTENCE_ROOT: &str = "/data";
@@ -99,6 +100,7 @@ impl Plugin for AgentPlugin {
             .map_err(PluginError::registration)?;
 
         context.retain(action_registrations);
+        context.provide(Rc::clone(&runtime))?;
         context.provide(Rc::new(runtime.tool_registry()))?;
         let route_registration = webserver
             .serve_http(

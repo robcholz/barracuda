@@ -1433,6 +1433,7 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
+ "barracuda-vm-agent-plugin",
  "barracuda-vm-plugin",
  "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
@@ -1581,6 +1582,23 @@ dependencies = [
  "embassy-futures",
  "embedded-io-async 0.7.0",
  "spin 0.10.1",
+]
+
+[[package]]
+name = "barracuda-vm-agent-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "futures-channel",
+ "futures-lite",
+ "futures-util",
+ "spin 0.10.1",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

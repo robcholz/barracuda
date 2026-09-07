@@ -60,6 +60,7 @@ barracuda-imessage-wechat-plugin = { path = "plugins/imessage-wechat/crates/plug
 barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
+barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }

@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-vm-agent-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Lua package adapter for isolated Barracuda Agent asks"
+license = "Apache-2.0"
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+barracuda-agent-plugin.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
