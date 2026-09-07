@@ -1,7 +1,7 @@
 # Barracuda Plugin Manager
 
-`barracuda-plugin-manager` is the system boundary for grouping Components and
-assigning persistent storage ownership. Runtime composition stays in
+`barracuda-plugin-manager` is the system boundary for Plugin identity,
+capabilities, owned tasks, and persistent storage. Runtime composition stays in
 `barracuda-system`; this core crate does not construct or own the application
 System.
 
@@ -23,30 +23,25 @@ start(webserver)    -> start(imessage-gateway)    -> start(imessage-web)    -> .
 ```
 
 Both phases are synchronous. `register` atomically constructs the complete
-typed capability and Component graph without yielding. A Plugin explicitly
-loads each owned Component through `context.event_router.load(component)` in
-this phase. `start` is only an optional post-registration hook:
-`PluginStartContext` cannot publish capabilities or load Components, and task
-spawning itself is synchronous. Event Router remains responsible for polling
-Component futures after the complete Plugin set has registered and all startup
-hooks have run. Only work that directly advances an Event Router contract
-belongs in those Component futures. Independent services run as owner-managed
-Embassy tasks under the repository's
+typed capability graph without yielding. `start` is only an optional
+post-registration hook: `PluginStartContext` cannot publish capabilities, and
+task spawning itself is synchronous. Long-running services run as
+owner-managed Embassy tasks under the repository's
 [`execution-ownership.md`](../../.agents/docs/execution-ownership.md) boundary.
 System installs the Embassy spawner directly on Plugin Manager; only
 `PluginStartContext::task_spawner` exposes it, so registration cannot start a
 service before the complete graph exists.
 
-Async storage access and other I/O run in the Component or Embassy task that
-owns that work. Lifecycle methods may clone storage handles into those owners,
-but do not block or await I/O themselves. `PluginManager::open` remains async
-because mounting the shared database performs real storage I/O.
+Async storage access and other I/O run in the Embassy task that owns that work.
+Lifecycle methods may clone storage handles into those owners, but do not block
+or await I/O themselves. `PluginManager::open` remains async because mounting
+the shared database performs real storage I/O.
 
 The manager validates `PluginDeclaration::ID`, derives one namespace-restricted storage
 implementation from that stable identity, and passes it through
 `PluginRegisterContext` as the `PluginStorage` contract. A Plugin may clone its
-storage capability into any number of Components. Keys are UTF-8 strings and
-values are Plugin-owned fixed-layout zerocopy types; Plugin Manager adds no
+storage capability into its owned services and tasks. Keys are UTF-8 strings
+and values are Plugin-owned fixed-layout zerocopy types; Plugin Manager adds no
 serialization format of its own.
 
 Plugins can also exchange runtime-only typed capabilities. A provider calls
@@ -60,39 +55,34 @@ System assembles statically selected Platform handles and derived shared
 services into one `barracuda_plugin_api::PluginContext`. Every concrete Plugin
 constructor receives a shared reference to that construction context and takes
 or clones only the fixed handles it owns. `PluginRegisterContext` separately
-carries Plugin-owned storage, declared Plugin capabilities, retained resources,
-and the explicit Event Router registration boundary. The Embassy spawner
-remains an explicit startup lifecycle facility rather than a construction
-resource or typed lookup.
+carries Plugin-owned storage, declared Plugin capabilities, and retained
+resources. The Embassy spawner remains an explicit startup lifecycle facility
+rather than a construction resource or typed lookup.
 
 Capabilities follow their provider's lifecycle. A provider cannot unload while
 declared dependents remain registered, and phase rollback removes everything
 published by that attempt. `PluginRegisterContext::retain` keeps registration
 guards or other resources alive until the owning Plugin unloads successfully.
 
-Each Plugin declares its own identity, constructs its own Components, and calls
-`context.event_router.load`. `barracuda-system` therefore knows which Plugins
-make up the application but does not know their IDs or which Components they
-contain.
+Each Plugin declares its own identity and constructs its capabilities and
+owned tasks. `barracuda-system` knows which Plugins make up the application but
+does not own their internal services.
 
 ```text
 System
 ├── PluginContext { ip_stack, http_clients }
 └── PluginManager
-    ├── EventRouter registrar
-    │   └── Plugin -> Component, Component, ...
     ├── Typed capability registry
     │   └── (provider, TypeId) -> Rc<dyn Any>
+    ├── Plugin-owned task cancellation
     └── ekv Database
         ├── PluginStorage("scheduler")
         └── PluginStorage("another-plugin")
 ```
 
-The Event Router still owns Component registration, execution, and teardown.
-The Plugin layer records the Component identities belonging to each Plugin so
-they can be rolled back or unloaded as a group. Unloading does not delete the
-Plugin namespace; registering the same `PluginId` again restores access to the
-same data.
+Unloading cancels the Plugin's owned tasks, removes its capabilities, and drops
+its retained resources. It does not delete the Plugin namespace; registering
+the same `PluginId` again restores access to the same data.
 
 System passes the writable database NOR capability projected by the selected
 Platform from its Board-native layout to `PluginManager::open`. Plugin Manager constructs and

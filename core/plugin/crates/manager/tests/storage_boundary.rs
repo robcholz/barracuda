@@ -10,11 +10,11 @@ impl PluginDeclaration for StorageAgnosticPlugin {
     const ID: &'static str = "storage-agnostic";
 }
 
-impl<const M: usize> Plugin<M> for StorageAgnosticPlugin {}
+impl Plugin for StorageAgnosticPlugin {}
 
 #[test]
 fn plugin_contract_is_generic_over_semantic_storage_not_flash() {
-    fn assert_plugin<T: Plugin<64>>() {}
+    fn assert_plugin<T: Plugin>() {}
 
     assert_plugin::<StorageAgnosticPlugin>();
 }
