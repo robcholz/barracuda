@@ -37,7 +37,38 @@ impl Vfs {
     /// Creates a mount-management-free view rooted beneath `root`.
     pub fn scoped(&self, root: &str) -> Result<crate::ScopedVfs, FsError> {
         let root = normalize(root)?;
-        Ok(crate::ScopedVfs::new(self.clone(), root))
+        Ok(crate::ScopedVfs::with_mounts(
+            self.clone(),
+            alloc::vec![crate::scoped::ScopedMount::new(String::from("/"), root)],
+        ))
+    }
+
+    /// Creates a mount-management-free view with independent logical roots.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FsError::InvalidPath`] for an invalid logical mount point or
+    /// source root, and [`FsError::MountConflict`] when normalized logical
+    /// mount points collide.
+    pub fn scoped_mounts<I, Point, Source>(&self, mounts: I) -> Result<crate::ScopedVfs, FsError>
+    where
+        I: IntoIterator<Item = (Point, Source)>,
+        Point: AsRef<str>,
+        Source: AsRef<str>,
+    {
+        let mut scoped_mounts = Vec::new();
+        for (point, source_root) in mounts {
+            let point = normalize(point.as_ref())?;
+            if scoped_mounts
+                .iter()
+                .any(|mount: &crate::scoped::ScopedMount| mount.point == point)
+            {
+                return Err(FsError::MountConflict);
+            }
+            let source_root = normalize(source_root.as_ref())?;
+            scoped_mounts.push(crate::scoped::ScopedMount::new(point, source_root));
+        }
+        Ok(crate::ScopedVfs::with_mounts(self.clone(), scoped_mounts))
     }
 
     /// Mounts a backend root at `mount_point`.
