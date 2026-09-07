@@ -175,7 +175,7 @@ mod tests {
         );
 
         assert_eq!(response.status(), 204);
-        assert!(response.body().is_empty());
+        assert_eq!(response.body(), Some(&b""[..]));
         let requests = observed.borrow();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].0.model, "root-model");
@@ -196,7 +196,10 @@ mod tests {
                 endpoint.handle(HttpRequest::new(HttpMethod::Post, body)),
             );
             assert_eq!(response.status(), 400);
-            assert_eq!(response.body(), br#"{"error":"invalid_request"}"#);
+            assert_eq!(
+                response.body(),
+                Some(&br#"{"error":"invalid_request"}"#[..])
+            );
         }
     }
 
@@ -210,7 +213,10 @@ mod tests {
         );
 
         assert_eq!(response.status(), 400);
-        assert_eq!(response.body(), br#"{"error":"invalid_request"}"#);
+        assert_eq!(
+            response.body(),
+            Some(&br#"{"error":"invalid_request"}"#[..])
+        );
     }
 
     #[test]
@@ -223,7 +229,10 @@ mod tests {
         );
 
         assert_eq!(response.status(), 422);
-        assert_eq!(response.body(), br#"{"error":"invalid_configuration"}"#);
+        assert_eq!(
+            response.body(),
+            Some(&br#"{"error":"invalid_configuration"}"#[..])
+        );
     }
 
     #[test]
@@ -240,7 +249,10 @@ mod tests {
         );
 
         assert_eq!(response.status(), 405);
-        assert_eq!(response.body(), br#"{"error":"method_not_allowed"}"#);
+        assert_eq!(
+            response.body(),
+            Some(&br#"{"error":"method_not_allowed"}"#[..])
+        );
         assert!(!*called.borrow());
     }
 }
