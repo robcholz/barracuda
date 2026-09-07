@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_read",
+    "description": "Read a bounded UTF-8 byte range from a file inside the scoped filesystem.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "offset": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 16384 }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_move",
+    "description": "Rename a file or directory within the scoped filesystem without replacing a destination.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" }
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    }
+  }
+}

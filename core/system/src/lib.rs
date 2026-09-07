@@ -139,6 +139,7 @@ where
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins;
             barracuda_agent_plugin::AgentPlugin::new(&mut plugin_context),
+            barracuda_agent_file_plugin::AgentFilePlugin::new(&mut plugin_context),
             barracuda_agent_http_plugin::AgentHttpPlugin::new(&mut plugin_context),
             barracuda_agent_imessage_gateway_plugin::AgentIMessageGatewayPlugin::new(&mut plugin_context),
             barracuda_agent_scheduler_plugin::AgentSchedulerPlugin::new(&mut plugin_context),

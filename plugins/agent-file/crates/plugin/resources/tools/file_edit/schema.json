@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_edit",
+    "description": "Atomically replace exact text in an existing UTF-8 file inside the scoped filesystem.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "old_text": { "type": "string", "minLength": 1, "maxLength": 32768 },
+        "new_text": { "type": "string", "maxLength": 32768 },
+        "replace_all": { "type": "boolean" }
+      },
+      "required": ["path", "old_text", "new_text"],
+      "additionalProperties": false
+    }
+  }
+}

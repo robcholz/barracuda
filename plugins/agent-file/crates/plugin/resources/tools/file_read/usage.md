@@ -1,0 +1,1 @@
+Use `file_read` for UTF-8 text files. `offset` and `limit` are byte counts, defaulting to 0 and 4096. When `next_offset` is present, call again with that value. A range that splits a multi-byte UTF-8 character returns `invalid_utf8`; adjust the range boundary.

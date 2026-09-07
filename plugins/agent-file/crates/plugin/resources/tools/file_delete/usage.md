@@ -1,0 +1,1 @@
+Use `file_delete` for one known file or one empty directory. It does not recurse. Path validity and mount policy come from the Plugin `ScopedVfs`. Inspect the target first when deletion is not explicitly requested.

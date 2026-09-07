@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 barracuda-board-hal.workspace = true
 # BEGIN GENERATED PLUGINS
 barracuda-agent-plugin.workspace = true
+barracuda-agent-file-plugin.workspace = true
 barracuda-agent-http-plugin.workspace = true
 barracuda-agent-imessage-gateway-plugin.workspace = true
 barracuda-agent-scheduler-plugin.workspace = true
