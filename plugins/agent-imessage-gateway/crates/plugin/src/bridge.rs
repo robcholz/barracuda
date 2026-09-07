@@ -1,18 +1,16 @@
-use alloc::{boxed::Box, rc::Rc};
-use core::future::pending;
-
-use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
-};
+use alloc::{rc::Rc, vec::Vec};
 use barracuda_plugin::manager::{
     PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
+};
+use barracuda_workflow_plugin::{
+    WorkflowActionRegistration, WorkflowActionRegistry, WorkflowActionRegistryError,
 };
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 
 use crate::{
     state::{BridgeBook, PersistedRoute},
-    to_agent::{ToAgent, to_agent_handler},
-    to_gateway::{ToGateway, to_gateway_handler},
+    to_agent::ToAgentAction,
+    to_gateway::ToGatewayAction,
 };
 
 pub(crate) struct BridgeShared<Storage> {
@@ -36,17 +34,17 @@ pub enum ImessageBridgeStorageError {
     InvalidState,
 }
 
-/// Event Router Component exposing the two Workflow bridge RPCs.
-pub struct ImessageBridgeComponent<Storage> {
+/// Persistent route state behind the two iMessage bridge Workflow Actions.
+pub(crate) struct ImessageBridge<Storage> {
     control: BridgeControl<Storage>,
 }
 
-impl<Storage> ImessageBridgeComponent<Storage>
+impl<Storage> ImessageBridge<Storage>
 where
     Storage: PluginStorage,
 {
-    /// Restores persisted route mappings and constructs the Component.
-    pub async fn load(storage: Storage) -> Result<Self, ImessageBridgeStorageError> {
+    /// Restores persisted route mappings and constructs the bridge.
+    pub(crate) async fn load(storage: Storage) -> Result<Self, ImessageBridgeStorageError> {
         let mut book = BridgeBook::new();
         let transaction = storage.read_transaction().await;
         let mut entries = transaction.entries().await?;
@@ -66,26 +64,15 @@ where
             },
         })
     }
-}
 
-impl<Storage, const M: usize> Component<M> for ImessageBridgeComponent<Storage>
-where
-    Storage: PluginStorage,
-{
-    fn name(&self) -> &'static str {
-        "imessage-bridge"
-    }
-
-    fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_json::<ToAgent, _>("*", to_agent_handler(self.control.clone()))?;
-        context.register_json::<ToGateway, _>("*", to_gateway_handler(self.control.clone()))
-    }
-
-    fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(pending())
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        Ok(())
+    /// Registers both stable Workflow Action addresses until the returned guards are dropped.
+    pub(crate) fn register_actions(
+        &self,
+        actions: &WorkflowActionRegistry,
+    ) -> Result<Vec<WorkflowActionRegistration>, WorkflowActionRegistryError> {
+        Ok(alloc::vec![
+            actions.add_action(ToAgentAction::new(self.control.clone()))?,
+            actions.add_action(ToGatewayAction::new(self.control.clone()))?,
+        ])
     }
 }

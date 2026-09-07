@@ -17,8 +17,7 @@
             "unsupported",
             "authentication",
             "rate_limited",
-            "delivery",
-            "invalid_receipt"
+            "delivery"
           ]
         }
       },

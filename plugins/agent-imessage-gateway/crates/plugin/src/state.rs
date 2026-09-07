@@ -5,6 +5,7 @@ use alloc::{
 use core::mem::size_of;
 
 use barracuda_plugin::manager::PluginStorage;
+use serde::Serialize;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 pub(crate) const CHANNEL_MAX: usize = 32;
@@ -79,7 +80,8 @@ pub(crate) enum GatewayEvent {
     Continuing,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum BridgeError {
     InvalidRequest,
     Conflict,
@@ -339,4 +341,117 @@ pub(crate) async fn persist_mapping<Storage: PluginStorage>(
         .put(&mapping.session, &record)
         .await
         .map_err(|_error| BridgeError::Storage)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use alloc::string::String;
+
+    use super::{BridgeBook, GatewayEvent, PersistedRoute, ResolveResult, Route};
+
+    fn route() -> Route {
+        Route::new("imessage", "chat-7", Some("thread-2")).expect("valid route")
+    }
+
+    #[test]
+    fn queued_replies_are_consumed_in_user_turn_order() {
+        let mut book = BridgeBook::new();
+        let first = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare first binding");
+        book.commit_mapping(first);
+        let second = book
+            .prepare_binding(route(), "message-10", "session-4")
+            .expect("prepare second binding");
+        book.commit_mapping(second);
+
+        assert_eq!(
+            book.resolve(&route()),
+            ResolveResult::Found {
+                session: String::from("session-4"),
+                open_required: false,
+            }
+        );
+        let first_target = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start first turn")
+            .expect("first target");
+        assert_eq!(first_target.reply_to.as_deref(), Some("message-9"));
+        let continuing = book
+            .gateway_target("session-4", GatewayEvent::Continuing)
+            .expect("continue first turn")
+            .expect("continuing target");
+        assert_eq!(continuing.reply_to.as_deref(), Some("message-9"));
+        let ended = book
+            .gateway_target("session-4", GatewayEvent::TurnEnded)
+            .expect("end first turn")
+            .expect("terminal target");
+        assert_eq!(ended.reply_to.as_deref(), Some("message-9"));
+
+        let second_target = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start second turn")
+            .expect("second target");
+        assert_eq!(second_target.reply_to.as_deref(), Some("message-10"));
+    }
+
+    #[test]
+    fn closing_and_restoring_require_the_agent_session_to_reopen() {
+        let mut book = BridgeBook::new();
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding");
+        let persisted = PersistedRoute::from_mapping(&mapping).expect("encode persisted route");
+        book.commit_mapping(mapping);
+        assert_eq!(
+            book.gateway_target("session-4", GatewayEvent::Closed)
+                .expect("close session"),
+            None
+        );
+        assert_eq!(
+            book.resolve(&route()),
+            ResolveResult::Found {
+                session: String::from("session-4"),
+                open_required: true,
+            }
+        );
+
+        let mut restored = BridgeBook::new();
+        restored
+            .restore("session-4", persisted)
+            .expect("restore route");
+        assert_eq!(
+            restored.resolve(&route()),
+            ResolveResult::Found {
+                session: String::from("session-4"),
+                open_required: true,
+            }
+        );
+    }
+
+    #[test]
+    fn tool_turns_keep_the_route_without_consuming_a_reply() {
+        let mut book = BridgeBook::new();
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding");
+        book.commit_mapping(mapping);
+
+        let tool_target = book
+            .gateway_target("session-4", GatewayEvent::OtherTurnStarted)
+            .expect("start tool turn")
+            .expect("tool target");
+        assert_eq!(tool_target.route, route());
+        assert_eq!(tool_target.reply_to, None);
+        let _ended = book
+            .gateway_target("session-4", GatewayEvent::TurnEnded)
+            .expect("end tool turn");
+        let user_target = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start user turn")
+            .expect("user target");
+        assert_eq!(user_target.reply_to.as_deref(), Some("message-9"));
+    }
 }

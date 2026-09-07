@@ -1,330 +1,128 @@
-use alloc::{boxed::Box, rc::Rc};
-use core::future::pending;
+use alloc::rc::Rc;
 
 use async_channel::{Receiver, Sender};
-use barracuda_event_router::{
-    Component, ComponentError, ComponentFuture, ComponentResult, EventEmitter, RegisterContext,
-    RunContext, UnregisterContext,
-};
+use barracuda_workflow_plugin::WorkflowService;
 use gateway::MessageGateway;
 
 use crate::gateway_message_received::{
-    emit_inbound, validate_inbound, GatewayInboundMessage, GatewayMessageReceived,
-    InboundValidationError,
+    valid_inbound, GatewayInboundMessage, GatewayMessageReceived,
 };
-use crate::gateway_send::{gateway_send_handler, GatewaySend};
+use crate::gateway_send::{send, GatewaySendRequest, GatewaySendResponse};
 use crate::gateway_send_media::{
-    deliver_media_stream, gateway_send_media_handler, GatewaySendMedia, MediaJob, MediaSessions,
+    accept_media, deliver_media_stream, GatewaySendMediaRequest, MediaJob, MediaSessions,
 };
 use crate::gateway_send_stream::{
-    deliver_event_stream, gateway_send_stream_handler, EventJob, EventSessions, GatewaySendStream,
+    accept_stream, deliver_event_stream, EventJob, EventSessions, GatewaySendStreamRequest,
 };
-use crate::json::event_input_capacity;
+use crate::json::{GatewayAccepted, GatewayOperationError};
 
 pub(crate) const STREAM_WORKERS: usize = 4;
 
-/// Failure queueing a normalized message for Event emission.
+/// Failure publishing a normalized inbound Gateway message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayIngressError {
     /// Required route metadata or the provider message identifier is absent.
     #[error("inbound Gateway message is missing required metadata")]
     InvalidMessage,
-    /// The complete encoded message cannot fit one Event document.
-    #[error("inbound Gateway message exceeds the Event lane capacity")]
-    MessageTooLarge,
-    /// The matching Gateway ingress Component has stopped.
-    #[error("Gateway ingress Component is not running")]
-    Stopped,
+    /// The Workflow runtime rejected or could not encode the Event.
+    #[error("inbound Gateway Event delivery failed")]
+    Delivery,
 }
 
 /// Cloneable producer handle for transport-specific inbound adapters.
 #[derive(Clone)]
 pub struct GatewayIngress {
-    messages: Sender<GatewayInboundMessage>,
-    event_input_bytes: usize,
+    workflow: Rc<WorkflowService>,
 }
 
 impl GatewayIngress {
-    /// Queues one normalized inbound message, awaiting bounded backpressure.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GatewayIngressError::InvalidMessage`] when required metadata
-    /// is absent, [`GatewayIngressError::MessageTooLarge`] when the complete
-    /// Event does not fit one lane, or [`GatewayIngressError::Stopped`] after
-    /// the ingress Component stops accepting messages.
+    /// Publishes one normalized inbound message as a Workflow Event.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
-        log::info!(
-            "IMessage Gateway received inbound message `{}` on `{}` conversation `{}` ({} text bytes)",
-            message.message_id,
-            message.route.channel,
-            message.route.conversation_id,
-            message.text.len()
-        );
-        match validate_inbound(&message, self.event_input_bytes) {
-            Ok(()) => {}
-            Err(InboundValidationError::InvalidMessage) => {
-                log::warn!(
-                    "IMessage Gateway rejected inbound message `{}`: invalid metadata",
-                    message.message_id
-                );
-                return Err(GatewayIngressError::InvalidMessage);
-            }
-            Err(InboundValidationError::MessageTooLarge) => {
-                log::warn!(
-                    "IMessage Gateway rejected inbound message `{}`: Event document exceeds {} bytes",
-                    message.message_id,
-                    self.event_input_bytes
-                );
-                return Err(GatewayIngressError::MessageTooLarge);
-            }
+        if !valid_inbound(&message) {
+            return Err(GatewayIngressError::InvalidMessage);
         }
-        let message_id = message.message_id.clone();
-        match self.messages.send(message).await {
-            Ok(()) => {
-                log::debug!("IMessage Gateway queued inbound message `{message_id}`");
-                Ok(())
-            }
-            Err(_error) => {
-                log::warn!(
-                    "IMessage Gateway could not queue inbound message `{message_id}`: ingress stopped"
-                );
-                Err(GatewayIngressError::Stopped)
-            }
-        }
+        let input =
+            serde_json::to_value(message).map_err(|_error| GatewayIngressError::Delivery)?;
+        self.workflow
+            .emit::<GatewayMessageReceived>(input)
+            .map_err(|_error| GatewayIngressError::Delivery)
     }
 }
 
-/// Event Router adapter that owns all public Gateway JSON RPC registrations.
-pub struct GatewayComponent {
+/// Shared Gateway operation runtime used by Agent tools and Workflow Actions.
+pub struct GatewayRuntime {
     gateway: Rc<MessageGateway>,
-    event_sessions: Rc<EventSessions>,
-    media_sessions: Rc<MediaSessions>,
+    workflow: Rc<WorkflowService>,
+    event_sessions: EventSessions,
+    media_sessions: MediaSessions,
     event_jobs: Sender<EventJob>,
+    event_worker_jobs: Receiver<EventJob>,
     media_jobs: Sender<MediaJob>,
+    media_worker_jobs: Receiver<MediaJob>,
 }
 
-/// Runtime Components that advance inbound and application-stream contracts.
-pub struct GatewayRuntimeComponents {
-    inbound: GatewayInboundComponent,
-    events: [GatewayEventStreamComponent; STREAM_WORKERS],
-    media: [GatewayMediaStreamComponent; STREAM_WORKERS],
-}
-
-impl GatewayRuntimeComponents {
-    /// Separates the runtime graph into independently polled Components.
+impl GatewayRuntime {
+    /// Creates the typed operation runtime and inbound producer.
     #[must_use]
-    pub fn into_parts(
-        self,
-    ) -> (
-        GatewayInboundComponent,
-        [GatewayEventStreamComponent; STREAM_WORKERS],
-        [GatewayMediaStreamComponent; STREAM_WORKERS],
-    ) {
-        (self.inbound, self.events, self.media)
-    }
-}
-
-impl GatewayComponent {
-    /// Creates the RPC adapter, ingress handle, and bounded runtime workers.
-    #[must_use]
-    pub fn new<const M: usize>(
-        gateway: MessageGateway,
-        ingress_capacity: usize,
-    ) -> (Self, GatewayIngress, GatewayRuntimeComponents) {
-        let gateway = Rc::new(gateway);
-        let (messages, inbound_messages) = async_channel::bounded(ingress_capacity.max(1));
+    pub fn new(
+        gateway: Rc<MessageGateway>,
+        workflow: Rc<WorkflowService>,
+    ) -> (Rc<Self>, GatewayIngress) {
         let (event_jobs, event_worker_jobs) = async_channel::bounded(STREAM_WORKERS);
         let (media_jobs, media_worker_jobs) = async_channel::bounded(STREAM_WORKERS);
-        let event_sessions = Rc::new(EventSessions::default());
-        let media_sessions = Rc::new(MediaSessions::default());
-        let component = Self {
-            gateway: Rc::clone(&gateway),
-            event_sessions: Rc::clone(&event_sessions),
-            media_sessions: Rc::clone(&media_sessions),
-            event_jobs,
-            media_jobs,
+        let ingress = GatewayIngress {
+            workflow: Rc::clone(&workflow),
         };
-        let runtime = GatewayRuntimeComponents {
-            inbound: GatewayInboundComponent {
-                messages: inbound_messages,
-            },
-            events: core::array::from_fn(|_| GatewayEventStreamComponent {
-                gateway: Rc::clone(&gateway),
-                sessions: Rc::clone(&event_sessions),
-                jobs: event_worker_jobs.clone(),
-            }),
-            media: core::array::from_fn(|_| GatewayMediaStreamComponent {
-                gateway: Rc::clone(&gateway),
-                sessions: Rc::clone(&media_sessions),
-                jobs: media_worker_jobs.clone(),
-            }),
-        };
-        let event_input_bytes = event_input_capacity::<M>(
-            <GatewayMessageReceived as barracuda_event_router::Event>::ID,
-        )
-        .unwrap_or_default();
         (
-            component,
-            GatewayIngress {
-                messages,
-                event_input_bytes,
-            },
-            runtime,
-        )
-    }
-}
-
-impl<const M: usize> Component<M> for GatewayComponent {
-    fn name(&self) -> &'static str {
-        "imessage-gateway"
-    }
-
-    fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context
-            .register_json::<GatewaySend, _>("*", gateway_send_handler(Rc::clone(&self.gateway)))?;
-        context.register_json::<GatewaySendStream, _>(
-            "*",
-            gateway_send_stream_handler(Rc::clone(&self.event_sessions), self.event_jobs.clone()),
-        )?;
-        context.register_json::<GatewaySendMedia, _>(
-            "*",
-            gateway_send_media_handler(Rc::clone(&self.media_sessions), self.media_jobs.clone()),
+            Rc::new(Self {
+                gateway,
+                workflow,
+                event_sessions: EventSessions::default(),
+                media_sessions: MediaSessions::default(),
+                event_jobs,
+                event_worker_jobs,
+                media_jobs,
+                media_worker_jobs,
+            }),
+            ingress,
         )
     }
 
-    fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(pending())
+    /// Sends one complete text message.
+    pub async fn send(
+        &self,
+        request: GatewaySendRequest,
+    ) -> Result<GatewaySendResponse, GatewayOperationError> {
+        send(&self.gateway, request).await
     }
 
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.event_jobs.close();
-        self.media_jobs.close();
-        self.event_sessions.clear();
-        self.media_sessions.clear();
-        Ok(())
-    }
-}
-
-/// Component that emits bounded inbound Gateway JSON Events.
-pub struct GatewayInboundComponent {
-    messages: Receiver<GatewayInboundMessage>,
-}
-
-impl<const M: usize> Component<M> for GatewayInboundComponent {
-    fn name(&self) -> &'static str {
-        "imessage-gateway-inbound"
+    /// Accepts one semantic event for an outbound text stream.
+    pub fn send_stream(
+        &self,
+        request: GatewaySendStreamRequest,
+    ) -> Result<GatewayAccepted, GatewayOperationError> {
+        accept_stream(&self.event_sessions, &self.event_jobs, request)
     }
 
-    fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        Ok(())
+    /// Accepts one command for an outbound binary media stream.
+    pub fn send_media(
+        &self,
+        request: GatewaySendMediaRequest,
+    ) -> Result<GatewayAccepted, GatewayOperationError> {
+        accept_media(&self.media_sessions, &self.media_jobs, request)
     }
 
-    fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let emitter = EventEmitter::<M>::new(context.rpc().clone());
-            loop {
-                let message = match self.messages.recv().await {
-                    Ok(message) => message,
-                    Err(_closed) => return pending().await,
-                };
-                log::info!(
-                    "IMessage Gateway emitting `gateway.message.received` for message `{}`",
-                    message.message_id
-                );
-                if let Err(error) = emit_inbound(&emitter, &message).await {
-                    log::error!(
-                        "IMessage Gateway failed to emit inbound message `{}`: {error}",
-                        message.message_id
-                    );
-                    return Err(ComponentError::lifecycle(error));
-                }
-                log::debug!(
-                    "IMessage Gateway Event Router accepted inbound message `{}`",
-                    message.message_id
-                );
-            }
-        })
+    /// Runs one of the fixed outbound semantic-stream workers.
+    pub async fn run_event_worker(&self) {
+        while let Ok(job) = self.event_worker_jobs.recv().await {
+            deliver_event_stream(&self.gateway, &self.event_sessions, &self.workflow, job).await;
+        }
     }
 
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.messages.close();
-        Ok(())
-    }
-}
-
-/// Component that drives accepted semantic event streams to channel providers.
-pub struct GatewayEventStreamComponent {
-    gateway: Rc<MessageGateway>,
-    sessions: Rc<EventSessions>,
-    jobs: Receiver<EventJob>,
-}
-
-impl<const M: usize> Component<M> for GatewayEventStreamComponent {
-    fn name(&self) -> &'static str {
-        "imessage-gateway-event-stream"
-    }
-
-    fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        Ok(())
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let emitter = EventEmitter::<M>::new(context.rpc().clone());
-            loop {
-                let job = match self.jobs.recv().await {
-                    Ok(job) => job,
-                    Err(_closed) => return pending().await,
-                };
-                deliver_event_stream(&self.gateway, &self.sessions, &emitter, job)
-                    .await
-                    .map_err(ComponentError::lifecycle)?;
-            }
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.jobs.close();
-        self.sessions.clear();
-        Ok(())
-    }
-}
-
-/// Component that drives accepted outbound media streams to channel providers.
-pub struct GatewayMediaStreamComponent {
-    gateway: Rc<MessageGateway>,
-    sessions: Rc<MediaSessions>,
-    jobs: Receiver<MediaJob>,
-}
-
-impl<const M: usize> Component<M> for GatewayMediaStreamComponent {
-    fn name(&self) -> &'static str {
-        "imessage-gateway-media-stream"
-    }
-
-    fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        Ok(())
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let emitter = EventEmitter::<M>::new(context.rpc().clone());
-            loop {
-                let job = match self.jobs.recv().await {
-                    Ok(job) => job,
-                    Err(_closed) => return pending().await,
-                };
-                deliver_media_stream(&self.gateway, &self.sessions, &emitter, job)
-                    .await
-                    .map_err(ComponentError::lifecycle)?;
-            }
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.jobs.close();
-        self.sessions.clear();
-        Ok(())
+    /// Runs one of the fixed outbound media-stream workers.
+    pub async fn run_media_worker(&self) {
+        while let Ok(job) = self.media_worker_jobs.recv().await {
+            deliver_media_stream(&self.gateway, &self.media_sessions, &self.workflow, job).await;
+        }
     }
 }

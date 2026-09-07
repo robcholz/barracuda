@@ -1,3 +1,0 @@
-id = "imessage-bridge"
-depends-on = []
-description = "Bridges iMessage Gateway routes to Agent sessions and outbound stream commands."

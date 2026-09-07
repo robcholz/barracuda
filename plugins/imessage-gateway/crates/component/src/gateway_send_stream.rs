@@ -1,79 +1,48 @@
-use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, string::String};
-use core::{
-    cell::{Cell, RefCell},
-    fmt,
-};
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
+use alloc::string::String;
+use core::cell::{Cell, RefCell};
 
 use async_channel::{Receiver, Sender, TrySendError};
-use barracuda_event_router::{
-    json_schema, Event, EventEmitter, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema,
-    JsonWriter, RpcError,
-};
+use barracuda_workflow_plugin::{Event, WorkflowService};
 use futures_lite::stream;
 use gateway::{
     MessageGateway, MessageTarget, SendStream, SendStreamEvent, SendStreamRequest, StreamError,
 };
-use serde::Deserialize;
-use serde_json::value::RawValue;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::component::STREAM_WORKERS;
-use crate::gateway_send::map_gateway_error;
-use crate::json::{
-    encoded_json_len, event_input_capacity, valid_required, write_encoded_json, write_json_string,
-    AckResponse, EncodedJson, ErrorResponse, GatewayJsonError, FRAME_CAPACITY,
-};
+use crate::json::{map_gateway_error, valid_required, GatewayAccepted, GatewayOperationError};
+use crate::route::GatewayRoute;
 
 const EVENT_QUEUE_CAPACITY: usize = 16;
 
-/// Feeds one complete semantic Agent event into an outbound Gateway stream.
-pub struct GatewaySendStream;
-
-impl JsonRpcSchema for GatewaySendStream {
-    const ADDRESS: &'static str = "gateway.send_stream";
-    const REQUEST_SCHEMA: JsonSchema = json_schema!("send_stream", request);
-    const RESPONSE_SCHEMA: JsonSchema = json_schema!("send_stream", response);
-    const MAX_REQUEST_BYTES: usize = FRAME_CAPACITY;
-    const MAX_RESPONSE_BYTES: usize = 128;
+/// One semantic event supplied to an outbound Gateway stream.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewaySendStreamRequest {
+    /// Destination provider and conversation.
+    pub route: GatewayRoute,
+    /// Optional provider message being replied to.
+    pub reply_to: Option<String>,
+    /// Agent session that owns this event stream.
+    pub session: String,
+    /// Agent-assigned event sequence.
+    pub sequence: u64,
+    /// Forward-compatible semantic event type.
+    #[serde(rename = "type")]
+    pub event_type: String,
+    /// Complete semantic payload.
+    pub payload: Value,
 }
 
-/// Terminal outcome for one accepted outbound semantic event stream.
+/// Terminal Workflow Event for one accepted outbound semantic stream.
 pub struct GatewaySendStreamFinished;
 
 impl Event for GatewaySendStreamFinished {
     const ID: &'static str = "gateway.send_stream.finished";
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RouteRequest<'a> {
-    #[serde(borrow)]
-    channel: &'a str,
-    #[serde(borrow)]
-    conversation_id: &'a str,
-    #[serde(default, borrow)]
-    thread_id: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StreamRequest<'a> {
-    #[serde(borrow)]
-    route: RouteRequest<'a>,
-    #[serde(default, borrow)]
-    reply_to: Option<&'a str>,
-    #[serde(borrow)]
-    session: &'a str,
-    sequence: u64,
-    #[serde(rename = "type", borrow)]
-    event_type: &'a str,
-    #[serde(borrow)]
-    payload: &'a RawValue,
-}
-
-#[derive(Deserialize)]
-struct StreamErrorPayload<'a> {
-    #[serde(borrow)]
-    error: &'a str,
 }
 
 type StreamItem = Result<SendStreamEvent, StreamError>;
@@ -100,206 +69,89 @@ pub(crate) struct EventSessions {
 }
 
 impl EventSessions {
-    pub(crate) fn clear(&self) {
-        self.entries.borrow_mut().clear();
-    }
-
     fn remove(&self, session: &str) {
         self.entries.borrow_mut().remove(session);
     }
 
     fn push(
         &self,
-        session_id: &str,
-        sequence: u64,
+        request: &GatewaySendStreamRequest,
         target: &MessageTarget,
-        reply_to: Option<&str>,
         event: SendStreamEvent,
         terminal: bool,
-    ) -> Result<(), GatewayJsonError> {
-        self.push_item(session_id, sequence, target, reply_to, Ok(event), terminal)
-    }
-
-    fn fail(
-        &self,
-        session_id: &str,
-        sequence: u64,
-        target: &MessageTarget,
-        reply_to: Option<&str>,
-        error: StreamError,
-    ) -> Result<(), GatewayJsonError> {
-        self.push_item(session_id, sequence, target, reply_to, Err(error), true)
-    }
-
-    fn push_item(
-        &self,
-        session_id: &str,
-        sequence: u64,
-        target: &MessageTarget,
-        reply_to: Option<&str>,
-        item: StreamItem,
-        terminal: bool,
-    ) -> Result<(), GatewayJsonError> {
+    ) -> Result<(), GatewayOperationError> {
         let mut entries = self.entries.borrow_mut();
         let session = entries
-            .get(session_id)
+            .get(&request.session)
             .cloned()
-            .ok_or(GatewayJsonError::UnknownStream)?;
-        if sequence <= session.last_sequence.get() {
-            return Err(GatewayJsonError::OutOfOrder);
+            .ok_or(GatewayOperationError::UnknownStream)?;
+        if request.sequence <= session.last_sequence.get() {
+            return Err(GatewayOperationError::OutOfOrder);
         }
-        if target != &session.target || reply_to != session.reply_to.as_deref() {
-            return Err(GatewayJsonError::InvalidRequest);
+        if target != &session.target || request.reply_to != session.reply_to {
+            return Err(GatewayOperationError::InvalidRequest);
         }
+        let item = if request.event_type == "stream_error" {
+            Err(stream_error(&request.payload)?)
+        } else {
+            Ok(event)
+        };
         match session.events.try_send(item) {
             Ok(()) => {
-                session.last_sequence.set(sequence);
+                session.last_sequence.set(request.sequence);
                 if terminal {
-                    session.terminal_sequence.replace(Some(sequence));
-                    entries.remove(session_id);
+                    session.terminal_sequence.replace(Some(request.sequence));
+                    entries.remove(&request.session);
                 }
                 Ok(())
             }
-            Err(TrySendError::Full(_item)) => Err(GatewayJsonError::Busy),
+            Err(TrySendError::Full(_item)) => Err(GatewayOperationError::Busy),
             Err(TrySendError::Closed(_item)) => {
-                entries.remove(session_id);
-                Err(GatewayJsonError::UnknownStream)
+                entries.remove(&request.session);
+                Err(GatewayOperationError::UnknownStream)
             }
         }
     }
 }
 
-/// Builds the JSON event handler for [`GatewaySendStream`].
-pub(crate) fn gateway_send_stream_handler(
-    sessions: Rc<EventSessions>,
-    jobs: Sender<EventJob>,
-) -> impl JsonHandler {
-    move |_context, document: JsonRef, response: JsonWriter| {
-        let sessions = Rc::clone(&sessions);
-        let jobs = jobs.clone();
-        async move {
-            let request = document.deserialize::<StreamRequest<'_>>()?;
-            if !valid_request(&request) {
-                return response
-                    .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                    .await;
-            }
-
-            let target = target(&request.route);
-            let stream_error = if request.event_type == "stream_error" {
-                let payload =
-                    match serde_json::from_str::<StreamErrorPayload<'_>>(request.payload.get()) {
-                        Ok(payload) if valid_required(payload.error) => payload,
-                        _ => {
-                            return response
-                                .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                                .await;
-                        }
-                    };
-                Some(StreamError::failed(payload.error))
-            } else {
-                None
-            };
-
-            let Some(event) = SendStreamEvent::inline(
-                request.session,
-                request.sequence,
-                request.event_type,
-                request.payload.get(),
-            ) else {
-                return response
-                    .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                    .await;
-            };
-
-            let result = if request.event_type == "turn_started" {
-                start_stream(
-                    &sessions,
-                    &jobs,
-                    request.session,
-                    request.sequence,
-                    target,
-                    request.reply_to,
-                    event,
-                )
-            } else if let Some(error) = stream_error {
-                if sessions.entries.borrow().contains_key(request.session) {
-                    sessions.fail(
-                        request.session,
-                        request.sequence,
-                        &target,
-                        request.reply_to,
-                        error,
-                    )
-                } else {
-                    start_failed_stream(
-                        &jobs,
-                        request.session,
-                        request.sequence,
-                        target,
-                        request.reply_to,
-                        error,
-                    )
-                }
-            } else {
-                sessions.push(
-                    request.session,
-                    request.sequence,
-                    &target,
-                    request.reply_to,
-                    event,
-                    request.event_type == "turn_ended",
-                )
-            };
-
-            match &result {
-                Ok(()) if request.event_type == "turn_started" => log::info!(
-                    "IMessage Gateway opened outbound stream for `{}` on `{}` conversation `{}` at sequence {}",
-                    request.session,
-                    request.route.channel,
-                    request.route.conversation_id,
-                    request.sequence
-                ),
-                Ok(()) if matches!(request.event_type, "turn_ended" | "stream_error") => log::info!(
-                    "IMessage Gateway accepted terminal event for `{}` at sequence {}",
-                    request.session,
-                    request.sequence
-                ),
-                Ok(()) => log::debug!(
-                    "IMessage Gateway accepted `{}` for `{}` at sequence {}",
-                    request.event_type,
-                    request.session,
-                    request.sequence
-                ),
-                Err(error) => log::warn!(
-                    "IMessage Gateway rejected `{}` for `{}` at sequence {}: {}",
-                    request.event_type,
-                    request.session,
-                    request.sequence,
-                    error.code()
-                ),
-            }
-
-            match result {
-                Ok(()) => {
-                    response
-                        .write(&AckResponse {
-                            accepted_sequence: request.sequence,
-                        })
-                        .await
-                }
-                Err(error) => response.write(&ErrorResponse(error)).await,
-            }
-        }
+pub(crate) fn accept_stream(
+    sessions: &EventSessions,
+    jobs: &Sender<EventJob>,
+    request: GatewaySendStreamRequest,
+) -> Result<GatewayAccepted, GatewayOperationError> {
+    if !valid_stream_request(&request) {
+        return Err(GatewayOperationError::InvalidRequest);
     }
+    let target = target(&request.route);
+    let payload = serde_json::to_string(&request.payload)
+        .map_err(|_error| GatewayOperationError::InvalidRequest)?;
+    let event = SendStreamEvent::new(
+        request.session.clone(),
+        request.sequence,
+        request.event_type.clone(),
+        payload,
+    );
+    if request.event_type == "turn_started" {
+        start_stream(sessions, jobs, &request, target, event)?;
+    } else if request.event_type == "stream_error"
+        && !sessions.entries.borrow().contains_key(&request.session)
+    {
+        start_failed_stream(jobs, &request, target, stream_error(&request.payload)?)?;
+    } else {
+        let terminal = matches!(request.event_type.as_str(), "turn_ended" | "stream_error");
+        sessions.push(&request, &target, event, terminal)?;
+    }
+    Ok(GatewayAccepted {
+        accepted_sequence: request.sequence,
+    })
 }
 
-fn valid_request(request: &StreamRequest<'_>) -> bool {
-    valid_session(request.session)
-        && valid_required(request.event_type)
-        && valid_required(request.route.channel)
-        && valid_required(request.route.conversation_id)
-        && request.payload.get().starts_with('{')
+fn valid_stream_request(request: &GatewaySendStreamRequest) -> bool {
+    valid_session(&request.session)
+        && valid_required(&request.event_type)
+        && valid_required(&request.route.channel)
+        && valid_required(&request.route.conversation_id)
+        && request.payload.is_object()
 }
 
 fn valid_session(session: &str) -> bool {
@@ -308,134 +160,122 @@ fn valid_session(session: &str) -> bool {
     })
 }
 
-fn target(route: &RouteRequest<'_>) -> MessageTarget {
-    let mut target = MessageTarget::new(route.channel, route.conversation_id);
-    target.thread_id = route.thread_id.map(String::from);
+fn target(route: &GatewayRoute) -> MessageTarget {
+    let mut target = MessageTarget::new(route.channel.clone(), route.conversation_id.clone());
+    target.thread_id = route.thread_id.clone();
     target
+}
+
+fn stream_error(payload: &Value) -> Result<StreamError, GatewayOperationError> {
+    payload
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|message| valid_required(message))
+        .map(StreamError::failed)
+        .ok_or(GatewayOperationError::InvalidRequest)
 }
 
 fn start_stream(
     sessions: &EventSessions,
     jobs: &Sender<EventJob>,
-    session_id: &str,
-    sequence: u64,
+    request: &GatewaySendStreamRequest,
     target: MessageTarget,
-    reply_to: Option<&str>,
     event: SendStreamEvent,
-) -> Result<(), GatewayJsonError> {
-    if sessions.entries.borrow().contains_key(session_id) {
-        return Err(GatewayJsonError::DuplicateStream);
+) -> Result<(), GatewayOperationError> {
+    if sessions.entries.borrow().contains_key(&request.session) {
+        return Err(GatewayOperationError::DuplicateStream);
     }
     if sessions.entries.borrow().len() >= STREAM_WORKERS {
-        return Err(GatewayJsonError::Busy);
+        return Err(GatewayOperationError::Busy);
     }
-
     let (events, receiver) = async_channel::bounded(EVENT_QUEUE_CAPACITY);
     events
         .try_send(Ok(event))
-        .map_err(|_error| GatewayJsonError::Busy)?;
+        .map_err(|_error| GatewayOperationError::Busy)?;
     let terminal_sequence = Rc::new(RefCell::new(None));
-    let reply_to = reply_to.map(String::from);
     let job = EventJob {
-        session: String::from(session_id),
+        session: request.session.clone(),
         terminal_sequence: Rc::clone(&terminal_sequence),
         target: target.clone(),
-        reply_to: reply_to.clone(),
+        reply_to: request.reply_to.clone(),
         events: receiver,
     };
-    match jobs.try_send(job) {
-        Ok(()) => {
-            sessions.entries.borrow_mut().insert(
-                String::from(session_id),
-                Rc::new(EventSession {
-                    last_sequence: Cell::new(sequence),
-                    target,
-                    reply_to,
-                    terminal_sequence,
-                    events,
-                }),
-            );
-            Ok(())
-        }
-        Err(TrySendError::Full(_job)) => Err(GatewayJsonError::Busy),
-        Err(TrySendError::Closed(_job)) => Err(GatewayJsonError::Busy),
-    }
+    jobs.try_send(job)
+        .map_err(|_error| GatewayOperationError::Busy)?;
+    sessions.entries.borrow_mut().insert(
+        request.session.clone(),
+        Rc::new(EventSession {
+            last_sequence: Cell::new(request.sequence),
+            target,
+            reply_to: request.reply_to.clone(),
+            terminal_sequence,
+            events,
+        }),
+    );
+    Ok(())
 }
 
 fn start_failed_stream(
     jobs: &Sender<EventJob>,
-    session_id: &str,
-    sequence: u64,
+    request: &GatewaySendStreamRequest,
     target: MessageTarget,
-    reply_to: Option<&str>,
     error: StreamError,
-) -> Result<(), GatewayJsonError> {
+) -> Result<(), GatewayOperationError> {
     let (events, receiver) = async_channel::bounded(EVENT_QUEUE_CAPACITY);
     events
         .try_send(Err(error))
-        .map_err(|_error| GatewayJsonError::Busy)?;
+        .map_err(|_error| GatewayOperationError::Busy)?;
     drop(events);
-    let terminal_sequence = Rc::new(RefCell::new(Some(sequence)));
-    let job = EventJob {
-        session: String::from(session_id),
-        terminal_sequence,
+    jobs.try_send(EventJob {
+        session: request.session.clone(),
+        terminal_sequence: Rc::new(RefCell::new(Some(request.sequence))),
         target,
-        reply_to: reply_to.map(String::from),
+        reply_to: request.reply_to.clone(),
         events: receiver,
-    };
-    jobs.try_send(job).map_err(|_error| GatewayJsonError::Busy)
+    })
+    .map_err(|_error| GatewayOperationError::Busy)
 }
 
-pub(crate) async fn deliver_event_stream<const M: usize>(
+pub(crate) async fn deliver_event_stream(
     gateway: &MessageGateway,
     sessions: &EventSessions,
-    emitter: &EventEmitter<M>,
+    workflow: &WorkflowService,
     job: EventJob,
-) -> Result<(), barracuda_event_router::EmitError> {
+) {
     let session = job.session;
     let terminal_sequence = Rc::clone(&job.terminal_sequence);
-    let channel = job.target.channel.clone();
-    let conversation_id = job.target.conversation_id.clone();
-    log::info!(
-        "IMessage Gateway started provider delivery for `{session}` on `{channel}` conversation `{conversation_id}`"
-    );
-    let events = event_stream(job.events);
     let request = SendStreamRequest {
         target: job.target,
-        events,
+        events: event_stream(job.events),
         reply_to: job.reply_to,
     };
     let result = gateway.send_stream(request).await;
     sessions.remove(&session);
-    let completed_sequence = *terminal_sequence.borrow();
-    let sequence = completed_sequence.unwrap_or_default();
-    let mut terminal = match (&result, completed_sequence) {
-        (Ok(receipt), Some(_)) => TerminalEvent::completed(&session, sequence, &receipt.message_id),
-        (Ok(_receipt), None) => {
-            TerminalEvent::failed(&session, sequence, GatewayJsonError::Delivery)
-        }
-        (Err(error), _) => TerminalEvent::failed(&session, sequence, map_gateway_error(error)),
+    let sequence = terminal_sequence.borrow().unwrap_or_default();
+    let terminal = match result {
+        Ok(receipt) if terminal_sequence.borrow().is_some() => StreamTerminalEvent {
+            session,
+            sequence,
+            outcome: "completed",
+            message_id: Some(receipt.message_id),
+            error: None,
+        },
+        Ok(_receipt) => StreamTerminalEvent {
+            session,
+            sequence,
+            outcome: "failed",
+            message_id: None,
+            error: Some(GatewayOperationError::Delivery),
+        },
+        Err(error) => StreamTerminalEvent {
+            session,
+            sequence,
+            outcome: "failed",
+            message_id: None,
+            error: Some(map_gateway_error(&error)),
+        },
     };
-    match &result {
-        Ok(receipt) if completed_sequence.is_some() => log::info!(
-            "IMessage Gateway completed provider delivery for `{session}` as message `{}` at sequence {sequence}",
-            receipt.message_id
-        ),
-        Ok(_receipt) => log::warn!(
-            "IMessage Gateway provider delivery for `{session}` ended before `turn_ended`"
-        ),
-        Err(error) => log::warn!(
-            "IMessage Gateway provider delivery for `{session}` failed: {error}"
-        ),
-    }
-    let event_input_bytes = event_input_capacity::<M>(GatewaySendStreamFinished::ID)?;
-    if terminal
-        .encoded_len()
-        .map_or(true, |length| length > event_input_bytes)
-    {
-        terminal = TerminalEvent::failed(&session, sequence, GatewayJsonError::InvalidReceipt);
-    }
-    emitter.emit::<GatewaySendStreamFinished>(&terminal).await
+    emit_terminal::<GatewaySendStreamFinished, _>(workflow, &terminal);
 }
 
 fn event_stream(events: Receiver<StreamItem>) -> SendStream {
@@ -444,220 +284,28 @@ fn event_stream(events: Receiver<StreamItem>) -> SendStream {
     }))
 }
 
-enum TerminalOutcome<'a> {
-    Completed(&'a str),
-    Failed(GatewayJsonError),
-}
-
-struct TerminalEvent<'a> {
-    session: &'a str,
+#[derive(Serialize)]
+struct StreamTerminalEvent {
+    session: String,
     sequence: u64,
-    outcome: TerminalOutcome<'a>,
+    outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<GatewayOperationError>,
 }
 
-impl<'a> TerminalEvent<'a> {
-    const fn completed(session: &'a str, sequence: u64, message_id: &'a str) -> Self {
-        Self {
-            session,
-            sequence,
-            outcome: TerminalOutcome::Completed(message_id),
-        }
-    }
-
-    const fn failed(session: &'a str, sequence: u64, error: GatewayJsonError) -> Self {
-        Self {
-            session,
-            sequence,
-            outcome: TerminalOutcome::Failed(error),
-        }
-    }
-}
-
-impl EncodedJson for TerminalEvent<'_> {
-    fn encode(&self, writer: &mut impl fmt::Write) -> fmt::Result {
-        writer.write_str("{\"session\":")?;
-        write_json_string(writer, self.session)?;
-        write!(writer, ",\"sequence\":{},\"outcome\":", self.sequence)?;
-        match self.outcome {
-            TerminalOutcome::Completed(message_id) => {
-                writer.write_str("\"completed\",\"message_id\":")?;
-                write_json_string(writer, message_id)?;
-            }
-            TerminalOutcome::Failed(error) => {
-                writer.write_str("\"failed\",\"error\":")?;
-                write_json_string(writer, error.code())?;
+fn emit_terminal<EventType, Payload>(workflow: &WorkflowService, payload: &Payload)
+where
+    EventType: Event,
+    Payload: Serialize,
+{
+    match serde_json::to_value(payload) {
+        Ok(value) => {
+            if let Err(error) = workflow.emit::<EventType>(value) {
+                log::error!("IMessage Gateway failed to emit terminal Event: {error}");
             }
         }
-        writer.write_char('}')
-    }
-}
-
-impl JsonPayload for TerminalEvent<'_> {
-    fn encoded_len(&self) -> Result<usize, RpcError> {
-        encoded_json_len(self)
-    }
-
-    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
-        write_encoded_json(self, destination)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use alloc::{boxed::Box, rc::Rc, string::String};
-
-    use barracuda_event_router::{RpcAddress, RpcError, RpcLaneStorage, RpcRegistry};
-    use futures_lite::{future::block_on, StreamExt as _};
-    use gateway::{MessageTarget, SendStreamEvent, StreamError};
-
-    use super::{
-        event_stream, gateway_send_stream_handler, EventSession, EventSessions, GatewaySendStream,
-        EVENT_QUEUE_CAPACITY,
-    };
-    use crate::json::GatewayJsonError;
-
-    fn event(sequence: u64) -> SendStreamEvent {
-        SendStreamEvent::new("session-1", sequence, "output_delta", r#"{"text":"x"}"#)
-    }
-
-    #[test]
-    fn text_session_enforces_order_route_and_bounded_backpressure() {
-        let sessions = EventSessions::default();
-        let target = MessageTarget::new("test", "chat");
-        let (events, receiver) = async_channel::bounded(2);
-        sessions.entries.borrow_mut().insert(
-            String::from("session-1"),
-            Rc::new(EventSession {
-                last_sequence: core::cell::Cell::new(1),
-                target: target.clone(),
-                reply_to: None,
-                terminal_sequence: Rc::new(core::cell::RefCell::new(None)),
-                events,
-            }),
-        );
-
-        assert_eq!(
-            sessions.push("session-1", 1, &target, None, event(1), false),
-            Err(GatewayJsonError::OutOfOrder)
-        );
-        assert_eq!(
-            sessions.push(
-                "session-1",
-                2,
-                &MessageTarget::new("other", "chat"),
-                None,
-                event(2),
-                false,
-            ),
-            Err(GatewayJsonError::InvalidRequest)
-        );
-        assert_eq!(
-            sessions.push("session-1", 2, &target, None, event(2), false),
-            Ok(())
-        );
-        assert_eq!(
-            sessions.push("session-1", 3, &target, None, event(3), false),
-            Ok(())
-        );
-        assert_eq!(
-            sessions.push("session-1", 4, &target, None, event(4), true),
-            Err(GatewayJsonError::Busy)
-        );
-        assert!(receiver.try_recv().is_ok());
-        assert_eq!(
-            sessions.push("session-1", 4, &target, None, event(4), true),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn configured_queue_accepts_a_sixteen_event_burst() {
-        let sessions = EventSessions::default();
-        let target = MessageTarget::new("test", "chat");
-        let (events, _receiver) = async_channel::bounded(EVENT_QUEUE_CAPACITY);
-        sessions.entries.borrow_mut().insert(
-            String::from("session-1"),
-            Rc::new(EventSession {
-                last_sequence: core::cell::Cell::new(0),
-                target: target.clone(),
-                reply_to: None,
-                terminal_sequence: Rc::new(core::cell::RefCell::new(None)),
-                events,
-            }),
-        );
-
-        for sequence in 1..=16 {
-            assert_eq!(
-                sessions.push("session-1", sequence, &target, None, event(sequence), false),
-                Ok(())
-            );
-        }
-        assert_eq!(
-            sessions.push("session-1", 17, &target, None, event(17), false),
-            Err(GatewayJsonError::Busy)
-        );
-    }
-
-    #[test]
-    fn complete_semantic_event_request_is_bounded_by_the_rpc_lane() {
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 512, 1>::new()));
-        let registry = RpcRegistry::new(lanes);
-        let (jobs, _receiver) = async_channel::bounded(1);
-        let _registration = registry
-            .register_json::<GatewaySendStream, _>(
-                "*",
-                gateway_send_stream_handler(Rc::new(EventSessions::default()), jobs),
-            )
-            .expect("register Gateway stream endpoint");
-        let address = RpcAddress::try_from("gateway.send_stream").expect("valid address");
-        let payload = "x".repeat(512);
-        let request = alloc::format!(
-            r#"{{"route":{{"channel":"test","conversation_id":"chat"}},"session":"session-1","sequence":1,"type":"turn_started","payload":{{"text":"{payload}"}}}}"#
-        );
-
-        assert!(matches!(
-            registry.client().call_json(&address, &request),
-            Err(RpcError::FrameTooLarge { capacity: 512, .. })
-        ));
-    }
-
-    #[test]
-    fn stream_error_can_start_and_terminate_delivery() {
-        block_on(async {
-            let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 512, 1>::new()));
-            let registry = RpcRegistry::new(lanes);
-            let (jobs, receiver) = async_channel::bounded(1);
-            let _registration = registry
-                .register_json::<GatewaySendStream, _>(
-                    "*",
-                    gateway_send_stream_handler(Rc::new(EventSessions::default()), jobs),
-                )
-                .expect("register Gateway stream endpoint");
-            let address = RpcAddress::try_from("gateway.send_stream").expect("valid address");
-            let response = registry
-                .client()
-                .call_json(
-                    &address,
-                    r#"{"route":{"channel":"test","conversation_id":"chat"},"reply_to":"message-1","session":"session-9","sequence":0,"type":"stream_error","payload":{"session":"session-9","error":"worker_stopped"}}"#,
-                )
-                .expect("start stream error call")
-                .await
-                .expect("complete stream error call");
-
-            assert_eq!(
-                response.as_str().expect("response JSON"),
-                r#"{"accepted_sequence":0}"#
-            );
-            let job = receiver.recv().await.expect("failed stream delivery job");
-            assert_eq!(*job.terminal_sequence.borrow(), Some(0));
-            let mut events = event_stream(job.events);
-            assert_eq!(
-                events.next().await,
-                Some(Err(StreamError::failed("worker_stopped")))
-            );
-            assert_eq!(events.next().await, None);
-        });
+        Err(error) => log::error!("IMessage Gateway failed to serialize terminal Event: {error}"),
     }
 }

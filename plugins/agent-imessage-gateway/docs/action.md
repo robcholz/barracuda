@@ -1,4 +1,7 @@
-# iMessage Bridge RPCs
+# Agent iMessage Gateway Workflow Actions
+
+Both Actions use static request and response schemas under `schemas/action`.
+Their typed handlers use Serde after Workflow schema validation.
 
 `imessage_bridge.to_agent` resolves a complete `gateway.message.received`
 document without changing reply state, or binds an open Agent session to that

@@ -1,54 +1,36 @@
-use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, string::String};
-use core::{
-    cell::{Cell, RefCell},
-    fmt,
-};
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
 
 use async_channel::{Receiver, Sender, TrySendError};
-use barracuda_event_router::{
-    json_schema, Event, EventEmitter, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema,
-    JsonWriter, RpcError,
-};
+use barracuda_workflow_plugin::{Event, WorkflowService};
 use futures_lite::stream;
 use gateway::{
     BinaryBody, BinaryChunk, MediaKind, MessageGateway, MessageTarget, SendMediaRequest,
-    StreamError,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::component::STREAM_WORKERS;
-use crate::gateway_send::map_gateway_error;
 use crate::json::{
-    encoded_json_len, event_input_capacity, valid_required, valid_stream_id, write_encoded_json,
-    write_json_string, AckResponse, EncodedJson, ErrorResponse, GatewayJsonError, FRAME_CAPACITY,
+    map_gateway_error, valid_required, valid_stream_id, GatewayAccepted, GatewayOperationError,
 };
 
 const CHUNK_QUEUE_CAPACITY: usize = 2;
 
-/// Applies one bounded command to an outbound media stream.
-pub struct GatewaySendMedia;
-
-impl JsonRpcSchema for GatewaySendMedia {
-    const ADDRESS: &'static str = "gateway.send_media";
-    const REQUEST_SCHEMA: JsonSchema = json_schema!("send_media", request);
-    const RESPONSE_SCHEMA: JsonSchema = json_schema!("send_media", response);
-    const MAX_REQUEST_BYTES: usize = FRAME_CAPACITY;
-    const MAX_RESPONSE_BYTES: usize = 128;
-}
-
-/// Terminal outcome for one accepted outbound media stream.
-pub struct GatewaySendMediaFinished;
-
-impl Event for GatewaySendMediaFinished {
-    const ID: &'static str = "gateway.send_media.finished";
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+/// Media kind selected by a Gateway media stream.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum GatewayMediaKind {
+pub enum GatewayMediaKind {
+    /// Generic file attachment.
     File,
+    /// Image attachment.
     Image,
+    /// Audio attachment.
     Audio,
+    /// Video attachment.
     Video,
 }
 
@@ -63,45 +45,60 @@ impl From<GatewayMediaKind> for MediaKind {
     }
 }
 
-#[derive(Deserialize)]
+/// One command for an outbound binary media stream.
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-enum MediaRequest<'a> {
+pub enum GatewaySendMediaRequest {
+    /// Opens a stream and reserves one media worker.
     Start {
-        #[serde(borrow)]
-        stream_id: &'a str,
+        /// Stable caller-owned stream identifier.
+        stream_id: String,
+        /// Must be zero for stream creation.
         sequence: u32,
-        #[serde(borrow)]
-        channel: &'a str,
-        #[serde(borrow)]
-        conversation_id: &'a str,
-        #[serde(default, borrow)]
-        thread_id: Option<&'a str>,
+        /// Registered provider channel.
+        channel: String,
+        /// Provider conversation identifier.
+        conversation_id: String,
+        /// Optional provider thread identifier.
+        thread_id: Option<String>,
+        /// Attachment presentation kind.
         kind: GatewayMediaKind,
-        #[serde(default, borrow)]
-        filename: Option<&'a str>,
-        #[serde(default, borrow)]
-        mime_type: Option<&'a str>,
-        #[serde(default, borrow)]
-        caption: Option<&'a str>,
-        #[serde(default, borrow)]
-        reply_to: Option<&'a str>,
+        /// Optional attachment filename.
+        filename: Option<String>,
+        /// Optional MIME type.
+        mime_type: Option<String>,
+        /// Optional caption.
+        caption: Option<String>,
+        /// Optional provider message being replied to.
+        reply_to: Option<String>,
     },
+    /// Appends one base64-encoded binary chunk.
     Chunk {
-        #[serde(borrow)]
-        stream_id: &'a str,
+        /// Stable caller-owned stream identifier.
+        stream_id: String,
+        /// Next expected stream sequence.
         sequence: u32,
-        #[serde(borrow)]
-        content_base64: &'a str,
+        /// Canonical base64 content.
+        content_base64: String,
     },
+    /// Closes the binary stream.
     Finish {
-        #[serde(borrow)]
-        stream_id: &'a str,
+        /// Stable caller-owned stream identifier.
+        stream_id: String,
+        /// Next expected stream sequence.
         sequence: u32,
     },
 }
 
+/// Terminal Workflow Event for one accepted outbound media stream.
+pub struct GatewaySendMediaFinished;
+
+impl Event for GatewaySendMediaFinished {
+    const ID: &'static str = "gateway.send_media.finished";
+}
+
 enum MediaCommand {
-    Chunk(JsonRef),
+    Chunk(Vec<u8>),
     Finish(u32),
 }
 
@@ -123,211 +120,142 @@ pub(crate) struct MediaSessions {
 }
 
 impl MediaSessions {
-    pub(crate) fn clear(&self) {
-        self.entries.borrow_mut().clear();
-    }
-
     fn remove(&self, stream_id: &str) {
         self.entries.borrow_mut().remove(stream_id);
     }
 
-    fn prepare_chunk(
+    fn prepare(
         &self,
         stream_id: &str,
         sequence: u32,
-    ) -> Result<Rc<MediaSession>, GatewayJsonError> {
-        let entries = self.entries.borrow();
-        let session = entries
+    ) -> Result<Rc<MediaSession>, GatewayOperationError> {
+        let session = self
+            .entries
+            .borrow()
             .get(stream_id)
-            .ok_or(GatewayJsonError::UnknownStream)?;
+            .cloned()
+            .ok_or(GatewayOperationError::UnknownStream)?;
         if sequence != session.next_sequence.get() {
-            return Err(GatewayJsonError::OutOfOrder);
+            return Err(GatewayOperationError::OutOfOrder);
         }
-        Ok(Rc::clone(session))
+        Ok(session)
     }
+}
 
-    fn push_chunk(session: &MediaSession, request: JsonRef) -> Result<(), GatewayJsonError> {
-        match session.commands.try_send(MediaCommand::Chunk(request)) {
-            Ok(()) => {
-                session
+pub(crate) fn accept_media(
+    sessions: &MediaSessions,
+    jobs: &Sender<MediaJob>,
+    request: GatewaySendMediaRequest,
+) -> Result<GatewayAccepted, GatewayOperationError> {
+    match request {
+        GatewaySendMediaRequest::Start {
+            stream_id,
+            sequence,
+            channel,
+            conversation_id,
+            thread_id,
+            kind,
+            filename,
+            mime_type,
+            caption,
+            reply_to,
+        } => {
+            if sequence != 0
+                || !valid_stream_id(&stream_id)
+                || !valid_required(&channel)
+                || !valid_required(&conversation_id)
+            {
+                return Err(GatewayOperationError::InvalidRequest);
+            }
+            if sessions.entries.borrow().contains_key(&stream_id) {
+                return Err(GatewayOperationError::DuplicateStream);
+            }
+            if sessions.entries.borrow().len() >= STREAM_WORKERS {
+                return Err(GatewayOperationError::Busy);
+            }
+            let (commands, receiver) = async_channel::bounded(CHUNK_QUEUE_CAPACITY);
+            let terminal_sequence = Rc::new(RefCell::new(None));
+            let mut target = MessageTarget::new(channel, conversation_id);
+            target.thread_id = thread_id;
+            let request = SendMediaRequest {
+                target,
+                body: BinaryBody::Stream(binary_stream(receiver, Rc::clone(&terminal_sequence))),
+                filename,
+                mime_type,
+                caption,
+                reply_to,
+            };
+            jobs.try_send(MediaJob {
+                stream_id: stream_id.clone(),
+                terminal_sequence,
+                kind: kind.into(),
+                request,
+            })
+            .map_err(|_error| GatewayOperationError::Busy)?;
+            sessions.entries.borrow_mut().insert(
+                stream_id,
+                Rc::new(MediaSession {
+                    next_sequence: Cell::new(1),
+                    commands,
+                }),
+            );
+            Ok(GatewayAccepted {
+                accepted_sequence: u64::from(sequence),
+            })
+        }
+        GatewaySendMediaRequest::Chunk {
+            stream_id,
+            sequence,
+            content_base64,
+        } => {
+            if !valid_stream_id(&stream_id) {
+                return Err(GatewayOperationError::InvalidRequest);
+            }
+            let bytes = decode_base64(&content_base64)?;
+            let session = sessions.prepare(&stream_id, sequence)?;
+            match session.commands.try_send(MediaCommand::Chunk(bytes)) {
+                Ok(()) => session
                     .next_sequence
-                    .set(session.next_sequence.get().saturating_add(1));
-                Ok(())
-            }
-            Err(TrySendError::Full(_command)) => Err(GatewayJsonError::Busy),
-            Err(TrySendError::Closed(_command)) => Err(GatewayJsonError::UnknownStream),
-        }
-    }
-
-    fn finish(&self, stream_id: &str, sequence: u32) -> Result<(), GatewayJsonError> {
-        let mut entries = self.entries.borrow_mut();
-        let session = entries
-            .get(stream_id)
-            .ok_or(GatewayJsonError::UnknownStream)?;
-        if sequence != session.next_sequence.get() {
-            return Err(GatewayJsonError::OutOfOrder);
-        }
-        match session.commands.try_send(MediaCommand::Finish(sequence)) {
-            Ok(()) => {
-                entries.remove(stream_id);
-                Ok(())
-            }
-            Err(TrySendError::Full(_command)) => Err(GatewayJsonError::Busy),
-            Err(TrySendError::Closed(_command)) => {
-                entries.remove(stream_id);
-                Err(GatewayJsonError::UnknownStream)
-            }
-        }
-    }
-}
-
-/// Builds the JSON command handler for [`GatewaySendMedia`].
-pub(crate) fn gateway_send_media_handler(
-    sessions: Rc<MediaSessions>,
-    jobs: Sender<MediaJob>,
-) -> impl JsonHandler {
-    move |_context, document: JsonRef, response: JsonWriter| {
-        let sessions = Rc::clone(&sessions);
-        let jobs = jobs.clone();
-        async move {
-            let request = document.deserialize::<MediaRequest<'_>>()?;
-            match request {
-                MediaRequest::Start {
-                    stream_id,
-                    sequence,
-                    channel,
-                    conversation_id,
-                    thread_id,
-                    kind,
-                    filename,
-                    mime_type,
-                    caption,
-                    reply_to,
-                } => {
-                    if sequence != 0
-                        || !valid_stream_id(stream_id)
-                        || !valid_required(channel)
-                        || !valid_required(conversation_id)
-                    {
-                        return response
-                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                            .await;
-                    }
-                    if sessions.entries.borrow().contains_key(stream_id) {
-                        return response
-                            .write(&ErrorResponse(GatewayJsonError::DuplicateStream))
-                            .await;
-                    }
-                    if sessions.entries.borrow().len() >= STREAM_WORKERS {
-                        return response.write(&ErrorResponse(GatewayJsonError::Busy)).await;
-                    }
-
-                    let (commands, receiver) = async_channel::bounded(CHUNK_QUEUE_CAPACITY);
-                    let terminal_sequence = Rc::new(RefCell::new(None));
-                    let mut target = MessageTarget::new(channel, conversation_id);
-                    target.thread_id = thread_id.map(String::from);
-                    let request = SendMediaRequest {
-                        target,
-                        body: BinaryBody::Stream(binary_stream(
-                            receiver,
-                            Rc::clone(&terminal_sequence),
-                        )),
-                        filename: filename.map(String::from),
-                        mime_type: mime_type.map(String::from),
-                        caption: caption.map(String::from),
-                        reply_to: reply_to.map(String::from),
-                    };
-                    let job = MediaJob {
-                        stream_id: String::from(stream_id),
-                        terminal_sequence,
-                        kind: kind.into(),
-                        request,
-                    };
-                    match jobs.try_send(job) {
-                        Ok(()) => {
-                            sessions.entries.borrow_mut().insert(
-                                String::from(stream_id),
-                                Rc::new(MediaSession {
-                                    next_sequence: Cell::new(1),
-                                    commands,
-                                }),
-                            );
-                            response
-                                .write(&AckResponse {
-                                    accepted_sequence: u64::from(sequence),
-                                })
-                                .await
-                        }
-                        Err(TrySendError::Full(_job)) => {
-                            response.write(&ErrorResponse(GatewayJsonError::Busy)).await
-                        }
-                        Err(TrySendError::Closed(_job)) => Err(RpcError::RegistryDropped),
-                    }
-                }
-                MediaRequest::Chunk {
-                    stream_id,
-                    sequence,
-                    content_base64,
-                } => {
-                    if !valid_stream_id(stream_id) {
-                        return response
-                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                            .await;
-                    }
-                    if visit_base64(content_base64, |_| Ok(())).is_err() {
-                        return response
-                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                            .await;
-                    }
-                    let session = match sessions.prepare_chunk(stream_id, sequence) {
-                        Ok(session) => session,
-                        Err(error) => return response.write(&ErrorResponse(error)).await,
-                    };
-                    let _ = content_base64;
-                    let result = MediaSessions::push_chunk(&session, document);
-                    match result {
-                        Ok(()) => {
-                            response
-                                .write(&AckResponse {
-                                    accepted_sequence: u64::from(sequence),
-                                })
-                                .await
-                        }
-                        Err(error) => response.write(&ErrorResponse(error)).await,
-                    }
-                }
-                MediaRequest::Finish {
-                    stream_id,
-                    sequence,
-                } => {
-                    if !valid_stream_id(stream_id) {
-                        return response
-                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
-                            .await;
-                    }
-                    let result = sessions.finish(stream_id, sequence);
-                    match result {
-                        Ok(()) => {
-                            response
-                                .write(&AckResponse {
-                                    accepted_sequence: u64::from(sequence),
-                                })
-                                .await
-                        }
-                        Err(error) => response.write(&ErrorResponse(error)).await,
-                    }
+                    .set(session.next_sequence.get().saturating_add(1)),
+                Err(TrySendError::Full(_command)) => return Err(GatewayOperationError::Busy),
+                Err(TrySendError::Closed(_command)) => {
+                    sessions.remove(&stream_id);
+                    return Err(GatewayOperationError::UnknownStream);
                 }
             }
+            Ok(GatewayAccepted {
+                accepted_sequence: u64::from(sequence),
+            })
+        }
+        GatewaySendMediaRequest::Finish {
+            stream_id,
+            sequence,
+        } => {
+            if !valid_stream_id(&stream_id) {
+                return Err(GatewayOperationError::InvalidRequest);
+            }
+            let session = sessions.prepare(&stream_id, sequence)?;
+            match session.commands.try_send(MediaCommand::Finish(sequence)) {
+                Ok(()) => sessions.remove(&stream_id),
+                Err(TrySendError::Full(_command)) => return Err(GatewayOperationError::Busy),
+                Err(TrySendError::Closed(_command)) => {
+                    sessions.remove(&stream_id);
+                    return Err(GatewayOperationError::UnknownStream);
+                }
+            }
+            Ok(GatewayAccepted {
+                accepted_sequence: u64::from(sequence),
+            })
         }
     }
 }
 
-pub(crate) async fn deliver_media_stream<const M: usize>(
+pub(crate) async fn deliver_media_stream(
     gateway: &MessageGateway,
     sessions: &MediaSessions,
-    emitter: &EventEmitter<M>,
+    workflow: &WorkflowService,
     job: MediaJob,
-) -> Result<(), barracuda_event_router::EmitError> {
+) {
     let MediaJob {
         stream_id,
         terminal_sequence,
@@ -341,25 +269,40 @@ pub(crate) async fn deliver_media_stream<const M: usize>(
         MediaKind::Video => gateway.send_video(request).await,
     };
     sessions.remove(&stream_id);
-    let completed_sequence = *terminal_sequence.borrow();
-    let sequence = completed_sequence.unwrap_or_default();
-    let mut terminal = match (&result, completed_sequence) {
-        (Ok(receipt), Some(_)) => {
-            TerminalEvent::completed(&stream_id, sequence, &receipt.message_id)
-        }
-        (Ok(_receipt), None) => {
-            TerminalEvent::failed(&stream_id, sequence, GatewayJsonError::Delivery)
-        }
-        (Err(error), _) => TerminalEvent::failed(&stream_id, sequence, map_gateway_error(error)),
+    let sequence = terminal_sequence.borrow().unwrap_or_default();
+    let terminal = match result {
+        Ok(receipt) if terminal_sequence.borrow().is_some() => MediaTerminalEvent {
+            stream_id,
+            sequence,
+            outcome: "completed",
+            message_id: Some(receipt.message_id),
+            error: None,
+        },
+        Ok(_receipt) => MediaTerminalEvent {
+            stream_id,
+            sequence,
+            outcome: "failed",
+            message_id: None,
+            error: Some(GatewayOperationError::Delivery),
+        },
+        Err(error) => MediaTerminalEvent {
+            stream_id,
+            sequence,
+            outcome: "failed",
+            message_id: None,
+            error: Some(map_gateway_error(&error)),
+        },
     };
-    let event_input_bytes = event_input_capacity::<M>(GatewaySendMediaFinished::ID)?;
-    if terminal
-        .encoded_len()
-        .map_or(true, |length| length > event_input_bytes)
-    {
-        terminal = TerminalEvent::failed(&stream_id, sequence, GatewayJsonError::InvalidReceipt);
+    match serde_json::to_value(&terminal) {
+        Ok(value) => {
+            if let Err(error) = workflow.emit::<GatewaySendMediaFinished>(value) {
+                log::error!("IMessage Gateway failed to emit media terminal Event: {error}");
+            }
+        }
+        Err(error) => {
+            log::error!("IMessage Gateway failed to serialize media terminal Event: {error}");
+        }
     }
-    emitter.emit::<GatewaySendMediaFinished>(&terminal).await
 }
 
 fn binary_stream(
@@ -370,15 +313,8 @@ fn binary_stream(
         (commands, terminal_sequence),
         |(commands, terminal_sequence)| async move {
             match commands.recv().await {
-                Ok(MediaCommand::Chunk(request)) => {
-                    let bytes = match request.deserialize::<MediaRequest<'_>>() {
-                        Ok(MediaRequest::Chunk { content_base64, .. }) => {
-                            decode_base64(content_base64)
-                                .map_err(|_| StreamError::failed("invalid Gateway media chunk"))
-                        }
-                        Ok(_) | Err(_) => Err(StreamError::failed("invalid Gateway media chunk")),
-                    };
-                    Some((bytes, (commands, terminal_sequence)))
+                Ok(MediaCommand::Chunk(bytes)) => {
+                    Some((Ok(BinaryChunk::from(bytes)), (commands, terminal_sequence)))
                 }
                 Ok(MediaCommand::Finish(sequence)) => {
                     terminal_sequence.replace(Some(sequence));
@@ -390,155 +326,67 @@ fn binary_stream(
     ))
 }
 
-fn decode_base64(encoded: &str) -> Result<BinaryChunk, GatewayJsonError> {
-    let mut output = BinaryChunk::empty_inline();
-    visit_base64(encoded, |byte| {
-        output
-            .push(byte)
-            .then_some(())
-            .ok_or(GatewayJsonError::InvalidRequest)
-    })?;
-    Ok(output)
-}
-
-fn visit_base64(
-    encoded: &str,
-    mut push: impl FnMut(u8) -> Result<(), GatewayJsonError>,
-) -> Result<(), GatewayJsonError> {
+fn decode_base64(encoded: &str) -> Result<Vec<u8>, GatewayOperationError> {
     if !encoded.len().is_multiple_of(4) {
-        return Err(GatewayJsonError::InvalidRequest);
+        return Err(GatewayOperationError::InvalidRequest);
     }
+    let mut output = Vec::with_capacity(encoded.len() / 4 * 3);
     let group_count = encoded.len() / 4;
     for (index, chunk) in encoded.as_bytes().chunks_exact(4).enumerate() {
-        let a = decode_base64_byte(*chunk.first().ok_or(GatewayJsonError::InvalidRequest)?)?;
-        let b = decode_base64_byte(*chunk.get(1).ok_or(GatewayJsonError::InvalidRequest)?)?;
-        let c = *chunk.get(2).ok_or(GatewayJsonError::InvalidRequest)?;
-        let d = *chunk.get(3).ok_or(GatewayJsonError::InvalidRequest)?;
+        let a = decode_base64_byte(*chunk.first().ok_or(GatewayOperationError::InvalidRequest)?)?;
+        let b = decode_base64_byte(*chunk.get(1).ok_or(GatewayOperationError::InvalidRequest)?)?;
+        let c = *chunk.get(2).ok_or(GatewayOperationError::InvalidRequest)?;
+        let d = *chunk.get(3).ok_or(GatewayOperationError::InvalidRequest)?;
         let is_last = index.saturating_add(1) == group_count;
-        if c == b'=' && (!is_last || d != b'=') {
-            return Err(GatewayJsonError::InvalidRequest);
-        }
-        if d == b'=' && !is_last {
-            return Err(GatewayJsonError::InvalidRequest);
+        if c == b'=' && (!is_last || d != b'=') || d == b'=' && !is_last {
+            return Err(GatewayOperationError::InvalidRequest);
         }
         let c_value = if c == b'=' { 0 } else { decode_base64_byte(c)? };
         let d_value = if d == b'=' { 0 } else { decode_base64_byte(d)? };
-        if (c == b'=' && b & 0x0f != 0) || (d == b'=' && c_value & 0x03 != 0) {
-            return Err(GatewayJsonError::InvalidRequest);
+        if c == b'=' && b & 0x0f != 0 || d == b'=' && c_value & 0x03 != 0 {
+            return Err(GatewayOperationError::InvalidRequest);
         }
         let word = (u32::from(a) << 18)
             | (u32::from(b) << 12)
             | (u32::from(c_value) << 6)
             | u32::from(d_value);
-        push(((word >> 16) & 0xff) as u8)?;
+        output.push(((word >> 16) & 0xff) as u8);
         if c != b'=' {
-            push(((word >> 8) & 0xff) as u8)?;
+            output.push(((word >> 8) & 0xff) as u8);
         }
         if d != b'=' {
-            push((word & 0xff) as u8)?;
+            output.push((word & 0xff) as u8);
         }
     }
-    Ok(())
+    Ok(output)
 }
 
-fn decode_base64_byte(byte: u8) -> Result<u8, GatewayJsonError> {
+fn decode_base64_byte(byte: u8) -> Result<u8, GatewayOperationError> {
     match byte {
         b'A'..=b'Z' => byte
             .checked_sub(b'A')
-            .ok_or(GatewayJsonError::InvalidRequest),
+            .ok_or(GatewayOperationError::InvalidRequest),
         b'a'..=b'z' => byte
             .checked_sub(b'a')
             .and_then(|value| value.checked_add(26))
-            .ok_or(GatewayJsonError::InvalidRequest),
+            .ok_or(GatewayOperationError::InvalidRequest),
         b'0'..=b'9' => byte
             .checked_sub(b'0')
             .and_then(|value| value.checked_add(52))
-            .ok_or(GatewayJsonError::InvalidRequest),
+            .ok_or(GatewayOperationError::InvalidRequest),
         b'+' => Ok(62),
         b'/' => Ok(63),
-        _ => Err(GatewayJsonError::InvalidRequest),
+        _ => Err(GatewayOperationError::InvalidRequest),
     }
 }
 
-enum TerminalOutcome<'a> {
-    Completed(&'a str),
-    Failed(GatewayJsonError),
-}
-
-struct TerminalEvent<'a> {
-    stream_id: &'a str,
+#[derive(Serialize)]
+struct MediaTerminalEvent {
+    stream_id: String,
     sequence: u32,
-    outcome: TerminalOutcome<'a>,
-}
-
-impl<'a> TerminalEvent<'a> {
-    const fn completed(stream_id: &'a str, sequence: u32, message_id: &'a str) -> Self {
-        Self {
-            stream_id,
-            sequence,
-            outcome: TerminalOutcome::Completed(message_id),
-        }
-    }
-
-    const fn failed(stream_id: &'a str, sequence: u32, error: GatewayJsonError) -> Self {
-        Self {
-            stream_id,
-            sequence,
-            outcome: TerminalOutcome::Failed(error),
-        }
-    }
-}
-
-impl EncodedJson for TerminalEvent<'_> {
-    fn encode(&self, writer: &mut impl fmt::Write) -> fmt::Result {
-        writer.write_str("{\"stream_id\":")?;
-        write_json_string(writer, self.stream_id)?;
-        write!(writer, ",\"sequence\":{},\"outcome\":", self.sequence)?;
-        match self.outcome {
-            TerminalOutcome::Completed(message_id) => {
-                writer.write_str("\"completed\",\"message_id\":")?;
-                write_json_string(writer, message_id)?;
-            }
-            TerminalOutcome::Failed(error) => {
-                writer.write_str("\"failed\",\"error\":")?;
-                write_json_string(writer, error.code())?;
-            }
-        }
-        writer.write_char('}')
-    }
-}
-
-impl JsonPayload for TerminalEvent<'_> {
-    fn encoded_len(&self) -> Result<usize, RpcError> {
-        encoded_json_len(self)
-    }
-
-    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
-        write_encoded_json(self, destination)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use alloc::vec;
-
-    use super::decode_base64;
-    use crate::json::GatewayJsonError;
-
-    #[test]
-    fn media_chunks_require_canonical_base64_and_use_the_request_lane_bound() {
-        assert_eq!(
-            decode_base64("AAH/gA==").map(|bytes| bytes.as_slice().to_vec()),
-            Ok(vec![0, 1, 255, 128])
-        );
-        assert_eq!(decode_base64("AB=="), Err(GatewayJsonError::InvalidRequest));
-        assert_eq!(
-            decode_base64("not-base64"),
-            Err(GatewayJsonError::InvalidRequest)
-        );
-        assert_eq!(
-            decode_base64(&"A".repeat(324)).map(|bytes| bytes.len()),
-            Ok(243)
-        );
-    }
+    outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<GatewayOperationError>,
 }
