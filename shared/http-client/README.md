@@ -14,7 +14,7 @@ Platform composition constructs the default Embassy-backed resources:
 let http_clients = http_client::ClientFactory::new(platform.ip_stack, move || tls.config());
 ```
 
-Components that already own another `embedded-nal-async` TCP/DNS pair use the
+Subsystems that already own another `embedded-nal-async` TCP/DNS pair use the
 same production API:
 
 ```rust,ignore

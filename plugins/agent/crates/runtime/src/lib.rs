@@ -275,7 +275,7 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// Registers one tool group discovered during Component startup.
+    /// Registers one tool group discovered during Plugin startup.
     ///
     /// If durable runtime state is still loading, the group is installed into
     /// the Tool Registry as soon as it becomes available.

@@ -8,8 +8,7 @@
 
 `Vm` is the single typed execution API used by both Workflow Actions and the
 separate `agent-vm` adapter. The Plugin owns four Embassy execution tasks and
-four reusable 64 KiB Lua heaps. Requests and Events use ordinary Serde values;
-there is no Event Router lane or transport-derived source/input limit.
+four reusable 64 KiB Lua heaps. Requests and Events use ordinary Serde values.
 
 Dependent VM package Plugins still register require-only Lua packages through
 `LuaPackageRegistry` during Plugin registration.

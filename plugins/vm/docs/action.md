@@ -5,7 +5,7 @@ Workflow Action registry. Their static request and response contracts live at
 `schemas/action/<address>/`.
 
 `vm.run` accepts a complete Lua source string and immediately returns a
-`run_id`. It has no Event Router frame limit:
+`run_id`:
 
 ```json
 {"source":"io.print('hello')"}

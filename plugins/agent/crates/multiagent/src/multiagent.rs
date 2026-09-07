@@ -75,7 +75,7 @@ struct RemovalPlan {
     cause: RemovalCause,
 }
 
-/// Optional multiagent domain component attached to one Session.
+/// Optional multiagent orchestration attached to one Session.
 ///
 /// It owns topology, join state, pending result delivery, command validation,
 /// and timeout policy. It never owns live Agents, Agent slots, AgentManager,

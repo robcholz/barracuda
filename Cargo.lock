@@ -785,7 +785,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-imessage-gateway-component"
+name = "barracuda-imessage-gateway-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-runtime",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "gateway",
+ "gateway-http",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-imessage-gateway-runtime"
 version = "0.1.0"
 dependencies = [
  "async-channel",
@@ -795,21 +810,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-imessage-gateway-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-imessage-gateway-component",
- "barracuda-plugin",
- "barracuda-workflow-plugin",
- "embassy-executor",
- "embassy-futures",
- "gateway",
- "gateway-http",
- "serde",
  "thiserror 2.0.18",
 ]
 
@@ -1519,24 +1519,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-vm-component"
-version = "0.1.0"
-dependencies = [
- "barracuda-lua",
- "barracuda-vm-builtin-packages",
- "barracuda-vm-package-api",
- "barracuda-workflow-plugin",
- "critical-section",
- "embassy-executor",
- "embassy-time",
- "embedded-alloc",
- "getset",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
@@ -1552,11 +1534,29 @@ dependencies = [
  "barracuda-lua",
  "barracuda-plugin",
  "barracuda-vm-builtin-packages",
- "barracuda-vm-component",
  "barracuda-vm-package-api",
+ "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm-runtime"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-vm-builtin-packages",
+ "barracuda-vm-package-api",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
+ "embedded-alloc",
+ "getset",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

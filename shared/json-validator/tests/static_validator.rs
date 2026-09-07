@@ -6,9 +6,9 @@ use json_validator::{
 use serde_json::json;
 
 const TOOL_ARGUMENTS: Validator = validator!("tests/fixtures/tool.json");
-const RPC_DOCUMENT: Validator = validator!("tests/fixtures/rpc.json");
+const STREAM_EVENT: Validator = validator!("tests/fixtures/stream-event.json");
 const RECURSIVE_DOCUMENT: Validator = validator!("tests/fixtures/recursive.json");
-const STATIC_DOCUMENT: JsonSchema = json_schema!("tests/fixtures/rpc.json");
+const STATIC_DOCUMENT: JsonSchema = json_schema!("tests/fixtures/stream-event.json");
 const INLINE_DOCUMENT: JsonSchema = json_schema_inline!(
     r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}"#
 );
@@ -105,12 +105,12 @@ fn rejects_nested_item_enum_and_minimum_violations() {
 
 #[test]
 fn validates_borrowed_json_without_a_value_tree() {
-    assert!(RPC_DOCUMENT
+    assert!(STREAM_EVENT
         .validate_str(
             r#"{"action":"start","id":"task-1","sequence":0,"at":"2026-09-05T12:30:45.123Z"}"#,
         )
         .is_ok());
-    assert!(RPC_DOCUMENT
+    assert!(STREAM_EVENT
         .validate_str(r#"{"action":"chunk","id":"task_2","sequence":1,"data":"YQ=="}"#)
         .is_ok());
 }
@@ -126,7 +126,7 @@ fn borrowed_validation_enforces_composition_and_constraints() {
         r#"{"action":"chunk","id":"task-1","sequence":1,"data":"%%%"}"#,
         r#"{"action":"chunk","id":"task-1","sequence":1,"data":"YQ==","extra":true}"#,
     ] {
-        assert!(RPC_DOCUMENT.validate_str(invalid).is_err(), "{invalid}");
+        assert!(STREAM_EVENT.validate_str(invalid).is_err(), "{invalid}");
     }
 }
 

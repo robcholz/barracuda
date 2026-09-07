@@ -14,10 +14,9 @@ throwaway snippets.
 - Single-file example: `examples/*.rs` inside the crate it demonstrates, which
   Cargo discovers automatically. Depend only on that crate's public API.
 - Standalone example crate: a workspace member for an example that needs its own
-  `Cargo.toml`, `build.rs`, or feature wiring. `core/event-router/example-crates/`
-  is the existing model: add the directory to the workspace `members` glob, set
-  `publish = false`, and use relative `path` deps with `workspace = true` for
-  shared deps.
+  `Cargo.toml`, `build.rs`, or feature wiring. Add the directory to the
+  workspace `members` glob, set `publish = false`, and use relative `path`
+  dependencies with `workspace = true` for shared dependencies.
 
 ## What makes a good example
 
@@ -44,5 +43,5 @@ throwaway snippets.
 When adding or removing an example, update the crate's `examples/README.md`
 table and any usage guide's Examples list in the same change.
 
-In-repo voice: `core/event-router/examples/` and
-`core/event-router/example-crates/`.
+Use the existing examples under `plugins/agent/crates/*/examples/` as the
+in-repo reference for voice and shape.

@@ -1,7 +1,7 @@
 #![no_std]
 #![allow(clippy::arc_with_non_send_sync)]
 
-//! Optional per-Session multiagent domain component.
+//! Optional per-Session multiagent orchestration.
 //!
 //! [`Multiagent`] owns graph policy, tool commands, and the inspection read
 //! model. Its effects describe physical operations without executing them.
@@ -14,17 +14,17 @@
 #[macro_use]
 extern crate alloc;
 
-mod component;
 mod effect;
 mod model;
+mod multiagent;
 mod policy;
 mod state;
 mod tool_port;
 mod tools;
 
-pub use self::component::Multiagent;
 pub use self::effect::{
     DispatchOutcome, EffectId, InterruptOutcome, MultiagentEffect, MultiagentEffectResult,
     MultiagentPhysicalError,
 };
 pub use self::model::{SubagentSpec, SubagentTimeout};
+pub use self::multiagent::Multiagent;

@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-mod component;
 #[allow(unsafe_code)]
 #[allow(clippy::indexing_slicing)]
 mod memory;
@@ -11,11 +10,12 @@ mod memory;
 #[allow(unsafe_code)]
 pub mod run;
 mod runtime;
+mod vm;
 
 pub use barracuda_vm_builtin_packages::BuiltinPackages;
-pub use component::{
+pub use memory::VmMemoryPoolError;
+pub use runtime::{VmRuntime, VmRuntimeStartError};
+pub use vm::{
     Vm, VmControlAccepted, VmError, VmInputRequest, VmLimits, VmRunAccepted, VmRunReference,
     VmRunRequest,
 };
-pub use memory::VmMemoryPoolError;
-pub use runtime::{VmRuntime, VmRuntimeStartError};

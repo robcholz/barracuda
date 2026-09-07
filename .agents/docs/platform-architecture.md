@@ -354,9 +354,9 @@ introduced only when System needs lifecycle, power, backlight, framebuffer, or
 concurrency semantics that those upstream contracts do not express.
 
 System assigns every exposed port collection to one owner. That owner may
-publish a higher-level typed capability or Event Router contract for scripts
-and Plugins. Arbitration, access control, and dynamic device attachment belong
-to that owner. Any physical overlap already declared by the Board remains a
+publish a higher-level typed capability or a Workflow contract for scripts and
+Plugins. Arbitration, access control, and dynamic device attachment belong to
+that owner. Any physical overlap already declared by the Board remains a
 property of the concrete Board composition.
 
 The GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
@@ -484,7 +484,7 @@ partitions
 +-- remaining regions         -> OTA, boot state, or future consumers
 ~~~
 
-Platform does not know LittleFS, FATFS, ekv, Event Router, WebServer, Plugin
+Platform does not know LittleFS, FATFS, ekv, Workflow, WebServer, Plugin
 Manager, or Plugin identities. System owns those choices and constructions.
 
 A Plugin normally receives scoped semantic storage from System. If a product
@@ -512,18 +512,17 @@ PlatformResources::partitions
              |
              v
 System storage construction
-+-- LittleFS -> Event Router and file-oriented consumers
++-- LittleFS -> process-wide VFS and file-oriented Plugins
 +-- FATFS    -> WebServer static assets
 +-- ekv      -> Plugin Manager scoped storage
 ~~~
 
-System mounts the process-wide VFS before constructing its consumers. Event
-Router accesses that global namespace directly and owns
-`/system/workflows.json`, a single JSON array containing its ordered Workflow
-definitions. `/system` is a shared System namespace; Event Router does not own
-sibling paths.
-WebServer owns URL-to-asset behavior over the read-only FAT filesystem. Plugin
-Manager owns ekv namespaces and exposes only semantic Plugin storage.
+System mounts the process-wide VFS before constructing its consumers. Plugin
+Manager gives each Plugin that declares filesystem access a private namespace.
+The Workflow Plugin owns `/workflows.json` within its namespace, a single JSON
+array containing its ordered definitions. WebServer owns URL-to-asset behavior
+over the read-only FAT filesystem. Plugin Manager owns ekv namespaces and
+exposes only semantic Plugin storage.
 
 ## IP and communication capabilities
 
@@ -568,7 +567,7 @@ backend. Platforms must not read or parse the setting at runtime; invalid
 values are build errors.
 
 Logging is process-global support, not a consumable business capability. It
-does not become a `PlatformResources` field, Plugin capability, Event Router
+does not become a `PlatformResources` field, Plugin capability, Workflow
 contract, or Board peripheral. Platform-specific output setup remains outside
 Core and Plugins.
 
@@ -622,7 +621,7 @@ second reqwless transport implementation.
 
 System combines the Platform's `ip_stack` and `tls` capabilities into one
 `http_client::ClientFactory`. Construction code may clone that factory;
-business components receive only `http_client::Client` and use its fluent
+business consumers receive only `http_client::Client` and use its fluent
 `get`/`post`/`request` facade. TCP, DNS, TLS configuration, reqwless types, and
 buffer sizes must not parameterize Plugin or domain APIs.
 
@@ -636,8 +635,8 @@ embedded, macOS, and Linux Platforms. The operating-system Platforms may use
 native facilities behind their implementations, while System and Plugins retain
 the same Embassy lifecycle.
 
-The boundary between Event Router Components and owner-managed Embassy tasks is
-defined in [`execution-ownership.md`](execution-ownership.md).
+Task ownership and cancellation are defined in
+[`execution-ownership.md`](execution-ownership.md).
 
 ## System
 
@@ -645,7 +644,7 @@ System is the aggregation entry. Its responsibilities include:
 
 - consuming the selected Target resources;
 - constructing mounted filesystems and databases from partitions;
-- constructing Event Router and Plugin Manager;
+- constructing Plugin Manager;
 - assembling the fixed Plugin set;
 - supplying Platform services and HAL capabilities to their consumers;
 - establishing Plugin registration and startup order.
@@ -668,8 +667,8 @@ For example, a Display Plugin consumes Display. It does not consume SPI pins,
 a Board matrix, or a concrete display-controller Driver. A storage-consuming
 Plugin receives scoped storage rather than a raw partition.
 
-Guidance for choosing between Event Router contracts and typed Plugin
-capabilities lives in [`plugin-communication.md`](plugin-communication.md).
+Guidance for choosing among typed Plugin capabilities, Workflow contracts, and
+Agent Tools lives in [`plugin-communication.md`](plugin-communication.md).
 Execution ownership for long-lived Plugin work lives in
 [`execution-ownership.md`](execution-ownership.md).
 
@@ -703,7 +702,6 @@ composition/
 +-- selected/          # generated allocation and orchestration of both axes
 
 core/
-+-- event-router/
 +-- plugin/
 |   +-- crates/
 |       +-- api/

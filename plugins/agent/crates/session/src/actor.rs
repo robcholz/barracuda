@@ -639,7 +639,7 @@ where
         agent_ids.extend(root_agent);
         agent_ids.extend(self.managed_agents.iter().copied());
         agent_ids.extend(self.orchestration.agent_ids());
-        // Drop every live component handle before deleting its canonical
+        // Drop every live Agent handle before deleting its canonical
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
         self.agents.clear();

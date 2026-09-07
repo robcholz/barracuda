@@ -627,43 +627,44 @@ mod action {
         }
     }
 
-    /// Registers every former Agent session RPC as a direct Workflow Action.
+    /// Registers every Agent session operation as a Workflow Action.
     pub(crate) fn register_actions(
         actions: &WorkflowActionRegistry,
         runtime: Rc<AgentRuntime>,
         sessions: SessionRegistry,
     ) -> Result<Vec<WorkflowActionRegistration>, WorkflowActionRegistryError> {
-        let mut registrations = Vec::new();
-        registrations.push(actions.add_action(NewSessionAction {
-            runtime: Rc::clone(&runtime),
-        })?);
-        registrations.push(actions.add_action(ListSessionsAction {
-            runtime: Rc::clone(&runtime),
-        })?);
-        registrations.push(actions.add_action(OpenSessionAction {
-            runtime: Rc::clone(&runtime),
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(DeleteSessionAction { runtime })?);
-        registrations.push(actions.add_action(AppendAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(RespondAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(SetReasoningEffortAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(SetPermissionLevelAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(InterruptAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(CancelAction {
-            sessions: sessions.clone(),
-        })?);
-        registrations.push(actions.add_action(CloseAction { sessions })?);
+        let registrations = alloc::vec![
+            actions.add_action(NewSessionAction {
+                runtime: Rc::clone(&runtime),
+            })?,
+            actions.add_action(ListSessionsAction {
+                runtime: Rc::clone(&runtime),
+            })?,
+            actions.add_action(OpenSessionAction {
+                runtime: Rc::clone(&runtime),
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(DeleteSessionAction { runtime })?,
+            actions.add_action(AppendAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(RespondAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(SetReasoningEffortAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(SetPermissionLevelAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(InterruptAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(CancelAction {
+                sessions: sessions.clone(),
+            })?,
+            actions.add_action(CloseAction { sessions })?,
+        ];
         Ok(registrations)
     }
 
@@ -724,7 +725,7 @@ mod action {
         };
 
         #[test]
-        fn parses_public_identifiers_without_transport_storage() {
+        fn parses_public_identifiers() {
             assert!(parse_session("session-12").is_ok());
             assert!(parse_input_request("input-9").is_ok());
             assert_eq!(
@@ -734,7 +735,7 @@ mod action {
         }
 
         #[test]
-        fn preserves_the_former_rpc_addresses_as_workflow_actions() {
+        fn registers_the_session_workflow_action_addresses() {
             assert_eq!(
                 [
                     NewSessionAction::SCHEMA.address(),
@@ -763,18 +764,10 @@ mod action {
                     "session.close",
                 ]
             );
-            assert!(!ListSessionsAction::SCHEMA
-                .request()
-                .as_str()
-                .contains("maximum"));
-            assert!(!AppendAction::SCHEMA
-                .request()
-                .as_str()
-                .contains("maxLength"));
         }
 
         #[test]
-        fn action_schemas_do_not_reintroduce_rpc_transport_caps() {
+        fn action_schemas_accept_supported_request_sizes() {
             assert!(ListSessionsAction::SCHEMA
                 .request()
                 .validate(&json!({ "limit": 1_000_000 }))

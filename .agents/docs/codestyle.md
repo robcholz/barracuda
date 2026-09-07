@@ -49,13 +49,11 @@ Decision flow for a single-value conversion:
 Do not implement `From` when:
 
 - the constructor guards a validation boundary; keep the validating
-  constructor private or named (`RpcGroup::from_validated`,
-  `ComponentId::from_raw`);
-- the conversion drops part of the source (`RpcMulticastBranch::into_reader`);
-- the mapping is lossy or has a fallback branch
-  (`RpcCardinality::from_type_id`, `EmitRejection::from_code`);
+  constructor private or named;
+- the conversion drops part of the source;
+- the mapping is lossy or has a fallback branch;
 - the source type is `pub(crate)`; a public `From` would leak it, so keep a
-  `pub(crate)` named constructor (`RpcPayloadFrame::from_frame(BorrowedFrame)`).
+  `pub(crate)` named constructor.
 
 For `TryFrom`, use the crate's natural error type. If that type is too broad
 for the single failure this conversion can produce, introduce a tighter error
