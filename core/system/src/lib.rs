@@ -106,8 +106,8 @@ where
         let prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
-        mount("/", backend, MountOptions::read_write()).await?;
-        log::info!("mounted System filesystem");
+        mount("/data", backend, MountOptions::read_write()).await?;
+        log::info!("mounted System data filesystem");
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
