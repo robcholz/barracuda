@@ -28,14 +28,6 @@ use esp_hal::{
         AnyI2c, Config as I2cConfig, ConfigError as I2cConfigErrorInner, I2c,
         Instance as I2cInstance,
     },
-    ledc::{
-        channel::{Channel, ChannelIFace, Error as LedcChannelError, Number as LedcChannelNumber},
-        timer::{
-            config::{Config as LedcTimerConfig, Duty as LedcDuty},
-            Error as LedcTimerError, LSClockSource, Number as LedcTimerNumber, Timer, TimerIFace,
-        },
-        Ledc, LowSpeed,
-    },
     spi::master::{
         AnySpi, Config as SpiConfig, ConfigError as SpiConfigErrorInner, Instance as SpiInstance,
         Spi,
@@ -49,6 +41,18 @@ use esp_hal::{
     Blocking,
 };
 
+#[cfg(not(feature = "runtime-pwm"))]
+use barracuda_board_hal::UnavailablePwm;
+#[cfg(feature = "runtime-pwm")]
+use esp_hal::ledc::{
+    channel::{Channel, ChannelIFace, Error as LedcChannelError, Number as LedcChannelNumber},
+    timer::{
+        config::{Config as LedcTimerConfig, Duty as LedcDuty},
+        Error as LedcTimerError, LSClockSource, Number as LedcTimerNumber, Timer, TimerIFace,
+    },
+    Ledc, LowSpeed,
+};
+
 #[doc(hidden)]
 pub use static_cell::StaticCell as __StaticCell;
 
@@ -56,6 +60,11 @@ pub use static_cell::StaticCell as __StaticCell;
 type PlatformI2sResource = RuntimeI2sResource;
 #[cfg(not(feature = "runtime-i2s"))]
 type PlatformI2sResource = core::convert::Infallible;
+
+#[cfg(feature = "runtime-pwm")]
+type PlatformPwmResource = RuntimePwmResource;
+#[cfg(not(feature = "runtime-pwm"))]
+type PlatformPwmResource = core::convert::Infallible;
 
 #[doc(hidden)]
 pub use esp_hal as __vendor;
@@ -125,15 +134,21 @@ impl embedded_hal_async::spi::SpiBus for ExposedSpiBus {
 pub struct ExposedUart(Uart<'static, Blocking>);
 
 /// ESP LEDC channel exposed through the standard PWM contract.
+#[cfg(feature = "runtime-pwm")]
 pub type ExposedPwm = Channel<'static, LowSpeed>;
+/// Uninhabited PWM output on ESP targets without a vendor LEDC driver.
+#[cfg(not(feature = "runtime-pwm"))]
+pub type ExposedPwm = UnavailablePwm;
 
 /// Statically allocated timer descriptor generated from a Platform manifest.
+#[cfg(feature = "runtime-pwm")]
 #[derive(Clone, Copy)]
 pub struct RuntimePwmTimer {
     number: LedcTimerNumber,
     storage: &'static __StaticCell<Timer<'static, LowSpeed>>,
 }
 
+#[cfg(feature = "runtime-pwm")]
 impl RuntimePwmTimer {
     /// Creates one move-only runtime timer descriptor.
     #[must_use]
@@ -146,6 +161,7 @@ impl RuntimePwmTimer {
 }
 
 /// Platform-owned LEDC controller, timer, and channel allocation.
+#[cfg(feature = "runtime-pwm")]
 pub struct RuntimePwmResource {
     controller: esp_hal::peripherals::LEDC<'static>,
     timer: Option<RuntimePwmTimer>,
@@ -236,6 +252,7 @@ where
 }
 
 /// Failure while constructing an exposed ESP LEDC output.
+#[cfg(feature = "runtime-pwm")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ExposedPwmError {
     /// The manifest did not provide a timer and channel pair.
@@ -246,6 +263,7 @@ pub enum ExposedPwmError {
     Channel(LedcChannelError),
 }
 
+#[cfg(feature = "runtime-pwm")]
 impl core::fmt::Display for ExposedPwmError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -256,6 +274,7 @@ impl core::fmt::Display for ExposedPwmError {
     }
 }
 
+#[cfg(feature = "runtime-pwm")]
 impl core::error::Error for ExposedPwmError {}
 
 impl embedded_io::ErrorType for ExposedUart {
@@ -325,7 +344,7 @@ impl RuntimePlatform for RuntimeAdapter {
     type SpiError = SpiConfigError;
     type UartController = AnyUart<'static>;
     type AdcResource = RuntimeAdcResource;
-    type PwmResource = RuntimePwmResource;
+    type PwmResource = PlatformPwmResource;
     type I2sResource = PlatformI2sResource;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
@@ -434,6 +453,7 @@ impl RuntimeAnalogPlatform for RuntimeAdapter {
     }
 }
 
+#[cfg(feature = "runtime-pwm")]
 impl RuntimePwmPlatform for RuntimeAdapter {
     type Pwm = ExposedPwm;
     type PwmError = ExposedPwmError;
@@ -479,6 +499,33 @@ impl RuntimePwmPlatform for RuntimeAdapter {
     }
 }
 
+#[cfg(not(feature = "runtime-pwm"))]
+impl RuntimePwmPlatform for RuntimeAdapter {
+    type Pwm = ExposedPwm;
+    type PwmError = core::convert::Infallible;
+
+    fn supports_pwm(_resource: &Self::PwmResource, _pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn supports_pwm_config(
+        _resource: &Self::PwmResource,
+        _pin: &Self::PinToken,
+        _frequency_hz: u32,
+    ) -> bool {
+        false
+    }
+
+    fn pwm(
+        resource: Self::PwmResource,
+        _pin: Self::PinToken,
+        _frequency_hz: u32,
+    ) -> Result<Self::Pwm, Self::PwmError> {
+        match resource {}
+    }
+}
+
+#[cfg(feature = "runtime-pwm")]
 fn configure_ledc_timer(
     timer: &mut Timer<'static, LowSpeed>,
     frequency_hz: u32,
@@ -630,7 +677,7 @@ pub fn runtime_io<
     spi: [AnySpi<'static>; S],
     uart: [AnyUart<'static>; U],
     adc: [RuntimeAdcResource; A],
-    pwm: [RuntimePwmResource; W],
+    pwm: [PlatformPwmResource; W],
     i2s: [PlatformI2sResource; T],
 ) -> RuntimeIo<P, I, S, U, A, W, T> {
     RuntimeIo::new_with_resources(pins, i2c, spi, uart, adc, pwm, i2s)
@@ -809,6 +856,7 @@ pub use __barracuda_esp32_runtime_gpio_number as runtime_gpio_number;
 
 /// Builds one Platform-owned ESP LEDC allocation from generated descriptors.
 #[must_use]
+#[cfg(feature = "runtime-pwm")]
 pub fn runtime_pwm_resource(
     controller: esp_hal::peripherals::LEDC<'static>,
     timers: &[RuntimePwmTimer],
@@ -823,6 +871,7 @@ pub fn runtime_pwm_resource(
 
 /// Resolves one manifest timer name and allocates its static vendor storage.
 #[macro_export]
+#[cfg(feature = "runtime-pwm")]
 macro_rules! __barracuda_esp32_runtime_pwm_timer {
     ($timer:ident) => {{
         static STORAGE: $crate::hal::__StaticCell<
@@ -840,6 +889,7 @@ macro_rules! __barracuda_esp32_runtime_pwm_timer {
 
 /// Resolves one manifest LEDC channel name.
 #[macro_export]
+#[cfg(feature = "runtime-pwm")]
 macro_rules! __barracuda_esp32_runtime_pwm_channel {
     ($channel:ident) => {
         $crate::hal::__vendor::ledc::channel::Number::$channel
@@ -847,8 +897,10 @@ macro_rules! __barracuda_esp32_runtime_pwm_channel {
 }
 
 #[doc(hidden)]
+#[cfg(feature = "runtime-pwm")]
 pub use __barracuda_esp32_runtime_pwm_channel as runtime_pwm_channel;
 #[doc(hidden)]
+#[cfg(feature = "runtime-pwm")]
 pub use __barracuda_esp32_runtime_pwm_timer as runtime_pwm_timer;
 
 /// Converts a selected raw pin token into a digital output.

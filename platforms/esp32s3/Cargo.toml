@@ -5,8 +5,9 @@ edition = "2021"
 description = "ESP32-S3 Platform implementation for Barracuda"
 
 [features]
-default = ["runtime-i2s"]
+default = ["runtime-i2s", "runtime-pwm"]
 runtime-i2s = []
+runtime-pwm = []
 
 [dependencies]
 barracuda-board.workspace = true

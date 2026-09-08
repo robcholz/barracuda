@@ -10,6 +10,7 @@ mbedtls = [
     "http-client/mbedtls",
     "dep:mbedtls-rs",
 ]
+force-esp-riscv-gcc = ["mbedtls", "mbedtls-rs/force-esp-riscv-gcc"]
 pem = ["mbedtls", "mbedtls-rs/pem-parse"]
 std = ["mbedtls", "mbedtls-rs/std"]
 

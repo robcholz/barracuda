@@ -18,10 +18,6 @@ hal:
         - { channel: ADC1_CH5, pin: GPIO21 }
         - { channel: ADC1_CH6, pin: GPIO22 }
         - { channel: ADC1_CH7, pin: GPIO23 }
-  runtime-pwm-controllers:
-    - controller: LEDC
-      timers: [Timer0]
-      channels: [Channel0]
 selection:
   board-chips:
     - esp32p4

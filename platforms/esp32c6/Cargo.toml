@@ -5,8 +5,9 @@ edition = "2021"
 description = "ESP32-C6 Platform implementation for Barracuda"
 
 [features]
-default = []
+default = ["runtime-pwm"]
 runtime-i2s = []
+runtime-pwm = []
 
 [dependencies]
 barracuda-board.workspace = true

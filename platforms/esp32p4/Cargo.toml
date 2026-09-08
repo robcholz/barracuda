@@ -7,6 +7,7 @@ description = "ESP32-P4 Platform implementation for Barracuda"
 [features]
 default = []
 runtime-i2s = []
+runtime-pwm = []
 
 [dependencies]
 barracuda-board.workspace = true
@@ -15,7 +16,7 @@ log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 barracuda-board-hal.workspace = true
-barracuda-tls.workspace = true
+barracuda-tls = { workspace = true, features = ["force-esp-riscv-gcc"] }
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net.workspace = true

@@ -164,3 +164,23 @@ fn central_resolver_contains_no_concrete_platform_registry() -> Result<(), std::
     }
     Ok(())
 }
+
+#[test]
+fn esp32p4_does_not_advertise_an_unimplemented_ledc_pool() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let platforms = discover_platforms(&root).expect("workspace Platform catalog");
+    let esp32p4 = platforms
+        .iter()
+        .find(|platform| platform.name() == "esp32p4")
+        .expect("ESP32-P4 Platform");
+
+    assert!(esp32p4.hal().runtime_pwm_controllers().is_empty());
+
+    for name in ["esp32", "esp32c3", "esp32c6", "esp32s2", "esp32s3"] {
+        let platform = platforms
+            .iter()
+            .find(|platform| platform.name() == name)
+            .expect("LEDC-capable ESP Platform");
+        assert!(!platform.hal().runtime_pwm_controllers().is_empty());
+    }
+}
