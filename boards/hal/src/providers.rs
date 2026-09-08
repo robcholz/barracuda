@@ -43,6 +43,15 @@ pub trait RuntimePlatform: Send + Sync + 'static {
     /// Consumes one raw pin token as a configurable digital pin.
     fn digital(pin: Self::PinToken) -> Self::DigitalPin;
 
+    /// Returns whether one I2C controller accepts the selected physical route.
+    fn supports_i2c(
+        _controller: &Self::I2cController,
+        _scl: &Self::PinToken,
+        _sda: &Self::PinToken,
+    ) -> bool {
+        true
+    }
+
     /// Consumes one controller and two pins as an async I2C bus.
     fn i2c(
         controller: Self::I2cController,
@@ -50,6 +59,16 @@ pub trait RuntimePlatform: Send + Sync + 'static {
         sda: Self::PinToken,
         frequency_hz: u32,
     ) -> Result<Self::I2cBus, Self::I2cError>;
+
+    /// Returns whether one SPI controller accepts the selected physical route.
+    fn supports_spi(
+        _controller: &Self::SpiController,
+        _sck: &Self::PinToken,
+        _mosi: Option<&Self::PinToken>,
+        _miso: Option<&Self::PinToken>,
+    ) -> bool {
+        true
+    }
 
     /// Consumes one controller and selected pins as an async SPI bus.
     fn spi(
@@ -872,11 +891,26 @@ impl<
                     }));
                 }
             }
-            let controller_index = state
-                .i2c
-                .iter()
-                .position(Option::is_some)
+            let scl = state.pins[scl_index]
+                .token
+                .as_ref()
                 .ok_or(RuntimeOpenError::NoController { protocol: "I2C" })?;
+            let sda = state.pins[sda_index]
+                .token
+                .as_ref()
+                .ok_or(RuntimeOpenError::NoController { protocol: "I2C" })?;
+            let controller_index = state.i2c.iter().position(|controller| {
+                controller
+                    .as_ref()
+                    .is_some_and(|controller| H::supports_i2c(controller, scl, sda))
+            });
+            let controller_index = match controller_index {
+                Some(index) => index,
+                None if state.i2c.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported { function: "I2C" });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "I2C" }),
+            };
             let controller = state.i2c[controller_index]
                 .take()
                 .ok_or(RuntimeOpenError::NoController { protocol: "I2C" })?;
@@ -946,11 +980,24 @@ impl<
                     }));
                 }
             }
-            let controller_index = state
-                .spi
-                .iter()
-                .position(Option::is_some)
+            let sck = state.pins[sck_index]
+                .token
+                .as_ref()
                 .ok_or(RuntimeOpenError::NoController { protocol: "SPI" })?;
+            let mosi = mosi_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            let miso = miso_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            let controller_index = state.spi.iter().position(|controller| {
+                controller
+                    .as_ref()
+                    .is_some_and(|controller| H::supports_spi(controller, sck, mosi, miso))
+            });
+            let controller_index = match controller_index {
+                Some(index) => index,
+                None if state.spi.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported { function: "SPI" });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "SPI" }),
+            };
             let controller = state.spi[controller_index]
                 .take()
                 .ok_or(RuntimeOpenError::NoController { protocol: "SPI" })?;

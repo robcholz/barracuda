@@ -246,6 +246,14 @@ impl RuntimePlatform for FakePlatform {
         FakePin(pin)
     }
 
+    fn supports_i2c(
+        controller: &Self::I2cController,
+        scl: &Self::PinToken,
+        _sda: &Self::PinToken,
+    ) -> bool {
+        *controller == 10 && *scl != 4
+    }
+
     fn i2c(
         controller: Self::I2cController,
         scl: Self::PinToken,
@@ -258,6 +266,15 @@ impl RuntimePlatform for FakePlatform {
             sda,
             frequency_hz,
         })
+    }
+
+    fn supports_spi(
+        controller: &Self::SpiController,
+        sck: &Self::PinToken,
+        _mosi: Option<&Self::PinToken>,
+        _miso: Option<&Self::PinToken>,
+    ) -> bool {
+        *controller == 20 && *sck == 1
     }
 
     fn spi(
@@ -496,6 +513,51 @@ fn runtime_controller_exhaustion_does_not_consume_more_pins() {
     ));
     assert!(io.digital_available("D3"));
     assert!(io.digital_available("D4"));
+}
+
+#[test]
+fn invalid_bus_routes_do_not_consume_controllers_or_pins() {
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_i2c(I2cRequest {
+            scl: "D4",
+            sda: "D1",
+            frequency_hz: 100_000,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "I2C" })
+    ));
+    assert!(io.digital_available("D4"));
+    let i2c = io
+        .open_i2c(I2cRequest {
+            scl: "D2",
+            sda: "D3",
+            frequency_hz: 100_000,
+        })
+        .expect("invalid route preserved I2C resources");
+    assert_eq!(i2c.controller, 10);
+
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_spi(SpiRequest {
+            sck: "D2",
+            mosi: Some("D3"),
+            miso: None,
+            frequency_hz: 1_000_000,
+            mode: spi::MODE_0,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "SPI" })
+    ));
+    assert!(io.digital_available("D2"));
+    let spi = io
+        .open_spi(SpiRequest {
+            sck: "D1",
+            mosi: Some("D2"),
+            miso: None,
+            frequency_hz: 1_000_000,
+            mode: spi::MODE_0,
+        })
+        .expect("invalid route preserved SPI resources");
+    assert_eq!(spi.controller, 20);
 }
 
 #[test]
