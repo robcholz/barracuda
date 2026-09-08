@@ -13,6 +13,8 @@ members = [
     "core/system",
     "plugins/*/crates/*",
     "platforms/*",
+    "platforms/macos/network-gateway",
+    "platforms/macos/network-gateway-protocol",
     "shared/*",
     "tools/plugin-tool",
     "tools/system-image",
@@ -84,6 +86,7 @@ barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-selected = { path = "platforms/selected" }
 barracuda-platform-test = { path = "platforms/test" }
 barracuda-platform-tool = { path = "platforms/tool" }
+barracuda-platform-macos-network-gateway-protocol = { path = "platforms/macos/network-gateway-protocol" }
 barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
