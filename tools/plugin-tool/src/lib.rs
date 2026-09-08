@@ -599,31 +599,31 @@ fn package_name(manifest: &str) -> Option<String> {
 }
 
 fn plugin_entry(source: &str) -> Option<String> {
-    let entries = source
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let declaration = line.strip_prefix("impl")?;
-            if !declaration.starts_with(char::is_whitespace) && !declaration.starts_with('<') {
-                return None;
-            }
-            let (trait_implementation, implementation) = declaration.split_once(" for ")?;
-            let trait_name = trait_implementation.split_whitespace().next_back()?;
-            (trait_name == "Plugin"
-                || trait_name
-                    .strip_prefix("Plugin<")
-                    .is_some_and(|parameters| parameters.ends_with('>')))
-            .then_some(implementation)
+    let file = syn::parse_file(source).ok()?;
+    let entries = file
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Impl(implementation) => plugin_implementation_entry(implementation),
+            _ => None,
         })
-        .filter_map(|implementation| implementation.split_whitespace().next())
-        .filter_map(|implementation| implementation.split('<').next())
-        .filter(|entry| *entry != "Dependency")
-        .map(String::from)
         .collect::<Vec<_>>();
     match entries.as_slice() {
         [entry] => Some(entry.clone()),
         _ => None,
     }
+}
+
+fn plugin_implementation_entry(implementation: &syn::ItemImpl) -> Option<String> {
+    let (_, implemented_trait, _) = implementation.trait_.as_ref()?;
+    if implemented_trait.segments.last()?.ident != "Plugin" {
+        return None;
+    }
+    let syn::Type::Path(implementation_type) = implementation.self_ty.as_ref() else {
+        return None;
+    };
+    let entry = implementation_type.path.segments.last()?.ident.to_string();
+    (entry != "Dependency").then_some(entry)
 }
 
 fn render_dependencies(plugins: &[&Plugin]) -> String {
@@ -770,6 +770,20 @@ mod tests {
         assert_eq!(metadata.id(), "demo");
         assert!(metadata.dependencies().is_empty());
         assert_eq!(metadata.description(), "A concise description.");
+    }
+
+    #[test]
+    fn ignores_nested_test_plugin_implementations() {
+        let source = r#"
+            impl Plugin for DemoPlugin {}
+
+            #[cfg(test)]
+            mod tests {
+                impl Plugin for TestProbe {}
+            }
+        "#;
+
+        assert_eq!(plugin_entry(source), Some(String::from("DemoPlugin")));
     }
 
     #[test]

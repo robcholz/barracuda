@@ -13,6 +13,7 @@ barracuda-plugin = { workspace = true, features = ["manifest"] }
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false }
+syn = { version = "2", features = ["full"] }
 thiserror = "2"
 
 [dev-dependencies]
