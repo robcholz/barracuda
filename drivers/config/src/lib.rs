@@ -1,12 +1,13 @@
 //! Driver manifest loading and Board composition validation.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
 
 use barracuda_board_config::{BoardDefinition, BuiltinPeripheralDefinition, PeripheralParameter};
+use barracuda_platform_config::{HalBinding, PlatformDefinition};
 use serde::Deserialize;
 
 /// Driver manifest schema version supported by this toolchain.
@@ -92,8 +93,11 @@ pub struct DriverImplementation {
     package: String,
     #[serde(rename = "crate")]
     crate_name: String,
-    #[serde(rename = "driver-type")]
-    driver_type: String,
+    factory: String,
+    #[serde(rename = "bindings-expression")]
+    bindings_expression: String,
+    #[serde(rename = "config-expression")]
+    config_expression: String,
 }
 
 impl DriverImplementation {
@@ -109,10 +113,54 @@ impl DriverImplementation {
         &self.crate_name
     }
 
-    /// Returns the public Driver factory type path inside the crate.
+    /// Returns the Driver-owned factory type template.
     #[must_use]
-    pub fn driver_type(&self) -> &str {
-        &self.driver_type
+    pub fn factory(&self) -> &str {
+        &self.factory
+    }
+
+    /// Returns the Driver-owned bindings expression template.
+    #[must_use]
+    pub fn bindings_expression(&self) -> &str {
+        &self.bindings_expression
+    }
+
+    /// Returns the Driver-owned configuration expression template.
+    #[must_use]
+    pub fn config_expression(&self) -> &str {
+        &self.config_expression
+    }
+}
+
+/// Initial electrical level selected before enabling a digital output.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InitialOutputLevel {
+    /// Drive low before handing the output to its peripheral Driver.
+    Low,
+    /// Drive high before handing the output to its peripheral Driver.
+    High,
+}
+
+/// Driver-owned mapping from one parameter to a safe initial output level.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InitialOutputFromParameter {
+    parameter: String,
+    values: BTreeMap<String, InitialOutputLevel>,
+}
+
+impl InitialOutputFromParameter {
+    /// Returns the Driver parameter that determines the initial level.
+    #[must_use]
+    pub fn parameter(&self) -> &str {
+        &self.parameter
+    }
+
+    /// Returns the initial level mapped from one serialized parameter value.
+    #[must_use]
+    pub fn level_for(&self, value: &str) -> Option<InitialOutputLevel> {
+        self.values.get(value).copied()
     }
 }
 
@@ -130,10 +178,16 @@ pub enum BindingKind {
     I2cDevice,
     /// One selected SPI device.
     SpiDevice,
+    /// One exclusively owned SPI controller without chip select.
+    SpiBus,
     /// One parallel output bus.
     ParallelOutput,
     /// One MIPI DSI host.
     DsiHost,
+    /// One parallel camera receiver.
+    CameraCapture,
+    /// One full-duplex I2S stream.
+    I2sStream,
     /// A semantic power-control capability.
     PowerControl,
     /// A semantic brightness-control capability.
@@ -147,6 +201,10 @@ pub struct BindingSchema {
     kind: BindingKind,
     #[serde(default = "required_by_default")]
     required: bool,
+    #[serde(default)]
+    initial: Option<InitialOutputLevel>,
+    #[serde(default, rename = "initial-from")]
+    initial_from: Option<InitialOutputFromParameter>,
 }
 
 impl BindingSchema {
@@ -160,6 +218,18 @@ impl BindingSchema {
     #[must_use]
     pub const fn required(&self) -> bool {
         self.required
+    }
+
+    /// Returns the fixed safe initialization level, when declared.
+    #[must_use]
+    pub const fn initial(&self) -> Option<InitialOutputLevel> {
+        self.initial
+    }
+
+    /// Returns the parameter-based safe initialization mapping, when declared.
+    #[must_use]
+    pub const fn initial_from(&self) -> Option<&InitialOutputFromParameter> {
+        self.initial_from.as_ref()
     }
 }
 
@@ -193,6 +263,8 @@ pub struct ParameterSchema {
     values: Vec<String>,
     #[serde(default)]
     default: Option<PeripheralParameter>,
+    #[serde(default, rename = "rust-values")]
+    rust_values: BTreeMap<String, String>,
 }
 
 impl ParameterSchema {
@@ -212,6 +284,10 @@ impl ParameterSchema {
     #[must_use]
     pub const fn default(&self) -> Option<&PeripheralParameter> {
         self.default.as_ref()
+    }
+
+    fn rust_value(&self, value: &str) -> Option<&str> {
+        self.rust_values.get(value).map(String::as_str)
     }
 }
 
@@ -380,11 +456,13 @@ pub enum ResolveError {
 /// Failure while turning a resolved Board into monomorphized Rust source.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum GenerateError {
-    /// The selected chip has no static Board binding adapter yet.
-    #[error("chip `{chip}` has no Board binding adapter")]
-    UnsupportedChip {
-        /// Unsupported canonical chip ID.
-        chip: String,
+    /// The selected Platform does not implement a required HAL resource form.
+    #[error("Platform `{platform}` HAL does not support {binding:?}")]
+    UnsupportedHalBinding {
+        /// Platform selected for the Board.
+        platform: String,
+        /// Required HAL resource form.
+        binding: HalBinding,
     },
     /// A capability has not defined its generated Board storage contract.
     #[error("Driver `{driver}` produces unsupported generated capability `{capability}`")]
@@ -414,7 +492,7 @@ pub enum GenerateError {
         /// Parameter name.
         parameter: String,
     },
-    /// A schema-valid value cannot be represented by the selected chip adapter.
+    /// A schema-valid value cannot be represented by the selected backend.
     #[error("resolved peripheral `{peripheral}` has unsupported value for `{parameter}`")]
     UnsupportedResolvedValue {
         /// Board-level peripheral name.
@@ -431,6 +509,26 @@ pub enum GenerateError {
         binding: String,
         /// Unsupported category.
         kind: BindingKind,
+    },
+    /// A Driver-owned composition template contains an unknown placeholder.
+    #[error("Driver `{driver}` composition template contains unknown placeholder `{placeholder}`")]
+    InvalidTemplate {
+        /// Driver whose template failed.
+        driver: String,
+        /// Placeholder that could not be resolved.
+        placeholder: String,
+    },
+    /// Two Board names normalize to the same generated Rust identifier.
+    #[error(
+        "Board hardware names `{first}` and `{second}` both generate Rust identifier `{identifier}`"
+    )]
+    IdentifierCollision {
+        /// First Board name.
+        first: String,
+        /// Conflicting Board name.
+        second: String,
+        /// Generated identifier.
+        identifier: String,
     },
 }
 
@@ -532,7 +630,9 @@ fn validate_manifest(path: &Path, driver: &DriverDefinition) -> Result<(), Catal
         || driver.capability.trim().is_empty()
         || driver.implementation.package.trim().is_empty()
         || !valid_crate
-        || driver.implementation.driver_type.trim().is_empty()
+        || driver.implementation.factory.trim().is_empty()
+        || driver.implementation.bindings_expression.trim().is_empty()
+        || driver.implementation.config_expression.trim().is_empty()
         || !valid_names
         || !valid_enums
     {
@@ -543,6 +643,18 @@ fn validate_manifest(path: &Path, driver: &DriverDefinition) -> Result<(), Catal
             ),
         });
     }
+    for template in [
+        driver.implementation.factory(),
+        driver.implementation.bindings_expression(),
+        driver.implementation.config_expression(),
+    ] {
+        validate_template_placeholders(driver, template).map_err(|message| {
+            CatalogError::Manifest {
+                path: path.to_owned(),
+                message,
+            }
+        })?;
+    }
     for (name, schema) in &driver.parameters {
         if let Some(default) = &schema.default
             && !parameter_matches(schema, default)
@@ -552,6 +664,108 @@ fn validate_manifest(path: &Path, driver: &DriverDefinition) -> Result<(), Catal
                 message: format!("default for parameter `{name}` does not match its schema"),
             });
         }
+        if !schema.rust_values.is_empty()
+            && (schema.parameter_type != ParameterType::Enum
+                || schema.rust_values.iter().any(|(value, rust)| {
+                    rust.trim().is_empty()
+                        || !schema.values.iter().any(|candidate| candidate == value)
+                }))
+        {
+            return Err(CatalogError::Manifest {
+                path: path.to_owned(),
+                message: format!("Rust value mapping for parameter `{name}` is outside its enum"),
+            });
+        }
+    }
+    for (role, schema) in &driver.bindings {
+        let has_initial = schema.initial.is_some();
+        let has_mapping = schema.initial_from.is_some();
+        if (has_initial || has_mapping) && schema.kind != BindingKind::DigitalOutput
+            || has_initial && has_mapping
+        {
+            return Err(CatalogError::Manifest {
+                path: path.to_owned(),
+                message: format!("binding `{role}` has an invalid output initialization policy"),
+            });
+        }
+        if schema.kind == BindingKind::DigitalOutput && !has_initial && !has_mapping {
+            return Err(CatalogError::Manifest {
+                path: path.to_owned(),
+                message: format!(
+                    "digital output binding `{role}` must declare its safe initial level"
+                ),
+            });
+        }
+        if let Some(mapping) = &schema.initial_from {
+            let Some(parameter) = driver.parameter(&mapping.parameter) else {
+                return Err(CatalogError::Manifest {
+                    path: path.to_owned(),
+                    message: format!(
+                        "binding `{role}` maps unknown parameter `{}`",
+                        mapping.parameter
+                    ),
+                });
+            };
+            let complete_mapping = match parameter.parameter_type {
+                ParameterType::Enum => {
+                    parameter
+                        .values
+                        .iter()
+                        .all(|value| mapping.values.contains_key(value))
+                        && mapping.values.keys().all(|value| {
+                            parameter.values.iter().any(|candidate| candidate == value)
+                        })
+                }
+                ParameterType::Boolean => {
+                    mapping.values.len() == 2
+                        && mapping.values.contains_key("true")
+                        && mapping.values.contains_key("false")
+                }
+                ParameterType::Integer | ParameterType::String => false,
+            };
+            if !complete_mapping || (!parameter.required && parameter.default.is_none()) {
+                return Err(CatalogError::Manifest {
+                    path: path.to_owned(),
+                    message: format!(
+                        "binding `{role}` does not map every parameter value to an initial level"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_template_placeholders(driver: &DriverDefinition, template: &str) -> Result<(), String> {
+    let mut remaining = template;
+    while let Some(start) = remaining.find("{{") {
+        let placeholder_start = start + 2;
+        let Some(end) = remaining[placeholder_start..].find("}}") else {
+            return Err(format!(
+                "Driver `{}` has an unterminated composition placeholder",
+                driver.id()
+            ));
+        };
+        let placeholder_end = placeholder_start + end;
+        let placeholder = remaining[placeholder_start..placeholder_end].trim();
+        let valid = placeholder == "crate"
+            || matches!(placeholder, "hal.delay.type" | "hal.delay.value")
+            || placeholder
+                .strip_prefix("parameter.")
+                .is_some_and(|name| driver.parameter(name).is_some())
+            || placeholder
+                .strip_prefix("binding.")
+                .and_then(|value| value.rsplit_once('.'))
+                .is_some_and(|(role, part)| {
+                    matches!(part, "type" | "value") && driver.binding(role).is_some()
+                });
+        if !valid {
+            return Err(format!(
+                "Driver `{}` composition template contains unknown placeholder `{placeholder}`",
+                driver.id()
+            ));
+        }
+        remaining = &remaining[placeholder_end + 2..];
     }
     Ok(())
 }
@@ -583,8 +797,16 @@ pub fn resolve_board<'a>(
                 });
             }
             if let Some(resource) = definition.binding(role)
-                && schema.kind() == BindingKind::SpiDevice
-                && board.internal_io().spi_device(resource).is_none()
+                && ((schema.kind() == BindingKind::SpiDevice
+                    && board.internal_io().spi_device(resource).is_none())
+                    || (schema.kind() == BindingKind::SpiBus
+                        && board.internal_io().spi_bus(resource).is_none())
+                    || (schema.kind() == BindingKind::I2cDevice
+                        && board.internal_io().i2c_device(resource).is_none())
+                    || (schema.kind() == BindingKind::CameraCapture
+                        && board.internal_io().camera_capture(resource).is_none())
+                    || (schema.kind() == BindingKind::I2sStream
+                        && board.internal_io().i2s_stream(resource).is_none()))
             {
                 return Err(ResolveError::UnknownInternalResource {
                     peripheral: name.to_owned(),
@@ -650,13 +872,13 @@ fn parameter_matches(schema: &ParameterSchema, value: &PeripheralParameter) -> b
 
 /// Renders the selected Board HAL from validated Board and Driver manifests.
 ///
-/// The source contains concrete chip and Driver types. It performs no runtime
-/// lookup and introduces no trait objects or heap allocation.
+/// The source contains concrete Platform HAL and Driver types. It performs no
+/// runtime lookup and introduces no trait objects or heap allocation.
 ///
 /// # Errors
 ///
-/// Returns [`GenerateError`] when the chip adapter or a declared capability is
-/// not supported by the static generator.
+/// Returns [`GenerateError`] when a binding or template cannot be emitted by
+/// the static generator.
 pub fn render_board_hal(
     board: &BoardDefinition,
     resolved: &ResolvedBoard<'_>,
@@ -667,557 +889,886 @@ pub fn render_board_hal(
              pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n",
         ));
     }
-    match board.hardware().chip() {
-        "stm32f429zi" => render_stm32f429zi_hal(board, resolved),
-        "esp32" => render_esp_hal(board, resolved, "esp32"),
-        "esp32s3" => render_esp_hal(board, resolved, "esp32s3"),
-        chip => Err(GenerateError::UnsupportedChip {
-            chip: chip.to_owned(),
-        }),
-    }
+    render_generic_hal(board, resolved, &[], &[])
 }
 
-fn render_stm32f429zi_hal(
+/// Renders a selected Board HAL with the runtime controller pools supplied by
+/// the independently selected Platform.
+///
+/// # Errors
+///
+/// Returns [`GenerateError`] when a binding or controller token cannot be
+/// emitted by the static generator.
+pub fn render_board_hal_for_platform(
     board: &BoardDefinition,
     resolved: &ResolvedBoard<'_>,
+    platform: &PlatformDefinition,
 ) -> Result<String, GenerateError> {
-    let indicators = resolved
-        .peripherals()
-        .filter(|peripheral| peripheral.driver().capability() == "indicator")
-        .collect::<Vec<_>>();
-    if indicators.len() > 1 {
-        return Err(GenerateError::DuplicatePrimaryCapability {
-            capability: String::from("indicator"),
+    if !board.has_hardware_surface() {
+        return render_board_hal(board, resolved);
+    }
+    render_generic_hal(
+        board,
+        resolved,
+        platform.hal().runtime_i2c_controllers(),
+        platform.hal().runtime_spi_controllers(),
+    )
+}
+
+/// Validates that a selected Platform HAL can construct every Board resource.
+///
+/// # Errors
+///
+/// Returns [`GenerateError::UnsupportedHalBinding`] when the Platform manifest
+/// omits a binding form required by the Board or one of its Drivers.
+pub fn validate_platform_hal(
+    board: &BoardDefinition,
+    resolved: &ResolvedBoard<'_>,
+    platform: &PlatformDefinition,
+) -> Result<(), GenerateError> {
+    if board.exposed_io().pins().next().is_some() && !platform.hal().supports(HalBinding::Gpio) {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::Gpio,
+        });
+    }
+    if board.exposed_io().pins().next().is_some()
+        && !platform.hal().runtime_i2c_controllers().is_empty()
+        && !platform.hal().supports(HalBinding::I2cDevice)
+    {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::I2cDevice,
+        });
+    }
+    if board.exposed_io().pins().next().is_some()
+        && !platform.hal().runtime_spi_controllers().is_empty()
+        && !platform.hal().supports(HalBinding::SpiBus)
+    {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::SpiBus,
         });
     }
     for peripheral in resolved.peripherals() {
-        if peripheral.driver().capability() != "indicator" {
-            return Err(GenerateError::UnsupportedCapability {
-                driver: peripheral.driver().id().to_owned(),
+        for (role, schema) in peripheral.driver().bindings() {
+            if peripheral.binding(role).is_some()
+                && let Some(binding) = hal_binding(schema.kind())
+                && !platform.hal().supports(binding)
+            {
+                return Err(GenerateError::UnsupportedHalBinding {
+                    platform: platform.name().to_owned(),
+                    binding,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
+    match kind {
+        BindingKind::DigitalInput => Some(HalBinding::DigitalInput),
+        BindingKind::DigitalOutput => Some(HalBinding::DigitalOutput),
+        BindingKind::SpiDevice => Some(HalBinding::SpiDevice),
+        BindingKind::SpiBus => Some(HalBinding::SpiBus),
+        BindingKind::I2cDevice => Some(HalBinding::I2cDevice),
+        BindingKind::CameraCapture => Some(HalBinding::CameraCapture),
+        BindingKind::I2sStream => Some(HalBinding::I2sStream),
+        _ => None,
+    }
+}
+
+#[derive(Debug)]
+struct RenderedPeripheral {
+    name: String,
+    field: String,
+    alias: String,
+    error_variant: String,
+    capability: String,
+    factory: String,
+    bindings: String,
+    config: String,
+}
+
+#[derive(Default)]
+struct RenderState {
+    raw_fields: Vec<(String, String)>,
+    binding_errors: Vec<(String, String)>,
+    identifiers: BTreeMap<String, String>,
+}
+
+fn render_generic_hal(
+    board: &BoardDefinition,
+    resolved: &ResolvedBoard<'_>,
+    runtime_i2c_controllers: &[String],
+    runtime_spi_controllers: &[String],
+) -> Result<String, GenerateError> {
+    let mut state = RenderState::default();
+    let mut rendered = Vec::new();
+    let mut primary_capabilities = BTreeSet::new();
+
+    for peripheral in resolved.peripherals() {
+        let field = checked_identifier(peripheral.name(), &mut state.identifiers)?;
+        if matches!(peripheral.driver().capability(), "display" | "indicator")
+            && !primary_capabilities.insert(peripheral.driver().capability())
+        {
+            return Err(GenerateError::DuplicatePrimaryCapability {
                 capability: peripheral.driver().capability().to_owned(),
             });
         }
-    }
 
-    let mut binding_fields = Vec::new();
-    let mut binding_arguments = Vec::new();
-    for peripheral in resolved.peripherals() {
+        let mut substitutions = BTreeMap::new();
+        substitutions.insert(
+            String::from("crate"),
+            peripheral.driver().implementation().crate_name().to_owned(),
+        );
+        substitutions.insert(
+            String::from("hal.delay.type"),
+            String::from("::barracuda_platform_selected::__platform::hal::DriverDelay"),
+        );
+        substitutions.insert(
+            String::from("hal.delay.value"),
+            String::from("::barracuda_platform_selected::__platform::hal::delay()"),
+        );
         for (role, schema) in peripheral.driver().bindings() {
-            if schema.kind() != BindingKind::DigitalOutput {
-                return Err(GenerateError::UnsupportedBindingKind {
-                    driver: peripheral.driver().id().to_owned(),
-                    binding: role.to_owned(),
-                    kind: schema.kind(),
-                });
-            }
-            let Some(identifier) = peripheral.binding(role) else {
+            let Some(resource) = peripheral.binding(role) else {
                 continue;
             };
-            validate_hardware_identifier(identifier)?;
-            let field = rust_identifier(&format!("{}_{}", peripheral.name(), role));
-            let ty = format!(
-                "::barracuda_chip_stm32f429zi::Peri<'static, ::barracuda_chip_stm32f429zi::peripherals::{identifier}>"
-            );
-            binding_fields.push((field, ty));
+            let rendered_binding =
+                render_binding(board, peripheral, role, schema, resource, &mut state)?;
+            substitutions.insert(format!("binding.{role}.type"), rendered_binding.0);
+            substitutions.insert(format!("binding.{role}.value"), rendered_binding.1);
         }
-    }
-    for (name, gpio) in board.exposed_io().gpios() {
-        validate_hardware_identifier(gpio.pin())?;
-        let field = rust_identifier(&format!("gpio_{name}"));
-        let ty = format!(
-            "::barracuda_chip_stm32f429zi::Peri<'static, ::barracuda_chip_stm32f429zi::peripherals::{}>",
-            gpio.pin()
-        );
-        binding_fields.push((field, ty));
-    }
-    for (field, ty) in &binding_fields {
-        binding_arguments.push(format!("{field}: {ty}"));
+        for (name, schema) in &peripheral.driver().parameters {
+            let value = peripheral.parameter(name).ok_or_else(|| {
+                GenerateError::MissingResolvedParameter {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: name.clone(),
+                }
+            })?;
+            substitutions.insert(
+                format!("parameter.{name}"),
+                render_parameter(peripheral, name, schema, value)?,
+            );
+        }
+
+        let implementation = peripheral.driver().implementation();
+        let factory = render_template(peripheral, implementation.factory(), &substitutions)?;
+        let bindings = render_template(
+            peripheral,
+            implementation.bindings_expression(),
+            &substitutions,
+        )?;
+        let config = render_template(
+            peripheral,
+            implementation.config_expression(),
+            &substitutions,
+        )?;
+        rendered.push(RenderedPeripheral {
+            name: peripheral.name().to_owned(),
+            alias: format!("{}Capability", pascal_identifier(peripheral.name())),
+            error_variant: pascal_identifier(peripheral.name()),
+            capability: peripheral.driver().capability().to_owned(),
+            field,
+            factory,
+            bindings,
+            config,
+        });
     }
 
-    let gpio_count = board.exposed_io().gpios().count();
+    let pin_count = board.exposed_io().pins().count();
+    for (name, pin) in board.exposed_io().pins() {
+        validate_hardware_identifier(pin.pin())?;
+        let field = checked_identifier(&format!("pin_{name}"), &mut state.identifiers)?;
+        state.raw_fields.push((
+            field,
+            format!(
+                "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                pin.pin()
+            ),
+        ));
+    }
+
+    let runtime_i2c_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_i2c_controllers
+            .iter()
+            .filter(|controller| !board.internal_io().uses_controller(controller))
+            .collect::<Vec<_>>()
+    };
+    let runtime_spi_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_spi_controllers
+            .iter()
+            .filter(|controller| !board.internal_io().uses_controller(controller))
+            .collect::<Vec<_>>()
+    };
+    for controller in runtime_i2c_controllers
+        .iter()
+        .chain(runtime_spi_controllers.iter())
+    {
+        validate_hardware_identifier(controller)?;
+        let field = checked_identifier(
+            &format!("runtime_controller_{controller}"),
+            &mut state.identifiers,
+        )?;
+        state.raw_fields.push((
+            field,
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({controller})"
+            ),
+        ));
+    }
+
     let mut source = String::from(
-        "#[cfg(target_arch = \"arm\")]\nmod generated_board_hal {\n\
-         use core::convert::Infallible;\n\
-         use ::barracuda_board_hal::{BoardHal, BoardHalInitResult, BoardHalResources, ExposedIo, NamedResources, UnavailableI2c, UnavailableSpi};\n\
-         use ::barracuda_board_hal::{indicator::{ActiveLevel, BuiltinIndicator, IndicatorConfig}, PeripheralDriver};\n\
+        "mod generated_board_hal {\n\
+         use core::fmt;\n\
+         use ::barracuda_board_hal::{BoardHal, BoardHalInitResult, BoardHalResources, PeripheralDriver};\n\
          use ::embassy_executor::Spawner;\n\n\
          pub struct GeneratedBoardBindings {\n",
     );
-    for (field, ty) in &binding_fields {
+    for (field, ty) in &state.raw_fields {
         source.push_str(&format!("    {field}: {ty},\n"));
     }
     source.push_str("}\n\nimpl GeneratedBoardBindings {\n    #[must_use]\n    pub const fn new(\n");
-    for argument in &binding_arguments {
-        source.push_str(&format!("        {argument},\n"));
+    for (field, ty) in &state.raw_fields {
+        source.push_str(&format!("        {field}: {ty},\n"));
     }
     source.push_str("    ) -> Self {\n        Self {\n");
-    for (field, _) in &binding_fields {
+    for (field, _) in &state.raw_fields {
         source.push_str(&format!("            {field},\n"));
     }
     source.push_str("        }\n    }\n}\n\n");
 
-    if let Some(indicator) = indicators.first() {
-        let implementation = indicator.driver().implementation();
-        let alias = format!("{}Capability", pascal_identifier(indicator.name()));
-        let factory = format!(
-            "::{}::{}<::barracuda_chip_stm32f429zi::DigitalOutput>",
-            implementation.crate_name(),
-            implementation.driver_type()
-        );
+    for peripheral in &rendered {
         source.push_str(&format!(
-            "type {alias} = <{factory} as PeripheralDriver>::Capability;\n\n\
-             pub struct GeneratedBuiltins {{\n    {}: Option<{alias}>,\n}}\n\n",
-            rust_identifier(indicator.name())
+            "type {}Factory = {};\npub type {} = <{}Factory as PeripheralDriver>::Capability;\n\n",
+            peripheral.error_variant,
+            peripheral.factory,
+            peripheral.alias,
+            peripheral.error_variant,
         ));
-        source.push_str(&format!(
-            "impl BuiltinIndicator for GeneratedBuiltins {{\n    type Indicator = {alias};\n\n    fn take_indicator(&mut self) -> Option<Self::Indicator> {{\n        self.{}.take()\n    }}\n}}\n\n",
-            rust_identifier(indicator.name())
-        ));
-    } else {
+    }
+    if rendered.is_empty() {
         source.push_str(
             "pub type GeneratedBuiltins = ::barracuda_board_hal::NoBuiltinCapabilities;\n\n",
         );
+    } else {
+        source.push_str("pub struct GeneratedBuiltins {\n");
+        for peripheral in &rendered {
+            source.push_str(&format!(
+                "    {}: Option<{}>,\n",
+                peripheral.field, peripheral.alias
+            ));
+        }
+        source.push_str("}\n\nimpl GeneratedBuiltins {\n");
+        for peripheral in &rendered {
+            source.push_str(&format!(
+                "    pub fn take_{}(&mut self) -> Option<{}> {{ self.{}.take() }}\n",
+                peripheral.field, peripheral.alias, peripheral.field
+            ));
+        }
+        source.push_str("}\n\n");
+        for peripheral in &rendered {
+            match peripheral.capability.as_str() {
+                "display" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::display::BuiltinDisplay for GeneratedBuiltins {{\n    type Display = {};\n    fn take_display(&mut self) -> Option<Self::Display> {{ self.{}.take() }}\n}}\n\n",
+                    peripheral.alias, peripheral.field
+                )),
+                "indicator" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::indicator::BuiltinIndicator for GeneratedBuiltins {{\n    type Indicator = {};\n    fn take_indicator(&mut self) -> Option<Self::Indicator> {{ self.{}.take() }}\n}}\n\n",
+                    peripheral.alias, peripheral.field
+                )),
+                "led-strip" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::led_strip::BuiltinLedStrip for GeneratedBuiltins {{\n    type LedStrip = {};\n    fn take_led_strip(&mut self) -> Option<Self::LedStrip> {{ self.{}.take() }}\n}}\n\n",
+                    peripheral.alias, peripheral.field
+                )),
+                "camera" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::camera::BuiltinCamera for GeneratedBuiltins {{\n    type Camera = {};\n    fn take_camera(&mut self) -> Option<Self::Camera> {{ self.{}.take() }}\n}}\n\n",
+                    peripheral.alias, peripheral.field
+                )),
+                "audio-codec" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::audio::BuiltinAudioCodec for GeneratedBuiltins {{\n    type AudioCodec = {};\n    fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> {{ self.{}.take() }}\n}}\n\n",
+                    peripheral.alias, peripheral.field
+                )),
+                _ => {}
+            }
+        }
     }
 
     source.push_str(&format!(
-        "pub struct GeneratedIo {{\n    gpio: Option<NamedResources<::barracuda_chip_stm32f429zi::DynamicPin, {gpio_count}>>,\n}}\n\n\
-         impl ExposedIo for GeneratedIo {{\n    type Gpio = NamedResources<::barracuda_chip_stm32f429zi::DynamicPin, {gpio_count}>;\n    type I2c = NamedResources<UnavailableI2c, 0>;\n    type Spi = NamedResources<UnavailableSpi, 0>;\n\n    fn take_gpio(&mut self) -> Option<Self::Gpio> {{ self.gpio.take() }}\n    fn take_i2c(&mut self) -> Option<Self::I2c> {{ None }}\n    fn take_spi(&mut self) -> Option<Self::Spi> {{ None }}\n}}\n\n\
-         pub struct SelectedBoardHal;\n\n\
-         impl BoardHal for SelectedBoardHal {{\n    type Bindings = GeneratedBoardBindings;\n    type Resources = BoardHalResources<GeneratedBuiltins, GeneratedIo>;\n    type Error = Infallible;\n\n    async fn initialize(_spawner: Spawner, bindings: Self::Bindings) -> BoardHalInitResult<Self> {{\n"
+        "pub type GeneratedIo = ::barracuda_platform_selected::__platform::hal::RuntimeIo<{pin_count}, {}, {}>;\n\n",
+        runtime_i2c_controllers.len(),
+        runtime_spi_controllers.len(),
     ));
-    if let Some(indicator) = indicators.first() {
-        let implementation = indicator.driver().implementation();
-        let field = rust_identifier(indicator.name());
-        let binding_field = rust_identifier(&format!("{}_pin", indicator.name()));
-        let active = match indicator.parameter("active-level") {
-            Some(PeripheralParameter::String(value)) if value == "low" => "Low",
-            Some(PeripheralParameter::String(value)) if value == "high" => "High",
-            _ => {
-                return Err(GenerateError::MissingResolvedParameter {
-                    peripheral: indicator.name().to_owned(),
-                    parameter: String::from("active-level"),
-                });
-            }
-        };
-        let initial = if active == "High" { "Low" } else { "High" };
-        let factory = format!(
-            "::{}::{}<::barracuda_chip_stm32f429zi::DigitalOutput>",
-            implementation.crate_name(),
-            implementation.driver_type()
-        );
-        source.push_str(&format!(
-            "        let {field} = <{factory} as PeripheralDriver>::initialize(\n            ::barracuda_chip_stm32f429zi::digital_output(bindings.{binding_field}, ::barracuda_board_hal::DigitalLevel::{initial}),\n            IndicatorConfig::new(ActiveLevel::{active}),\n        ).await;\n        let {field} = match {field} {{ Ok(value) => value, Err(never) => match never {{}} }};\n        let builtins = GeneratedBuiltins {{ {field}: Some({field}) }};\n"
-        ));
+
+    if rendered.is_empty() && state.binding_errors.is_empty() {
+        source.push_str("type GeneratedBoardError = core::convert::Infallible;\n\n");
     } else {
-        source.push_str("        let builtins = ::barracuda_board_hal::NoBuiltinCapabilities;\n");
-    }
-    if gpio_count == 0 {
-        source.push_str("        let gpio = NamedResources::empty();\n");
-    } else {
-        source.push_str("        let gpio = NamedResources::new([\n");
-        for (name, _) in board.exposed_io().gpios() {
-            let field = rust_identifier(&format!("gpio_{name}"));
+        source.push_str("#[derive(Debug)]\npub enum GeneratedBoardError {\n");
+        for (variant, ty) in &state.binding_errors {
+            source.push_str(&format!("    {variant}({ty}),\n"));
+        }
+        for peripheral in &rendered {
             source.push_str(&format!(
-                "            ({name:?}, ::barracuda_chip_stm32f429zi::dynamic_pin(bindings.{field})),\n"
+                "    {}(<{}Factory as PeripheralDriver>::Error),\n",
+                peripheral.error_variant, peripheral.error_variant
             ));
         }
-        source.push_str("        ]);\n");
+        source.push_str("}\n\nimpl fmt::Display for GeneratedBoardError {\n    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n");
+        for (variant, _) in &state.binding_errors {
+            source.push_str(&format!(
+                "            Self::{variant}(_) => formatter.write_str({:?}),\n",
+                format!("failed to construct `{}` binding", variant)
+            ));
+        }
+        for peripheral in &rendered {
+            source.push_str(&format!(
+                "            Self::{}(_) => formatter.write_str({:?}),\n",
+                peripheral.error_variant,
+                format!("failed to initialize `{}`", peripheral.name)
+            ));
+        }
+        source.push_str(
+            "        }\n    }\n}\n\nimpl core::error::Error for GeneratedBoardError {}\n\n",
+        );
+    }
+
+    source.push_str(
+        "pub struct SelectedBoardHal;\n\nimpl BoardHal for SelectedBoardHal {\n    type Bindings = GeneratedBoardBindings;\n    type Resources = BoardHalResources<GeneratedBuiltins, GeneratedIo>;\n    type Error = GeneratedBoardError;\n\n    async fn initialize(_spawner: Spawner, bindings: Self::Bindings) -> BoardHalInitResult<Self> {\n",
+    );
+    for peripheral in &rendered {
+        source.push_str(&format!(
+            "        let {} = <{}Factory as PeripheralDriver>::initialize({}, {}).await.map_err(GeneratedBoardError::{})?;\n",
+            peripheral.field,
+            peripheral.error_variant,
+            peripheral.bindings,
+            peripheral.config,
+            peripheral.error_variant,
+        ));
+    }
+    if rendered.is_empty() {
+        source.push_str("        let builtins = ::barracuda_board_hal::NoBuiltinCapabilities;\n");
+    } else {
+        source.push_str("        let builtins = GeneratedBuiltins {\n");
+        for peripheral in &rendered {
+            source.push_str(&format!(
+                "            {}: Some({}),\n",
+                peripheral.field, peripheral.field
+            ));
+        }
+        source.push_str("        };\n");
     }
     source.push_str(
-        "        Ok(BoardHalResources::new(builtins, GeneratedIo { gpio: Some(gpio) }))\n    }\n}\n}\n\n#[cfg(target_arch = \"arm\")]\npub use generated_board_hal::*;\n",
+        "        let io = ::barracuda_platform_selected::__platform::hal::runtime_io([\n",
     );
+    for (name, _) in board.exposed_io().pins() {
+        let field = rust_identifier(&format!("pin_{name}"));
+        source.push_str(&format!(
+            "            ({name:?}, ::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.{field})),\n"
+        ));
+    }
+    source.push_str("        ], [\n");
+    for controller in &runtime_i2c_controllers {
+        let field = rust_identifier(&format!("runtime_controller_{controller}"));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_i2c_controller(bindings.{field}),\n"
+        ));
+    }
+    source.push_str("        ], [\n");
+    for controller in &runtime_spi_controllers {
+        let field = rust_identifier(&format!("runtime_controller_{controller}"));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_spi_controller(bindings.{field}),\n"
+        ));
+    }
+    source.push_str("        ]);\n");
+    source.push_str("        Ok(BoardHalResources::new(builtins, io))\n    }\n}\n}\n\n");
+    source.push_str("pub use generated_board_hal::*;\n");
     Ok(source)
 }
 
-fn render_esp_hal(
+fn render_binding(
     board: &BoardDefinition,
-    resolved: &ResolvedBoard<'_>,
-    chip: &str,
-) -> Result<String, GenerateError> {
-    if !board.exposed_io().is_empty() {
-        return Err(GenerateError::UnsupportedCapability {
-            driver: String::from("board"),
-            capability: format!("{chip}-exposed-io"),
-        });
-    }
-    let displays = resolved
-        .peripherals()
-        .filter(|peripheral| peripheral.driver().capability() == "display")
-        .collect::<Vec<_>>();
-    if displays.len() > 1 {
-        return Err(GenerateError::DuplicatePrimaryCapability {
-            capability: String::from("display"),
-        });
-    }
-    let display = displays
-        .first()
-        .ok_or_else(|| GenerateError::UnsupportedCapability {
-            driver: String::from("board"),
-            capability: format!("{chip}-internal-io-without-display"),
-        })?;
-    if display.driver().id() == "gdeh0154d67-display" {
-        return render_esp_gdeh0154d67_hal(board, display, chip);
-    }
-    if display.driver().id() != "mipi-dbi-display" || resolved.peripherals().count() != 1 {
-        return Err(GenerateError::UnsupportedCapability {
-            driver: display.driver().id().to_owned(),
-            capability: display.driver().capability().to_owned(),
-        });
-    }
-    let spi_name =
-        display
-            .binding("spi")
-            .ok_or_else(|| GenerateError::MissingResolvedParameter {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("spi binding"),
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    schema: &BindingSchema,
+    resource: &str,
+    state: &mut RenderState,
+) -> Result<(String, String), GenerateError> {
+    match schema.kind() {
+        BindingKind::DigitalInput | BindingKind::DigitalOutput => {
+            validate_hardware_identifier(resource)?;
+            let field = checked_identifier(
+                &format!("{}_{}", peripheral.name(), role),
+                &mut state.identifiers,
+            )?;
+            state.raw_fields.push((
+                field.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::pin_binding_type!({resource})"
+                ),
+            ));
+            if schema.kind() == BindingKind::DigitalInput {
+                Ok((
+                    String::from("::barracuda_platform_selected::__platform::hal::DigitalInput"),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::digital_input(bindings.{field})"
+                    ),
+                ))
+            } else {
+                let initial = resolved_initial_level(peripheral, role, schema)?;
+                Ok((
+                    String::from("::barracuda_platform_selected::__platform::hal::DigitalOutput"),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::digital_output(bindings.{field}, ::barracuda_board_hal::DigitalLevel::{initial})"
+                    ),
+                ))
+            }
+        }
+        BindingKind::SpiDevice => {
+            let spi = board.internal_io().spi_device(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
             })?;
-    let spi = board.internal_io().spi_device(spi_name).ok_or_else(|| {
-        GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi binding"),
+            if spi.mosi().is_none() && spi.miso().is_none() {
+                return Err(GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role}.mosi-or-miso"),
+                });
+            }
+            for identifier in [
+                Some(spi.peripheral()),
+                Some(spi.sck()),
+                spi.mosi(),
+                spi.miso(),
+                Some(spi.chip_select()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                validate_hardware_identifier(identifier)?;
+            }
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let sck = checked_identifier(&format!("{prefix}_sck"), &mut state.identifiers)?;
+            let chip_select =
+                checked_identifier(&format!("{prefix}_chip_select"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    controller.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        spi.peripheral()
+                    ),
+                ),
+                (
+                    sck.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({})", spi.sck()),
+                ),
+                (
+                    chip_select.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        spi.chip_select()
+                    ),
+                ),
+            ]);
+            let mosi_field = spi
+                .mosi()
+                .map(|mosi| {
+                    let field =
+                        checked_identifier(&format!("{prefix}_mosi"), &mut state.identifiers)?;
+                    state.raw_fields.push((
+                        field.clone(),
+                        format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({mosi})"),
+                    ));
+                    Ok(field)
+                })
+                .transpose()?;
+            let miso_field = spi
+                .miso()
+                .map(|miso| {
+                    let field =
+                        checked_identifier(&format!("{prefix}_miso"), &mut state.identifiers)?;
+                    state.raw_fields.push((
+                        field.clone(),
+                        format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({miso})"),
+                    ));
+                    Ok(field)
+                })
+                .transpose()?;
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::SpiConfigError"),
+            ));
+            let value = match (mosi_field, miso_field) {
+                (Some(mosi), Some(miso)) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_device_full_duplex(bindings.{controller}, bindings.{sck}, bindings.{mosi}, bindings.{miso}, bindings.{chip_select}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (Some(mosi), None) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_device(bindings.{controller}, bindings.{sck}, bindings.{mosi}, bindings.{chip_select}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (None, Some(miso)) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_device_rx_only(bindings.{controller}, bindings.{sck}, bindings.{miso}, bindings.{chip_select}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (None, None) => {
+                    return Err(GenerateError::UnsupportedResolvedValue {
+                        peripheral: peripheral.name().to_owned(),
+                        parameter: format!("{role}.mosi-or-miso"),
+                    });
+                }
+            };
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::SpiDevice"),
+                value,
+            ))
         }
-    })?;
-    let mosi = spi
-        .mosi()
-        .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi.mosi"),
-        })?;
-    if spi.miso().is_some() {
-        return Err(GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi.miso"),
-        });
-    }
-    let dc = display
-        .binding("dc")
-        .ok_or_else(|| GenerateError::MissingResolvedParameter {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("dc binding"),
-        })?;
-    let reset =
-        display
-            .binding("reset")
-            .ok_or_else(|| GenerateError::MissingResolvedParameter {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("reset binding"),
+        BindingKind::SpiBus => {
+            let spi = board.internal_io().spi_bus(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
             })?;
-    let backlight =
-        display
-            .binding("backlight")
-            .ok_or_else(|| GenerateError::MissingResolvedParameter {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("backlight binding"),
+            for identifier in [
+                Some(spi.peripheral()),
+                Some(spi.sck()),
+                spi.mosi(),
+                spi.miso(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                validate_hardware_identifier(identifier)?;
+            }
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let sck = checked_identifier(&format!("{prefix}_sck"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    controller.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::controller_binding_type!({})", spi.peripheral()),
+                ),
+                (
+                    sck.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({})", spi.sck()),
+                ),
+            ]);
+            let mosi = spi.mosi().map(|pin| {
+                let field = checked_identifier(&format!("{prefix}_mosi"), &mut state.identifiers)?;
+                state.raw_fields.push((field.clone(), format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})")));
+                Ok(field)
+            }).transpose()?;
+            let miso = spi.miso().map(|pin| {
+                let field = checked_identifier(&format!("{prefix}_miso"), &mut state.identifiers)?;
+                state.raw_fields.push((field.clone(), format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})")));
+                Ok(field)
+            }).transpose()?;
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::SpiConfigError"),
+            ));
+            let value = match (mosi, miso) {
+                (Some(mosi), Some(miso)) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_bus_full_duplex(bindings.{controller}, bindings.{sck}, bindings.{mosi}, bindings.{miso}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (Some(mosi), None) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_bus(bindings.{controller}, bindings.{sck}, bindings.{mosi}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (None, Some(miso)) => format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_bus_rx_only(bindings.{controller}, bindings.{sck}, bindings.{miso}, {}).map_err(GeneratedBoardError::{variant})?",
+                    spi.frequency_hz()
+                ),
+                (None, None) => {
+                    return Err(GenerateError::UnsupportedResolvedValue {
+                        peripheral: peripheral.name().to_owned(),
+                        parameter: format!("{role}.mosi-or-miso"),
+                    });
+                }
+            };
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::SpiBus"),
+                value,
+            ))
+        }
+        BindingKind::I2cDevice => {
+            let i2c = board.internal_io().i2c_device(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
             })?;
-    for identifier in [
-        spi.peripheral(),
-        spi.sck(),
-        mosi,
-        spi.chip_select(),
-        dc,
-        reset,
-        backlight,
-    ] {
-        validate_hardware_identifier(identifier)?;
+            for identifier in [i2c.peripheral(), i2c.scl(), i2c.sda()] {
+                validate_hardware_identifier(identifier)?;
+            }
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let scl = checked_identifier(&format!("{prefix}_scl"), &mut state.identifiers)?;
+            let sda = checked_identifier(&format!("{prefix}_sda"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    controller.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        i2c.peripheral()
+                    ),
+                ),
+                (
+                    scl.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({})", i2c.scl()),
+                ),
+                (
+                    sda.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({})", i2c.sda()),
+                ),
+            ]);
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::I2cConfigError"),
+            ));
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::I2cBus"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::i2c_device(bindings.{controller}, bindings.{scl}, bindings.{sda}, {}).map_err(GeneratedBoardError::{variant})?",
+                    i2c.frequency_hz()
+                ),
+            ))
+        }
+        BindingKind::CameraCapture => {
+            let camera = board
+                .internal_io()
+                .camera_capture(resource)
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let dma = checked_identifier(&format!("{prefix}_dma"), &mut state.identifiers)?;
+            state.raw_fields.push((
+                controller.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    camera.peripheral()
+                ),
+            ));
+            state.raw_fields.push((
+                dma.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    camera.dma()
+                ),
+            ));
+            let mut pins = Vec::new();
+            for (name, pin) in [
+                ("xclk", camera.xclk()),
+                ("pclk", camera.pclk()),
+                ("vsync", camera.vsync()),
+                ("href", camera.href()),
+            ] {
+                validate_hardware_identifier(pin)?;
+                let field =
+                    checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                pins.push(field);
+            }
+            for (index, pin) in camera.data().iter().enumerate() {
+                validate_hardware_identifier(pin)?;
+                let field =
+                    checked_identifier(&format!("{prefix}_d{index}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                pins.push(field);
+            }
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::CameraConfigError"),
+            ));
+            let pin_values = pins
+                .iter()
+                .map(|field| format!("bindings.{field}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::CameraReceiver"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::camera_capture(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
+                    camera.xclk_frequency_hz(),
+                    camera.dma_buffer_bytes()
+                ),
+            ))
+        }
+        BindingKind::I2sStream => {
+            let stream = board.internal_io().i2s_stream(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
+            })?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let dma = checked_identifier(&format!("{prefix}_dma"), &mut state.identifiers)?;
+            state.raw_fields.push((
+                controller.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    stream.peripheral()
+                ),
+            ));
+            state.raw_fields.push((
+                dma.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    stream.dma()
+                ),
+            ));
+            let mut pin_fields = Vec::new();
+            for (name, pin) in [
+                ("bclk", stream.bclk()),
+                ("ws", stream.ws()),
+                ("dout", stream.dout()),
+                ("din", stream.din()),
+            ] {
+                validate_hardware_identifier(pin)?;
+                let field =
+                    checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                pin_fields.push(field);
+            }
+            let mclk = stream.mclk().map(|pin| {
+                validate_hardware_identifier(pin)?;
+                let field = checked_identifier(&format!("{prefix}_mclk"), &mut state.identifiers)?;
+                state.raw_fields.push((field.clone(), format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})")));
+                Ok(field)
+            }).transpose()?;
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::I2sConfigError"),
+            ));
+            let bclk = &pin_fields[0];
+            let ws = &pin_fields[1];
+            let dout = &pin_fields[2];
+            let din = &pin_fields[3];
+            let constructor = match mclk {
+                Some(mclk) => format!(
+                    "{{ let (tx_dma, rx_dma) = ::barracuda_platform_selected::__platform::hal::i2s_dma_buffers!({}).map_err(GeneratedBoardError::{variant})?; ::barracuda_platform_selected::__platform::hal::i2s_stream_with_mclk(bindings.{controller}, bindings.{dma}, bindings.{bclk}, bindings.{ws}, bindings.{dout}, bindings.{din}, bindings.{mclk}, {}, {}, {}, tx_dma, rx_dma) }}",
+                    stream.dma_buffer_bytes(),
+                    stream.sample_rate_hz(),
+                    stream.channels(),
+                    stream.bits_per_sample()
+                ),
+                None => format!(
+                    "{{ let (tx_dma, rx_dma) = ::barracuda_platform_selected::__platform::hal::i2s_dma_buffers!({}).map_err(GeneratedBoardError::{variant})?; ::barracuda_platform_selected::__platform::hal::i2s_stream(bindings.{controller}, bindings.{dma}, bindings.{bclk}, bindings.{ws}, bindings.{dout}, bindings.{din}, {}, {}, {}, tx_dma, rx_dma) }}",
+                    stream.dma_buffer_bytes(),
+                    stream.sample_rate_hz(),
+                    stream.channels(),
+                    stream.bits_per_sample()
+                ),
+            };
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::I2sDevice"),
+                format!("{constructor}.map_err(GeneratedBoardError::{variant})?"),
+            ))
+        }
+        kind => Err(GenerateError::UnsupportedBindingKind {
+            driver: peripheral.driver().id().to_owned(),
+            binding: role.to_owned(),
+            kind,
+        }),
     }
-
-    let controller = resolved_string(display, "controller")?;
-    let model = match controller {
-        "gc9a01" => "GC9A01",
-        "gc9107" => "GC9107",
-        "ili9342c" => "ILI9342CRgb565",
-        "st7735s" => "ST7735s",
-        "st7789" => "ST7789",
-        _ => {
-            return Err(GenerateError::UnsupportedResolvedValue {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("controller"),
-            });
-        }
-    };
-    let width = resolved_dimension(display, "width")?;
-    let height = resolved_dimension(display, "height")?;
-    let offset_x = resolved_u16(display, "offset-x")?;
-    let offset_y = resolved_u16(display, "offset-y")?;
-    let color_order = match resolved_string(display, "color-order")? {
-        "rgb" => "Rgb",
-        "bgr" => "Bgr",
-        _ => {
-            return Err(GenerateError::UnsupportedResolvedValue {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("color-order"),
-            });
-        }
-    };
-    let orientation = match resolved_string(display, "orientation")? {
-        "deg0" => "Deg0",
-        "deg90" => "Deg90",
-        "deg180" => "Deg180",
-        "deg270" => "Deg270",
-        _ => {
-            return Err(GenerateError::UnsupportedResolvedValue {
-                peripheral: display.name().to_owned(),
-                parameter: String::from("orientation"),
-            });
-        }
-    };
-    let invert = resolved_boolean(display, "invert-colors")?;
-    let backlight_active_high = resolved_boolean(display, "backlight-active-high")?;
-    let implementation = display.driver().implementation();
-    let chip_crate = format!("barracuda_chip_{chip}");
-    let factory = format!(
-        "::{}::{}<::{chip_crate}::SpiDevice, ::{chip_crate}::DigitalOutput, ::{}::{model}, ::{chip_crate}::DigitalOutput, ::{chip_crate}::DigitalOutput, ::{chip_crate}::DriverDelay, 512>",
-        implementation.crate_name(),
-        implementation.driver_type(),
-        implementation.crate_name(),
-    );
-    let capability = format!("<{factory} as PeripheralDriver>::Capability");
-    let driver_error = format!("<{factory} as PeripheralDriver>::Error");
-    let field = rust_identifier(display.name());
-
-    let source = format!(
-        "#[cfg(target_arch = \"xtensa\")]\nmod generated_board_hal {{\n\
-         use core::fmt;\n\
-         use ::barracuda_board_hal::{{BoardHal, BoardHalInitResult, BoardHalResources, NoExposedIo, PeripheralDriver, display::{{BuiltinDisplay, DisplayOrientation, PixelFormat}}}};\n\
-         use ::barracuda_mipi_dbi_display::{{MipiDbiColorOrder, MipiDbiDisplayBindings, MipiDbiDisplayConfig, MipiDbiDriverConfig, Size}};\n\
-         use ::embassy_executor::Spawner;\n\n\
-         pub struct GeneratedBoardBindings {{\n\
-             {field}_spi: ::{chip_crate}::peripherals::{spi_peripheral}<'static>,\n\
-             {field}_sck: ::{chip_crate}::peripherals::{sck}<'static>,\n\
-             {field}_mosi: ::{chip_crate}::peripherals::{mosi}<'static>,\n\
-             {field}_chip_select: ::{chip_crate}::peripherals::{chip_select}<'static>,\n\
-             {field}_dc: ::{chip_crate}::peripherals::{dc}<'static>,\n\
-             {field}_reset: ::{chip_crate}::peripherals::{reset}<'static>,\n\
-             {field}_backlight: ::{chip_crate}::peripherals::{backlight}<'static>,\n\
-         }}\n\n\
-         impl GeneratedBoardBindings {{\n\
-             #[must_use]\n\
-             pub const fn new(\n\
-                 {field}_spi: ::{chip_crate}::peripherals::{spi_peripheral}<'static>,\n\
-                 {field}_sck: ::{chip_crate}::peripherals::{sck}<'static>,\n\
-                 {field}_mosi: ::{chip_crate}::peripherals::{mosi}<'static>,\n\
-                 {field}_chip_select: ::{chip_crate}::peripherals::{chip_select}<'static>,\n\
-                 {field}_dc: ::{chip_crate}::peripherals::{dc}<'static>,\n\
-                 {field}_reset: ::{chip_crate}::peripherals::{reset}<'static>,\n\
-                 {field}_backlight: ::{chip_crate}::peripherals::{backlight}<'static>,\n\
-             ) -> Self {{\n\
-                 Self {{ {field}_spi, {field}_sck, {field}_mosi, {field}_chip_select, {field}_dc, {field}_reset, {field}_backlight }}\n\
-             }}\n\
-         }}\n\n\
-         type DisplayFactory = {factory};\n\
-         pub type DisplayCapability = {capability};\n\n\
-         pub struct GeneratedBuiltins {{ {field}: Option<DisplayCapability> }}\n\n\
-         impl BuiltinDisplay for GeneratedBuiltins {{\n\
-             type Display = DisplayCapability;\n\
-             fn take_display(&mut self) -> Option<Self::Display> {{ self.{field}.take() }}\n\
-         }}\n\n\
-         #[derive(Debug)]\n\
-         pub enum GeneratedBoardError {{\n\
-             SpiConfig(::{chip_crate}::SpiConfigError),\n\
-             Display({driver_error}),\n\
-         }}\n\n\
-         impl fmt::Display for GeneratedBoardError {{\n\
-             fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {{\n\
-                 match self {{\n\
-                     Self::SpiConfig(_) => formatter.write_str(\"SPI configuration failed\"),\n\
-                     Self::Display(_) => formatter.write_str(\"display initialization failed\"),\n\
-                 }}\n\
-             }}\n\
-         }}\n\n\
-         impl core::error::Error for GeneratedBoardError {{}}\n\n\
-         pub struct SelectedBoardHal;\n\n\
-         impl BoardHal for SelectedBoardHal {{\n\
-             type Bindings = GeneratedBoardBindings;\n\
-             type Resources = BoardHalResources<GeneratedBuiltins, NoExposedIo>;\n\
-             type Error = GeneratedBoardError;\n\n\
-             async fn initialize(_spawner: Spawner, bindings: Self::Bindings) -> BoardHalInitResult<Self> {{\n\
-                 let spi = ::{chip_crate}::spi_device(\n\
-                     bindings.{field}_spi, bindings.{field}_sck, bindings.{field}_mosi,\n\
-                     bindings.{field}_chip_select, {frequency},\n\
-                 ).map_err(GeneratedBoardError::SpiConfig)?;\n\
-                 let config = MipiDbiDisplayConfig::new(\n\
-                     Size::new({width}, {height}), PixelFormat::Rgb565, DisplayOrientation::{orientation},\n\
-                 ).with_offset({offset_x}, {offset_y}).with_color_order(MipiDbiColorOrder::{color_order}).with_inverted_colors({invert}).with_digital_backlight({backlight_active_high});\n\
-                 let {field} = <DisplayFactory as PeripheralDriver>::initialize(\n\
-                     MipiDbiDisplayBindings::new(\n\
-                         spi,\n\
-                         ::{chip_crate}::digital_output(bindings.{field}_dc, ::barracuda_board_hal::DigitalLevel::Low),\n\
-                         ::{chip_crate}::digital_output(bindings.{field}_reset, ::barracuda_board_hal::DigitalLevel::High),\n\
-                         Some(::{chip_crate}::digital_output(bindings.{field}_backlight, ::barracuda_board_hal::DigitalLevel::Low)),\n\
-                         ::{chip_crate}::DriverDelay::new(),\n\
-                         ::{chip_crate}::take_primary_display_buffer(),\n\
-                     ),\n\
-                     MipiDbiDriverConfig::new(::{driver_crate}::{model}, config),\n\
-                 ).await.map_err(GeneratedBoardError::Display)?;\n\
-                 Ok(BoardHalResources::new(GeneratedBuiltins {{ {field}: Some({field}) }}, NoExposedIo))\n\
-             }}\n\
-         }}\n\
-         }}\n\n\
-         #[cfg(target_arch = \"xtensa\")]\n\
-         pub use generated_board_hal::*;\n",
-        spi_peripheral = spi.peripheral(),
-        sck = spi.sck(),
-        chip_select = spi.chip_select(),
-        backlight = backlight,
-        frequency = spi.frequency_hz(),
-        driver_crate = implementation.crate_name(),
-    );
-    Ok(source)
 }
 
-fn render_esp_gdeh0154d67_hal(
-    board: &BoardDefinition,
-    display: &ResolvedPeripheral<'_>,
-    chip: &str,
-) -> Result<String, GenerateError> {
-    let binding = |role: &str| {
-        display
-            .binding(role)
-            .ok_or_else(|| GenerateError::MissingResolvedParameter {
-                peripheral: display.name().to_owned(),
-                parameter: format!("{role} binding"),
-            })
-    };
-    let spi_name = binding("spi")?;
-    let spi = board.internal_io().spi_device(spi_name).ok_or_else(|| {
-        GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi binding"),
-        }
-    })?;
-    let mosi = spi
-        .mosi()
-        .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi.mosi"),
-        })?;
-    if spi.miso().is_some() {
-        return Err(GenerateError::UnsupportedResolvedValue {
-            peripheral: display.name().to_owned(),
-            parameter: String::from("spi.miso"),
+fn resolved_initial_level(
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    schema: &BindingSchema,
+) -> Result<&'static str, GenerateError> {
+    let level = if let Some(level) = schema.initial() {
+        level
+    } else if let Some(mapping) = schema.initial_from() {
+        let value = resolved_mapping_key(peripheral, &mapping.parameter)?;
+        *mapping
+            .values
+            .get(value)
+            .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                peripheral: peripheral.name().to_owned(),
+                parameter: format!("{role} initial level"),
+            })?
+    } else {
+        return Err(GenerateError::MissingResolvedParameter {
+            peripheral: peripheral.name().to_owned(),
+            parameter: format!("{role} initial level"),
         });
-    }
-    let busy = binding("busy")?;
-    let dc = binding("dc")?;
-    let reset = binding("reset")?;
-    let power_hold = binding("power-hold")?;
-    for identifier in [
-        spi.peripheral(),
-        spi.sck(),
-        mosi,
-        spi.chip_select(),
-        busy,
-        dc,
-        reset,
-        power_hold,
-    ] {
-        validate_hardware_identifier(identifier)?;
-    }
-
-    let implementation = display.driver().implementation();
-    let chip_crate = format!("barracuda_chip_{chip}");
-    let factory = format!(
-        "::{}::{}<::{chip_crate}::SpiDevice, ::{chip_crate}::DigitalInput, ::{chip_crate}::DigitalOutput, ::{chip_crate}::DigitalOutput, ::{chip_crate}::DigitalOutput, ::{chip_crate}::DriverDelay>",
-        implementation.crate_name(),
-        implementation.driver_type(),
-    );
-    let capability = format!("<{factory} as PeripheralDriver>::Capability");
-    let driver_error = format!("<{factory} as PeripheralDriver>::Error");
-    let driver_crate = implementation.crate_name();
-    let field = rust_identifier(display.name());
-
-    Ok(format!(
-        "#[cfg(target_arch = \"xtensa\")]\nmod generated_board_hal {{\n\
-         use core::fmt;\n\
-         use ::barracuda_board_hal::{{BoardHal, BoardHalInitResult, BoardHalResources, NoExposedIo, PeripheralDriver, display::BuiltinDisplay}};\n\
-         use ::{driver_crate}::Gdeh0154d67Bindings;\n\
-         use ::embassy_executor::Spawner;\n\n\
-         pub struct GeneratedBoardBindings {{\n\
-             {field}_spi: ::{chip_crate}::peripherals::{spi_peripheral}<'static>,\n\
-             {field}_sck: ::{chip_crate}::peripherals::{sck}<'static>,\n\
-             {field}_mosi: ::{chip_crate}::peripherals::{mosi}<'static>,\n\
-             {field}_chip_select: ::{chip_crate}::peripherals::{chip_select}<'static>,\n\
-             {field}_busy: ::{chip_crate}::peripherals::{busy}<'static>,\n\
-             {field}_dc: ::{chip_crate}::peripherals::{dc}<'static>,\n\
-             {field}_reset: ::{chip_crate}::peripherals::{reset}<'static>,\n\
-             {field}_power_hold: ::{chip_crate}::peripherals::{power_hold}<'static>,\n\
-         }}\n\n\
-         impl GeneratedBoardBindings {{\n\
-             #[must_use]\n\
-             pub const fn new(\n\
-                 {field}_spi: ::{chip_crate}::peripherals::{spi_peripheral}<'static>,\n\
-                 {field}_sck: ::{chip_crate}::peripherals::{sck}<'static>,\n\
-                 {field}_mosi: ::{chip_crate}::peripherals::{mosi}<'static>,\n\
-                 {field}_chip_select: ::{chip_crate}::peripherals::{chip_select}<'static>,\n\
-                 {field}_busy: ::{chip_crate}::peripherals::{busy}<'static>,\n\
-                 {field}_dc: ::{chip_crate}::peripherals::{dc}<'static>,\n\
-                 {field}_reset: ::{chip_crate}::peripherals::{reset}<'static>,\n\
-                 {field}_power_hold: ::{chip_crate}::peripherals::{power_hold}<'static>,\n\
-             ) -> Self {{\n\
-                 Self {{ {field}_spi, {field}_sck, {field}_mosi, {field}_chip_select, {field}_busy, {field}_dc, {field}_reset, {field}_power_hold }}\n\
-             }}\n\
-         }}\n\n\
-         type DisplayFactory = {factory};\n\
-         pub type DisplayCapability = {capability};\n\n\
-         pub struct GeneratedBuiltins {{ {field}: Option<DisplayCapability> }}\n\n\
-         impl BuiltinDisplay for GeneratedBuiltins {{\n\
-             type Display = DisplayCapability;\n\
-             fn take_display(&mut self) -> Option<Self::Display> {{ self.{field}.take() }}\n\
-         }}\n\n\
-         #[derive(Debug)]\n\
-         pub enum GeneratedBoardError {{\n\
-             SpiConfig(::{chip_crate}::SpiConfigError),\n\
-             Display({driver_error}),\n\
-         }}\n\n\
-         impl fmt::Display for GeneratedBoardError {{\n\
-             fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {{\n\
-                 match self {{\n\
-                     Self::SpiConfig(_) => formatter.write_str(\"SPI configuration failed\"),\n\
-                     Self::Display(_) => formatter.write_str(\"e-paper initialization failed\"),\n\
-                 }}\n\
-             }}\n\
-         }}\n\n\
-         impl core::error::Error for GeneratedBoardError {{}}\n\n\
-         pub struct SelectedBoardHal;\n\n\
-         impl BoardHal for SelectedBoardHal {{\n\
-             type Bindings = GeneratedBoardBindings;\n\
-             type Resources = BoardHalResources<GeneratedBuiltins, NoExposedIo>;\n\
-             type Error = GeneratedBoardError;\n\n\
-             async fn initialize(_spawner: Spawner, bindings: Self::Bindings) -> BoardHalInitResult<Self> {{\n\
-                 let spi = ::{chip_crate}::spi_device(\n\
-                     bindings.{field}_spi, bindings.{field}_sck, bindings.{field}_mosi,\n\
-                     bindings.{field}_chip_select, {frequency},\n\
-                 ).map_err(GeneratedBoardError::SpiConfig)?;\n\
-                 let {field} = <DisplayFactory as PeripheralDriver>::initialize(\n\
-                     Gdeh0154d67Bindings::new(\n\
-                         spi,\n\
-                         ::{chip_crate}::digital_input(bindings.{field}_busy),\n\
-                         ::{chip_crate}::digital_output(bindings.{field}_dc, ::barracuda_board_hal::DigitalLevel::Low),\n\
-                         ::{chip_crate}::digital_output(bindings.{field}_reset, ::barracuda_board_hal::DigitalLevel::High),\n\
-                         ::{chip_crate}::digital_output(bindings.{field}_power_hold, ::barracuda_board_hal::DigitalLevel::Low),\n\
-                         ::{chip_crate}::DriverDelay::new(),\n\
-                     ),\n\
-                     (),\n\
-                 ).await.map_err(GeneratedBoardError::Display)?;\n\
-                 Ok(BoardHalResources::new(GeneratedBuiltins {{ {field}: Some({field}) }}, NoExposedIo))\n\
-             }}\n\
-         }}\n\
-         }}\n\n\
-         #[cfg(target_arch = \"xtensa\")]\n\
-         pub use generated_board_hal::*;\n",
-        spi_peripheral = spi.peripheral(),
-        sck = spi.sck(),
-        chip_select = spi.chip_select(),
-        frequency = spi.frequency_hz(),
-    ))
+    };
+    Ok(match level {
+        InitialOutputLevel::Low => "Low",
+        InitialOutputLevel::High => "High",
+    })
 }
 
-fn resolved_string<'a>(
+fn resolved_mapping_key<'a>(
     peripheral: &'a ResolvedPeripheral<'_>,
     parameter: &str,
 ) -> Result<&'a str, GenerateError> {
     match peripheral.parameter(parameter) {
         Some(PeripheralParameter::String(value)) => Ok(value),
+        Some(PeripheralParameter::Boolean(true)) => Ok("true"),
+        Some(PeripheralParameter::Boolean(false)) => Ok("false"),
         _ => Err(GenerateError::MissingResolvedParameter {
             peripheral: peripheral.name().to_owned(),
             parameter: parameter.to_owned(),
@@ -1225,46 +1776,74 @@ fn resolved_string<'a>(
     }
 }
 
-fn resolved_boolean(
+fn render_parameter(
     peripheral: &ResolvedPeripheral<'_>,
-    parameter: &str,
-) -> Result<bool, GenerateError> {
-    match peripheral.parameter(parameter) {
-        Some(PeripheralParameter::Boolean(value)) => Ok(*value),
-        _ => Err(GenerateError::MissingResolvedParameter {
-            peripheral: peripheral.name().to_owned(),
-            parameter: parameter.to_owned(),
-        }),
-    }
-}
-
-fn resolved_dimension(
-    peripheral: &ResolvedPeripheral<'_>,
-    parameter: &str,
-) -> Result<u32, GenerateError> {
-    match peripheral.parameter(parameter) {
-        Some(PeripheralParameter::Integer(value)) => {
-            u32::try_from(*value).map_err(|_| GenerateError::UnsupportedResolvedValue {
+    name: &str,
+    schema: &ParameterSchema,
+    value: &PeripheralParameter,
+) -> Result<String, GenerateError> {
+    match value {
+        PeripheralParameter::Boolean(value) => Ok(value.to_string()),
+        PeripheralParameter::Integer(value) => Ok(value.to_string()),
+        PeripheralParameter::String(value) => Ok(schema
+            .rust_value(value)
+            .map_or_else(|| format!("{value:?}"), str::to_owned)),
+        PeripheralParameter::Sequence(_) | PeripheralParameter::Mapping(_) => {
+            Err(GenerateError::UnsupportedResolvedValue {
                 peripheral: peripheral.name().to_owned(),
-                parameter: parameter.to_owned(),
+                parameter: name.to_owned(),
             })
         }
-        _ => Err(GenerateError::MissingResolvedParameter {
-            peripheral: peripheral.name().to_owned(),
-            parameter: parameter.to_owned(),
-        }),
     }
 }
 
-fn resolved_u16(
+fn render_template(
     peripheral: &ResolvedPeripheral<'_>,
-    parameter: &str,
-) -> Result<u16, GenerateError> {
-    let value = resolved_dimension(peripheral, parameter)?;
-    u16::try_from(value).map_err(|_| GenerateError::UnsupportedResolvedValue {
-        peripheral: peripheral.name().to_owned(),
-        parameter: parameter.to_owned(),
-    })
+    template: &str,
+    substitutions: &BTreeMap<String, String>,
+) -> Result<String, GenerateError> {
+    let mut rendered = String::with_capacity(template.len());
+    let mut remaining = template;
+    while let Some(start) = remaining.find("{{") {
+        rendered.push_str(&remaining[..start]);
+        let placeholder_start = start + 2;
+        let Some(end) = remaining[placeholder_start..].find("}}") else {
+            return Err(GenerateError::InvalidTemplate {
+                driver: peripheral.driver().id().to_owned(),
+                placeholder: remaining[start..].to_owned(),
+            });
+        };
+        let placeholder_end = placeholder_start + end;
+        let placeholder = remaining[placeholder_start..placeholder_end].trim();
+        let value =
+            substitutions
+                .get(placeholder)
+                .ok_or_else(|| GenerateError::InvalidTemplate {
+                    driver: peripheral.driver().id().to_owned(),
+                    placeholder: placeholder.to_owned(),
+                })?;
+        rendered.push_str(value);
+        remaining = &remaining[placeholder_end + 2..];
+    }
+    rendered.push_str(remaining);
+    Ok(rendered)
+}
+
+fn checked_identifier(
+    name: &str,
+    identifiers: &mut BTreeMap<String, String>,
+) -> Result<String, GenerateError> {
+    let identifier = rust_identifier(name);
+    if let Some(first) = identifiers.insert(identifier.clone(), name.to_owned())
+        && first != name
+    {
+        return Err(GenerateError::IdentifierCollision {
+            first,
+            second: name.to_owned(),
+            identifier,
+        });
+    }
+    Ok(identifier)
 }
 
 fn validate_hardware_identifier(identifier: &str) -> Result<(), GenerateError> {
@@ -1294,7 +1873,66 @@ fn rust_identifier(name: &str) -> String {
         }
         result.push(character.to_ascii_lowercase());
     }
+    if is_rust_keyword(&result) {
+        result.insert(0, '_');
+    }
     result
+}
+
+fn is_rust_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "as" | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+            | "try"
+    )
 }
 
 fn pascal_identifier(name: &str) -> String {

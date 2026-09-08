@@ -27,6 +27,16 @@ pub use embedded_graphics_core::geometry::Size;
 /// MIPI DBI controller model types available to static Board generation.
 pub use mipidsi::models::{GC9A01, GC9107, ILI9342CRgb565, ST7735s, ST7789};
 
+/// Takes the statically allocated transfer buffer used by one generated panel.
+///
+/// Generated Board initialization constructs its primary display once, so the
+/// returned buffer has one move-only owner for the lifetime of the application.
+#[must_use]
+pub fn take_transfer_buffer() -> &'static mut [u8; 512] {
+    static BUFFER: static_cell::StaticCell<[u8; 512]> = static_cell::StaticCell::new();
+    BUFFER.init([0; 512])
+}
+
 /// Color component order selected in a panel's MADCTL register.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MipiDbiColorOrder {
@@ -340,14 +350,18 @@ where
 
     async fn set_power(&mut self, power: DisplayPower) -> Result<(), Self::ControlError> {
         match power {
-            DisplayPower::On => self
-                .inner
-                .wake(&mut self.delay)
-                .map_err(MipiDbiControlError::Interface),
-            DisplayPower::Sleep | DisplayPower::Off => self
-                .inner
-                .sleep(&mut self.delay)
-                .map_err(MipiDbiControlError::Interface),
+            DisplayPower::On => {
+                self.inner
+                    .wake(&mut self.delay)
+                    .map_err(MipiDbiControlError::Interface)?;
+                self.set_configured_backlight(true)
+            }
+            DisplayPower::Sleep | DisplayPower::Off => {
+                self.set_configured_backlight(false)?;
+                self.inner
+                    .sleep(&mut self.delay)
+                    .map_err(MipiDbiControlError::Interface)
+            }
         }
     }
 
@@ -374,6 +388,27 @@ where
 
     async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
         Ok(())
+    }
+}
+
+impl<DI, M, RST, BL, DELAY> MipiDbiDisplay<DI, M, RST, BL, DELAY>
+where
+    DI: Interface,
+    M: Model,
+    M::ColorFormat: InterfacePixelFormat<DI::Word>,
+    RST: OutputPin,
+    BL: OutputPin,
+{
+    fn set_configured_backlight(
+        &mut self,
+        on: bool,
+    ) -> Result<(), MipiDbiControlError<DI::Error, BL::Error>> {
+        let (Some(backlight), Some(active_high)) =
+            (&mut self.backlight, self.config.backlight_active_high)
+        else {
+            return Ok(());
+        };
+        set_backlight(backlight, active_high, on).map_err(MipiDbiControlError::Backlight)
     }
 }
 

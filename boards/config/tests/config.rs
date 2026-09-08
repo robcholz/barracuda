@@ -50,37 +50,13 @@ hardware:
 native-layout:
   artifact: partitions.csv
 exposed-io:
-  gpio:
+  pins:
     user-control:
       pin: gpio2
-  analog-input:
-    sensor-voltage:
-      peripheral: adc1
-      pin: gpio3
-      channel: 2
-  analog-output:
-    reference-voltage:
-      peripheral: dac1
-      pin: gpio4
-      channel: 1
-  pwm:
-    actuator:
-      peripheral: ledc0
-      pin: gpio5
-      channel: 0
-  i2c:
-    expansion:
-      peripheral: i2c0
-      scl: gpio6
-      sda: gpio7
-      frequency-hz: 400000
-  spi:
-    storage:
-      peripheral: spi2
-      sck: gpio8
-      mosi: gpio9
-      miso: gpio10
-      frequency-hz: 20000000
+    expansion-clock:
+      pin: gpio6
+    expansion-data:
+      pin: gpio7
 builtin-peripherals:
   indicator:
     driver: gpio-indicator
@@ -96,48 +72,8 @@ builtin-peripherals:
     assert!(board.has_hardware_surface());
     let io = board.exposed_io();
 
-    assert_eq!(
-        io.gpio("user-control").map(|gpio| gpio.pin()),
-        Some("gpio2")
-    );
-    assert_eq!(
-        io.analog_input("sensor-voltage").map(|input| (
-            input.peripheral(),
-            input.pin(),
-            input.channel()
-        )),
-        Some(("adc1", "gpio3", 2))
-    );
-    assert_eq!(
-        io.analog_output("reference-voltage").map(|output| (
-            output.peripheral(),
-            output.pin(),
-            output.channel()
-        )),
-        Some(("dac1", "gpio4", 1))
-    );
-    assert_eq!(
-        io.pwm("actuator")
-            .map(|pwm| (pwm.peripheral(), pwm.pin(), pwm.channel())),
-        Some(("ledc0", "gpio5", 0))
-    );
-    assert_eq!(
-        io.i2c("expansion")
-            .map(|i2c| (i2c.peripheral(), i2c.scl(), i2c.sda(), i2c.frequency_hz())),
-        Some(("i2c0", "gpio6", "gpio7", 400_000))
-    );
-    assert_eq!(
-        io.spi("storage").map(|spi| {
-            (
-                spi.peripheral(),
-                spi.sck(),
-                spi.mosi(),
-                spi.miso(),
-                spi.frequency_hz(),
-            )
-        }),
-        Some(("spi2", "gpio8", Some("gpio9"), Some("gpio10"), 20_000_000))
-    );
+    assert_eq!(io.pin("user-control").map(|pin| pin.pin()), Some("gpio2"));
+    assert_eq!(io.pins().count(), 3);
     assert_eq!(
         board
             .builtin_peripheral("indicator")
@@ -162,6 +98,37 @@ builtin-peripherals:
             PeripheralParameter::String(String::from("pulse")),
         ]))
     );
+}
+
+#[test]
+fn internal_io_reports_controllers_reserved_from_runtime_pools() {
+    let board = parse(
+        r#"
+name: reserved-controllers
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  i2c-device:
+    codec-control:
+      peripheral: I2C0
+      scl: GPIO1
+      sda: GPIO2
+      frequency-hz: 400000
+  spi-bus:
+    pixels:
+      peripheral: SPI2
+      sck: GPIO3
+      mosi: GPIO4
+      frequency-hz: 8000000
+"#,
+    )
+    .expect("valid internal resources");
+
+    assert!(board.internal_io().uses_controller("I2C0"));
+    assert!(board.internal_io().uses_controller("SPI2"));
+    assert!(!board.internal_io().uses_controller("I2C1"));
 }
 
 #[test]
@@ -209,6 +176,105 @@ builtin-peripherals:
 }
 
 #[test]
+fn parses_driver_data_plane_resources() {
+    let board = parse(
+        r#"
+name: media-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+internal-io:
+  spi-bus:
+    pixels:
+      peripheral: SPI2
+      sck: GPIO1
+      mosi: GPIO2
+      frequency-hz: 2400000
+  camera-capture:
+    camera:
+      peripheral: LCD_CAM
+      dma: DMA_CH0
+      xclk: GPIO3
+      pclk: GPIO4
+      vsync: GPIO5
+      href: GPIO6
+      data: [GPIO7, GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14]
+      xclk-frequency-hz: 20000000
+      dma-buffer-bytes: 98304
+  i2s-stream:
+    audio:
+      peripheral: I2S0
+      dma: DMA_CH1
+      bclk: GPIO15
+      ws: GPIO16
+      dout: GPIO17
+      din: GPIO18
+      mclk: GPIO19
+      sample-rate-hz: 16000
+      channels: 2
+      bits-per-sample: 16
+      dma-buffer-bytes: 1024
+"#,
+    )
+    .expect("valid Driver data planes");
+
+    let pixels = board.internal_io().spi_bus("pixels").expect("SPI bus");
+    assert_eq!(
+        (pixels.peripheral(), pixels.frequency_hz()),
+        ("SPI2", 2_400_000)
+    );
+    let camera = board
+        .internal_io()
+        .camera_capture("camera")
+        .expect("camera receiver");
+    assert_eq!(
+        (camera.data()[7].as_str(), camera.dma_buffer_bytes()),
+        ("GPIO14", 98_304)
+    );
+    let audio = board.internal_io().i2s_stream("audio").expect("I2S stream");
+    assert_eq!(
+        (
+            audio.sample_rate_hz(),
+            audio.channels(),
+            audio.bits_per_sample(),
+            audio.dma_buffer_bytes()
+        ),
+        (16_000, 2, 16, 1_024)
+    );
+}
+
+#[test]
+fn parses_internal_i2c_device_reserved_for_a_builtin_driver() {
+    let board = parse(
+        r#"
+name: sensor-board
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  i2c-device:
+    environment-bus:
+      peripheral: I2C0
+      scl: GPIO1
+      sda: GPIO2
+      frequency-hz: 400000
+"#,
+    )
+    .expect("valid internal I2C bus");
+    let i2c = board
+        .internal_io()
+        .i2c_device("environment-bus")
+        .expect("environment I2C bus");
+
+    assert_eq!(i2c.peripheral(), "I2C0");
+    assert_eq!(i2c.scl(), "GPIO1");
+    assert_eq!(i2c.sda(), "GPIO2");
+    assert_eq!(i2c.frequency_hz(), 400_000);
+}
+
+#[test]
 fn board_without_io_or_builtins_has_no_hardware_surface() {
     let board = parse(VALID).expect("valid Board YAML");
 
@@ -216,7 +282,7 @@ fn board_without_io_or_builtins_has_no_hardware_surface() {
 }
 
 #[test]
-fn accepts_repeated_physical_identifiers_across_declarations() {
+fn one_exposed_pin_is_not_preassigned_to_a_function() {
     let yaml = r#"
 name: muxed-product
 hardware:
@@ -224,23 +290,16 @@ hardware:
 native-layout:
   artifact: partitions.csv
 exposed-io:
-  gpio:
+  pins:
     raw-line:
-      pin: gpio2
-  i2c:
-    expansion:
-      peripheral: i2c0
-      scl: gpio2
-      sda: gpio3
-      frequency-hz: 100000
-builtin-peripherals:
-  indicator:
-    driver: gpio-indicator
-    bindings:
       pin: gpio2
 "#;
 
-    parse(yaml).expect("the common schema assigns no overlap policy");
+    let board = parse(yaml).expect("multifunction exposed pin");
+    assert_eq!(
+        board.exposed_io().pin("raw-line").map(|pin| pin.pin()),
+        Some("gpio2")
+    );
 }
 
 #[test]
@@ -252,7 +311,7 @@ hardware:
 native-layout:
   artifact: partitions.csv
 exposed-io:
-  gpio:
+  pins:
     user-control:
       pin: ''
 "#;
@@ -274,8 +333,8 @@ hardware:
   chip: esp32c6
 native-layout:
   artifact: partitions.csv
-exposed-io:
-  i2c:
+internal-io:
+  i2c-device:
     expansion:
       peripheral: i2c0
       scl: gpio6
@@ -287,6 +346,61 @@ exposed-io:
         parse(yaml).unwrap_err(),
         ConfigError::ZeroProtocolFrequency {
             resource: String::from("expansion"),
+        }
+    );
+}
+
+#[test]
+fn rejects_zero_driver_dma_buffer() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  camera-capture:
+    camera:
+      peripheral: LCD_CAM
+      dma: DMA_CH0
+      xclk: GPIO15
+      pclk: GPIO13
+      vsync: GPIO6
+      href: GPIO7
+      data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
+      xclk-frequency-hz: 20000000
+      dma-buffer-bytes: 0
+"#;
+
+    assert_eq!(
+        parse(yaml).unwrap_err(),
+        ConfigError::ZeroDmaBuffer {
+            resource: String::from("camera"),
+        }
+    );
+}
+
+#[test]
+fn rejects_spi_without_a_data_pin() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32c6
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  spi-device:
+    sensor:
+      peripheral: SPI2
+      sck: GPIO6
+      chip-select: GPIO7
+      frequency-hz: 10000000
+"#;
+
+    assert_eq!(
+        parse(yaml).unwrap_err(),
+        ConfigError::MissingSpiDataPin {
+            resource: String::from("sensor"),
         }
     );
 }

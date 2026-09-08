@@ -224,15 +224,33 @@ impl BoardDefinition {
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct InternalIoDefinition {
+    #[serde(default, rename = "spi-bus")]
+    spi_buses: BTreeMap<String, SpiDefinition>,
     #[serde(default, rename = "spi-device")]
     spi_devices: BTreeMap<String, SpiDeviceDefinition>,
+    #[serde(default, rename = "i2c-device")]
+    i2c_devices: BTreeMap<String, I2cDefinition>,
+    #[serde(default, rename = "camera-capture")]
+    camera_captures: BTreeMap<String, CameraCaptureDefinition>,
+    #[serde(default, rename = "i2s-stream")]
+    i2s_streams: BTreeMap<String, I2sStreamDefinition>,
 }
 
 impl InternalIoDefinition {
     /// Returns whether no internal resources are declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.spi_devices.is_empty()
+        self.spi_buses.is_empty()
+            && self.spi_devices.is_empty()
+            && self.i2c_devices.is_empty()
+            && self.camera_captures.is_empty()
+            && self.i2s_streams.is_empty()
+    }
+
+    /// Finds one SPI bus reserved by a built-in Driver.
+    #[must_use]
+    pub fn spi_bus(&self, name: &str) -> Option<&SpiDefinition> {
+        self.spi_buses.get(name)
     }
 
     /// Finds one statically selected SPI device by its Board-local name.
@@ -241,7 +259,65 @@ impl InternalIoDefinition {
         self.spi_devices.get(name)
     }
 
+    /// Finds one statically selected I2C bus reserved by a built-in Driver.
+    #[must_use]
+    pub fn i2c_device(&self, name: &str) -> Option<&I2cDefinition> {
+        self.i2c_devices.get(name)
+    }
+
+    /// Finds one parallel camera receiver reserved by a built-in Driver.
+    #[must_use]
+    pub fn camera_capture(&self, name: &str) -> Option<&CameraCaptureDefinition> {
+        self.camera_captures.get(name)
+    }
+
+    /// Finds one I2S stream reserved by a built-in Driver.
+    #[must_use]
+    pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
+        self.i2s_streams.get(name)
+    }
+
+    /// Returns whether a fixed built-in declaration consumes this controller.
+    ///
+    /// Runtime I/O controller pools use this to exclude singleton tokens that
+    /// are already assigned to statically composed Driver bindings.
+    #[must_use]
+    pub fn uses_controller(&self, peripheral: &str) -> bool {
+        self.spi_buses
+            .values()
+            .any(|binding| binding.peripheral == peripheral)
+            || self
+                .spi_devices
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .i2c_devices
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .camera_captures
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .i2s_streams
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
+        for (name, spi) in &self.spi_buses {
+            validate_resource_name("internal spi-bus", name)?;
+            validate_identifier(name, "peripheral", &spi.peripheral)?;
+            validate_identifier(name, "sck", &spi.sck)?;
+            if let Some(mosi) = &spi.mosi {
+                validate_identifier(name, "mosi", mosi)?;
+            }
+            if let Some(miso) = &spi.miso {
+                validate_identifier(name, "miso", miso)?;
+            }
+            validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
+            validate_frequency(name, spi.frequency_hz)?;
+        }
         for (name, spi) in &self.spi_devices {
             validate_resource_name("internal spi-device", name)?;
             validate_identifier(name, "peripheral", &spi.peripheral)?;
@@ -253,7 +329,215 @@ impl InternalIoDefinition {
             if let Some(miso) = &spi.miso {
                 validate_identifier(name, "miso", miso)?;
             }
+            validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
             validate_frequency(name, spi.frequency_hz)?;
+        }
+        for (name, i2c) in &self.i2c_devices {
+            validate_resource_name("internal i2c-device", name)?;
+            i2c.validate(name)?;
+        }
+        for (name, camera) in &self.camera_captures {
+            validate_resource_name("internal camera-capture", name)?;
+            camera.validate(name)?;
+        }
+        for (name, stream) in &self.i2s_streams {
+            validate_resource_name("internal i2s-stream", name)?;
+            stream.validate(name)?;
+        }
+        Ok(())
+    }
+}
+
+/// One parallel camera receiver and its fixed Board wiring.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CameraCaptureDefinition {
+    peripheral: String,
+    dma: String,
+    xclk: String,
+    pclk: String,
+    vsync: String,
+    href: String,
+    data: [String; 8],
+    #[serde(rename = "xclk-frequency-hz")]
+    xclk_frequency_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl CameraCaptureDefinition {
+    /// Returns the chip-native camera controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the sensor master-clock pin.
+    #[must_use]
+    pub fn xclk(&self) -> &str {
+        &self.xclk
+    }
+    /// Returns the sensor pixel-clock pin.
+    #[must_use]
+    pub fn pclk(&self) -> &str {
+        &self.pclk
+    }
+    /// Returns the vertical-sync pin.
+    #[must_use]
+    pub fn vsync(&self) -> &str {
+        &self.vsync
+    }
+    /// Returns the horizontal-reference pin.
+    #[must_use]
+    pub fn href(&self) -> &str {
+        &self.href
+    }
+    /// Returns the eight parallel data pins in least-significant-bit order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 8] {
+        &self.data
+    }
+    /// Returns the sensor master-clock frequency.
+    #[must_use]
+    pub const fn xclk_frequency_hz(&self) -> u32 {
+        self.xclk_frequency_hz
+    }
+    /// Returns the statically allocated DMA frame-buffer capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", self.peripheral.as_str()),
+            ("dma", self.dma.as_str()),
+            ("xclk", self.xclk.as_str()),
+            ("pclk", self.pclk.as_str()),
+            ("vsync", self.vsync.as_str()),
+            ("href", self.href.as_str()),
+        ] {
+            validate_identifier(name, field, value)?;
+        }
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        validate_frequency(name, self.xclk_frequency_hz)?;
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One full-duplex I2S controller and its fixed Board wiring.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct I2sStreamDefinition {
+    peripheral: String,
+    dma: String,
+    bclk: String,
+    ws: String,
+    dout: String,
+    din: String,
+    #[serde(default)]
+    mclk: Option<String>,
+    #[serde(rename = "sample-rate-hz")]
+    sample_rate_hz: u32,
+    channels: u8,
+    #[serde(rename = "bits-per-sample")]
+    bits_per_sample: u8,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl I2sStreamDefinition {
+    /// Returns the chip-native I2S controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the bit-clock pin.
+    #[must_use]
+    pub fn bclk(&self) -> &str {
+        &self.bclk
+    }
+    /// Returns the word-select pin.
+    #[must_use]
+    pub fn ws(&self) -> &str {
+        &self.ws
+    }
+    /// Returns the controller-to-codec data pin.
+    #[must_use]
+    pub fn dout(&self) -> &str {
+        &self.dout
+    }
+    /// Returns the codec-to-controller data pin.
+    #[must_use]
+    pub fn din(&self) -> &str {
+        &self.din
+    }
+    /// Returns the optional master-clock pin.
+    #[must_use]
+    pub fn mclk(&self) -> Option<&str> {
+        self.mclk.as_deref()
+    }
+    /// Returns the sample rate.
+    #[must_use]
+    pub const fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+    /// Returns the channel count.
+    #[must_use]
+    pub const fn channels(&self) -> u8 {
+        self.channels
+    }
+    /// Returns the valid PCM bits in each word.
+    #[must_use]
+    pub const fn bits_per_sample(&self) -> u8 {
+        self.bits_per_sample
+    }
+    /// Returns each statically allocated I2S DMA buffer's capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", self.peripheral.as_str()),
+            ("dma", self.dma.as_str()),
+            ("bclk", self.bclk.as_str()),
+            ("ws", self.ws.as_str()),
+            ("dout", self.dout.as_str()),
+            ("din", self.din.as_str()),
+        ] {
+            validate_identifier(name, field, value)?;
+        }
+        if let Some(mclk) = &self.mclk {
+            validate_identifier(name, "mclk", mclk)?;
+        }
+        validate_frequency(name, self.sample_rate_hz)?;
+        if self.channels == 0 || self.bits_per_sample == 0 {
+            return Err(ConfigError::InvalidI2sFormat {
+                resource: name.to_owned(),
+            });
+        }
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
+                resource: name.to_owned(),
+            });
         }
         Ok(())
     }
@@ -264,29 +548,14 @@ impl InternalIoDefinition {
 #[serde(deny_unknown_fields)]
 pub struct ExposedIoDefinition {
     #[serde(default)]
-    gpio: BTreeMap<String, GpioDefinition>,
-    #[serde(default, rename = "analog-input")]
-    analog_input: BTreeMap<String, AnalogChannelDefinition>,
-    #[serde(default, rename = "analog-output")]
-    analog_output: BTreeMap<String, AnalogChannelDefinition>,
-    #[serde(default)]
-    pwm: BTreeMap<String, PwmDefinition>,
-    #[serde(default)]
-    i2c: BTreeMap<String, I2cDefinition>,
-    #[serde(default)]
-    spi: BTreeMap<String, SpiDefinition>,
+    pins: BTreeMap<String, PinDefinition>,
 }
 
 impl ExposedIoDefinition {
     /// Returns the total number of explicitly exposed I/O resources.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.gpio.len()
-            + self.analog_input.len()
-            + self.analog_output.len()
-            + self.pwm.len()
-            + self.i2c.len()
-            + self.spi.len()
+        self.pins.len()
     }
 
     /// Returns whether no I/O resources are exposed.
@@ -295,98 +564,34 @@ impl ExposedIoDefinition {
         self.len() == 0
     }
 
-    /// Finds a dynamically configurable digital GPIO by its Board-level name.
+    /// Finds one multifunction physical pin by its Board-level name.
     #[must_use]
-    pub fn gpio(&self, name: &str) -> Option<&GpioDefinition> {
-        self.gpio.get(name)
+    pub fn pin(&self, name: &str) -> Option<&PinDefinition> {
+        self.pins.get(name)
     }
 
-    /// Iterates exposed GPIO declarations in stable Board-name order.
-    pub fn gpios(&self) -> impl Iterator<Item = (&str, &GpioDefinition)> {
-        self.gpio.iter().map(|(name, gpio)| (name.as_str(), gpio))
-    }
-
-    /// Finds an analog input channel by its Board-level name.
-    #[must_use]
-    pub fn analog_input(&self, name: &str) -> Option<&AnalogChannelDefinition> {
-        self.analog_input.get(name)
-    }
-
-    /// Finds an analog output channel by its Board-level name.
-    #[must_use]
-    pub fn analog_output(&self, name: &str) -> Option<&AnalogChannelDefinition> {
-        self.analog_output.get(name)
-    }
-
-    /// Finds a PWM output by its Board-level name.
-    #[must_use]
-    pub fn pwm(&self, name: &str) -> Option<&PwmDefinition> {
-        self.pwm.get(name)
-    }
-
-    /// Finds an I2C controller by its Board-level name.
-    #[must_use]
-    pub fn i2c(&self, name: &str) -> Option<&I2cDefinition> {
-        self.i2c.get(name)
-    }
-
-    /// Finds an SPI controller by its Board-level name.
-    #[must_use]
-    pub fn spi(&self, name: &str) -> Option<&SpiDefinition> {
-        self.spi.get(name)
+    /// Iterates exposed physical pins in stable Board-name order.
+    pub fn pins(&self) -> impl Iterator<Item = (&str, &PinDefinition)> {
+        self.pins.iter().map(|(name, pin)| (name.as_str(), pin))
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        for (name, gpio) in &self.gpio {
-            validate_resource_name("gpio", name)?;
-            validate_identifier(name, "pin", &gpio.pin)?;
-        }
-        for (section, channels) in [
-            ("analog-input", &self.analog_input),
-            ("analog-output", &self.analog_output),
-        ] {
-            for (name, channel) in channels {
-                validate_resource_name(section, name)?;
-                validate_identifier(name, "peripheral", &channel.peripheral)?;
-                validate_identifier(name, "pin", &channel.pin)?;
-            }
-        }
-        for (name, pwm) in &self.pwm {
-            validate_resource_name("pwm", name)?;
-            validate_identifier(name, "peripheral", &pwm.peripheral)?;
-            validate_identifier(name, "pin", &pwm.pin)?;
-        }
-        for (name, i2c) in &self.i2c {
-            validate_resource_name("i2c", name)?;
-            validate_identifier(name, "peripheral", &i2c.peripheral)?;
-            validate_identifier(name, "scl", &i2c.scl)?;
-            validate_identifier(name, "sda", &i2c.sda)?;
-            validate_frequency(name, i2c.frequency_hz)?;
-        }
-        for (name, spi) in &self.spi {
-            validate_resource_name("spi", name)?;
-            validate_identifier(name, "peripheral", &spi.peripheral)?;
-            validate_identifier(name, "sck", &spi.sck)?;
-            if let Some(mosi) = &spi.mosi {
-                validate_identifier(name, "mosi", mosi)?;
-            }
-            if let Some(miso) = &spi.miso {
-                validate_identifier(name, "miso", miso)?;
-            }
-            validate_frequency(name, spi.frequency_hz)?;
+        for (name, pin) in &self.pins {
+            validate_resource_name("pin", name)?;
+            validate_identifier(name, "pin", &pin.pin)?;
         }
         Ok(())
     }
 }
 
-/// One exposed digital GPIO declaration.
+/// One exposed multifunction physical pin.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct GpioDefinition {
+pub struct PinDefinition {
     pin: String,
 }
 
-impl GpioDefinition {
+impl PinDefinition {
     /// Returns the chip-native pin identifier.
     #[must_use]
     pub fn pin(&self) -> &str {
@@ -394,65 +599,7 @@ impl GpioDefinition {
     }
 }
 
-/// One ADC or DAC channel declaration.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct AnalogChannelDefinition {
-    peripheral: String,
-    pin: String,
-    channel: u8,
-}
-
-impl AnalogChannelDefinition {
-    /// Returns the chip-native ADC or DAC peripheral identifier.
-    #[must_use]
-    pub fn peripheral(&self) -> &str {
-        &self.peripheral
-    }
-
-    /// Returns the chip-native pin identifier.
-    #[must_use]
-    pub fn pin(&self) -> &str {
-        &self.pin
-    }
-
-    /// Returns the peripheral channel number.
-    #[must_use]
-    pub const fn channel(&self) -> u8 {
-        self.channel
-    }
-}
-
-/// One PWM channel declaration.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PwmDefinition {
-    peripheral: String,
-    pin: String,
-    channel: u8,
-}
-
-impl PwmDefinition {
-    /// Returns the chip-native PWM peripheral identifier.
-    #[must_use]
-    pub fn peripheral(&self) -> &str {
-        &self.peripheral
-    }
-
-    /// Returns the chip-native pin identifier.
-    #[must_use]
-    pub fn pin(&self) -> &str {
-        &self.pin
-    }
-
-    /// Returns the peripheral channel number.
-    #[must_use]
-    pub const fn channel(&self) -> u8 {
-        self.channel
-    }
-}
-
-/// One exposed I2C controller and its signal pins.
+/// One statically wired I2C controller used by a built-in Driver.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct I2cDefinition {
@@ -487,9 +634,16 @@ impl I2cDefinition {
     pub const fn frequency_hz(&self) -> u32 {
         self.frequency_hz
     }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_identifier(name, "scl", &self.scl)?;
+        validate_identifier(name, "sda", &self.sda)?;
+        validate_frequency(name, self.frequency_hz)
+    }
 }
 
-/// One exposed SPI controller and its signal pins.
+/// One statically wired SPI controller used by a built-in Driver.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SpiDefinition {
@@ -683,6 +837,20 @@ fn validate_frequency(resource: &str, frequency_hz: u32) -> Result<(), ConfigErr
     }
 }
 
+fn validate_spi_data_pin(
+    resource: &str,
+    mosi: Option<&str>,
+    miso: Option<&str>,
+) -> Result<(), ConfigError> {
+    if mosi.is_none() && miso.is_none() {
+        Err(ConfigError::MissingSpiDataPin {
+            resource: resource.to_owned(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Concrete hardware facts shared with Platform build validation.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -767,6 +935,24 @@ pub enum ConfigError {
     #[error("Board protocol resource `{resource}` frequency must be greater than zero")]
     ZeroProtocolFrequency {
         /// Board-level resource name.
+        resource: String,
+    },
+    /// An SPI declaration has neither a controller-output nor controller-input pin.
+    #[error("Board SPI resource `{resource}` must declare `mosi`, `miso`, or both")]
+    MissingSpiDataPin {
+        /// Board-level SPI resource name.
+        resource: String,
+    },
+    /// An I2S stream has no channels or no valid sample bits.
+    #[error("Board I2S stream `{resource}` must have channels and sample bits")]
+    InvalidI2sFormat {
+        /// Board-level I2S resource name.
+        resource: String,
+    },
+    /// A DMA-backed media resource requested no storage.
+    #[error("Board DMA resource `{resource}` buffer must be greater than zero bytes")]
+    ZeroDmaBuffer {
+        /// Board-level camera or I2S resource name.
         resource: String,
     },
 }

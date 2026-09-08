@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 use barracuda_platform_config::{
-    discover_platforms, resolve_board_platform, resolve_platform, PlatformTarget,
+    discover_platforms, resolve_board_platform, resolve_platform, HalBinding, PlatformTarget,
 };
 use tempfile::tempdir;
 
@@ -17,7 +17,7 @@ fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
     fs::write(
         directory.join("platform.yml"),
         format!(
-            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
+            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
     )
     .expect("Platform manifest");
@@ -52,6 +52,11 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     assert_eq!(board.directory(), root.path().join("platforms/acme-rv"));
     assert_eq!(board.application().support_binaries(), ["acme-network"]);
     assert!(board.cargo_features_for_chip("acme123-pro").is_empty());
+    assert!(board.hal().supports(HalBinding::DigitalOutput));
+    assert!(board.hal().supports(HalBinding::I2cDevice));
+    assert!(!board.hal().supports(HalBinding::SpiDevice));
+    assert_eq!(board.hal().runtime_i2c_controllers(), ["I2C0", "I2C1"]);
+    assert_eq!(board.hal().runtime_spi_controllers(), ["SPI2"]);
     assert_eq!(
         board
             .application()

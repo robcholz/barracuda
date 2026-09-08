@@ -2,6 +2,10 @@
 
 #![no_std]
 
+/// Platform-owned GPIO, SPI, I2C, DVP camera, I2S, and delay implementation.
+#[cfg(target_arch = "xtensa")]
+pub mod hal;
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32S3RegionAccess {

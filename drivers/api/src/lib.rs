@@ -354,3 +354,301 @@ pub mod indicator {
         fn take_indicator(&mut self) -> Option<Self::Indicator>;
     }
 }
+
+/// Stable addressable LED-strip capability API.
+pub mod led_strip {
+    /// One additive RGB pixel with eight bits per component.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Rgb8 {
+        /// Red intensity.
+        pub red: u8,
+        /// Green intensity.
+        pub green: u8,
+        /// Blue intensity.
+        pub blue: u8,
+    }
+
+    impl Rgb8 {
+        /// Creates one RGB pixel.
+        #[must_use]
+        pub const fn new(red: u8, green: u8, blue: u8) -> Self {
+            Self { red, green, blue }
+        }
+    }
+
+    /// Semantic pixel output independent of its wire protocol.
+    pub trait LedStrip {
+        /// Concrete transfer failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the number of addressable pixels wired on the Board.
+        fn len(&self) -> usize;
+
+        /// Returns whether the strip has no addressable pixels.
+        fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
+
+        /// Replaces the strip contents. Missing trailing pixels are turned off.
+        fn write(&mut self, pixels: &[Rgb8]) -> Result<(), Self::Error>;
+
+        /// Turns every pixel off.
+        fn clear(&mut self) -> Result<(), Self::Error> {
+            self.write(&[])
+        }
+    }
+
+    /// Move-only access to the Board's primary built-in LED strip.
+    pub trait BuiltinLedStrip {
+        /// Concrete, statically dispatched LED-strip capability.
+        type LedStrip: LedStrip;
+
+        /// Transfers the primary LED strip to its sole consumer once.
+        fn take_led_strip(&mut self) -> Option<Self::LedStrip>;
+    }
+}
+
+/// Stable camera capability API.
+pub mod camera {
+    use core::future::Future;
+
+    /// Error family for a Platform-owned camera data receiver.
+    pub trait FrameReceiverErrorType {
+        /// Error returned while receiving one sensor frame.
+        type Error: core::error::Error;
+    }
+
+    /// Narrow data-plane binding used by parallel camera sensor Drivers.
+    ///
+    /// Sensor control continues to use `embedded-hal` I2C and GPIO traits. A
+    /// Platform implements this binding only for the camera receiver mechanism
+    /// that `embedded-hal` does not standardize.
+    pub trait FrameReceiver: FrameReceiverErrorType {
+        /// Receives one complete frame and returns its initialized byte count.
+        fn receive<'a>(
+            &'a mut self,
+            frame: &'a mut [u8],
+        ) -> impl Future<Output = Result<usize, Self::Error>> + 'a;
+    }
+
+    /// Pixel representation produced by a Camera Driver.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub enum CameraPixelFormat {
+        /// JPEG-compressed byte stream.
+        Jpeg,
+        /// Packed RGB565 pixels.
+        Rgb565,
+        /// Packed YUV 4:2:2 pixels.
+        Yuv422,
+        /// Eight-bit grayscale pixels.
+        Grayscale,
+    }
+
+    /// Stable description of a configured camera stream.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CameraDescriptor {
+        width: u16,
+        height: u16,
+        pixel_format: CameraPixelFormat,
+    }
+
+    impl CameraDescriptor {
+        /// Creates a camera stream descriptor.
+        #[must_use]
+        pub const fn new(width: u16, height: u16, pixel_format: CameraPixelFormat) -> Self {
+            Self {
+                width,
+                height,
+                pixel_format,
+            }
+        }
+
+        /// Returns the active width in pixels.
+        #[must_use]
+        pub const fn width(self) -> u16 {
+            self.width
+        }
+
+        /// Returns the active height in pixels.
+        #[must_use]
+        pub const fn height(self) -> u16 {
+            self.height
+        }
+
+        /// Returns the produced pixel representation.
+        #[must_use]
+        pub const fn pixel_format(self) -> CameraPixelFormat {
+            self.pixel_format
+        }
+    }
+
+    /// One captured frame stored in the caller-provided buffer.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CapturedFrame {
+        bytes_used: usize,
+        descriptor: CameraDescriptor,
+    }
+
+    impl CapturedFrame {
+        /// Creates frame metadata after a successful capture.
+        #[must_use]
+        pub const fn new(bytes_used: usize, descriptor: CameraDescriptor) -> Self {
+            Self {
+                bytes_used,
+                descriptor,
+            }
+        }
+
+        /// Returns the initialized prefix length in the capture buffer.
+        #[must_use]
+        pub const fn bytes_used(self) -> usize {
+            self.bytes_used
+        }
+
+        /// Returns the format and dimensions of this frame.
+        #[must_use]
+        pub const fn descriptor(self) -> CameraDescriptor {
+            self.descriptor
+        }
+    }
+
+    /// Semantic still-frame camera capability.
+    pub trait Camera {
+        /// Concrete control or capture failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the configured stream description.
+        fn descriptor(&self) -> CameraDescriptor;
+
+        /// Captures one frame into caller-owned memory.
+        fn capture<'a>(
+            &'a mut self,
+            buffer: &'a mut [u8],
+        ) -> impl Future<Output = Result<CapturedFrame, Self::Error>> + 'a;
+    }
+
+    /// Move-only access to the Board's primary built-in camera.
+    pub trait BuiltinCamera {
+        /// Concrete, statically dispatched camera capability.
+        type Camera: Camera;
+
+        /// Transfers the primary camera to its sole consumer once.
+        fn take_camera(&mut self) -> Option<Self::Camera>;
+    }
+}
+
+/// Stable audio-codec capability API.
+pub mod audio {
+    use core::future::Future;
+
+    /// Wire format of a Platform-owned PCM data stream.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct PcmFormat {
+        /// Audio samples per second, per channel.
+        pub sample_rate_hz: u32,
+        /// Number of interleaved channels.
+        pub channels: u8,
+        /// Valid audio bits carried in each word.
+        pub bits_per_sample: u8,
+        /// External master-clock frequency, or `None` when the codec derives
+        /// its clock from BCLK.
+        pub master_clock_hz: Option<u32>,
+    }
+
+    /// Narrow PCM data-plane binding used by audio-codec Drivers.
+    ///
+    /// Codec control continues to use `embedded-hal` I2C. A Platform implements
+    /// this binding for I2S/PCM transfer, which `embedded-hal` does not
+    /// standardize.
+    pub trait PcmStream {
+        /// Error returned by a PCM transfer.
+        type Error: core::error::Error;
+
+        /// Returns the configured wire format.
+        fn format(&self) -> PcmFormat;
+
+        /// Writes interleaved signed 16-bit samples.
+        fn write<'a>(
+            &'a mut self,
+            samples: &'a [i16],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        /// Reads interleaved signed 16-bit samples.
+        fn read<'a>(
+            &'a mut self,
+            samples: &'a mut [i16],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+    }
+
+    /// Stable description of one configured PCM stream.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct AudioDescriptor {
+        sample_rate_hz: u32,
+        channels: u8,
+        bits_per_sample: u8,
+    }
+
+    impl AudioDescriptor {
+        /// Creates an interleaved PCM stream descriptor.
+        #[must_use]
+        pub const fn new(sample_rate_hz: u32, channels: u8, bits_per_sample: u8) -> Self {
+            Self {
+                sample_rate_hz,
+                channels,
+                bits_per_sample,
+            }
+        }
+
+        /// Returns the sample rate in hertz.
+        #[must_use]
+        pub const fn sample_rate_hz(self) -> u32 {
+            self.sample_rate_hz
+        }
+
+        /// Returns the number of interleaved channels.
+        #[must_use]
+        pub const fn channels(self) -> u8 {
+            self.channels
+        }
+
+        /// Returns the valid PCM bits in each I2S word.
+        #[must_use]
+        pub const fn bits_per_sample(self) -> u8 {
+            self.bits_per_sample
+        }
+    }
+
+    /// Semantic PCM input/output backed by an external audio codec.
+    pub trait AudioCodec {
+        /// Concrete register or stream failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the configured PCM stream description.
+        fn descriptor(&self) -> AudioDescriptor;
+
+        /// Sets output volume on a portable `0..=255` scale.
+        fn set_output_volume(&mut self, volume: u8) -> Result<(), Self::Error>;
+
+        /// Writes interleaved signed PCM samples.
+        fn write<'a>(
+            &'a mut self,
+            samples: &'a [i16],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        /// Reads interleaved signed PCM samples.
+        fn read<'a>(
+            &'a mut self,
+            samples: &'a mut [i16],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+    }
+
+    /// Move-only access to the Board's primary built-in audio codec.
+    pub trait BuiltinAudioCodec {
+        /// Concrete, statically dispatched codec capability.
+        type AudioCodec: AudioCodec;
+
+        /// Transfers the primary codec to its sole consumer once.
+        fn take_audio_codec(&mut self) -> Option<Self::AudioCodec>;
+    }
+}

@@ -1,0 +1,18 @@
+id: es8311-audio-codec
+api-version: 1
+capability: audio-codec
+implementation:
+  package: barracuda-es8311-audio-codec
+  crate: barracuda_es8311_audio_codec
+  factory: "::{{crate}}::Es8311AudioCodecDriver<{{binding.control.type}}, {{binding.stream.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Es8311Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Es8311Config::new({{parameter.address}})"
+bindings:
+  control:
+    kind: i2c-device
+  stream:
+    kind: i2s-stream
+parameters:
+  address:
+    type: integer
+    default: 24

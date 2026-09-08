@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "boards/api",
-    "boards/chips/*",
     "boards/config",
     "drivers/*",
     "boards/tool",
@@ -36,15 +35,16 @@ barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
-# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES
-barracuda-chip-esp32 = { path = "boards/chips/esp32" }
-barracuda-chip-esp32s3 = { path = "boards/chips/esp32s3" }
-barracuda-chip-stm32f429zi = { path = "boards/chips/stm32f429zi" }
-# END GENERATED BOARD WORKSPACE DEPENDENCIES
 # BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES
+barracuda-apa102-led-strip = { path = "drivers/apa102-led-strip" }
+barracuda-es8311-audio-codec = { path = "drivers/es8311-audio-codec" }
+barracuda-es8389-audio-codec = { path = "drivers/es8389-audio-codec" }
 barracuda-gdeh0154d67-display = { path = "drivers/gdeh0154d67-display" }
 barracuda-indicator-led = { path = "drivers/indicator-led" }
 barracuda-mipi-dbi-display = { path = "drivers/mipi-dbi-display" }
+barracuda-ov2640-camera = { path = "drivers/ov2640-camera" }
+barracuda-ov3660-camera = { path = "drivers/ov3660-camera" }
+barracuda-ws2812-spi-led-strip = { path = "drivers/ws2812-spi-led-strip" }
 # END GENERATED DRIVER WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }

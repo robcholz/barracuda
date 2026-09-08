@@ -2,6 +2,10 @@ name: esp32c6
 package: barracuda-platform-esp32c6
 crate: barracuda_platform_esp32c6
 type: Esp32c6Platform
+hal:
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, i2c-device]
+  runtime-i2c-controllers: [I2C0]
+  runtime-spi-controllers: [SPI2]
 selection:
   board-chips:
     - esp32c6

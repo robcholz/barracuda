@@ -10,6 +10,7 @@ barracuda-driver.workspace = true
 embedded-graphics-core.workspace = true
 embedded-hal.workspace = true
 mipidsi.workspace = true
+static_cell.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,16 +1,16 @@
 [package]
-name = "barracuda-chip-stm32f429zi"
+name = "barracuda-es8389-audio-codec"
 version = "0.1.0"
 edition = "2024"
-description = "STM32F429ZI Board binding adapter for generated Barracuda HALs"
+description = "ES8389 audio codec Driver over embedded-hal I2C"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-board-hal.workspace = true
+barracuda-driver.workspace = true
 embedded-hal.workspace = true
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-embassy-stm32 = { version = "0.6.0", default-features = false, features = ["stm32f429zi"] }
+[dev-dependencies]
+embassy-futures.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

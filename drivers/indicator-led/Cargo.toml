@@ -2,7 +2,7 @@
 name = "barracuda-indicator-led"
 version = "0.1.0"
 edition = "2024"
-description = "Reusable indicator LED driver over embedded-hal"
+description = "Reusable indicator LED Driver over embedded-hal"
 license = "Apache-2.0"
 
 [dependencies]

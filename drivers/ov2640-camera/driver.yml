@@ -1,0 +1,24 @@
+id: ov2640-camera
+api-version: 1
+capability: camera
+implementation:
+  package: barracuda-ov2640-camera
+  crate: barracuda_ov2640_camera
+  factory: "::{{crate}}::Ov2640CameraDriver<{{binding.control.type}}, {{binding.capture.type}}, {{binding.reset.type}}, {{binding.power-down.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Ov2640Bindings::new({{binding.control.value}}, {{binding.capture.value}}, {{binding.reset.value}}, {{binding.power-down.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Ov2640Config::qvga_jpeg({{parameter.address}})"
+bindings:
+  control:
+    kind: i2c-device
+  capture:
+    kind: camera-capture
+  reset:
+    kind: digital-output
+    initial: high
+  power-down:
+    kind: digital-output
+    initial: high
+parameters:
+  address:
+    type: integer
+    default: 48

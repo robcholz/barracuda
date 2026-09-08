@@ -7,6 +7,66 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+/// One hardware resource form implemented by a Platform HAL.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HalBinding {
+    /// Digital input construction.
+    DigitalInput,
+    /// Digital output construction.
+    DigitalOutput,
+    /// Runtime-configurable GPIO construction.
+    Gpio,
+    /// Exclusive SPI-device construction.
+    SpiDevice,
+    /// Exclusively owned SPI-bus construction.
+    SpiBus,
+    /// I2C-device construction.
+    I2cDevice,
+    /// Parallel camera receiver construction.
+    CameraCapture,
+    /// Full-duplex I2S stream construction.
+    I2sStream,
+}
+
+/// Hardware construction capabilities implemented alongside one Platform.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HalConfig {
+    #[serde(default)]
+    bindings: Vec<HalBinding>,
+    #[serde(default, rename = "runtime-i2c-controllers")]
+    runtime_i2c_controllers: Vec<String>,
+    #[serde(default, rename = "runtime-spi-controllers")]
+    runtime_spi_controllers: Vec<String>,
+}
+
+impl HalConfig {
+    /// Returns whether this Platform can construct the requested HAL binding.
+    #[must_use]
+    pub fn supports(&self, binding: HalBinding) -> bool {
+        self.bindings.contains(&binding)
+    }
+
+    /// Returns the statically supported binding forms.
+    #[must_use]
+    pub fn bindings(&self) -> &[HalBinding] {
+        &self.bindings
+    }
+
+    /// Returns controller singletons available for runtime I2C routing.
+    #[must_use]
+    pub fn runtime_i2c_controllers(&self) -> &[String] {
+        &self.runtime_i2c_controllers
+    }
+
+    /// Returns controller singletons available for runtime SPI routing.
+    #[must_use]
+    pub fn runtime_spi_controllers(&self) -> &[String] {
+        &self.runtime_spi_controllers
+    }
+}
+
 /// Cargo target properties used to select a concrete Platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlatformTarget<'a> {
@@ -148,6 +208,7 @@ pub struct PlatformDefinition {
     selection: SelectionConfig,
     system_image: SystemImageConfig,
     application: ApplicationConfig,
+    hal: HalConfig,
 }
 
 impl PlatformDefinition {
@@ -193,6 +254,12 @@ impl PlatformDefinition {
         &self.application
     }
 
+    /// Returns hardware construction implemented by this Platform.
+    #[must_use]
+    pub const fn hal(&self) -> &HalConfig {
+        &self.hal
+    }
+
     /// Returns Platform-owned Cargo features needed by one supported chip.
     #[must_use]
     pub fn cargo_features_for_chip(&self, chip: &str) -> &[String] {
@@ -236,6 +303,8 @@ struct PlatformDocument {
     system_image: SystemImageConfig,
     #[serde(default)]
     application: ApplicationConfig,
+    #[serde(default)]
+    hal: HalConfig,
 }
 
 /// Failure while discovering or resolving a Platform.
@@ -517,6 +586,7 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
         selection: document.selection,
         system_image: document.system_image,
         application: document.application,
+        hal: document.hal,
     })
 }
 

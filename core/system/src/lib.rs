@@ -12,7 +12,9 @@ extern crate alloc;
 mod read_only_flash;
 mod resources;
 
-use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
+use barracuda_board_hal::{
+    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
+};
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -75,17 +77,16 @@ where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
     Builtins: Unpin,
-    Io: ExposedIo + Unpin,
-    Io::Gpio: ResourceSet + Send + 'static,
-    <Io::Gpio as ResourceSet>::Resource: ConfigurableDigitalPin + Send,
-    <<Io::Gpio as ResourceSet>::Resource as embedded_hal::digital::ErrorType>::Error:
-        core::fmt::Debug,
-    Io::I2c: ResourceSet + Send + 'static,
-    <Io::I2c as ResourceSet>::Resource: embedded_hal_async::i2c::I2c + Send,
-    <<Io::I2c as ResourceSet>::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
-    Io::Spi: ResourceSet + Send + 'static,
-    <Io::Spi as ResourceSet>::Resource: embedded_hal_async::spi::SpiBus + Send,
-    <<Io::Spi as ResourceSet>::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Io: ExposedIo + DigitalProvider + I2cProvider + SpiProvider + Unpin,
+    Io::Pin: Send,
+    <Io::Pin as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
+    <Io as DigitalProvider>::Error: core::fmt::Display,
+    <Io as I2cProvider>::Bus: Send,
+    <<Io as I2cProvider>::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    <Io as I2cProvider>::Error: core::fmt::Display,
+    <Io as SpiProvider>::Bus: Send,
+    <<Io as SpiProvider>::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    <Io as SpiProvider>::Error: core::fmt::Display,
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///

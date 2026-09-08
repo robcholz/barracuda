@@ -14,14 +14,13 @@ use barracuda_board_config::{
     ConfigError, SelectionError,
 };
 use barracuda_driver_config::{
-    load_catalog, resolve_board, CatalogError, ResolveError as DriverResolveError,
+    load_catalog, render_board_hal_for_platform, resolve_board, validate_platform_hal,
+    CatalogError, GenerateError, ResolveError as DriverResolveError,
 };
 use barracuda_platform_config::{resolve_board_platform, ResolveError as PlatformResolveError};
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
-const WORKSPACE_BEGIN: &str = "# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES";
-const WORKSPACE_END: &str = "# END GENERATED BOARD WORKSPACE DEPENDENCIES";
 const DRIVER_WORKSPACE_BEGIN: &str = "# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES";
 const DRIVER_WORKSPACE_END: &str = "# END GENERATED DRIVER WORKSPACE DEPENDENCIES";
 
@@ -39,7 +38,7 @@ pub enum SyncStatus {
 pub struct SyncReport {
     status: SyncStatus,
     boards: usize,
-    chip_adapters: usize,
+    drivers: usize,
 }
 
 impl SyncReport {
@@ -55,10 +54,10 @@ impl SyncReport {
         self.boards
     }
 
-    /// Returns the number of distinct registered chip adapter packages.
+    /// Returns the number of discovered Driver manifests.
     #[must_use]
-    pub const fn chip_adapters(&self) -> usize {
-        self.chip_adapters
+    pub const fn drivers(&self) -> usize {
+        self.drivers
     }
 }
 
@@ -80,7 +79,7 @@ pub struct Cli {
 /// Operations supported by `cargo board`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Synchronize discovered chip adapters and Drivers into the workspace registry.
+    /// Validate Boards and synchronize Drivers into the workspace registry.
     Sync {
         /// Check whether generated files are current without writing them.
         #[arg(long)]
@@ -146,6 +145,9 @@ pub enum CommandError {
     /// A Board does not satisfy its selected Driver schemas.
     #[error(transparent)]
     DriverComposition(#[from] DriverResolveError),
+    /// A resolved Board cannot be rendered into static Rust bindings.
+    #[error(transparent)]
+    DriverGeneration(#[from] GenerateError),
     /// The Board's Platform could not be resolved.
     #[error(transparent)]
     Platform(#[from] PlatformResolveError),
@@ -194,35 +196,6 @@ pub enum CommandError {
     /// Generated Board dependencies do not match the catalog.
     #[error("Board registry is stale; run `cargo board sync`")]
     StaleRegistry,
-    /// A Board hardware surface has no adapter for its canonical chip ID.
-    #[error("Board `{name}` uses chip `{chip}` but no adapter exists at `{path}`")]
-    ChipAdapterMissing {
-        /// Board requiring an adapter.
-        name: String,
-        /// Canonical chip ID.
-        chip: String,
-        /// Expected adapter manifest.
-        path: PathBuf,
-    },
-    /// A chip adapter has the wrong conventional Cargo package name.
-    #[error("chip `{chip}` adapter package must be `{expected}`, found `{declared}`")]
-    ChipAdapterPackageMismatch {
-        /// Canonical chip ID.
-        chip: String,
-        /// Required package name.
-        expected: String,
-        /// Cargo package name found in the manifest.
-        declared: String,
-    },
-    /// A chip adapter Cargo manifest is malformed.
-    #[error("invalid chip adapter manifest `{path}`: {source}")]
-    ChipAdapterManifest {
-        /// Manifest path.
-        path: PathBuf,
-        /// TOML parsing failure.
-        #[source]
-        source: toml::de::Error,
-    },
     /// The local target runner executable could not be installed.
     #[error("failed to install target runner `{path}`: {source}")]
     RunnerInstall {
@@ -311,11 +284,11 @@ where
             };
             writeln!(
                 output,
-                "{}{action} {} registry ({} Boards, {} chip adapters).",
+                "{}{action} {} registry ({} Boards, {} Drivers).",
                 prefix(color, barracuda_cli_style::SUCCESS, "✔"),
                 styled(color, barracuda_cli_style::EMPHASIS, "Board"),
                 report.boards(),
-                report.chip_adapters()
+                report.drivers()
             )
             .map_err(CommandError::Output)
         }
@@ -391,50 +364,24 @@ pub fn sync(workspace_root: &Path, check: bool) -> Result<(), CommandError> {
     sync_with_report(workspace_root, check).map(|_report| ())
 }
 
-/// Synchronizes discovered chip adapters and Drivers into the tracked workspace registry.
+/// Validates discovered Boards and synchronizes Drivers into the workspace registry.
 ///
 /// # Errors
 ///
 /// Returns an error when Board discovery, generated markers, or file access fails.
 pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport, CommandError> {
     let boards = discover_boards(workspace_root)?;
-    let mut chip_adapters = Vec::new();
     for name in &boards {
-        let board = read_board(workspace_root, name)?;
-        if board.has_hardware_surface() {
-            match chip_adapter_dependency(workspace_root, board.hardware().chip())? {
-                Some(adapter) if !chip_adapters.contains(&adapter) => chip_adapters.push(adapter),
-                Some(_) => {}
-                None => {
-                    return Err(CommandError::ChipAdapterMissing {
-                        name: name.clone(),
-                        chip: board.hardware().chip().to_owned(),
-                        path: chip_adapter_manifest_path(workspace_root, board.hardware().chip()),
-                    })
-                }
-            }
-        }
+        read_board(workspace_root, name)?;
     }
-    chip_adapters.sort_by(|left, right| left.package.cmp(&right.package));
     let catalog = load_catalog(workspace_root)?;
+    let driver_count = catalog.drivers().count();
 
     let manifest_path = workspace_root.join("Cargo.toml");
     let old_manifest = fs::read_to_string(&manifest_path).map_err(|source| CommandError::Read {
         path: manifest_path.clone(),
         source,
     })?;
-    let dependencies = chip_adapters
-        .iter()
-        .map(|adapter| {
-            format!(
-                "{} = {{ path = {:?} }}",
-                adapter.package(),
-                adapter.path().to_string_lossy()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let manifest = replace_block(&old_manifest, WORKSPACE_BEGIN, WORKSPACE_END, &dependencies)?;
     let driver_dependencies = catalog
         .drivers()
         .map(|driver| {
@@ -447,7 +394,7 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
         .collect::<Vec<_>>()
         .join("\n");
     let manifest = replace_block(
-        &manifest,
+        &old_manifest,
         DRIVER_WORKSPACE_BEGIN,
         DRIVER_WORKSPACE_END,
         &driver_dependencies,
@@ -469,78 +416,8 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
             SyncStatus::Current
         },
         boards: boards.len(),
-        chip_adapters: chip_adapters.len(),
+        drivers: driver_count,
     })
-}
-
-/// Convention-discovered Cargo dependency for one chip adapter.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChipAdapterDependency {
-    package: String,
-    path: PathBuf,
-}
-
-impl ChipAdapterDependency {
-    /// Returns the conventional chip adapter package name.
-    #[must_use]
-    pub fn package(&self) -> &str {
-        &self.package
-    }
-
-    /// Returns the adapter path relative to the workspace.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-/// Discovers `boards/chips/<chip>/Cargo.toml` and verifies its package name.
-pub fn chip_adapter_dependency(
-    workspace_root: &Path,
-    chip: &str,
-) -> Result<Option<ChipAdapterDependency>, CommandError> {
-    validate_board_name(chip)?;
-    let manifest_path = chip_adapter_manifest_path(workspace_root, chip);
-    let contents = match fs::read_to_string(&manifest_path) {
-        Ok(contents) => contents,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(CommandError::Read {
-                path: manifest_path,
-                source,
-            });
-        }
-    };
-    let manifest = toml::from_str::<toml::Value>(&contents).map_err(|source| {
-        CommandError::ChipAdapterManifest {
-            path: manifest_path.clone(),
-            source,
-        }
-    })?;
-    let declared = manifest
-        .get("package")
-        .and_then(|package| package.get("name"))
-        .and_then(toml::Value::as_str)
-        .unwrap_or("");
-    let expected = format!("barracuda-chip-{chip}");
-    if declared != expected {
-        return Err(CommandError::ChipAdapterPackageMismatch {
-            chip: chip.to_owned(),
-            expected,
-            declared: declared.to_owned(),
-        });
-    }
-    Ok(Some(ChipAdapterDependency {
-        package: expected,
-        path: PathBuf::from("boards/chips").join(chip),
-    }))
-}
-
-fn chip_adapter_manifest_path(workspace_root: &Path, chip: &str) -> PathBuf {
-    workspace_root
-        .join("boards/chips")
-        .join(chip)
-        .join("Cargo.toml")
 }
 
 fn replace_block(text: &str, begin: &str, end: &str, body: &str) -> Result<String, CommandError> {
@@ -675,9 +552,16 @@ fn read_board(workspace_root: &Path, name: &str) -> Result<BoardDefinition, Comm
             declared: board.name().to_owned(),
         });
     }
-    if board.builtin_peripheral_count() != 0 {
+    if board.has_hardware_surface() {
         let catalog = load_catalog(workspace_root)?;
-        resolve_board(&board, &catalog)?;
+        let resolved = resolve_board(&board, &catalog)?;
+        let platform = resolve_board_platform(
+            workspace_root,
+            board.hardware().chip(),
+            board.toolchain().map(|toolchain| toolchain.target()),
+        )?;
+        validate_platform_hal(&board, &resolved, &platform)?;
+        render_board_hal_for_platform(&board, &resolved, &platform)?;
     }
     Ok(board)
 }
@@ -774,30 +658,11 @@ fn write_selected_build(
             features
         )
     };
-    replace_file_block(
-        &workspace_root.join("platforms/selected/Cargo.toml"),
-        "# BEGIN GENERATED SELECTED PLATFORM",
-        "# END GENERATED SELECTED PLATFORM",
-        &platform_dependency,
-    )?;
     let mut board_dependencies = Vec::new();
     if board.has_hardware_surface() {
-        match chip_adapter_dependency(workspace_root, board.hardware().chip())? {
-            Some(adapter) => {
-                board_dependencies.push(format!("{}.workspace = true", adapter.package()))
-            }
-            None => {
-                return Err(CommandError::ChipAdapterMissing {
-                    name: board.name().to_owned(),
-                    chip: board.hardware().chip().to_owned(),
-                    path: chip_adapter_manifest_path(workspace_root, board.hardware().chip()),
-                })
-            }
-        }
-    }
-    if board.builtin_peripheral_count() != 0 {
         let catalog = load_catalog(workspace_root)?;
         let resolved = resolve_board(board, &catalog)?;
+        validate_platform_hal(board, &resolved, &platform)?;
         for peripheral in resolved.peripherals() {
             let dependency = format!(
                 "{}.workspace = true",
@@ -810,6 +675,12 @@ fn write_selected_build(
         board_dependencies.push(String::from("barracuda-driver.workspace = true"));
     }
     board_dependencies.sort();
+    replace_file_block(
+        &workspace_root.join("platforms/selected/Cargo.toml"),
+        "# BEGIN GENERATED SELECTED PLATFORM",
+        "# END GENERATED SELECTED PLATFORM",
+        &platform_dependency,
+    )?;
     replace_file_block(
         &workspace_root.join("boards/selected/Cargo.toml"),
         "# BEGIN GENERATED SELECTED BOARD HAL",
@@ -951,55 +822,63 @@ mod tests {
         .expect("selected Board manifest");
     }
 
-    fn add_chip_backed_board(root: &Path, name: &str) {
+    fn add_catalog_board(root: &Path, name: &str) {
         let directory = root.join("boards/configs").join(name);
         fs::create_dir_all(&directory).expect("Board directory");
         fs::write(
             directory.join("board.yml"),
             format!(
-                "name: {name}\nhardware:\n  chip: {name}\nnative-layout:\n  artifact: layout.yml\nexposed-io:\n  gpio:\n    button:\n      pin: P0\n"
+                "name: {name}\nhardware:\n  chip: {name}\nnative-layout:\n  artifact: layout.yml\n"
             ),
         )
         .expect("Board YAML");
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
-        let adapter = root.join("boards/chips").join(name);
-        fs::create_dir_all(&adapter).expect("chip adapter directory");
+    }
+
+    fn add_driver(root: &Path, name: &str) {
+        let driver = root.join("drivers").join(name);
+        let crate_name = name.replace('-', "_");
+        fs::create_dir_all(&driver).expect("Driver directory");
         fs::write(
-            adapter.join("Cargo.toml"),
-            format!("[package]\nname = \"barracuda-chip-{name}\"\nversion = \"0.1.0\"\n"),
+            driver.join("driver.yml"),
+            format!(
+                "id: {name}\napi-version: 1\ncapability: test\nimplementation:\n  package: barracuda-{name}\n  crate: barracuda_{crate_name}\n  factory: \"::{{{{crate}}}}::Driver\"\n  bindings-expression: \"()\"\n  config-expression: \"()\"\nbindings: {{}}\nparameters: {{}}\n"
+            ),
         )
-        .expect("chip adapter manifest");
+        .expect("Driver manifest");
     }
 
     fn add_workspace(root: &Path) {
         fs::create_dir_all(root.join("drivers")).expect("Driver catalog");
         fs::write(
             root.join("Cargo.toml"),
-            "[workspace.dependencies]\n# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES\nold\n# END GENERATED BOARD WORKSPACE DEPENDENCIES\n# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES\nold\n# END GENERATED DRIVER WORKSPACE DEPENDENCIES\n",
+            "[workspace.dependencies]\n# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES\nold\n# END GENERATED DRIVER WORKSPACE DEPENDENCIES\n",
         )
         .expect("workspace manifest");
     }
 
     #[test]
-    fn sync_discovers_chip_adapters_without_board_hal_crates() {
+    fn sync_discovers_drivers_and_validates_boards() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
-        add_chip_backed_board(root.path(), "zeta-chip");
-        add_chip_backed_board(root.path(), "alpha-chip");
+        add_catalog_board(root.path(), "zeta-board");
+        add_catalog_board(root.path(), "alpha-board");
+        add_driver(root.path(), "zeta-driver");
+        add_driver(root.path(), "alpha-driver");
 
         let report = sync_with_report(root.path(), false).expect("Board sync");
 
         assert_eq!(report.status(), SyncStatus::Updated);
         assert_eq!(report.boards(), 2);
-        assert_eq!(report.chip_adapters(), 2);
+        assert_eq!(report.drivers(), 2);
         let workspace =
             fs::read_to_string(root.path().join("Cargo.toml")).expect("workspace manifest");
         let alpha = workspace
-            .find("barracuda-chip-alpha-chip = { path = \"boards/chips/alpha-chip\" }")
-            .expect("alpha adapter");
+            .find("barracuda-alpha-driver = { path = \"drivers/alpha-driver\" }")
+            .expect("alpha Driver");
         let zeta = workspace
-            .find("barracuda-chip-zeta-chip = { path = \"boards/chips/zeta-chip\" }")
-            .expect("zeta adapter");
+            .find("barracuda-zeta-driver = { path = \"drivers/zeta-driver\" }")
+            .expect("zeta Driver");
         assert!(alpha < zeta);
     }
 
@@ -1007,7 +886,8 @@ mod tests {
     fn board_sync_check_rejects_stale_registry_without_writing() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
-        add_chip_backed_board(root.path(), "alpha-chip");
+        add_catalog_board(root.path(), "alpha-board");
+        add_driver(root.path(), "alpha-driver");
         let before = fs::read_to_string(root.path().join("Cargo.toml")).expect("before");
 
         let error = sync_with_report(root.path(), true).expect_err("stale registry");
@@ -1020,40 +900,45 @@ mod tests {
     }
 
     #[test]
-    fn board_sync_rejects_a_nonconventional_chip_adapter_package_name() {
+    fn board_sync_rejects_an_invalid_driver_manifest() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
-        add_chip_backed_board(root.path(), "alpha-chip");
+        add_catalog_board(root.path(), "alpha-board");
+        add_driver(root.path(), "alpha-driver");
         fs::write(
-            root.path().join("boards/chips/alpha-chip/Cargo.toml"),
-            "[package]\nname = \"custom-adapter\"\nversion = \"0.1.0\"\n",
+            root.path().join("drivers/alpha-driver/driver.yml"),
+            "id: wrong-id\n",
         )
-        .expect("replace chip adapter manifest");
+        .expect("replace Driver manifest");
 
-        let error = sync_with_report(root.path(), false).expect_err("invalid adapter package");
+        let error = sync_with_report(root.path(), false).expect_err("invalid Driver manifest");
 
-        assert!(matches!(
-            error,
-            CommandError::ChipAdapterPackageMismatch { .. }
-        ));
+        assert!(matches!(error, CommandError::DriverCatalog(_)));
     }
 
     #[test]
-    fn board_sync_rejects_a_hardware_surface_without_a_chip_adapter() {
+    fn board_sync_rejects_a_hardware_surface_missing_from_the_platform_hal() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
+        let platform = root.path().join("platforms/test");
+        fs::create_dir_all(&platform).expect("Platform directory");
+        fs::write(
+            platform.join("platform.yml"),
+            "name: test\npackage: test-platform\ncrate: test_platform\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+        )
+        .expect("Platform manifest");
         let directory = root.path().join("boards/configs/alpha-board");
         fs::create_dir_all(&directory).expect("Board directory");
         fs::write(
             directory.join("board.yml"),
-            "name: alpha-board\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\nexposed-io:\n  gpio:\n    button:\n      pin: P0\n",
+            "name: alpha-board\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\nexposed-io:\n  pins:\n    button:\n      pin: P0\n",
         )
         .expect("Board YAML");
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
 
-        let error = sync_with_report(root.path(), false).expect_err("missing chip adapter");
+        let error = sync_with_report(root.path(), false).expect_err("missing Platform HAL binding");
 
-        assert!(matches!(error, CommandError::ChipAdapterMissing { .. }));
+        assert!(matches!(error, CommandError::DriverGeneration(_)));
     }
 
     #[test]

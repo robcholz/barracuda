@@ -2,15 +2,14 @@
 
 `boards/` owns concrete product bundles and the build-time tooling that turns
 their common YAML into static Rust data. Reusable peripheral Drivers live in
-the workspace-level `drivers/` directory.
-Chip-specific token conversion lives once under `boards/chips/<chip>`; Board
-bundles contain no handwritten Rust HAL.
+the workspace-level `drivers/` directory. Each Platform adapts its vendor HAL
+into upstream hardware traits; Board bundles contain no handwritten Rust HAL.
 
 ```text
 boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
-|-- chips/        # shared vendor-HAL token adapters, one per chip
 |-- config/       # std-only YAML parsing, validation, and Rust generation
+|-- hal/          # named resource ownership exposed to hardware Plugins
 `-- configs/
     `-- <board>/
         |-- board.yml
@@ -23,16 +22,29 @@ explicit Board hardware surface, and native-layout binding. It must not contain
 a Rust Platform type or select `macos`, `linux`, `esp32`, or another Platform
 implementation.
 
-The optional hardware surface has three sections. `exposed-io` names only the
-digital GPIO, analog, PWM, I2C, and SPI capabilities made available above the
-Board layer. `internal-io` names protocol resources reserved for fixed
-peripherals. `builtin-peripherals` selects a Driver by stable ID, binds its
-roles, and supplies typed construction parameters. Repeating a physical
-identifier is accepted because overlap and mux behavior belong to the concrete
-chip adapter.
+The optional hardware surface has three sections. `exposed-io` names physical
+pins once, without assigning their runtime function. `internal-io` names
+protocol resources reserved for fixed peripherals. `builtin-peripherals`
+selects a Driver by stable ID, binds its roles, and supplies typed construction
+parameters. The Platform HAL later consumes an exposed pin token as digital,
+analog, PWM, I2C, SPI, UART, I2S, or another supported function selected by the
+application.
 
 ```yaml
+exposed-io:
+  pins:
+    expansion-1:
+      pin: GPIO1
+    expansion-2:
+      pin: GPIO2
+
 internal-io:
+  i2c-device:
+    sensor-i2c:
+      peripheral: I2C0
+      scl: GPIO1
+      sda: GPIO2
+      frequency-hz: 400000
   spi-device:
     display-spi:
       peripheral: SPI2
@@ -40,6 +52,29 @@ internal-io:
       mosi: GPIO5
       chip-select: GPIO7
       frequency-hz: 80000000
+  camera-capture:
+    camera:
+      peripheral: LCD_CAM
+      dma: DMA_CH0
+      xclk: GPIO15
+      pclk: GPIO13
+      vsync: GPIO6
+      href: GPIO7
+      data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
+      xclk-frequency-hz: 20000000
+      dma-buffer-bytes: 98304
+  i2s-stream:
+    audio:
+      peripheral: I2S0
+      dma: DMA_CH1
+      bclk: GPIO4
+      ws: GPIO5
+      dout: GPIO1
+      din: GPIO2
+      sample-rate-hz: 16000
+      channels: 2
+      bits-per-sample: 16
+      dma-buffer-bytes: 1024
 
 builtin-peripherals:
   display:
@@ -55,13 +90,30 @@ builtin-peripherals:
       height: 240
 ```
 
-A Board that declares this surface requires a shared adapter at
-`boards/chips/<chip>`. Every selectable Driver owns `drivers/<id>/driver.yml`,
-which declares its bindings, parameters, capability, and implementation type.
-`cargo board sync` discovers both by convention. `board.yml` remains hardware
-data and contains no Cargo package, crate path, Rust type, or Platform feature
-registration. Selection resolves Driver schemas and generates a concrete,
-monomorphized `SelectedBoardHal`; no runtime registry or trait object is added.
+Every selectable peripheral Driver owns `drivers/<id>/driver.yml`, which
+declares its bindings, parameters, capability, and static construction
+templates. `cargo board sync` discovers Drivers by convention. `board.yml`
+remains hardware data and contains no Cargo package, crate path, Rust type, or
+Platform feature registration. Selection resolves and renders the complete
+composition before it writes selection state, then enables only the concrete
+peripheral Driver packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
+construction comes from the independently selected Platform HAL.
+The generated `SelectedBoardHal` is monomorphized; no runtime registry or trait
+object is added.
+
+The Board HAL does not replace `embedded-hal`. It provides one shared runtime
+owner for exposed physical resources. Function providers atomically claim pins
+and an internally selected controller when required, ask the selected Platform
+to configure their mux, and return
+concrete `embedded-hal` or `embedded-hal-async` values to `vm-gpio`, `vm-i2c`,
+`vm-spi`, or another hardware Plugin. Its construction, GPIO-mode, and analog
+extensions cover operations that embedded-hal 1.0 does not define.
+
+Generated device owners preserve vendor HAL move-only semantics. One function
+claim consumes its raw pin and controller tokens for the current boot; closing
+the VM handle stops access and drops the constructed HAL value but does not
+invent replacement singleton tokens. A conflicting or repeated open returns a
+runtime error, and a restart rebuilds the complete exposed surface.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's
 native format:
@@ -109,7 +161,7 @@ the self-described Platform catalog, then generates the two selected axes
 independently. Device entry code constructs the exact typed Platform and Board
 bindings.
 
-Adding a Board bundle, chip adapter, or Driver is a maintainer operation. Run `cargo board sync`
+Adding a Board bundle or Driver is a maintainer operation. Run `cargo board sync`
 and commit its deterministic workspace dependency block. Use
 `cargo board sync --check` in CI to reject a stale registry. Consumers who pull
 that commit only run `cargo board select` followed by ordinary Cargo commands.
@@ -130,8 +182,9 @@ one development kit as an alias for every product built around the chip.
 `stm32f429zi-nucleo` demonstrates the same YAML-only composition outside the
 ESP family. Its config builds the active-high green LD1 on PB0 through the
 shared `indicator-led` Driver and explicitly exposes PC13 as the dynamic GPIO
-name `user-button`. The shared STM32F429ZI adapter replaces its former
-Board-specific HAL crate.
+name `user-button`. The STM32 Platform HAL replaces its former Board-specific
+HAL crate. The name `user-button` identifies the physical PC13 pin; an
+application acquires its digital function at runtime.
 
 ## M5Stack Board coverage
 

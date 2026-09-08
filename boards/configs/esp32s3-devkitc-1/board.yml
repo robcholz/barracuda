@@ -5,3 +5,9 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+exposed-io:
+  pins:
+    expansion-1: { pin: GPIO1 }
+    expansion-2: { pin: GPIO2 }
+    expansion-3: { pin: GPIO3 }
+    expansion-4: { pin: GPIO4 }

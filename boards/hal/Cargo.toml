@@ -6,9 +6,13 @@ description = "Board HAL composition contract for Barracuda"
 
 [dependencies]
 barracuda-driver.workspace = true
+critical-section = "1"
 embassy-executor.workspace = true
 embedded-hal.workspace = true
 embedded-hal-async.workspace = true
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"

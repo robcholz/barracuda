@@ -1,0 +1,19 @@
+id: apa102-led-strip
+api-version: 1
+capability: led-strip
+implementation:
+  package: barracuda-apa102-led-strip
+  crate: barracuda_apa102_led_strip
+  factory: "::{{crate}}::Apa102LedStripDriver<{{binding.spi.type}}>"
+  bindings-expression: "{{binding.spi.value}}"
+  config-expression: "::{{crate}}::Apa102Config::new({{parameter.led-count}}, {{parameter.global-brightness}})"
+bindings:
+  spi:
+    kind: spi-bus
+parameters:
+  led-count:
+    type: integer
+    required: true
+  global-brightness:
+    type: integer
+    default: 31

@@ -3,7 +3,10 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, render_rust, SELECTED_BOARD_PATH};
-use barracuda_driver_config::{load_catalog, render_board_hal, resolve_board};
+use barracuda_driver_config::{
+    load_catalog, render_board_hal_for_platform, resolve_board, validate_platform_hal,
+};
+use barracuda_platform_config::resolve_board_platform;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
@@ -30,9 +33,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let catalog = load_catalog(&root)?;
     let resolved = resolve_board(&board, &catalog)?;
+    let platform = resolve_board_platform(
+        &root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )?;
+    validate_platform_hal(&board, &resolved, &platform)?;
     let mut generated = render_rust(&board);
     generated.push('\n');
-    generated.push_str(&render_board_hal(&board, &resolved)?);
+    generated.push_str(&render_board_hal_for_platform(
+        &board, &resolved, &platform,
+    )?);
     fs::write(output.join("selected_board.rs"), generated)?;
     Ok(())
 }

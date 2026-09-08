@@ -5,6 +5,11 @@
 
 #![no_std]
 
+extern crate alloc;
+
+mod providers;
+mod runtime;
+
 use core::{convert::Infallible, future::Future};
 
 use embassy_executor::Spawner;
@@ -13,14 +18,26 @@ use embedded_hal::{
     i2c, spi,
 };
 
+pub use providers::{
+    DigitalProvider, I2cProvider, I2cRequest, RuntimeIo, RuntimeOpenError, RuntimePlatform,
+    SpiProvider, SpiRequest, UnsupportedFunction,
+};
+pub use runtime::{LeaseError, ResourceKind};
+
+/// Stable built-in audio capability API implemented by codec Drivers.
+pub use barracuda_driver::audio;
+/// Stable built-in camera capability API implemented by Camera Drivers.
+pub use barracuda_driver::camera;
 /// Stable built-in display capability API implemented by display Drivers.
 pub use barracuda_driver::display;
 /// Stable built-in indicator capability API implemented by indicator Drivers.
 pub use barracuda_driver::indicator;
+/// Stable built-in LED-strip capability API implemented by LED Drivers.
+pub use barracuda_driver::led_strip;
 /// Stable factory contract implemented by every peripheral Driver.
 pub use barracuda_driver::PeripheralDriver;
 
-/// Input bias selected while a GPIO operates as a digital input.
+/// Input bias selected while a VM-exposed GPIO operates as an input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Pull {
     /// Leave the input electrically unbiased.
@@ -32,7 +49,7 @@ pub enum Pull {
     Down,
 }
 
-/// Electrical output driver selected for a digital GPIO.
+/// Electrical output driver selected for a VM-exposed GPIO.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputDrive {
     /// Actively drive both high and low levels.
@@ -42,7 +59,7 @@ pub enum OutputDrive {
     OpenDrain,
 }
 
-/// Digital latch level used while changing a GPIO into output mode.
+/// Digital latch level used while changing a VM-exposed GPIO to output mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DigitalLevel {
     /// Drive the logical low level.
@@ -52,39 +69,39 @@ pub enum DigitalLevel {
     High,
 }
 
-/// Runtime configuration for a digital input.
+/// Runtime configuration for a VM-exposed digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputConfig {
     /// Input bias.
     pub pull: Pull,
 }
 
-/// Runtime configuration for a digital output.
+/// Runtime configuration for a VM-exposed digital output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OutputConfig {
-    /// Output latch value installed before enabling the driver.
+    /// Output latch installed before enabling the driver.
     pub initial: DigitalLevel,
     /// Electrical output driver.
     pub drive: OutputDrive,
 }
 
-/// A GPIO whose owner may change its digital mode at runtime.
+/// An exposed GPIO whose runtime owner may change its digital mode.
 ///
-/// Reading and writing remain the standard [`InputPin`] and
-/// [`StatefulOutputPin`] operations. Implementations configure the selected
-/// mode before those operations are handed to a consumer.
+/// Reads and writes remain standard `embedded-hal` operations. This extension
+/// exists for the VM GPIO package because `embedded-hal` does not standardize
+/// runtime transitions between disabled, input, and output modes.
 pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
     /// Configures the pin as a digital input.
     fn configure_input(&mut self, config: InputConfig) -> Result<(), Self::Error>;
 
-    /// Installs the initial latch value and configures the pin as an output.
+    /// Installs the initial latch and configures the pin as an output.
     fn configure_output(&mut self, config: OutputConfig) -> Result<(), Self::Error>;
 
     /// Places the pin in its Platform-defined disconnected state.
     fn disable(&mut self) -> Result<(), Self::Error>;
 }
 
-/// Error family shared by one analog capability.
+/// Error family shared by one VM-exposed analog capability.
 pub trait AnalogErrorType {
     /// Error returned by analog conversions.
     type Error: core::error::Error;
@@ -92,7 +109,7 @@ pub trait AnalogErrorType {
 
 /// One Board-exposed analog input channel.
 pub trait AnalogInput: AnalogErrorType {
-    /// Highest raw sample value produced by this channel's current configuration.
+    /// Highest raw sample value produced by this channel.
     fn max_value(&self) -> u32;
 
     /// Samples the channel in its native integer range.
@@ -101,106 +118,19 @@ pub trait AnalogInput: AnalogErrorType {
 
 /// One Board-exposed analog output channel.
 pub trait AnalogOutput: AnalogErrorType {
-    /// Highest raw value accepted by this channel's current configuration.
+    /// Highest raw value accepted by this channel.
     fn max_value(&self) -> u32;
 
     /// Writes one value in the channel's native integer range.
     fn write(&mut self, value: u32) -> Result<(), Self::Error>;
 }
 
-/// A fixed-capacity set of concrete hardware values addressable by Board name.
+/// Unified owner of physical resources explicitly exposed by one Board.
 ///
-/// Naming is the only abstraction added here. Each stored value keeps its
-/// concrete type and implements the corresponding `embedded-hal` trait
-/// directly.
-pub struct NamedResources<T, const N: usize> {
-    entries: [Option<NamedResource<T>>; N],
-}
-
-struct NamedResource<T> {
-    name: &'static str,
-    resource: T,
-}
-
-impl<T, const N: usize> NamedResources<T, N> {
-    /// Creates a named set from Board-generated entries.
-    #[must_use]
-    pub fn new(entries: [(&'static str, T); N]) -> Self {
-        Self {
-            entries: entries.map(|(name, resource)| Some(NamedResource { name, resource })),
-        }
-    }
-}
-
-impl<T> NamedResources<T, 0> {
-    /// Creates an empty typed resource set.
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self { entries: [] }
-    }
-}
-
-/// Runtime name lookup over a set of otherwise concrete hardware values.
-pub trait ResourceSet {
-    /// Concrete hardware value stored in this set.
-    type Resource;
-
-    /// Returns whether the Board exposed `name` in this set.
-    fn contains(&self, name: &str) -> bool;
-
-    /// Borrows one exposed resource by Board name.
-    fn get(&self, name: &str) -> Option<&Self::Resource>;
-
-    /// Mutably borrows one exposed resource by Board name.
-    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource>;
-}
-
-impl<T, const N: usize> ResourceSet for NamedResources<T, N> {
-    type Resource = T;
-
-    fn contains(&self, name: &str) -> bool {
-        self.get(name).is_some()
-    }
-
-    fn get(&self, name: &str) -> Option<&Self::Resource> {
-        self.entries
-            .iter()
-            .filter_map(Option::as_ref)
-            .find(|entry| entry.name == name)
-            .map(|entry| &entry.resource)
-    }
-
-    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource> {
-        self.entries
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .find(|entry| entry.name == name)
-            .map(|entry| &mut entry.resource)
-    }
-}
-
-/// Move-only ownership access to the I/O explicitly exposed by one Board.
-///
-/// Implementations normally store each set in an `Option`. Calling a `take_*`
-/// method transfers the concrete set to its sole consumer and subsequent calls
-/// return `None`.
-pub trait ExposedIo {
-    /// Concrete named GPIO set.
-    type Gpio: ResourceSet;
-    /// Concrete named I2C set.
-    type I2c: ResourceSet;
-    /// Concrete named SPI set.
-    type Spi: ResourceSet;
-
-    /// Moves the Board-exposed GPIO set to its owner once.
-    fn take_gpio(&mut self) -> Option<Self::Gpio>;
-
-    /// Moves the Board-exposed I2C set to its owner once.
-    fn take_i2c(&mut self) -> Option<Self::I2c>;
-
-    /// Moves the Board-exposed SPI set to its owner once.
-    fn take_spi(&mut self) -> Option<Self::Spi>;
-}
+/// Protocol-specific provider traits are implemented on this same value. They
+/// atomically claim its move-only tokens before constructing standard HAL
+/// values, preventing protocol packages from creating conflicting views.
+pub trait ExposedIo: Send + Sync + 'static {}
 
 /// Resources produced by one selected Board HAL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -370,21 +300,36 @@ impl embedded_hal_async::spi::SpiBus for UnavailableSpi {
     }
 }
 
-impl ExposedIo for NoExposedIo {
-    type Gpio = NamedResources<UnavailableGpio, 0>;
-    type I2c = NamedResources<UnavailableI2c, 0>;
-    type Spi = NamedResources<UnavailableSpi, 0>;
+impl ExposedIo for NoExposedIo {}
 
-    fn take_gpio(&mut self) -> Option<Self::Gpio> {
-        None
+impl DigitalProvider for NoExposedIo {
+    type Pin = UnavailableGpio;
+    type Error = UnsupportedFunction;
+
+    fn digital_available(&self, _name: &str) -> bool {
+        false
     }
 
-    fn take_i2c(&mut self) -> Option<Self::I2c> {
-        None
+    fn acquire_digital(&self, _name: &str) -> Result<Self::Pin, Self::Error> {
+        Err(UnsupportedFunction::new("digital I/O"))
     }
+}
 
-    fn take_spi(&mut self) -> Option<Self::Spi> {
-        None
+impl I2cProvider for NoExposedIo {
+    type Bus = UnavailableI2c;
+    type Error = UnsupportedFunction;
+
+    fn open_i2c(&self, _request: I2cRequest<'_>) -> Result<Self::Bus, Self::Error> {
+        Err(UnsupportedFunction::new("I2C"))
+    }
+}
+
+impl SpiProvider for NoExposedIo {
+    type Bus = UnavailableSpi;
+    type Error = UnsupportedFunction;
+
+    fn open_spi(&self, _request: SpiRequest<'_>) -> Result<Self::Bus, Self::Error> {
+        Err(UnsupportedFunction::new("SPI"))
     }
 }
 

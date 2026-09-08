@@ -678,6 +678,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-apa102-led-strip"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-board"
 version = "0.1.0"
 
@@ -696,6 +704,7 @@ name = "barracuda-board-hal"
 version = "0.1.0"
 dependencies = [
  "barracuda-driver",
+ "critical-section",
  "embassy-executor",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -710,6 +719,8 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-board-tool",
  "barracuda-driver-config",
+ "barracuda-platform-config",
+ "barracuda-platform-selected",
  "embassy-executor",
 ]
 
@@ -729,7 +740,6 @@ dependencies = [
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",
- "toml",
 ]
 
 [[package]]
@@ -753,37 +763,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "barracuda-chip-esp32"
-version = "0.1.0"
-dependencies = [
- "barracuda-board-hal",
- "embedded-hal 1.0.0",
- "embedded-hal-bus",
- "esp-hal",
- "static_cell",
-]
-
-[[package]]
-name = "barracuda-chip-esp32s3"
-version = "0.1.0"
-dependencies = [
- "barracuda-board-hal",
- "embedded-hal 1.0.0",
- "embedded-hal-bus",
- "esp-hal",
- "static_cell",
-]
-
-[[package]]
-name = "barracuda-chip-stm32f429zi"
-version = "0.1.0"
-dependencies = [
- "barracuda-board-hal",
- "embassy-stm32",
- "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -825,10 +804,30 @@ name = "barracuda-driver-config"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "barracuda-platform-config",
  "serde",
+ "syn 2.0.118",
  "tempfile",
  "thiserror 2.0.18",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-es8311-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-es8389-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -849,7 +848,6 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
  "critical-section",
- "embassy-sync 0.7.2",
  "embedded-hal 1.0.0",
  "futures-lite",
 ]
@@ -874,7 +872,6 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
  "critical-section",
- "embassy-sync 0.7.2",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
@@ -1059,6 +1056,7 @@ dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "mipidsi",
+ "static_cell",
 ]
 
 [[package]]
@@ -1091,6 +1089,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-ov2640-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-ov3660-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-platform"
 version = "0.1.0"
 dependencies = [
@@ -1113,12 +1129,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1132,12 +1151,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1151,12 +1173,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1170,12 +1195,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1189,12 +1217,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1208,12 +1239,16 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
+ "barracuda-driver",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
@@ -1296,6 +1331,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-board-hal",
  "barracuda-platform",
  "barracuda-tls",
  "cortex-m-rt",
@@ -1304,6 +1340,7 @@ dependencies = [
  "embassy-net",
  "embassy-stm32",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
  "log",
  "panic-halt",
  "rtt-target",
@@ -1472,7 +1509,6 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
  "critical-section",
- "embassy-sync 0.7.2",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
@@ -1789,6 +1825,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-ws2812-spi-led-strip"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

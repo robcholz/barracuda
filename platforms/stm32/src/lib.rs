@@ -2,6 +2,10 @@
 
 #![no_std]
 
+/// Platform-owned GPIO implementation.
+#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+pub mod hal;
+
 /// Runtime access discipline declared by the native linker memory region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stm32RegionAccess {

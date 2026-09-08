@@ -2,6 +2,8 @@ name: stm32
 package: barracuda-platform-stm32
 crate: barracuda_platform_stm32
 type: Stm32Platform
+hal:
+  bindings: [digital-input, digital-output, gpio]
 selection:
   board-chips:
     - "stm32*"
