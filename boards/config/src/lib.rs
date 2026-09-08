@@ -226,6 +226,8 @@ impl BoardDefinition {
 pub struct InternalIoDefinition {
     #[serde(default, rename = "spi-bus")]
     spi_buses: BTreeMap<String, SpiDefinition>,
+    #[serde(default, rename = "spi-output")]
+    spi_outputs: BTreeMap<String, SpiOutputDefinition>,
     #[serde(default, rename = "spi-device")]
     spi_devices: BTreeMap<String, SpiDeviceDefinition>,
     #[serde(default, rename = "i2c-device")]
@@ -241,6 +243,7 @@ impl InternalIoDefinition {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.spi_buses.is_empty()
+            && self.spi_outputs.is_empty()
             && self.spi_devices.is_empty()
             && self.i2c_devices.is_empty()
             && self.camera_captures.is_empty()
@@ -251,6 +254,12 @@ impl InternalIoDefinition {
     #[must_use]
     pub fn spi_bus(&self, name: &str) -> Option<&SpiDefinition> {
         self.spi_buses.get(name)
+    }
+
+    /// Finds one data-only SPI waveform output by its Board-local name.
+    #[must_use]
+    pub fn spi_output(&self, name: &str) -> Option<&SpiOutputDefinition> {
+        self.spi_outputs.get(name)
     }
 
     /// Finds one statically selected SPI device by its Board-local name.
@@ -329,6 +338,11 @@ impl InternalIoDefinition {
             }
             validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
             validate_frequency(name, spi.frequency_hz)?;
+        }
+        for (name, output) in &self.spi_outputs {
+            validate_resource_name("internal spi-output", name)?;
+            validate_identifier(name, "data", &output.data)?;
+            validate_frequency(name, output.frequency_hz)?;
         }
         for (name, spi) in &self.spi_devices {
             validate_resource_name("internal spi-device", name)?;
@@ -667,6 +681,29 @@ pub struct SpiDefinition {
     miso: Option<String>,
     #[serde(rename = "frequency-hz")]
     frequency_hz: u32,
+}
+
+/// One data-only SPI waveform output whose controller is Platform-selected.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpiOutputDefinition {
+    data: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl SpiOutputDefinition {
+    /// Returns the physical waveform output pin.
+    #[must_use]
+    pub fn data(&self) -> &str {
+        &self.data
+    }
+
+    /// Returns the SPI clock rate used to synthesize the waveform.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
 }
 
 /// One internal SPI device, including the chip-select owned by its Driver.

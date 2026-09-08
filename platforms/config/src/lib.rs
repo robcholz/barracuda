@@ -21,6 +21,8 @@ pub enum HalBinding {
     SpiDevice,
     /// Exclusively owned SPI-bus construction.
     SpiBus,
+    /// Data-only SPI waveform construction with a Platform-owned controller.
+    SpiOutput,
     /// I2C-device construction.
     I2cDevice,
     /// Parallel camera receiver construction.

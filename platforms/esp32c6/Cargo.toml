@@ -6,6 +6,7 @@ description = "ESP32-C6 Platform implementation for Barracuda"
 
 [features]
 default = []
+runtime-i2s = []
 
 [dependencies]
 barracuda-board.workspace = true

@@ -989,6 +989,19 @@ pub fn spi_bus(
     .with_mosi(mosi))
 }
 
+/// Constructs one data-only SPI waveform output from a Platform-owned controller.
+pub fn spi_output(
+    spi: impl SpiInstance + 'static,
+    data: impl PeripheralOutput<'static> + 'static,
+    frequency_hz: u32,
+) -> Result<SpiBus, SpiConfigError> {
+    Ok(Spi::new(
+        spi,
+        SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+    )?
+    .with_mosi(data))
+}
+
 /// Constructs one receive-only SPI bus from Board-selected resources.
 pub fn spi_bus_rx_only(
     spi: impl SpiInstance + 'static,

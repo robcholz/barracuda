@@ -186,6 +186,10 @@ hardware:
 native-layout:
   artifact: memory.x
 internal-io:
+  spi-output:
+    status-pixels:
+      data: GPIO20
+      frequency-hz: 2400000
   spi-bus:
     pixels:
       peripheral: SPI2
@@ -224,6 +228,14 @@ internal-io:
     assert_eq!(
         (pixels.peripheral(), pixels.frequency_hz()),
         ("SPI2", 2_400_000)
+    );
+    let status_pixels = board
+        .internal_io()
+        .spi_output("status-pixels")
+        .expect("SPI waveform output");
+    assert_eq!(
+        (status_pixels.data(), status_pixels.frequency_hz()),
+        ("GPIO20", 2_400_000)
     );
     let camera = board
         .internal_io()

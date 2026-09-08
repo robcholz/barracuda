@@ -34,7 +34,10 @@ does not name a Cargo package, Rust crate, Rust type, or source path.
 
 Protocol controllers reserved for built-ins live under `internal-io`. A named
 `spi-device` contains the chip controller, signal pins, chip select, and
-frequency. Camera and I2S resources additionally size their statically allocated
+frequency. A data-only `spi-output`, such as a WS2812 waveform, declares only
+its real physical data pin; generation deterministically reserves a compatible
+controller from the Platform pool instead of inventing a clock pin in Board
+wiring. Camera and I2S resources additionally size their statically allocated
 DMA storage with `dma-buffer-bytes`; allocation is emitted at the concrete Board
 call site, so it costs nothing when that data plane is not selected. These
 resources are consumed by their Drivers and are never exposed through the

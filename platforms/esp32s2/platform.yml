@@ -3,7 +3,7 @@ package: barracuda-platform-esp32s2
 crate: barracuda_platform_esp32s2
 type: Esp32S2Platform
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, i2c-device]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]

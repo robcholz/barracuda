@@ -9,7 +9,7 @@ implementation:
   config-expression: "::{{crate}}::Ws2812Config::new({{parameter.led-count}}, {{parameter.color-order}})"
 bindings:
   spi:
-    kind: spi-bus
+    kind: spi-output
 parameters:
   led-count:
     type: integer

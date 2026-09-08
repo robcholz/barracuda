@@ -52,6 +52,10 @@ internal-io:
       mosi: GPIO5
       chip-select: GPIO7
       frequency-hz: 80000000
+  spi-output:
+    status-pixels:
+      data: GPIO15
+      frequency-hz: 2400000
   camera-capture:
     camera:
       peripheral: LCD_CAM

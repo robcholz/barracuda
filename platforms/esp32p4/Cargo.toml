@@ -6,6 +6,7 @@ description = "ESP32-P4 Platform implementation for Barracuda"
 
 [features]
 default = []
+runtime-i2s = []
 
 [dependencies]
 barracuda-board.workspace = true

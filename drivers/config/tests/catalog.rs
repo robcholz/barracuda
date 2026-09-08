@@ -792,6 +792,40 @@ fn every_repository_builtin_composition_resolves_and_generates() {
             continue;
         }
         let resolved = resolve_board(&board, &catalog).expect("repository Board resolves");
-        render_board_hal(&board, &resolved).expect("repository Board HAL generates");
+        let platform = resolve_board_platform(
+            root,
+            board.hardware().chip(),
+            board.toolchain().map(|toolchain| toolchain.target()),
+        )
+        .expect("repository Board Platform resolves");
+        render_board_hal_for_platform(&board, &resolved, &platform)
+            .expect("repository Board HAL generates");
     }
+}
+
+#[test]
+fn atom_matrix_reserves_a_platform_spi_controller_without_a_fake_clock_pin() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let catalog = load_catalog(root).expect("repository Driver catalog");
+    let yaml = fs::read_to_string(root.join("boards/configs/m5stack-atom-matrix/board.yml"))
+        .expect("Atom Matrix Board YAML");
+    let board = parse(&yaml).expect("valid Atom Matrix Board");
+    let resolved = resolve_board(&board, &catalog).expect("Atom Matrix resolves");
+    let platform = resolve_board_platform(
+        root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )
+    .expect("ESP32 Platform resolves");
+
+    let rust = render_board_hal_for_platform(&board, &resolved, &platform)
+        .expect("Atom Matrix HAL generates");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("controller_binding_type!(SPI2)"));
+    assert!(rust.contains("pin_binding_type!(GPIO27)"));
+    assert!(rust.contains("hal::spi_output("));
+    assert!(!rust.contains("led_strip_spi_sck"));
 }

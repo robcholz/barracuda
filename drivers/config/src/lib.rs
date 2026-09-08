@@ -183,6 +183,8 @@ pub enum BindingKind {
     SpiDevice,
     /// One exclusively owned SPI controller without chip select.
     SpiBus,
+    /// One data-only SPI waveform output using a Platform-owned controller.
+    SpiOutput,
     /// One parallel output bus.
     ParallelOutput,
     /// One MIPI DSI host.
@@ -467,6 +469,9 @@ pub enum GenerateError {
         /// Required HAL resource form.
         binding: HalBinding,
     },
+    /// A data-only SPI binding has no unreserved Platform controller.
+    #[error("Platform has no unreserved SPI controller for a data-only output")]
+    MissingPlatformSpiController,
     /// A capability has not defined its generated Board storage contract.
     #[error("Driver `{driver}` produces unsupported generated capability `{capability}`")]
     UnsupportedCapability {
@@ -804,6 +809,8 @@ pub fn resolve_board<'a>(
                     && board.internal_io().spi_device(resource).is_none())
                     || (schema.kind() == BindingKind::SpiBus
                         && board.internal_io().spi_bus(resource).is_none())
+                    || (schema.kind() == BindingKind::SpiOutput
+                        && board.internal_io().spi_output(resource).is_none())
                     || (schema.kind() == BindingKind::I2cDevice
                         && board.internal_io().i2c_device(resource).is_none())
                     || (schema.kind() == BindingKind::CameraCapture
@@ -981,6 +988,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::DigitalOutput => Some(HalBinding::DigitalOutput),
         BindingKind::SpiDevice => Some(HalBinding::SpiDevice),
         BindingKind::SpiBus => Some(HalBinding::SpiBus),
+        BindingKind::SpiOutput => Some(HalBinding::SpiOutput),
         BindingKind::I2cDevice => Some(HalBinding::I2cDevice),
         BindingKind::CameraCapture => Some(HalBinding::CameraCapture),
         BindingKind::I2sStream => Some(HalBinding::I2sStream),
@@ -1005,6 +1013,7 @@ struct RenderState {
     raw_fields: Vec<(String, String)>,
     binding_errors: Vec<(String, String)>,
     identifiers: BTreeMap<String, String>,
+    reserved_spi_controllers: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1063,8 +1072,15 @@ fn render_generic_hal(
             let Some(resource) = peripheral.binding(role) else {
                 continue;
             };
-            let rendered_binding =
-                render_binding(board, peripheral, role, schema, resource, &mut state)?;
+            let rendered_binding = render_binding(
+                board,
+                peripheral,
+                role,
+                schema,
+                resource,
+                runtime_spi_controllers,
+                &mut state,
+            )?;
             substitutions.insert(format!("binding.{role}.type"), rendered_binding.0);
             substitutions.insert(format!("binding.{role}.value"), rendered_binding.1);
         }
@@ -1124,6 +1140,7 @@ fn render_generic_hal(
         runtime_i2c_controllers
             .iter()
             .filter(|controller| !board.internal_io().uses_controller(controller))
+            .filter(|controller| !state.reserved_spi_controllers.contains(*controller))
             .collect::<Vec<_>>()
     };
     let runtime_spi_controllers = if pin_count == 0 {
@@ -1521,6 +1538,7 @@ fn render_binding(
     role: &str,
     schema: &BindingSchema,
     resource: &str,
+    runtime_spi_controllers: &[String],
     state: &mut RenderState,
 ) -> Result<(String, String), GenerateError> {
     match schema.kind() {
@@ -1736,6 +1754,54 @@ fn render_binding(
             Ok((
                 String::from("::barracuda_platform_selected::__platform::hal::SpiBus"),
                 value,
+            ))
+        }
+        BindingKind::SpiOutput => {
+            let output = board.internal_io().spi_output(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
+            })?;
+            validate_hardware_identifier(output.data())?;
+            let controller = runtime_spi_controllers
+                .iter()
+                .find(|controller| {
+                    !board.internal_io().uses_controller(controller)
+                        && !state.reserved_spi_controllers.contains(*controller)
+                })
+                .ok_or(GenerateError::MissingPlatformSpiController)?;
+            state.reserved_spi_controllers.insert(controller.clone());
+
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller_field =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let data_field = checked_identifier(&format!("{prefix}_data"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    controller_field.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::controller_binding_type!({controller})"),
+                ),
+                (
+                    data_field.clone(),
+                    format!("::barracuda_platform_selected::__platform::hal::pin_binding_type!({})", output.data()),
+                ),
+            ]);
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::SpiConfigError"),
+            ));
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::SpiBus"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::spi_output(bindings.{controller_field}, bindings.{data_field}, {}).map_err(GeneratedBoardError::{variant})?",
+                    output.frequency_hz()
+                ),
             ))
         }
         BindingKind::I2cDevice => {
