@@ -20,8 +20,8 @@ cargo run
 
 `cargo run` builds the Platform launcher, deploys the selected System image,
 starts the loopback network gateway, and starts the System application. The
-launcher owns both processes, so Ctrl-C stops the complete run. No second
-terminal or manual gateway command is required.
+launcher owns both processes, so Ctrl-C or SIGTERM stops the complete run. No
+second terminal or manual gateway command is required.
 
 The gateway forwards device-originated TCP and UDP through ordinary host
 sockets, translates DNS requests sent to `10.0.2.3`, and assigns a loopback
