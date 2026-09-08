@@ -12,16 +12,19 @@ mod command;
 mod line_editor;
 mod protocol;
 
-use std::path::Path;
+use std::{net::IpAddr, path::Path};
 
 use anyhow::{bail, Context as _, Result};
+use dialoguer::{console::Style, theme::ColorfulTheme, Input, Select};
 
 const DEFAULT_URL: &str = "ws://10.42.0.2:8787";
+const DEFAULT_REMOTE_PORT: u16 = 8787;
 const RUNTIME_ADDRESS_PATH: &str = ".barracuda/address";
 
 #[derive(Debug, PartialEq, Eq)]
 enum RunMode<'a> {
-    Remote(Option<&'a str>),
+    Interactive,
+    Remote(&'a str),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -39,21 +42,72 @@ async fn main() {
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match mode_from_args(&args.iter().skip(1).map(String::as_str).collect::<Vec<_>>())? {
-        RunMode::Remote(explicit_url) => {
-            let url = match explicit_url {
-                Some(url) => url.to_owned(),
-                None => default_url()?,
-            };
+        RunMode::Interactive => {
+            let url = prompt_for_url()?;
             client::run(&url).await
         }
+        RunMode::Remote(url) => client::run(url).await,
     }
 }
 
 fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
     match args {
-        [] | ["connect"] => Ok(RunMode::Remote(None)),
-        ["connect", url] => Ok(RunMode::Remote(Some(url))),
+        [] | ["connect"] => Ok(RunMode::Interactive),
+        ["connect", url] => Ok(RunMode::Remote(url)),
         [other, ..] => bail!("unknown subcommand `{other}`; use `connect [url]`"),
+    }
+}
+
+fn prompt_for_url() -> Result<String> {
+    let local_url = default_url();
+    let description_style = Style::new().for_stderr().black().bright();
+    let local_description = match &local_url {
+        Ok(url) => url.as_str(),
+        Err(_error) => "no running instance found",
+    };
+    let choices = [
+        format!("Local   {}", description_style.apply_to(local_description)),
+        format!(
+            "Remote  {}",
+            description_style.apply_to("enter a device IP address")
+        ),
+    ];
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Connect to Barracuda")
+        .default(0)
+        .items(&choices)
+        .report(false)
+        .interact()
+        .context("select Barracuda connection")?;
+    match selection {
+        0 => {
+            let url = local_url?;
+            eprintln!("Local Barracuda: {url}");
+            Ok(url)
+        }
+        1 => {
+            let address = Input::<String>::with_theme(&ColorfulTheme::default())
+                .with_prompt(format!(
+                    "Remote Barracuda IP address (port {DEFAULT_REMOTE_PORT})"
+                ))
+                .validate_with(|value: &String| -> std::result::Result<(), &str> {
+                    if value.trim().parse::<IpAddr>().is_ok() {
+                        Ok(())
+                    } else {
+                        Err("enter a valid IPv4 or IPv6 address")
+                    }
+                })
+                .interact_text()
+                .context("read remote Barracuda IP address")?;
+            let address = address
+                .trim()
+                .parse::<IpAddr>()
+                .context("validate remote Barracuda IP address")?;
+            let url = remote_url(address);
+            eprintln!("Remote Barracuda: {url}");
+            Ok(url)
+        }
+        index => bail!("invalid connection selection index {index}"),
     }
 }
 
@@ -99,17 +153,28 @@ fn websocket_url(address: &str) -> Result<String> {
     bail!("Barracuda address must use http:// or https://")
 }
 
+fn remote_url(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => format!("ws://{address}:{DEFAULT_REMOTE_PORT}"),
+        IpAddr::V6(address) => format!("ws://[{address}]:{DEFAULT_REMOTE_PORT}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{mode_from_args, runtime_address, websocket_url, RunMode, RUNTIME_ADDRESS_PATH};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::{
+        mode_from_args, remote_url, runtime_address, websocket_url, RunMode, RUNTIME_ADDRESS_PATH,
+    };
 
     #[test]
     fn default_mode_connects_to_the_default_channel() {
         assert_eq!(
             mode_from_args(&[]).expect("default channel"),
-            RunMode::Remote(None)
+            RunMode::Interactive
         );
     }
 
@@ -117,11 +182,23 @@ mod tests {
     fn connect_remains_a_remote_client_mode() {
         assert_eq!(
             mode_from_args(&["connect"]).expect("default remote URL"),
-            RunMode::Remote(None)
+            RunMode::Interactive
         );
         assert_eq!(
             mode_from_args(&["connect", "ws://host.example:9000"]).expect("explicit remote URL"),
-            RunMode::Remote(Some("ws://host.example:9000"))
+            RunMode::Remote("ws://host.example:9000")
+        );
+    }
+
+    #[test]
+    fn remote_ip_addresses_use_the_webserver_port() {
+        assert_eq!(
+            remote_url(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
+            "ws://192.0.2.10:8787"
+        );
+        assert_eq!(
+            remote_url(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            "ws://[::1]:8787"
         );
     }
 

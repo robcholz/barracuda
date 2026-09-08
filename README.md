@@ -92,7 +92,11 @@ cargo cli
 cargo cli ws://DEVICE_ADDRESS:8787
 ```
 
-The default endpoint is `ws://10.42.0.2:8787`.
+Without an explicit URL, the CLI opens a Local/Remote selector. Local displays
+and uses the active workspace address published by the macOS launcher, or the
+Linux endpoint `ws://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6
+address and connects to its WebServer on port 8787. Passing an explicit URL
+continues to bypass the prompt for scripts and automation.
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:

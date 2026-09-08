@@ -776,6 +776,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "barracuda-imessage-web-plugin",
+ "dialoguer",
  "futures-util",
  "rustyline",
  "serde",

@@ -29,6 +29,8 @@ URL to the configured guest TCP port. The macOS Platform logs that URL when
 the session opens and publishes it to `.barracuda/address`. `cargo cli` and the
 model configuration helper discover the active address from that file, so an
 ephemeral loopback port does not need to be copied into `.env.local`.
+The CLI's Local/Remote selector shows the discovered Local address before it
+connects.
 
 Platform, System, Core, and Plugin logs are written to standard error at
 `info`. Select another level for a build with, for example,
