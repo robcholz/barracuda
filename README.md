@@ -89,15 +89,13 @@ for the development host, even when the selected Board uses an embedded target:
 
 ```bash
 cargo cli
-cargo cli ws://DEVICE_ADDRESS:8787
 cargo cli configure
 ```
 
-Without an explicit URL, the CLI opens a Local/Remote selector. Local displays
-and uses the active workspace address published by the macOS launcher, or the
-Linux endpoint `ws://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6
-address and connects to its WebServer on port 8787. Passing an explicit URL
-continues to bypass the prompt for scripts and automation.
+`cargo cli` opens a Local/Remote selector. Local displays and uses the active
+workspace address published by the macOS launcher, or the Linux endpoint
+`http://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6 address and
+connects to its WebServer on port 8787.
 
 `cargo cli configure` uses the same Local/Remote selector, then opens the
 Barracuda Plugin portal. The portal lists the configuration pages contributed

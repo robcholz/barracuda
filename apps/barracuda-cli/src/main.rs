@@ -4,7 +4,7 @@
 //! rendering. It never constructs or controls a Barracuda System.
 //!
 //! ```text
-//! cargo cli [URL]
+//! cargo cli
 //! cargo cli configure [ADDRESS]
 //! ```
 
@@ -28,7 +28,7 @@ const RUNTIME_ADDRESS_PATH: &str = ".barracuda/address";
 
 #[derive(Debug, PartialEq, Eq)]
 enum RunMode<'a> {
-    Connect(Option<&'a str>),
+    Connect,
     Configure(Option<&'a str>),
 }
 
@@ -47,11 +47,8 @@ async fn main() {
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match mode_from_args(&args.iter().skip(1).map(String::as_str).collect::<Vec<_>>())? {
-        RunMode::Connect(explicit_url) => {
-            let url = match explicit_url {
-                Some(url) => url.to_owned(),
-                None => websocket_url(&prompt_for_address()?)?,
-            };
+        RunMode::Connect => {
+            let url = websocket_url(&prompt_for_address()?)?;
             client::run(&url).await
         }
         RunMode::Configure(explicit_address) => {
@@ -66,16 +63,10 @@ async fn run() -> Result<()> {
 
 fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
     match args {
-        [] | ["connect"] => Ok(RunMode::Connect(None)),
-        ["connect", url] => Ok(RunMode::Connect(Some(url))),
+        [] => Ok(RunMode::Connect),
         ["configure"] => Ok(RunMode::Configure(None)),
         ["configure", address] => Ok(RunMode::Configure(Some(address))),
-        [url] if url.starts_with("ws://") || url.starts_with("wss://") => {
-            Ok(RunMode::Connect(Some(url)))
-        }
-        [other, ..] => bail!(
-            "unknown command `{other}`; use `cargo cli [URL]` or `cargo cli configure [ADDRESS]`"
-        ),
+        [other, ..] => bail!("unknown command `{other}`; use `cargo cli` or `cargo cli configure`"),
     }
 }
 
@@ -138,9 +129,7 @@ fn default_address() -> Result<String> {
         return Ok(address);
     }
     if cfg!(target_os = "macos") {
-        bail!(
-            "no running Barracuda address found; start `cargo run`, select Remote, or pass an explicit address"
-        );
+        bail!("no running Barracuda address found; start `cargo run` or select Remote");
     }
     Ok(DEFAULT_ADDRESS.to_owned())
 }
@@ -186,12 +175,8 @@ fn configuration_url(address: &str) -> Result<String> {
         format!("http://{authority}")
     } else if let Some(authority) = address.strip_prefix("https://") {
         format!("https://{authority}")
-    } else if let Some(authority) = address.strip_prefix("ws://") {
-        format!("http://{authority}")
-    } else if let Some(authority) = address.strip_prefix("wss://") {
-        format!("https://{authority}")
     } else {
-        bail!("Barracuda address must use http://, https://, ws://, or wss://");
+        bail!("Barracuda address must use http:// or https://");
     };
     Ok(format!("{}/portal/", address.trim_end_matches('/')))
 }
@@ -231,24 +216,15 @@ mod tests {
     fn default_mode_connects_to_the_default_channel() {
         assert_eq!(
             mode_from_args(&[]).expect("default channel"),
-            RunMode::Connect(None)
+            RunMode::Connect
         );
     }
 
     #[test]
-    fn connect_remains_a_remote_client_mode() {
-        assert_eq!(
-            mode_from_args(&["connect"]).expect("default remote URL"),
-            RunMode::Connect(None)
-        );
-        assert_eq!(
-            mode_from_args(&["connect", "ws://host.example:9000"]).expect("explicit remote URL"),
-            RunMode::Connect(Some("ws://host.example:9000"))
-        );
-        assert_eq!(
-            mode_from_args(&["ws://host.example:9000"]).expect("short explicit URL"),
-            RunMode::Connect(Some("ws://host.example:9000"))
-        );
+    fn connection_requires_the_interactive_entrypoint() {
+        assert!(mode_from_args(&["connect"]).is_err());
+        assert!(mode_from_args(&["connect", "ws://host.example:9000"]).is_err());
+        assert!(mode_from_args(&["ws://host.example:9000"]).is_err());
     }
 
     #[test]
@@ -275,9 +251,10 @@ mod tests {
             RunMode::Configure(Some("http://device.local:8787"))
         );
         assert_eq!(
-            configuration_url("ws://device.local:8787/").expect("configuration URL"),
+            configuration_url("http://device.local:8787/").expect("configuration URL"),
             "http://device.local:8787/portal/"
         );
+        assert!(configuration_url("ws://device.local:8787/").is_err());
     }
 
     #[test]
