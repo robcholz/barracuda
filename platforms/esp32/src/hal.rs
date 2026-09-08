@@ -334,6 +334,15 @@ impl RuntimePlatform for RuntimeAdapter {
         }
     }
 
+    fn supports_i2c_config(
+        _controller: &Self::I2cController,
+        _scl: &Self::PinToken,
+        _sda: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0
+    }
+
     fn i2c(
         controller: Self::I2cController,
         scl: Self::PinToken,
@@ -341,6 +350,17 @@ impl RuntimePlatform for RuntimeAdapter {
         frequency_hz: u32,
     ) -> Result<Self::I2cBus, Self::I2cError> {
         exposed_i2c(controller, scl, sda, frequency_hz)
+    }
+
+    fn supports_spi_config(
+        _controller: &Self::SpiController,
+        _sck: &Self::PinToken,
+        mosi: Option<&Self::PinToken>,
+        miso: Option<&Self::PinToken>,
+        frequency_hz: u32,
+        _mode: EmbeddedMode,
+    ) -> bool {
+        frequency_hz > 0 && (mosi.is_some() || miso.is_some())
     }
 
     fn spi(
@@ -422,6 +442,14 @@ impl RuntimePwmPlatform for RuntimeAdapter {
         resource.timer.is_some() && resource.channel.is_some()
     }
 
+    fn supports_pwm_config(
+        resource: &Self::PwmResource,
+        pin: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_pwm(resource, pin)
+    }
+
     fn pwm(
         mut resource: Self::PwmResource,
         pin: Self::PinToken,
@@ -495,6 +523,15 @@ impl RuntimeUartPlatform for RuntimeAdapter {
         rx: Option<&Self::PinToken>,
     ) -> bool {
         tx.is_some() || rx.is_some()
+    }
+
+    fn supports_uart_config(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+        config: UartConfig,
+    ) -> bool {
+        config.baud > 0 && Self::supports_uart(controller, tx, rx)
     }
 
     fn uart(

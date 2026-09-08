@@ -254,6 +254,15 @@ impl RuntimePlatform for FakePlatform {
         *controller == 10 && *scl != 4
     }
 
+    fn supports_i2c_config(
+        controller: &Self::I2cController,
+        scl: &Self::PinToken,
+        sda: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_i2c(controller, scl, sda)
+    }
+
     fn i2c(
         controller: Self::I2cController,
         scl: Self::PinToken,
@@ -275,6 +284,17 @@ impl RuntimePlatform for FakePlatform {
         _miso: Option<&Self::PinToken>,
     ) -> bool {
         *controller == 20 && *sck == 1
+    }
+
+    fn supports_spi_config(
+        controller: &Self::SpiController,
+        sck: &Self::PinToken,
+        mosi: Option<&Self::PinToken>,
+        miso: Option<&Self::PinToken>,
+        frequency_hz: u32,
+        _mode: spi::Mode,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_spi(controller, sck, mosi, miso)
     }
 
     fn spi(
@@ -330,6 +350,14 @@ impl RuntimePwmPlatform for FakePlatform {
         *resource == 50 && *pin == 3
     }
 
+    fn supports_pwm_config(
+        resource: &Self::PwmResource,
+        pin: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_pwm(resource, pin)
+    }
+
     fn pwm(
         resource: Self::PwmResource,
         _pin: Self::PinToken,
@@ -350,6 +378,15 @@ impl RuntimeUartPlatform for FakePlatform {
         rx: Option<&Self::PinToken>,
     ) -> bool {
         *controller == 30 && (tx.is_some_and(|pin| *pin == 3) || rx.is_some_and(|pin| *pin == 4))
+    }
+
+    fn supports_uart_config(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+        config: UartConfig,
+    ) -> bool {
+        config.baud > 0 && Self::supports_uart(controller, tx, rx)
     }
 
     fn uart(
@@ -380,6 +417,21 @@ impl RuntimeI2sPlatform for FakePlatform {
         _mclk: Option<&Self::PinToken>,
     ) -> bool {
         *resource == 60 && *bclk == 1 && *ws == 2 && (dout.is_some() || din.is_some())
+    }
+
+    fn supports_i2s_format(
+        resource: &Self::I2sResource,
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
+        format: audio::PcmFormat,
+    ) -> bool {
+        format.sample_rate_hz > 0
+            && format.channels == 2
+            && format.bits_per_sample == 16
+            && Self::supports_i2s(resource, bclk, ws, dout, din, mclk)
     }
 
     fn i2s(
@@ -558,6 +610,82 @@ fn invalid_bus_routes_do_not_consume_controllers_or_pins() {
         })
         .expect("invalid route preserved SPI resources");
     assert_eq!(spi.controller, 20);
+}
+
+#[test]
+fn invalid_parameters_do_not_consume_composite_resources() {
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_i2c(I2cRequest {
+            scl: "D1",
+            sda: "D2",
+            frequency_hz: 0,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "I2C" })
+    ));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D2"));
+
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_spi(SpiRequest {
+            sck: "D1",
+            mosi: Some("D2"),
+            miso: None,
+            frequency_hz: 0,
+            mode: spi::MODE_0,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "SPI" })
+    ));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D2"));
+
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_pwm(PwmRequest {
+            pin: "D3",
+            frequency_hz: 0,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "PWM" })
+    ));
+    assert!(io.digital_available("D3"));
+
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_uart(UartRequest {
+            tx: Some("D3"),
+            rx: Some("D4"),
+            config: UartConfig {
+                baud: 0,
+                data_bits: UartDataBits::Eight,
+                parity: UartParity::None,
+                stop_bits: UartStopBits::One,
+            },
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "UART" })
+    ));
+    assert!(io.digital_available("D3"));
+    assert!(io.digital_available("D4"));
+
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_i2s(I2sRequest {
+            bclk: "D1",
+            ws: "D2",
+            dout: Some("D3"),
+            din: None,
+            mclk: None,
+            format: audio::PcmFormat {
+                sample_rate_hz: 48_000,
+                channels: 1,
+                bits_per_sample: 16,
+                master_clock_hz: None,
+            },
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "I2S" })
+    ));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D3"));
 }
 
 #[test]

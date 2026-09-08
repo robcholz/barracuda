@@ -9,7 +9,7 @@ use barracuda_board_hal::{
     audio, AnalogErrorType, AnalogInput, ConfigurableDigitalPin, DigitalLevel, InputConfig,
     OutputConfig, OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform, RuntimeI2sPlatform,
     RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, UartConfig, UartDataBits, UartParity,
-    UartStopBits, UnavailableAnalogOutput, UnavailableI2s, UnsupportedFunction,
+    UartStopBits, UnavailableAnalogOutput,
 };
 use embassy_stm32::{
     adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
@@ -17,7 +17,8 @@ use embassy_stm32::{
     i2c::{I2c, Master as I2cMaster},
     mode::Blocking,
     peripherals::{
-        ADC1, I2C1, PA10, PA5, PA6, PA7, PA8, PA9, PB6, PB7, PB8, PB9, SPI1, TIM1, USART1,
+        ADC1, DMA1_CH3, DMA1_CH4, I2C1, PA10, PA5, PA6, PA7, PA8, PA9, PB12, PB13, PB15, PB6, PB7,
+        PB8, PB9, PC6, SPI1, SPI2, TIM1, USART1,
     },
     spi::Spi,
     time::Hertz,
@@ -37,6 +38,10 @@ use embedded_hal::{
     i2c::Operation as I2cOperation,
     spi::Mode as EmbeddedMode,
 };
+use static_cell::StaticCell;
+
+#[doc(hidden)]
+pub use static_cell::StaticCell as __StaticCell;
 
 #[doc(hidden)]
 pub use embassy_stm32 as __vendor;
@@ -276,6 +281,130 @@ pub enum RuntimePwmChannel {
 /// TIM1 channel exposed through `embedded-hal` PWM.
 pub type ExposedPwm = embassy_stm32::timer::simple_pwm::SimplePwmChannel<'static, TIM1>;
 
+embassy_stm32::bind_interrupts!(struct RuntimeI2sIrqs {
+    DMA1_STREAM3 => embassy_stm32::dma::InterruptHandler<DMA1_CH3>;
+    DMA1_STREAM4 => embassy_stm32::dma::InterruptHandler<DMA1_CH4>;
+});
+
+/// One Platform-owned DMA stream valid for SPI2 I2S.
+pub enum RuntimeI2sDma {
+    /// SPI2 transmit DMA stream.
+    Tx(Peri<'static, DMA1_CH4>),
+    /// SPI2 receive DMA stream.
+    Rx(Peri<'static, DMA1_CH3>),
+}
+
+/// Platform-owned SPI2, DMA streams, and bounded PCM buffers.
+pub struct RuntimeI2sResource {
+    controller: Peri<'static, SPI2>,
+    tx_dma: Option<Peri<'static, DMA1_CH4>>,
+    rx_dma: Option<Peri<'static, DMA1_CH3>>,
+    tx_buffer: &'static mut [u16],
+    rx_buffer: &'static mut [u16],
+}
+
+/// Invalid generated I2S buffer allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeI2sResourceError;
+
+impl fmt::Display for RuntimeI2sResourceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("STM32 I2S DMA buffer must hold at least one stereo frame")
+    }
+}
+
+impl core::error::Error for RuntimeI2sResourceError {}
+
+/// STM32 I2S route, format, or transfer failure.
+#[derive(Debug)]
+pub enum ExposedI2sError {
+    /// The requested physical route is not a valid SPI2 I2S mapping.
+    InvalidPinRoute,
+    /// STM32F429 SPI2 I2S is half duplex and accepts one data direction.
+    UnsupportedDirection,
+    /// Only stereo, signed 16-bit PCM is implemented by this adapter.
+    UnsupportedFormat,
+    /// A required DMA stream was absent from the generated resource group.
+    MissingDma,
+    /// The vendor I2S ring buffer reported a transfer failure.
+    Transfer(embassy_stm32::i2s::Error),
+}
+
+impl fmt::Display for ExposedI2sError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPinRoute => formatter.write_str("invalid STM32 SPI2 I2S pin route"),
+            Self::UnsupportedDirection => {
+                formatter.write_str("STM32F429 SPI2 I2S supports TX or RX, not both")
+            }
+            Self::UnsupportedFormat => {
+                formatter.write_str("STM32 I2S requires stereo signed 16-bit PCM")
+            }
+            Self::MissingDma => formatter.write_str("missing STM32 SPI2 I2S DMA stream"),
+            Self::Transfer(error) => write!(formatter, "STM32 I2S transfer failed: {error:?}"),
+        }
+    }
+}
+
+impl core::error::Error for ExposedI2sError {}
+
+enum I2sDirection {
+    Tx(embassy_stm32::i2s::I2S<'static, u16>),
+    Rx(embassy_stm32::i2s::I2S<'static, u16>),
+}
+
+/// SPI2 I2S stream implementing Barracuda's narrow PCM capability.
+pub struct ExposedI2s {
+    stream: I2sDirection,
+    format: audio::PcmFormat,
+}
+
+impl audio::PcmStream for ExposedI2s {
+    type Error = ExposedI2sError;
+
+    fn format(&self) -> audio::PcmFormat {
+        self.format
+    }
+
+    async fn write(&mut self, samples: &[i16]) -> Result<(), Self::Error> {
+        match &mut self.stream {
+            I2sDirection::Tx(stream) => {
+                let mut converted = [0_u16; 64];
+                for chunk in samples.chunks(converted.len()) {
+                    for (target, sample) in converted.iter_mut().zip(chunk) {
+                        *target = *sample as u16;
+                    }
+                    stream
+                        .write(&converted[..chunk.len()])
+                        .await
+                        .map_err(ExposedI2sError::Transfer)?;
+                }
+                Ok(())
+            }
+            I2sDirection::Rx(_) => Err(ExposedI2sError::UnsupportedDirection),
+        }
+    }
+
+    async fn read(&mut self, samples: &mut [i16]) -> Result<(), Self::Error> {
+        match &mut self.stream {
+            I2sDirection::Rx(stream) => {
+                let mut converted = [0_u16; 64];
+                for chunk in samples.chunks_mut(converted.len()) {
+                    stream
+                        .read(&mut converted[..chunk.len()])
+                        .await
+                        .map_err(ExposedI2sError::Transfer)?;
+                    for (sample, source) in chunk.iter_mut().zip(&converted) {
+                        *sample = *source as i16;
+                    }
+                }
+                Ok(())
+            }
+            I2sDirection::Tx(_) => Err(ExposedI2sError::UnsupportedDirection),
+        }
+    }
+}
+
 /// Platform adapter used by generated runtime I/O composition.
 pub struct RuntimeAdapter;
 
@@ -291,7 +420,7 @@ impl RuntimePlatform for RuntimeAdapter {
     type UartController = Peri<'static, USART1>;
     type AdcResource = RuntimeAdcResource;
     type PwmResource = RuntimePwmResource;
-    type I2sResource = Infallible;
+    type I2sResource = RuntimeI2sResource;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         DynamicPin {
@@ -305,6 +434,15 @@ impl RuntimePlatform for RuntimeAdapter {
         sda: &Self::PinToken,
     ) -> bool {
         (scl.is::<PB6>() || scl.is::<PB8>()) && (sda.is::<PB7>() || sda.is::<PB9>())
+    }
+
+    fn supports_i2c_config(
+        controller: &Self::I2cController,
+        scl: &Self::PinToken,
+        sda: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_i2c(controller, scl, sda)
     }
 
     fn i2c(
@@ -362,6 +500,17 @@ impl RuntimePlatform for RuntimeAdapter {
             && mosi.is_none_or(|pin| pin.is::<PA7>())
             && miso.is_none_or(|pin| pin.is::<PA6>())
             && (mosi.is_some() || miso.is_some())
+    }
+
+    fn supports_spi_config(
+        controller: &Self::SpiController,
+        sck: &Self::PinToken,
+        mosi: Option<&Self::PinToken>,
+        miso: Option<&Self::PinToken>,
+        frequency_hz: u32,
+        _mode: EmbeddedMode,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_spi(controller, sck, mosi, miso)
     }
 
     fn spi(
@@ -460,6 +609,14 @@ impl RuntimePwmPlatform for RuntimeAdapter {
         resource.channel.is_some() && pin.is::<PA8>()
     }
 
+    fn supports_pwm_config(
+        resource: &Self::PwmResource,
+        pin: &Self::PinToken,
+        frequency_hz: u32,
+    ) -> bool {
+        frequency_hz > 0 && Self::supports_pwm(resource, pin)
+    }
+
     fn pwm(
         mut resource: Self::PwmResource,
         pin: Self::PinToken,
@@ -497,6 +654,15 @@ impl RuntimeUartPlatform for RuntimeAdapter {
         rx: Option<&Self::PinToken>,
     ) -> bool {
         tx.is_some_and(|pin| pin.is::<PA9>()) && rx.is_some_and(|pin| pin.is::<PA10>())
+    }
+
+    fn supports_uart_config(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+        config: UartConfig,
+    ) -> bool {
+        config.baud > 0 && Self::supports_uart(controller, tx, rx)
     }
 
     fn uart(
@@ -537,30 +703,135 @@ impl RuntimeUartPlatform for RuntimeAdapter {
 }
 
 impl RuntimeI2sPlatform for RuntimeAdapter {
-    type I2s = UnavailableI2s;
-    type I2sError = UnsupportedFunction;
+    type I2s = ExposedI2s;
+    type I2sError = ExposedI2sError;
 
     fn supports_i2s(
-        _resource: &Self::I2sResource,
-        _bclk: &Self::PinToken,
-        _ws: &Self::PinToken,
-        _dout: Option<&Self::PinToken>,
-        _din: Option<&Self::PinToken>,
-        _mclk: Option<&Self::PinToken>,
+        resource: &Self::I2sResource,
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
     ) -> bool {
-        false
+        let direction_available = match (dout, din) {
+            (Some(pin), None) => resource.tx_dma.is_some() && pin.is::<PB15>(),
+            (None, Some(pin)) => resource.rx_dma.is_some() && pin.is::<PB15>(),
+            _ => false,
+        };
+        bclk.is::<PB13>()
+            && ws.is::<PB12>()
+            && mclk.is_none_or(|pin| pin.is::<PC6>())
+            && direction_available
+    }
+
+    fn supports_i2s_format(
+        resource: &Self::I2sResource,
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
+        format: audio::PcmFormat,
+    ) -> bool {
+        let valid_clock = match (mclk, format.master_clock_hz) {
+            (None, None) => true,
+            (Some(_), Some(clock)) => format
+                .sample_rate_hz
+                .checked_mul(256)
+                .is_some_and(|expected| expected == clock),
+            _ => false,
+        };
+        format.sample_rate_hz > 0
+            && format.channels == 2
+            && format.bits_per_sample == 16
+            && valid_clock
+            && Self::supports_i2s(resource, bclk, ws, dout, din, mclk)
     }
 
     fn i2s(
-        resource: Self::I2sResource,
-        _bclk: Self::PinToken,
-        _ws: Self::PinToken,
-        _dout: Option<Self::PinToken>,
-        _din: Option<Self::PinToken>,
-        _mclk: Option<Self::PinToken>,
-        _format: audio::PcmFormat,
+        mut resource: Self::I2sResource,
+        bclk: Self::PinToken,
+        ws: Self::PinToken,
+        dout: Option<Self::PinToken>,
+        din: Option<Self::PinToken>,
+        mclk: Option<Self::PinToken>,
+        format: audio::PcmFormat,
     ) -> Result<Self::I2s, Self::I2sError> {
-        match resource {}
+        if format.sample_rate_hz == 0 || format.channels != 2 || format.bits_per_sample != 16 {
+            return Err(ExposedI2sError::UnsupportedFormat);
+        }
+        let mut config = embassy_stm32::i2s::Config::default();
+        config.frequency = Hertz(format.sample_rate_hz);
+        config.format = embassy_stm32::i2s::Format::Data16Channel16;
+        config.master_clock = mclk.is_some();
+        let bclk = bclk
+            .downcast::<PB13>()
+            .map_err(|_error| ExposedI2sError::InvalidPinRoute)?;
+        let ws = ws
+            .downcast::<PB12>()
+            .map_err(|_error| ExposedI2sError::InvalidPinRoute)?;
+        let transmit = dout.is_some() && din.is_none();
+        let stream = match (dout, din, mclk) {
+            (Some(dout), None, Some(mclk)) => embassy_stm32::i2s::I2S::new_txonly(
+                resource.controller,
+                dout.downcast::<PB15>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                ws,
+                bclk,
+                mclk.downcast::<PC6>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                resource.tx_dma.take().ok_or(ExposedI2sError::MissingDma)?,
+                resource.tx_buffer,
+                RuntimeI2sIrqs,
+                config,
+            ),
+            (Some(dout), None, None) => embassy_stm32::i2s::I2S::new_txonly_nomck(
+                resource.controller,
+                dout.downcast::<PB15>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                ws,
+                bclk,
+                resource.tx_dma.take().ok_or(ExposedI2sError::MissingDma)?,
+                resource.tx_buffer,
+                RuntimeI2sIrqs,
+                config,
+            ),
+            (None, Some(din), Some(mclk)) => embassy_stm32::i2s::I2S::new_rxonly(
+                resource.controller,
+                din.downcast::<PB15>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                ws,
+                bclk,
+                mclk.downcast::<PC6>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                resource.rx_dma.take().ok_or(ExposedI2sError::MissingDma)?,
+                resource.rx_buffer,
+                RuntimeI2sIrqs,
+                config,
+            ),
+            (None, Some(din), None) => embassy_stm32::i2s::I2S::new_rxonly_nomck(
+                resource.controller,
+                din.downcast::<PB15>()
+                    .map_err(|_error| ExposedI2sError::InvalidPinRoute)?,
+                ws,
+                bclk,
+                resource.rx_dma.take().ok_or(ExposedI2sError::MissingDma)?,
+                resource.rx_buffer,
+                RuntimeI2sIrqs,
+                config,
+            ),
+            _ => return Err(ExposedI2sError::UnsupportedDirection),
+        };
+        let mut stream = if transmit {
+            I2sDirection::Tx(stream)
+        } else {
+            I2sDirection::Rx(stream)
+        };
+        match &mut stream {
+            I2sDirection::Tx(stream) | I2sDirection::Rx(stream) => stream.start(),
+        }
+        Ok(ExposedI2s { stream, format })
     }
 }
 
@@ -584,8 +855,8 @@ pub fn runtime_io<const P: usize>(
     uart: [Peri<'static, USART1>; 1],
     adc: [RuntimeAdcResource; 1],
     pwm: [RuntimePwmResource; 1],
-    i2s: [Infallible; 0],
-) -> RuntimeIo<P, 1, 1, 1, 1, 1, 0> {
+    i2s: [RuntimeI2sResource; 1],
+) -> RuntimeIo<P, 1, 1, 1, 1, 1, 1> {
     RuntimeIo::new_with_resources(pins, i2c, spi, uart, adc, pwm, i2s)
 }
 
@@ -673,6 +944,76 @@ pub fn runtime_pwm_resource(
     RuntimePwmResource {
         controller,
         channel: channels.first().copied(),
+    }
+}
+
+/// Converts one generated DMA token into the SPI2 I2S DMA pool.
+#[doc(hidden)]
+pub trait RuntimeI2sDmaToken: embassy_stm32::PeripheralType + Send {
+    /// Preserves the concrete DMA stream identity.
+    fn erase(token: Peri<'static, Self>) -> RuntimeI2sDma;
+}
+
+impl RuntimeI2sDmaToken for DMA1_CH4 {
+    fn erase(token: Peri<'static, Self>) -> RuntimeI2sDma {
+        RuntimeI2sDma::Tx(token)
+    }
+}
+
+impl RuntimeI2sDmaToken for DMA1_CH3 {
+    fn erase(token: Peri<'static, Self>) -> RuntimeI2sDma {
+        RuntimeI2sDma::Rx(token)
+    }
+}
+
+/// Preserves one generated SPI2 I2S DMA stream.
+#[must_use]
+pub fn runtime_i2s_dma<D: RuntimeI2sDmaToken>(token: Peri<'static, D>) -> RuntimeI2sDma {
+    D::erase(token)
+}
+
+/// Allocates independent, bounded transmit and receive PCM ring buffers.
+///
+/// # Errors
+///
+/// Returns [`RuntimeI2sResourceError`] when the byte count is not aligned to
+/// signed 16-bit samples or cannot hold one stereo frame.
+#[doc(hidden)]
+pub fn runtime_i2s_buffers<const N: usize>(
+    bytes: usize,
+    tx: &'static StaticCell<[u16; N]>,
+    rx: &'static StaticCell<[u16; N]>,
+) -> Result<(&'static mut [u16], &'static mut [u16]), RuntimeI2sResourceError> {
+    if !bytes.is_multiple_of(core::mem::size_of::<u16>()) || N < 4 {
+        return Err(RuntimeI2sResourceError);
+    }
+    Ok((
+        tx.init([0; N]).as_mut_slice(),
+        rx.init([0; N]).as_mut_slice(),
+    ))
+}
+
+/// Builds one Platform-owned SPI2 I2S allocation.
+#[must_use]
+pub fn runtime_i2s_resource(
+    controller: Peri<'static, SPI2>,
+    dma: [RuntimeI2sDma; 2],
+    buffers: (&'static mut [u16], &'static mut [u16]),
+) -> RuntimeI2sResource {
+    let mut tx_dma = None;
+    let mut rx_dma = None;
+    for stream in dma {
+        match stream {
+            RuntimeI2sDma::Tx(token) => tx_dma = Some(token),
+            RuntimeI2sDma::Rx(token) => rx_dma = Some(token),
+        }
+    }
+    RuntimeI2sResource {
+        controller,
+        tx_dma,
+        rx_dma,
+        tx_buffer: buffers.0,
+        rx_buffer: buffers.1,
     }
 }
 
@@ -880,7 +1221,19 @@ macro_rules! __barracuda_stm32_runtime_pwm_channel {
     };
 }
 
+/// Statically allocates independent SPI2 I2S transmit and receive buffers.
+#[macro_export]
+macro_rules! __barracuda_stm32_runtime_i2s_dma_buffers {
+    ($bytes:expr) => {{
+        static TX: $crate::hal::__StaticCell<[u16; $bytes / 2]> = $crate::hal::__StaticCell::new();
+        static RX: $crate::hal::__StaticCell<[u16; $bytes / 2]> = $crate::hal::__StaticCell::new();
+        $crate::hal::runtime_i2s_buffers($bytes, &TX, &RX)
+    }};
+}
+
 pub use __barracuda_stm32_runtime_adc_channel as runtime_adc_channel;
+#[doc(hidden)]
+pub use __barracuda_stm32_runtime_i2s_dma_buffers as runtime_i2s_dma_buffers;
 #[doc(hidden)]
 pub use __barracuda_stm32_runtime_pwm_channel as runtime_pwm_channel;
 #[doc(hidden)]

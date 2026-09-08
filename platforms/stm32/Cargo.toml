@@ -20,6 +20,7 @@ stm32f429zi = [
     "dep:embedded-io-async",
     "dep:panic-halt",
     "dep:rtt-target",
+    "dep:static_cell",
     "embassy-stm32/stm32f429zi",
 ]
 
@@ -43,6 +44,7 @@ embedded-io = { version = "0.7", optional = true }
 embedded-io-async = { version = "0.7", optional = true }
 panic-halt = { version = "1.0.0", optional = true }
 rtt-target = { version = "0.6.2", features = ["log"], optional = true }
+static_cell = { workspace = true, optional = true }
 
 [build-dependencies]
 barracuda-board-config.workspace = true

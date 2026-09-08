@@ -30,6 +30,10 @@ hal:
     - controller: TIM1
       timers: [TIM1]
       channels: [Ch1]
+  runtime-i2s-controllers:
+    - controller: SPI2
+      dma-channels: [DMA1_CH4, DMA1_CH3]
+      dma-buffer-bytes: 4096
 selection:
   board-chips:
     - "stm32*"

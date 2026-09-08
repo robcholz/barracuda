@@ -52,6 +52,16 @@ pub trait RuntimePlatform: Send + Sync + 'static {
         true
     }
 
+    /// Returns whether an I2C route accepts the requested clock.
+    fn supports_i2c_config(
+        controller: &Self::I2cController,
+        scl: &Self::PinToken,
+        sda: &Self::PinToken,
+        _frequency_hz: u32,
+    ) -> bool {
+        Self::supports_i2c(controller, scl, sda)
+    }
+
     /// Consumes one controller and two pins as an async I2C bus.
     fn i2c(
         controller: Self::I2cController,
@@ -68,6 +78,18 @@ pub trait RuntimePlatform: Send + Sync + 'static {
         _miso: Option<&Self::PinToken>,
     ) -> bool {
         true
+    }
+
+    /// Returns whether an SPI route accepts the requested clock and mode.
+    fn supports_spi_config(
+        controller: &Self::SpiController,
+        sck: &Self::PinToken,
+        mosi: Option<&Self::PinToken>,
+        miso: Option<&Self::PinToken>,
+        _frequency_hz: u32,
+        _mode: Mode,
+    ) -> bool {
+        Self::supports_spi(controller, sck, mosi, miso)
     }
 
     /// Consumes one controller and selected pins as an async SPI bus.
@@ -112,6 +134,14 @@ pub trait RuntimePwmPlatform: RuntimePlatform {
 
     /// Returns whether this physical pin can be routed to a PWM output.
     fn supports_pwm(resource: &Self::PwmResource, pin: &Self::PinToken) -> bool;
+    /// Returns whether a PWM route accepts the requested frequency.
+    fn supports_pwm_config(
+        resource: &Self::PwmResource,
+        pin: &Self::PinToken,
+        _frequency_hz: u32,
+    ) -> bool {
+        Self::supports_pwm(resource, pin)
+    }
     /// Consumes a pin and one timer/channel resource at the requested frequency.
     fn pwm(
         resource: Self::PwmResource,
@@ -133,6 +163,15 @@ pub trait RuntimeUartPlatform: RuntimePlatform {
         tx: Option<&Self::PinToken>,
         rx: Option<&Self::PinToken>,
     ) -> bool;
+    /// Returns whether a UART route accepts the requested line configuration.
+    fn supports_uart_config(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+        _config: UartConfig,
+    ) -> bool {
+        Self::supports_uart(controller, tx, rx)
+    }
     /// Consumes one Platform-owned controller and the selected pins.
     fn uart(
         controller: Self::UartController,
@@ -158,6 +197,19 @@ pub trait RuntimeI2sPlatform: RuntimePlatform {
         din: Option<&Self::PinToken>,
         mclk: Option<&Self::PinToken>,
     ) -> bool;
+    /// Returns whether an I2S route accepts the requested PCM format.
+    #[allow(clippy::too_many_arguments)]
+    fn supports_i2s_format(
+        resource: &Self::I2sResource,
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
+        _format: audio::PcmFormat,
+    ) -> bool {
+        Self::supports_i2s(resource, bclk, ws, dout, din, mclk)
+    }
     /// Consumes selected pins and allocates an I2S controller and DMA resources.
     fn i2s(
         resource: Self::I2sResource,
@@ -631,9 +683,9 @@ impl<
                 })
             })?;
             let resource_index = state.pwm.iter().position(|resource| {
-                resource
-                    .as_ref()
-                    .is_some_and(|resource| H::supports_pwm(resource, token))
+                resource.as_ref().is_some_and(|resource| {
+                    H::supports_pwm_config(resource, token, request.frequency_hz)
+                })
             });
             let resource_index = match resource_index {
                 Some(index) => index,
@@ -729,9 +781,9 @@ impl<
             let tx_ref = tx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let rx_ref = rx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let controller_index = state.uart.iter().position(|controller| {
-                controller
-                    .as_ref()
-                    .is_some_and(|controller| H::supports_uart(controller, tx_ref, rx_ref))
+                controller.as_ref().is_some_and(|controller| {
+                    H::supports_uart_config(controller, tx_ref, rx_ref, request.config)
+                })
             });
             let controller_index = match controller_index {
                 Some(index) => index,
@@ -819,7 +871,15 @@ impl<
             let mclk_ref = mclk_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let resource_index = state.i2s.iter().position(|resource| {
                 resource.as_ref().is_some_and(|resource| {
-                    H::supports_i2s(resource, bclk_ref, ws_ref, dout_ref, din_ref, mclk_ref)
+                    H::supports_i2s_format(
+                        resource,
+                        bclk_ref,
+                        ws_ref,
+                        dout_ref,
+                        din_ref,
+                        mclk_ref,
+                        request.format,
+                    )
                 })
             });
             let resource_index = match resource_index {
@@ -900,9 +960,9 @@ impl<
                 .as_ref()
                 .ok_or(RuntimeOpenError::NoController { protocol: "I2C" })?;
             let controller_index = state.i2c.iter().position(|controller| {
-                controller
-                    .as_ref()
-                    .is_some_and(|controller| H::supports_i2c(controller, scl, sda))
+                controller.as_ref().is_some_and(|controller| {
+                    H::supports_i2c_config(controller, scl, sda, request.frequency_hz)
+                })
             });
             let controller_index = match controller_index {
                 Some(index) => index,
@@ -987,9 +1047,16 @@ impl<
             let mosi = mosi_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let miso = miso_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let controller_index = state.spi.iter().position(|controller| {
-                controller
-                    .as_ref()
-                    .is_some_and(|controller| H::supports_spi(controller, sck, mosi, miso))
+                controller.as_ref().is_some_and(|controller| {
+                    H::supports_spi_config(
+                        controller,
+                        sck,
+                        mosi,
+                        miso,
+                        request.frequency_hz,
+                        request.mode,
+                    )
+                })
             });
             let controller_index = match controller_index {
                 Some(index) => index,

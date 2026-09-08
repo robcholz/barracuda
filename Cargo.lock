@@ -691,7 +691,6 @@ dependencies = [
 name = "barracuda-apa102-led-strip"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
  "embedded-hal 1.0.0",
 ]
 
@@ -742,6 +741,7 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-board-tool",
+ "barracuda-driver",
  "barracuda-driver-config",
  "barracuda-platform-config",
  "barracuda-platform-selected",
@@ -1445,6 +1445,7 @@ dependencies = [
  "log",
  "panic-halt",
  "rtt-target",
+ "static_cell",
 ]
 
 [[package]]

@@ -1270,7 +1270,9 @@ fn render_generic_hal(
     for (field, ty) in &state.raw_fields {
         source.push_str(&format!("    {field}: {ty},\n"));
     }
-    source.push_str("}\n\nimpl GeneratedBoardBindings {\n    #[must_use]\n    pub const fn new(\n");
+    source.push_str(
+        "}\n\nimpl GeneratedBoardBindings {\n    #[must_use]\n    #[allow(clippy::too_many_arguments)]\n    pub const fn new(\n",
+    );
     for (field, ty) in &state.raw_fields {
         source.push_str(&format!("        {field}: {ty},\n"));
     }

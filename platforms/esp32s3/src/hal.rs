@@ -453,6 +453,30 @@ impl barracuda_board_hal::RuntimeI2sPlatform for RuntimeAdapter {
         resource.dma.is_some() && (dout.is_some() || din.is_some())
     }
 
+    fn supports_i2s_format(
+        resource: &Self::I2sResource,
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
+        format: barracuda_board_hal::audio::PcmFormat,
+    ) -> bool {
+        let valid_master_clock = match (mclk, format.master_clock_hz) {
+            (None, None) => true,
+            (Some(_), Some(clock)) => format
+                .sample_rate_hz
+                .checked_mul(256)
+                .is_some_and(|expected| expected == clock),
+            _ => false,
+        };
+        format.sample_rate_hz > 0
+            && matches!(format.channels, 1 | 2)
+            && format.bits_per_sample == 16
+            && valid_master_clock
+            && Self::supports_i2s(resource, bclk, ws, dout, din, mclk)
+    }
+
     fn i2s(
         mut resource: Self::I2sResource,
         bclk: Self::PinToken,
