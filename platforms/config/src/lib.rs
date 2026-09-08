@@ -201,6 +201,21 @@ impl PlatformDefinition {
             .get(chip)
             .map_or(&[], Vec::as_slice)
     }
+
+    /// Returns Platform-owned compiler flags for one concrete Cargo target.
+    #[must_use]
+    pub fn cargo_rustflags_for_target(&self, target: &str) -> &[String] {
+        self.selection
+            .targets
+            .iter()
+            .find(|selector| {
+                selector
+                    .triple
+                    .as_deref()
+                    .is_some_and(|pattern| wildcard_matches(pattern, target))
+            })
+            .map_or(&[], |selector| selector.rustflags.as_slice())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -221,6 +236,8 @@ struct TargetSelector {
     os: Option<String>,
     #[serde(default)]
     arch: Option<String>,
+    #[serde(default)]
+    rustflags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -506,6 +523,28 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
             message: String::from(
                 "selection.features-by-chip requires non-empty chips and Cargo features",
             ),
+        });
+    }
+    if document
+        .selection
+        .targets
+        .iter()
+        .any(|target| target.rustflags.iter().any(|flag| flag.trim().is_empty()))
+    {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: String::from("selection.targets.rustflags must not contain empty flags"),
+        });
+    }
+    if document
+        .selection
+        .targets
+        .iter()
+        .any(|target| !target.rustflags.is_empty() && target.triple.is_none())
+    {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: String::from("selection.targets.rustflags require a triple selector"),
         });
     }
     Ok(PlatformDefinition {

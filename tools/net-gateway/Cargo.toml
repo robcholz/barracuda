@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "WebSocket virtual router for Barracuda browser and macOS devices"
 
+[lib]
+path = "src/main.rs"
+
+[[bin]]
+name = "barracuda-net-gateway"
+path = "src/bin.rs"
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }

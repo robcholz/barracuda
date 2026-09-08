@@ -14,6 +14,14 @@ system-image:
     driver: file
     state-directory: .barracuda
     flash-image: board.flash
+application:
+  support-binaries:
+    - barracuda-macos
+  launcher:
+    program: "{support:barracuda-macos}"
+    arguments:
+      - "{application}"
+      - "{workspace}"
 settings:
   state-directory: .barracuda
   flash-image: board.flash

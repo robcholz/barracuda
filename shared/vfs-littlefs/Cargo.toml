@@ -12,8 +12,13 @@ barracuda-vfs.workspace = true
 embedded-io-async = "0.7"
 embedded-storage = "0.3"
 generic-array = "0.14"
-littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+littlefs2 = { version = "0.8", default-features = false, features = ["alloc"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

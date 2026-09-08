@@ -20,6 +20,8 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use session::{NetworkSession, Outbound};
 use tokio::sync::mpsc;
 
+const DEFAULT_DEVICE_WEB_PORT: u16 = 8787;
+
 #[derive(Debug, Parser)]
 #[command(about = "Route Barracuda virtual NICs through host TCP and UDP sockets")]
 struct Arguments {
@@ -33,7 +35,7 @@ struct Arguments {
     #[arg(long, default_value = "127.0.0.1")]
     forward_address: std::net::IpAddr,
     /// Port inside the device to expose through the returned URL.
-    #[arg(long, default_value_t = 80)]
+    #[arg(long, default_value_t = DEFAULT_DEVICE_WEB_PORT)]
     device_web_port: u16,
     /// Resolver used for requests sent to the guest-visible DNS address.
     #[arg(long, default_value = "1.1.1.1:53")]
@@ -52,26 +54,73 @@ struct GatewayState {
     allowed_origins: Arc<[String]>,
 }
 
+/// Runs the standalone network-gateway command.
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+pub async fn run_cli() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let arguments = Arguments::parse();
-    let state = GatewayState {
+    let config = GatewayConfig {
         public_base_url: arguments.public_base_url.into(),
         forward_address: arguments.forward_address,
         device_web_port: arguments.device_web_port,
         dns_server: arguments.dns_server,
         allowed_origins: arguments.allowed_origins.into(),
     };
-    let app = router(state);
     let listener = tokio::net::TcpListener::bind(arguments.listen).await?;
     tracing::info!(address = %arguments.listen, "network gateway listening");
-    axum::serve(listener, app)
+    serve(listener, config)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Runtime configuration for one host network gateway.
+#[derive(Clone, Debug)]
+pub struct GatewayConfig {
+    public_base_url: Arc<str>,
+    forward_address: std::net::IpAddr,
+    device_web_port: u16,
+    dns_server: SocketAddr,
+    allowed_origins: Arc<[String]>,
+}
+
+impl GatewayConfig {
+    /// Creates the default configuration for a trusted native loopback client.
+    #[must_use]
+    pub fn native() -> Self {
+        Self {
+            public_base_url: Arc::from("http://127.0.0.1"),
+            forward_address: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            device_web_port: DEFAULT_DEVICE_WEB_PORT,
+            dns_server: SocketAddr::from(([1, 1, 1, 1], 53)),
+            allowed_origins: Arc::from([]),
+        }
+    }
+
+    /// Creates the default browser configuration for one allowed page origin.
+    #[must_use]
+    pub fn browser(allowed_origin: String) -> Self {
+        let mut config = Self::native();
+        config.allowed_origins = Arc::from([allowed_origin]);
+        config
+    }
+}
+
+/// Serves virtual NIC WebSocket sessions on an already-bound listener.
+pub fn serve(
+    listener: tokio::net::TcpListener,
+    config: GatewayConfig,
+) -> axum::serve::Serve<tokio::net::TcpListener, Router, Router> {
+    let state = GatewayState {
+        public_base_url: config.public_base_url,
+        forward_address: config.forward_address,
+        device_web_port: config.device_web_port,
+        dns_server: config.dns_server,
+        allowed_origins: config.allowed_origins,
+    };
+    axum::serve(listener, router(state))
 }
 
 fn router(state: GatewayState) -> Router {
@@ -105,11 +154,13 @@ fn origin_allowed(headers: &HeaderMap, allowed_origins: &[String]) -> bool {
 async fn serve_device(socket: WebSocket, state: GatewayState) {
     let session_id = uuid::Uuid::new_v4();
     let (mut sender, mut receiver) = socket.split();
+    tracing::info!(%session_id, "device WebSocket upgraded; awaiting protocol handshake");
 
     let Some(Ok(Message::Binary(message))) = receiver.next().await else {
         tracing::warn!(%session_id, "device disconnected before protocol handshake");
         return;
     };
+    tracing::debug!(%session_id, bytes = message.len(), "device protocol handshake received");
     if !is_hello(&message) {
         tracing::warn!(%session_id, "device did not begin with a valid hello frame");
         return;
@@ -138,6 +189,9 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
                 Outbound::Packet(packet) => (Kind::Packet, packet),
                 Outbound::DeviceUrl(url) => (Kind::DeviceUrl, url.into_bytes()),
             };
+            if kind == Kind::DeviceUrl {
+                tracing::debug!(bytes = payload.len(), "sending device WebServer URL");
+            }
             let mut message = vec![0; barracuda_net_gateway_protocol::encoded_len(payload.len())];
             let Ok(length) = encode(kind, &payload, &mut message) else {
                 break;
@@ -147,6 +201,7 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
                 .await
                 .is_err()
             {
+                tracing::warn!(?kind, "could not send gateway frame to device");
                 break;
             }
         }
@@ -195,7 +250,7 @@ mod tests {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-    use super::{is_hello, origin_allowed, router, GatewayState};
+    use super::{is_hello, origin_allowed, router, GatewayState, DEFAULT_DEVICE_WEB_PORT};
 
     #[test]
     fn session_requires_a_valid_hello_as_its_first_frame() {
@@ -235,7 +290,7 @@ mod tests {
                 router(GatewayState {
                     public_base_url: "http://127.0.0.1".into(),
                     forward_address: "127.0.0.1".parse().expect("forward address"),
-                    device_web_port: 80,
+                    device_web_port: DEFAULT_DEVICE_WEB_PORT,
                     dns_server: "127.0.0.1:53".parse().expect("DNS address"),
                     allowed_origins: Vec::new().into(),
                 }),

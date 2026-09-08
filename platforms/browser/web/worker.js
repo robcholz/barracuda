@@ -1,9 +1,27 @@
+import { setMemory as setWasiMemory } from "./wasi_snapshot_preview1.js";
+
+self.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  self.postMessage({
+    type: "error",
+    message: reason instanceof Error ? reason.stack : String(reason),
+  });
+});
+
+self.addEventListener("error", (event) => {
+  self.postMessage({
+    type: "error",
+    message: event.error instanceof Error ? event.error.stack : event.message,
+  });
+});
+
 self.onmessage = async ({
   data: { wasm, wasmModuleUrl, image, gatewayUrl },
 }) => {
   try {
     const bindings = await import(wasmModuleUrl);
-    await bindings.default(wasm);
+    const instance = await bindings.default(wasm);
+    setWasiMemory(instance.memory);
     await bindings.start(gatewayUrl, new Uint8Array(image));
     self.postMessage({ type: "started" });
   } catch (error) {

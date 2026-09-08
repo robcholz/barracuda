@@ -9,6 +9,7 @@ license = "Apache-2.0"
 [features]
 default = []
 vendored = ["lunka/link-vendored"]
+wasm-static = []
 
 [dependencies]
 async-channel = { version = "2.5", default-features = false }

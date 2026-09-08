@@ -192,6 +192,7 @@ async fn route_guest_packets(
     nat: &mut futures_util::stream::SplitSink<netstack_smoltcp::Stack, Vec<u8>>,
 ) {
     while let Some(packet) = input.recv().await {
+        tracing::trace!(bytes = packet.len(), "received packet from device");
         if destination(&packet) == Some(GATEWAY_ADDRESS.octets()) {
             let target = gateway.rx_buf().await;
             target[..packet.len()].copy_from_slice(&packet);
@@ -411,6 +412,7 @@ async fn run_gateway_stack<'d>(mut runner: Runner<'d, Device<'d, MTU>>) {
 async fn send_gateway_packets(mut packets: TxRunner<'_, MTU>, responses: mpsc::Sender<Outbound>) {
     loop {
         let packet = packets.tx_buf().await;
+        tracing::trace!(bytes = packet.len(), "sending packet to device");
         let result = responses.send(Outbound::Packet(packet.to_vec())).await;
         packets.tx_done();
         if result.is_err() {

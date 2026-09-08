@@ -17,7 +17,7 @@ fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
     fs::write(
         directory.join("platform.yml"),
         format!(
-            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
+            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\n      rustflags: ['-C', 'link-arg=-zstack-size=8388608']\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
     )
     .expect("Platform manifest");
@@ -53,6 +53,10 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     assert_eq!(board.application().support_binaries(), ["acme-network"]);
     assert!(board.cargo_features_for_chip("acme123-pro").is_empty());
     assert_eq!(
+        board.cargo_rustflags_for_target("riscv64acme-unknown-none-elf"),
+        ["-C", "link-arg=-zstack-size=8388608"]
+    );
+    assert_eq!(
         board
             .application()
             .launcher()
@@ -78,6 +82,24 @@ fn platform_owns_cargo_features_for_supported_chips() {
 
     assert_eq!(platform.cargo_features_for_chip("acme123"), ["acme123-hal"]);
     assert!(platform.cargo_features_for_chip("acme999").is_empty());
+}
+
+#[test]
+fn target_rustflags_require_a_triple_selector() {
+    let root = tempdir().expect("temporary workspace");
+    let directory = root.path().join("platforms/acme");
+    fs::create_dir_all(&directory).expect("Platform directory");
+    fs::write(
+        directory.join("platform.yml"),
+        "name: acme\npackage: barracuda-platform-acme\ncrate: barracuda_platform_acme\ntype: AcmePlatform\nselection:\n  board-chips: [acme]\n  targets:\n    - os: acme\n      rustflags: ['-C', 'link-arg=-zstack-size=8388608']\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+    )
+    .expect("Platform manifest");
+
+    let error = discover_platforms(root.path()).expect_err("rustflags need a target triple");
+
+    assert!(error
+        .to_string()
+        .contains("rustflags require a triple selector"));
 }
 
 #[test]

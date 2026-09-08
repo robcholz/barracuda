@@ -10,7 +10,7 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-platform.workspace = true
 # BEGIN GENERATED SELECTED PLATFORM
-barracuda-platform-macos.workspace = true
+barracuda-platform-browser.workspace = true
 # END GENERATED SELECTED PLATFORM
 embassy-executor.workspace = true
 

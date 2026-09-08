@@ -1,5 +1,6 @@
 //! Full picoserve request/response path with allocation-counted, bounded test IO.
 #![allow(clippy::expect_used, clippy::panic)]
+#![recursion_limit = "256"]
 
 use core::future::Future;
 use core::task::{Context, Poll, Waker};

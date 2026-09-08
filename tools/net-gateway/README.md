@@ -11,7 +11,7 @@ cargo run -p barracuda-net-gateway --target "$(rustc -vV | sed -n 's/^host: //p'
 The default endpoint is `ws://127.0.0.1:8787/v1/connect`. A session translates
 guest TCP and UDP flows to host sockets, maps the guest-visible `10.0.2.3:53`
 resolver to `1.1.1.1:53`, and opens an ephemeral loopback listener forwarded to
-guest `10.0.2.15:80`. The assigned HTTP URL is returned to the device over the
+guest `10.0.2.15:8787`. The assigned HTTP URL is returned to the device over the
 same versioned protocol.
 
 Native clients do not send a browser `Origin` header and work with the default

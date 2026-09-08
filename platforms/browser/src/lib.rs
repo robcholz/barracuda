@@ -6,6 +6,8 @@
 mod flash;
 #[cfg(target_arch = "wasm32")]
 pub mod network;
+#[cfg(target_arch = "wasm32")]
+mod time;
 
 #[cfg(target_arch = "wasm32")]
 mod implementation {
@@ -116,8 +118,9 @@ mod implementation {
                 });
             }
             let partitions = Self::initialize_partitions().await?;
-            let ip_stack =
-                crate::network::create_stack(spawner).map_err(BrowserPlatformError::javascript)?;
+            let ip_stack = crate::network::create_stack(spawner)
+                .await
+                .map_err(BrowserPlatformError::javascript)?;
             Ok(PlatformResources {
                 ip_stack,
                 tls: barracuda_tls::PlaintextTls,
@@ -253,6 +256,8 @@ macro_rules! platform_entry {
                 $crate::__report_fatal(&alloc::format!("{error}"));
             }
         }
+
+        use $crate::__wasm_bindgen as wasm_bindgen;
 
         #[$crate::__wasm_bindgen::prelude::wasm_bindgen]
         #[doc(hidden)]

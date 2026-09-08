@@ -4,6 +4,7 @@ export async function bootBarracuda({
   systemImageUrl,
   gatewayUrl,
   onDeviceUrl = () => {},
+  onError = () => {},
 }) {
   const [wasm, image] = await Promise.all([
     fetch(wasmUrl)
@@ -18,6 +19,7 @@ export async function bootBarracuda({
   });
   worker.addEventListener("message", ({ data }) => {
     if (data?.type === "device-url") onDeviceUrl(data.url);
+    if (data?.type === "error") onError(data.message);
   });
   const started = new Promise((resolve, reject) => {
     const cleanup = () => {

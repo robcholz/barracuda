@@ -1,6 +1,6 @@
 //! Embassy packet-channel construction for the browser virtual NIC.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 use barracuda_net_gateway_protocol::{decode, encode, Kind};
 use embassy_executor::Spawner;
@@ -9,6 +9,7 @@ use embassy_net_driver_channel::{
     driver::{HardwareAddress, LinkState},
     Device, State, TxRunner,
 };
+use futures_channel::oneshot;
 use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 use web_sys::{BinaryType, MessageEvent, WebSocket};
 
@@ -34,47 +35,22 @@ pub fn configure_gateway(url: String) -> Result<(), JsValue> {
 ///
 /// The returned socket is intentionally private: Plugins receive only the
 /// resulting [`Stack`], never the WebSocket host transport.
-pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
+pub async fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     let url = GATEWAY_URL
         .with(|configured| configured.borrow().clone())
         .ok_or_else(|| JsValue::from_str("network gateway is not configured"))?;
     let socket = WebSocket::new(&url)?;
     socket.set_binary_type(BinaryType::Arraybuffer);
+    wait_until_open(&socket).await?;
 
     let state = Box::leak(Box::new(State::<MTU, RX_PACKETS, TX_PACKETS>::new()));
     let (runner, device): (_, Device<'static, MTU>) =
         embassy_net_driver_channel::new(state, HardwareAddress::Ip);
     let (link, mut rx, tx) = runner.split();
-
-    let hello_socket = socket.clone();
     let transmit_socket = socket.clone();
-    let mut transmit_runner = Some(tx);
-    let onopen = Closure::<dyn FnMut()>::new(move || {
-        let mut hello = [0; 3];
-        let hello_sent = encode(
-            Kind::Hello,
-            &[barracuda_net_gateway_protocol::VERSION],
-            &mut hello,
-        )
-        .ok()
-        .and_then(|length| hello_socket.send_with_u8_array(&hello[..length]).ok())
-        .is_some();
-        let Some(tx) = transmit_runner.take() else {
-            return;
-        };
-        if !hello_sent
-            || spawner
-                .spawn(transmit_task(transmit_socket.clone(), link, tx))
-                .is_err()
-        {
-            link.set_link_state(LinkState::Down);
-            let _ = hello_socket.close();
-            return;
-        }
-        link.set_link_state(LinkState::Up);
-    });
-    socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
-    onopen.forget();
+    let (ready_sender, ready_receiver) = oneshot::channel::<Result<(), JsValue>>();
+    let ready_sender = Rc::new(RefCell::new(Some(ready_sender)));
+    let message_ready_sender = Rc::clone(&ready_sender);
 
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
         let bytes = js_sys::Uint8Array::new(&event.data()).to_vec();
@@ -89,6 +65,9 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
                 Kind::DeviceUrl => {
                     if let Ok(url) = core::str::from_utf8(frame.payload) {
                         report_device_url(url);
+                        if let Some(sender) = message_ready_sender.borrow_mut().take() {
+                            let _result = sender.send(Ok(()));
+                        }
                     }
                 }
                 _ => {}
@@ -99,18 +78,49 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     onmessage.forget();
 
     let close_link = link;
+    let close_ready_sender = Rc::clone(&ready_sender);
     let onclose = Closure::<dyn FnMut()>::new(move || {
+        web_sys::console::warn_1(&JsValue::from_str(
+            "Barracuda Browser Platform network gateway closed",
+        ));
         close_link.set_link_state(LinkState::Down);
+        if let Some(sender) = close_ready_sender.borrow_mut().take() {
+            let _result = sender.send(Err(JsValue::from_str(
+                "Browser Platform network gateway closed during startup",
+            )));
+        }
     });
     socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
     onclose.forget();
 
     let error_link = link;
+    let error_ready_sender = ready_sender;
     let onerror = Closure::<dyn FnMut()>::new(move || {
+        web_sys::console::error_1(&JsValue::from_str(
+            "Barracuda Browser Platform network gateway failed",
+        ));
         error_link.set_link_state(LinkState::Down);
+        if let Some(sender) = error_ready_sender.borrow_mut().take() {
+            let _result = sender.send(Err(JsValue::from_str(
+                "Browser Platform network gateway failed during startup",
+            )));
+        }
     });
     socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
     onerror.forget();
+
+    let mut hello = [0; 3];
+    let length = encode(
+        Kind::Hello,
+        &[barracuda_net_gateway_protocol::VERSION],
+        &mut hello,
+    )
+    .map_err(|_| JsValue::from_str("network gateway hello cannot be encoded"))?;
+    socket.send_with_u8_array(&hello[..length])?;
+    spawner
+        .spawn(transmit_task(transmit_socket, link, tx))
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    link.set_link_state(LinkState::Up);
 
     let mut dns = heapless::Vec::new();
     dns.push(Ipv4Address::new(10, 0, 2, 3))
@@ -126,7 +136,39 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
         let _ = socket.close();
         return Err(JsValue::from_str(&error.to_string()));
     }
+    ready_receiver
+        .await
+        .map_err(|_closed| JsValue::from_str("network gateway readiness signal was dropped"))??;
     Ok(stack)
+}
+
+async fn wait_until_open(socket: &WebSocket) -> Result<(), JsValue> {
+    let (sender, receiver) = oneshot::channel::<Result<(), JsValue>>();
+    let sender = Rc::new(RefCell::new(Some(sender)));
+    let opened_sender = Rc::clone(&sender);
+    let onopen = Closure::<dyn FnMut()>::new(move || {
+        if let Some(sender) = opened_sender.borrow_mut().take() {
+            let _result = sender.send(Ok(()));
+        }
+    });
+    socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+
+    let failed_sender = sender;
+    let onerror = Closure::<dyn FnMut()>::new(move || {
+        if let Some(sender) = failed_sender.borrow_mut().take() {
+            let _result = sender.send(Err(JsValue::from_str(
+                "Browser Platform network gateway connection failed",
+            )));
+        }
+    });
+    socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+
+    let result = receiver
+        .await
+        .map_err(|_closed| JsValue::from_str("network gateway open signal was dropped"))?;
+    socket.set_onopen(None);
+    socket.set_onerror(None);
+    result
 }
 
 fn report_device_url(url: &str) {

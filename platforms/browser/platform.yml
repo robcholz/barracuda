@@ -7,6 +7,9 @@ selection:
     - browser
   targets:
     - triple: wasm32-unknown-unknown
+      rustflags:
+        - -C
+        - link-arg=-zstack-size=8388608
 system-image:
   layout:
     driver: file-regions
@@ -14,4 +17,12 @@ system-image:
     driver: file
     state-directory: .barracuda/browser
     flash-image: board.flash
-application: {}
+application:
+  support-binaries:
+    - barracuda-browser
+  launcher:
+    program: "{support:barracuda-browser}"
+    arguments:
+      - "{application}"
+      - "{workspace}"
+      - "{target-dir}"
