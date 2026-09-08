@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "skill_reload",
-    "description": "Re-scan the skills directories from disk so skills installed, edited, or removed at runtime become visible. Call this once after skills change on disk, then use skill_list or skill_read.",
+    "description": "Re-scan the skills directories into one globally unique catalog so skills installed, edited, or removed at runtime become visible. Duplicate names fail the reload and leave the previous catalog active.",
     "parameters": {
       "type": "object",
       "properties": {},

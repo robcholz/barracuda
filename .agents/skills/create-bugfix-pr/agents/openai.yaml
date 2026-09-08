@@ -1,0 +1,6 @@
+interface:
+  display_name: "Barracuda Bug-Fix PR"
+  short_description: "Review and publish evidence-backed bug-fix PRs"
+  default_prompt: "Use $create-bugfix-pr to review my fix and create a Barracuda PR with root-cause and regression evidence."
+policy:
+  allow_implicit_invocation: true

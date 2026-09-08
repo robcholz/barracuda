@@ -472,6 +472,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
@@ -743,7 +744,6 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-board-tool",
- "barracuda-driver",
  "barracuda-driver-config",
  "barracuda-platform-config",
  "barracuda-platform-selected",
@@ -907,6 +907,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-plugin",
  "barracuda-workflow-plugin",
+ "embassy-time",
  "embedded-io-async 0.7.0",
  "http-client",
  "serde",
@@ -943,10 +944,18 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "bluebubbles",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
  "http-client",
  "log",
  "serde",
@@ -991,6 +1000,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-plugin-build",
  "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "http-client",
  "inkbox",
  "log",
@@ -1007,6 +1018,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-plugin-build",
  "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "http-client",
  "log",
  "qq",
@@ -1023,6 +1036,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-plugin-build",
  "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "http-client",
  "log",
  "serde",
@@ -1052,6 +1067,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-plugin-build",
  "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "http-client",
  "log",
  "serde",
@@ -1561,6 +1578,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "dialoguer",
+ "syn 2.0.118",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -1678,7 +1696,10 @@ dependencies = [
  "barracuda-vfs-littlefs",
  "barracuda-vfs-memfs",
  "barracuda-vm-agent-plugin",
+ "barracuda-vm-filesystem-plugin",
+ "barracuda-vm-http-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-time-plugin",
  "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
@@ -1868,6 +1889,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-vm-filesystem-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-builtin-packages",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+]
+
+[[package]]
+name = "barracuda-vm-http-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-http-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-builtin-packages",
+ "barracuda-vm-filesystem-plugin",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-vm-time-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "futures-channel",
+ "futures-lite",
+ "futures-util",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
@@ -1909,6 +1968,25 @@ dependencies = [
  "getset",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm-time-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-plugin",
+ "barracuda-time-plugin",
+ "barracuda-vm-builtin-packages",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "futures-channel",
+ "futures-lite",
+ "thiserror 2.0.18",
+ "time",
 ]
 
 [[package]]

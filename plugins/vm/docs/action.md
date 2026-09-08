@@ -8,10 +8,12 @@ Action registry. Their static request and response contracts live at
 execution finishes. It has no Event Router frame limit:
 
 ```json
-{"source":"io.print('hello')"}
+{"source":"print('hello')"}
 ```
 
-A successful execution returns all complete `io.print(...)` messages in order:
+A successful execution returns output lines from `print(...)`, `io.write(...)`,
+and the virtual stdout/stderr handles in order. Newlines delimit entries; a
+final unterminated fragment is retained as the last entry:
 
 ```json
 {"run_id":1,"outcome":"success","output":["hello"]}
@@ -21,7 +23,7 @@ Cancellation returns `outcome: "cancelled"`. Execution failures return
 `outcome: "error"` with a stable `error` code and diagnostic. Rejection before
 an execution slot is accepted returns `{"error":"<code>"}`.
 
-If Lua waits in `io.input()`, the Workflow Action continues awaiting the same
+If Lua waits in `io.read()`, the Workflow Action continues awaiting the same
 execution; it does not return an intermediate response or emit a Workflow
 Event. A concurrent workflow branch may supply input using `vm.input`.
 

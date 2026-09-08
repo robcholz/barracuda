@@ -96,6 +96,44 @@ impl Drop for VmMemoryLease {
     }
 }
 
+/// Lua state backed by one owned VM memory slot for focused package tests.
+#[cfg(feature = "test-fixture")]
+pub struct FixedMemoryLua {
+    lua: Lua,
+    _lease: VmMemoryLease,
+}
+
+#[cfg(feature = "test-fixture")]
+impl FixedMemoryLua {
+    /// Creates one Lua state with the same allocator path as a normal VM run.
+    pub fn new(bytes: usize) -> Result<Self, FixedMemoryLuaError> {
+        let pool = VmMemoryPool::new(1, bytes)?;
+        let lease = pool.acquire().ok_or(FixedMemoryLuaError::Unavailable)?;
+        let lua = unsafe { lease.create_lua() }?;
+        Ok(Self { lua, _lease: lease })
+    }
+
+    /// Mutably borrows the fixed-memory Lua state.
+    pub fn lua_mut(&mut self) -> &mut Lua {
+        &mut self.lua
+    }
+}
+
+/// Failure constructing a fixed-memory Lua test state.
+#[cfg(feature = "test-fixture")]
+#[derive(Debug, thiserror::Error)]
+pub enum FixedMemoryLuaError {
+    /// The backing memory pool could not be created.
+    #[error(transparent)]
+    Pool(#[from] VmMemoryPoolError),
+    /// The sole newly created slot could not be acquired.
+    #[error("fixed VM memory slot is unavailable")]
+    Unavailable,
+    /// Lua could not initialize inside the fixed allocator.
+    #[error(transparent)]
+    Lua(#[from] barracuda_lua::Error),
+}
+
 /// Failure while creating the VM's reusable Lua memory pool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum VmMemoryPoolError {

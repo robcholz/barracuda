@@ -16,6 +16,9 @@ use crate::runtime::{RunControl, VM_YIELD_DELAY_MILLIS, VmYieldSignal};
 use crate::vm::VmProgressSender;
 use crate::{VmExecutionError, VmLimits, VmRunCompletion, VmRunOutcome, VmRunProgress};
 
+const MAX_OUTPUT_BYTES_PER_RUN: usize = 64 * 1024;
+const MAX_OUTPUT_LINES_PER_RUN: usize = 1024;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ExecutionErrorKind {
     VmCreate,
@@ -78,8 +81,12 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
         completion,
     } = job;
     let mut output = Vec::new();
-    let result = drive_execution(
+    let mut pending_output = String::new();
+    let mut output_bytes = 0_usize;
+    let mut result = drive_execution(
         &mut output,
+        &mut pending_output,
+        &mut output_bytes,
         ExecutionSetup {
             source,
             control: &control,
@@ -92,6 +99,16 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
         },
     )
     .await;
+    if !pending_output.is_empty() {
+        if output.len() >= MAX_OUTPUT_LINES_PER_RUN {
+            result = Err(ExecutionError::new(
+                ExecutionErrorKind::LuaRuntime,
+                "Lua output limit exceeded",
+            ));
+        } else {
+            output.push(pending_output);
+        }
+    }
     let result = if control.is_cancelled() {
         VmRunCompletion {
             run_id,
@@ -134,6 +151,8 @@ struct ExecutionSetup<'a> {
 
 async fn drive_execution(
     output_messages: &mut Vec<String>,
+    pending_output: &mut String,
+    output_bytes: &mut usize,
     setup: ExecutionSetup<'_>,
 ) -> Result<(), ExecutionError> {
     let mut lua = unsafe { setup.memory.create_lua() }.map_err(|error| factory_error(&error))?;
@@ -163,7 +182,9 @@ async fn drive_execution(
         )
         .await
         {
-            ExecutionEvent::Output(Some(message)) => output_messages.push(message),
+            ExecutionEvent::Output(Some(message)) => {
+                append_output(output_messages, pending_output, output_bytes, &message)?
+            }
             ExecutionEvent::Output(None) => {}
             ExecutionEvent::InputRequired(true) => {
                 setup.progress.send(VmRunProgress::InputRequired {
@@ -181,7 +202,7 @@ async fn drive_execution(
             ExecutionEvent::Complete(result) => {
                 lua_input.close();
                 while let Some(message) = output.next().await {
-                    output_messages.push(message);
+                    append_output(output_messages, pending_output, output_bytes, &message)?;
                 }
                 return result.map_err(|error| execution_error(&error));
             }
@@ -191,6 +212,38 @@ async fn drive_execution(
             ExecutionEvent::Cancelled => return Ok(()),
         }
     }
+}
+
+fn append_output(
+    output_messages: &mut Vec<String>,
+    pending_output: &mut String,
+    output_bytes: &mut usize,
+    chunk: &str,
+) -> Result<(), ExecutionError> {
+    *output_bytes = output_bytes.checked_add(chunk.len()).ok_or_else(|| {
+        ExecutionError::new(ExecutionErrorKind::LuaRuntime, "Lua output limit exceeded")
+    })?;
+    if *output_bytes > MAX_OUTPUT_BYTES_PER_RUN {
+        return Err(ExecutionError::new(
+            ExecutionErrorKind::LuaRuntime,
+            "Lua output limit exceeded",
+        ));
+    }
+
+    pending_output.push_str(chunk);
+    while let Some(newline) = pending_output.find('\n') {
+        if output_messages.len() >= MAX_OUTPUT_LINES_PER_RUN {
+            pending_output.clear();
+            return Err(ExecutionError::new(
+                ExecutionErrorKind::LuaRuntime,
+                "Lua output limit exceeded",
+            ));
+        }
+        let remainder = pending_output.split_off(newline.saturating_add(1));
+        pending_output.truncate(newline);
+        output_messages.push(core::mem::replace(pending_output, remainder));
+    }
+    Ok(())
 }
 
 enum ExecutionEvent {

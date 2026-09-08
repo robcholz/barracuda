@@ -4,6 +4,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use barracuda_agent_skill::{
     CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry,
+    SkillResourcePage,
 };
 use barracuda_platform_test::memory_vfs;
 use barracuda_vfs::ScopedVfs;
@@ -33,6 +34,31 @@ impl SkillRegistry for ExternalRegistry {
             Ok("body".to_owned())
         })
     }
+
+    fn read_resource<'a>(
+        &'a self,
+        name: &'a SkillName,
+        path: &'a str,
+        offset: u64,
+        limit: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<SkillResourcePage, SkillError>> + 'a>> {
+        Box::pin(async move {
+            if self.catalog.get(name).is_none() {
+                return Err(SkillError::NotFound(name.clone()));
+            }
+            Ok(SkillResourcePage::new(
+                path.to_owned(),
+                "example"
+                    .chars()
+                    .skip(offset as usize)
+                    .take(limit)
+                    .collect(),
+                offset,
+                limit.min(7_usize.saturating_sub(offset as usize)),
+                None,
+            ))
+        })
+    }
 }
 
 #[test]
@@ -57,6 +83,14 @@ fn public_registry_trait_drives_skill_set() {
                 .content(),
             "body"
         );
+        assert_eq!(
+            skills
+                .read_resource(&SkillName::new("external"), "references/example.md", 0, 16)
+                .await
+                .unwrap()
+                .content(),
+            "example"
+        );
     });
 }
 
@@ -72,7 +106,7 @@ fn registry_parses_standard_frontmatter() {
 
         let registry = Arc::new(
             FsSkillRegistry::new(filesystem)
-                .set_root("skills")
+                .add_root("skills")
                 .await
                 .unwrap(),
         );
@@ -87,7 +121,6 @@ fn registry_parses_standard_frontmatter() {
             Some("example-org")
         );
         assert_eq!(skill.allowed_tools(), Some("Read Bash(git:*)"));
-        assert_eq!(skill.directory(), Some("skills/example-skill"));
 
         let mut skills = registry.skill_set();
         let list: serde_json::Value = serde_json::from_str(skills.list_skills()).unwrap();
@@ -106,7 +139,6 @@ fn registry_parses_standard_frontmatter() {
             document.content(),
             "# Instructions\n\nRead references/GUIDE.md."
         );
-        assert_eq!(document.directory(), Some("skills/example-skill"));
     });
 }
 
@@ -122,13 +154,270 @@ fn unknown_frontmatter_subtrees_are_ignored() {
         .await;
 
         let registry = FsSkillRegistry::new(filesystem)
-            .set_root("skills")
+            .add_root("skills")
             .await
             .unwrap();
         assert!(registry
             .catalog()
             .get(&SkillName::new("example-skill"))
             .is_some());
+    });
+}
+
+#[test]
+fn duplicate_skill_names_across_roots_are_rejected_regardless_of_root_order() {
+    block_on(async {
+        for roots in [["data", "system"], ["system", "data"]] {
+            let filesystem = memory_vfs().await.unwrap();
+            write_skill_at(
+                &filesystem,
+                roots[0],
+                "example-skill",
+                &skill_md("example-skill"),
+            )
+            .await;
+            write_skill_at(
+                &filesystem,
+                roots[1],
+                "example-skill",
+                &skill_md("example-skill"),
+            )
+            .await;
+
+            let error = match FsSkillRegistry::new(filesystem)
+                .add_root(roots[0])
+                .await
+                .unwrap()
+                .add_root(roots[1])
+                .await
+            {
+                Ok(_) => panic!("duplicate skill should fail"),
+                Err(error) => error,
+            };
+            assert!(matches!(
+                error,
+                SkillError::DuplicateSkill { ref name, .. }
+                    if name.as_str() == "example-skill"
+            ));
+        }
+    });
+}
+
+#[test]
+fn resource_reads_are_bounded_to_the_registered_skill_directory() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(&filesystem, "example-skill", &skill_md("example-skill")).await;
+        filesystem
+            .write_atomic("skills/example-skill/references/guide.md", b"hello world")
+            .await
+            .unwrap();
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem)
+                .add_root("skills")
+                .await
+                .unwrap(),
+        );
+        let skills = registry.skill_set();
+
+        let first = skills
+            .read_resource(
+                &SkillName::new("example-skill"),
+                "references/guide.md",
+                0,
+                5,
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.content(), "hello");
+        assert_eq!(first.offset(), 0);
+        assert_eq!(first.bytes(), 5);
+        assert_eq!(first.next_offset(), Some(5));
+
+        let second = skills
+            .read_resource(
+                &SkillName::new("example-skill"),
+                "references/guide.md",
+                5,
+                16,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.content(), " world");
+        assert_eq!(second.next_offset(), None);
+
+        assert!(matches!(
+            skills
+                .read_resource(&SkillName::new("example-skill"), "references", 0, 16,)
+                .await,
+            Err(SkillError::ResourceNotFile { .. })
+        ));
+        assert!(matches!(
+            skills
+                .read_resource(
+                    &SkillName::new("example-skill"),
+                    "references/guide.md",
+                    12,
+                    16,
+                )
+                .await,
+            Err(SkillError::ResourceRangeOutOfBounds { .. })
+        ));
+        assert!(matches!(
+            skills
+                .read_resource(
+                    &SkillName::new("example-skill"),
+                    "references/guide.md",
+                    0,
+                    0,
+                )
+                .await,
+            Err(SkillError::InvalidResourceLimit {
+                limit: 0,
+                min: 4,
+                max: 16_384,
+            })
+        ));
+        assert!(matches!(
+            skills
+                .read_resource(
+                    &SkillName::new("example-skill"),
+                    "references/guide.md",
+                    0,
+                    3,
+                )
+                .await,
+            Err(SkillError::InvalidResourceLimit {
+                limit: 3,
+                min: 4,
+                max: 16_384,
+            })
+        ));
+        assert!(matches!(
+            skills
+                .read_resource(
+                    &SkillName::new("missing-skill"),
+                    "references/guide.md",
+                    0,
+                    16,
+                )
+                .await,
+            Err(SkillError::NotFound(_))
+        ));
+
+        for path in [
+            "/skills/secret.md",
+            "../secret.md",
+            "references/../../secret.md",
+        ] {
+            assert!(matches!(
+                skills
+                    .read_resource(&SkillName::new("example-skill"), path, 0, 16)
+                    .await,
+                Err(SkillError::InvalidResourcePath { .. })
+            ));
+        }
+    });
+}
+
+#[test]
+fn resource_read_rejects_non_utf8_pages() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(&filesystem, "example-skill", &skill_md("example-skill")).await;
+        filesystem
+            .write_atomic("skills/example-skill/references/binary", &[0xff, 0, 0, 0])
+            .await
+            .unwrap();
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem)
+                .add_root("skills")
+                .await
+                .unwrap(),
+        );
+        let skills = registry.skill_set();
+
+        assert!(matches!(
+            skills
+                .read_resource(&SkillName::new("example-skill"), "references/binary", 0, 4,)
+                .await,
+            Err(SkillError::InvalidResourceUtf8 { .. })
+        ));
+    });
+}
+
+#[test]
+fn resource_pages_end_on_utf8_boundaries() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(&filesystem, "example-skill", &skill_md("example-skill")).await;
+        filesystem
+            .write_atomic(
+                "skills/example-skill/references/chinese.md",
+                "你好".as_bytes(),
+            )
+            .await
+            .unwrap();
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem)
+                .add_root("skills")
+                .await
+                .unwrap(),
+        );
+        let skills = registry.skill_set();
+
+        let first = skills
+            .read_resource(
+                &SkillName::new("example-skill"),
+                "references/chinese.md",
+                0,
+                4,
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.content(), "你");
+        assert_eq!(first.bytes(), 3);
+        assert_eq!(first.next_offset(), Some(3));
+
+        let second = skills
+            .read_resource(
+                &SkillName::new("example-skill"),
+                "references/chinese.md",
+                first.next_offset().unwrap(),
+                4,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.content(), "好");
+        assert_eq!(second.next_offset(), None);
+    });
+}
+
+#[test]
+fn failed_reload_keeps_the_previous_unique_catalog() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill_at(&filesystem, "data", "notes", &skill_md("notes")).await;
+        write_skill_at(&filesystem, "system", "time", &skill_md("time")).await;
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem.clone())
+                .add_root("data")
+                .await
+                .unwrap()
+                .add_root("system")
+                .await
+                .unwrap(),
+        );
+        let version = registry.catalog().version();
+
+        write_skill_at(&filesystem, "system", "notes", &skill_md("notes")).await;
+        assert!(matches!(
+            registry.reload().await,
+            Err(SkillError::DuplicateSkill { .. })
+        ));
+        assert_eq!(registry.catalog().version(), version);
+        assert!(registry.catalog().get(&SkillName::new("notes")).is_some());
+        assert!(registry.catalog().get(&SkillName::new("time")).is_some());
     });
 }
 
@@ -274,14 +563,18 @@ fn closing_fence_must_occupy_its_own_line() {
 }
 
 async fn write_skill(filesystem: &ScopedVfs, name: &str, document: &str) {
+    write_skill_at(filesystem, "skills", name, document).await;
+}
+
+async fn write_skill_at(filesystem: &ScopedVfs, root: &str, name: &str, document: &str) {
     filesystem
-        .write_atomic(&format!("skills/{name}/SKILL.md"), document.as_bytes())
+        .write_atomic(&format!("{root}/{name}/SKILL.md"), document.as_bytes())
         .await
         .unwrap();
 }
 
 async fn registry_error(filesystem: ScopedVfs) -> SkillError {
-    match FsSkillRegistry::new(filesystem).set_root("skills").await {
+    match FsSkillRegistry::new(filesystem).add_root("skills").await {
         Ok(_) => panic!("registry load should fail"),
         Err(error) => error,
     }

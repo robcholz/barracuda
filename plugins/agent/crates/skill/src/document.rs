@@ -8,12 +8,21 @@ use core::fmt;
 
 use barracuda_minimal_yaml::Entry;
 use barracuda_vfs::FsError;
-use getset::Getters;
+use getset::{CopyGetters, Getters};
 use thiserror::Error;
 
 const MAX_NAME_CHARS: usize = 64;
 const MAX_DESCRIPTION_CHARS: usize = 1024;
 const MAX_COMPATIBILITY_CHARS: usize = 500;
+
+/// Default number of resource bytes returned by one read.
+pub const DEFAULT_RESOURCE_READ_BYTES: usize = 4 * 1024;
+/// Minimum number of resource bytes accepted by one read.
+///
+/// Four bytes can contain any single valid UTF-8 scalar value.
+pub const MIN_RESOURCE_READ_BYTES: usize = 4;
+/// Maximum number of resource bytes returned by one read.
+pub const MAX_RESOURCE_READ_BYTES: usize = 16 * 1024;
 
 /// A skill's standard name and its directory name under a skills root.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -94,11 +103,7 @@ impl Skill {
         self.allowed_tools.as_deref()
     }
 
-    /// Filesystem directory used to resolve relative skill resources.
-    ///
-    /// External registries may omit this when they resolve resources through a
-    /// non-filesystem backend.
-    pub fn directory(&self) -> Option<&str> {
+    pub(crate) fn directory(&self) -> Option<&str> {
         self.directory.as_deref()
     }
 }
@@ -107,12 +112,11 @@ impl Skill {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillDocument {
     content: String,
-    directory: Option<String>,
 }
 
 impl SkillDocument {
-    pub(crate) fn new(content: String, directory: Option<String>) -> Self {
-        Self { content, directory }
+    pub(crate) fn new(content: String) -> Self {
+        Self { content }
     }
 
     /// Markdown below the `SKILL.md` frontmatter.
@@ -124,15 +128,55 @@ impl SkillDocument {
     pub fn into_content(self) -> String {
         self.content
     }
+}
 
-    /// Filesystem directory used to resolve relative resource paths.
-    pub fn directory(&self) -> Option<&str> {
-        self.directory.as_deref()
+/// One bounded UTF-8 page from a file inside a registered skill directory.
+#[derive(Clone, CopyGetters, Debug, PartialEq, Eq)]
+pub struct SkillResourcePage {
+    path: String,
+    content: String,
+    /// Byte offset at which this page starts.
+    #[getset(get_copy = "pub")]
+    offset: u64,
+    /// Number of bytes returned in this page.
+    #[getset(get_copy = "pub")]
+    bytes: usize,
+    /// Byte offset for the next page, when more content remains.
+    #[getset(get_copy = "pub")]
+    next_offset: Option<u64>,
+}
+
+impl SkillResourcePage {
+    /// Construct a page supplied by a skill registry backend.
+    pub fn new(
+        path: String,
+        content: String,
+        offset: u64,
+        bytes: usize,
+        next_offset: Option<u64>,
+    ) -> Self {
+        Self {
+            path,
+            content,
+            offset,
+            bytes,
+            next_offset,
+        }
     }
 
-    /// Consume the snapshot and return its instructions and optional directory.
-    pub fn into_parts(self) -> (String, Option<String>) {
-        (self.content, self.directory)
+    /// Relative resource path inside the skill directory.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// UTF-8 content in this page.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Consume the page and return its UTF-8 content.
+    pub fn into_content(self) -> String {
+        self.content
     }
 }
 
@@ -148,6 +192,72 @@ pub enum SkillError {
     /// Reading a skill's `SKILL.md` failed.
     #[error("failed to read skill '{0}': {1}")]
     ReadFailed(SkillName, FsError),
+    /// Two configured roots contain the same globally unique skill name.
+    #[error("duplicate skill '{name}' found at '{first_directory}' and '{second_directory}'")]
+    DuplicateSkill {
+        /// Conflicting skill name.
+        name: SkillName,
+        /// Directory discovered first.
+        first_directory: String,
+        /// Conflicting directory.
+        second_directory: String,
+    },
+    /// A resource path is not a contained relative path inside its skill.
+    #[error("invalid resource path '{path}' for skill '{name}'")]
+    InvalidResourcePath {
+        /// Addressed skill.
+        name: SkillName,
+        /// Rejected relative path.
+        path: String,
+    },
+    /// The requested resource range starts beyond the file length.
+    #[error("resource offset {offset} exceeds length {length} for skill '{name}' path '{path}'")]
+    ResourceRangeOutOfBounds {
+        /// Addressed skill.
+        name: SkillName,
+        /// Relative resource path.
+        path: String,
+        /// Requested byte offset.
+        offset: u64,
+        /// Resource byte length.
+        length: u64,
+    },
+    /// A resource read requested an unsupported page size.
+    #[error("resource read limit must be between {min} and {max}, got {limit}")]
+    InvalidResourceLimit {
+        /// Requested page size.
+        limit: usize,
+        /// Minimum supported page size.
+        min: usize,
+        /// Maximum supported page size.
+        max: usize,
+    },
+    /// The addressed resource exists but is not a regular file.
+    #[error("skill '{name}' resource '{path}' is not a regular file")]
+    ResourceNotFile {
+        /// Addressed skill.
+        name: SkillName,
+        /// Relative resource path.
+        path: String,
+    },
+    /// Reading a resource from its resolved skill directory failed.
+    #[error("failed to read skill '{name}' resource '{path}': {source}")]
+    ResourceReadFailed {
+        /// Addressed skill.
+        name: SkillName,
+        /// Relative resource path.
+        path: String,
+        /// Filesystem failure.
+        source: FsError,
+    },
+    /// A resource page was not valid UTF-8.
+    #[error("skill '{name}' resource '{path}' is not valid UTF-8 in the requested range")]
+    InvalidResourceUtf8 {
+        /// Addressed skill.
+        name: SkillName,
+        /// Relative resource path.
+        path: String,
+    },
     /// A skill's `SKILL.md` bytes were not valid UTF-8.
     #[error("skill '{0}' is not valid UTF-8")]
     InvalidUtf8(SkillName),

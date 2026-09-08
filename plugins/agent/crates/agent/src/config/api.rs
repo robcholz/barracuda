@@ -31,7 +31,7 @@ pub type SharedApiManager = Arc<RefCell<ModelApiManager>>;
 /// Configs are keyed by their `model`: [`set_api`](Self::set_api) with a model
 /// that already exists **replaces** the stored config (e.g. to rotate a key), and
 /// every purpose bound to that model then resolves to the updated config.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ModelApiManager {
     /// Configs by model name (one per model).
     by_model: BTreeMap<String, ModelApiConfig>,
@@ -77,6 +77,33 @@ impl ModelApiManager {
             .get(&purpose)
             .or(self.default_model.as_ref())?;
         self.by_model.get(model).cloned()
+    }
+
+    /// Returns the API explicitly bound to `purpose`, excluding default fallback.
+    #[must_use]
+    pub fn get_explicit_api(&self, purpose: ApiPurpose) -> Option<ModelApiConfig> {
+        let model = self.by_purpose.get(&purpose)?;
+        self.by_model.get(model).cloned()
+    }
+
+    /// Returns the configured default API.
+    #[must_use]
+    pub fn get_default_api(&self) -> Option<ModelApiConfig> {
+        let model = self.default_model.as_ref()?;
+        self.by_model.get(model).cloned()
+    }
+
+    /// Installs an API as the fallback without changing any purpose binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InitError`] without changing the manager when `api` is invalid.
+    pub fn set_default_api(&mut self, api: ModelApiConfig) -> Result<(), InitError> {
+        api.validate()?;
+        let model = api.model.clone();
+        self.by_model.insert(model.clone(), api);
+        self.default_model = Some(model);
+        Ok(())
     }
 }
 
@@ -178,6 +205,49 @@ mod tests {
         assert_eq!(
             manager.get_api(ApiPurpose::Memory).unwrap().api_key,
             "new-key"
+        );
+    }
+
+    #[test]
+    fn explicit_bindings_and_default_can_be_rebuilt_without_changing_fallbacks() {
+        let mut manager = ModelApiManager::default();
+        manager
+            .set_api(cfg("default-model", "k0"), ApiPurpose::RootAgent, true)
+            .unwrap();
+        manager
+            .set_api(cfg("memory-model", "k1"), ApiPurpose::Memory, false)
+            .unwrap();
+
+        let mut restored = ModelApiManager::default();
+        restored
+            .set_api(
+                manager.get_explicit_api(ApiPurpose::RootAgent).unwrap(),
+                ApiPurpose::RootAgent,
+                false,
+            )
+            .unwrap();
+        restored
+            .set_api(
+                manager.get_explicit_api(ApiPurpose::Memory).unwrap(),
+                ApiPurpose::Memory,
+                false,
+            )
+            .unwrap();
+        restored
+            .set_default_api(manager.get_default_api().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            restored.get_api(ApiPurpose::RootAgent).unwrap(),
+            cfg("default-model", "k0")
+        );
+        assert_eq!(
+            restored.get_api(ApiPurpose::Memory).unwrap(),
+            cfg("memory-model", "k1")
+        );
+        assert_eq!(
+            restored.get_api(ApiPurpose::Compaction).unwrap(),
+            cfg("default-model", "k0")
         );
     }
 }

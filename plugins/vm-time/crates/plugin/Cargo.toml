@@ -1,0 +1,39 @@
+[package]
+name = "barracuda-vm-time-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Lua standard os time adapter for Barracuda's UTC clock"
+license = "Apache-2.0"
+
+[features]
+default = []
+test-fixture = []
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+barracuda-plugin.workspace = true
+barracuda-time-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+time = { version = "0.3.55", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

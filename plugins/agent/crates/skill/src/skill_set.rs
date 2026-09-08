@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use core::fmt::Write as _;
 
-use super::document::{SkillDocument, SkillError, SkillName};
+use super::document::{SkillDocument, SkillError, SkillName, SkillResourcePage};
 use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,13 +69,19 @@ impl SkillSet {
     /// Read one skill's Markdown instructions on demand.
     pub async fn read_skill(&mut self, name: &SkillName) -> Result<SkillDocument, SkillError> {
         self.document_buffer.clear();
-        let directory = self
-            .registry
-            .catalog()
-            .get(name)
-            .and_then(|skill| skill.directory().map(String::from));
         self.document_buffer = self.registry.read_document(name).await?;
-        Ok(SkillDocument::new(self.document_buffer.clone(), directory))
+        Ok(SkillDocument::new(self.document_buffer.clone()))
+    }
+
+    /// Read one bounded UTF-8 page from a relative file inside a skill.
+    pub async fn read_resource(
+        &self,
+        name: &SkillName,
+        path: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<SkillResourcePage, SkillError> {
+        self.registry.read_resource(name, path, offset, limit).await
     }
 
     fn catalog_cache_is_fresh(&self, snapshot: &CatalogSnapshot, kind: CatalogBufferKind) -> bool {

@@ -1,0 +1,3 @@
+id = "vm-http"
+depends-on = ["http", "vm"]
+description = "Exposes bounded outbound HTTP as a require-only Lua package."

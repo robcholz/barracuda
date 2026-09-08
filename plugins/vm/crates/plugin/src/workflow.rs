@@ -117,7 +117,7 @@ mod tests {
             vm.start(spawner).map_err(|error| error.to_string())?;
             let response = RunAction(vm)
                 .invoke(VmRunRequest {
-                    source: "local io = require('io'); io.print('workflow result')".into(),
+                    source: "print('workflow result')".into(),
                 })
                 .await
                 .map_err(|error| error.to_string())?;

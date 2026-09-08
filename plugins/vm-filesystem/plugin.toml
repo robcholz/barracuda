@@ -1,0 +1,3 @@
+id = "vm-filesystem"
+depends-on = ["vm"]
+description = "Exposes the Plugin-scoped VFS through Lua's standard file APIs."

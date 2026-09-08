@@ -73,13 +73,16 @@ barracuda-analog-plugin = { path = "plugins/vm-analog/crates/plugin" }
 barracuda-audio-plugin = { path = "plugins/vm-audio/crates/plugin" }
 barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-display-plugin = { path = "plugins/vm-display/crates/plugin" }
+barracuda-vm-filesystem-plugin = { path = "plugins/vm-filesystem/crates/plugin" }
 barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
+barracuda-vm-http-plugin = { path = "plugins/vm-http/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
+barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
 barracuda-uart-plugin = { path = "plugins/vm-uart/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }
 barracuda-workflow-plugin = { path = "plugins/workflow/crates/plugin" }

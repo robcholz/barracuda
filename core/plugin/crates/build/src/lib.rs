@@ -8,6 +8,7 @@ use std::{
     io::{self, BufRead},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 /// A task could not be prepared, executed, or validated.
@@ -112,6 +113,9 @@ fn command(root: &Path, id: &str, name: &str, task: &PluginTask) -> Result<(), T
 /// # Errors
 /// Reports missing Cargo context, invalid manifests, or task failures.
 pub fn build() -> Result<(), TaskError> {
+    let output_timestamp = SystemTime::now()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap_or(UNIX_EPOCH);
     let directory = env::var_os("CARGO_MANIFEST_DIR")
         .ok_or_else(|| TaskError::Task("missing CARGO_MANIFEST_DIR".into()))?;
     let directory = PathBuf::from(directory);
@@ -134,36 +138,78 @@ pub fn build() -> Result<(), TaskError> {
     if task.inputs.is_empty() {
         println!("cargo:rerun-if-changed={}", root.join(&task.cwd).display());
     }
-    for path in task.inputs.iter().chain(&task.outputs) {
+    for path in &task.inputs {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }
     let _lock = lock(root)?;
     if task.inputs.is_empty() || task.outputs.is_empty() {
-        return command(root, manifest.id(), "build", task);
+        command(root, manifest.id(), "build", task)?;
+        backdate_outputs(root, &task.outputs, output_timestamp)?;
+    } else {
+        let cache = PathBuf::from(
+            env::var_os("OUT_DIR").ok_or_else(|| TaskError::Task("missing OUT_DIR".into()))?,
+        )
+        .join("plugin-build-fingerprint");
+        let mut inputs = Sha256::new();
+        hash_path(&mut inputs, &root.join("plugin.toml"))?;
+        for path in &task.inputs {
+            hash_path(&mut inputs, &root.join(path))?;
+        }
+        for variable in std::iter::once("PATH").chain(task.env.iter().map(String::as_str)) {
+            inputs.update(format!("{variable}={:?}\n", env::var_os(variable)));
+        }
+        let inputs = inputs.finalize();
+        let outputs_exist = task.outputs.iter().all(|path| root.join(path).exists());
+        if !outputs_exist
+            || fs::read(&cache).ok().as_deref()
+                != Some(fingerprint(&inputs, root, &task.outputs)?.as_slice())
+        {
+            command(root, manifest.id(), "build", task)?;
+            backdate_outputs(root, &task.outputs, output_timestamp)?;
+            fs::write(&cache, fingerprint(&inputs, root, &task.outputs)?)
+                .map_err(|error| TaskError::Task(format!("{}: {error}", cache.display())))?;
+        }
     }
-    let cache = PathBuf::from(
-        env::var_os("OUT_DIR").ok_or_else(|| TaskError::Task("missing OUT_DIR".into()))?,
-    )
-    .join("plugin-build-fingerprint");
-    let mut inputs = Sha256::new();
-    hash_path(&mut inputs, &root.join("plugin.toml"))?;
-    for path in &task.inputs {
-        hash_path(&mut inputs, &root.join(path))?;
+
+    // Declare outputs only after a successful task has validated and dated
+    // them for Cargo's next fingerprint check.
+    for path in &task.outputs {
+        println!("cargo:rerun-if-changed={}", root.join(path).display());
     }
-    for variable in std::iter::once("PATH").chain(task.env.iter().map(String::as_str)) {
-        inputs.update(format!("{variable}={:?}\n", env::var_os(variable)));
+    Ok(())
+}
+
+// Cargo records its build-script reference timestamp before the task can write
+// source-tree outputs. Date successful outputs just before this invocation so
+// watching them does not immediately invalidate the build that produced them.
+fn backdate_outputs(
+    root: &Path,
+    outputs: &[String],
+    modified: SystemTime,
+) -> Result<(), TaskError> {
+    for output in outputs {
+        set_modified(&root.join(output), modified)?;
     }
-    let inputs = inputs.finalize();
-    let outputs_exist = task.outputs.iter().all(|path| root.join(path).exists());
-    if outputs_exist
-        && fs::read(&cache).ok().as_deref()
-            == Some(fingerprint(&inputs, root, &task.outputs)?.as_slice())
-    {
-        return Ok(());
+    Ok(())
+}
+
+fn set_modified(path: &Path, modified: SystemTime) -> Result<(), TaskError> {
+    let fail = |error: io::Error| TaskError::Task(format!("{}: {error}", path.display()));
+    let metadata = fs::symlink_metadata(path).map_err(fail)?;
+    if metadata.file_type().is_symlink() {
+        return Err(TaskError::Task(format!(
+            "task output must not be a symlink: {}",
+            path.display()
+        )));
     }
-    command(root, manifest.id(), "build", task)?;
-    fs::write(&cache, fingerprint(&inputs, root, &task.outputs)?)
-        .map_err(|error| TaskError::Task(format!("{}: {error}", cache.display())))
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(fail)? {
+            set_modified(&entry.map_err(fail)?.path(), modified)?;
+        }
+    }
+    fs::File::open(path)
+        .and_then(|file| file.set_times(fs::FileTimes::new().set_modified(modified)))
+        .map_err(fail)
 }
 
 fn fingerprint(inputs: &[u8], root: &Path, outputs: &[String]) -> Result<Vec<u8>, TaskError> {

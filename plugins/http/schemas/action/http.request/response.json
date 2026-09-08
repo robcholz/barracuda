@@ -17,7 +17,9 @@
             "invalid_url",
             "tls_not_configured",
             "invalid_header",
+            "request_too_large",
             "busy",
+            "timeout",
             "transport",
             "invalid_response_text",
             "response_too_large"

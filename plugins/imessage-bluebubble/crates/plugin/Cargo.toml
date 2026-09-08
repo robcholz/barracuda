@@ -13,10 +13,20 @@ bluebubbles = { path = "../provider" }
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
 http-client.workspace = true
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+barracuda-vfs.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

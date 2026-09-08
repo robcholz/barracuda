@@ -46,7 +46,7 @@ async fn run() -> anyhow::Result<()> {
         )
         .await?;
 
-    let registry = Arc::new(FsSkillRegistry::new(filesystem).set_root("skills").await?);
+    let registry = Arc::new(FsSkillRegistry::new(filesystem).add_root("skills").await?);
     let mut set = registry.skill_set();
 
     println!("== JSON catalog ==");

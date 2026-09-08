@@ -40,7 +40,7 @@ async fn registry() -> Arc<FsSkillRegistry> {
     }
     Arc::new(
         FsSkillRegistry::new(filesystem)
-            .set_root(SKILLS_ROOT)
+            .add_root(SKILLS_ROOT)
             .await
             .expect("scan skills fixtures"),
     )

@@ -5,7 +5,6 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
-use alloc::vec::Vec;
 
 mod bundled_workflows;
 mod model_api_http;
@@ -32,6 +31,18 @@ pub use barracuda_agent_runtime::{
 pub use model_api_http::SET_API_PATH;
 
 const PERSISTENCE_ROOT: &str = "/data";
+const USER_SKILLS_ROOT: &str = "/data/skills";
+const BUNDLED_SKILLS_ROOT: &str = "/workspace/resources/skills";
+
+fn runtime_storage_config() -> RuntimeStorageConfig {
+    RuntimeStorageConfig {
+        persistence_root: PERSISTENCE_ROOT.into(),
+        skill_roots: [USER_SKILLS_ROOT, BUNDLED_SKILLS_ROOT]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    }
+}
 
 /// Plugin that constructs the Agent runtime and registers its Workflow Actions.
 #[barracuda_plugin::macros::plugin]
@@ -87,13 +98,13 @@ impl Plugin for AgentPlugin {
         let filesystem = context.filesystem()?.clone();
         let http_clients = self.http_clients.clone();
         let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
-        let storage = RuntimeStorageConfig {
-            persistence_root: PERSISTENCE_ROOT.into(),
-            skill_roots: Vec::new(),
-        };
+        let storage = runtime_storage_config();
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
             .map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
+        let api_configuration =
+            embassy_futures::block_on(model_api_http::load_configuration(context.storage()))?;
+        runtime.replace_api_configuration(api_configuration.clone());
         let workflow_adapter = AgentWorkflowAdapter::new(Rc::clone(&runtime));
         let action_registrations = workflow_adapter
             .register_actions(&actions)
@@ -105,7 +116,11 @@ impl Plugin for AgentPlugin {
         let route_registration = webserver
             .serve_http(
                 SET_API_PATH,
-                model_api_http::SetApiEndpoint::new(Rc::clone(&runtime)),
+                model_api_http::SetApiEndpoint::new(
+                    Rc::clone(&runtime),
+                    context.storage().clone(),
+                    api_configuration,
+                ),
             )
             .map_err(PluginError::registration)?;
         context.retain(route_registration);
@@ -187,3 +202,23 @@ async fn agent_task(
 #[derive(Debug, thiserror::Error)]
 #[error("Agent runtime was not prepared during Plugin registration")]
 struct AgentRuntimeUnavailable;
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+
+    use super::runtime_storage_config;
+
+    #[test]
+    fn runtime_scans_bundled_and_user_skill_roots_without_selection_priority() {
+        let mut roots = runtime_storage_config().skill_roots;
+        roots.sort();
+        assert_eq!(
+            roots,
+            [
+                String::from("/data/skills"),
+                String::from("/workspace/resources/skills"),
+            ]
+        );
+    }
+}
