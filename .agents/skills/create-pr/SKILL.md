@@ -1,9 +1,13 @@
 ---
 name: create-pr
-description: Review, prepare, create, or update a Barracuda pull request with the repository's required PR body style. Use when opening a PR, drafting its title or body, or revising an existing PR description.
+description: Review, prepare, create, or update a Barracuda feature, refactor, or documentation pull request with the repository's required PR body style. Use create-bugfix-pr instead when the PR primarily corrects faulty or regressed behavior.
 ---
 
 # Create a Barracuda Pull Request
+
+Use this skill for feature, refactor, documentation, and other non-bug-fix PRs.
+When the primary outcome corrects faulty or regressed behavior, use
+`create-bugfix-pr` instead.
 
 Open a PR only after reviewing the complete diff against its intended base.
 The PR body is a maintainer-facing explanation of observable behavior,
