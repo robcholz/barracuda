@@ -4,7 +4,8 @@
 //! rendering. It never constructs or controls a Barracuda System.
 //!
 //! ```text
-//! cargo cli URL
+//! cargo cli [URL]
+//! cargo cli configure [ADDRESS]
 //! ```
 
 mod client;
@@ -12,19 +13,23 @@ mod command;
 mod line_editor;
 mod protocol;
 
-use std::{net::IpAddr, path::Path};
+use std::{
+    net::IpAddr,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use anyhow::{bail, Context as _, Result};
 use dialoguer::{console::Style, theme::ColorfulTheme, Input, Select};
 
-const DEFAULT_URL: &str = "ws://10.42.0.2:8787";
+const DEFAULT_ADDRESS: &str = "http://10.42.0.2:8787";
 const DEFAULT_REMOTE_PORT: u16 = 8787;
 const RUNTIME_ADDRESS_PATH: &str = ".barracuda/address";
 
 #[derive(Debug, PartialEq, Eq)]
 enum RunMode<'a> {
-    Interactive,
-    Remote(&'a str),
+    Connect(Option<&'a str>),
+    Configure(Option<&'a str>),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -42,27 +47,43 @@ async fn main() {
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match mode_from_args(&args.iter().skip(1).map(String::as_str).collect::<Vec<_>>())? {
-        RunMode::Interactive => {
-            let url = prompt_for_url()?;
+        RunMode::Connect(explicit_url) => {
+            let url = match explicit_url {
+                Some(url) => url.to_owned(),
+                None => websocket_url(&prompt_for_address()?)?,
+            };
             client::run(&url).await
         }
-        RunMode::Remote(url) => client::run(url).await,
+        RunMode::Configure(explicit_address) => {
+            let address = match explicit_address {
+                Some(address) => address.to_owned(),
+                None => prompt_for_address()?,
+            };
+            open_configuration(&address)
+        }
     }
 }
 
 fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
     match args {
-        [] | ["connect"] => Ok(RunMode::Interactive),
-        ["connect", url] => Ok(RunMode::Remote(url)),
-        [other, ..] => bail!("unknown subcommand `{other}`; use `connect [url]`"),
+        [] | ["connect"] => Ok(RunMode::Connect(None)),
+        ["connect", url] => Ok(RunMode::Connect(Some(url))),
+        ["configure"] => Ok(RunMode::Configure(None)),
+        ["configure", address] => Ok(RunMode::Configure(Some(address))),
+        [url] if url.starts_with("ws://") || url.starts_with("wss://") => {
+            Ok(RunMode::Connect(Some(url)))
+        }
+        [other, ..] => bail!(
+            "unknown command `{other}`; use `cargo cli [URL]` or `cargo cli configure [ADDRESS]`"
+        ),
     }
 }
 
-fn prompt_for_url() -> Result<String> {
-    let local_url = default_url();
+fn prompt_for_address() -> Result<String> {
+    let local_address = default_address();
     let description_style = Style::new().for_stderr().black().bright();
-    let local_description = match &local_url {
-        Ok(url) => url.as_str(),
+    let local_description = match &local_address {
+        Ok(address) => address.as_str(),
         Err(_error) => "no running instance found",
     };
     let choices = [
@@ -73,7 +94,7 @@ fn prompt_for_url() -> Result<String> {
         ),
     ];
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Connect to Barracuda")
+        .with_prompt("Select Barracuda")
         .default(0)
         .items(&choices)
         .report(false)
@@ -81,9 +102,9 @@ fn prompt_for_url() -> Result<String> {
         .context("select Barracuda connection")?;
     match selection {
         0 => {
-            let url = local_url?;
-            eprintln!("Local Barracuda: {url}");
-            Ok(url)
+            let address = local_address?;
+            eprintln!("Local Barracuda: {address}");
+            Ok(address)
         }
         1 => {
             let address = Input::<String>::with_theme(&ColorfulTheme::default())
@@ -103,25 +124,25 @@ fn prompt_for_url() -> Result<String> {
                 .trim()
                 .parse::<IpAddr>()
                 .context("validate remote Barracuda IP address")?;
-            let url = remote_url(address);
-            eprintln!("Remote Barracuda: {url}");
-            Ok(url)
+            let address = remote_address(address);
+            eprintln!("Remote Barracuda: {address}");
+            Ok(address)
         }
         index => bail!("invalid connection selection index {index}"),
     }
 }
 
-fn default_url() -> Result<String> {
+fn default_address() -> Result<String> {
     let current_directory = std::env::current_dir().context("read current directory")?;
     if let Some(address) = runtime_address(&current_directory)? {
-        return websocket_url(&address);
+        return Ok(address);
     }
     if cfg!(target_os = "macos") {
         bail!(
-            "no running Barracuda address found; start `cargo run` first or pass `cargo cli URL`"
+            "no running Barracuda address found; start `cargo run`, select Remote, or pass an explicit address"
         );
     }
-    Ok(DEFAULT_URL.to_owned())
+    Ok(DEFAULT_ADDRESS.to_owned())
 }
 
 fn runtime_address(start: &Path) -> Result<Option<String>> {
@@ -153,11 +174,46 @@ fn websocket_url(address: &str) -> Result<String> {
     bail!("Barracuda address must use http:// or https://")
 }
 
-fn remote_url(address: IpAddr) -> String {
+fn remote_address(address: IpAddr) -> String {
     match address {
-        IpAddr::V4(address) => format!("ws://{address}:{DEFAULT_REMOTE_PORT}"),
-        IpAddr::V6(address) => format!("ws://[{address}]:{DEFAULT_REMOTE_PORT}"),
+        IpAddr::V4(address) => format!("http://{address}:{DEFAULT_REMOTE_PORT}"),
+        IpAddr::V6(address) => format!("http://[{address}]:{DEFAULT_REMOTE_PORT}"),
     }
+}
+
+fn configuration_url(address: &str) -> Result<String> {
+    let address = if let Some(authority) = address.strip_prefix("http://") {
+        format!("http://{authority}")
+    } else if let Some(authority) = address.strip_prefix("https://") {
+        format!("https://{authority}")
+    } else if let Some(authority) = address.strip_prefix("ws://") {
+        format!("http://{authority}")
+    } else if let Some(authority) = address.strip_prefix("wss://") {
+        format!("https://{authority}")
+    } else {
+        bail!("Barracuda address must use http://, https://, ws://, or wss://");
+    };
+    Ok(format!("{}/portal/", address.trim_end_matches('/')))
+}
+
+fn open_configuration(address: &str) -> Result<()> {
+    let url = configuration_url(address)?;
+    println!("Barracuda configuration: {url}");
+    let (program, arguments): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+        ("open", vec![url.as_str()])
+    } else if cfg!(target_os = "windows") {
+        ("cmd", vec!["/C", "start", "", url.as_str()])
+    } else {
+        ("xdg-open", vec![url.as_str()])
+    };
+    Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("open Barracuda configuration URL `{url}`"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -167,14 +223,15 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::{
-        mode_from_args, remote_url, runtime_address, websocket_url, RunMode, RUNTIME_ADDRESS_PATH,
+        configuration_url, mode_from_args, remote_address, runtime_address, websocket_url, RunMode,
+        RUNTIME_ADDRESS_PATH,
     };
 
     #[test]
     fn default_mode_connects_to_the_default_channel() {
         assert_eq!(
             mode_from_args(&[]).expect("default channel"),
-            RunMode::Interactive
+            RunMode::Connect(None)
         );
     }
 
@@ -182,23 +239,44 @@ mod tests {
     fn connect_remains_a_remote_client_mode() {
         assert_eq!(
             mode_from_args(&["connect"]).expect("default remote URL"),
-            RunMode::Interactive
+            RunMode::Connect(None)
         );
         assert_eq!(
             mode_from_args(&["connect", "ws://host.example:9000"]).expect("explicit remote URL"),
-            RunMode::Remote("ws://host.example:9000")
+            RunMode::Connect(Some("ws://host.example:9000"))
+        );
+        assert_eq!(
+            mode_from_args(&["ws://host.example:9000"]).expect("short explicit URL"),
+            RunMode::Connect(Some("ws://host.example:9000"))
         );
     }
 
     #[test]
     fn remote_ip_addresses_use_the_webserver_port() {
         assert_eq!(
-            remote_url(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
-            "ws://192.0.2.10:8787"
+            remote_address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
+            "http://192.0.2.10:8787"
         );
         assert_eq!(
-            remote_url(IpAddr::V6(Ipv6Addr::LOCALHOST)),
-            "ws://[::1]:8787"
+            remote_address(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            "http://[::1]:8787"
+        );
+    }
+
+    #[test]
+    fn configuration_mode_opens_the_plugin_portal() {
+        assert_eq!(
+            mode_from_args(&["configure"]).expect("interactive configuration"),
+            RunMode::Configure(None)
+        );
+        assert_eq!(
+            mode_from_args(&["configure", "http://device.local:8787"])
+                .expect("explicit configuration address"),
+            RunMode::Configure(Some("http://device.local:8787"))
+        );
+        assert_eq!(
+            configuration_url("ws://device.local:8787/").expect("configuration URL"),
+            "http://device.local:8787/portal/"
         );
     }
 
@@ -225,6 +303,6 @@ mod tests {
     #[test]
     fn unknown_subcommand_is_rejected() {
         let error = mode_from_args(&["chat"]).expect_err("unknown command");
-        assert!(error.to_string().contains("unknown subcommand `chat`"));
+        assert!(error.to_string().contains("unknown command `chat`"));
     }
 }

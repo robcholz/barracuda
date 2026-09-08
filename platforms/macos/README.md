@@ -26,11 +26,11 @@ second terminal or manual gateway command is required.
 The gateway forwards device-originated TCP and UDP through ordinary host
 sockets, translates DNS requests sent to `10.0.2.3`, and assigns a loopback
 URL to the configured guest TCP port. The macOS Platform logs that URL when
-the session opens and publishes it to `.barracuda/address`. `cargo cli` and the
-model configuration helper discover the active address from that file, so an
-ephemeral loopback port does not need to be copied into `.env.local`.
-The CLI's Local/Remote selector shows the discovered Local address before it
-connects.
+the session opens and publishes it to `.barracuda/address`. The CLI discovers
+the active address from that file, so an ephemeral loopback port does not need
+to be copied into local configuration. Its Local/Remote selector shows the
+discovered Local address before it connects. `cargo cli configure` uses the
+same selector and opens the active System's Plugin configuration portal.
 
 Platform, System, Core, and Plugin logs are written to standard error at
 `info`. Select another level for a build with, for example,

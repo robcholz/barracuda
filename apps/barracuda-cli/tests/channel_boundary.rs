@@ -24,5 +24,5 @@ fn terminal_channel_has_no_selected_target_or_system_dependencies() {
 fn cargo_cli_always_builds_the_channel_for_the_host() {
     let cargo = include_str!("../../../.cargo/config.toml");
 
-    assert!(cargo.contains("cli = \"run --target host-tuple --package barracuda-cli -- connect\""));
+    assert!(cargo.contains("cli = \"run --target host-tuple --package barracuda-cli --\""));
 }
