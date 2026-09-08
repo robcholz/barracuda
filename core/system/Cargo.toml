@@ -32,6 +32,7 @@ barracuda-scheduler-plugin.workspace = true
 barracuda-time-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 barracuda-vm-agent-plugin.workspace = true
+barracuda-camera-plugin.workspace = true
 barracuda-gpio-plugin.workspace = true
 barracuda-i2c-plugin.workspace = true
 barracuda-led-strip-plugin.workspace = true

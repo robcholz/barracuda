@@ -200,6 +200,34 @@ impl led_strip::BuiltinLedStrip for NoBuiltinCapabilities {
     }
 }
 
+/// Uninhabited camera capability used when a Board has no built-in camera.
+pub struct UnavailableCamera {
+    never: Infallible,
+}
+
+impl camera::Camera for UnavailableCamera {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> camera::CameraDescriptor {
+        match self.never {}
+    }
+
+    async fn capture<'a>(
+        &'a mut self,
+        _buffer: &'a mut [u8],
+    ) -> Result<camera::CapturedFrame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl camera::BuiltinCamera for NoBuiltinCapabilities {
+    type Camera = UnavailableCamera;
+
+    fn take_camera(&mut self) -> Option<Self::Camera> {
+        None
+    }
+}
+
 /// Explicit absence of exposed Board I/O capabilities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;

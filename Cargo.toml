@@ -69,6 +69,7 @@ barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
+barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }

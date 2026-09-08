@@ -743,6 +743,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-camera-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-captive-portal-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1538,6 +1549,7 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-board-hal",
+ "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",

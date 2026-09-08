@@ -1204,6 +1204,11 @@ fn render_generic_hal(
                 "impl ::barracuda_board_hal::led_strip::BuiltinLedStrip for GeneratedBuiltins {\n    type LedStrip = ::barracuda_board_hal::UnavailableLedStrip;\n    fn take_led_strip(&mut self) -> Option<Self::LedStrip> { None }\n}\n\n",
             );
         }
+        if !primary_capabilities.contains("camera") {
+            source.push_str(
+                "impl ::barracuda_board_hal::camera::BuiltinCamera for GeneratedBuiltins {\n    type Camera = ::barracuda_board_hal::UnavailableCamera;\n    fn take_camera(&mut self) -> Option<Self::Camera> { None }\n}\n\n",
+            );
+        }
     }
 
     source.push_str(&format!(

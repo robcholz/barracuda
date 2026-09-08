@@ -13,8 +13,8 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    led_strip::BuiltinLedStrip, BoardHalResources, DigitalProvider, ExposedIo, I2cProvider,
-    SpiProvider,
+    camera::BuiltinCamera, led_strip::BuiltinLedStrip, BoardHalResources, DigitalProvider,
+    ExposedIo, I2cProvider, SpiProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -77,7 +77,9 @@ impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: BuiltinLedStrip + Unpin,
+    Builtins: BuiltinCamera + BuiltinLedStrip + Unpin,
+    Builtins::Camera: Send + 'static,
+    <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
     Builtins::LedStrip: Send + 'static,
     <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Io: ExposedIo + DigitalProvider + I2cProvider + SpiProvider + Unpin,
@@ -164,6 +166,7 @@ where
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
+            barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
