@@ -175,8 +175,9 @@ impl ToolHandler for ReloadSkillsTool {
         alloc::boxed::Box::pin(async move {
             let skills = { lock_skill_set(&self.skills).clone() };
             if let Err(error) = skills.reload().await {
+                log::warn!("skill catalog reload failed: {error}");
                 return Ok(ToolOutput {
-                    content: format!("Could not refresh skills from disk: {error}"),
+                    content: reload_failure_content(&error),
                     ok: false,
                 });
             }
@@ -188,17 +189,28 @@ impl ToolHandler for ReloadSkillsTool {
     }
 }
 
+fn reload_failure_content(error: &SkillError) -> String {
+    match error {
+        SkillError::DuplicateSkill { name, .. } => format!(
+            "Could not refresh skills: duplicate skill \"{name}\". Skill names must be unique."
+        ),
+        _ => String::from("Could not refresh skills from disk. See system logs for details."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, sync::Arc};
     use core::cell::RefCell;
 
     use barracuda_agent_skill::FsSkillRegistry;
-    use barracuda_agent_tool::ToolHandler;
+    use barracuda_agent_tool::{EmptyArgs, ToolHandler};
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
 
-    use super::{ReadArgs, ReadResourceArgs, ReadSkillResourceTool, ReadSkillTool};
+    use super::{
+        ReadArgs, ReadResourceArgs, ReadSkillResourceTool, ReadSkillTool, ReloadSkillsTool,
+    };
 
     #[test]
     fn skill_read_hides_the_backend_directory() -> Result<(), Box<dyn core::error::Error>> {
@@ -306,7 +318,54 @@ mod tests {
             .validate_str(r#"{"name":"example","path":"references/guide.md"}"#)
             .is_ok());
         assert!(SCHEMA
+            .validate_str(r#"{"name":"example","path":"references/guide.md","limit":3}"#)
+            .is_err());
+        assert!(SCHEMA
             .validate_str(r#"{"name":"example","path":"references/guide.md","limit":16385}"#)
             .is_err());
+    }
+
+    #[test]
+    fn reload_error_hides_backend_directories() -> Result<(), Box<dyn core::error::Error>> {
+        block_on(async {
+            let filesystem = memory_vfs().await?;
+            filesystem
+                .write_atomic(
+                    "user-skills/example/SKILL.md",
+                    b"---\nname: example\ndescription: Use for examples.\n---\nbody",
+                )
+                .await?;
+            filesystem
+                .write_atomic(
+                    "bundled-skills/other/SKILL.md",
+                    b"---\nname: other\ndescription: Use for other examples.\n---\nbody",
+                )
+                .await?;
+            let registry = Arc::new(
+                FsSkillRegistry::new(filesystem.clone())
+                    .add_root("user-skills")
+                    .await?
+                    .add_root("bundled-skills")
+                    .await?,
+            );
+            filesystem
+                .write_atomic(
+                    "bundled-skills/example/SKILL.md",
+                    b"---\nname: example\ndescription: Duplicate example.\n---\nbody",
+                )
+                .await?;
+
+            let output = ReloadSkillsTool {
+                skills: Arc::new(RefCell::new(registry.skill_set())),
+            }
+            .invoke(EmptyArgs {})
+            .await?;
+
+            assert!(!output.ok);
+            assert!(output.content.contains("duplicate skill \"example\""));
+            assert!(!output.content.contains("user-skills"));
+            assert!(!output.content.contains("bundled-skills"));
+            Ok::<_, Box<dyn core::error::Error>>(())
+        })
     }
 }

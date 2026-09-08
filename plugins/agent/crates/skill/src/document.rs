@@ -17,6 +17,10 @@ const MAX_COMPATIBILITY_CHARS: usize = 500;
 
 /// Default number of resource bytes returned by one read.
 pub const DEFAULT_RESOURCE_READ_BYTES: usize = 4 * 1024;
+/// Minimum number of resource bytes accepted by one read.
+///
+/// Four bytes can contain any single valid UTF-8 scalar value.
+pub const MIN_RESOURCE_READ_BYTES: usize = 4;
 /// Maximum number of resource bytes returned by one read.
 pub const MAX_RESOURCE_READ_BYTES: usize = 16 * 1024;
 
@@ -219,10 +223,12 @@ pub enum SkillError {
         length: u64,
     },
     /// A resource read requested an unsupported page size.
-    #[error("resource read limit must be between 1 and {max}, got {limit}")]
+    #[error("resource read limit must be between {min} and {max}, got {limit}")]
     InvalidResourceLimit {
         /// Requested page size.
         limit: usize,
+        /// Minimum supported page size.
+        min: usize,
         /// Maximum supported page size.
         max: usize,
     },

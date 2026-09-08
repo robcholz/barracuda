@@ -272,7 +272,26 @@ fn resource_reads_are_bounded_to_the_registered_skill_directory() {
                     0,
                 )
                 .await,
-            Err(SkillError::InvalidResourceLimit { .. })
+            Err(SkillError::InvalidResourceLimit {
+                limit: 0,
+                min: 4,
+                max: 16_384,
+            })
+        ));
+        assert!(matches!(
+            skills
+                .read_resource(
+                    &SkillName::new("example-skill"),
+                    "references/guide.md",
+                    0,
+                    3,
+                )
+                .await,
+            Err(SkillError::InvalidResourceLimit {
+                limit: 3,
+                min: 4,
+                max: 16_384,
+            })
         ));
         assert!(matches!(
             skills
@@ -307,7 +326,7 @@ fn resource_read_rejects_non_utf8_pages() {
         let filesystem = memory_vfs().await.unwrap();
         write_skill(&filesystem, "example-skill", &skill_md("example-skill")).await;
         filesystem
-            .write_atomic("skills/example-skill/references/binary", &[0xff])
+            .write_atomic("skills/example-skill/references/binary", &[0xff, 0, 0, 0])
             .await
             .unwrap();
         let registry = Arc::new(
@@ -320,7 +339,7 @@ fn resource_read_rejects_non_utf8_pages() {
 
         assert!(matches!(
             skills
-                .read_resource(&SkillName::new("example-skill"), "references/binary", 0, 1,)
+                .read_resource(&SkillName::new("example-skill"), "references/binary", 0, 4,)
                 .await,
             Err(SkillError::InvalidResourceUtf8 { .. })
         ));
@@ -352,7 +371,7 @@ fn resource_pages_end_on_utf8_boundaries() {
                 &SkillName::new("example-skill"),
                 "references/chinese.md",
                 0,
-                5,
+                4,
             )
             .await
             .unwrap();
@@ -365,7 +384,7 @@ fn resource_pages_end_on_utf8_boundaries() {
                 &SkillName::new("example-skill"),
                 "references/chinese.md",
                 first.next_offset().unwrap(),
-                5,
+                4,
             )
             .await
             .unwrap();

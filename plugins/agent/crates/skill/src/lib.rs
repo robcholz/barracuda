@@ -15,7 +15,7 @@ mod skill_set;
 
 pub use document::{
     Skill, SkillDocument, SkillError, SkillName, SkillResourcePage, DEFAULT_RESOURCE_READ_BYTES,
-    MAX_RESOURCE_READ_BYTES,
+    MAX_RESOURCE_READ_BYTES, MIN_RESOURCE_READ_BYTES,
 };
 pub use registry::{
     CatalogSnapshot, EmptySkillRegistry, FsSkillRegistry, SkillRegistry, SkillRegistryVersion,

@@ -13,7 +13,7 @@ use getset::CopyGetters;
 
 use super::document::{
     frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName, SkillResourcePage,
-    MAX_RESOURCE_READ_BYTES,
+    MAX_RESOURCE_READ_BYTES, MIN_RESOURCE_READ_BYTES,
 };
 use super::skill_set::SkillSet;
 
@@ -231,9 +231,10 @@ impl FsSkillRegistry {
         offset: u64,
         limit: usize,
     ) -> Result<SkillResourcePage, SkillError> {
-        if limit == 0 || limit > MAX_RESOURCE_READ_BYTES {
+        if !(MIN_RESOURCE_READ_BYTES..=MAX_RESOURCE_READ_BYTES).contains(&limit) {
             return Err(SkillError::InvalidResourceLimit {
                 limit,
+                min: MIN_RESOURCE_READ_BYTES,
                 max: MAX_RESOURCE_READ_BYTES,
             });
         }

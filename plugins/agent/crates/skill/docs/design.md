@@ -53,6 +53,10 @@ path remains inside that directory. Absolute paths, parent traversal, and
 filesystem paths supplied by the model are rejected. Reading script source does
 not grant permission to execute it.
 
+Callers select a page size from 4 bytes to 16 KiB. The lower bound can contain
+any single UTF-8 scalar value, while the upper bound keeps each read allocation
+bounded.
+
 ## Reload
 
 Reload scans all configured roots and constructs a complete replacement

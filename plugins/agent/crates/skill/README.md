@@ -49,8 +49,8 @@ its `cap_groups`, `manage_mode`, category, peripheral, and tag schema.
 - `SkillSet::list_skills()` returns the same discovery fields as JSON.
 - `SkillSet::read_skill()` returns the Markdown instructions below frontmatter
   while keeping its filesystem directory internal to resource resolution.
-- `SkillSet::read_resource()` returns a bounded UTF-8 byte range from a relative
-  regular file inside the uniquely registered skill directory.
+- `SkillSet::read_resource()` returns a 4-byte to 16-KiB UTF-8 page from a
+  relative regular file inside the uniquely registered skill directory.
 - `SkillSet::reload()` rescans the roots without replacing a valid snapshot on failure.
 
 ```rust

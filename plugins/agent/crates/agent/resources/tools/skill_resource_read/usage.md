@@ -1,1 +1,1 @@
-Use this after reading a skill when its instructions explicitly reference an additional text file. The path is relative to that skill and cannot address another skill or filesystem location. Continue from `next_offset` when the response is paginated.
+Use this after reading a skill when its instructions explicitly reference an additional text file. The path is relative to that skill and cannot address another skill or filesystem location. The page limit is 4 to 16384 bytes so every UTF-8 character can fit. Continue from `next_offset` when the response is paginated.
