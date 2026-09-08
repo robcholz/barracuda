@@ -1010,8 +1010,10 @@ fn render_generic_hal(
 
     for peripheral in resolved.peripherals() {
         let field = checked_identifier(peripheral.name(), &mut state.identifiers)?;
-        if matches!(peripheral.driver().capability(), "display" | "indicator")
-            && !primary_capabilities.insert(peripheral.driver().capability())
+        if matches!(
+            peripheral.driver().capability(),
+            "display" | "indicator" | "led-strip" | "camera" | "audio-codec"
+        ) && !primary_capabilities.insert(peripheral.driver().capability())
         {
             return Err(GenerateError::DuplicatePrimaryCapability {
                 capability: peripheral.driver().capability().to_owned(),
@@ -1196,6 +1198,11 @@ fn render_generic_hal(
                 )),
                 _ => {}
             }
+        }
+        if !primary_capabilities.contains("led-strip") {
+            source.push_str(
+                "impl ::barracuda_board_hal::led_strip::BuiltinLedStrip for GeneratedBuiltins {\n    type LedStrip = ::barracuda_board_hal::UnavailableLedStrip;\n    fn take_led_strip(&mut self) -> Option<Self::LedStrip> { None }\n}\n\n",
+            );
         }
     }
 

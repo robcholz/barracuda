@@ -175,6 +175,31 @@ pub struct EmptyBoardHal;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoBuiltinCapabilities;
 
+/// Uninhabited LED-strip capability used when a Board has no built-in strip.
+pub struct UnavailableLedStrip {
+    never: Infallible,
+}
+
+impl led_strip::LedStrip for UnavailableLedStrip {
+    type Error = Infallible;
+
+    fn len(&self) -> usize {
+        match self.never {}
+    }
+
+    fn write(&mut self, _pixels: &[led_strip::Rgb8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl led_strip::BuiltinLedStrip for NoBuiltinCapabilities {
+    type LedStrip = UnavailableLedStrip;
+
+    fn take_led_strip(&mut self) -> Option<Self::LedStrip> {
+        None
+    }
+}
+
 /// Explicit absence of exposed Board I/O capabilities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;

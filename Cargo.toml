@@ -71,6 +71,7 @@ barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
+barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }

@@ -13,7 +13,8 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
+    led_strip::BuiltinLedStrip, BoardHalResources, DigitalProvider, ExposedIo, I2cProvider,
+    SpiProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -76,7 +77,9 @@ impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: Unpin,
+    Builtins: BuiltinLedStrip + Unpin,
+    Builtins::LedStrip: Send + 'static,
+    <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Io: ExposedIo + DigitalProvider + I2cProvider + SpiProvider + Unpin,
     Io::Pin: Send,
     <Io::Pin as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -163,6 +166,7 @@ where
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
+            barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),

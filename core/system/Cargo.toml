@@ -34,6 +34,7 @@ barracuda-vm-plugin.workspace = true
 barracuda-vm-agent-plugin.workspace = true
 barracuda-gpio-plugin.workspace = true
 barracuda-i2c-plugin.workspace = true
+barracuda-led-strip-plugin.workspace = true
 barracuda-message-queue-plugin.workspace = true
 barracuda-spi-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
