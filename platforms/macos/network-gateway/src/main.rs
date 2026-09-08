@@ -14,13 +14,13 @@ use axum::{
     routing::get,
     Router,
 };
-use barracuda_platform_net_gateway_protocol::{decode, encode, Kind, VERSION};
+use barracuda_platform_macos_network_gateway_protocol::{decode, encode, Kind, VERSION};
 use clap::Parser;
 use futures_util::{SinkExt as _, StreamExt as _};
 use session::{NetworkSession, Outbound};
 use tokio::sync::mpsc;
 
-const DEFAULT_DEVICE_WEB_PORT: u16 = 8787;
+const DEFAULT_FORWARD_PORT: u16 = 8787;
 
 #[derive(Debug, Parser)]
 #[command(about = "Route Barracuda virtual NICs through host TCP and UDP sockets")]
@@ -28,15 +28,15 @@ struct Arguments {
     /// WebSocket listen address.
     #[arg(long, default_value = "127.0.0.1:8787")]
     listen: SocketAddr,
-    /// Public base URL used when reporting a device WebServer route.
+    /// Public base URL used when reporting the forwarded guest TCP route.
     #[arg(long, default_value = "http://127.0.0.1")]
     public_base_url: String,
-    /// Host address used for per-device WebServer forwarding listeners.
+    /// Host address used for per-session forwarding listeners.
     #[arg(long, default_value = "127.0.0.1")]
     forward_address: std::net::IpAddr,
-    /// Port inside the device to expose through the returned URL.
-    #[arg(long, default_value_t = DEFAULT_DEVICE_WEB_PORT)]
-    device_web_port: u16,
+    /// Guest TCP port to expose through the returned URL.
+    #[arg(long, default_value_t = DEFAULT_FORWARD_PORT)]
+    forward_port: u16,
     /// Resolver used for requests sent to the guest-visible DNS address.
     #[arg(long, default_value = "1.1.1.1:53")]
     dns_server: SocketAddr,
@@ -49,7 +49,7 @@ struct Arguments {
 struct GatewayState {
     public_base_url: Arc<str>,
     forward_address: std::net::IpAddr,
-    device_web_port: u16,
+    forward_port: u16,
     dns_server: SocketAddr,
     allowed_origins: Arc<[String]>,
 }
@@ -64,7 +64,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
     let config = GatewayConfig {
         public_base_url: arguments.public_base_url.into(),
         forward_address: arguments.forward_address,
-        device_web_port: arguments.device_web_port,
+        forward_port: arguments.forward_port,
         dns_server: arguments.dns_server,
         allowed_origins: arguments.allowed_origins.into(),
     };
@@ -81,7 +81,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
 pub struct GatewayConfig {
     public_base_url: Arc<str>,
     forward_address: std::net::IpAddr,
-    device_web_port: u16,
+    forward_port: u16,
     dns_server: SocketAddr,
     allowed_origins: Arc<[String]>,
 }
@@ -93,7 +93,7 @@ impl GatewayConfig {
         Self {
             public_base_url: Arc::from("http://127.0.0.1"),
             forward_address: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            device_web_port: DEFAULT_DEVICE_WEB_PORT,
+            forward_port: DEFAULT_FORWARD_PORT,
             dns_server: SocketAddr::from(([1, 1, 1, 1], 53)),
             allowed_origins: Arc::from([]),
         }
@@ -116,7 +116,7 @@ pub fn serve(
     let state = GatewayState {
         public_base_url: config.public_base_url,
         forward_address: config.forward_address,
-        device_web_port: config.device_web_port,
+        forward_port: config.forward_port,
         dns_server: config.dns_server,
         allowed_origins: config.allowed_origins,
     };
@@ -171,7 +171,7 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
         responses_tx,
         &state.public_base_url,
         state.forward_address,
-        state.device_web_port,
+        state.forward_port,
         state.dns_server,
     )
     .await
@@ -187,13 +187,16 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
         while let Some(outbound) = responses_rx.recv().await {
             let (kind, payload) = match outbound {
                 Outbound::Packet(packet) => (Kind::Packet, packet),
-                Outbound::DeviceUrl(url) => (Kind::DeviceUrl, url.into_bytes()),
+                Outbound::ForwardUrl(url) => (Kind::ForwardUrl, url.into_bytes()),
             };
-            if kind == Kind::DeviceUrl {
-                tracing::debug!(bytes = payload.len(), "sending device WebServer URL");
+            if kind == Kind::ForwardUrl {
+                tracing::debug!(bytes = payload.len(), "sending forwarded guest TCP URL");
             }
             let mut message =
-                vec![0; barracuda_platform_net_gateway_protocol::encoded_len(payload.len())];
+                vec![
+                    0;
+                    barracuda_platform_macos_network_gateway_protocol::encoded_len(payload.len())
+                ];
             let Ok(length) = encode(kind, &payload, &mut message) else {
                 break;
             };
@@ -247,11 +250,13 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use axum::http::{header::ORIGIN, HeaderMap, HeaderValue};
-    use barracuda_platform_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
+    use barracuda_platform_macos_network_gateway_protocol::{
+        decode, encode, encoded_len, Kind, VERSION,
+    };
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-    use super::{is_hello, origin_allowed, router, GatewayState, DEFAULT_DEVICE_WEB_PORT};
+    use super::{is_hello, origin_allowed, router, GatewayState, DEFAULT_FORWARD_PORT};
 
     #[test]
     fn session_requires_a_valid_hello_as_its_first_frame() {
@@ -291,7 +296,7 @@ mod tests {
                 router(GatewayState {
                     public_base_url: "http://127.0.0.1".into(),
                     forward_address: "127.0.0.1".parse().expect("forward address"),
-                    device_web_port: DEFAULT_DEVICE_WEB_PORT,
+                    forward_port: DEFAULT_FORWARD_PORT,
                     dns_server: "127.0.0.1:53".parse().expect("DNS address"),
                     allowed_origins: Vec::new().into(),
                 }),
@@ -315,7 +320,7 @@ mod tests {
             .expect("gateway response")
             .expect("valid WebSocket response")
             .into_data();
-        assert!(decode(&message).is_ok_and(|frame| frame.kind == Kind::DeviceUrl));
+        assert!(decode(&message).is_ok_and(|frame| frame.kind == Kind::ForwardUrl));
         socket.close(None).await.expect("close gateway WebSocket");
         server.abort();
     }

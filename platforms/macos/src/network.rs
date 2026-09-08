@@ -1,6 +1,8 @@
 //! macOS Embassy Net driver backed by the shared WebSocket packet gateway.
 
-use barracuda_platform_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
+use barracuda_platform_macos_network_gateway_protocol::{
+    decode, encode, encoded_len, Kind, VERSION,
+};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_net_driver_channel::{
@@ -109,8 +111,8 @@ async fn receive_task(
                 target[..frame.payload.len()].copy_from_slice(frame.payload);
                 packets.rx_done(frame.payload.len());
             }
-            Kind::DeviceUrl => match core::str::from_utf8(frame.payload) {
-                Ok(url) => log::info!("device WebServer available at {url}"),
+            Kind::ForwardUrl => match core::str::from_utf8(frame.payload) {
+                Ok(url) => log::info!("forwarded guest TCP service available at {url}"),
                 Err(_error) => break,
             },
             Kind::Error => {

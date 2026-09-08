@@ -1,20 +1,20 @@
 [package]
-name = "barracuda-platform-net-gateway"
+name = "barracuda-platform-macos-network-gateway"
 version = "0.1.0"
 edition = "2021"
-description = "WebSocket virtual router for Barracuda browser and macOS devices"
+description = "User-space virtual network gateway for the Barracuda macOS Platform"
 
 [lib]
 path = "src/main.rs"
 
 [[bin]]
-name = "barracuda-platform-net-gateway"
+name = "barracuda-platform-macos-network-gateway"
 path = "src/bin.rs"
 
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-barracuda-platform-net-gateway-protocol.workspace = true
+barracuda-platform-macos-network-gateway-protocol.workspace = true
 clap = { version = "4", features = ["derive"] }
 embassy-net = { workspace = true, features = ["std"] }
 embassy-net-driver-channel.workspace = true

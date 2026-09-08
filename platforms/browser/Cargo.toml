@@ -9,7 +9,6 @@ name = "barracuda-browser"
 path = "src/bin/browser.rs"
 
 [dependencies]
-barracuda-board.workspace = true
 barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["embedded-tls"] }
 critical-section = { version = "1", features = ["std"] }
@@ -33,6 +32,11 @@ anyhow = "1"
 barracuda-system-image = { path = "../../tools/system-image" }
 tokio = { version = "1.52.3", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+barracuda-board-config.workspace = true
+serde = { version = "1", features = ["derive"] }
+yaml-peg = { version = "1.0.8", features = ["serde"] }
 
 [lints.rust]
 unsafe_code = "deny"

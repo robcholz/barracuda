@@ -7,7 +7,7 @@
     "format:check": "bun --bun run prettier --check 'platforms/*/web/**/*.js' 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
     "lint": "bun --bun run eslint 'plugins/*/resources/web/**/*.ts' 'tools/web/**/*.ts'",
     "check": "bun --bun run tsc --noEmit",
-    "test": "bun test ./plugins ./tools/web",
+    "test": "bun test ./platforms/browser/web ./plugins ./tools/web",
     "dev": "bun plugins/captive-portal/resources/web/build.ts && bun plugins/captive-portal/resources/web/preview.ts"
   },
   "devDependencies": {

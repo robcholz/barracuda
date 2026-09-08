@@ -11,8 +11,8 @@ path = "src/bin/barracuda-macos.rs"
 [dependencies]
 anyhow = "1"
 barracuda-board.workspace = true
-barracuda-platform-net-gateway = { path = "../net-gateway" }
-barracuda-platform-net-gateway-protocol.workspace = true
+barracuda-platform-macos-network-gateway = { path = "network-gateway" }
+barracuda-platform-macos-network-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
 barracuda-system-image = { path = "../../tools/system-image" }
 barracuda-tls = { workspace = true, features = ["pem", "std"] }

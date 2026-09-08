@@ -54,7 +54,7 @@ pub async fn resources_with_bindings(
 #[macro_export]
 macro_rules! __host_application_bindings {
     () => {
-        $crate::TargetBindings::new(&$crate::BOARD, ())
+        $crate::TargetBindings::new($crate::__platform::platform_bindings!(&$crate::BOARD), ())
     };
 }
 

@@ -2,7 +2,7 @@
 name = "littlefs2-sys"
 version = "0.4.0"
 edition = "2018"
-description = "Low-level bindings to littlefs with a reproducible WASI artifact"
+description = "Low-level littlefs bindings with reproducible WASI source builds"
 license = "BSD-3-Clause"
 repository = "https://github.com/nickray/littlefs2-sys"
 build = "build.rs"

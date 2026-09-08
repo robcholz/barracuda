@@ -19,8 +19,8 @@ pub enum Kind {
     Hello = 1,
     /// Raw layer-three IP packet.
     Packet = 2,
-    /// UTF-8 public URL assigned to the device's web server.
-    DeviceUrl = 3,
+    /// UTF-8 public URL forwarding one configured guest TCP port.
+    ForwardUrl = 3,
     /// UTF-8 diagnostic followed by connection shutdown.
     Error = 4,
 }
@@ -32,7 +32,7 @@ impl TryFrom<u8> for Kind {
         match value {
             1 => Ok(Self::Hello),
             2 => Ok(Self::Packet),
-            3 => Ok(Self::DeviceUrl),
+            3 => Ok(Self::ForwardUrl),
             4 => Ok(Self::Error),
             value => Err(DecodeError::UnknownKind(value)),
         }

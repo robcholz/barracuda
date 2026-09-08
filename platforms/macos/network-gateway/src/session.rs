@@ -41,7 +41,7 @@ pub(crate) const DNS_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 2, 3);
 /// Packet or control information returned to a connected device.
 pub(crate) enum Outbound {
     Packet(Vec<u8>),
-    DeviceUrl(String),
+    ForwardUrl(String),
 }
 
 /// Owns all forwarding tasks for one connected virtual NIC.
@@ -52,18 +52,18 @@ pub(crate) struct NetworkSession {
 }
 
 impl NetworkSession {
-    /// Starts outbound TCP/UDP forwarding and a host listener for the guest WebServer.
+    /// Starts outbound TCP/UDP forwarding and a listener for one configured guest TCP port.
     pub(crate) async fn new(
         responses: mpsc::Sender<Outbound>,
         public_base_url: &str,
         forward_address: std::net::IpAddr,
-        device_web_port: u16,
+        guest_port: u16,
         dns_server: SocketAddr,
     ) -> Result<Self, SessionError> {
         let listener = std::net::TcpListener::bind((forward_address, 0))?;
         let forwarded_port = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
-        let device_url = forwarded_url(public_base_url, forwarded_port)?;
+        let forward_url = forwarded_url(public_base_url, forwarded_port)?;
 
         let cancellation = CancellationToken::new();
         let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(RX_PACKETS);
@@ -82,7 +82,7 @@ impl NetworkSession {
                             input_rx,
                             listener,
                             responses,
-                            device_web_port,
+                            guest_port,
                             dns_server,
                             thread_cancellation,
                             initialized_tx,
@@ -102,7 +102,7 @@ impl NetworkSession {
             thread: Some(thread),
         };
         if url_responses
-            .send(Outbound::DeviceUrl(device_url))
+            .send(Outbound::ForwardUrl(forward_url))
             .await
             .is_err()
         {
@@ -137,7 +137,7 @@ async fn run_network(
     mut input_rx: mpsc::Receiver<Vec<u8>>,
     listener: std::net::TcpListener,
     responses: mpsc::Sender<Outbound>,
-    device_web_port: u16,
+    guest_port: u16,
     dns_server: SocketAddr,
     cancellation: CancellationToken,
     initialized: oneshot::Sender<Result<(), SessionError>>,
@@ -178,7 +178,7 @@ async fn run_network(
         () = send_nat_packets(&mut nat_stream, responses) => {}
         () = run_nat_tcp(tcp, dns_server, cancellation.clone()) => {}
         () = run_nat_udp(udp, dns_server, cancellation.clone()) => {}
-        () = run_host_forward(listener, gateway_stack, device_web_port, cancellation.clone()) => {}
+        () = run_host_forward(listener, gateway_stack, guest_port, cancellation.clone()) => {}
         result = nat_runner => if let Err(error) = result {
             tracing::warn!(?error, "user-space TCP runner stopped");
         }
@@ -525,9 +525,9 @@ pub(crate) enum SessionError {
     InputChannelClosed,
     #[error("device packet has {0} bytes, exceeding the virtual NIC MTU")]
     PacketTooLarge(usize),
-    #[error("could not connect to the guest WebServer: {0}")]
+    #[error("could not connect to the forwarded guest TCP port: {0}")]
     GuestConnect(embassy_net::tcp::ConnectError),
-    #[error("guest WebServer connection failed: {0}")]
+    #[error("forwarded guest TCP connection failed: {0}")]
     GuestIo(embassy_net::tcp::Error),
 }
 
@@ -598,7 +598,7 @@ mod tests {
         )
         .await;
         assert!(session.is_ok());
-        assert!(matches!(events.recv().await, Some(Outbound::DeviceUrl(_))));
+        assert!(matches!(events.recv().await, Some(Outbound::ForwardUrl(_))));
         if let Ok(session) = session {
             assert!(matches!(
                 session.input(&[0; MTU + 1]).await,
@@ -652,7 +652,7 @@ mod tests {
         .await
         .expect("start network session");
         let device_url = match events.recv().await {
-            Some(Outbound::DeviceUrl(url)) => url,
+            Some(Outbound::ForwardUrl(url)) => url,
             _ => String::new(),
         };
         let forward_address = device_url

@@ -1049,7 +1049,7 @@ name = "barracuda-platform-browser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-board",
+ "barracuda-board-config",
  "barracuda-platform",
  "barracuda-system-image",
  "barracuda-tls",
@@ -1065,9 +1065,11 @@ dependencies = [
  "embassy-time-queue-utils",
  "embedded-storage",
  "heapless 0.9.3",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
  "tracing-subscriber",
+ "yaml-peg",
 ]
 
 [[package]]
@@ -1230,8 +1232,8 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-platform",
- "barracuda-platform-net-gateway",
- "barracuda-platform-net-gateway-protocol",
+ "barracuda-platform-macos-network-gateway",
+ "barracuda-platform-macos-network-gateway-protocol",
  "barracuda-system-image",
  "barracuda-tls",
  "critical-section",
@@ -1258,12 +1260,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-platform-net-gateway"
+name = "barracuda-platform-macos-network-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "barracuda-platform-net-gateway-protocol",
+ "barracuda-platform-macos-network-gateway-protocol",
  "clap",
  "embassy-net",
  "embassy-net-driver-channel",
@@ -1280,7 +1282,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-platform-net-gateway-protocol"
+name = "barracuda-platform-macos-network-gateway-protocol"
 version = "0.1.0"
 
 [[package]]

@@ -27,3 +27,19 @@ fn browser_bridge_does_not_name_application_services() -> Result<(), std::io::Er
     }
     Ok(())
 }
+
+#[test]
+fn browser_platform_projects_board_layout_without_board_runtime_bindings(
+) -> Result<(), std::io::Error> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let platform = fs::read_to_string(root.join("src/lib.rs"))?;
+    let build = fs::read_to_string(root.join("build.rs"))?;
+
+    assert!(platform.contains("type Bindings = ();"));
+    assert!(!platform.contains("barracuda_board::Board"));
+    assert!(!platform.contains("const FLASH_CAPACITY"));
+    assert!(!platform.contains("RESOURCES_OFFSET"));
+    assert!(build.contains("board.native_layout().artifact()"));
+    assert!(platform.contains("for region in regions"));
+    Ok(())
+}

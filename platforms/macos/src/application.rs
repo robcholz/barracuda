@@ -1,3 +1,12 @@
+/// Projects the existing macOS file-layout Board descriptor into Platform bindings.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! platform_bindings {
+    ($board:expr) => {
+        $board
+    };
+}
+
 /// Generates the macOS process entry around one application future.
 #[macro_export]
 macro_rules! platform_entry {

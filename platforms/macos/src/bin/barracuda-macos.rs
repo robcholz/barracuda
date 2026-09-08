@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process::Stdio};
 
 use anyhow::{anyhow, bail, Context as _};
-use barracuda_platform_net_gateway::{serve as serve_gateway, GatewayConfig};
+use barracuda_platform_macos_network_gateway::{serve as serve_gateway, GatewayConfig};
 use tokio::{net::TcpListener, process::Command};
 
 const GATEWAY_ADDRESS: &str = "127.0.0.1:8787";

@@ -1,8 +1,8 @@
 [package]
-name = "barracuda-platform-net-gateway-protocol"
+name = "barracuda-platform-macos-network-gateway-protocol"
 version = "0.1.0"
 edition = "2021"
-description = "Wire protocol shared by Barracuda virtual NICs and the network gateway"
+description = "Private wire protocol for the macOS Platform network gateway"
 
 [lints.rust]
 unsafe_code = "forbid"

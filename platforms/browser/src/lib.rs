@@ -11,6 +11,8 @@ mod ffi;
 #[cfg(target_os = "wasi")]
 mod flash;
 #[cfg(target_os = "wasi")]
+mod layout;
+#[cfg(target_os = "wasi")]
 pub mod network;
 #[cfg(target_os = "wasi")]
 mod time;
@@ -19,24 +21,19 @@ mod time;
 mod implementation {
     use core::cell::RefCell;
 
-    use crate::flash::{OpfsNorFlash, OpfsNorFlashError};
-    use barracuda_board::Board;
+    use crate::{
+        flash::{OpfsNorFlash, OpfsNorFlashError},
+        layout::{selected_layout, FileLayoutError, FileRegionAccess},
+    };
     use barracuda_platform::{
-        NamedPartition, PartitionAccess, PartitionFilesystem, Partitions, PartitionsInsertError,
-        Platform, PlatformInitResult, PlatformResources,
+        NamedPartition, PartitionAccess, Partitions, PartitionsInsertError, Platform,
+        PlatformInitResult, PlatformResources,
     };
     use embassy_embedded_hal::flash::partition::BlockingPartition;
     use embassy_executor::Spawner;
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 
-    const FLASH_CAPACITY: usize = 4 * 1024 * 1024;
-    const SYSTEM_OFFSET: u32 = 0;
-    const SYSTEM_SIZE: u32 = 2 * 1024 * 1024;
-    const RESOURCES_OFFSET: u32 = SYSTEM_OFFSET + SYSTEM_SIZE;
-    const RESOURCES_SIZE: u32 = 1024 * 1024;
-    const DATABASE_OFFSET: u32 = RESOURCES_OFFSET + RESOURCES_SIZE;
-    const DATABASE_SIZE: u32 = 1024 * 1024;
-    const PARTITION_CAPACITY: usize = 3;
+    const PARTITION_CAPACITY: usize = 16;
 
     struct BootConfig {
         system_image: Vec<u8>,
@@ -60,50 +57,43 @@ mod implementation {
                 .with(|configured| configured.borrow_mut().take())
                 .ok_or(BrowserPlatformError::NotConfigured)?
                 .system_image;
-            let resources_end = usize::try_from(RESOURCES_OFFSET)
-                .ok()
-                .and_then(|offset| offset.checked_add(RESOURCES_SIZE as usize))
-                .ok_or(BrowserPlatformError::ImageSize {
-                    expected: FLASH_CAPACITY,
-                    actual: image.len(),
-                })?;
-            let resources = image.get(RESOURCES_OFFSET as usize..resources_end).ok_or(
-                BrowserPlatformError::ImageSize {
-                    expected: FLASH_CAPACITY,
-                    actual: image.len(),
-                },
-            )?;
-            let mut flash = OpfsNorFlash::open("board.flash", FLASH_CAPACITY).await?;
-            flash.replace_region(RESOURCES_OFFSET, RESOURCES_SIZE as usize, resources)?;
+            let layout = selected_layout();
+            let regions = layout.validate(image.len())?;
+            let mut flash = OpfsNorFlash::open("board.flash", layout.capacity()).await?;
+            for region in regions {
+                if region.access() != FileRegionAccess::ReadOnly {
+                    continue;
+                }
+                let start = region.offset() as usize;
+                let end = start
+                    .checked_add(region.size() as usize)
+                    .ok_or(FileLayoutError::Range)?;
+                let provisioned = image.get(start..end).ok_or(FileLayoutError::Range)?;
+                flash.replace_region(region.offset(), region.size() as usize, provisioned)?;
+            }
             let flash = Box::leak(Box::new(Mutex::<CriticalSectionRawMutex, _>::new(
                 RefCell::new(flash),
             )));
 
             let mut partitions = BrowserPartitions::new();
-            partitions.insert(NamedPartition::new(
-                "system",
-                PartitionAccess::ReadWrite,
-                PartitionFilesystem::LittleFs,
-                BlockingPartition::new(flash, SYSTEM_OFFSET, SYSTEM_SIZE),
-            ))?;
-            partitions.insert(NamedPartition::new(
-                "resources",
-                PartitionAccess::ReadOnly,
-                PartitionFilesystem::FatFs,
-                BlockingPartition::new(flash, RESOURCES_OFFSET, RESOURCES_SIZE),
-            ))?;
-            partitions.insert(NamedPartition::new(
-                "kv_database",
-                PartitionAccess::ReadWrite,
-                PartitionFilesystem::Raw,
-                BlockingPartition::new(flash, DATABASE_OFFSET, DATABASE_SIZE),
-            ))?;
+            for region in regions {
+                let access = match region.access() {
+                    FileRegionAccess::ReadOnly => PartitionAccess::ReadOnly,
+                    FileRegionAccess::ReadWrite => PartitionAccess::ReadWrite,
+                };
+                partitions.insert(NamedPartition::new(
+                    region.name(),
+                    access,
+                    region.filesystem(),
+                    BlockingPartition::new(flash, region.offset(), region.size()),
+                ))?;
+            }
             Ok(partitions)
         }
     }
 
     impl Platform for BrowserPlatform {
-        type Bindings = &'static Board;
+        type Bindings = ();
         type Tls = barracuda_tls::PlaintextTls;
         type Partitions = BrowserPartitions;
         type Error = BrowserPlatformError;
@@ -112,12 +102,7 @@ mod implementation {
             Ok(())
         }
 
-        async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
-            if board.hardware().chip() != "browser" {
-                return Err(BrowserPlatformError::IncompatibleChip {
-                    chip: board.hardware().chip(),
-                });
-            }
+        async fn initialize(spawner: Spawner, (): ()) -> PlatformInitResult<Self> {
             let partitions = Self::initialize_partitions().await?;
             let ip_stack = crate::network::create_stack(spawner)
                 .await
@@ -133,17 +118,11 @@ mod implementation {
     /// Browser Platform initialization failure.
     #[derive(Debug, thiserror::Error)]
     pub enum BrowserPlatformError {
-        /// The selected Board does not target the Browser Platform.
-        #[error("Browser Platform does not support Board chip `{chip}`")]
-        IncompatibleChip {
-            /// Canonical chip name declared by the Board.
-            chip: &'static str,
-        },
         /// The generated application entry was invoked without boot inputs.
         #[error("Browser Platform boot inputs are not configured")]
         NotConfigured,
-        /// A downloaded resource image has the wrong size.
-        #[error("Browser resource image is {actual} bytes, expected {expected}")]
+        /// A downloaded native flash image has the wrong size.
+        #[error("Browser flash image is {actual} bytes, expected {expected}")]
         ImageSize {
             /// Required partition size.
             expected: usize,
@@ -153,6 +132,9 @@ mod implementation {
         /// OPFS initialization or access failed.
         #[error(transparent)]
         Flash(#[from] OpfsNorFlashError),
+        /// The selected Board's native file layout is invalid.
+        #[error(transparent)]
+        Layout(#[from] FileLayoutError),
         /// The native partition collection rejected an entry.
         #[error("Browser native partition collection rejected an entry: {0:?}")]
         Partitions(#[from] PartitionsInsertError),
@@ -166,11 +148,9 @@ mod implementation {
         let system_image = crate::ffi::system_image()
             .map_err(|error| BrowserPlatformError::Host(error.to_string()))?;
         let actual = system_image.len();
-        if actual != FLASH_CAPACITY {
-            return Err(BrowserPlatformError::ImageSize {
-                expected: FLASH_CAPACITY,
-                actual,
-            });
+        let expected = selected_layout().capacity();
+        if actual != expected {
+            return Err(BrowserPlatformError::ImageSize { expected, actual });
         }
         BOOT_CONFIG.with(|configured| {
             let mut configured = configured.borrow_mut();
@@ -198,6 +178,15 @@ pub use implementation::{
 #[cfg(not(target_os = "wasi"))]
 /// Browser Platform marker available to host-side catalog tooling.
 pub struct BrowserPlatform;
+
+/// Constructs the Browser Platform's unit binding without inspecting the Board.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! platform_bindings {
+    ($_board:expr) => {
+        ()
+    };
+}
 
 #[cfg(target_os = "wasi")]
 #[doc(hidden)]
