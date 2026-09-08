@@ -19,6 +19,7 @@
 
 mod agent_manifests;
 mod codegen;
+mod inputs;
 mod model;
 mod parse;
 
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
     for source in [
         "manifest_gen/main.rs",
         "manifest_gen/agent_manifests.rs",
+        "manifest_gen/inputs.rs",
         "manifest_gen/model.rs",
         "manifest_gen/parse.rs",
         "manifest_gen/codegen.rs",
