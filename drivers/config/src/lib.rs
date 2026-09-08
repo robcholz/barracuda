@@ -1069,20 +1069,28 @@ fn render_generic_hal(
             String::from("::barracuda_platform_selected::__platform::hal::delay()"),
         );
         for (role, schema) in peripheral.driver().bindings() {
-            let Some(resource) = peripheral.binding(role) else {
-                continue;
-            };
-            let rendered_binding = render_binding(
-                board,
-                peripheral,
-                role,
-                schema,
-                resource,
-                runtime_spi_controllers,
-                &mut state,
-            )?;
-            substitutions.insert(format!("binding.{role}.type"), rendered_binding.0);
-            substitutions.insert(format!("binding.{role}.value"), rendered_binding.1);
+            if let Some(resource) = peripheral.binding(role) {
+                let mut rendered_binding = render_binding(
+                    board,
+                    peripheral,
+                    role,
+                    schema,
+                    resource,
+                    runtime_spi_controllers,
+                    &mut state,
+                )?;
+                if !schema.required() {
+                    rendered_binding.1 = format!("Some({})", rendered_binding.1);
+                }
+                substitutions.insert(format!("binding.{role}.type"), rendered_binding.0);
+                substitutions.insert(format!("binding.{role}.value"), rendered_binding.1);
+            } else if !schema.required() {
+                substitutions.insert(
+                    format!("binding.{role}.type"),
+                    optional_binding_type(peripheral, role, schema.kind())?,
+                );
+                substitutions.insert(format!("binding.{role}.value"), String::from("None"));
+            }
         }
         for (name, schema) in &peripheral.driver().parameters {
             let value = peripheral.parameter(name).ok_or_else(|| {
@@ -1530,6 +1538,23 @@ fn render_generic_hal(
     source.push_str("        Ok(BoardHalResources::new(builtins, io))\n    }\n}\n}\n\n");
     source.push_str("pub use generated_board_hal::*;\n");
     Ok(source)
+}
+
+fn optional_binding_type(
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    kind: BindingKind,
+) -> Result<String, GenerateError> {
+    match kind {
+        BindingKind::DigitalOutput => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::DigitalOutput",
+        )),
+        _ => Err(GenerateError::UnsupportedBindingKind {
+            driver: peripheral.driver().id().to_owned(),
+            binding: role.to_owned(),
+            kind,
+        }),
+    }
 }
 
 fn render_binding(

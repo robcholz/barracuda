@@ -165,8 +165,8 @@ impl Ov2640Config {
 pub struct Ov2640Bindings<I2C, CAPTURE, RESET, PWDN, DELAY> {
     control: I2C,
     capture: CAPTURE,
-    reset: RESET,
-    power_down: PWDN,
+    reset: Option<RESET>,
+    power_down: Option<PWDN>,
     delay: DELAY,
 }
 
@@ -176,8 +176,8 @@ impl<I2C, CAPTURE, RESET, PWDN, DELAY> Ov2640Bindings<I2C, CAPTURE, RESET, PWDN,
     pub const fn new(
         control: I2C,
         capture: CAPTURE,
-        reset: RESET,
-        power_down: PWDN,
+        reset: Option<RESET>,
+        power_down: Option<PWDN>,
         delay: DELAY,
     ) -> Self {
         Self {
@@ -247,15 +247,16 @@ where
         mut bindings: Self::Bindings,
         config: Self::Config,
     ) -> Result<Self::Capability, Self::Error> {
-        bindings
-            .power_down
-            .set_low()
-            .map_err(Ov2640InitError::Power)?;
-        bindings.delay.delay_ms(2);
-        bindings.reset.set_low().map_err(Ov2640InitError::Reset)?;
-        bindings.delay.delay_ms(2);
-        bindings.reset.set_high().map_err(Ov2640InitError::Reset)?;
-        bindings.delay.delay_ms(10);
+        if let Some(power_down) = bindings.power_down.as_mut() {
+            power_down.set_low().map_err(Ov2640InitError::Power)?;
+            bindings.delay.delay_ms(2);
+        }
+        if let Some(reset) = bindings.reset.as_mut() {
+            reset.set_low().map_err(Ov2640InitError::Reset)?;
+            bindings.delay.delay_ms(2);
+            reset.set_high().map_err(Ov2640InitError::Reset)?;
+            bindings.delay.delay_ms(10);
+        }
         write_register(&mut bindings.control, config.address, 0xff, 0x01)
             .map_err(Ov2640InitError::Control)?;
         let product = read_register(&mut bindings.control, config.address, 0x0a)
@@ -387,7 +388,9 @@ mod tests {
 
     #[test]
     fn initializes_sensor_and_captures_into_caller_memory() {
-        let bindings = Ov2640Bindings::new(Control, Capture, Pin, Pin, Delay);
+        let bindings = Ov2640Bindings::<Control, Capture, Pin, Pin, Delay>::new(
+            Control, Capture, None, None, Delay,
+        );
         let mut camera = block_on(Ov2640CameraDriver::initialize(
             bindings,
             Ov2640Config::qvga_jpeg(0x30),

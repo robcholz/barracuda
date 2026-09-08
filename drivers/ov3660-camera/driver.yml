@@ -14,9 +14,11 @@ bindings:
     kind: camera-capture
   reset:
     kind: digital-output
+    required: false
     initial: high
   power-down:
     kind: digital-output
+    required: false
     initial: high
 parameters:
   address:

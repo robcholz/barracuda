@@ -87,6 +87,11 @@ manifest IDs must match. Version 1 manifests declare:
 - named parameter schemas, including required values, defaults, and enum
   domains, with optional Rust value mappings.
 
+An optional digital-output binding represents a control signal that is not
+physically connected on every Board variant. Generation emits `None` when the
+Board omits it and `Some(move-only output)` when it is wired; Drivers never
+invent placeholder GPIOs for reset or power-down signals marked NC.
+
 `barracuda_driver_config::load_catalog` rejects malformed manifests, unsupported
 API versions, invalid implementation identities, invalid defaults, and
 directory mismatches. `resolve_board` rejects unknown Drivers, missing or

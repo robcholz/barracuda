@@ -279,8 +279,8 @@ impl Ov3660Config {
 pub struct Ov3660Bindings<I2C, CAPTURE, RESET, PWDN, DELAY> {
     control: I2C,
     capture: CAPTURE,
-    reset: RESET,
-    power_down: PWDN,
+    reset: Option<RESET>,
+    power_down: Option<PWDN>,
     delay: DELAY,
 }
 
@@ -290,8 +290,8 @@ impl<I2C, CAPTURE, RESET, PWDN, DELAY> Ov3660Bindings<I2C, CAPTURE, RESET, PWDN,
     pub const fn new(
         control: I2C,
         capture: CAPTURE,
-        reset: RESET,
-        power_down: PWDN,
+        reset: Option<RESET>,
+        power_down: Option<PWDN>,
         delay: DELAY,
     ) -> Self {
         Self {
@@ -358,15 +358,16 @@ where
         mut bindings: Self::Bindings,
         config: Self::Config,
     ) -> Result<Self::Capability, Self::Error> {
-        bindings
-            .power_down
-            .set_low()
-            .map_err(Ov3660InitError::Power)?;
-        bindings.delay.delay_ms(2);
-        bindings.reset.set_low().map_err(Ov3660InitError::Reset)?;
-        bindings.delay.delay_ms(2);
-        bindings.reset.set_high().map_err(Ov3660InitError::Reset)?;
-        bindings.delay.delay_ms(20);
+        if let Some(power_down) = bindings.power_down.as_mut() {
+            power_down.set_low().map_err(Ov3660InitError::Power)?;
+            bindings.delay.delay_ms(2);
+        }
+        if let Some(reset) = bindings.reset.as_mut() {
+            reset.set_low().map_err(Ov3660InitError::Reset)?;
+            bindings.delay.delay_ms(2);
+            reset.set_high().map_err(Ov3660InitError::Reset)?;
+            bindings.delay.delay_ms(20);
+        }
 
         let product = u16::from(
             read_register(&mut bindings.control, config.address, 0x300a)
@@ -531,7 +532,13 @@ mod tests {
 
     #[test]
     fn initializes_16_bit_registers_and_captures_jpeg() {
-        let bindings = Ov3660Bindings::new(Control::default(), Capture, Pin, Pin, Delay);
+        let bindings = Ov3660Bindings::<Control, Capture, Pin, Pin, Delay>::new(
+            Control::default(),
+            Capture,
+            None,
+            None,
+            Delay,
+        );
         let mut camera = block_on(Ov3660CameraDriver::initialize(
             bindings,
             Ov3660Config::qvga_jpeg(0x3c),
