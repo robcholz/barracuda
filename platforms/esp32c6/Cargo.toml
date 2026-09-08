@@ -18,6 +18,9 @@ embassy-net.workspace = true
 embassy-sync = { version = "0.8.0", default-features = false }
 embedded-hal.workspace = true
 embedded-hal-bus.workspace = true
+embedded-hal-async = "1.0"
+embedded-io = "0.7"
+embedded-io-async = "0.7"
 esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32c6", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32c6", "embedded-storage"] }

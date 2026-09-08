@@ -9,6 +9,7 @@ use barracuda_board_hal::{
 };
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
+    i2c::Operation as I2cOperation,
     spi::{Mode as EmbeddedMode, Phase, Polarity},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -33,7 +34,7 @@ use esp_hal::{
         AnyUart, Config as HalUartConfig, ConfigError as UartConfigError, DataBits,
         Instance as UartInstance, Parity, StopBits, Uart,
     },
-    Async, Blocking,
+    Blocking,
 };
 
 #[doc(hidden)]
@@ -49,10 +50,79 @@ pub type SpiBus = Spi<'static, Blocking>;
 pub type SpiDevice = ExclusiveDevice<SpiBus, DigitalOutput, Delay>;
 /// Blocking I2C controller passed to a peripheral Driver.
 pub type I2cBus = I2c<'static, Blocking>;
-/// Async I2C controller exposed to the VM I2C Plugin.
-pub type ExposedI2cBus = I2c<'static, Async>;
-/// Async SPI controller exposed to the VM SPI Plugin.
-pub type ExposedSpiBus = Spi<'static, Async>;
+/// Send-safe I2C adapter exposed through the async ecosystem contract.
+///
+/// ESP HAL's interrupt-backed async marker is intentionally `!Send`, while a
+/// Barracuda Plugin handle can move between executor tasks. Runtime buses use
+/// the blocking peripheral driver behind async trait methods so ownership can
+/// remain safe without an unsafe `Send` assertion.
+pub struct ExposedI2cBus(I2c<'static, Blocking>);
+
+impl embedded_hal::i2c::ErrorType for ExposedI2cBus {
+    type Error = esp_hal::i2c::master::Error;
+}
+
+impl embedded_hal_async::i2c::I2c for ExposedI2cBus {
+    async fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [I2cOperation<'_>],
+    ) -> Result<(), Self::Error> {
+        embedded_hal::i2c::I2c::transaction(&mut self.0, address, operations)
+    }
+}
+
+/// Send-safe SPI adapter exposed through the async ecosystem contract.
+pub struct ExposedSpiBus(Spi<'static, Blocking>);
+
+impl embedded_hal::spi::ErrorType for ExposedSpiBus {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal_async::spi::SpiBus for ExposedSpiBus {
+    async fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::read(&mut self.0, words)
+    }
+
+    async fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::write(&mut self.0, words)
+    }
+
+    async fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer(&mut self.0, read, write)
+    }
+
+    async fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer_in_place(&mut self.0, words)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::flush(&mut self.0)
+    }
+}
+
+/// Send-safe UART adapter exposed through the async byte-stream contract.
+pub struct ExposedUart(Uart<'static, Blocking>);
+
+impl embedded_io::ErrorType for ExposedUart {
+    type Error = esp_hal::uart::IoError;
+}
+
+impl embedded_io_async::Read for ExposedUart {
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        embedded_io::Read::read(&mut self.0, buffer)
+    }
+}
+
+impl embedded_io_async::Write for ExposedUart {
+    async fn write(&mut self, buffer: &[u8]) -> Result<usize, Self::Error> {
+        embedded_io::Write::write(&mut self.0, buffer)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_io::Write::flush(&mut self.0)
+    }
+}
 /// Delay provider used during peripheral Driver initialization.
 pub type DriverDelay = Delay;
 /// SPI configuration failure surfaced by generated Board initialization.
@@ -147,7 +217,7 @@ impl RuntimePlatform for RuntimeAdapter {
         } else {
             bus
         };
-        Ok(bus.into_async())
+        Ok(ExposedSpiBus(bus))
     }
 }
 
@@ -187,7 +257,7 @@ impl RuntimePwmPlatform for RuntimeAdapter {
 }
 
 impl RuntimeUartPlatform for RuntimeAdapter {
-    type Uart = Uart<'static, Async>;
+    type Uart = ExposedUart;
     type UartError = ExposedUartConfigError;
 
     fn supports_uart(
@@ -234,7 +304,7 @@ impl RuntimeUartPlatform for RuntimeAdapter {
         } else {
             uart
         };
-        Ok(uart.into_async())
+        Ok(ExposedUart(uart))
     }
 }
 
@@ -551,7 +621,7 @@ pub fn exposed_i2c(
     sda: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<ExposedI2cBus, I2cConfigError> {
-    Ok(i2c_device(i2c, scl, sda, frequency_hz)?.into_async())
+    Ok(ExposedI2cBus(i2c_device(i2c, scl, sda, frequency_hz)?))
 }
 
 /// Constructs a transmit-only async SPI bus explicitly exposed by the Board.
@@ -561,7 +631,7 @@ pub fn exposed_spi_bus(
     mosi: impl PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(spi_bus(spi, sck, mosi, frequency_hz)?.into_async())
+    Ok(ExposedSpiBus(spi_bus(spi, sck, mosi, frequency_hz)?))
 }
 
 /// Constructs a receive-only async SPI bus explicitly exposed by the Board.
@@ -571,7 +641,12 @@ pub fn exposed_spi_bus_rx_only(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(spi_bus_rx_only(spi, sck, miso, frequency_hz)?.into_async())
+    Ok(ExposedSpiBus(spi_bus_rx_only(
+        spi,
+        sck,
+        miso,
+        frequency_hz,
+    )?))
 }
 
 /// Constructs a full-duplex async SPI bus explicitly exposed by the Board.
@@ -582,7 +657,13 @@ pub fn exposed_spi_bus_full_duplex(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(spi_bus_full_duplex(spi, sck, mosi, miso, frequency_hz)?.into_async())
+    Ok(ExposedSpiBus(spi_bus_full_duplex(
+        spi,
+        sck,
+        mosi,
+        miso,
+        frequency_hz,
+    )?))
 }
 
 /// Constructs the delay provider used by synchronous peripheral Drivers.
@@ -608,6 +689,6 @@ macro_rules! __barracuda_esp32_controller_binding_type {
 }
 
 #[doc(hidden)]
-pub use crate::__barracuda_esp32_controller_binding_type as controller_binding_type;
+pub use __barracuda_esp32_controller_binding_type as controller_binding_type;
 #[doc(hidden)]
-pub use crate::__barracuda_esp32_pin_binding_type as pin_binding_type;
+pub use __barracuda_esp32_pin_binding_type as pin_binding_type;

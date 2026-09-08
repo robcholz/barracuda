@@ -45,9 +45,9 @@ macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
 }
 
 #[doc(hidden)]
-pub use crate::__barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
+pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
-pub use crate::__barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
+pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
 
 /// ESP32-S3 camera receiver construction failure.
 #[derive(Debug)]

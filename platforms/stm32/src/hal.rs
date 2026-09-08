@@ -276,4 +276,4 @@ macro_rules! __barracuda_stm32_pin_binding_type {
 }
 
 #[doc(hidden)]
-pub use crate::__barracuda_stm32_pin_binding_type as pin_binding_type;
+pub use __barracuda_stm32_pin_binding_type as pin_binding_type;
