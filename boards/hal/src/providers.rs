@@ -86,6 +86,23 @@ pub trait RuntimePwmPlatform: RuntimePlatform {
     fn pwm(pin: Self::PinToken, frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError>;
 }
 
+/// Optional Platform construction contract for UART functions.
+pub trait RuntimeUartPlatform: RuntimePlatform {
+    /// Bidirectional byte stream returned to an application handle.
+    type Uart: embedded_io_async::Read + embedded_io_async::Write + Send + 'static;
+    /// Platform UART construction failure.
+    type UartError: core::error::Error;
+
+    /// Returns whether the selected physical pins can be routed as UART.
+    fn supports_uart(tx: Option<&Self::PinToken>, rx: Option<&Self::PinToken>) -> bool;
+    /// Consumes selected pins and allocates a UART controller.
+    fn uart(
+        tx: Option<Self::PinToken>,
+        rx: Option<Self::PinToken>,
+        config: UartConfig,
+    ) -> Result<Self::Uart, Self::UartError>;
+}
+
 struct RuntimePin<Pin> {
     name: &'static str,
     token: Option<Pin>,
@@ -172,6 +189,8 @@ pub enum RuntimeOpenError<E> {
     },
     /// SPI was requested without either data signal.
     MissingSpiData,
+    /// UART was requested without either data signal.
+    MissingUartData,
     /// The selected physical resource cannot implement the requested function.
     Unsupported {
         /// Function rejected by the Platform.
@@ -192,6 +211,7 @@ impl<E: fmt::Display> fmt::Display for RuntimeOpenError<E> {
                 )
             }
             Self::MissingSpiData => formatter.write_str("SPI requires MOSI or MISO"),
+            Self::MissingUartData => formatter.write_str("UART requires TX or RX"),
             Self::Unsupported { function } => {
                 write!(formatter, "the selected pin does not support {function}")
             }
@@ -207,7 +227,10 @@ impl<E: core::error::Error + 'static> core::error::Error for RuntimeOpenError<E>
         match self {
             Self::Resource(error) => Some(error),
             Self::Platform(error) => Some(error),
-            Self::NoController { .. } | Self::MissingSpiData | Self::Unsupported { .. } => None,
+            Self::NoController { .. }
+            | Self::MissingSpiData
+            | Self::MissingUartData
+            | Self::Unsupported { .. } => None,
         }
     }
 }
@@ -382,6 +405,81 @@ impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize> PwmP
             Ok(token)
         })?;
         H::pwm(token, request.frequency_hz).map_err(RuntimeOpenError::Platform)
+    }
+}
+
+impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> UartProvider
+    for RuntimeIo<H, P, I, S>
+{
+    type Port = H::Uart;
+    type Error = RuntimeOpenError<H::UartError>;
+
+    fn uart_available(&self, tx: Option<&str>, rx: Option<&str>) -> bool {
+        if tx.is_none() && rx.is_none() {
+            return false;
+        }
+        let tx_index = tx.and_then(|name| self.resolve_pin(name).ok());
+        let rx_index = rx.and_then(|name| self.resolve_pin(name).ok());
+        if tx.is_some_and(|_| tx_index.is_none())
+            || rx.is_some_and(|_| rx_index.is_none())
+            || tx_index.is_some() && tx_index == rx_index
+        {
+            return false;
+        }
+        critical_section::with(|section| {
+            let state = self.state.borrow(section).borrow();
+            let tx = tx_index.and_then(|index| state.pins[index].token.as_ref());
+            let rx = rx_index.and_then(|index| state.pins[index].token.as_ref());
+            (tx_index.is_none() || tx.is_some())
+                && (rx_index.is_none() || rx.is_some())
+                && H::supports_uart(tx, rx)
+        })
+    }
+
+    fn open_uart(&self, request: UartRequest<'_>) -> Result<Self::Port, Self::Error> {
+        if request.tx.is_none() && request.rx.is_none() {
+            return Err(RuntimeOpenError::MissingUartData);
+        }
+        let tx_index = request
+            .tx
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
+        let rx_index = request
+            .rx
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
+        let mut roles = alloc::vec![];
+        roles.extend(tx_index);
+        roles.extend(rx_index);
+        self.ensure_distinct(&roles)?;
+
+        let (tx, rx) = critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            for (_, index) in &roles {
+                let pin = &state.pins[*index];
+                if pin.token.is_none() {
+                    return Err(RuntimeOpenError::Resource(LeaseError::Busy {
+                        resource: pin.name,
+                        owner: pin.owner.unwrap_or("runtime function"),
+                    }));
+                }
+            }
+            let tx_ref = tx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            let rx_ref = rx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            if !H::supports_uart(tx_ref, rx_ref) {
+                return Err(RuntimeOpenError::Unsupported { function: "UART" });
+            }
+            let tx = tx_index.and_then(|(_, index)| state.pins[index].token.take());
+            let rx = rx_index.and_then(|(_, index)| state.pins[index].token.take());
+            if let Some((_, index)) = tx_index {
+                state.pins[index].owner = Some("UART TX");
+            }
+            if let Some((_, index)) = rx_index {
+                state.pins[index].owner = Some("UART RX");
+            }
+            Ok((tx, rx))
+        })?;
+        H::uart(tx, rx, request.config).map_err(RuntimeOpenError::Platform)
     }
 }
 
@@ -605,6 +703,77 @@ pub trait PwmProvider {
     fn pwm_available(&self, name: &str) -> bool;
     /// Claims a pin and constructs one PWM output.
     fn open_pwm(&self, request: PwmRequest<'_>) -> Result<Self::Output, Self::Error>;
+}
+
+/// Number of data bits in one UART frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UartDataBits {
+    /// Seven data bits.
+    Seven,
+    /// Eight data bits.
+    #[default]
+    Eight,
+    /// Nine data bits.
+    Nine,
+}
+
+/// UART parity mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UartParity {
+    /// No parity bit.
+    #[default]
+    None,
+    /// Even parity.
+    Even,
+    /// Odd parity.
+    Odd,
+}
+
+/// Number of UART stop bits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UartStopBits {
+    /// One stop bit.
+    #[default]
+    One,
+    /// Two stop bits.
+    Two,
+}
+
+/// Portable UART line configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UartConfig {
+    /// Baud rate in symbols per second.
+    pub baud: u32,
+    /// Data bits per frame.
+    pub data_bits: UartDataBits,
+    /// Parity mode.
+    pub parity: UartParity,
+    /// Stop bits per frame.
+    pub stop_bits: UartStopBits,
+}
+
+/// Runtime request for a UART function on selected exposed pins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UartRequest<'a> {
+    /// Optional Board-visible transmit pin.
+    pub tx: Option<&'a str>,
+    /// Optional Board-visible receive pin.
+    pub rx: Option<&'a str>,
+    /// Portable line configuration.
+    pub config: UartConfig,
+}
+
+/// Constructs UART streams from runtime-selected exposed resources.
+pub trait UartProvider {
+    /// Byte stream implementing the ecosystem async I/O contracts.
+    type Port: embedded_io_async::Read + embedded_io_async::Write + Send + 'static;
+    /// Failure while validating, claiming, or configuring UART.
+    type Error: core::error::Error;
+
+    /// Returns whether the free named pins can form a UART function.
+    fn uart_available(&self, tx: Option<&str>, rx: Option<&str>) -> bool;
+    /// Atomically claims the selected pins and constructs a UART stream.
+    fn open_uart(&self, request: UartRequest<'_>) -> Result<Self::Port, Self::Error>;
 }
 
 /// Runtime request for an I2C function on two exposed pins.

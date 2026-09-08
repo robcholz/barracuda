@@ -719,6 +719,8 @@ dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1609,6 +1611,7 @@ dependencies = [
  "barracuda-target-api",
  "barracuda-time-plugin",
  "barracuda-tls",
+ "barracuda-uart-plugin",
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
@@ -1711,6 +1714,19 @@ dependencies = [
  "mbedtls-rs",
  "rand_core 0.10.1",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-uart-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
 ]
 
 [[package]]

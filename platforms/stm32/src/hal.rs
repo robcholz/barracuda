@@ -5,8 +5,8 @@ use core::convert::Infallible;
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
     Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
-    UnavailableAnalogInput, UnavailableAnalogOutput, UnavailableI2c, UnavailablePwm,
-    UnavailableSpi, UnsupportedFunction,
+    RuntimeUartPlatform, UartConfig, UnavailableAnalogInput, UnavailableAnalogOutput,
+    UnavailableI2c, UnavailablePwm, UnavailableSpi, UnavailableUart, UnsupportedFunction,
 };
 use embassy_stm32::gpio::{AnyPin, Flex, Input, Level, Output, Pin, Pull, Speed};
 use embedded_hal::{
@@ -94,6 +94,23 @@ impl RuntimePwmPlatform for RuntimeAdapter {
 
     fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
         Err(UnsupportedFunction::new("PWM"))
+    }
+}
+
+impl RuntimeUartPlatform for RuntimeAdapter {
+    type Uart = UnavailableUart;
+    type UartError = UnsupportedFunction;
+
+    fn supports_uart(_tx: Option<&Self::PinToken>, _rx: Option<&Self::PinToken>) -> bool {
+        false
+    }
+
+    fn uart(
+        _tx: Option<Self::PinToken>,
+        _rx: Option<Self::PinToken>,
+        _config: UartConfig,
+    ) -> Result<Self::Uart, Self::UartError> {
+        Err(UnsupportedFunction::new("UART"))
     }
 }
 

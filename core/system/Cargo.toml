@@ -41,6 +41,7 @@ barracuda-led-strip-plugin.workspace = true
 barracuda-message-queue-plugin.workspace = true
 barracuda-pwm-plugin.workspace = true
 barracuda-spi-plugin.workspace = true
+barracuda-uart-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 # END GENERATED PLUGINS

@@ -21,7 +21,8 @@ use embedded_hal::{
 pub use providers::{
     AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, PwmProvider, PwmRequest,
     RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform,
-    SpiProvider, SpiRequest, UnsupportedFunction,
+    RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig, UartDataBits, UartParity,
+    UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
 };
 pub use runtime::{LeaseError, ResourceKind};
 
@@ -338,6 +339,31 @@ pub struct UnavailablePwm {
     never: Infallible,
 }
 
+/// Uninhabited UART stream used by Boards without runtime UART support.
+pub struct UnavailableUart {
+    never: Infallible,
+}
+
+impl embedded_io::ErrorType for UnavailableUart {
+    type Error = Infallible;
+}
+
+impl embedded_io_async::Read for UnavailableUart {
+    async fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl embedded_io_async::Write for UnavailableUart {
+    async fn write(&mut self, _buffer: &[u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
 impl embedded_hal::pwm::ErrorType for UnavailablePwm {
     type Error = Infallible;
 }
@@ -529,6 +555,19 @@ impl PwmProvider for NoExposedIo {
 
     fn open_pwm(&self, _request: PwmRequest<'_>) -> Result<Self::Output, Self::Error> {
         Err(UnsupportedFunction::new("PWM"))
+    }
+}
+
+impl UartProvider for NoExposedIo {
+    type Port = UnavailableUart;
+    type Error = UnsupportedFunction;
+
+    fn uart_available(&self, _tx: Option<&str>, _rx: Option<&str>) -> bool {
+        false
+    }
+
+    fn open_uart(&self, _request: UartRequest<'_>) -> Result<Self::Port, Self::Error> {
+        Err(UnsupportedFunction::new("UART"))
     }
 }
 

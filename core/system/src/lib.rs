@@ -15,6 +15,7 @@ mod resources;
 use barracuda_board_hal::{
     camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, AnalogProvider,
     BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, PwmProvider, SpiProvider,
+    UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -91,6 +92,7 @@ where
         + I2cProvider
         + PwmProvider
         + SpiProvider
+        + UartProvider
         + Unpin,
     Io::Input: Send,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
@@ -110,6 +112,9 @@ where
     <Io as SpiProvider>::Bus: Send,
     <<Io as SpiProvider>::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
     <Io as SpiProvider>::Error: core::fmt::Display,
+    <Io as UartProvider>::Port: Send,
+    <<Io as UartProvider>::Port as embedded_io::ErrorType>::Error: core::fmt::Debug,
+    <Io as UartProvider>::Error: core::fmt::Display,
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
@@ -193,6 +198,7 @@ where
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
+            barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );

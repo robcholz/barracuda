@@ -1,0 +1,3 @@
+id = "uart"
+depends-on = ["vm"]
+description = "Registers the Board-exposed UART Lua package."

@@ -1,21 +1,20 @@
 [package]
-name = "barracuda-board-hal"
+name = "barracuda-uart-plugin"
 version = "0.1.0"
-edition = "2021"
-description = "Board HAL composition contract for Barracuda"
+edition = "2024"
+description = "Barracuda Plugin exposing Board UART resources to Lua"
+license = "Apache-2.0"
 
 [dependencies]
-barracuda-driver.workspace = true
-critical-section = "1"
-embassy-executor.workspace = true
-embedded-hal.workspace = true
-embedded-hal-async.workspace = true
+barracuda-board-hal.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
-embedded-graphics-core.workspace = true
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

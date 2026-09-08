@@ -8,7 +8,8 @@ use barracuda_board_hal::{
     AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
     DigitalProvider, I2cProvider, I2cRequest, InputConfig, LeaseError, OutputConfig, PwmProvider,
     PwmRequest, RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform,
-    RuntimePwmPlatform, SpiProvider, SpiRequest,
+    RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig, UartDataBits,
+    UartParity, UartProvider, UartRequest, UartStopBits,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -132,6 +133,34 @@ struct FakeAnalog(u8);
 
 struct FakePwm(u16);
 
+#[derive(Debug, PartialEq, Eq)]
+struct FakeUart {
+    tx: Option<u8>,
+    rx: Option<u8>,
+    config: UartConfig,
+}
+
+impl embedded_io::ErrorType for FakeUart {
+    type Error = Infallible;
+}
+
+impl embedded_io_async::Read for FakeUart {
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        buffer.fill(0x55);
+        Ok(buffer.len())
+    }
+}
+
+impl embedded_io_async::Write for FakeUart {
+    async fn write(&mut self, buffer: &[u8]) -> Result<usize, Self::Error> {
+        Ok(buffer.len())
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 impl embedded_hal::pwm::ErrorType for FakePwm {
     type Error = Infallible;
 }
@@ -251,6 +280,23 @@ impl RuntimePwmPlatform for FakePlatform {
 
     fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
         Ok(FakePwm(0))
+    }
+}
+
+impl RuntimeUartPlatform for FakePlatform {
+    type Uart = FakeUart;
+    type UartError = Infallible;
+
+    fn supports_uart(tx: Option<&Self::PinToken>, rx: Option<&Self::PinToken>) -> bool {
+        tx.is_some_and(|pin| *pin == 3) || rx.is_some_and(|pin| *pin == 4)
+    }
+
+    fn uart(
+        tx: Option<Self::PinToken>,
+        rx: Option<Self::PinToken>,
+        config: UartConfig,
+    ) -> Result<Self::Uart, Self::UartError> {
+        Ok(FakeUart { tx, rx, config })
     }
 }
 
@@ -388,4 +434,41 @@ fn pwm_claims_the_same_physical_pin_seen_by_gpio() {
         })
         .expect("PWM output");
     assert!(!io.digital_available("D3"));
+}
+
+#[test]
+fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
+    let io = runtime_io();
+    assert!(!io.uart_available(Some("D1"), Some("D2")));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D2"));
+    assert!(matches!(
+        io.open_uart(UartRequest {
+            tx: Some("D3"),
+            rx: Some("D3"),
+            config: UartConfig {
+                baud: 115_200,
+                data_bits: UartDataBits::Eight,
+                parity: UartParity::None,
+                stop_bits: UartStopBits::One,
+            },
+        }),
+        Err(RuntimeOpenError::Resource(LeaseError::Duplicate { .. }))
+    ));
+    let port = io
+        .open_uart(UartRequest {
+            tx: Some("D3"),
+            rx: Some("D4"),
+            config: UartConfig {
+                baud: 115_200,
+                data_bits: UartDataBits::Eight,
+                parity: UartParity::None,
+                stop_bits: UartStopBits::One,
+            },
+        })
+        .expect("UART port");
+    assert_eq!(port.tx, Some(3));
+    assert_eq!(port.rx, Some(4));
+    assert!(!io.digital_available("D3"));
+    assert!(!io.digital_available("D4"));
 }
