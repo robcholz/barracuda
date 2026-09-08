@@ -238,6 +238,9 @@ impl RuntimePlatform for FakePlatform {
     type SpiBus = FakeSpi;
     type SpiError = Infallible;
     type UartController = u8;
+    type AdcResource = u8;
+    type PwmResource = u8;
+    type I2sResource = u8;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         FakePin(pin)
@@ -281,15 +284,19 @@ impl RuntimeAnalogPlatform for FakePlatform {
     type AnalogOutput = FakeAnalog;
     type AnalogError = Infallible;
 
-    fn supports_analog_input(pin: &Self::PinToken) -> bool {
-        *pin == 1
+    fn supports_analog_input(resource: &Self::AdcResource, pin: &Self::PinToken) -> bool {
+        *resource == 40 && *pin == 1
     }
 
     fn supports_analog_output(pin: &Self::PinToken) -> bool {
         *pin == 2
     }
 
-    fn analog_input(pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError> {
+    fn analog_input(
+        resource: Self::AdcResource,
+        pin: Self::PinToken,
+    ) -> Result<Self::AnalogInput, Self::AnalogError> {
+        assert_eq!(resource, 40);
         Ok(FakeAnalog(pin))
     }
 
@@ -302,11 +309,16 @@ impl RuntimePwmPlatform for FakePlatform {
     type Pwm = FakePwm;
     type PwmError = Infallible;
 
-    fn supports_pwm(pin: &Self::PinToken) -> bool {
-        *pin == 3
+    fn supports_pwm(resource: &Self::PwmResource, pin: &Self::PinToken) -> bool {
+        *resource == 50 && *pin == 3
     }
 
-    fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
+    fn pwm(
+        resource: Self::PwmResource,
+        _pin: Self::PinToken,
+        _frequency_hz: u32,
+    ) -> Result<Self::Pwm, Self::PwmError> {
+        assert_eq!(resource, 50);
         Ok(FakePwm(0))
     }
 }
@@ -343,16 +355,18 @@ impl RuntimeI2sPlatform for FakePlatform {
     type I2sError = Infallible;
 
     fn supports_i2s(
+        resource: &Self::I2sResource,
         bclk: &Self::PinToken,
         ws: &Self::PinToken,
         dout: Option<&Self::PinToken>,
         din: Option<&Self::PinToken>,
         _mclk: Option<&Self::PinToken>,
     ) -> bool {
-        *bclk == 1 && *ws == 2 && (dout.is_some() || din.is_some())
+        *resource == 60 && *bclk == 1 && *ws == 2 && (dout.is_some() || din.is_some())
     }
 
     fn i2s(
+        resource: Self::I2sResource,
         bclk: Self::PinToken,
         ws: Self::PinToken,
         dout: Option<Self::PinToken>,
@@ -360,6 +374,7 @@ impl RuntimeI2sPlatform for FakePlatform {
         _mclk: Option<Self::PinToken>,
         format: audio::PcmFormat,
     ) -> Result<Self::I2s, Self::I2sError> {
+        assert_eq!(resource, 60);
         Ok(FakeI2s {
             bclk,
             ws,
@@ -370,12 +385,15 @@ impl RuntimeI2sPlatform for FakePlatform {
     }
 }
 
-fn runtime_io() -> RuntimeIo<FakePlatform, 4, 1, 1, 1> {
-    RuntimeIo::new_with_uart(
+fn runtime_io() -> RuntimeIo<FakePlatform, 4, 1, 1, 1, 1, 1, 1> {
+    RuntimeIo::new_with_resources(
         [("D1", 1), ("D2", 2), ("D3", 3), ("D4", 4)],
         [10],
         [20],
         [30],
+        [40],
+        [50],
+        [60],
     )
 }
 
@@ -502,6 +520,14 @@ fn analog_support_is_checked_before_the_shared_pin_is_consumed() {
 fn pwm_claims_the_same_physical_pin_seen_by_gpio() {
     let io = runtime_io();
     assert!(io.pwm_available("D3"));
+    assert!(matches!(
+        io.open_pwm(PwmRequest {
+            pin: "D2",
+            frequency_hz: 1_000,
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "PWM" })
+    ));
+    assert!(io.digital_available("D2"));
     let _pwm = io
         .open_pwm(PwmRequest {
             pin: "D3",
@@ -567,6 +593,25 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
 #[test]
 fn i2s_claims_every_signal_from_the_shared_owner() {
     let io = runtime_io();
+    assert!(matches!(
+        io.open_i2s(I2sRequest {
+            bclk: "D1",
+            ws: "D3",
+            dout: Some("D4"),
+            din: None,
+            mclk: None,
+            format: audio::PcmFormat {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                bits_per_sample: 16,
+                master_clock_hz: None,
+            },
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "I2S" })
+    ));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D3"));
+    assert!(io.digital_available("D4"));
     let stream = io
         .open_i2s(I2sRequest {
             bclk: "D1",

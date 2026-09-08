@@ -265,6 +265,35 @@ System places it in `PluginContext` behind one shared `Arc`; hardware VM Plugins
 clone that owner, not independent protocol collections. Platform-owned
 controller pools are part of this owner but are not application-visible names.
 
+Controller, channel, timer, DMA, and buffer inventory belongs to the Platform
+manifest rather than `exposed-io`. Resource families that must be acquired
+together are declared as typed controller groups:
+
+~~~yaml
+hal:
+  runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: CHANNEL0, pin: GPIO1 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [TIMER0]
+      channels: [CHANNEL0]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA_CH0]
+      dma-buffer-bytes: 4096
+~~~
+
+The Board generator removes an entire runtime group when a built-in binding
+already consumes its controller or DMA channel. It then constructs fixed-size,
+concrete pools; firmware never scans the chip or infers missing resources.
+ADC channel routes retain their controller and channel identity after the
+physical pin enters the shared owner. PWM handles consume both a timer and an
+output channel. I2S handles consume a controller, DMA, and bounded static
+buffers together with their pins.
+
 `ExposedIo` marks this shared ownership boundary. Focused provider traits open
 functions on it and return concrete, statically dispatched values implementing
 upstream contracts:

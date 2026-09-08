@@ -304,6 +304,18 @@ impl InternalIoDefinition {
                 .any(|binding| binding.peripheral == peripheral)
     }
 
+    /// Returns whether a fixed built-in declaration consumes this DMA channel.
+    ///
+    /// Platform-owned runtime DMA pools use this to remove channels already
+    /// moved into camera or I2S Driver bindings.
+    #[must_use]
+    pub fn uses_dma(&self, dma: &str) -> bool {
+        self.camera_captures
+            .values()
+            .any(|binding| binding.dma == dma)
+            || self.i2s_streams.values().any(|binding| binding.dma == dma)
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         for (name, spi) in &self.spi_buses {
             validate_resource_name("internal spi-bus", name)?;

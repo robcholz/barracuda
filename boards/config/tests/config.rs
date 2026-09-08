@@ -129,6 +129,7 @@ internal-io:
     assert!(board.internal_io().uses_controller("I2C0"));
     assert!(board.internal_io().uses_controller("SPI2"));
     assert!(!board.internal_io().uses_controller("I2C1"));
+    assert!(!board.internal_io().uses_dma("DMA_CH0"));
 }
 
 #[test]

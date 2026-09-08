@@ -33,6 +33,12 @@ pub trait RuntimePlatform: Send + Sync + 'static {
     type SpiError: core::error::Error;
     /// Type-erased UART controller token.
     type UartController: Send + 'static;
+    /// Platform-owned ADC controller and its statically declared channel routes.
+    type AdcResource: Send + 'static;
+    /// Platform-owned PWM controller and its timer/channel slots.
+    type PwmResource: Send + 'static;
+    /// Platform-owned I2S controller, DMA channel, and bounded buffers.
+    type I2sResource: Send + 'static;
 
     /// Consumes one raw pin token as a configurable digital pin.
     fn digital(pin: Self::PinToken) -> Self::DigitalPin;
@@ -66,11 +72,14 @@ pub trait RuntimeAnalogPlatform: RuntimePlatform {
     type AnalogError: core::error::Error;
 
     /// Returns whether this physical pin supports analog input.
-    fn supports_analog_input(pin: &Self::PinToken) -> bool;
+    fn supports_analog_input(resource: &Self::AdcResource, pin: &Self::PinToken) -> bool;
     /// Returns whether this physical pin supports analog output.
     fn supports_analog_output(pin: &Self::PinToken) -> bool;
     /// Consumes a physical pin as an analog input.
-    fn analog_input(pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError>;
+    fn analog_input(
+        resource: Self::AdcResource,
+        pin: Self::PinToken,
+    ) -> Result<Self::AnalogInput, Self::AnalogError>;
     /// Consumes a physical pin as an analog output.
     fn analog_output(pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError>;
 }
@@ -83,9 +92,13 @@ pub trait RuntimePwmPlatform: RuntimePlatform {
     type PwmError: core::error::Error;
 
     /// Returns whether this physical pin can be routed to a PWM output.
-    fn supports_pwm(pin: &Self::PinToken) -> bool;
-    /// Consumes a pin and allocates a PWM timer/channel at the requested frequency.
-    fn pwm(pin: Self::PinToken, frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError>;
+    fn supports_pwm(resource: &Self::PwmResource, pin: &Self::PinToken) -> bool;
+    /// Consumes a pin and one timer/channel resource at the requested frequency.
+    fn pwm(
+        resource: Self::PwmResource,
+        pin: Self::PinToken,
+        frequency_hz: u32,
+    ) -> Result<Self::Pwm, Self::PwmError>;
 }
 
 /// Optional Platform construction contract for UART functions.
@@ -119,6 +132,7 @@ pub trait RuntimeI2sPlatform: RuntimePlatform {
 
     /// Returns whether the selected physical pins can be routed as I2S.
     fn supports_i2s(
+        resource: &Self::I2sResource,
         bclk: &Self::PinToken,
         ws: &Self::PinToken,
         dout: Option<&Self::PinToken>,
@@ -127,6 +141,7 @@ pub trait RuntimeI2sPlatform: RuntimePlatform {
     ) -> bool;
     /// Consumes selected pins and allocates an I2S controller and DMA resources.
     fn i2s(
+        resource: Self::I2sResource,
         bclk: Self::PinToken,
         ws: Self::PinToken,
         dout: Option<Self::PinToken>,
@@ -148,11 +163,17 @@ struct RuntimeIoState<
     const I: usize,
     const S: usize,
     const U: usize,
+    const A: usize,
+    const W: usize,
+    const T: usize,
 > {
     pins: [RuntimePin<H::PinToken>; P],
     i2c: [Option<H::I2cController>; I],
     spi: [Option<H::SpiController>; S],
     uart: [Option<H::UartController>; U],
+    adc: [Option<H::AdcResource>; A],
+    pwm: [Option<H::PwmResource>; W],
+    i2s: [Option<H::I2sResource>; T],
 }
 
 /// Board-generated owner of exposed pins and Platform-owned runtime controllers.
@@ -166,8 +187,11 @@ pub struct RuntimeIo<
     const I: usize,
     const S: usize,
     const U: usize = 0,
+    const A: usize = 0,
+    const W: usize = 0,
+    const T: usize = 0,
 > {
-    state: critical_section::Mutex<RefCell<RuntimeIoState<H, P, I, S, U>>>,
+    state: critical_section::Mutex<RefCell<RuntimeIoState<H, P, I, S, U, A, W, T>>>,
 }
 
 impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> RuntimeIo<H, P, I, S, 0> {
@@ -189,13 +213,16 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Runtime
                 i2c: i2c.map(Some),
                 spi: spi.map(Some),
                 uart: [],
+                adc: [],
+                pwm: [],
+                i2s: [],
             })),
         }
     }
 }
 
 impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    RuntimeIo<H, P, I, S, U>
+    RuntimeIo<H, P, I, S, U, 0, 0, 0>
 {
     /// Creates the unified runtime owner with a Platform-owned UART pool.
     #[must_use]
@@ -215,6 +242,50 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U
                 i2c: i2c.map(Some),
                 spi: spi.map(Some),
                 uart: uart.map(Some),
+                adc: [],
+                pwm: [],
+                i2s: [],
+            })),
+        }
+    }
+}
+
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > RuntimeIo<H, P, I, S, U, A, W, T>
+{
+    /// Creates the unified owner with every Platform-owned runtime resource pool.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_resources(
+        pins: [(&'static str, H::PinToken); P],
+        i2c: [H::I2cController; I],
+        spi: [H::SpiController; S],
+        uart: [H::UartController; U],
+        adc: [H::AdcResource; A],
+        pwm: [H::PwmResource; W],
+        i2s: [H::I2sResource; T],
+    ) -> Self {
+        Self {
+            state: critical_section::Mutex::new(RefCell::new(RuntimeIoState {
+                pins: pins.map(|(name, token)| RuntimePin {
+                    name,
+                    token: Some(token),
+                    owner: None,
+                }),
+                i2c: i2c.map(Some),
+                spi: spi.map(Some),
+                uart: uart.map(Some),
+                adc: adc.map(Some),
+                pwm: pwm.map(Some),
+                i2s: i2s.map(Some),
             })),
         }
     }
@@ -318,8 +389,16 @@ impl<E> From<LeaseError> for RuntimeOpenError<E> {
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    DigitalProvider for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > DigitalProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Pin = H::DigitalPin;
     type Error = LeaseError;
@@ -351,8 +430,16 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U
     }
 }
 
-impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    AnalogProvider for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimeAnalogPlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > AnalogProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Input = H::AnalogInput;
     type Output = H::AnalogOutput;
@@ -364,10 +451,14 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, c
         };
         critical_section::with(|section| {
             let state = self.state.borrow(section).borrow();
-            state.pins[index]
-                .token
-                .as_ref()
-                .is_some_and(H::supports_analog_input)
+            let Some(pin) = state.pins[index].token.as_ref() else {
+                return false;
+            };
+            state
+                .adc
+                .iter()
+                .flatten()
+                .any(|resource| H::supports_analog_input(resource, pin))
         })
     }
 
@@ -385,16 +476,47 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, c
     }
 
     fn acquire_analog_input(&self, name: &str) -> Result<Self::Input, Self::Error> {
-        self.acquire_analog(
-            name,
-            "analog input",
-            H::supports_analog_input,
-            H::analog_input,
-        )
+        let index = self.resolve_pin(name)?;
+        let (resource, token) = critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            let pin = &state.pins[index];
+            let token = pin.token.as_ref().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: pin.name,
+                    owner: pin.owner.unwrap_or("runtime function"),
+                })
+            })?;
+            let resource_index = state.adc.iter().position(|resource| {
+                resource
+                    .as_ref()
+                    .is_some_and(|resource| H::supports_analog_input(resource, token))
+            });
+            let resource_index = match resource_index {
+                Some(index) => index,
+                None if state.adc.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported {
+                        function: "analog input",
+                    });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "ADC" }),
+            };
+            let resource = state.adc[resource_index]
+                .take()
+                .ok_or(RuntimeOpenError::NoController { protocol: "ADC" })?;
+            let token = state.pins[index].token.take().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: state.pins[index].name,
+                    owner: "runtime function",
+                })
+            })?;
+            state.pins[index].owner = Some("analog input");
+            Ok((resource, token))
+        })?;
+        H::analog_input(resource, token).map_err(RuntimeOpenError::Platform)
     }
 
     fn acquire_analog_output(&self, name: &str) -> Result<Self::Output, Self::Error> {
-        self.acquire_analog(
+        self.acquire_analog_output(
             name,
             "analog output",
             H::supports_analog_output,
@@ -403,10 +525,18 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, c
     }
 }
 
-impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimeAnalogPlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > RuntimeIo<H, P, I, S, U, A, W, T>
 {
-    fn acquire_analog<Value>(
+    fn acquire_analog_output<Value>(
         &self,
         name: &str,
         function: &'static str,
@@ -439,8 +569,16 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, c
     }
 }
 
-impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    PwmProvider for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimePwmPlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > PwmProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Output = H::Pwm;
     type Error = RuntimeOpenError<H::PwmError>;
@@ -451,42 +589,66 @@ impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize, cons
         };
         critical_section::with(|section| {
             let state = self.state.borrow(section).borrow();
-            state.pins[index]
-                .token
-                .as_ref()
-                .is_some_and(H::supports_pwm)
+            let Some(pin) = state.pins[index].token.as_ref() else {
+                return false;
+            };
+            state
+                .pwm
+                .iter()
+                .flatten()
+                .any(|resource| H::supports_pwm(resource, pin))
         })
     }
 
     fn open_pwm(&self, request: PwmRequest<'_>) -> Result<Self::Output, Self::Error> {
         let index = self.resolve_pin(request.pin)?;
-        let token = critical_section::with(|section| {
+        let (resource, token) = critical_section::with(|section| {
             let mut state = self.state.borrow(section).borrow_mut();
-            let pin = &mut state.pins[index];
+            let pin = &state.pins[index];
             let token = pin.token.as_ref().ok_or_else(|| {
                 RuntimeOpenError::Resource(LeaseError::Busy {
                     resource: pin.name,
                     owner: pin.owner.unwrap_or("runtime function"),
                 })
             })?;
-            if !H::supports_pwm(token) {
-                return Err(RuntimeOpenError::Unsupported { function: "PWM" });
-            }
-            let token = pin.token.take().ok_or_else(|| {
+            let resource_index = state.pwm.iter().position(|resource| {
+                resource
+                    .as_ref()
+                    .is_some_and(|resource| H::supports_pwm(resource, token))
+            });
+            let resource_index = match resource_index {
+                Some(index) => index,
+                None if state.pwm.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported { function: "PWM" });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "PWM" }),
+            };
+            let resource = state.pwm[resource_index]
+                .take()
+                .ok_or(RuntimeOpenError::NoController { protocol: "PWM" })?;
+            let token = state.pins[index].token.take().ok_or_else(|| {
                 RuntimeOpenError::Resource(LeaseError::Busy {
-                    resource: pin.name,
+                    resource: state.pins[index].name,
                     owner: "runtime function",
                 })
             })?;
-            pin.owner = Some("PWM");
-            Ok(token)
+            state.pins[index].owner = Some("PWM");
+            Ok((resource, token))
         })?;
-        H::pwm(token, request.frequency_hz).map_err(RuntimeOpenError::Platform)
+        H::pwm(resource, token, request.frequency_hz).map_err(RuntimeOpenError::Platform)
     }
 }
 
-impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    UartProvider for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimeUartPlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > UartProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Port = H::Uart;
     type Error = RuntimeOpenError<H::UartError>;
@@ -576,8 +738,16 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize, con
     }
 }
 
-impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    I2sProvider for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimeI2sPlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > I2sProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Stream = H::I2s;
     type Error = RuntimeOpenError<H::I2sError>;
@@ -606,7 +776,7 @@ impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize, cons
         roles.extend(mclk_index);
         self.ensure_distinct(&roles)?;
 
-        let (bclk, ws, dout, din, mclk) = critical_section::with(|section| {
+        let (resource, bclk, ws, dout, din, mclk) = critical_section::with(|section| {
             let mut state = self.state.borrow(section).borrow_mut();
             for (_, index) in &roles {
                 let pin = &state.pins[*index];
@@ -628,9 +798,21 @@ impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize, cons
             let dout_ref = dout_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let din_ref = din_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let mclk_ref = mclk_index.and_then(|(_, index)| state.pins[index].token.as_ref());
-            if !H::supports_i2s(bclk_ref, ws_ref, dout_ref, din_ref, mclk_ref) {
-                return Err(RuntimeOpenError::Unsupported { function: "I2S" });
-            }
+            let resource_index = state.i2s.iter().position(|resource| {
+                resource.as_ref().is_some_and(|resource| {
+                    H::supports_i2s(resource, bclk_ref, ws_ref, dout_ref, din_ref, mclk_ref)
+                })
+            });
+            let resource_index = match resource_index {
+                Some(index) => index,
+                None if state.i2s.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported { function: "I2S" });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "I2S" }),
+            };
+            let resource = state.i2s[resource_index]
+                .take()
+                .ok_or(RuntimeOpenError::NoController { protocol: "I2S" })?;
             let bclk = state.pins[bclk_index]
                 .token
                 .take()
@@ -653,14 +835,23 @@ impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize, cons
             if let Some((_, index)) = mclk_index {
                 state.pins[index].owner = Some("I2S MCLK");
             }
-            Ok((bclk, ws, dout, din, mclk))
+            Ok((resource, bclk, ws, dout, din, mclk))
         })?;
-        H::i2s(bclk, ws, dout, din, mclk, request.format).map_err(RuntimeOpenError::Platform)
+        H::i2s(resource, bclk, ws, dout, din, mclk, request.format)
+            .map_err(RuntimeOpenError::Platform)
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize> I2cProvider
-    for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > I2cProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Bus = H::I2cBus;
     type Error = RuntimeOpenError<H::I2cError>;
@@ -712,8 +903,16 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize> SpiProvider
-    for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > SpiProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
     type Bus = H::SpiBus;
     type Error = RuntimeOpenError<H::SpiError>;
@@ -791,8 +990,16 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    crate::ExposedIo for RuntimeIo<H, P, I, S, U>
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > crate::ExposedIo for RuntimeIo<H, P, I, S, U, A, W, T>
 {
 }
 

@@ -95,6 +95,22 @@ hal:
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2]
   runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC0
+      channels:
+        - channel: CHANNEL0
+          pin: GPIO1
+  runtime-pwm-controllers:
+    - controller: PWM0
+      timers: [TIMER0]
+      channels: [CHANNEL0]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA0]
+      dma-buffer-bytes: 1024
+    - controller: I2S1
+      dma-channels: [DMA1]
+      dma-buffer-bytes: 2048
 selection:
   board-chips: [acme]
   targets:
@@ -123,6 +139,18 @@ internal-io:
       scl: GPIO8
       sda: GPIO9
       frequency-hz: 400000
+  i2s-stream:
+    builtin-audio:
+      peripheral: I2S0
+      dma: DMA0
+      bclk: GPIO10
+      ws: GPIO11
+      dout: GPIO12
+      din: GPIO13
+      sample-rate-hz: 48000
+      channels: 2
+      bits-per-sample: 16
+      dma-buffer-bytes: 1024
 exposed-io:
   pins:
     clock: { pin: GPIO1 }
@@ -140,7 +168,7 @@ exposed-io:
     let rust =
         render_board_hal_for_platform(&board, &resolved, &platform).expect("generated runtime I/O");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<2, 1, 1, 1>"));
+    assert!(rust.contains("hal::RuntimeIo<2, 1, 1, 1, 1, 1, 1>"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(!rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));
@@ -149,6 +177,16 @@ exposed-io:
     assert!(rust.contains("hal::runtime_spi_controller"));
     assert!(rust.contains("controller_binding_type!(UART1)"));
     assert!(rust.contains("hal::runtime_uart_controller"));
+    assert!(rust.contains("controller_binding_type!(ADC0)"));
+    assert!(rust.contains("hal::runtime_adc_channel!(CHANNEL0, GPIO1)"));
+    assert!(rust.contains("controller_binding_type!(PWM0)"));
+    assert!(rust.contains("hal::runtime_pwm_timer!(TIMER0)"));
+    assert!(rust.contains("hal::runtime_pwm_channel!(CHANNEL0)"));
+    assert!(rust.contains("controller_binding_type!(I2S1)"));
+    assert!(rust.contains("controller_binding_type!(DMA1)"));
+    assert!(!rust.contains("controller_binding_type!(I2S0)"));
+    assert!(!rust.contains("controller_binding_type!(DMA0)"));
+    assert!(rust.contains("hal::runtime_i2s_dma_buffers!(2048)"));
 }
 
 #[test]
@@ -171,7 +209,7 @@ fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
     let rust = render_board_hal_for_platform(&board, &resolved, &platform)
         .expect("generated ESP32-S3 runtime owner");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<4, 2, 2, 1>"));
+    assert!(rust.contains("hal::RuntimeIo<4, 2, 2, 1, 0, 0, 0>"));
     assert!(rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));

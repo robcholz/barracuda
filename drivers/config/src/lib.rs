@@ -7,7 +7,10 @@ use std::{
 };
 
 use barracuda_board_config::{BoardDefinition, BuiltinPeripheralDefinition, PeripheralParameter};
-use barracuda_platform_config::{HalBinding, PlatformDefinition};
+use barracuda_platform_config::{
+    HalBinding, PlatformDefinition, RuntimeAdcController, RuntimeI2sController,
+    RuntimePwmController,
+};
 use serde::Deserialize;
 
 /// Driver manifest schema version supported by this toolchain.
@@ -889,7 +892,7 @@ pub fn render_board_hal(
              pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n",
         ));
     }
-    render_generic_hal(board, resolved, &[], &[], &[])
+    render_generic_hal(board, resolved, RuntimeResources::default())
 }
 
 /// Renders a selected Board HAL with the runtime controller pools supplied by
@@ -910,9 +913,14 @@ pub fn render_board_hal_for_platform(
     render_generic_hal(
         board,
         resolved,
-        platform.hal().runtime_i2c_controllers(),
-        platform.hal().runtime_spi_controllers(),
-        platform.hal().runtime_uart_controllers(),
+        RuntimeResources {
+            i2c: platform.hal().runtime_i2c_controllers(),
+            spi: platform.hal().runtime_spi_controllers(),
+            uart: platform.hal().runtime_uart_controllers(),
+            adc: platform.hal().runtime_adc_controllers(),
+            pwm: platform.hal().runtime_pwm_controllers(),
+            i2s: platform.hal().runtime_i2s_controllers(),
+        },
     )
 }
 
@@ -999,13 +1007,29 @@ struct RenderState {
     identifiers: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Copy, Default)]
+struct RuntimeResources<'a> {
+    i2c: &'a [String],
+    spi: &'a [String],
+    uart: &'a [String],
+    adc: &'a [RuntimeAdcController],
+    pwm: &'a [RuntimePwmController],
+    i2s: &'a [RuntimeI2sController],
+}
+
 fn render_generic_hal(
     board: &BoardDefinition,
     resolved: &ResolvedBoard<'_>,
-    runtime_i2c_controllers: &[String],
-    runtime_spi_controllers: &[String],
-    runtime_uart_controllers: &[String],
+    resources: RuntimeResources<'_>,
 ) -> Result<String, GenerateError> {
+    let RuntimeResources {
+        i2c: runtime_i2c_controllers,
+        spi: runtime_spi_controllers,
+        uart: runtime_uart_controllers,
+        adc: runtime_adc_controllers,
+        pwm: runtime_pwm_controllers,
+        i2s: runtime_i2s_controllers,
+    } = resources;
     let mut state = RenderState::default();
     let mut rendered = Vec::new();
     let mut primary_capabilities = BTreeSet::new();
@@ -1118,6 +1142,36 @@ fn render_generic_hal(
             .filter(|controller| !board.internal_io().uses_controller(controller))
             .collect::<Vec<_>>()
     };
+    let runtime_adc_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_adc_controllers
+            .iter()
+            .filter(|resource| !board.internal_io().uses_controller(resource.controller()))
+            .collect::<Vec<_>>()
+    };
+    let runtime_pwm_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_pwm_controllers
+            .iter()
+            .filter(|resource| !board.internal_io().uses_controller(resource.controller()))
+            .collect::<Vec<_>>()
+    };
+    let runtime_i2s_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_i2s_controllers
+            .iter()
+            .filter(|resource| {
+                !board.internal_io().uses_controller(resource.controller())
+                    && !resource
+                        .dma_channels()
+                        .iter()
+                        .any(|dma| board.internal_io().uses_dma(dma))
+            })
+            .collect::<Vec<_>>()
+    };
     for controller in runtime_i2c_controllers
         .iter()
         .chain(runtime_spi_controllers.iter())
@@ -1133,6 +1187,73 @@ fn render_generic_hal(
             format!(
                 "::barracuda_platform_selected::__platform::hal::controller_binding_type!({controller})"
             ),
+        ));
+    }
+    for resource in &runtime_adc_controllers {
+        validate_hardware_identifier(resource.controller())?;
+        let field = checked_identifier(
+            &format!("runtime_adc_controller_{}", resource.controller()),
+            &mut state.identifiers,
+        )?;
+        state.raw_fields.push((
+            field,
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                resource.controller()
+            ),
+        ));
+        for channel in resource.channels() {
+            validate_hardware_identifier(channel.channel())?;
+            validate_hardware_identifier(channel.pin())?;
+        }
+    }
+    for resource in &runtime_pwm_controllers {
+        validate_hardware_identifier(resource.controller())?;
+        let field = checked_identifier(
+            &format!("runtime_pwm_controller_{}", resource.controller()),
+            &mut state.identifiers,
+        )?;
+        state.raw_fields.push((
+            field,
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                resource.controller()
+            ),
+        ));
+        for timer in resource.timers() {
+            validate_hardware_identifier(timer)?;
+        }
+        for channel in resource.channels() {
+            validate_hardware_identifier(channel)?;
+        }
+    }
+    for (index, resource) in runtime_i2s_controllers.iter().enumerate() {
+        validate_hardware_identifier(resource.controller())?;
+        let field = checked_identifier(
+            &format!("runtime_i2s_controller_{}", resource.controller()),
+            &mut state.identifiers,
+        )?;
+        state.raw_fields.push((
+            field,
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                resource.controller()
+            ),
+        ));
+        for dma in resource.dma_channels() {
+            validate_hardware_identifier(dma)?;
+            let field =
+                checked_identifier(&format!("runtime_i2s_dma_{dma}"), &mut state.identifiers)?;
+            state.raw_fields.push((
+                field,
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({dma})"
+                ),
+            ));
+        }
+        state.binding_errors.push((
+            format!("RuntimeI2s{index}"),
+            String::from("::barracuda_platform_selected::__platform::hal::RuntimeI2sResourceError"),
         ));
     }
 
@@ -1233,10 +1354,13 @@ fn render_generic_hal(
     }
 
     source.push_str(&format!(
-        "pub type GeneratedIo = ::barracuda_platform_selected::__platform::hal::RuntimeIo<{pin_count}, {}, {}, {}>;\n\n",
+        "pub type GeneratedIo = ::barracuda_platform_selected::__platform::hal::RuntimeIo<{pin_count}, {}, {}, {}, {}, {}, {}>;\n\n",
         runtime_i2c_controllers.len(),
         runtime_spi_controllers.len(),
         runtime_uart_controllers.len(),
+        runtime_adc_controllers.len(),
+        runtime_pwm_controllers.len(),
+        runtime_i2s_controllers.len(),
     ));
 
     if rendered.is_empty() && state.binding_errors.is_empty() {
@@ -1324,6 +1448,58 @@ fn render_generic_hal(
         let field = rust_identifier(&format!("runtime_controller_{controller}"));
         source.push_str(&format!(
             "            ::barracuda_platform_selected::__platform::hal::runtime_uart_controller(bindings.{field}),\n"
+        ));
+    }
+    source.push_str("        ], [\n");
+    for resource in &runtime_adc_controllers {
+        let field = rust_identifier(&format!("runtime_adc_controller_{}", resource.controller()));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_adc_resource(bindings.{field}, &[\n"
+        ));
+        for channel in resource.channels() {
+            source.push_str(&format!(
+                "                ::barracuda_platform_selected::__platform::hal::runtime_adc_channel!({}, {}),\n",
+                channel.channel(),
+                channel.pin(),
+            ));
+        }
+        source.push_str("            ]),\n");
+    }
+    source.push_str("        ], [\n");
+    for resource in &runtime_pwm_controllers {
+        let field = rust_identifier(&format!("runtime_pwm_controller_{}", resource.controller()));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_pwm_resource(bindings.{field}, &[\n"
+        ));
+        for timer in resource.timers() {
+            source.push_str(&format!(
+                "                ::barracuda_platform_selected::__platform::hal::runtime_pwm_timer!({timer}),\n"
+            ));
+        }
+        source.push_str("            ], &[\n");
+        for channel in resource.channels() {
+            source.push_str(&format!(
+                "                ::barracuda_platform_selected::__platform::hal::runtime_pwm_channel!({channel}),\n"
+            ));
+        }
+        source.push_str("            ]),\n");
+    }
+    source.push_str("        ], [\n");
+    for (index, resource) in runtime_i2s_controllers.iter().enumerate() {
+        let controller_field =
+            rust_identifier(&format!("runtime_i2s_controller_{}", resource.controller()));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_i2s_resource(bindings.{controller_field}, [\n"
+        ));
+        for dma in resource.dma_channels() {
+            let field = rust_identifier(&format!("runtime_i2s_dma_{dma}"));
+            source.push_str(&format!(
+                "                ::barracuda_platform_selected::__platform::hal::runtime_i2s_dma(bindings.{field}),\n"
+            ));
+        }
+        source.push_str(&format!(
+            "            ], ::barracuda_platform_selected::__platform::hal::runtime_i2s_dma_buffers!({}).map_err(GeneratedBoardError::RuntimeI2s{index})?),\n",
+            resource.dma_buffer_bytes(),
         ));
     }
     source.push_str("        ]);\n");

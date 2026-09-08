@@ -170,6 +170,9 @@ impl RuntimePlatform for RuntimeAdapter {
     type SpiBus = ExposedSpiBus;
     type SpiError = SpiConfigError;
     type UartController = AnyUart<'static>;
+    type AdcResource = core::convert::Infallible;
+    type PwmResource = core::convert::Infallible;
+    type I2sResource = core::convert::Infallible;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         DynamicPin {
@@ -226,7 +229,7 @@ impl RuntimeAnalogPlatform for RuntimeAdapter {
     type AnalogOutput = UnavailableAnalogOutput;
     type AnalogError = UnsupportedFunction;
 
-    fn supports_analog_input(_pin: &Self::PinToken) -> bool {
+    fn supports_analog_input(_resource: &Self::AdcResource, _pin: &Self::PinToken) -> bool {
         false
     }
 
@@ -234,8 +237,11 @@ impl RuntimeAnalogPlatform for RuntimeAdapter {
         false
     }
 
-    fn analog_input(_pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError> {
-        Err(UnsupportedFunction::new("analog input"))
+    fn analog_input(
+        resource: Self::AdcResource,
+        _pin: Self::PinToken,
+    ) -> Result<Self::AnalogInput, Self::AnalogError> {
+        match resource {}
     }
 
     fn analog_output(_pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
@@ -247,12 +253,16 @@ impl RuntimePwmPlatform for RuntimeAdapter {
     type Pwm = UnavailablePwm;
     type PwmError = UnsupportedFunction;
 
-    fn supports_pwm(_pin: &Self::PinToken) -> bool {
+    fn supports_pwm(_resource: &Self::PwmResource, _pin: &Self::PinToken) -> bool {
         false
     }
 
-    fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
-        Err(UnsupportedFunction::new("PWM"))
+    fn pwm(
+        resource: Self::PwmResource,
+        _pin: Self::PinToken,
+        _frequency_hz: u32,
+    ) -> Result<Self::Pwm, Self::PwmError> {
+        match resource {}
     }
 }
 
@@ -313,6 +323,7 @@ impl RuntimeI2sPlatform for RuntimeAdapter {
     type I2sError = UnsupportedFunction;
 
     fn supports_i2s(
+        _resource: &Self::I2sResource,
         _bclk: &Self::PinToken,
         _ws: &Self::PinToken,
         _dout: Option<&Self::PinToken>,
@@ -323,6 +334,7 @@ impl RuntimeI2sPlatform for RuntimeAdapter {
     }
 
     fn i2s(
+        resource: Self::I2sResource,
         _bclk: Self::PinToken,
         _ws: Self::PinToken,
         _dout: Option<Self::PinToken>,
@@ -330,23 +342,41 @@ impl RuntimeI2sPlatform for RuntimeAdapter {
         _mclk: Option<Self::PinToken>,
         _format: audio::PcmFormat,
     ) -> Result<Self::I2s, Self::I2sError> {
-        Err(UnsupportedFunction::new("I2S"))
+        match resource {}
     }
 }
 
 /// Generated exposed-I/O owner specialized to the ESP Platform adapter.
-pub type RuntimeIo<const P: usize, const I: usize, const S: usize, const U: usize> =
-    barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S, U>;
+pub type RuntimeIo<
+    const P: usize,
+    const I: usize,
+    const S: usize,
+    const U: usize,
+    const A: usize,
+    const W: usize,
+    const T: usize,
+> = barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S, U, A, W, T>;
 
 /// Constructs the selected Board's unified runtime I/O owner.
 #[must_use]
-pub fn runtime_io<const P: usize, const I: usize, const S: usize, const U: usize>(
+pub fn runtime_io<
+    const P: usize,
+    const I: usize,
+    const S: usize,
+    const U: usize,
+    const A: usize,
+    const W: usize,
+    const T: usize,
+>(
     pins: [(&'static str, AnyPin<'static>); P],
     i2c: [AnyI2c<'static>; I],
     spi: [AnySpi<'static>; S],
     uart: [AnyUart<'static>; U],
-) -> RuntimeIo<P, I, S, U> {
-    RuntimeIo::new_with_uart(pins, i2c, spi, uart)
+    adc: [core::convert::Infallible; A],
+    pwm: [core::convert::Infallible; W],
+    i2s: [core::convert::Infallible; T],
+) -> RuntimeIo<P, I, S, U, A, W, T> {
+    RuntimeIo::new_with_resources(pins, i2c, spi, uart, adc, pwm, i2s)
 }
 
 /// Erases one selected pin token while preserving its exclusive ownership.

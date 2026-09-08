@@ -17,7 +17,7 @@ fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
     fs::write(
         directory.join("platform.yml"),
         format!(
-            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\n  runtime-uart-controllers: [UART1]\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
+            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\n  runtime-uart-controllers: [UART1]\n  runtime-adc-controllers:\n    - controller: ADC1\n      channels:\n        - channel: CHANNEL0\n          pin: GPIO1\n  runtime-pwm-controllers:\n    - controller: PWM0\n      timers: [TIMER0]\n      channels: [CHANNEL0]\n  runtime-i2s-controllers:\n    - controller: I2S0\n      dma-channels: [DMA_CH0]\n      dma-buffer-bytes: 4096\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
     )
     .expect("Platform manifest");
@@ -58,6 +58,18 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     assert_eq!(board.hal().runtime_i2c_controllers(), ["I2C0", "I2C1"]);
     assert_eq!(board.hal().runtime_spi_controllers(), ["SPI2"]);
     assert_eq!(board.hal().runtime_uart_controllers(), ["UART1"]);
+    let adc = &board.hal().runtime_adc_controllers()[0];
+    assert_eq!(adc.controller(), "ADC1");
+    assert_eq!(adc.channels()[0].channel(), "CHANNEL0");
+    assert_eq!(adc.channels()[0].pin(), "GPIO1");
+    let pwm = &board.hal().runtime_pwm_controllers()[0];
+    assert_eq!(pwm.controller(), "PWM0");
+    assert_eq!(pwm.timers(), ["TIMER0"]);
+    assert_eq!(pwm.channels(), ["CHANNEL0"]);
+    let i2s = &board.hal().runtime_i2s_controllers()[0];
+    assert_eq!(i2s.controller(), "I2S0");
+    assert_eq!(i2s.dma_channels(), ["DMA_CH0"]);
+    assert_eq!(i2s.dma_buffer_bytes(), 4096);
     assert_eq!(
         board
             .application()
@@ -84,6 +96,22 @@ fn platform_owns_cargo_features_for_supported_chips() {
 
     assert_eq!(platform.cargo_features_for_chip("acme123"), ["acme123-hal"]);
     assert!(platform.cargo_features_for_chip("acme999").is_empty());
+}
+
+#[test]
+fn rejects_unbounded_runtime_i2s_storage() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace("dma-buffer-bytes: 4096", "dma-buffer-bytes: 0"),
+    )
+    .expect("invalid Platform manifest");
+
+    let error = discover_platforms(root.path()).expect_err("zero DMA buffer must fail");
+    assert!(error.to_string().contains("nonzero buffer"));
 }
 
 #[test]
