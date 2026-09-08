@@ -10,14 +10,11 @@
 
 mod client;
 mod command;
+mod configure;
 mod line_editor;
 mod protocol;
 
-use std::{
-    net::IpAddr,
-    path::Path,
-    process::{Command, Stdio},
-};
+use std::{net::IpAddr, path::Path};
 
 use anyhow::{bail, Context as _, Result};
 use dialoguer::{console::Style, theme::ColorfulTheme, Input, Select};
@@ -56,7 +53,7 @@ async fn run() -> Result<()> {
                 Some(address) => address.to_owned(),
                 None => prompt_for_address()?,
             };
-            open_configuration(&address)
+            configure::run(&address).await
         }
     }
 }
@@ -170,37 +167,6 @@ fn remote_address(address: IpAddr) -> String {
     }
 }
 
-fn configuration_url(address: &str) -> Result<String> {
-    let address = if let Some(authority) = address.strip_prefix("http://") {
-        format!("http://{authority}")
-    } else if let Some(authority) = address.strip_prefix("https://") {
-        format!("https://{authority}")
-    } else {
-        bail!("Barracuda address must use http:// or https://");
-    };
-    Ok(format!("{}/portal/", address.trim_end_matches('/')))
-}
-
-fn open_configuration(address: &str) -> Result<()> {
-    let url = configuration_url(address)?;
-    println!("Barracuda configuration: {url}");
-    let (program, arguments): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
-        ("open", vec![url.as_str()])
-    } else if cfg!(target_os = "windows") {
-        ("cmd", vec!["/C", "start", "", url.as_str()])
-    } else {
-        ("xdg-open", vec![url.as_str()])
-    };
-    Command::new(program)
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| format!("open Barracuda configuration URL `{url}`"))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -208,7 +174,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::{
-        configuration_url, mode_from_args, remote_address, runtime_address, websocket_url, RunMode,
+        mode_from_args, remote_address, runtime_address, websocket_url, RunMode,
         RUNTIME_ADDRESS_PATH,
     };
 
@@ -240,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn configuration_mode_opens_the_plugin_portal() {
+    fn configuration_mode_selects_the_target() {
         assert_eq!(
             mode_from_args(&["configure"]).expect("interactive configuration"),
             RunMode::Configure(None)
@@ -250,11 +216,6 @@ mod tests {
                 .expect("explicit configuration address"),
             RunMode::Configure(Some("http://device.local:8787"))
         );
-        assert_eq!(
-            configuration_url("http://device.local:8787/").expect("configuration URL"),
-            "http://device.local:8787/portal/"
-        );
-        assert!(configuration_url("ws://device.local:8787/").is_err());
     }
 
     #[test]
