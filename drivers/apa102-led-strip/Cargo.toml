@@ -9,6 +9,9 @@ license = "Apache-2.0"
 barracuda-driver.workspace = true
 embedded-hal.workspace = true
 
+[dev-dependencies]
+embassy-futures.workspace = true
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

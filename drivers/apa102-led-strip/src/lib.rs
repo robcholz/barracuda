@@ -8,7 +8,7 @@ use barracuda_driver::{
     PeripheralDriver,
     led_strip::{LedStrip, Rgb8},
 };
-use embedded_hal::spi::SpiBus;
+use embedded_hal::{digital::OutputPin, spi::SpiBus};
 
 /// Board-owned APA102 chain configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,12 +29,14 @@ impl Apa102Config {
 }
 
 /// APA102 initialization failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Apa102InitError {
+#[derive(Debug)]
+pub enum Apa102InitError<PowerError> {
     /// A strip must contain at least one LED.
     EmptyStrip,
     /// APA102 global brightness is a five-bit value.
     InvalidBrightness,
+    /// The Board's LED power rail could not be enabled.
+    Power(PowerError),
 }
 
 /// APA102 output failure.
@@ -47,35 +49,62 @@ pub enum Apa102Error<SpiError> {
 }
 
 /// Initialized APA102-compatible LED strip.
-pub struct Apa102LedStrip<SPI> {
+pub struct Apa102LedStrip<SPI, POWER> {
     spi: SPI,
+    _power_enable: POWER,
     config: Apa102Config,
 }
 
-/// Static factory used by generated Board composition.
-pub struct Apa102LedStripDriver<SPI>(PhantomData<fn() -> SPI>);
+/// Move-only transport and power resources consumed by the strip Driver.
+pub struct Apa102Bindings<SPI, POWER> {
+    spi: SPI,
+    power_enable: POWER,
+}
 
-impl<SPI> PeripheralDriver for Apa102LedStripDriver<SPI>
+impl<SPI, POWER> Apa102Bindings<SPI, POWER> {
+    /// Combines the exclusive SPI bus and active-low LED power control.
+    #[must_use]
+    pub const fn new(spi: SPI, power_enable: POWER) -> Self {
+        Self { spi, power_enable }
+    }
+}
+
+/// Static factory used by generated Board composition.
+pub struct Apa102LedStripDriver<SPI, POWER>(PhantomData<fn() -> (SPI, POWER)>);
+
+impl<SPI, POWER> PeripheralDriver for Apa102LedStripDriver<SPI, POWER>
 where
     SPI: SpiBus<u8> + 'static,
+    POWER: OutputPin + 'static,
 {
-    type Bindings = SPI;
+    type Bindings = Apa102Bindings<SPI, POWER>;
     type Config = Apa102Config;
-    type Capability = Apa102LedStrip<SPI>;
-    type Error = Apa102InitError;
+    type Capability = Apa102LedStrip<SPI, POWER>;
+    type Error = Apa102InitError<POWER::Error>;
 
-    async fn initialize(spi: SPI, config: Self::Config) -> Result<Self::Capability, Self::Error> {
+    async fn initialize(
+        mut bindings: Self::Bindings,
+        config: Self::Config,
+    ) -> Result<Self::Capability, Self::Error> {
         if config.led_count == 0 {
             return Err(Apa102InitError::EmptyStrip);
         }
         if config.global_brightness > 31 {
             return Err(Apa102InitError::InvalidBrightness);
         }
-        Ok(Apa102LedStrip { spi, config })
+        bindings
+            .power_enable
+            .set_low()
+            .map_err(Apa102InitError::Power)?;
+        Ok(Apa102LedStrip {
+            spi: bindings.spi,
+            _power_enable: bindings.power_enable,
+            config,
+        })
     }
 }
 
-impl<SPI> LedStrip for Apa102LedStrip<SPI>
+impl<SPI, POWER> LedStrip for Apa102LedStrip<SPI, POWER>
 where
     SPI: SpiBus<u8>,
 {
@@ -104,7 +133,7 @@ where
     }
 }
 
-impl<SPI> Apa102LedStrip<SPI>
+impl<SPI, POWER> Apa102LedStrip<SPI, POWER>
 where
     SPI: SpiBus<u8>,
 {
@@ -125,14 +154,39 @@ where
 mod tests {
     extern crate std;
 
-    use super::{Apa102Config, Apa102LedStrip};
+    use super::{Apa102Bindings, Apa102Config, Apa102LedStrip, Apa102LedStripDriver};
+    use barracuda_driver::PeripheralDriver;
     use barracuda_driver::led_strip::{LedStrip, Rgb8};
-    use core::convert::Infallible;
-    use embedded_hal::spi::{ErrorType, SpiBus};
+    use core::{
+        convert::Infallible,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    use embassy_futures::block_on;
+    use embedded_hal::{
+        digital::{ErrorType as DigitalErrorType, OutputPin},
+        spi::{ErrorType, SpiBus},
+    };
 
     #[derive(Default)]
     struct RecordingSpi {
         bytes: std::vec::Vec<u8>,
+    }
+
+    static POWER_ENABLED: AtomicBool = AtomicBool::new(false);
+
+    struct PowerEnable;
+    impl DigitalErrorType for PowerEnable {
+        type Error = Infallible;
+    }
+    impl OutputPin for PowerEnable {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            POWER_ENABLED.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            POWER_ENABLED.store(false, Ordering::Relaxed);
+            Ok(())
+        }
     }
     impl ErrorType for RecordingSpi {
         type Error = Infallible;
@@ -160,9 +214,22 @@ mod tests {
     fn writes_start_pixels_and_end_clock() {
         let mut strip = Apa102LedStrip {
             spi: RecordingSpi::default(),
+            _power_enable: PowerEnable,
             config: Apa102Config::new(1, 7),
         };
         strip.write(&[Rgb8::new(1, 2, 3)]).expect("write strip");
         assert_eq!(strip.spi.bytes, [0, 0, 0, 0, 0xe7, 3, 2, 1, 0xff]);
+    }
+
+    #[test]
+    fn initialization_enables_the_board_power_rail() {
+        POWER_ENABLED.store(false, Ordering::Relaxed);
+        let bindings = Apa102Bindings::new(RecordingSpi::default(), PowerEnable);
+        let _strip = block_on(Apa102LedStripDriver::initialize(
+            bindings,
+            Apa102Config::new(1, 7),
+        ))
+        .expect("initialize strip");
+        assert!(POWER_ENABLED.load(Ordering::Relaxed));
     }
 }

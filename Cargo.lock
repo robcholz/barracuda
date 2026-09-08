@@ -692,6 +692,7 @@ name = "barracuda-apa102-led-strip"
 version = "0.1.0"
 dependencies = [
  "barracuda-driver",
+ "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 

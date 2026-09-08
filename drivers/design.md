@@ -143,6 +143,9 @@ but no Board-specific Rust HAL.
 `ws2812-spi-led-strip` owns the three-bit SPI waveform encoding used by WS2812
 and SK6812 RGB chains. `apa102-led-strip` owns APA102 and SK9822 framing. Both
 produce the same LED-strip capability while consuming an exclusive SPI bus.
+The APA102 Driver also retains an active-low Board power output so products
+such as TinyPICO cannot expose or power down the LED rail while the strip is in
+use.
 
 `ov2640-camera` owns sensor detection and the QVGA JPEG SCCB register program.
 It consumes `embedded-hal` I2C for control and the narrow camera frame-receiver
