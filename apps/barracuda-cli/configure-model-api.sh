@@ -22,9 +22,8 @@ set -a
 source "${env_file}"
 set +a
 
-endpoint="${BARRACUDA_MODEL_API_ENDPOINT:-http://10.42.0.2:8787/api/model-api}"
-
 for variable_name in \
+    BARRACUDA_ADDRESS \
     BARRACUDA_LLM_API_KEY \
     BARRACUDA_LLM_MODEL \
     BARRACUDA_LLM_BASE_URL; do
@@ -34,11 +33,13 @@ for variable_name in \
     fi
 done
 
+endpoint="${BARRACUDA_ADDRESS%/}/api/model-api"
 backend="${BARRACUDA_LLM_BACKEND:-openai_compatible}"
 timeout_ms="${BARRACUDA_LLM_TIMEOUT_MS:-30000}"
 max_tokens="${BARRACUDA_LLM_MAX_TOKENS:-4096}"
 image_max_bytes="${BARRACUDA_LLM_IMAGE_MAX_BYTES:-1048576}"
 
+printf 'configuring model APIs via %s\n' "${endpoint}"
 status="$(
     jq -nc \
         --arg api_key "${BARRACUDA_LLM_API_KEY}" \
@@ -62,6 +63,8 @@ status="$(
     | curl \
         --silent \
         --show-error \
+        --connect-timeout 5 \
+        --max-time 30 \
         --output /dev/null \
         --write-out '%{http_code}' \
         --header 'Content-Type: application/json' \
