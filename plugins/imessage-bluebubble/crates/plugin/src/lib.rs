@@ -158,6 +158,16 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             };
             let mut channel_registration = self.channel_registration.lock().await;
+            let previous_configuration =
+                match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
+                    Ok(configuration) => configuration,
+                    Err(error) => {
+                        log::error!(
+                            "failed to read the previous BlueBubbles gateway configuration: {error}"
+                        );
+                        return Self::response(500, br#"{"error":"storage"}"#);
+                    }
+                };
             let Ok(bytes) = encode_configuration(&config) else {
                 log::error!("failed to encode BlueBubbles gateway configuration");
                 return Self::response(500, br#"{"error":"storage"}"#);
@@ -180,6 +190,17 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                     Self::response(204, b"")
                 }
                 Err(error) => {
+                    let restored = if let Some(previous) = previous_configuration.as_deref() {
+                        self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
+                    } else {
+                        self.storage.delete(CONFIGURATION_STORAGE_KEY).await
+                    };
+                    if let Err(storage_error) = restored {
+                        log::error!(
+                            "failed to roll back rejected BlueBubbles gateway configuration: {storage_error}"
+                        );
+                        return Self::response(500, br#"{"error":"storage"}"#);
+                    }
                     log::warn!("rejected BlueBubbles gateway configuration: {error}");
                     Self::response(422, br#"{"error":"invalid_configuration"}"#)
                 }
@@ -209,7 +230,80 @@ async fn load_configuration<Storage: PluginStorage>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
+    use core::cell::RefCell;
+
+    use barracuda_imessage_gateway_plugin::{
+        ChannelError, ChannelFuture, IMessageGatewayPlugin, Operation, SendMessageRequest,
+        SendReceipt,
+    };
+    use barracuda_platform_test::{
+        install_global_memory_vfs, memory_partition, never_embassy_stack,
+    };
+    use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
+    use barracuda_workflow_plugin::WorkflowPlugin;
+    use futures_lite::future::block_on;
+
     use super::*;
+
+    struct OccupiedImessageChannel;
+
+    impl MessageChannel for OccupiedImessageChannel {
+        fn channel(&self) -> &str {
+            "imessage"
+        }
+
+        fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
+            Box::pin(async { Err(ChannelError::unsupported(Operation::SendMessage)) })
+        }
+    }
+
+    struct RejectedConfigurationProbe {
+        http_clients: ClientFactory<'static>,
+        rolled_back: Rc<RefCell<bool>>,
+    }
+
+    impl PluginDeclaration for RejectedConfigurationProbe {
+        const ID: &'static str = "rejected-configuration-probe";
+        const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
+    }
+
+    impl Plugin for RejectedConfigurationProbe {
+        fn register<Storage>(
+            &mut self,
+            context: &mut PluginRegisterContext<'_, Storage>,
+        ) -> PluginResult<()>
+        where
+            Storage: PluginStorage,
+        {
+            let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+            let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedImessageChannel);
+            context.retain(
+                gateway
+                    .register(occupied)
+                    .map_err(PluginError::registration)?,
+            );
+            let endpoint = ConfigEndpoint {
+                gateway,
+                http_clients: self.http_clients.clone(),
+                channel_registration: Mutex::new(None),
+                storage: context.storage().clone(),
+            };
+            let body = br#"{"server_url":"https://blue.example","password":"secret"}"#;
+            let response =
+                block_on(endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())));
+            let stored = block_on(context.storage().get_bytes(CONFIGURATION_STORAGE_KEY))?;
+            self.rolled_back
+                .replace(response.status() == 422 && stored.is_none());
+            Ok(())
+        }
+    }
+
+    fn plugin_context() -> PluginContext {
+        let stack = never_embassy_stack();
+        PluginContext::new(stack, ClientFactory::plaintext(stack))
+    }
 
     #[test]
     fn stored_configuration_round_trips_every_field() -> Result<(), serde_json::Error> {
@@ -233,5 +327,30 @@ mod tests {
         );
         assert_eq!(restored.stream_max_edits, config.stream_max_edits);
         Ok(())
+    }
+
+    #[test]
+    fn rejected_channel_registration_rolls_back_persisted_configuration() {
+        block_on(install_global_memory_vfs()).expect("install test VFS");
+        let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
+        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+        manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
+        let mut context = plugin_context();
+        let rolled_back = Rc::new(RefCell::new(false));
+
+        manager
+            .register(WorkflowPlugin::new(&mut context))
+            .expect("register Workflow Plugin");
+        manager
+            .register(IMessageGatewayPlugin::new(&mut context))
+            .expect("register IMessage Gateway Plugin");
+        manager
+            .register(RejectedConfigurationProbe {
+                http_clients: context.http_clients.clone(),
+                rolled_back: Rc::clone(&rolled_back),
+            })
+            .expect("exercise rejected provider configuration");
+
+        assert!(*rolled_back.borrow());
     }
 }

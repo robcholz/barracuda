@@ -165,6 +165,16 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             };
             let mut channel_registration = self.channel_registration.lock().await;
+            let previous_configuration =
+                match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
+                    Ok(configuration) => configuration,
+                    Err(error) => {
+                        log::error!(
+                            "failed to read the previous Wechat gateway configuration: {error}"
+                        );
+                        return Self::response(500, br#"{"error":"storage"}"#);
+                    }
+                };
             let Ok(bytes) = encode_configuration(&config) else {
                 log::error!("failed to encode Wechat gateway configuration");
                 return Self::response(500, br#"{"error":"storage"}"#);
@@ -187,6 +197,17 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                     Self::response(204, b"")
                 }
                 Err(error) => {
+                    let restored = if let Some(previous) = previous_configuration.as_deref() {
+                        self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
+                    } else {
+                        self.storage.delete(CONFIGURATION_STORAGE_KEY).await
+                    };
+                    if let Err(storage_error) = restored {
+                        log::error!(
+                            "failed to roll back rejected Wechat gateway configuration: {storage_error}"
+                        );
+                        return Self::response(500, br#"{"error":"storage"}"#);
+                    }
                     log::warn!("rejected Wechat gateway configuration: {error}");
                     Self::response(422, br#"{"error":"invalid_configuration"}"#)
                 }
