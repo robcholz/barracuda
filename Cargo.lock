@@ -914,6 +914,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-i2s-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1592,6 +1603,7 @@ dependencies = [
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
+ "barracuda-i2s-plugin",
  "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",

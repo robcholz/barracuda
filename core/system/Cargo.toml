@@ -37,6 +37,7 @@ barracuda-camera-plugin.workspace = true
 barracuda-display-plugin.workspace = true
 barracuda-gpio-plugin.workspace = true
 barracuda-i2c-plugin.workspace = true
+barracuda-i2s-plugin.workspace = true
 barracuda-led-strip-plugin.workspace = true
 barracuda-message-queue-plugin.workspace = true
 barracuda-pwm-plugin.workspace = true

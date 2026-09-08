@@ -14,8 +14,8 @@ mod resources;
 
 use barracuda_board_hal::{
     camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, AnalogProvider,
-    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, PwmProvider, SpiProvider,
-    UartProvider,
+    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider, PwmProvider,
+    SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -90,6 +90,7 @@ where
         + AnalogProvider
         + DigitalProvider
         + I2cProvider
+        + I2sProvider
         + PwmProvider
         + SpiProvider
         + UartProvider
@@ -109,6 +110,9 @@ where
     <Io as I2cProvider>::Bus: Send,
     <<Io as I2cProvider>::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
     <Io as I2cProvider>::Error: core::fmt::Display,
+    <Io as I2sProvider>::Stream: Send,
+    <<Io as I2sProvider>::Stream as barracuda_board_hal::audio::PcmStream>::Error: core::fmt::Debug,
+    <Io as I2sProvider>::Error: core::fmt::Display,
     <Io as SpiProvider>::Bus: Send,
     <<Io as SpiProvider>::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
     <Io as SpiProvider>::Error: core::fmt::Display,
@@ -194,6 +198,7 @@ where
             barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
+            barracuda_i2s_plugin::I2sPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),

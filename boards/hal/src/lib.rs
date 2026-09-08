@@ -19,10 +19,10 @@ use embedded_hal::{
 };
 
 pub use providers::{
-    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, PwmProvider, PwmRequest,
-    RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform,
-    RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig, UartDataBits, UartParity,
-    UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
+    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, PwmProvider,
+    PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo, RuntimeOpenError,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig,
+    UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
 };
 pub use runtime::{LeaseError, ResourceKind};
 
@@ -364,6 +364,27 @@ impl embedded_io_async::Write for UnavailableUart {
     }
 }
 
+/// Uninhabited PCM stream used by Boards without runtime I2S support.
+pub struct UnavailableI2s {
+    never: Infallible,
+}
+
+impl audio::PcmStream for UnavailableI2s {
+    type Error = Infallible;
+
+    fn format(&self) -> audio::PcmFormat {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _samples: &[i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _samples: &mut [i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
 impl embedded_hal::pwm::ErrorType for UnavailablePwm {
     type Error = Infallible;
 }
@@ -568,6 +589,15 @@ impl UartProvider for NoExposedIo {
 
     fn open_uart(&self, _request: UartRequest<'_>) -> Result<Self::Port, Self::Error> {
         Err(UnsupportedFunction::new("UART"))
+    }
+}
+
+impl I2sProvider for NoExposedIo {
+    type Stream = UnavailableI2s;
+    type Error = UnsupportedFunction;
+
+    fn open_i2s(&self, _request: I2sRequest<'_>) -> Result<Self::Stream, Self::Error> {
+        Err(UnsupportedFunction::new("I2S"))
     }
 }
 

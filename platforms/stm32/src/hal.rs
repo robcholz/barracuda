@@ -3,10 +3,11 @@
 use core::convert::Infallible;
 
 use barracuda_board_hal::{
-    ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
-    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
-    RuntimeUartPlatform, UartConfig, UnavailableAnalogInput, UnavailableAnalogOutput,
-    UnavailableI2c, UnavailablePwm, UnavailableSpi, UnavailableUart, UnsupportedFunction,
+    audio, ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
+    Pull as BoardPull, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimePlatform,
+    RuntimePwmPlatform, RuntimeUartPlatform, UartConfig, UnavailableAnalogInput,
+    UnavailableAnalogOutput, UnavailableI2c, UnavailableI2s, UnavailablePwm, UnavailableSpi,
+    UnavailableUart, UnsupportedFunction,
 };
 use embassy_stm32::gpio::{AnyPin, Flex, Input, Level, Output, Pin, Pull, Speed};
 use embedded_hal::{
@@ -111,6 +112,32 @@ impl RuntimeUartPlatform for RuntimeAdapter {
         _config: UartConfig,
     ) -> Result<Self::Uart, Self::UartError> {
         Err(UnsupportedFunction::new("UART"))
+    }
+}
+
+impl RuntimeI2sPlatform for RuntimeAdapter {
+    type I2s = UnavailableI2s;
+    type I2sError = UnsupportedFunction;
+
+    fn supports_i2s(
+        _bclk: &Self::PinToken,
+        _ws: &Self::PinToken,
+        _dout: Option<&Self::PinToken>,
+        _din: Option<&Self::PinToken>,
+        _mclk: Option<&Self::PinToken>,
+    ) -> bool {
+        false
+    }
+
+    fn i2s(
+        _bclk: Self::PinToken,
+        _ws: Self::PinToken,
+        _dout: Option<Self::PinToken>,
+        _din: Option<Self::PinToken>,
+        _mclk: Option<Self::PinToken>,
+        _format: audio::PcmFormat,
+    ) -> Result<Self::I2s, Self::I2sError> {
+        Err(UnsupportedFunction::new("I2S"))
     }
 }
 

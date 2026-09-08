@@ -5,11 +5,11 @@
 use core::convert::Infallible;
 
 use barracuda_board_hal::{
-    AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
-    DigitalProvider, I2cProvider, I2cRequest, InputConfig, LeaseError, OutputConfig, PwmProvider,
-    PwmRequest, RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform,
-    RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig, UartDataBits,
-    UartParity, UartProvider, UartRequest, UartStopBits,
+    audio, AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
+    DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, InputConfig, LeaseError,
+    OutputConfig, PwmProvider, PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo,
+    RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider,
+    SpiRequest, UartConfig, UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -138,6 +138,32 @@ struct FakeUart {
     tx: Option<u8>,
     rx: Option<u8>,
     config: UartConfig,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct FakeI2s {
+    bclk: u8,
+    ws: u8,
+    dout: Option<u8>,
+    din: Option<u8>,
+    format: audio::PcmFormat,
+}
+
+impl audio::PcmStream for FakeI2s {
+    type Error = Infallible;
+
+    fn format(&self) -> audio::PcmFormat {
+        self.format
+    }
+
+    async fn write(&mut self, _samples: &[i16]) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn read(&mut self, samples: &mut [i16]) -> Result<(), Self::Error> {
+        samples.fill(0x1234);
+        Ok(())
+    }
 }
 
 impl embedded_io::ErrorType for FakeUart {
@@ -297,6 +323,38 @@ impl RuntimeUartPlatform for FakePlatform {
         config: UartConfig,
     ) -> Result<Self::Uart, Self::UartError> {
         Ok(FakeUart { tx, rx, config })
+    }
+}
+
+impl RuntimeI2sPlatform for FakePlatform {
+    type I2s = FakeI2s;
+    type I2sError = Infallible;
+
+    fn supports_i2s(
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        _mclk: Option<&Self::PinToken>,
+    ) -> bool {
+        *bclk == 1 && *ws == 2 && (dout.is_some() || din.is_some())
+    }
+
+    fn i2s(
+        bclk: Self::PinToken,
+        ws: Self::PinToken,
+        dout: Option<Self::PinToken>,
+        din: Option<Self::PinToken>,
+        _mclk: Option<Self::PinToken>,
+        format: audio::PcmFormat,
+    ) -> Result<Self::I2s, Self::I2sError> {
+        Ok(FakeI2s {
+            bclk,
+            ws,
+            dout,
+            din,
+            format,
+        })
     }
 }
 
@@ -470,5 +528,31 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
     assert_eq!(port.tx, Some(3));
     assert_eq!(port.rx, Some(4));
     assert!(!io.digital_available("D3"));
+    assert!(!io.digital_available("D4"));
+}
+
+#[test]
+fn i2s_claims_every_signal_from_the_shared_owner() {
+    let io = runtime_io();
+    let stream = io
+        .open_i2s(I2sRequest {
+            bclk: "D1",
+            ws: "D2",
+            dout: Some("D3"),
+            din: Some("D4"),
+            mclk: None,
+            format: audio::PcmFormat {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                bits_per_sample: 16,
+                master_clock_hz: None,
+            },
+        })
+        .expect("I2S stream");
+    assert_eq!(stream.bclk, 1);
+    assert_eq!(stream.ws, 2);
+    assert_eq!(stream.dout, Some(3));
+    assert_eq!(stream.din, Some(4));
+    assert!(!io.digital_available("D1"));
     assert!(!io.digital_available("D4"));
 }

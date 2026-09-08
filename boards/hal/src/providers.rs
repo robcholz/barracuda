@@ -7,7 +7,7 @@ use core::{cell::RefCell, fmt};
 
 use embedded_hal::spi::Mode;
 
-use crate::{AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, ResourceKind};
+use crate::{audio, AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, ResourceKind};
 
 /// Platform adapter used by the Board-generated runtime I/O owner.
 ///
@@ -103,6 +103,32 @@ pub trait RuntimeUartPlatform: RuntimePlatform {
     ) -> Result<Self::Uart, Self::UartError>;
 }
 
+/// Optional Platform construction contract for I2S functions.
+pub trait RuntimeI2sPlatform: RuntimePlatform {
+    /// PCM stream returned to an application handle.
+    type I2s: audio::PcmStream + Send + 'static;
+    /// Platform I2S construction failure.
+    type I2sError: core::error::Error;
+
+    /// Returns whether the selected physical pins can be routed as I2S.
+    fn supports_i2s(
+        bclk: &Self::PinToken,
+        ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        mclk: Option<&Self::PinToken>,
+    ) -> bool;
+    /// Consumes selected pins and allocates an I2S controller and DMA resources.
+    fn i2s(
+        bclk: Self::PinToken,
+        ws: Self::PinToken,
+        dout: Option<Self::PinToken>,
+        din: Option<Self::PinToken>,
+        mclk: Option<Self::PinToken>,
+        format: audio::PcmFormat,
+    ) -> Result<Self::I2s, Self::I2sError>;
+}
+
 struct RuntimePin<Pin> {
     name: &'static str,
     token: Option<Pin>,
@@ -191,6 +217,8 @@ pub enum RuntimeOpenError<E> {
     MissingSpiData,
     /// UART was requested without either data signal.
     MissingUartData,
+    /// I2S was requested without either data signal.
+    MissingI2sData,
     /// The selected physical resource cannot implement the requested function.
     Unsupported {
         /// Function rejected by the Platform.
@@ -212,6 +240,7 @@ impl<E: fmt::Display> fmt::Display for RuntimeOpenError<E> {
             }
             Self::MissingSpiData => formatter.write_str("SPI requires MOSI or MISO"),
             Self::MissingUartData => formatter.write_str("UART requires TX or RX"),
+            Self::MissingI2sData => formatter.write_str("I2S requires DOUT or DIN"),
             Self::Unsupported { function } => {
                 write!(formatter, "the selected pin does not support {function}")
             }
@@ -230,6 +259,7 @@ impl<E: core::error::Error + 'static> core::error::Error for RuntimeOpenError<E>
             Self::NoController { .. }
             | Self::MissingSpiData
             | Self::MissingUartData
+            | Self::MissingI2sData
             | Self::Unsupported { .. } => None,
         }
     }
@@ -480,6 +510,89 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> Uar
             Ok((tx, rx))
         })?;
         H::uart(tx, rx, request.config).map_err(RuntimeOpenError::Platform)
+    }
+}
+
+impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize> I2sProvider
+    for RuntimeIo<H, P, I, S>
+{
+    type Stream = H::I2s;
+    type Error = RuntimeOpenError<H::I2sError>;
+
+    fn open_i2s(&self, request: I2sRequest<'_>) -> Result<Self::Stream, Self::Error> {
+        if request.dout.is_none() && request.din.is_none() {
+            return Err(RuntimeOpenError::MissingI2sData);
+        }
+        let bclk_index = self.resolve_pin(request.bclk)?;
+        let ws_index = self.resolve_pin(request.ws)?;
+        let dout_index = request
+            .dout
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
+        let din_index = request
+            .din
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
+        let mclk_index = request
+            .mclk
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
+        let mut roles = alloc::vec![(request.bclk, bclk_index), (request.ws, ws_index)];
+        roles.extend(dout_index);
+        roles.extend(din_index);
+        roles.extend(mclk_index);
+        self.ensure_distinct(&roles)?;
+
+        let (bclk, ws, dout, din, mclk) = critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            for (_, index) in &roles {
+                let pin = &state.pins[*index];
+                if pin.token.is_none() {
+                    return Err(RuntimeOpenError::Resource(LeaseError::Busy {
+                        resource: pin.name,
+                        owner: pin.owner.unwrap_or("runtime function"),
+                    }));
+                }
+            }
+            let bclk_ref = state.pins[bclk_index]
+                .token
+                .as_ref()
+                .ok_or(RuntimeOpenError::Unsupported { function: "I2S" })?;
+            let ws_ref = state.pins[ws_index]
+                .token
+                .as_ref()
+                .ok_or(RuntimeOpenError::Unsupported { function: "I2S" })?;
+            let dout_ref = dout_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            let din_ref = din_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            let mclk_ref = mclk_index.and_then(|(_, index)| state.pins[index].token.as_ref());
+            if !H::supports_i2s(bclk_ref, ws_ref, dout_ref, din_ref, mclk_ref) {
+                return Err(RuntimeOpenError::Unsupported { function: "I2S" });
+            }
+            let bclk = state.pins[bclk_index]
+                .token
+                .take()
+                .ok_or(RuntimeOpenError::Unsupported { function: "I2S" })?;
+            let ws = state.pins[ws_index]
+                .token
+                .take()
+                .ok_or(RuntimeOpenError::Unsupported { function: "I2S" })?;
+            let dout = dout_index.and_then(|(_, index)| state.pins[index].token.take());
+            let din = din_index.and_then(|(_, index)| state.pins[index].token.take());
+            let mclk = mclk_index.and_then(|(_, index)| state.pins[index].token.take());
+            state.pins[bclk_index].owner = Some("I2S BCLK");
+            state.pins[ws_index].owner = Some("I2S WS");
+            if let Some((_, index)) = dout_index {
+                state.pins[index].owner = Some("I2S DOUT");
+            }
+            if let Some((_, index)) = din_index {
+                state.pins[index].owner = Some("I2S DIN");
+            }
+            if let Some((_, index)) = mclk_index {
+                state.pins[index].owner = Some("I2S MCLK");
+            }
+            Ok((bclk, ws, dout, din, mclk))
+        })?;
+        H::i2s(bclk, ws, dout, din, mclk, request.format).map_err(RuntimeOpenError::Platform)
     }
 }
 
@@ -774,6 +887,34 @@ pub trait UartProvider {
     fn uart_available(&self, tx: Option<&str>, rx: Option<&str>) -> bool;
     /// Atomically claims the selected pins and constructs a UART stream.
     fn open_uart(&self, request: UartRequest<'_>) -> Result<Self::Port, Self::Error>;
+}
+
+/// Runtime request for an I2S function on selected exposed pins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct I2sRequest<'a> {
+    /// Board-visible bit-clock pin.
+    pub bclk: &'a str,
+    /// Board-visible word-select pin.
+    pub ws: &'a str,
+    /// Optional Board-visible audio output pin.
+    pub dout: Option<&'a str>,
+    /// Optional Board-visible audio input pin.
+    pub din: Option<&'a str>,
+    /// Optional Board-visible master-clock pin.
+    pub mclk: Option<&'a str>,
+    /// PCM wire format.
+    pub format: audio::PcmFormat,
+}
+
+/// Constructs I2S PCM streams from runtime-selected exposed resources.
+pub trait I2sProvider {
+    /// PCM data-plane stream.
+    type Stream: audio::PcmStream + Send + 'static;
+    /// Failure while validating, claiming, or configuring I2S.
+    type Error: core::error::Error;
+
+    /// Atomically claims selected pins and constructs an I2S stream.
+    fn open_i2s(&self, request: I2sRequest<'_>) -> Result<Self::Stream, Self::Error>;
 }
 
 /// Runtime request for an I2C function on two exposed pins.
