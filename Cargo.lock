@@ -1214,6 +1214,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]
@@ -1239,6 +1241,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]
@@ -1264,6 +1268,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]
@@ -1289,6 +1295,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]
@@ -1314,6 +1322,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]
@@ -1340,6 +1350,8 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "log",
+ "nb 1.1.0",
+ "static_cell",
 ]
 
 [[package]]

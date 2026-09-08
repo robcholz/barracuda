@@ -65,9 +65,9 @@ pub trait RuntimePlatform: Send + Sync + 'static {
 /// Optional Platform construction contract for analog functions.
 pub trait RuntimeAnalogPlatform: RuntimePlatform {
     /// Analog input returned to an application handle.
-    type AnalogInput: AnalogInput + Send + 'static;
+    type AnalogInput: AnalogInput + 'static;
     /// Analog output returned to an application handle.
-    type AnalogOutput: AnalogOutput + Send + 'static;
+    type AnalogOutput: AnalogOutput + 'static;
     /// Platform analog configuration failure.
     type AnalogError: core::error::Error;
 
@@ -87,7 +87,7 @@ pub trait RuntimeAnalogPlatform: RuntimePlatform {
 /// Optional Platform construction contract for PWM functions.
 pub trait RuntimePwmPlatform: RuntimePlatform {
     /// PWM output returned to an application handle.
-    type Pwm: embedded_hal::pwm::SetDutyCycle + Send + 'static;
+    type Pwm: embedded_hal::pwm::SetDutyCycle + 'static;
     /// Platform PWM construction failure.
     type PwmError: core::error::Error;
 
@@ -1078,7 +1078,7 @@ pub struct PwmRequest<'a> {
 /// Constructs PWM outputs from the shared exposed-I/O owner.
 pub trait PwmProvider {
     /// Output implementing the ecosystem PWM contract.
-    type Output: embedded_hal::pwm::SetDutyCycle + Send + 'static;
+    type Output: embedded_hal::pwm::SetDutyCycle + 'static;
     /// Failure while resolving, claiming, or configuring PWM.
     type Error: core::error::Error;
 

@@ -7,6 +7,21 @@ hal:
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: ADC1_CH0, pin: GPIO16 }
+        - { channel: ADC1_CH1, pin: GPIO17 }
+        - { channel: ADC1_CH2, pin: GPIO18 }
+        - { channel: ADC1_CH3, pin: GPIO19 }
+        - { channel: ADC1_CH4, pin: GPIO20 }
+        - { channel: ADC1_CH5, pin: GPIO21 }
+        - { channel: ADC1_CH6, pin: GPIO22 }
+        - { channel: ADC1_CH7, pin: GPIO23 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [Timer0]
+      channels: [Channel0]
 selection:
   board-chips:
     - esp32p4

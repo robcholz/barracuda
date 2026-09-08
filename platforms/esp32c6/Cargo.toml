@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "ESP32-C6 Platform implementation for Barracuda"
 
+[features]
+default = []
+
 [dependencies]
 barracuda-board.workspace = true
 barracuda-platform.workspace = true
@@ -24,6 +27,8 @@ embedded-io-async = "0.7"
 esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32c6", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32c6", "embedded-storage"] }
+static_cell.workspace = true
+nb = "1"
 
 [build-dependencies]
 barracuda-board-config.workspace = true

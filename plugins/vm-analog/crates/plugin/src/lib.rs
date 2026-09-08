@@ -39,8 +39,6 @@ impl<Io> AnalogPlugin<Io> {
 impl<Io> Plugin for AnalogPlugin<Io>
 where
     Io: ExposedIo + AnalogProvider,
-    Io::Input: Send,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
     <Io::Output as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
@@ -80,8 +78,6 @@ impl<Io> AnalogPackage<Io> {
 impl<Io> Package for AnalogPackage<Io>
 where
     Io: AnalogProvider + Send + Sync + 'static,
-    Io::Input: Send,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
     <Io::Output as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
@@ -132,8 +128,6 @@ where
 impl<Io> LuaPackage for AnalogPackage<Io>
 where
     Io: AnalogProvider + Send + Sync + 'static,
-    Io::Input: Send,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
     <Io::Output as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
@@ -166,7 +160,7 @@ impl<Channel> AnalogInputHandle<Channel> {
 
 impl<Channel> UserData for AnalogInputHandle<Channel>
 where
-    Channel: AnalogInput + Send + 'static,
+    Channel: AnalogInput + 'static,
     Channel::Error: core::fmt::Debug,
 {
     fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
@@ -189,7 +183,7 @@ where
 
 fn add_common_input_methods<Channel>(methods: &mut UserDataMethods<'_, AnalogInputHandle<Channel>>)
 where
-    Channel: AnalogInput + Send + 'static,
+    Channel: AnalogInput + 'static,
     Channel::Error: core::fmt::Debug,
 {
     methods.add_method("is_open", |handle, (): ()| {
@@ -247,7 +241,7 @@ impl<Channel> AnalogOutputHandle<Channel> {
 
 impl<Channel> UserData for AnalogOutputHandle<Channel>
 where
-    Channel: AnalogOutput + Send + 'static,
+    Channel: AnalogOutput + 'static,
     Channel::Error: core::fmt::Debug,
 {
     fn add_methods(methods: &mut UserDataMethods<'_, Self>) {

@@ -1257,13 +1257,16 @@ fn render_generic_hal(
         ));
     }
 
-    let mut source = String::from(
-        "mod generated_board_hal {\n\
-         use core::fmt;\n\
-         use ::barracuda_board_hal::{BoardHal, BoardHalInitResult, BoardHalResources, PeripheralDriver};\n\
-         use ::embassy_executor::Spawner;\n\n\
-         pub struct GeneratedBoardBindings {\n",
-    );
+    let mut source = String::from("mod generated_board_hal {\n");
+    if !rendered.is_empty() || !state.binding_errors.is_empty() {
+        source.push_str("use core::fmt;\n");
+    }
+    source.push_str("use ::barracuda_board_hal::{BoardHal, BoardHalInitResult, BoardHalResources");
+    if !rendered.is_empty() {
+        source.push_str(", PeripheralDriver");
+    }
+    source
+        .push_str("};\nuse ::embassy_executor::Spawner;\n\npub struct GeneratedBoardBindings {\n");
     for (field, ty) in &state.raw_fields {
         source.push_str(&format!("    {field}: {ty},\n"));
     }

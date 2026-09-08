@@ -8,6 +8,7 @@ use barracuda_driver::{
 };
 use esp_hal::{
     dma::{DmaBufError, DmaError, DmaRxBuf, DmaTxBuf},
+    gpio::NoPin,
     i2s::master::{
         Channels, ConfigError as VendorI2sConfigError, DataFormat, Error as VendorI2sError, I2s,
         I2sMasterDmaChannel, I2sRx, I2sTx, Instance as I2sInstance, TdmConfig,
@@ -48,6 +49,8 @@ macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
 pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
+#[doc(hidden)]
+pub use __barracuda_esp32s3_i2s_dma_buffers as runtime_i2s_dma_buffers;
 
 /// ESP32-S3 camera receiver construction failure.
 #[derive(Debug)]
@@ -181,6 +184,8 @@ pub fn camera_capture(
 /// ESP32-S3 I2S construction failure.
 #[derive(Debug)]
 pub enum I2sConfigError {
+    /// The Platform manifest did not provide an I2S DMA channel.
+    MissingDma,
     /// The Board-selected DMA storage cannot be used by the controller.
     DmaBuffer(DmaBufError),
     /// Barracuda currently exposes signed 16-bit mono or stereo PCM only.
@@ -192,6 +197,7 @@ pub enum I2sConfigError {
 impl core::fmt::Display for I2sConfigError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::MissingDma => formatter.write_str("missing ESP32-S3 I2S DMA channel"),
             Self::DmaBuffer(_) => formatter.write_str("invalid I2S DMA buffer"),
             Self::UnsupportedFormat => formatter.write_str("unsupported I2S PCM format"),
             Self::Peripheral(_) => formatter.write_str("invalid ESP32-S3 I2S configuration"),
@@ -200,6 +206,17 @@ impl core::fmt::Display for I2sConfigError {
 }
 
 impl core::error::Error for I2sConfigError {}
+
+/// Error surfaced while generated runtime I2S DMA storage is created.
+pub type RuntimeI2sResourceError = I2sConfigError;
+
+/// Platform-owned ESP32-S3 I2S controller, DMA channel, and bounded buffers.
+pub struct RuntimeI2sResource {
+    controller: esp_hal::peripherals::I2S0<'static>,
+    dma: Option<esp_hal::peripherals::DMA_CH0<'static>>,
+    tx_buffer: DmaTxBuf,
+    rx_buffer: DmaRxBuf,
+}
 
 /// ESP32-S3 I2S transfer failure.
 #[derive(Debug)]
@@ -419,4 +436,140 @@ fn finish_i2s(
         rx_buffer: Some(rx_buffer),
         format,
     })
+}
+
+impl barracuda_board_hal::RuntimeI2sPlatform for RuntimeAdapter {
+    type I2s = I2sDevice;
+    type I2sError = I2sConfigError;
+
+    fn supports_i2s(
+        resource: &Self::I2sResource,
+        _bclk: &Self::PinToken,
+        _ws: &Self::PinToken,
+        dout: Option<&Self::PinToken>,
+        din: Option<&Self::PinToken>,
+        _mclk: Option<&Self::PinToken>,
+    ) -> bool {
+        resource.dma.is_some() && (dout.is_some() || din.is_some())
+    }
+
+    fn i2s(
+        mut resource: Self::I2sResource,
+        bclk: Self::PinToken,
+        ws: Self::PinToken,
+        dout: Option<Self::PinToken>,
+        din: Option<Self::PinToken>,
+        mclk: Option<Self::PinToken>,
+        format: barracuda_board_hal::audio::PcmFormat,
+    ) -> Result<Self::I2s, Self::I2sError> {
+        let dma = resource.dma.take().ok_or(I2sConfigError::MissingDma)?;
+        match (dout, din, mclk) {
+            (Some(dout), Some(din), Some(mclk)) => i2s_stream_with_mclk(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                dout,
+                din,
+                mclk,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (Some(dout), Some(din), None) => i2s_stream(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                dout,
+                din,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (Some(dout), None, Some(mclk)) => i2s_stream_with_mclk(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                dout,
+                NoPin,
+                mclk,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (Some(dout), None, None) => i2s_stream(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                dout,
+                NoPin,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (None, Some(din), Some(mclk)) => i2s_stream_with_mclk(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                NoPin,
+                din,
+                mclk,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (None, Some(din), None) => i2s_stream(
+                resource.controller,
+                dma,
+                bclk,
+                ws,
+                NoPin,
+                din,
+                format.sample_rate_hz,
+                format.channels,
+                format.bits_per_sample,
+                resource.tx_buffer,
+                resource.rx_buffer,
+            ),
+            (None, None, _) => Err(I2sConfigError::UnsupportedFormat),
+        }
+    }
+}
+
+/// Preserves ownership of one generated ESP32-S3 I2S DMA channel token.
+#[must_use]
+pub fn runtime_i2s_dma(
+    dma: esp_hal::peripherals::DMA_CH0<'static>,
+) -> esp_hal::peripherals::DMA_CH0<'static> {
+    dma
+}
+
+/// Builds one runtime I2S allocation from a controller, DMA pool, and buffers.
+#[must_use]
+pub fn runtime_i2s_resource<const N: usize>(
+    controller: esp_hal::peripherals::I2S0<'static>,
+    dma: [esp_hal::peripherals::DMA_CH0<'static>; N],
+    buffers: (DmaTxBuf, DmaRxBuf),
+) -> RuntimeI2sResource {
+    let (tx_buffer, rx_buffer) = buffers;
+    RuntimeI2sResource {
+        controller,
+        dma: dma.into_iter().next(),
+        tx_buffer,
+        rx_buffer,
+    }
 }

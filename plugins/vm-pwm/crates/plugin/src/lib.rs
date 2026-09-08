@@ -40,7 +40,6 @@ impl<Io> PwmPlugin<Io> {
 impl<Io> Plugin for PwmPlugin<Io>
 where
     Io: ExposedIo + PwmProvider,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
 {
@@ -78,7 +77,6 @@ impl<Io> PwmPackage<Io> {
 impl<Io> Package for PwmPackage<Io>
 where
     Io: PwmProvider + Send + Sync + 'static,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
 {
@@ -113,7 +111,6 @@ where
 impl<Io> LuaPackage for PwmPackage<Io>
 where
     Io: PwmProvider + Send + Sync + 'static,
-    Io::Output: Send,
     Io::Error: core::fmt::Display,
     <Io::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
 {
@@ -143,7 +140,7 @@ impl<Output> PwmHandle<Output> {
 
 impl<Output> UserData for PwmHandle<Output>
 where
-    Output: SetDutyCycle + Send + 'static,
+    Output: SetDutyCycle + 'static,
     Output::Error: core::fmt::Debug,
 {
     fn add_methods(methods: &mut UserDataMethods<'_, Self>) {

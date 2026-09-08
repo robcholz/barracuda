@@ -97,13 +97,10 @@ where
         + SpiProvider
         + UartProvider
         + Unpin,
-    Io::Input: Send,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
-    <Io as AnalogProvider>::Output: Send,
     <<Io as AnalogProvider>::Output as barracuda_board_hal::AnalogErrorType>::Error:
         core::fmt::Debug,
     <Io as AnalogProvider>::Error: core::fmt::Display,
-    <Io as PwmProvider>::Output: Send,
     <<Io as PwmProvider>::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
     <Io as PwmProvider>::Error: core::fmt::Display,
     Io::Pin: Send,
