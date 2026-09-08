@@ -10,14 +10,12 @@ use hyper::{
     body::Incoming,
     client::conn::http1,
     header::{CONTENT_LENGTH, CONTENT_TYPE, HOST},
-    Method, Request, StatusCode, Uri,
+    Request, StatusCode, Uri,
 };
 use hyper_util::rt::TokioIo;
-use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::{net::TcpStream, time::timeout};
 
-const CATALOG_PATH: &str = "/portal/entries.json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
@@ -212,11 +210,6 @@ const CONFIGURATIONS: &[Configuration] = &[
     },
 ];
 
-#[derive(Deserialize)]
-struct PortalEntry {
-    id: String,
-}
-
 struct Response {
     status: StatusCode,
     body: Bytes,
@@ -224,18 +217,12 @@ struct Response {
 
 /// Runs the terminal configuration menu for one Barracuda HTTP address.
 pub async fn run(address: &str) -> Result<()> {
-    let entries: Vec<PortalEntry> = get_json(address, CATALOG_PATH).await?;
-    let configurations = available_configurations(&entries);
-    if configurations.is_empty() {
-        bail!("the selected Barracuda has no supported configurable Plugins");
-    }
-
     println!("Barracuda configuration: {address}");
     println!("Values are sent over plaintext HTTP; use only a trusted configuration network.\n");
 
     let theme = ColorfulTheme::default();
     loop {
-        let mut choices: Vec<String> = configurations
+        let mut choices: Vec<String> = CONFIGURATIONS
             .iter()
             .map(|configuration| format!("{}  ({})", configuration.title, configuration.id))
             .collect();
@@ -246,7 +233,7 @@ pub async fn run(address: &str) -> Result<()> {
             .default(0)
             .interact()
             .context("select Plugin configuration")?;
-        let Some(configuration) = configurations.get(selection) else {
+        let Some(configuration) = CONFIGURATIONS.get(selection) else {
             return Ok(());
         };
 
@@ -255,10 +242,9 @@ pub async fn run(address: &str) -> Result<()> {
         if configuration.batch {
             payload = Value::Array(vec![payload]);
         }
-        let response = request(
+        let response = post(
             address,
             configuration.endpoint,
-            Method::POST,
             serde_json::to_vec(&payload).context("encode Plugin configuration")?,
         )
         .await?;
@@ -283,13 +269,6 @@ pub async fn run(address: &str) -> Result<()> {
             configuration.title
         );
     }
-}
-
-fn available_configurations(entries: &[PortalEntry]) -> Vec<&'static Configuration> {
-    CONFIGURATIONS
-        .iter()
-        .filter(|configuration| entries.iter().any(|entry| entry.id == configuration.id))
-        .collect()
 }
 
 fn prompt_payload(configuration: &Configuration, theme: &ColorfulTheme) -> Result<Value> {
@@ -416,29 +395,13 @@ fn is_http_url(value: &str) -> bool {
     })
 }
 
-async fn get_json<T: for<'de> Deserialize<'de>>(address: &str, path: &str) -> Result<T> {
-    let response = request(address, path, Method::GET, Vec::new()).await?;
-    if response.status != StatusCode::OK {
-        bail!(
-            "failed to read enabled Plugin catalog: HTTP {}",
-            response.status
-        );
-    }
-    serde_json::from_slice(&response.body).context("decode enabled Plugin catalog")
-}
-
-async fn request(address: &str, path: &str, method: Method, body: Vec<u8>) -> Result<Response> {
-    timeout(REQUEST_TIMEOUT, request_inner(address, path, method, body))
+async fn post(address: &str, path: &str, body: Vec<u8>) -> Result<Response> {
+    timeout(REQUEST_TIMEOUT, post_inner(address, path, body))
         .await
         .context("Barracuda configuration request timed out")?
 }
 
-async fn request_inner(
-    address: &str,
-    path: &str,
-    method: Method,
-    body: Vec<u8>,
-) -> Result<Response> {
+async fn post_inner(address: &str, path: &str, body: Vec<u8>) -> Result<Response> {
     if !path.starts_with('/') || path.contains(['?', '#']) {
         bail!("invalid Plugin configuration endpoint `{path}`");
     }
@@ -471,9 +434,7 @@ async fn request_inner(
     let authority = uri
         .authority()
         .context("Barracuda address has no authority")?;
-    let request = Request::builder()
-        .method(method)
-        .uri(uri.path_and_query().map_or("/", |value| value.as_str()))
+    let request = Request::post(uri.path_and_query().map_or("/", |value| value.as_str()))
         .header(HOST, authority.as_str())
         .header(CONTENT_TYPE, "application/json")
         .header(CONTENT_LENGTH, body.len())
@@ -498,26 +459,25 @@ async fn collect_response(response: hyper::Response<Incoming>) -> Result<Respons
 
 #[cfg(test)]
 mod tests {
-    use super::{available_configurations, is_http_url, validate_input, FieldKind, PortalEntry};
+    use super::{is_http_url, validate_input, FieldKind, CONFIGURATIONS};
 
     #[test]
-    fn enabled_portal_entries_filter_the_hardcoded_catalog() {
-        let entries = [
-            PortalEntry {
-                id: String::from("agent"),
-            },
-            PortalEntry {
-                id: String::from("imessage-web"),
-            },
-            PortalEntry {
-                id: String::from("imessage-telegram"),
-            },
-        ];
-
-        let configurations = available_configurations(&entries);
-        assert_eq!(configurations.len(), 2);
-        assert_eq!(configurations[0].id, "agent");
-        assert_eq!(configurations[1].id, "imessage-telegram");
+    fn configuration_catalog_is_fully_cli_owned() {
+        assert_eq!(
+            CONFIGURATIONS
+                .iter()
+                .map(|configuration| configuration.id)
+                .collect::<Vec<_>>(),
+            [
+                "agent",
+                "agent-websearch",
+                "imessage-qq",
+                "imessage-wechat",
+                "imessage-bluebubble",
+                "imessage-telegram",
+                "imessage-inkbox",
+            ]
+        );
     }
 
     #[test]
