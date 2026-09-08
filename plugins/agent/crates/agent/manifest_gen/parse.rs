@@ -44,15 +44,6 @@ pub(crate) struct ParsedManifest {
     pub(crate) common_instructions_path: PathBuf,
 }
 
-/// The manifest files expected in every kind directory; also the set the build
-/// script registers for `rerun-if-changed`.
-pub(crate) const MANIFEST_FILES: &[&str] = &["agent.json", "tools/tools.json", "instructions.md"];
-
-/// Files the shared `common/` base is tracked for `rerun-if-changed`. `agent.json`
-/// is included so that *adding* one re-triggers the build (and fails it, since
-/// the shared base must not declare an agent kind).
-pub(crate) const COMMON_FILES: &[&str] = &["tools/tools.json", "instructions.md", "agent.json"];
-
 /// The exact top-level entries a kind directory must contain — no more, no less.
 /// Two files plus the tool metadata subdirectory; anything else fails the build.
 const KIND_ROOT_ENTRIES: &[&str] = &["agent.json", "instructions.md", "tools"];

@@ -5,7 +5,7 @@ use std::{fs, path::Path, process::Command};
 
 fn cargo(root: &Path, action: &str, value: &str) -> std::process::Output {
     Command::new(env!("CARGO"))
-        .args([action, "--offline", "--quiet"])
+        .args([action, "--offline"])
         .current_dir(root)
         .env("CARGO_TARGET_DIR", root.join("target"))
         .env("BARRACUDA_TASK_TEST_ENV", value)
@@ -32,7 +32,13 @@ fn cargo_build_and_run_track_inputs_outputs_and_environment() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(fs::read_to_string(root.join("count")).unwrap(), "1\n");
-    assert!(cargo(root, "run", "first").status.success());
+    let unchanged = cargo(root, "run", "first");
+    assert!(unchanged.status.success());
+    assert!(
+        !String::from_utf8_lossy(&unchanged.stderr).contains("Compiling task-hook-fixture"),
+        "unchanged cargo run rebuilt the fixture:\n{}",
+        String::from_utf8_lossy(&unchanged.stderr)
+    );
     assert_eq!(fs::read_to_string(root.join("count")).unwrap(), "1\n");
     fs::write(root.join("resources/input"), "second").unwrap();
     assert!(cargo(root, "build", "first").status.success());

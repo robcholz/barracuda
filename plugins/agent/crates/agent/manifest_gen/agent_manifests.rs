@@ -17,9 +17,8 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::codegen;
-use crate::parse::{
-    parse_common, parse_kind, CommonBase, ParsedKind, ParsedManifest, COMMON_FILES, MANIFEST_FILES,
-};
+use crate::inputs::{COMMON_FILES, MANIFEST_FILES};
+use crate::parse::{parse_common, parse_kind, CommonBase, ParsedKind, ParsedManifest};
 
 /// The generated file's name within `OUT_DIR`.
 const OUTPUT_FILE: &str = "manifests.rs";
@@ -46,8 +45,8 @@ pub(crate) fn generate(manifest_dir: &Path, out_dir: &Path) -> Result<()> {
     // Re-run when a kind is added or removed.
     println!("cargo:rerun-if-changed={}", agents_dir.display());
 
-    // The shared base every kind inherits. Tracked for rerun (including
-    // agent.json, so adding one re-triggers the build and fails it).
+    // The shared base every kind inherits. The parent directory watch above
+    // catches additions, including the forbidden common/agent.json.
     let common_dir = agents_dir.join(SHARED_DIR);
     for file in COMMON_FILES {
         println!("cargo:rerun-if-changed={}", common_dir.join(file).display());
