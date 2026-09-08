@@ -39,6 +39,8 @@ pub struct HalConfig {
     runtime_i2c_controllers: Vec<String>,
     #[serde(default, rename = "runtime-spi-controllers")]
     runtime_spi_controllers: Vec<String>,
+    #[serde(default, rename = "runtime-uart-controllers")]
+    runtime_uart_controllers: Vec<String>,
 }
 
 impl HalConfig {
@@ -64,6 +66,12 @@ impl HalConfig {
     #[must_use]
     pub fn runtime_spi_controllers(&self) -> &[String] {
         &self.runtime_spi_controllers
+    }
+
+    /// Returns controller singletons available for runtime UART routing.
+    #[must_use]
+    pub fn runtime_uart_controllers(&self) -> &[String] {
+        &self.runtime_uart_controllers
     }
 }
 

@@ -889,7 +889,7 @@ pub fn render_board_hal(
              pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n",
         ));
     }
-    render_generic_hal(board, resolved, &[], &[])
+    render_generic_hal(board, resolved, &[], &[], &[])
 }
 
 /// Renders a selected Board HAL with the runtime controller pools supplied by
@@ -912,6 +912,7 @@ pub fn render_board_hal_for_platform(
         resolved,
         platform.hal().runtime_i2c_controllers(),
         platform.hal().runtime_spi_controllers(),
+        platform.hal().runtime_uart_controllers(),
     )
 }
 
@@ -1003,6 +1004,7 @@ fn render_generic_hal(
     resolved: &ResolvedBoard<'_>,
     runtime_i2c_controllers: &[String],
     runtime_spi_controllers: &[String],
+    runtime_uart_controllers: &[String],
 ) -> Result<String, GenerateError> {
     let mut state = RenderState::default();
     let mut rendered = Vec::new();
@@ -1108,9 +1110,18 @@ fn render_generic_hal(
             .filter(|controller| !board.internal_io().uses_controller(controller))
             .collect::<Vec<_>>()
     };
+    let runtime_uart_controllers = if pin_count == 0 {
+        Vec::new()
+    } else {
+        runtime_uart_controllers
+            .iter()
+            .filter(|controller| !board.internal_io().uses_controller(controller))
+            .collect::<Vec<_>>()
+    };
     for controller in runtime_i2c_controllers
         .iter()
         .chain(runtime_spi_controllers.iter())
+        .chain(runtime_uart_controllers.iter())
     {
         validate_hardware_identifier(controller)?;
         let field = checked_identifier(
@@ -1222,9 +1233,10 @@ fn render_generic_hal(
     }
 
     source.push_str(&format!(
-        "pub type GeneratedIo = ::barracuda_platform_selected::__platform::hal::RuntimeIo<{pin_count}, {}, {}>;\n\n",
+        "pub type GeneratedIo = ::barracuda_platform_selected::__platform::hal::RuntimeIo<{pin_count}, {}, {}, {}>;\n\n",
         runtime_i2c_controllers.len(),
         runtime_spi_controllers.len(),
+        runtime_uart_controllers.len(),
     ));
 
     if rendered.is_empty() && state.binding_errors.is_empty() {
@@ -1305,6 +1317,13 @@ fn render_generic_hal(
         let field = rust_identifier(&format!("runtime_controller_{controller}"));
         source.push_str(&format!(
             "            ::barracuda_platform_selected::__platform::hal::runtime_spi_controller(bindings.{field}),\n"
+        ));
+    }
+    source.push_str("        ], [\n");
+    for controller in &runtime_uart_controllers {
+        let field = rust_identifier(&format!("runtime_controller_{controller}"));
+        source.push_str(&format!(
+            "            ::barracuda_platform_selected::__platform::hal::runtime_uart_controller(bindings.{field}),\n"
         ));
     }
     source.push_str("        ]);\n");

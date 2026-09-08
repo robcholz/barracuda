@@ -35,6 +35,7 @@ impl RuntimePlatform for RuntimeAdapter {
     type SpiController = Infallible;
     type SpiBus = UnavailableSpi;
     type SpiError = UnsupportedFunction;
+    type UartController = Infallible;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         DynamicPin {
@@ -102,16 +103,21 @@ impl RuntimeUartPlatform for RuntimeAdapter {
     type Uart = UnavailableUart;
     type UartError = UnsupportedFunction;
 
-    fn supports_uart(_tx: Option<&Self::PinToken>, _rx: Option<&Self::PinToken>) -> bool {
-        false
+    fn supports_uart(
+        controller: &Self::UartController,
+        _tx: Option<&Self::PinToken>,
+        _rx: Option<&Self::PinToken>,
+    ) -> bool {
+        match *controller {}
     }
 
     fn uart(
+        controller: Self::UartController,
         _tx: Option<Self::PinToken>,
         _rx: Option<Self::PinToken>,
         _config: UartConfig,
     ) -> Result<Self::Uart, Self::UartError> {
-        Err(UnsupportedFunction::new("UART"))
+        match controller {}
     }
 }
 
@@ -142,8 +148,8 @@ impl RuntimeI2sPlatform for RuntimeAdapter {
 }
 
 /// Generated exposed-I/O owner specialized to the STM32 Platform adapter.
-pub type RuntimeIo<const P: usize, const I: usize, const S: usize> =
-    barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S>;
+pub type RuntimeIo<const P: usize, const I: usize, const S: usize, const U: usize> =
+    barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S, U>;
 
 /// Constructs the selected Board's unified runtime I/O owner.
 #[must_use]
@@ -151,8 +157,9 @@ pub fn runtime_io<const P: usize>(
     pins: [(&'static str, embassy_stm32::Peri<'static, AnyPin>); P],
     i2c: [Infallible; 0],
     spi: [Infallible; 0],
-) -> RuntimeIo<P, 0, 0> {
-    RuntimeIo::new(pins, i2c, spi)
+    uart: [Infallible; 0],
+) -> RuntimeIo<P, 0, 0, 0> {
+    RuntimeIo::new_with_uart(pins, i2c, spi, uart)
 }
 
 /// Erases one selected pin token while preserving its exclusive ownership.

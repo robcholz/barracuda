@@ -135,6 +135,7 @@ struct FakePwm(u16);
 
 #[derive(Debug, PartialEq, Eq)]
 struct FakeUart {
+    controller: u8,
     tx: Option<u8>,
     rx: Option<u8>,
     config: UartConfig,
@@ -236,6 +237,7 @@ impl RuntimePlatform for FakePlatform {
     type SpiController = u8;
     type SpiBus = FakeSpi;
     type SpiError = Infallible;
+    type UartController = u8;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         FakePin(pin)
@@ -313,16 +315,26 @@ impl RuntimeUartPlatform for FakePlatform {
     type Uart = FakeUart;
     type UartError = Infallible;
 
-    fn supports_uart(tx: Option<&Self::PinToken>, rx: Option<&Self::PinToken>) -> bool {
-        tx.is_some_and(|pin| *pin == 3) || rx.is_some_and(|pin| *pin == 4)
+    fn supports_uart(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+    ) -> bool {
+        *controller == 30 && (tx.is_some_and(|pin| *pin == 3) || rx.is_some_and(|pin| *pin == 4))
     }
 
     fn uart(
+        controller: Self::UartController,
         tx: Option<Self::PinToken>,
         rx: Option<Self::PinToken>,
         config: UartConfig,
     ) -> Result<Self::Uart, Self::UartError> {
-        Ok(FakeUart { tx, rx, config })
+        Ok(FakeUart {
+            controller,
+            tx,
+            rx,
+            config,
+        })
     }
 }
 
@@ -358,8 +370,13 @@ impl RuntimeI2sPlatform for FakePlatform {
     }
 }
 
-fn runtime_io() -> RuntimeIo<FakePlatform, 4, 1, 1> {
-    RuntimeIo::new([("D1", 1), ("D2", 2), ("D3", 3), ("D4", 4)], [10], [20])
+fn runtime_io() -> RuntimeIo<FakePlatform, 4, 1, 1, 1> {
+    RuntimeIo::new_with_uart(
+        [("D1", 1), ("D2", 2), ("D3", 3), ("D4", 4)],
+        [10],
+        [20],
+        [30],
+    )
 }
 
 #[test]
@@ -502,6 +519,21 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
     assert!(io.digital_available("D2"));
     assert!(matches!(
         io.open_uart(UartRequest {
+            tx: Some("D1"),
+            rx: Some("D2"),
+            config: UartConfig {
+                baud: 115_200,
+                data_bits: UartDataBits::Eight,
+                parity: UartParity::None,
+                stop_bits: UartStopBits::One,
+            },
+        }),
+        Err(RuntimeOpenError::Unsupported { function: "UART" })
+    ));
+    assert!(io.digital_available("D1"));
+    assert!(io.digital_available("D2"));
+    assert!(matches!(
+        io.open_uart(UartRequest {
             tx: Some("D3"),
             rx: Some("D3"),
             config: UartConfig {
@@ -527,6 +559,7 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
         .expect("UART port");
     assert_eq!(port.tx, Some(3));
     assert_eq!(port.rx, Some(4));
+    assert_eq!(port.controller, 30);
     assert!(!io.digital_available("D3"));
     assert!(!io.digital_available("D4"));
 }

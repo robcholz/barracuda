@@ -31,6 +31,8 @@ pub trait RuntimePlatform: Send + Sync + 'static {
     type SpiBus: embedded_hal_async::spi::SpiBus + Send + 'static;
     /// SPI configuration failure reported by the vendor HAL.
     type SpiError: core::error::Error;
+    /// Type-erased UART controller token.
+    type UartController: Send + 'static;
 
     /// Consumes one raw pin token as a configurable digital pin.
     fn digital(pin: Self::PinToken) -> Self::DigitalPin;
@@ -94,9 +96,14 @@ pub trait RuntimeUartPlatform: RuntimePlatform {
     type UartError: core::error::Error;
 
     /// Returns whether the selected physical pins can be routed as UART.
-    fn supports_uart(tx: Option<&Self::PinToken>, rx: Option<&Self::PinToken>) -> bool;
-    /// Consumes selected pins and allocates a UART controller.
+    fn supports_uart(
+        controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+    ) -> bool;
+    /// Consumes one Platform-owned controller and the selected pins.
     fn uart(
+        controller: Self::UartController,
         tx: Option<Self::PinToken>,
         rx: Option<Self::PinToken>,
         config: UartConfig,
@@ -135,10 +142,17 @@ struct RuntimePin<Pin> {
     owner: Option<&'static str>,
 }
 
-struct RuntimeIoState<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> {
+struct RuntimeIoState<
+    H: RuntimePlatform,
+    const P: usize,
+    const I: usize,
+    const S: usize,
+    const U: usize,
+> {
     pins: [RuntimePin<H::PinToken>; P],
     i2c: [Option<H::I2cController>; I],
     spi: [Option<H::SpiController>; S],
+    uart: [Option<H::UartController>; U],
 }
 
 /// Board-generated owner of exposed pins and Platform-owned runtime controllers.
@@ -146,11 +160,17 @@ struct RuntimeIoState<H: RuntimePlatform, const P: usize, const I: usize, const 
 /// Every physical token can be claimed once during a boot. An acquisition that
 /// needs several resources checks all of them under one critical section before
 /// moving any token, so a failed conflict check cannot partially consume state.
-pub struct RuntimeIo<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> {
-    state: critical_section::Mutex<RefCell<RuntimeIoState<H, P, I, S>>>,
+pub struct RuntimeIo<
+    H: RuntimePlatform,
+    const P: usize,
+    const I: usize,
+    const S: usize,
+    const U: usize = 0,
+> {
+    state: critical_section::Mutex<RefCell<RuntimeIoState<H, P, I, S, U>>>,
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> RuntimeIo<H, P, I, S> {
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> RuntimeIo<H, P, I, S, 0> {
     /// Creates the unified runtime owner from Board-named pin tokens and the
     /// compatible controller pools declared by the Platform.
     #[must_use]
@@ -168,6 +188,33 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Runtime
                 }),
                 i2c: i2c.map(Some),
                 spi: spi.map(Some),
+                uart: [],
+            })),
+        }
+    }
+}
+
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    RuntimeIo<H, P, I, S, U>
+{
+    /// Creates the unified runtime owner with a Platform-owned UART pool.
+    #[must_use]
+    pub fn new_with_uart(
+        pins: [(&'static str, H::PinToken); P],
+        i2c: [H::I2cController; I],
+        spi: [H::SpiController; S],
+        uart: [H::UartController; U],
+    ) -> Self {
+        Self {
+            state: critical_section::Mutex::new(RefCell::new(RuntimeIoState {
+                pins: pins.map(|(name, token)| RuntimePin {
+                    name,
+                    token: Some(token),
+                    owner: None,
+                }),
+                i2c: i2c.map(Some),
+                spi: spi.map(Some),
+                uart: uart.map(Some),
             })),
         }
     }
@@ -271,8 +318,8 @@ impl<E> From<LeaseError> for RuntimeOpenError<E> {
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> DigitalProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    DigitalProvider for RuntimeIo<H, P, I, S, U>
 {
     type Pin = H::DigitalPin;
     type Error = LeaseError;
@@ -304,8 +351,8 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Digital
     }
 }
 
-impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize> AnalogProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    AnalogProvider for RuntimeIo<H, P, I, S, U>
 {
     type Input = H::AnalogInput;
     type Output = H::AnalogOutput;
@@ -356,8 +403,8 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize> A
     }
 }
 
-impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize>
-    RuntimeIo<H, P, I, S>
+impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    RuntimeIo<H, P, I, S, U>
 {
     fn acquire_analog<Value>(
         &self,
@@ -392,8 +439,8 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize>
     }
 }
 
-impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize> PwmProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    PwmProvider for RuntimeIo<H, P, I, S, U>
 {
     type Output = H::Pwm;
     type Error = RuntimeOpenError<H::PwmError>;
@@ -438,8 +485,8 @@ impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize> PwmP
     }
 }
 
-impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> UartProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    UartProvider for RuntimeIo<H, P, I, S, U>
 {
     type Port = H::Uart;
     type Error = RuntimeOpenError<H::UartError>;
@@ -462,7 +509,11 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> Uar
             let rx = rx_index.and_then(|index| state.pins[index].token.as_ref());
             (tx_index.is_none() || tx.is_some())
                 && (rx_index.is_none() || rx.is_some())
-                && H::supports_uart(tx, rx)
+                && state
+                    .uart
+                    .iter()
+                    .flatten()
+                    .any(|controller| H::supports_uart(controller, tx, rx))
         })
     }
 
@@ -483,7 +534,7 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> Uar
         roles.extend(rx_index);
         self.ensure_distinct(&roles)?;
 
-        let (tx, rx) = critical_section::with(|section| {
+        let (controller, tx, rx) = critical_section::with(|section| {
             let mut state = self.state.borrow(section).borrow_mut();
             for (_, index) in &roles {
                 let pin = &state.pins[*index];
@@ -496,9 +547,21 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> Uar
             }
             let tx_ref = tx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
             let rx_ref = rx_index.and_then(|(_, index)| state.pins[index].token.as_ref());
-            if !H::supports_uart(tx_ref, rx_ref) {
-                return Err(RuntimeOpenError::Unsupported { function: "UART" });
-            }
+            let controller_index = state.uart.iter().position(|controller| {
+                controller
+                    .as_ref()
+                    .is_some_and(|controller| H::supports_uart(controller, tx_ref, rx_ref))
+            });
+            let controller_index = match controller_index {
+                Some(index) => index,
+                None if state.uart.iter().any(Option::is_some) => {
+                    return Err(RuntimeOpenError::Unsupported { function: "UART" });
+                }
+                None => return Err(RuntimeOpenError::NoController { protocol: "UART" }),
+            };
+            let controller = state.uart[controller_index]
+                .take()
+                .ok_or(RuntimeOpenError::NoController { protocol: "UART" })?;
             let tx = tx_index.and_then(|(_, index)| state.pins[index].token.take());
             let rx = rx_index.and_then(|(_, index)| state.pins[index].token.take());
             if let Some((_, index)) = tx_index {
@@ -507,14 +570,14 @@ impl<H: RuntimeUartPlatform, const P: usize, const I: usize, const S: usize> Uar
             if let Some((_, index)) = rx_index {
                 state.pins[index].owner = Some("UART RX");
             }
-            Ok((tx, rx))
+            Ok((controller, tx, rx))
         })?;
-        H::uart(tx, rx, request.config).map_err(RuntimeOpenError::Platform)
+        H::uart(controller, tx, rx, request.config).map_err(RuntimeOpenError::Platform)
     }
 }
 
-impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize> I2sProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    I2sProvider for RuntimeIo<H, P, I, S, U>
 {
     type Stream = H::I2s;
     type Error = RuntimeOpenError<H::I2sError>;
@@ -596,8 +659,8 @@ impl<H: RuntimeI2sPlatform, const P: usize, const I: usize, const S: usize> I2sP
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> I2cProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize> I2cProvider
+    for RuntimeIo<H, P, I, S, U>
 {
     type Bus = H::I2cBus;
     type Error = RuntimeOpenError<H::I2cError>;
@@ -649,8 +712,8 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> I2cProv
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> SpiProvider
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize> SpiProvider
+    for RuntimeIo<H, P, I, S, U>
 {
     type Bus = H::SpiBus;
     type Error = RuntimeOpenError<H::SpiError>;
@@ -728,8 +791,8 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> SpiProv
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> crate::ExposedIo
-    for RuntimeIo<H, P, I, S>
+impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
+    crate::ExposedIo for RuntimeIo<H, P, I, S, U>
 {
 }
 

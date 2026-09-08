@@ -94,6 +94,7 @@ hal:
   bindings: [gpio, i2c-device, spi-bus]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2]
+  runtime-uart-controllers: [UART1]
 selection:
   board-chips: [acme]
   targets:
@@ -139,13 +140,15 @@ exposed-io:
     let rust =
         render_board_hal_for_platform(&board, &resolved, &platform).expect("generated runtime I/O");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<2, 1, 1>"));
+    assert!(rust.contains("hal::RuntimeIo<2, 1, 1, 1>"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(!rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));
     assert!(rust.contains("hal::runtime_pin(bindings.pin_clock)"));
     assert!(rust.contains("hal::runtime_i2c_controller"));
     assert!(rust.contains("hal::runtime_spi_controller"));
+    assert!(rust.contains("controller_binding_type!(UART1)"));
+    assert!(rust.contains("hal::runtime_uart_controller"));
 }
 
 #[test]
@@ -168,11 +171,12 @@ fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
     let rust = render_board_hal_for_platform(&board, &resolved, &platform)
         .expect("generated ESP32-S3 runtime owner");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<4, 2, 2>"));
+    assert!(rust.contains("hal::RuntimeIo<4, 2, 2, 1>"));
     assert!(rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));
     assert!(rust.contains("controller_binding_type!(SPI3)"));
+    assert!(rust.contains("controller_binding_type!(UART1)"));
 }
 
 #[test]

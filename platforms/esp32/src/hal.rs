@@ -3,8 +3,9 @@
 use barracuda_board_hal::{
     audio, ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
     Pull as BoardPull, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimePlatform,
-    RuntimePwmPlatform, RuntimeUartPlatform, UartConfig, UnavailableAnalogInput,
-    UnavailableAnalogOutput, UnavailableI2s, UnavailablePwm, UnavailableUart, UnsupportedFunction,
+    RuntimePwmPlatform, RuntimeUartPlatform, UartConfig, UartDataBits, UartParity, UartStopBits,
+    UnavailableAnalogInput, UnavailableAnalogOutput, UnavailableI2s, UnavailablePwm,
+    UnsupportedFunction,
 };
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
@@ -28,6 +29,10 @@ use esp_hal::{
     },
     spi::Mode as HalSpiMode,
     time::Rate,
+    uart::{
+        AnyUart, Config as HalUartConfig, ConfigError as UartConfigError, DataBits,
+        Instance as UartInstance, Parity, StopBits, Uart,
+    },
     Async, Blocking,
 };
 
@@ -55,6 +60,33 @@ pub type SpiConfigError = SpiConfigErrorInner;
 /// I2C configuration failure surfaced by generated Board initialization.
 pub type I2cConfigError = I2cConfigErrorInner;
 
+/// Failure while configuring a runtime ESP UART.
+#[derive(Debug)]
+pub enum ExposedUartConfigError {
+    /// The ESP HAL rejected the requested line configuration.
+    Peripheral(UartConfigError),
+    /// ESP UART hardware does not support nine data bits.
+    UnsupportedDataBits,
+}
+
+impl core::fmt::Display for ExposedUartConfigError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Peripheral(error) => error.fmt(formatter),
+            Self::UnsupportedDataBits => formatter.write_str("ESP UART supports 7 or 8 data bits"),
+        }
+    }
+}
+
+impl core::error::Error for ExposedUartConfigError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Peripheral(error) => Some(error),
+            Self::UnsupportedDataBits => None,
+        }
+    }
+}
+
 /// Type-erased Platform adapter used by generated runtime I/O composition.
 pub struct RuntimeAdapter;
 
@@ -67,6 +99,7 @@ impl RuntimePlatform for RuntimeAdapter {
     type SpiController = AnySpi<'static>;
     type SpiBus = ExposedSpiBus;
     type SpiError = SpiConfigError;
+    type UartController = AnyUart<'static>;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         DynamicPin {
@@ -154,19 +187,54 @@ impl RuntimePwmPlatform for RuntimeAdapter {
 }
 
 impl RuntimeUartPlatform for RuntimeAdapter {
-    type Uart = UnavailableUart;
-    type UartError = UnsupportedFunction;
+    type Uart = Uart<'static, Async>;
+    type UartError = ExposedUartConfigError;
 
-    fn supports_uart(_tx: Option<&Self::PinToken>, _rx: Option<&Self::PinToken>) -> bool {
-        false
+    fn supports_uart(
+        _controller: &Self::UartController,
+        tx: Option<&Self::PinToken>,
+        rx: Option<&Self::PinToken>,
+    ) -> bool {
+        tx.is_some() || rx.is_some()
     }
 
     fn uart(
-        _tx: Option<Self::PinToken>,
-        _rx: Option<Self::PinToken>,
-        _config: UartConfig,
+        controller: Self::UartController,
+        tx: Option<Self::PinToken>,
+        rx: Option<Self::PinToken>,
+        config: UartConfig,
     ) -> Result<Self::Uart, Self::UartError> {
-        Err(UnsupportedFunction::new("UART"))
+        let data_bits = match config.data_bits {
+            UartDataBits::Seven => DataBits::_7,
+            UartDataBits::Eight => DataBits::_8,
+            UartDataBits::Nine => return Err(ExposedUartConfigError::UnsupportedDataBits),
+        };
+        let parity = match config.parity {
+            UartParity::None => Parity::None,
+            UartParity::Even => Parity::Even,
+            UartParity::Odd => Parity::Odd,
+        };
+        let stop_bits = match config.stop_bits {
+            UartStopBits::One => StopBits::_1,
+            UartStopBits::Two => StopBits::_2,
+        };
+        let config = HalUartConfig::default()
+            .with_baudrate(config.baud)
+            .with_data_bits(data_bits)
+            .with_parity(parity)
+            .with_stop_bits(stop_bits);
+        let uart = Uart::new(controller, config).map_err(ExposedUartConfigError::Peripheral)?;
+        let uart = if let Some(tx) = tx {
+            uart.with_tx(tx)
+        } else {
+            uart
+        };
+        let uart = if let Some(rx) = rx {
+            uart.with_rx(rx)
+        } else {
+            uart
+        };
+        Ok(uart.into_async())
     }
 }
 
@@ -197,17 +265,18 @@ impl RuntimeI2sPlatform for RuntimeAdapter {
 }
 
 /// Generated exposed-I/O owner specialized to the ESP Platform adapter.
-pub type RuntimeIo<const P: usize, const I: usize, const S: usize> =
-    barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S>;
+pub type RuntimeIo<const P: usize, const I: usize, const S: usize, const U: usize> =
+    barracuda_board_hal::RuntimeIo<RuntimeAdapter, P, I, S, U>;
 
 /// Constructs the selected Board's unified runtime I/O owner.
 #[must_use]
-pub fn runtime_io<const P: usize, const I: usize, const S: usize>(
+pub fn runtime_io<const P: usize, const I: usize, const S: usize, const U: usize>(
     pins: [(&'static str, AnyPin<'static>); P],
     i2c: [AnyI2c<'static>; I],
     spi: [AnySpi<'static>; S],
-) -> RuntimeIo<P, I, S> {
-    RuntimeIo::new(pins, i2c, spi)
+    uart: [AnyUart<'static>; U],
+) -> RuntimeIo<P, I, S, U> {
+    RuntimeIo::new_with_uart(pins, i2c, spi, uart)
 }
 
 /// Erases one selected pin token while preserving its exclusive ownership.
@@ -226,6 +295,12 @@ pub fn runtime_i2c_controller(i2c: impl I2cInstance + 'static) -> AnyI2c<'static
 #[must_use]
 pub fn runtime_spi_controller(spi: impl SpiInstance + 'static) -> AnySpi<'static> {
     spi.degrade()
+}
+
+/// Erases one selected UART controller token for the runtime pool.
+#[must_use]
+pub fn runtime_uart_controller(uart: impl UartInstance + 'static) -> AnyUart<'static> {
+    uart.degrade()
 }
 
 /// Converts a selected raw pin token into a digital output.

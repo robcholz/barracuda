@@ -17,7 +17,7 @@ fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
     fs::write(
         directory.join("platform.yml"),
         format!(
-            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
+            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\n  runtime-uart-controllers: [UART1]\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
     )
     .expect("Platform manifest");
@@ -57,6 +57,7 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     assert!(!board.hal().supports(HalBinding::SpiDevice));
     assert_eq!(board.hal().runtime_i2c_controllers(), ["I2C0", "I2C1"]);
     assert_eq!(board.hal().runtime_spi_controllers(), ["SPI2"]);
+    assert_eq!(board.hal().runtime_uart_controllers(), ["UART1"]);
     assert_eq!(
         board
             .application()
