@@ -1214,6 +1214,11 @@ fn render_generic_hal(
                 "impl ::barracuda_board_hal::display::BuiltinDisplay for GeneratedBuiltins {\n    type Display = ::barracuda_board_hal::UnavailableDisplay;\n    fn take_display(&mut self) -> Option<Self::Display> { None }\n}\n\n",
             );
         }
+        if !primary_capabilities.contains("audio-codec") {
+            source.push_str(
+                "impl ::barracuda_board_hal::audio::BuiltinAudioCodec for GeneratedBuiltins {\n    type AudioCodec = ::barracuda_board_hal::UnavailableAudioCodec;\n    fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> { None }\n}\n\n",
+            );
+        }
     }
 
     source.push_str(&format!(

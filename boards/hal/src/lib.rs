@@ -230,6 +230,39 @@ impl camera::BuiltinCamera for NoBuiltinCapabilities {
     }
 }
 
+/// Uninhabited audio-codec capability used when a Board has no built-in codec.
+pub struct UnavailableAudioCodec {
+    never: Infallible,
+}
+
+impl audio::AudioCodec for UnavailableAudioCodec {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> audio::AudioDescriptor {
+        match self.never {}
+    }
+
+    fn set_output_volume(&mut self, _volume: u8) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _samples: &[i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _samples: &mut [i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl audio::BuiltinAudioCodec for NoBuiltinCapabilities {
+    type AudioCodec = UnavailableAudioCodec;
+
+    fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> {
+        None
+    }
+}
+
 /// Uninhabited display capability used when a Board has no built-in display.
 pub struct UnavailableDisplay {
     never: Infallible,

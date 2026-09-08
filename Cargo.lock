@@ -696,6 +696,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-audio-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-board"
 version = "0.1.0"
 
@@ -1596,6 +1607,7 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
+ "barracuda-audio-plugin",
  "barracuda-board-hal",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",

@@ -13,9 +13,9 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, AnalogProvider,
-    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider, PwmProvider,
-    SpiProvider, UartProvider,
+    audio::BuiltinAudioCodec, camera::BuiltinCamera, display::BuiltinDisplay,
+    led_strip::BuiltinLedStrip, AnalogProvider, BoardHalResources, DigitalProvider, ExposedIo,
+    I2cProvider, I2sProvider, PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -78,7 +78,9 @@ impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: BuiltinCamera + BuiltinDisplay + BuiltinLedStrip + Unpin,
+    Builtins: BuiltinAudioCodec + BuiltinCamera + BuiltinDisplay + BuiltinLedStrip + Unpin,
+    Builtins::AudioCodec: Send + 'static,
+    <Builtins::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
     Builtins::Display: Send + 'static,
     <Builtins::Display as barracuda_board_hal::display::Display>::ControlError: core::fmt::Debug,
     <Builtins::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
@@ -194,6 +196,7 @@ where
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
+            barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),
             barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
             barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
