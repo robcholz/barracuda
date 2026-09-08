@@ -6,7 +6,7 @@ selection:
   board-chips:
     - browser
   targets:
-    - triple: wasm32-unknown-unknown
+    - triple: wasm32-wasip1
       rustflags:
         - -C
         - link-arg=-zstack-size=8388608

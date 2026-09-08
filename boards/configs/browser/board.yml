@@ -2,6 +2,6 @@ name: browser
 hardware:
   chip: browser
 toolchain:
-  target: wasm32-unknown-unknown
+  target: wasm32-wasip1
 native-layout:
   artifact: file-layout.yml

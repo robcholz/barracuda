@@ -1,18 +1,34 @@
 #include <stdarg.h>
+#include <stdint.h>
 
-/* Keep Lua's C ABI under private names; Lunka models these calls as diverging. */
-#define lua_error barracuda_lua_error_impl
-#define lua_yieldk barracuda_lua_yieldk_impl
-#define luaL_argerror barracuda_luaL_argerror_impl
-#define luaL_typeerror barracuda_luaL_typeerror_impl
-#define luaL_error barracuda_luaL_error_impl
-#include "lua.h"
-#include "lauxlib.h"
-#undef lua_error
-#undef lua_yieldk
-#undef luaL_argerror
-#undef luaL_typeerror
-#undef luaL_error
+typedef struct lua_State lua_State;
+typedef intptr_t lua_KContext;
+typedef int (*lua_KFunction)(lua_State *, int, lua_KContext);
+
+extern int barracuda_lua_error_impl(lua_State *state);
+extern int barracuda_lua_yieldk_impl(
+    lua_State *state,
+    int results,
+    lua_KContext context,
+    lua_KFunction continuation
+);
+extern int barracuda_luaL_argerror_impl(
+    lua_State *state,
+    int argument,
+    const char *message
+);
+extern int barracuda_luaL_typeerror_impl(
+    lua_State *state,
+    int argument,
+    const char *type_name
+);
+extern void luaL_where(lua_State *state, int level);
+extern const char *lua_pushvfstring(
+    lua_State *state,
+    const char *format,
+    va_list arguments
+);
+extern void lua_concat(lua_State *state, int values);
 
 __attribute__((noreturn)) void lua_error(lua_State *state) {
     (void)barracuda_lua_error_impl(state);
@@ -55,7 +71,7 @@ __attribute__((noreturn)) void luaL_error(
     va_list arguments;
     va_start(arguments, format);
     luaL_where(state, 1);
-    lua_pushvfstring(state, format, arguments);
+    (void)lua_pushvfstring(state, format, arguments);
     va_end(arguments);
     lua_concat(state, 2);
     (void)barracuda_lua_error_impl(state);

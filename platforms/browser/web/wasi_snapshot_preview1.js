@@ -18,6 +18,17 @@ function view() {
   return new DataView(memory.buffer);
 }
 
+export function args_get() {
+  return ERRNO_SUCCESS;
+}
+
+export function args_sizes_get(count, size) {
+  const data = view();
+  data.setUint32(count, 0, true);
+  data.setUint32(size, 0, true);
+  return ERRNO_SUCCESS;
+}
+
 export function environ_get() {
   return ERRNO_SUCCESS;
 }

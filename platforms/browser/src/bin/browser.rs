@@ -1,4 +1,4 @@
-//! Host launcher for the Barracuda Browser Platform.
+//! Development server and static bundle exporter for the Browser Platform.
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}
@@ -25,16 +25,17 @@ mod host {
     };
 
     use anyhow::{anyhow, bail, Context as _};
-    use barracuda_platform_net_gateway::{serve as serve_gateway, GatewayConfig};
     use tokio::{
         io::{AsyncReadExt as _, AsyncWriteExt as _},
         net::{TcpListener, TcpStream},
     };
-    use wasm_bindgen_cli_support::Bindgen;
 
     const INDEX: &[u8] = include_bytes!("../../web/index.html");
     const BOOTSTRAP: &[u8] = include_bytes!("../../web/bootstrap.js");
     const WORKER: &[u8] = include_bytes!("../../web/worker.js");
+    const BROWSER_HOST: &[u8] = include_bytes!("../../web/browser_host.js");
+    const BROWSER_WEBSOCKET: &[u8] = include_bytes!("../../web/browser_websocket.js");
+    const SERVICE_WORKER: &[u8] = include_bytes!("../../web/service-worker.js");
     const WASI: &[u8] = include_bytes!("../../web/wasi_snapshot_preview1.js");
 
     struct Inputs {
@@ -48,43 +49,26 @@ mod host {
         let inputs = inputs()?;
         let flash = barracuda_system_image::deploy_selected(&inputs.workspace)
             .map_err(|error| anyhow!(error))?;
-        let output = inputs.target_directory.join("barracuda-browser");
-        generate_bindings(&inputs.application, &output)?;
+        let bundle = inputs.target_directory.join("barracuda-browser");
+        export_bundle(&inputs.application, Path::new(flash.destination()), &bundle)?;
 
-        let http_listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
-            .context("bind Browser Platform HTTP server")?;
-        let http_address = http_listener
+            .context("bind Browser Platform development server")?;
+        let address = listener
             .local_addr()
-            .context("read Browser Platform HTTP address")?;
-        let origin = format!("http://{http_address}");
-        let gateway_listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
-            .await
-            .context("bind Browser Platform network gateway")?;
-        let gateway_address = gateway_listener
-            .local_addr()
-            .context("read Browser Platform gateway address")?;
-        let gateway_url = format!("ws://{gateway_address}/v1/connect");
-        let page_url = format!("{origin}/");
+            .context("read Browser Platform development server address")?;
+        let page_url = format!("http://{address}/");
+        let server = tokio::spawn(serve_http(listener, bundle.clone()));
 
-        let gateway = tokio::spawn(async move {
-            serve_gateway(gateway_listener, GatewayConfig::browser(origin)).await
-        });
-        let server = tokio::spawn(serve_http(
-            http_listener,
-            output,
-            PathBuf::from(flash.destination()),
-            gateway_url,
-        ));
-
+        println!("Barracuda Browser bundle: {}", bundle.display());
         println!("Barracuda Browser Platform: {page_url}");
         if inputs.open_browser {
             open(&page_url)?;
         }
 
         tokio::select! {
-            result = gateway => result.context("network gateway task stopped")??,
-            result = server => result.context("browser HTTP task stopped")??,
+            result = server => result.context("browser development server stopped")??,
             result = tokio::signal::ctrl_c() => result.context("wait for Ctrl-C")?,
         }
         Ok(())
@@ -95,7 +79,7 @@ mod host {
         let application = arguments
             .next()
             .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("missing wasm application path"))?;
+            .ok_or_else(|| anyhow!("missing WASI application path"))?;
         let workspace = arguments
             .next()
             .map(PathBuf::from)
@@ -123,60 +107,45 @@ mod host {
         })
     }
 
-    fn generate_bindings(application: &Path, output: &Path) -> anyhow::Result<()> {
-        fs::create_dir_all(output)
-            .with_context(|| format!("create browser output `{}`", output.display()))?;
-        Bindgen::new()
-            .input_path(application)
-            .out_name("barracuda_system")
-            .web(true)?
-            .generate(output)
-            .context("generate browser bindings")?;
-
-        let glue_path = output.join("barracuda_system.js");
-        let glue = fs::read_to_string(&glue_path)
-            .with_context(|| format!("read generated bindings `{}`", glue_path.display()))?;
-        let glue = glue.replace(
-            "from \"wasi_snapshot_preview1\"",
-            "from \"./wasi_snapshot_preview1.js\"",
-        );
-        let marker = "    wasm = instance.exports;";
-        if !glue.contains(marker) {
-            bail!("generated browser bindings do not expose an initialization point");
+    fn export_bundle(application: &Path, flash: &Path, output: &Path) -> anyhow::Result<()> {
+        if output.exists() {
+            fs::remove_dir_all(output)
+                .with_context(|| format!("remove stale Browser bundle `{}`", output.display()))?;
         }
-        let glue = glue.replace(
-            marker,
-            "    wasm = instance.exports;\n    import1.setMemory(wasm.memory);",
-        );
-        fs::write(&glue_path, glue)
-            .with_context(|| format!("write generated bindings `{}`", glue_path.display()))
+        fs::create_dir_all(output)
+            .with_context(|| format!("create Browser bundle `{}`", output.display()))?;
+        for (name, bytes) in [
+            ("index.html", INDEX),
+            ("bootstrap.js", BOOTSTRAP),
+            ("worker.js", WORKER),
+            ("browser_host.js", BROWSER_HOST),
+            ("browser_websocket.js", BROWSER_WEBSOCKET),
+            ("service-worker.js", SERVICE_WORKER),
+            ("wasi_snapshot_preview1.js", WASI),
+        ] {
+            fs::write(output.join(name), bytes)
+                .with_context(|| format!("write Browser bundle asset `{name}`"))?;
+        }
+        fs::copy(application, output.join("barracuda_system.wasm"))
+            .context("copy WASI System into Browser bundle")?;
+        fs::copy(flash, output.join("board.flash"))
+            .context("copy System image into Browser bundle")?;
+        Ok(())
     }
 
-    async fn serve_http(
-        listener: TcpListener,
-        generated: PathBuf,
-        flash: PathBuf,
-        gateway_url: String,
-    ) -> std::io::Result<()> {
+    async fn serve_http(listener: TcpListener, bundle: PathBuf) -> std::io::Result<()> {
         loop {
             let (stream, _peer) = listener.accept().await?;
-            let generated = generated.clone();
-            let flash = flash.clone();
-            let gateway_url = gateway_url.clone();
+            let bundle = bundle.clone();
             tokio::spawn(async move {
-                if let Err(error) = serve_request(stream, &generated, &flash, &gateway_url).await {
+                if let Err(error) = serve_request(stream, &bundle).await {
                     eprintln!("Browser Platform HTTP request failed: {error}");
                 }
             });
         }
     }
 
-    async fn serve_request(
-        mut stream: TcpStream,
-        generated: &Path,
-        flash: &Path,
-        gateway_url: &str,
-    ) -> std::io::Result<()> {
+    async fn serve_request(mut stream: TcpStream, bundle: &Path) -> std::io::Result<()> {
         let mut request = [0_u8; 8 * 1024];
         let count = stream.read(&mut request).await?;
         let first_line = String::from_utf8_lossy(&request[..count])
@@ -203,31 +172,20 @@ mod host {
             .await;
         }
 
-        let dynamic;
-        let bytes = match path {
-            "/" | "/index.html" => INDEX,
-            "/bootstrap.js" => BOOTSTRAP,
-            "/worker.js" => WORKER,
-            "/wasi_snapshot_preview1.js" => WASI,
-            "/config.js" => {
-                dynamic = format!("export const gatewayUrl = {gateway_url:?};\n").into_bytes();
-                &dynamic
-            }
-            "/barracuda_system.js" => {
-                dynamic = fs::read(generated.join("barracuda_system.js"))?;
-                &dynamic
-            }
-            "/barracuda_system_bg.wasm" => {
-                dynamic = fs::read(generated.join("barracuda_system_bg.wasm"))?;
-                &dynamic
-            }
-            "/board.flash" => {
-                dynamic = fs::read(flash)?;
-                &dynamic
-            }
+        let name = match path {
+            "/" | "/index.html" => "index.html",
+            "/bootstrap.js" => "bootstrap.js",
+            "/worker.js" => "worker.js",
+            "/browser_host.js" => "browser_host.js",
+            "/browser_websocket.js" => "browser_websocket.js",
+            "/service-worker.js" => "service-worker.js",
+            "/wasi_snapshot_preview1.js" => "wasi_snapshot_preview1.js",
+            "/barracuda_system.wasm" => "barracuda_system.wasm",
+            "/board.flash" => "board.flash",
             _ => return respond(&mut stream, 404, "text/plain", b"Not Found", method).await,
         };
-        respond(&mut stream, 200, content_type(path), bytes, method).await
+        let bytes = fs::read(bundle.join(name))?;
+        respond(&mut stream, 200, content_type(name), &bytes, method).await
     }
 
     async fn respond(

@@ -1,18 +1,25 @@
 //! Browser Platform implementation for a dedicated Web Worker.
 
-#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#![cfg_attr(not(target_os = "wasi"), allow(dead_code))]
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
+#[allow(unsafe_code)]
+mod executor;
+#[cfg(target_os = "wasi")]
+#[allow(unsafe_code)]
+mod ffi;
+#[cfg(target_os = "wasi")]
 mod flash;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 pub mod network;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 mod time;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 mod implementation {
     use core::cell::RefCell;
 
+    use crate::flash::{OpfsNorFlash, OpfsNorFlashError};
     use barracuda_board::Board;
     use barracuda_platform::{
         NamedPartition, PartitionAccess, PartitionFilesystem, Partitions, PartitionsInsertError,
@@ -21,9 +28,6 @@ mod implementation {
     use embassy_embedded_hal::flash::partition::BlockingPartition;
     use embassy_executor::Spawner;
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
-    use wasm_bindgen::{JsCast as _, JsValue};
-
-    use crate::flash::{OpfsNorFlash, OpfsNorFlashError};
 
     const FLASH_CAPACITY: usize = 4 * 1024 * 1024;
     const SYSTEM_OFFSET: u32 = 0;
@@ -105,10 +109,7 @@ mod implementation {
         type Error = BrowserPlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
-            js_sys::global()
-                .dyn_into::<web_sys::DedicatedWorkerGlobalScope>()
-                .map(|_| ())
-                .map_err(|_| BrowserPlatformError::NotDedicatedWorker)
+            Ok(())
         }
 
         async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
@@ -120,7 +121,8 @@ mod implementation {
             let partitions = Self::initialize_partitions().await?;
             let ip_stack = crate::network::create_stack(spawner)
                 .await
-                .map_err(BrowserPlatformError::javascript)?;
+                .map_err(BrowserPlatformError::Host)?;
+            crate::ffi::report_device_url("./");
             Ok(PlatformResources {
                 ip_stack,
                 tls: barracuda_tls::PlaintextTls,
@@ -138,9 +140,6 @@ mod implementation {
             /// Canonical chip name declared by the Board.
             chip: &'static str,
         },
-        /// Startup was attempted outside a dedicated worker.
-        #[error("Browser Platform must run in a dedicated Web Worker")]
-        NotDedicatedWorker,
         /// The generated application entry was invoked without boot inputs.
         #[error("Browser Platform boot inputs are not configured")]
         NotConfigured,
@@ -159,91 +158,63 @@ mod implementation {
         #[error("Browser native partition collection rejected an entry: {0:?}")]
         Partitions(#[from] PartitionsInsertError),
         /// A browser API operation failed.
-        #[error("Browser API operation failed: {0}")]
-        Javascript(String),
-    }
-
-    impl BrowserPlatformError {
-        fn javascript(value: JsValue) -> Self {
-            Self::Javascript(
-                value
-                    .as_string()
-                    .unwrap_or_else(|| String::from("unknown JavaScript exception")),
-            )
-        }
+        #[error("Browser host operation failed: {0}")]
+        Host(String),
     }
 
     #[doc(hidden)]
-    pub fn configure_boot(
-        gateway_url: String,
-        system_image: js_sys::Uint8Array,
-    ) -> Result<(), JsValue> {
-        js_sys::global()
-            .dyn_into::<web_sys::DedicatedWorkerGlobalScope>()
-            .map_err(|_| JsValue::from_str("Barracuda must run in a dedicated Web Worker"))?;
-        let actual = system_image.length() as usize;
+    pub fn configure_boot() -> Result<(), BrowserPlatformError> {
+        let system_image = crate::ffi::system_image()
+            .map_err(|error| BrowserPlatformError::Host(error.to_string()))?;
+        let actual = system_image.len();
         if actual != FLASH_CAPACITY {
-            return Err(JsValue::from_str(
-                &BrowserPlatformError::ImageSize {
-                    expected: FLASH_CAPACITY,
-                    actual,
-                }
-                .to_string(),
-            ));
+            return Err(BrowserPlatformError::ImageSize {
+                expected: FLASH_CAPACITY,
+                actual,
+            });
         }
-        crate::network::configure_gateway(gateway_url)?;
         BOOT_CONFIG.with(|configured| {
             let mut configured = configured.borrow_mut();
             if configured.is_some() {
-                return Err(JsValue::from_str("Browser Platform is already starting"));
+                return Err(BrowserPlatformError::Host(String::from(
+                    "Browser Platform is already starting",
+                )));
             }
-            configured.replace(BootConfig {
-                system_image: system_image.to_vec(),
-            });
+            configured.replace(BootConfig { system_image });
             Ok(())
         })
     }
 
     #[doc(hidden)]
     pub fn report_fatal(message: &str) {
-        if let Ok(worker) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
-            let event = js_sys::Object::new();
-            let _ = js_sys::Reflect::set(
-                &event,
-                &JsValue::from_str("type"),
-                &JsValue::from_str("error"),
-            );
-            let _ = js_sys::Reflect::set(
-                &event,
-                &JsValue::from_str("message"),
-                &JsValue::from_str(message),
-            );
-            let _ = worker.post_message(&event);
-        }
+        crate::ffi::report_error(message);
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 pub use implementation::{
     BrowserPartition, BrowserPartitions, BrowserPlatform, BrowserPlatformError,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_os = "wasi"))]
 /// Browser Platform marker available to host-side catalog tooling.
 pub struct BrowserPlatform;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
+#[doc(hidden)]
+pub use executor::start as __start_executor;
+#[cfg(target_os = "wasi")]
+#[doc(hidden)]
+pub use ffi::report_started as __report_started;
+#[cfg(target_os = "wasi")]
 #[doc(hidden)]
 pub use implementation::{configure_boot as __configure_boot, report_fatal as __report_fatal};
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 #[doc(hidden)]
-pub use js_sys as __js_sys;
-#[cfg(target_arch = "wasm32")]
-#[doc(hidden)]
-pub use wasm_bindgen as __wasm_bindgen;
+pub use time::dispatch as __dispatch_alarm;
 
 /// Generates the Web Worker entry around one Barracuda application future.
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_os = "wasi")]
 #[macro_export]
 macro_rules! platform_entry {
     (|$spawner:ident| $application:expr) => {
@@ -257,24 +228,26 @@ macro_rules! platform_entry {
             }
         }
 
-        use $crate::__wasm_bindgen as wasm_bindgen;
-
-        #[$crate::__wasm_bindgen::prelude::wasm_bindgen]
+        #[unsafe(no_mangle)]
         #[doc(hidden)]
-        pub fn start(
-            gateway_url: std::string::String,
-            system_image: $crate::__wasm_bindgen::JsValue,
-        ) -> Result<(), $crate::__wasm_bindgen::JsValue> {
-            use $crate::__wasm_bindgen::JsCast as _;
-
-            let system_image = system_image.dyn_into::<$crate::__js_sys::Uint8Array>()?;
-            $crate::__configure_boot(gateway_url, system_image)?;
-            let executor =
-                std::boxed::Box::leak(std::boxed::Box::new(embassy_executor::Executor::new()));
-            executor.start(|spawner| {
+        pub extern "C" fn barracuda_browser_start() {
+            if let Err(error) = $crate::__configure_boot() {
+                $crate::__report_fatal(&alloc::format!("{error}"));
+                return;
+            }
+            if let Err(error) = $crate::__start_executor(|spawner| {
                 spawner.must_spawn(__browser_application(spawner));
-            });
-            Ok(())
+            }) {
+                $crate::__report_fatal(&alloc::format!("{error}"));
+                return;
+            }
+            $crate::__report_started();
+        }
+
+        #[unsafe(no_mangle)]
+        #[doc(hidden)]
+        pub extern "C" fn barracuda_browser_alarm() {
+            $crate::__dispatch_alarm();
         }
     };
 }

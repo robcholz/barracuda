@@ -1,11 +1,10 @@
 export async function bootBarracuda({
   wasmUrl,
-  wasmModuleUrl,
   systemImageUrl,
-  gatewayUrl,
   onDeviceUrl = () => {},
   onError = () => {},
 }) {
+  const serviceWorker = await installServiceWorker();
   const [wasm, image] = await Promise.all([
     fetch(wasmUrl)
       .then(requireOk)
@@ -20,6 +19,20 @@ export async function bootBarracuda({
   worker.addEventListener("message", ({ data }) => {
     if (data?.type === "device-url") onDeviceUrl(data.url);
     if (data?.type === "error") onError(data.message);
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.ports.length !== 1) return;
+    if (event.data?.type === "portal-request") {
+      const request = event.data.request;
+      worker.postMessage({ type: "portal-request", request }, [
+        request,
+        event.ports[0],
+      ]);
+    } else if (event.data?.type === "socket-open") {
+      worker.postMessage({ type: "socket-open", id: event.data.id }, [
+        event.ports[0],
+      ]);
+    }
   });
   const started = new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -42,9 +55,25 @@ export async function bootBarracuda({
     worker.addEventListener("message", onMessage);
     worker.addEventListener("error", onError);
   });
-  worker.postMessage({ wasm, wasmModuleUrl, image, gatewayUrl }, [wasm, image]);
+  worker.postMessage({ wasm, image }, [wasm, image]);
   await started;
+  await serviceWorker;
   return worker;
+}
+
+async function installServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error(
+      "this browser does not support the page-local network bridge",
+    );
+  }
+  await navigator.serviceWorker.register(
+    new URL("./service-worker.js", import.meta.url),
+    { type: "module", scope: "./" },
+  );
+  const registration = await navigator.serviceWorker.ready;
+  registration.active?.postMessage({ type: "register-bridge" });
+  return registration;
 }
 
 function requireOk(response) {

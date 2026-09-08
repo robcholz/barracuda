@@ -5,19 +5,13 @@ use core::ops::Range;
 use embedded_storage::nor_flash::{
     ErrorType, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
 };
-use wasm_bindgen::{JsCast as _, JsValue};
-use wasm_bindgen_futures::JsFuture;
-use web_sys::{
-    DedicatedWorkerGlobalScope, FileSystemDirectoryHandle, FileSystemFileHandle,
-    FileSystemGetDirectoryOptions, FileSystemGetFileOptions, FileSystemReadWriteOptions,
-    FileSystemSyncAccessHandle,
-};
+
+use crate::ffi;
 
 const ERASED_CHUNK: usize = 4096;
 
 /// Durable fixed-size NOR flash stored in the browser's Origin Private File System.
 pub struct OpfsNorFlash {
-    handle: FileSystemSyncAccessHandle,
     capacity: usize,
 }
 
@@ -29,39 +23,11 @@ impl OpfsNorFlash {
     /// Returns an error outside a dedicated worker, when OPFS is unavailable,
     /// or when an existing image has a different capacity.
     pub async fn open(name: &str, capacity: usize) -> Result<Self, OpfsNorFlashError> {
-        let worker = js_sys::global()
-            .dyn_into::<DedicatedWorkerGlobalScope>()
-            .map_err(|_| OpfsNorFlashError::Unavailable)?;
-        let root = JsFuture::from(worker.navigator().storage().get_directory())
-            .await
-            .map_err(OpfsNorFlashError::javascript)?
-            .dyn_into::<FileSystemDirectoryHandle>()
-            .map_err(|_| OpfsNorFlashError::Unavailable)?;
-
-        let directory_options = FileSystemGetDirectoryOptions::new();
-        directory_options.set_create(true);
-        let directory =
-            JsFuture::from(root.get_directory_handle_with_options("barracuda", &directory_options))
-                .await
-                .map_err(OpfsNorFlashError::javascript)?
-                .dyn_into::<FileSystemDirectoryHandle>()
-                .map_err(|_| OpfsNorFlashError::Unavailable)?;
-
-        let file_options = FileSystemGetFileOptions::new();
-        file_options.set_create(true);
-        let file = JsFuture::from(directory.get_file_handle_with_options(name, &file_options))
-            .await
-            .map_err(OpfsNorFlashError::javascript)?
-            .dyn_into::<FileSystemFileHandle>()
-            .map_err(|_| OpfsNorFlashError::Unavailable)?;
-        let handle = JsFuture::from(file.create_sync_access_handle())
-            .await
-            .map_err(OpfsNorFlashError::javascript)?
-            .dyn_into::<FileSystemSyncAccessHandle>()
-            .map_err(|_| OpfsNorFlashError::Unavailable)?;
-        let actual = handle.get_size().map_err(OpfsNorFlashError::javascript)? as usize;
-
-        let flash = Self { handle, capacity };
+        if name != "board.flash" {
+            return Err(OpfsNorFlashError::Unavailable);
+        }
+        let actual = ffi::stored_flash_size().map_err(OpfsNorFlashError::host)?;
+        let flash = Self { capacity };
         if actual == 0 {
             flash.initialize_erased()?;
         } else if actual != capacity {
@@ -98,9 +64,7 @@ impl OpfsNorFlash {
     }
 
     fn initialize_erased(&self) -> Result<(), OpfsNorFlashError> {
-        self.handle
-            .truncate_with_f64(self.capacity as f64)
-            .map_err(OpfsNorFlashError::javascript)?;
+        ffi::truncate_flash(self.capacity).map_err(OpfsNorFlashError::host)?;
         let erased = [0xff; ERASED_CHUNK];
         let mut offset = 0usize;
         while offset < self.capacity {
@@ -131,41 +95,21 @@ impl OpfsNorFlash {
     }
 
     fn read_exact(&self, offset: usize, bytes: &mut [u8]) -> Result<(), OpfsNorFlashError> {
-        let options = FileSystemReadWriteOptions::new();
-        options.set_at_f64(offset as f64);
-        let read = self
-            .handle
-            .read_with_u8_array_and_options(bytes, &options)
-            .map_err(OpfsNorFlashError::javascript)? as usize;
-        if read == bytes.len() {
-            Ok(())
-        } else {
-            Err(OpfsNorFlashError::ShortIo)
-        }
+        ffi::read_flash(offset, bytes).map_err(OpfsNorFlashError::host)
     }
 
     fn write_exact(&self, offset: usize, bytes: &[u8]) -> Result<(), OpfsNorFlashError> {
-        let options = FileSystemReadWriteOptions::new();
-        options.set_at_f64(offset as f64);
-        let written = self
-            .handle
-            .write_with_u8_array_and_options(bytes, &options)
-            .map_err(OpfsNorFlashError::javascript)? as usize;
-        if written == bytes.len() {
-            Ok(())
-        } else {
-            Err(OpfsNorFlashError::ShortIo)
-        }
+        ffi::write_flash(offset, bytes).map_err(OpfsNorFlashError::host)
     }
 
     fn flush(&self) -> Result<(), OpfsNorFlashError> {
-        self.handle.flush().map_err(OpfsNorFlashError::javascript)
+        ffi::flush_flash().map_err(OpfsNorFlashError::host)
     }
 }
 
 impl Drop for OpfsNorFlash {
     fn drop(&mut self) {
-        self.handle.close();
+        ffi::close_flash();
     }
 }
 
@@ -201,12 +145,8 @@ pub enum OpfsNorFlashError {
 }
 
 impl OpfsNorFlashError {
-    fn javascript(value: JsValue) -> Self {
-        Self::Javascript(
-            value
-                .as_string()
-                .unwrap_or_else(|| String::from("unknown JavaScript exception")),
-        )
+    fn host(error: ffi::HostError) -> Self {
+        Self::Javascript(error.to_string())
     }
 }
 

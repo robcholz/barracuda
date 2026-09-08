@@ -10,38 +10,32 @@ path = "src/bin/browser.rs"
 
 [dependencies]
 barracuda-board.workspace = true
-barracuda-platform-net-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["embedded-tls"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
-embassy-executor = { workspace = true, features = ["arch-wasm", "executor-thread"] }
+embassy-executor.workspace = true
+embassy-futures.workspace = true
 embassy-net.workspace = true
 embassy-net-driver-channel.workspace = true
 embassy-sync.workspace = true
+embassy-time.workspace = true
 embedded-storage = "0.3"
 heapless = "0.9"
 thiserror = "2"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(target_os = "wasi")'.dependencies]
 embassy-time-driver = { version = "0.2.2", features = ["tick-hz-1_000_000"] }
 embassy-time-queue-utils = "0.3.2"
-futures-channel = "0.3"
-js-sys = "0.3"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Crypto", "DedicatedWorkerGlobalScope", "Event", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetDirectoryOptions", "FileSystemGetFileOptions", "FileSystemReadWriteOptions", "FileSystemSyncAccessHandle", "MessageEvent", "Performance", "Request", "RequestInit", "RequestMode", "Response", "StorageManager", "WebSocket", "WorkerGlobalScope", "WorkerNavigator", "console"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
 anyhow = "1"
-barracuda-platform-net-gateway = { path = "../net-gateway" }
 barracuda-system-image = { path = "../../tools/system-image" }
 tokio = { version = "1.52.3", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wasm-bindgen-cli-support = "=0.2.127"
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]

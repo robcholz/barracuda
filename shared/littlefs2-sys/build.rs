@@ -2,14 +2,14 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
-        return link_wasi_artifact();
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("wasi") {
+        return build_wasi();
     }
 
     build_native()
 }
 
-fn link_wasi_artifact() -> Result<(), Box<dyn std::error::Error>> {
+fn build_wasi() -> Result<(), Box<dyn std::error::Error>> {
     if !cfg!(feature = "multiversion")
         || cfg!(feature = "assertions")
         || cfg!(feature = "malloc")
@@ -17,7 +17,10 @@ fn link_wasi_artifact() -> Result<(), Box<dyn std::error::Error>> {
         || cfg!(feature = "trace")
         || cfg!(feature = "unstable-littlefs-patched")
     {
-        return Err("the checked-in WASI artifact supports Barracuda's multiversion, no-malloc feature set only".into());
+        return Err(
+            "the WASI source build supports Barracuda's multiversion, no-malloc feature set only"
+                .into(),
+        );
     }
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
@@ -28,8 +31,19 @@ fn link_wasi_artifact() -> Result<(), Box<dyn std::error::Error>> {
         bindings,
         PathBuf::from(env::var("OUT_DIR")?).join("bindings.rs"),
     )?;
-    println!("cargo::rustc-link-search=native={}", artifact_dir.display());
-    println!("cargo::rustc-link-lib=static=lfs-sys");
+
+    cc::Build::new()
+        .flag("-std=c99")
+        .flag("-DLFS_NO_DEBUG")
+        .flag("-DLFS_NO_WARN")
+        .flag("-DLFS_NO_ERROR")
+        .flag("-DLFS_NO_ASSERT")
+        .flag("-DLFS_NO_MALLOC")
+        .flag("-DLFS_MULTIVERSION")
+        .include("littlefs")
+        .file("littlefs/lfs.c")
+        .file("littlefs/lfs_util.c")
+        .compile("lfs-sys");
     Ok(())
 }
 

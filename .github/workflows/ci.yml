@@ -340,9 +340,9 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Verify checked-in Browser C archives
+      - name: Install WASI SDK for Browser C sources
         if: matrix.name == 'browser'
-        run: platforms/browser/ci/verify-static.sh
+        run: platforms/browser/ci/install-wasi-sdk.sh
 
       - name: Check Platform
         if: matrix.toolchain == 'stable'

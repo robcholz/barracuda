@@ -16,24 +16,21 @@
     <main>
       <h1>Barracuda</h1>
       <p id="status">Starting the Barracuda System…</p>
-      <p><a id="device" hidden>Open the device WebServer</a></p>
+      <p><a id="device" target="_blank" hidden>Open the device WebServer</a></p>
       <pre id="error"></pre>
     </main>
     <script type="module">
       import { bootBarracuda } from "./bootstrap.js";
-      import { gatewayUrl } from "./config.js";
 
       const status = document.querySelector("#status");
       const device = document.querySelector("#device");
       const error = document.querySelector("#error");
       try {
         await bootBarracuda({
-          wasmUrl: "./barracuda_system_bg.wasm",
-          wasmModuleUrl: "./barracuda_system.js",
+          wasmUrl: "./barracuda_system.wasm",
           systemImageUrl: "./board.flash",
-          gatewayUrl,
           onDeviceUrl(url) {
-            device.href = new URL("portal/", url);
+            device.href = new URL("portal/", new URL(url, location.href));
             device.hidden = false;
           },
           onError(message) {
