@@ -2,6 +2,23 @@ name: esp32c3
 package: barracuda-platform-esp32c3
 crate: barracuda_platform_esp32c3
 type: Esp32C3Platform
+hal:
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
+  runtime-i2c-controllers: [I2C0]
+  runtime-spi-controllers: [SPI2]
+  runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: ADC1_CH0, pin: GPIO0 }
+        - { channel: ADC1_CH1, pin: GPIO1 }
+        - { channel: ADC1_CH2, pin: GPIO2 }
+        - { channel: ADC1_CH3, pin: GPIO3 }
+        - { channel: ADC1_CH4, pin: GPIO4 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [Timer0]
+      channels: [Channel0]
 selection:
   board-chips:
     - esp32c3

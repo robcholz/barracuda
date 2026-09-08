@@ -1,0 +1,3 @@
+id = "display"
+depends-on = ["vm"]
+description = "Registers the built-in display Lua package."

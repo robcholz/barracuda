@@ -1,0 +1,3 @@
+id = "i2s"
+depends-on = ["vm"]
+description = "Registers the Board-exposed I2S Lua package."

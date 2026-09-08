@@ -1,0 +1,23 @@
+id: indicator-led
+api-version: 1
+capability: indicator
+implementation:
+  package: barracuda-indicator-led
+  crate: barracuda_indicator_led
+  factory: "::{{crate}}::IndicatorLedDriver<{{binding.pin.type}}>"
+  bindings-expression: "{{binding.pin.value}}"
+  config-expression: "::barracuda_driver::indicator::IndicatorConfig::new({{parameter.active-level}})"
+bindings:
+  pin:
+    kind: digital-output
+    initial-from:
+      parameter: active-level
+      values: { low: high, high: low }
+parameters:
+  active-level:
+    type: enum
+    values: [low, high]
+    rust-values:
+      low: "::barracuda_driver::indicator::ActiveLevel::Low"
+      high: "::barracuda_driver::indicator::ActiveLevel::High"
+    required: true

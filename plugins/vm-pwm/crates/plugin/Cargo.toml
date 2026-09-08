@@ -1,18 +1,18 @@
 [package]
-name = "barracuda-board-stm32f429zi-nucleo"
+name = "barracuda-pwm-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Board HAL adapter for the STM32F429ZI Nucleo-144"
+description = "Barracuda Plugin exposing Board PWM resources to Lua"
 license = "Apache-2.0"
 
 [dependencies]
 barracuda-board-hal.workspace = true
-barracuda-indicator-led.workspace = true
-embassy-executor.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
 embedded-hal.workspace = true
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-embassy-stm32 = { version = "0.6.0", default-features = false, features = ["stm32f429zi"] }
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"

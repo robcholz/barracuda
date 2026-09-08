@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use barracuda_board_hal::{BoardHalResources, NoBuiltinCapabilities, NoExposedIo};
 pub use embassy_net::Stack;
 pub use http_client::ClientFactory;
@@ -19,21 +20,22 @@ pub struct PluginContext<Builtins = NoBuiltinCapabilities, Io = NoExposedIo> {
     /// capabilities.
     pub http_clients: ClientFactory<'static>,
     /// Complete HAL produced by the selected Board composition.
-    pub hal: BoardHalResources<Builtins, Io>,
+    pub hal: BoardHalResources<Builtins, Arc<Io>>,
 }
 
 impl<Builtins, Io> PluginContext<Builtins, Io> {
     /// Creates the unified Plugin construction context with the selected HAL.
     #[must_use]
-    pub const fn from_hal(
+    pub fn from_hal(
         ip_stack: Stack<'static>,
         http_clients: ClientFactory<'static>,
         hal: BoardHalResources<Builtins, Io>,
     ) -> Self {
+        let BoardHalResources { builtins, io } = hal;
         Self {
             ip_stack,
             http_clients,
-            hal,
+            hal: BoardHalResources::new(builtins, Arc::new(io)),
         }
     }
 }
@@ -41,7 +43,7 @@ impl<Builtins, Io> PluginContext<Builtins, Io> {
 impl PluginContext {
     /// Creates a construction context carrying an explicitly empty HAL.
     #[must_use]
-    pub const fn new(ip_stack: Stack<'static>, http_clients: ClientFactory<'static>) -> Self {
+    pub fn new(ip_stack: Stack<'static>, http_clients: ClientFactory<'static>) -> Self {
         Self::from_hal(
             ip_stack,
             http_clients,

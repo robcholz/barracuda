@@ -14,7 +14,7 @@ use alloc::{
 use core::{
     future::Future,
     pin::Pin,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use async_channel::{Receiver, Sender};
@@ -437,8 +437,8 @@ impl UserData for AgentOutput {
 
 struct PackageState {
     requests: Sender<AskJob>,
-    lifecycle: Mutex<Vec<(u64, Sender<()>)>>,
-    next_operation: AtomicU64,
+    lifecycle: Mutex<Vec<(usize, Sender<()>)>>,
+    next_operation: AtomicUsize,
     active_asks: AtomicUsize,
     active: AtomicBool,
 }
@@ -448,7 +448,7 @@ impl PackageState {
         Self {
             requests,
             lifecycle: Mutex::new(Vec::new()),
-            next_operation: AtomicU64::new(0),
+            next_operation: AtomicUsize::new(0),
             active_asks: AtomicUsize::new(0),
             active: AtomicBool::new(true),
         }
@@ -497,7 +497,7 @@ impl PackageState {
 
 struct OperationGuard {
     state: Arc<PackageState>,
-    id: u64,
+    id: usize,
     cancel: Sender<()>,
 }
 

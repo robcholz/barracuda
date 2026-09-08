@@ -7,17 +7,20 @@ precedent.
 
 ## Core model
 
-Barracuda has two independently selected axes:
+Barracuda has two independently selected axes and one Platform-owned hardware
+boundary:
 
 ~~~text
-Target = Platform + HAL
-HAL    = Board matrix + peripheral Drivers
+Platform  = platform services + vendor adaptation to ecosystem HAL contracts
+Board HAL = Board matrix + Drivers + named resources for runtime consumers
+Target    = Platform + Board HAL
 ~~~
 
 - **Platform** is an execution platform family: ESP, STM32, nRF, CH, Linux,
   macOS, or an equivalent environment. It provides platform mechanisms such as
-  an IP stack, TLS, and partitions. It does not describe a Board's concrete
-  peripherals, wiring, or product hardware matrix.
+  an IP stack, TLS, and partitions and adapts its vendor HAL into upstream
+  hardware contracts. It does not describe a Board's concrete peripherals,
+  wiring, or product hardware matrix.
 - **Board** is one concrete hardware combination. Its matrix describes the
   chip, buses, pins, clocks, attached peripherals, fixed wiring, and native
   physical layout of that product.
@@ -25,18 +28,24 @@ HAL    = Board matrix + peripheral Drivers
   touch controllers, and external storage devices are Drivers. Network is a
   Platform service in this architecture; it is not classified as a peripheral
   Driver.
-- **HAL** is the statically composed result of applying peripheral Drivers to a
-  Board matrix. It exposes initialized hardware capabilities such as Display
-  for System or Plugins to consume.
+- **Platform HAL module** is vendor adaptation implemented beside each
+  Platform. It converts the selected Platform's move-only tokens into concrete
+  values implementing `embedded-hal`, `embedded-hal-async`, or a narrow
+  domain binding where those ecosystems have no contract.
+- **Board HAL** is the statically composed result of applying peripheral
+  Drivers to a Board matrix through the selected Platform HAL module. It
+  exposes initialized built-ins and named `embedded-hal` resources for System
+  and hardware Plugins to consume.
 - **Target** is the independently selected Platform combined with the selected
-  Board's HAL.
+  Board HAL.
 - **System** is the aggregation entry. It constructs system-owned services,
   assembles the fixed Plugin graph, and routes Platform and HAL capabilities to
   their consumers.
 - **Plugin** is a self-contained functional module managed by System.
 
-A Platform is not a Board support package, a peripheral-driver collection, a
-HAL, or a System dependency bag.
+A Platform is not a Board support package, a peripheral-driver collection, or a
+System dependency bag. Its HAL module contains reusable vendor adaptation, not
+product wiring.
 
 ## Composition boundary
 
@@ -47,13 +56,14 @@ reference.
 ~~~text
 one hardware bootstrap --------+------------------------------+
                                |                              |
-selected Platform -------------+-> Platform bindings -> Platform
+selected Platform -------------+-> Platform bindings -> Platform services
+             `--------------------> Platform HAL
                                                               |
-selected Board config -> generated Board composition          |
+selected Board config -> generated Board composition <--------+
   +-- built-in Driver + wiring -> built-in capabilities       |
   `-- explicitly exposed I/O  -> GPIO/I2C/SPI capabilities    |
                                |                              |
-                               +------------> HAL ------------+
+                               +----------> Board HAL ---------+
                                                               |
                                                               v
                                                             Target
@@ -151,7 +161,7 @@ A Board describes one concrete product hardware matrix:
 - exact chip and package;
 - buses, pins, DMA channels, interrupts, and clocks;
 - attached peripheral models and their fixed wiring;
-- explicitly exposed GPIO, I2C, and SPI connectors;
+- explicitly exposed multifunction pins;
 - external memories and storage devices;
 - native boot and physical layout artifacts;
 - product-specific hardware feature presence.
@@ -188,106 +198,105 @@ Barracuda constructs. It contains two independent sets of declarations:
 
 - built-in peripherals name a Driver and the pins, bus, geometry, polarity,
   and other fixed inputs used to construct it;
-- exposed I/O names each digital GPIO, analog channel, PWM channel, I2C, or SPI
-  capability and the concrete pins and controller used to construct it.
+- exposed I/O names physical resources that applications may configure at
+  runtime, beginning with multifunction package pins.
 
 The generated Board composition constructs exactly those declarations. It does
 not expose unused pins or peripheral instances automatically. A physical
 resource omitted from `exposed-io` is absent from the Barracuda I/O surface even
 when the chip could otherwise use it.
 
-The common Board model does not assign conflict or mux semantics to references
-shared by declarations. A concrete Board config may deliberately describe
-hardware muxing or overlapping uses when its hardware and adapter support them.
-Barracuda neither promises that those uses can operate simultaneously nor
-rejects the configuration solely because the same physical identifier appears
-more than once. Electrical correctness, mode transitions, and runtime
-coordination remain properties of that concrete Board composition.
+Built-in composition consumes its resources before runtime I/O is constructed.
+One chip-native token cannot be both a built-in binding and an exposed resource.
+Within exposed I/O, a physical pin is declared once even when the selected
+Platform can route digital, analog, PWM, I2C, SPI, UART, or I2S functions to it.
+The function is selected when an application opens a handle; it is not encoded
+as a second logical copy of the pin in Board YAML.
 
 Generic validation covers the Board schema, referenced Driver identifiers,
-required wiring fields, and whether the selected adapter can construct the
-declaration. It does not certify the resulting product wiring or resource-use
-policy.
+required wiring fields, and whether the selected Platform declares the required
+HAL bindings. Move-only generated bindings prevent one chip token from being
+consumed twice. Platform providers validate runtime routing, electrical modes,
+frequencies, and controller limits before constructing a function handle.
 
 ## Exposed I/O and built-in peripherals
 
-Board configuration distinguishes fixed product hardware from connectors that
-Barracuda intentionally makes available to application-level consumers. The
-shape is conceptually:
+Board configuration distinguishes fixed product hardware from physical
+resources that Barracuda intentionally makes available to applications:
 
 ~~~yaml
 builtin-peripherals:
   status-indicator:
-    driver: gpio-output-indicator
+    driver: indicator-led
     bindings:
       pin: gpio10
     parameters:
       active-low: true
-  display:
-    driver: mipidsi-st7789
-    bindings:
-      spi: spi2
-      chip-select: gpio8
-      data-command: gpio9
-    parameters:
-      width: 320
-      height: 240
 
 exposed-io:
-  gpio:
-    user-button:
-      pin: gpio2
-  analog-input:
-    sensor-voltage:
-      peripheral: adc1
-      pin: gpio3
-      channel: 2
-  pwm:
-    actuator:
-      peripheral: ledc0
-      pin: gpio4
-      channel: 0
-  i2c:
-    expansion:
-      peripheral: i2c0
-      scl: gpio4
-      sda: gpio5
-      frequency-hz: 400000
-  spi:
-    expansion:
-      peripheral: spi0
-      sck: gpio18
-      mosi: gpio19
-      miso: gpio20
-      frequency-hz: 20000000
+  pins:
+    expansion-1: { pin: gpio2 }
+    expansion-2: { pin: gpio3 }
+    expansion-3: { pin: gpio4 }
+    expansion-4: { pin: gpio5 }
 ~~~
 
-The concrete schema may use chip-native names, but it stores hardware facts,
-Driver identifiers, electrical configuration, safe boot state, and stable
-connector names. Rust crate paths, Platform types, Plugin identities, and
-application policy do not belong in the Board matrix. A Driver identifier
-selects registered composition code; the YAML does not name a Rust type or
-crate path.
+The concrete schema stores hardware facts, Driver identifiers, stable
+application-visible names, and chip-native identifiers. Rust crate paths,
+Platform types, Plugin identities, and application policy do not belong in the
+Board matrix. A Driver identifier selects registered composition code; YAML
+does not name a Rust type or crate path.
 
-Board HAL resources retain the distinction between the two classes:
+Board HAL resources retain the distinction between fixed built-ins and dynamic
+I/O:
 
 ~~~rust,ignore
 BoardHalResources {
     builtins: BuiltinCapabilities { /* display, indicator, ... */ },
-    io: ExposedIo { gpio, i2c, spi },
+    io: RuntimeIo { /* move-only tokens, Platform providers */ },
 }
 ~~~
 
 `BoardHalResources<Builtins, Io>` is the common ownership envelope. Its generic
 fields preserve the concrete, statically composed capability types for each
 selected Board. Built-in Drivers return semantic capabilities such as Display
-or Indicator. Exposed declarations return I/O capabilities. The envelope does
-not imply that the underlying physical resources are disjoint. System routes
-each resulting capability to the subsystem or Plugin that owns its behavior.
+or Indicator. The single exposed-I/O value owns all runtime physical resources.
+System places it in `PluginContext` behind one shared `Arc`; hardware VM Plugins
+clone that owner, not independent protocol collections. Platform-owned
+controller pools are part of this owner but are not application-visible names.
 
-`ExposedIo` is an ownership and naming envelope, not a parallel I/O trait
-family. Its entries retain concrete, statically dispatched values implementing
-the upstream contracts:
+Controller, channel, timer, DMA, and buffer inventory belongs to the Platform
+manifest rather than `exposed-io`. Resource families that must be acquired
+together are declared as typed controller groups:
+
+~~~yaml
+hal:
+  runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: CHANNEL0, pin: GPIO1 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [TIMER0]
+      channels: [CHANNEL0]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA_CH0]
+      dma-buffer-bytes: 4096
+~~~
+
+The Board generator removes an entire runtime group when a built-in binding
+already consumes its controller or DMA channel. It then constructs fixed-size,
+concrete pools; firmware never scans the chip or infers missing resources.
+ADC channel routes retain their controller and channel identity after the
+physical pin enters the shared owner. PWM handles consume both a timer and an
+output channel. I2S handles consume a controller, DMA, and bounded static
+buffers together with their pins.
+
+`ExposedIo` marks this shared ownership boundary. Focused provider traits open
+functions on it and return concrete, statically dispatched values implementing
+upstream contracts:
 
 | Hardware use | Upstream contract |
 | --- | --- |
@@ -295,88 +304,71 @@ the upstream contracts:
 | asynchronous GPIO edge wait | `embedded_hal_async::digital::Wait` |
 | analog input or output | Barracuda `AnalogInput` or `AnalogOutput` |
 | PWM output | `embedded_hal::pwm::SetDutyCycle` |
-| I2C controller or shared handle | `embedded_hal::i2c::I2c` or `embedded_hal_async::i2c::I2c` |
-| exclusively owned SPI controller | `embedded_hal::spi::SpiBus` or `embedded_hal_async::spi::SpiBus` |
-| one device on an SPI controller | `embedded_hal::spi::SpiDevice` or `embedded_hal_async::spi::SpiDevice` |
+| I2C controller handle | `embedded_hal_async::i2c::I2c` |
+| exclusively owned SPI controller handle | `embedded_hal_async::spi::SpiBus` |
+| one device on a shared SPI controller | `embedded_hal_async::spi::SpiDevice` |
 
-Barracuda does not replace the digital GPIO, PWM, I2C, or SPI operations that
-`embedded-hal` already defines. `ConfigurableDigitalPin` adds the missing
-runtime transition between disabled, input, and output states; the configured
-value continues to implement `InputPin`, `OutputPin`, and
-`StatefulOutputPin`. `AnalogInput` and `AnalogOutput` cover ADC and DAC because
-`embedded-hal` 1.0 has no corresponding contracts. Initialization, pin mux,
-stable Board names, and static construction come from the concrete Board
-adapter. Cross-declaration conflict policy is not part of this common layer.
+Barracuda does not replace operations that upstream HAL traits already define.
+`ConfigurableDigitalPin` adds the missing runtime transition between disabled,
+input, and output states. `AnalogInput` and `AnalogOutput` cover ADC and DAC
+because `embedded-hal` 1.0 has no corresponding contracts. Stable Board names,
+static storage, pin mux, controller construction, and hardware teardown come
+from generated Board composition and selected Platform HAL providers.
 
-Exposed I/O returns capabilities with stable Board-level names. A digital GPIO
-owner selects input bias or output drive and initial level at runtime. An analog
-capability binds one controller channel and pin. An I2C capability owns its
-controller and signal pins. An SPI capability owns its controller and signal
-pins; a separately exposed GPIO supplies application-managed chip select when
-needed. When another Board declaration references the same physical resource,
-the concrete Board composition defines how those logical capabilities relate.
+The runtime owner contains one protocol-neutral catalog of move-only Platform
+tokens. Providers for digital, analog, PWM, I2C, SPI, UART, I2S, and future
+function families all claim through this same owner. A digital handle consumes
+one pin. An I2C handle atomically consumes a controller, SCL, and SDA. An I2S
+handle may consume a controller, clock and data pins, and DMA. Duplicate roles,
+unavailable routes, or any claimed resource fail without partially changing
+ownership.
 
-Reusable Drivers consume the standard `embedded-hal` and
-`embedded-hal-async` contracts where those contracts express the operation.
-The chip HAL's own type erasure is used when a bounded collection needs a
-uniform concrete type: for example, ESP and Embassy STM32 provide type-erased
-pin representations and erase peripheral instance identity inside their I2C
-and SPI drivers. Barracuda adapters do not reproduce that machinery. The
-selected build keeps concrete storage and dispatch statically allocated;
-consumers do not look up a Platform, Board, or Driver implementation at
-runtime, and async HAL traits are not converted into `dyn` trait objects.
+Applications name exposed pins and function parameters, not chip controller
+instances. For example, `i2c.open(scl, sda, frequency)` asks the provider to
+select a compatible free controller. This keeps controller allocation and
+built-in reservations in Platform composition and gives the same application
+API to Boards with different controller numbering.
+
+Reusable Drivers import `embedded-hal`, `embedded-hal-async`, and established
+domain ecosystem traits directly. Barracuda defines a narrow binding only when
+the ecosystem has no suitable contract. Current examples are parallel camera
+frame reception and PCM streaming; they live with the Driver capability API
+rather than forming a second general-purpose HAL. The selected build keeps
+concrete storage and dispatch statically allocated; consumers do not look up a
+Platform, Board, or Driver implementation at runtime, and async HAL traits are
+not converted into `dyn` trait objects.
 
 `embedded-hal` does not standardize changing a GPIO between input and output
-modes. Every exposed digital GPIO therefore implements the small Barracuda
+modes. Every VM-exposed digital handle therefore implements the small Board HAL
 configuration contract in addition to the upstream operation traits. Protocol
-alternate functions are established by constructing the declared controller;
-they are not another mode on this common digital API. Each chip adapter maps
-the configuration contract to its stable flexible-pin mechanism.
+alternate functions are established by the corresponding provider, not by the
+digital API. Each Platform's `hal` module owns vendor pin mux and controller
+construction.
 
-Built-in buses use the existing upstream sharing adapters. HAL-owned buses use
-the blocking or async `embassy-embedded-hal` shared I2C/SPI devices appropriate
-for the concrete Driver and Embassy mutexes. Devices with different bus
-configurations use its per-device configuration support when the chip HAL
-provides `SetConfig`; otherwise a small chip adapter delegates configuration to
-the vendor driver's stable API. The corresponding `embedded-hal-bus` adapters
-are also used where their ownership and execution model is the closer fit.
-Driver code receives `SpiDevice` when it addresses a CS-selected device and
-`SpiBus` only when it truly owns the whole bus.
+Built-in buses use existing upstream sharing adapters. HAL-owned buses use the
+blocking or async `embassy-embedded-hal` or `embedded-hal-bus` adapter whose
+ownership model fits the concrete Driver. Driver code receives `SpiDevice` when
+it addresses a CS-selected device and `SpiBus` only when it truly owns the
+whole bus. Built-in display Drivers such as `mipidsi` continue to receive these
+upstream values and remain outside dynamic exposed-I/O ownership.
 
-A built-in display uses an existing controller Driver when available. For a
-blocking MIPI DCS transport, controllers such as ST7789 are composed with
-`mipidsi`: its SPI interface consumes `embedded_hal::spi::SpiDevice`, and
-drawing consumers use the resulting
-`embedded-graphics-core::DrawTarget` implementation. A DMA or async display
-path selects an existing Driver that exposes that execution model, or isolates
-a blocking Driver behind its HAL-owned task. A Barracuda Display facade is
-introduced only when System needs lifecycle, power, backlight, framebuffer, or
-concurrency semantics that those upstream contracts do not express.
+The GPIO, I2C, and SPI Plugins are adapters over the shared runtime owner. They
+validate script-level arguments and ask their provider to atomically open a
+complete function. The returned HAL value lives in Lua userdata and operations
+call its upstream traits directly. Explicit `close`, lexical `<close>`, garbage
+collection, and VM teardown disable and drop the constructed function. They do
+not recreate vendor singleton tokens: the generated device owner keeps the raw
+pin and controller claimed until restart. Plugin revocation immediately
+invalidates operations. A GPIO claim therefore prevents the same pin from
+being opened as I2C or SPI during that boot, even though those functions belong
+to different VM packages.
 
-System assigns every exposed port collection to one owner. That owner may
-publish a higher-level typed capability or a Workflow contract for scripts and
-Plugins. Arbitration, access control, and dynamic device attachment belong to
-that owner. Any physical overlap already declared by the Board remains a
-property of the concrete Board composition.
-
-The GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
-concrete, move-only `BoardHalResources` value; it has no scripting service
-contract and adds no shared ownership or lock. System puts that complete HAL
-directly in `PluginContext` without splitting it into per-Plugin fields or
-constructing a consumer-specific hardware bundle. During unified Plugin
-construction, each hardware Plugin mutably accesses `context.hal.io`, takes its
-corresponding explicitly exposed value once, and becomes that value's sole
-owner. Built-in capabilities and any untaken exposed I/O remain in the HAL
-stored by System.
-
-Each Plugin decides how its package synchronizes that owned value. The current
-GPIO, I2C, and SPI packages place the concrete named set behind an Embassy
-async mutex. Cloned `Arc`s share only that package-layer lock; they do not clone
-or reconstruct hardware. GPIO calls the concrete pin's configuration and
-`embedded-hal` operations directly. I2C and SPI hold the mutex guard across the
-concrete `embedded-hal-async` future. Runtime dispatch is limited to Board-name
-lookup inside `NamedResources`; HAL operations, Board composition, and built-in
-peripheral Drivers remain statically dispatched.
+Board HAL has no scripting service contract. VM packages do not perform pin
+mux, reconstruct vendor peripherals, or keep protocol-local ownership maps.
+Runtime dispatch is limited to Board-name lookup and provider selection; data
+operations, Board composition, and built-in peripheral Drivers remain
+statically dispatched. The detailed ownership and application-pressure model
+is documented in `boards/hal/docs/design.md`.
 
 ## Peripheral Drivers and HAL
 
@@ -384,7 +376,7 @@ Drivers implement reusable peripheral behavior. The Board matrix supplies the
 concrete bus and wiring values used to instantiate them:
 
 ~~~text
-Board matrix + peripheral Drivers -> HAL capabilities
+Platform HAL + Board matrix + peripheral Drivers -> Board HAL capabilities
 ~~~
 
 For a display:
@@ -858,8 +850,8 @@ does not depend on accidental ordering between Cargo build scripts.
 platforms/
 +-- api/
 +-- selected/          # selects only Platform
-+-- esp/
-+-- stm32/
++-- esp/               # Platform services + vendor HAL adaptation
++-- stm32/             # Platform services + vendor HAL adaptation
 +-- nrf/
 +-- ch/
 +-- linux/
@@ -871,7 +863,6 @@ drivers/
 boards/
 +-- api/
 +-- hal/
-+-- chips/<chip>/      # vendor-HAL token vocabulary and package catalog
 +-- config/
 +-- configs/<board>/
 +-- selected/          # selects only Board + Board HAL
@@ -897,27 +888,33 @@ plugins/
 Dependencies flow toward semantic consumers:
 
 ~~~text
-peripheral Drivers + Board matrix -> HAL capabilities -------------------+
+Platform adaptation + peripheral Drivers + Board matrix -> Board HAL ----+
                                                                          |
-Platform -> Platform resources { IP, TLS, partitions } ------------------+-> System -> Plugins
+Platform services -> { IP, TLS, partitions } ----------------------------+-> System -> Plugins
 ~~~
 
 Platform crates do not own peripheral Driver implementations or Board
-composition. Board-related crates remain under boards/; peripheral Drivers
-remain under drivers/; the selected Target composition root remains outside an
-individual Platform implementation.
+composition. They do own their vendor-HAL token vocabulary and GPIO, I2C, SPI,
+camera, I2S, and delay constructors. DMA-backed media resources are composed
+statically: `camera-capture` and `i2s-stream` declarations size storage with
+`dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
+call site. Sensor and codec register behavior remains in Drivers. Board-related
+crates remain under boards/; peripheral Drivers remain under drivers/; the
+selected Target composition root remains outside an individual Platform
+implementation.
 
-A chip/package adapter supplies the vendor-HAL token vocabulary and
-constructors used by generated composition. It contains neither product wiring
-nor peripheral Driver behavior. It is an implementation dependency shared by
-the selected Platform and Board HAL, not a third selection axis and not a
-runtime capability exposed to System.
+Generated composition calls the selected Platform's `hal` module and hands the
+resulting `embedded-hal` resources to the Driver selected by its manifest. A new
+peripheral using an existing HAL binding therefore requires only its Driver
+crate, `driver.yml`, and Board YAML; it adds neither a chip crate nor a central
+renderer branch.
 
 ## Static composition requirements
 
 - Platform and Board are independently selected at build time.
-- HAL is statically composed from one Board matrix and its peripheral Drivers.
-- The concrete Platform and HAL are monomorphized for one Target.
+- Board HAL is statically composed from one Platform HAL, one Board matrix, and
+  its peripheral Drivers.
+- The concrete Platform and Board HAL are monomorphized for one Target.
 - Runtime Platform lookup and a dyn Platform registry are unnecessary.
 - Peripheral Driver calls remain statically dispatched.
 - A device entry acquires the hardware singleton once, constructs the selected
@@ -945,10 +942,12 @@ runtime capability exposed to System.
 
 Before changing target-sensitive code, verify:
 
-1. Is Platform used only for ESP/STM32/nRF/CH/Linux/macOS-level mechanisms?
+1. Does Platform own ESP/STM32/nRF/CH/Linux/macOS-level mechanisms and adapt
+   its vendor HAL into the upstream contracts consumed by Drivers?
 2. Is concrete product hardware described by Board rather than Platform?
 3. Is an external peripheral implementation under drivers/?
-4. Is HAL composition expressed as Board matrix plus peripheral Drivers?
+4. Does Board HAL composition use the selected Platform HAL plus Board matrix
+   and peripheral Drivers?
 5. Does Platform expose one partitions collection instead of business-specific
    partition fields?
 6. Are IP, Wi-Fi control, BLE, USB, and other communication capabilities named

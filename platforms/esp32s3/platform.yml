@@ -2,6 +2,32 @@ name: esp32s3
 package: barracuda-platform-esp32s3
 crate: barracuda_platform_esp32s3
 type: Esp32S3Platform
+hal:
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, camera-capture, i2s-stream]
+  runtime-i2c-controllers: [I2C0, I2C1]
+  runtime-spi-controllers: [SPI2, SPI3]
+  runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: ADC1_CH0, pin: GPIO1 }
+        - { channel: ADC1_CH1, pin: GPIO2 }
+        - { channel: ADC1_CH2, pin: GPIO3 }
+        - { channel: ADC1_CH3, pin: GPIO4 }
+        - { channel: ADC1_CH4, pin: GPIO5 }
+        - { channel: ADC1_CH5, pin: GPIO6 }
+        - { channel: ADC1_CH6, pin: GPIO7 }
+        - { channel: ADC1_CH7, pin: GPIO8 }
+        - { channel: ADC1_CH8, pin: GPIO9 }
+        - { channel: ADC1_CH9, pin: GPIO10 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [Timer0]
+      channels: [Channel0]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA_CH0]
+      dma-buffer-bytes: 4096
 selection:
   board-chips:
     - esp32s3

@@ -12,7 +12,11 @@ extern crate alloc;
 mod read_only_flash;
 mod resources;
 
-use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
+use barracuda_board_hal::{
+    audio::BuiltinAudioCodec, camera::BuiltinCamera, display::BuiltinDisplay,
+    led_strip::BuiltinLedStrip, AnalogProvider, BoardHalResources, DigitalProvider, ExposedIo,
+    I2cProvider, I2sProvider, PwmProvider, SpiProvider, UartProvider,
+};
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -74,18 +78,46 @@ impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: Unpin,
-    Io: ExposedIo + Unpin,
-    Io::Gpio: ResourceSet + Send + 'static,
-    <Io::Gpio as ResourceSet>::Resource: ConfigurableDigitalPin + Send,
-    <<Io::Gpio as ResourceSet>::Resource as embedded_hal::digital::ErrorType>::Error:
+    Builtins: BuiltinAudioCodec + BuiltinCamera + BuiltinDisplay + BuiltinLedStrip + Unpin,
+    Builtins::AudioCodec: Send + 'static,
+    <Builtins::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
+    Builtins::Display: Send + 'static,
+    <Builtins::Display as barracuda_board_hal::display::Display>::ControlError: core::fmt::Debug,
+    <Builtins::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
+    Builtins::Camera: Send + 'static,
+    <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
+    Builtins::LedStrip: Send + 'static,
+    <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
+    Io: ExposedIo
+        + AnalogProvider
+        + DigitalProvider
+        + I2cProvider
+        + I2sProvider
+        + PwmProvider
+        + SpiProvider
+        + UartProvider
+        + Unpin,
+    <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
+    <<Io as AnalogProvider>::Output as barracuda_board_hal::AnalogErrorType>::Error:
         core::fmt::Debug,
-    Io::I2c: ResourceSet + Send + 'static,
-    <Io::I2c as ResourceSet>::Resource: embedded_hal_async::i2c::I2c + Send,
-    <<Io::I2c as ResourceSet>::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
-    Io::Spi: ResourceSet + Send + 'static,
-    <Io::Spi as ResourceSet>::Resource: embedded_hal_async::spi::SpiBus + Send,
-    <<Io::Spi as ResourceSet>::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    <Io as AnalogProvider>::Error: core::fmt::Display,
+    <<Io as PwmProvider>::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
+    <Io as PwmProvider>::Error: core::fmt::Display,
+    Io::Pin: Send,
+    <Io::Pin as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
+    <Io as DigitalProvider>::Error: core::fmt::Display,
+    <Io as I2cProvider>::Bus: Send,
+    <<Io as I2cProvider>::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    <Io as I2cProvider>::Error: core::fmt::Display,
+    <Io as I2sProvider>::Stream: Send,
+    <<Io as I2sProvider>::Stream as barracuda_board_hal::audio::PcmStream>::Error: core::fmt::Debug,
+    <Io as I2sProvider>::Error: core::fmt::Display,
+    <Io as SpiProvider>::Bus: Send,
+    <<Io as SpiProvider>::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    <Io as SpiProvider>::Error: core::fmt::Display,
+    <Io as UartProvider>::Port: Send,
+    <<Io as UartProvider>::Port as embedded_io::ErrorType>::Error: core::fmt::Debug,
+    <Io as UartProvider>::Error: core::fmt::Display,
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
@@ -160,13 +192,21 @@ where
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
+            barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
+            barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),
+            barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
+            barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_vm_filesystem_plugin::VmFilesystemPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_vm_http_plugin::VmHttpPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
+            barracuda_i2s_plugin::I2sPlugin::new(&mut plugin_context),
+            barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
+            barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_vm_time_plugin::VmTimePlugin::new(&mut plugin_context),
+            barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );

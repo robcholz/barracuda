@@ -1,0 +1,33 @@
+name: esp32s3-eye
+hardware:
+  chip: esp32s3
+toolchain:
+  target: xtensa-esp32s3-none-elf
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  i2c-device:
+    camera-control:
+      # Espressif ESP32-S3-EYE BSP: OV2640 SCCB bus.
+      peripheral: I2C0
+      scl: GPIO5
+      sda: GPIO4
+      frequency-hz: 400000
+  camera-capture:
+    camera-data:
+      peripheral: LCD_CAM
+      dma: DMA_CH0
+      xclk: GPIO15
+      pclk: GPIO13
+      vsync: GPIO6
+      href: GPIO7
+      data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
+      xclk-frequency-hz: 16000000
+      dma-buffer-bytes: 98304
+builtin-peripherals:
+  camera:
+    driver: ov2640-camera
+    bindings:
+      capture: camera-data
+      control: camera-control
+    # The official BSP declares both RESET and PWDN as not connected.

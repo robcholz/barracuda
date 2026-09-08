@@ -31,7 +31,7 @@ fn add_selection_files(root: &Path) {
     fs::create_dir_all(&platform).expect("Platform directory");
     fs::write(
         platform.join("platform.yml"),
-        "name: macos\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
+        "name: macos\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nhal:\n  bindings: [digital-input, digital-output, gpio, spi-device, i2c-device]\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
     )
     .expect("Platform manifest");
     fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");
@@ -119,29 +119,110 @@ fn select_uses_platform_owned_features_for_the_board_chip() {
 }
 
 #[test]
-fn select_discovers_a_board_hal_from_the_board_bundle() {
+fn select_uses_the_platform_hal_without_a_chip_adapter() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");
     let board_path = root.path().join("boards/configs/local-macos/board.yml");
     let board = fs::read_to_string(&board_path).expect("Board YAML");
     fs::write(
         &board_path,
-        format!("{board}exposed-io:\n  gpio:\n    button:\n      pin: P0\n"),
+        format!(
+            "{}exposed-io:\n  pins:\n    button:\n      pin: GPIO0\n",
+            board.replace("chip: macos", "chip: esp32")
+        ),
     )
     .expect("Board hardware surface");
-    let hal = root.path().join("boards/configs/local-macos/hal");
-    fs::create_dir_all(&hal).expect("Board HAL directory");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
     fs::write(
-        hal.join("Cargo.toml"),
-        "[package]\nname = \"barracuda-board-local-macos\"\nversion = \"0.1.0\"\n",
+        platform_path,
+        platform.replace("board-chips: [macos]", "board-chips: [macos, esp32]"),
     )
-    .expect("Board HAL manifest");
+    .expect("Platform chip selection");
+    fs::create_dir_all(root.path().join("drivers")).expect("Driver catalog");
 
     run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
     let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
         .expect("selected Board manifest");
-    assert!(selected.contains("barracuda-board-local-macos.workspace = true"));
+    assert!(!selected.contains("barracuda-driver-gpio"));
+    assert!(!selected.contains("barracuda-platform-"));
+}
+
+#[test]
+fn select_adds_only_an_unknown_peripheral_driver() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "sensor-board", "sensor-board");
+    fs::write(
+        root.path().join("boards/configs/sensor-board/board.yml"),
+        r#"
+name: sensor-board
+hardware:
+  chip: esp32
+native-layout:
+  artifact: file-layout.yml
+internal-io:
+  i2c-device:
+    sensor:
+      peripheral: I2C0
+      scl: GPIO1
+      sda: GPIO2
+      frequency-hz: 400000
+  spi-device:
+    auxiliary:
+      peripheral: SPI2
+      sck: GPIO3
+      mosi: GPIO4
+      chip-select: GPIO5
+      frequency-hz: 10000000
+builtin-peripherals:
+  environment:
+    driver: future-sensor
+    bindings:
+      i2c: sensor
+      spi: auxiliary
+"#,
+    )
+    .expect("Board YAML");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        platform_path,
+        platform.replace("board-chips: [macos]", "board-chips: [macos, esp32]"),
+    )
+    .expect("Platform chip selection");
+    let driver = root.path().join("drivers/future-sensor");
+    fs::create_dir_all(&driver).expect("Driver directory");
+    fs::write(
+        driver.join("driver.yml"),
+        r#"
+id: future-sensor
+api-version: 1
+capability: environment-sensor
+implementation:
+  package: future-sensor
+  crate: future_sensor
+  factory: "::{{crate}}::Driver<{{binding.i2c.type}}, {{binding.spi.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.i2c.value}}, {{binding.spi.value}})"
+  config-expression: "()"
+bindings:
+  i2c:
+    kind: i2c-device
+  spi:
+    kind: spi-device
+parameters: {}
+"#,
+    )
+    .expect("Driver manifest");
+
+    run(["select", "sensor-board"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+        .expect("selected Board manifest");
+    assert!(selected.contains("future-sensor.workspace = true"));
+    assert!(!selected.contains("barracuda-driver-i2c"));
+    assert!(!selected.contains("barracuda-driver-spi"));
+    assert!(!selected.contains("barracuda-driver-gpio"));
 }
 
 #[test]
@@ -291,7 +372,8 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
     assert!(default_members.contains("apps/barracuda-system"));
     assert!(!default_members.contains("tools/barracuda-build"));
     assert!(!manifest.contains("\"tools/barracuda-build\","));
-    assert!(manifest.contains("\"boards/configs/*/hal\","));
+    assert!(!manifest.contains("boards/chips"));
+    assert!(!manifest.contains("\"boards/configs/*/hal\","));
     assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
 }
 

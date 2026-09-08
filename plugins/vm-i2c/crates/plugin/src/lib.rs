@@ -1,45 +1,52 @@
-//! Lua package for I2C values explicitly exposed by the selected Board.
+//! Lua package for runtime I2C handles over Board-exposed resources.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
-use barracuda_board_hal::{ExposedIo, ResourceSet};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
+use barracuda_board_hal::{ExposedIo, I2cProvider, I2cRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
+use barracuda_vm_plugin::{
+    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    UserDataHandle, UserDataMethods,
+};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
 use embedded_hal_async::i2c::I2c;
 
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
-/// Takes the concrete Board-exposed I2C set and registers the `i2c` package.
+/// Shares the unified exposed-I/O owner with the `i2c` Lua package.
 #[barracuda_plugin::macros::plugin]
-pub struct I2cPlugin<I2cSet> {
-    hardware: Option<I2cSet>,
+pub struct I2cPlugin<Io> {
+    io: Arc<Io>,
 }
 
-impl<I2cSet> I2cPlugin<I2cSet> {
-    /// Takes exclusive ownership of the I2C set from the complete HAL.
+impl<Io> I2cPlugin<Io> {
+    /// Acquires a shared handle to the Board's single runtime I/O owner.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
+    pub fn new<Builtins>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Io: ExposedIo<I2c = I2cSet>,
+        Io: ExposedIo + I2cProvider,
     {
         Self {
-            hardware: context.hal.io.take_i2c(),
+            io: Arc::clone(&context.hal.io),
         }
     }
 }
 
-impl<I2cSet> Plugin for I2cPlugin<I2cSet>
+impl<Io> Plugin for I2cPlugin<Io>
 where
-    I2cSet: ResourceSet + Send + 'static,
-    I2cSet::Resource: I2c + Send,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    Io: ExposedIo + I2cProvider,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     fn register<Storage>(
         &mut self,
@@ -52,117 +59,70 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(I2cPackage::new(self.hardware.take()))
+            .register(I2cPackage::new(Arc::clone(&self.io)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-type SharedI2c<I2cSet> = Arc<Mutex<CriticalSectionRawMutex, I2cSet>>;
-
-struct I2cPackage<I2cSet> {
-    hardware: Option<SharedI2c<I2cSet>>,
+struct I2cPackage<Io> {
+    io: Arc<Io>,
     active: Arc<AtomicBool>,
 }
 
-impl<I2cSet> I2cPackage<I2cSet> {
-    fn new(hardware: Option<I2cSet>) -> Self {
+impl<Io> I2cPackage<Io> {
+    fn new(io: Arc<Io>) -> Self {
         Self {
-            hardware: hardware.map(|hardware| Arc::new(Mutex::new(hardware))),
+            io,
             active: Arc::new(AtomicBool::new(true)),
         }
     }
 }
 
-impl<I2cSet> Package for I2cPackage<I2cSet>
+impl<Io> Package for I2cPackage<Io>
 where
-    I2cSet: ResourceSet + Send + 'static,
-    I2cSet::Resource: I2c + Send,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    Io: I2cProvider + Send + Sync + 'static,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = self.hardware.clone();
-        let available_active = Arc::clone(&self.active);
-        let read = self.hardware.clone();
-        let read_active = Arc::clone(&self.active);
-        let write = self.hardware.clone();
-        let write_active = Arc::clone(&self.active);
-        let write_read = self.hardware.clone();
-        let write_read_active = Arc::clone(&self.active);
-
+        let io = Arc::clone(&self.io);
+        let active = Arc::clone(&self.active);
         lua.register_lib("i2c", move |package| {
-            package.register_async("available", move |name: String| {
-                let hardware = available.clone();
-                let active = Arc::clone(&available_active);
-                async move {
+            package.register_with(
+                "open",
+                move |lua, (scl, sda, frequency_hz): (String, String, i64)| {
                     if !active.load(Ordering::Acquire) {
-                        return Some(Ok(false));
+                        return Some(Err(Error::runtime("I2C package has been revoked")));
                     }
-                    let exists = match hardware {
-                        Some(hardware) => {
-                            let hardware = hardware.lock().await;
-                            active.load(Ordering::Acquire) && hardware.contains(&name)
+                    let result = (|| {
+                        if scl == sda {
+                            return Err(Error::runtime("I2C SCL and SDA must use different pins"));
                         }
-                        None => false,
-                    };
-                    Some(Ok(exists))
-                }
-            })?;
-            package.register_async(
-                "read",
-                move |(name, address, length): (String, i64, i64)| {
-                    let hardware = read.clone();
-                    let active = Arc::clone(&read_active);
-                    async move {
-                        let (address, length) = match bus_args(address, length) {
-                            Ok(values) => values,
-                            Err(error) => return Some(Err(error)),
-                        };
-                        Some(i2c_read(hardware, active, name, address, length).await)
-                    }
-                },
-            )?;
-            package.register_async(
-                "write",
-                move |(name, address, bytes): (String, i64, Vec<u8>)| {
-                    let hardware = write.clone();
-                    let active = Arc::clone(&write_active);
-                    async move {
-                        let address = match parse_address(address) {
-                            Ok(address) => address,
-                            Err(error) => return Some(Err(error)),
-                        };
-                        Some(i2c_write(hardware, active, name, address, bytes).await)
-                    }
-                },
-            )?;
-            package.register_async(
-                "write_read",
-                move |(name, address, bytes, read_length): (String, i64, Vec<u8>, i64)| {
-                    let hardware = write_read.clone();
-                    let active = Arc::clone(&write_read_active);
-                    async move {
-                        let (address, read_length) = match bus_args(address, read_length) {
-                            Ok(values) => values,
-                            Err(error) => return Some(Err(error)),
-                        };
-                        Some(
-                            i2c_write_read(hardware, active, name, address, bytes, read_length)
-                                .await,
-                        )
-                    }
+                        let frequency_hz = positive_u32(frequency_hz, "I2C frequency")?;
+                        let bus = io
+                            .open_i2c(I2cRequest {
+                                scl: &scl,
+                                sda: &sda,
+                                frequency_hz,
+                            })
+                            .map_err(|error| Error::runtime(error.to_string()))?;
+                        let label = format!("SCL `{scl}`, SDA `{sda}`");
+                        lua.create_userdata(I2cHandle::new(label, bus, Arc::clone(&active)))
+                    })();
+                    Some(result)
                 },
             )
         })
     }
 }
 
-impl<I2cSet> LuaPackage for I2cPackage<I2cSet>
+impl<Io> LuaPackage for I2cPackage<Io>
 where
-    I2cSet: ResourceSet + Send + 'static,
-    I2cSet::Resource: I2c + Send,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    Io: I2cProvider + Send + Sync + 'static,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     fn name(&self) -> &'static str {
         "i2c"
@@ -173,97 +133,154 @@ where
     }
 }
 
-async fn i2c_read<I2cSet>(
-    hardware: Option<SharedI2c<I2cSet>>,
+struct I2cHandle<Bus> {
+    label: String,
+    bus: Option<Bus>,
     active: Arc<AtomicBool>,
-    name: String,
-    address: u8,
-    length: usize,
-) -> Result<Vec<u8>>
-where
-    I2cSet: ResourceSet,
-    I2cSet::Resource: I2c,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
-{
-    let mut bytes = vec![0; length];
-    let hardware = hardware.ok_or_else(|| Error::runtime("I2C is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    let bus = named_bus(&mut *hardware, &name)?;
-    bus.read(address, &mut bytes)
-        .await
-        .map_err(|error| bus_error(&name, error))?;
-    Ok(bytes)
 }
 
-async fn i2c_write<I2cSet>(
-    hardware: Option<SharedI2c<I2cSet>>,
-    active: Arc<AtomicBool>,
-    name: String,
-    address: u8,
-    bytes: Vec<u8>,
-) -> Result<()>
-where
-    I2cSet: ResourceSet,
-    I2cSet::Resource: I2c,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
-{
-    let hardware = hardware.ok_or_else(|| Error::runtime("I2C is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
-        .write(address, &bytes)
-        .await
-        .map_err(|error| bus_error(&name, error))
-}
+impl<Bus> I2cHandle<Bus> {
+    fn new(label: String, bus: Bus, active: Arc<AtomicBool>) -> Self {
+        Self {
+            label,
+            bus: Some(bus),
+            active,
+        }
+    }
 
-async fn i2c_write_read<I2cSet>(
-    hardware: Option<SharedI2c<I2cSet>>,
-    active: Arc<AtomicBool>,
-    name: String,
-    address: u8,
-    bytes: Vec<u8>,
-    read_length: usize,
-) -> Result<Vec<u8>>
-where
-    I2cSet: ResourceSet,
-    I2cSet::Resource: I2c,
-    <I2cSet::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
-{
-    let mut read = vec![0; read_length];
-    let hardware = hardware.ok_or_else(|| Error::runtime("I2C is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
-        .write_read(address, &bytes, &mut read)
-        .await
-        .map_err(|error| bus_error(&name, error))?;
-    Ok(read)
-}
-
-fn named_bus<'a, I2cSet>(hardware: &'a mut I2cSet, name: &str) -> Result<&'a mut I2cSet::Resource>
-where
-    I2cSet: ResourceSet,
-{
-    hardware
-        .get_mut(name)
-        .ok_or_else(|| Error::runtime(format!("I2C `{name}` is not exposed by this Board")))
-}
-
-fn bus_error(name: &str, error: impl core::fmt::Debug) -> Error {
-    Error::runtime(format!("I2C `{name}` transaction failed: {error:?}"))
-}
-
-fn ensure_active(active: &AtomicBool) -> Result<()> {
-    if active.load(Ordering::Acquire) {
-        Ok(())
-    } else {
-        Err(Error::runtime("I2C package has been revoked"))
+    fn close(&mut self) {
+        self.bus.take();
     }
 }
 
-fn bus_args(address: i64, length: i64) -> Result<(u8, usize)> {
-    Ok((parse_address(address)?, parse_length(length)?))
+impl<Bus> UserData for I2cHandle<Bus>
+where
+    Bus: I2c + Send + 'static,
+    <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+{
+    fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
+        methods.add_async_method("read", |handle, (address, length): (i64, i64)| async move {
+            Some(i2c_read(handle, address, length).await)
+        });
+        methods.add_async_method(
+            "write",
+            |handle, (address, bytes): (i64, Vec<u8>)| async move {
+                Some(i2c_write(handle, address, bytes).await)
+            },
+        );
+        methods.add_async_method(
+            "write_read",
+            |handle, (address, bytes, length): (i64, Vec<u8>, i64)| async move {
+                Some(i2c_write_read(handle, address, bytes, length).await)
+            },
+        );
+        methods.add_method("is_open", |handle, (): ()| {
+            Some(Ok(
+                handle.active.load(Ordering::Acquire) && handle.bus.is_some()
+            ))
+        });
+        methods.add_method_mut("close", |handle, (): ()| {
+            handle.close();
+            None::<Result<()>>
+        });
+        methods.add_meta_method_mut(MetaMethod::Close, |handle, _error: Option<String>| {
+            handle.close();
+            None::<Result<()>>
+        });
+    }
+}
+
+async fn i2c_read<Bus>(
+    handle: UserDataHandle<I2cHandle<Bus>>,
+    address: i64,
+    length: i64,
+) -> Result<Vec<u8>>
+where
+    Bus: I2c + Send + 'static,
+    <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+{
+    let address = parse_address(address)?;
+    let length = parse_length(length)?;
+    let mut bytes = vec![0; length];
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("I2C handle is closed"))?
+        .read(address, &mut bytes)
+        .await
+        .map_err(|error| bus_error(&label, error))?;
+    Ok(bytes)
+}
+
+async fn i2c_write<Bus>(
+    handle: UserDataHandle<I2cHandle<Bus>>,
+    address: i64,
+    bytes: Vec<u8>,
+) -> Result<()>
+where
+    Bus: I2c + Send + 'static,
+    <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+{
+    let address = parse_address(address)?;
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("I2C handle is closed"))?
+        .write(address, &bytes)
+        .await
+        .map_err(|error| bus_error(&label, error))
+}
+
+async fn i2c_write_read<Bus>(
+    handle: UserDataHandle<I2cHandle<Bus>>,
+    address: i64,
+    bytes: Vec<u8>,
+    length: i64,
+) -> Result<Vec<u8>>
+where
+    Bus: I2c + Send + 'static,
+    <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+{
+    let address = parse_address(address)?;
+    let length = parse_length(length)?;
+    let mut read = vec![0; length];
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("I2C handle is closed"))?
+        .write_read(address, &bytes, &mut read)
+        .await
+        .map_err(|error| bus_error(&label, error))?;
+    Ok(read)
+}
+
+fn ensure_handle(active: &AtomicBool, open: bool) -> Result<()> {
+    if !active.load(Ordering::Acquire) {
+        Err(Error::runtime("I2C package has been revoked"))
+    } else if !open {
+        Err(Error::runtime("I2C handle is closed"))
+    } else {
+        Ok(())
+    }
+}
+
+fn positive_u32(value: i64, field: &str) -> Result<u32> {
+    let value = u32::try_from(value)
+        .map_err(|_| Error::runtime(format!("{field} must be a positive 32-bit integer")))?;
+    if value == 0 {
+        Err(Error::runtime(format!("{field} must be greater than zero")))
+    } else {
+        Ok(value)
+    }
 }
 
 fn parse_address(value: i64) -> Result<u8> {
@@ -290,28 +307,69 @@ fn parse_length(value: i64) -> Result<usize> {
     }
 }
 
+fn bus_error(label: &str, error: impl core::fmt::Debug) -> Error {
+    Error::runtime(format!("I2C bus ({label}) transaction failed: {error:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use alloc::sync::Arc;
-    use barracuda_board_hal::NamedResources;
-    use core::{
-        convert::Infallible,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    extern crate std;
+
+    use core::{convert::Infallible, sync::atomic::AtomicBool};
     use embedded_hal::i2c::{ErrorType, Operation};
-    use futures_lite::future::block_on;
 
     use super::*;
 
-    struct TestI2c;
+    struct TestProvider {
+        busy: Arc<AtomicBool>,
+    }
 
-    impl ErrorType for TestI2c {
+    #[derive(Debug)]
+    struct TestOpenError;
+
+    impl core::fmt::Display for TestOpenError {
+        fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            formatter.write_str("I2C resources are busy")
+        }
+    }
+
+    impl core::error::Error for TestOpenError {}
+
+    struct TestBus {
+        busy: Arc<AtomicBool>,
+    }
+
+    impl Drop for TestBus {
+        fn drop(&mut self) {
+            self.busy.store(false, Ordering::Release);
+        }
+    }
+
+    impl I2cProvider for TestProvider {
+        type Bus = TestBus;
+        type Error = TestOpenError;
+
+        fn open_i2c(
+            &self,
+            request: I2cRequest<'_>,
+        ) -> core::result::Result<Self::Bus, Self::Error> {
+            if request.scl != "D1" || request.sda != "D2" || self.busy.swap(true, Ordering::AcqRel)
+            {
+                return Err(TestOpenError);
+            }
+            Ok(TestBus {
+                busy: Arc::clone(&self.busy),
+            })
+        }
+    }
+
+    impl ErrorType for TestBus {
         type Error = Infallible;
     }
 
-    impl I2c for TestI2c {
+    impl I2c for TestBus {
         async fn transaction(
             &mut self,
             address: u8,
@@ -326,110 +384,49 @@ mod tests {
         }
     }
 
-    struct SerializingI2c {
-        active: Arc<AtomicUsize>,
-        max_active: Arc<AtomicUsize>,
-    }
-
-    impl ErrorType for SerializingI2c {
-        type Error = Infallible;
-    }
-
-    impl I2c for SerializingI2c {
-        async fn transaction(
-            &mut self,
-            _address: u8,
-            _operations: &mut [Operation<'_>],
-        ) -> core::result::Result<(), Self::Error> {
-            let active_now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.max_active.fetch_max(active_now, Ordering::SeqCst);
-            futures_lite::future::yield_now().await;
-            self.active.fetch_sub(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
     #[test]
-    fn lua_uses_embedded_hal_async_i2c_values() {
-        let package = I2cPackage::new(Some(NamedResources::new([("sensors", TestI2c)])));
-        let mut lua = Lua::new().expect("create Lua");
-        package.install(&mut lua).expect("install I2C package");
-
-        let valid: bool = block_on(
-            lua.load(
-                "local i2c = require('i2c')\n\
-                 i2c.write('sensors', 42, 'xy')\n\
-                 local data = i2c.write_read('sensors', 42, 'z', 3)\n\
-                 return i2c.available('sensors') and data == '***'",
-            )
-            .eval_async(),
-        )
-        .expect("run I2C script");
-        assert!(valid);
-    }
-
-    #[test]
-    fn package_mutex_serializes_async_i2c_transactions() {
-        let active = Arc::new(AtomicUsize::new(0));
-        let max_active = Arc::new(AtomicUsize::new(0));
-        let hardware = Arc::new(Mutex::new(NamedResources::new([(
-            "bus",
-            SerializingI2c {
-                active: active.clone(),
-                max_active: max_active.clone(),
-            },
-        )])));
-
-        block_on(async {
-            let active = Arc::new(AtomicBool::new(true));
-            let first = i2c_write(
-                Some(hardware.clone()),
-                Arc::clone(&active),
-                "bus".into(),
-                1,
-                Vec::new(),
-            );
-            let second = i2c_write(Some(hardware), active, "bus".into(), 2, Vec::new());
-            let (first, second) = futures_lite::future::zip(first, second).await;
-            first.expect("first transaction");
-            second.expect("second transaction");
+    fn lua_opens_uses_and_drops_an_i2c_bus() {
+        let provider = Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
         });
-
-        assert_eq!(max_active.load(Ordering::SeqCst), 1);
-        assert_eq!(active.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn rejects_ten_bit_addresses_from_the_seven_bit_api() {
-        assert!(parse_address(0x80).is_err());
-    }
-
-    #[test]
-    fn rejects_transfers_that_can_exhaust_the_device_heap() {
-        assert_eq!(
-            parse_length(MAX_TRANSFER_BYTES as i64),
-            Ok(MAX_TRANSFER_BYTES)
-        );
-        assert!(parse_length(MAX_TRANSFER_BYTES as i64 + 1).is_err());
-        assert!(parse_length(i64::MAX).is_err());
-    }
-
-    #[test]
-    fn revocation_disables_callbacks_in_existing_lua_states() {
-        let package = I2cPackage::new(Some(NamedResources::new([("sensors", TestI2c)])));
+        let package = I2cPackage::new(Arc::clone(&provider));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install I2C package");
-        package.revoke();
 
-        let revoked: bool = block_on(
+        let result: bool = futures_lite::future::block_on(
             lua.load(
                 "local i2c = require('i2c')\n\
-                 local value, err = i2c.read('sensors', 42, 1)\n\
-                 return not i2c.available('sensors') and value == nil and type(err) == 'string'",
+                 local bus <close> = i2c.open('D1', 'D2', 400000)\n\
+                 local bytes = bus:read(0x3c, 2)\n\
+                 return bus:is_open() and #bytes == 2",
             )
             .eval_async(),
         )
-        .expect("run revoked I2C script");
-        assert!(revoked);
+        .expect("run I2C application");
+
+        assert!(result);
+        assert!(!provider.busy.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn lua_rejects_invalid_runtime_configuration_before_opening() {
+        let provider = Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
+        });
+        let package = I2cPackage::new(Arc::clone(&provider));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install I2C package");
+
+        let rejected: bool = lua
+            .load(
+                "local i2c = require('i2c')\n\
+                 local bus, err = i2c.open('D1', 'D1', 400000)\n\
+                 return bus == nil and type(err) == 'string'",
+            )
+            .eval()
+            .expect("run invalid I2C application");
+
+        assert!(rejected);
+        assert!(!provider.busy.load(Ordering::Acquire));
     }
 }

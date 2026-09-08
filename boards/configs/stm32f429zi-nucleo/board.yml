@@ -14,7 +14,7 @@ builtin-peripherals:
     parameters:
       active-level: high
 exposed-io:
-  gpio:
+  pins:
     user-button:
       # UM1974: blue B1 user button is connected to PC13.
       pin: PC13

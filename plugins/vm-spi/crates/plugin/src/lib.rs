@@ -1,45 +1,53 @@
-//! Lua package for SPI values explicitly exposed by the selected Board.
+//! Lua package for runtime SPI handles over Board-exposed resources.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
-use barracuda_board_hal::{ExposedIo, ResourceSet};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
+use barracuda_board_hal::{ExposedIo, SpiProvider, SpiRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
+use barracuda_vm_plugin::{
+    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    UserDataHandle, UserDataMethods,
+};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
+use embedded_hal::spi::{MODE_0, MODE_1, MODE_2, MODE_3, Mode};
 use embedded_hal_async::spi::SpiBus;
 
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
-/// Takes the concrete Board-exposed SPI set and registers the `spi` package.
+/// Shares the unified exposed-I/O owner with the `spi` Lua package.
 #[barracuda_plugin::macros::plugin]
-pub struct SpiPlugin<SpiSet> {
-    hardware: Option<SpiSet>,
+pub struct SpiPlugin<Io> {
+    io: Arc<Io>,
 }
 
-impl<SpiSet> SpiPlugin<SpiSet> {
-    /// Takes exclusive ownership of the SPI set from the complete HAL.
+impl<Io> SpiPlugin<Io> {
+    /// Acquires a shared handle to the Board's single runtime I/O owner.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
+    pub fn new<Builtins>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Io: ExposedIo<Spi = SpiSet>,
+        Io: ExposedIo + SpiProvider,
     {
         Self {
-            hardware: context.hal.io.take_spi(),
+            io: Arc::clone(&context.hal.io),
         }
     }
 }
 
-impl<SpiSet> Plugin for SpiPlugin<SpiSet>
+impl<Io> Plugin for SpiPlugin<Io>
 where
-    SpiSet: ResourceSet + Send + 'static,
-    SpiSet::Resource: SpiBus + Send,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Io: ExposedIo + SpiProvider,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
     fn register<Storage>(
         &mut self,
@@ -52,112 +60,79 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(SpiPackage::new(self.hardware.take()))
+            .register(SpiPackage::new(Arc::clone(&self.io)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-type SharedSpi<SpiSet> = Arc<Mutex<CriticalSectionRawMutex, SpiSet>>;
-
-struct SpiPackage<SpiSet> {
-    hardware: Option<SharedSpi<SpiSet>>,
+struct SpiPackage<Io> {
+    io: Arc<Io>,
     active: Arc<AtomicBool>,
 }
 
-impl<SpiSet> SpiPackage<SpiSet> {
-    fn new(hardware: Option<SpiSet>) -> Self {
+impl<Io> SpiPackage<Io> {
+    fn new(io: Arc<Io>) -> Self {
         Self {
-            hardware: hardware.map(|hardware| Arc::new(Mutex::new(hardware))),
+            io,
             active: Arc::new(AtomicBool::new(true)),
         }
     }
 }
 
-impl<SpiSet> Package for SpiPackage<SpiSet>
+impl<Io> Package for SpiPackage<Io>
 where
-    SpiSet: ResourceSet + Send + 'static,
-    SpiSet::Resource: SpiBus + Send,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Io: SpiProvider + Send + Sync + 'static,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = self.hardware.clone();
-        let available_active = Arc::clone(&self.active);
-        let read = self.hardware.clone();
-        let read_active = Arc::clone(&self.active);
-        let write = self.hardware.clone();
-        let write_active = Arc::clone(&self.active);
-        let transfer = self.hardware.clone();
-        let transfer_active = Arc::clone(&self.active);
-        let transfer_in_place = self.hardware.clone();
-        let transfer_in_place_active = Arc::clone(&self.active);
-
+        let io = Arc::clone(&self.io);
+        let active = Arc::clone(&self.active);
         lua.register_lib("spi", move |package| {
-            package.register_async("available", move |name: String| {
-                let hardware = available.clone();
-                let active = Arc::clone(&available_active);
-                async move {
+            package.register_with(
+                "open_bus",
+                move |lua,
+                      (sck, mosi, miso, frequency_hz, mode): (
+                    String,
+                    Option<String>,
+                    Option<String>,
+                    i64,
+                    i64,
+                )| {
                     if !active.load(Ordering::Acquire) {
-                        return Some(Ok(false));
+                        return Some(Err(Error::runtime("SPI package has been revoked")));
                     }
-                    let exists = match hardware {
-                        Some(hardware) => {
-                            let hardware = hardware.lock().await;
-                            active.load(Ordering::Acquire) && hardware.contains(&name)
-                        }
-                        None => false,
-                    };
-                    Some(Ok(exists))
-                }
-            })?;
-            package.register_async("read", move |(name, length): (String, i64)| {
-                let hardware = read.clone();
-                let active = Arc::clone(&read_active);
-                async move {
-                    let length = match parse_length(length) {
-                        Ok(length) => length,
-                        Err(error) => return Some(Err(error)),
-                    };
-                    Some(spi_read(hardware, active, name, length).await)
-                }
-            })?;
-            package.register_async("write", move |(name, bytes): (String, Vec<u8>)| {
-                let hardware = write.clone();
-                let active = Arc::clone(&write_active);
-                async move { Some(spi_write(hardware, active, name, bytes).await) }
-            })?;
-            package.register_async(
-                "transfer",
-                move |(name, bytes, read_length): (String, Vec<u8>, i64)| {
-                    let hardware = transfer.clone();
-                    let active = Arc::clone(&transfer_active);
-                    async move {
-                        let read_length = match parse_length(read_length) {
-                            Ok(length) => length,
-                            Err(error) => return Some(Err(error)),
-                        };
-                        Some(spi_transfer(hardware, active, name, bytes, read_length).await)
-                    }
-                },
-            )?;
-            package.register_async(
-                "transfer_in_place",
-                move |(name, bytes): (String, Vec<u8>)| {
-                    let hardware = transfer_in_place.clone();
-                    let active = Arc::clone(&transfer_in_place_active);
-                    async move { Some(spi_transfer_in_place(hardware, active, name, bytes).await) }
+                    let result = (|| {
+                        validate_data_pins(mosi.as_deref(), miso.as_deref())?;
+                        validate_distinct_pins(&sck, mosi.as_deref(), miso.as_deref())?;
+                        let frequency_hz = positive_u32(frequency_hz, "SPI frequency")?;
+                        let mode = parse_mode(mode)?;
+                        let bus = io
+                            .open_spi(SpiRequest {
+                                sck: &sck,
+                                mosi: mosi.as_deref(),
+                                miso: miso.as_deref(),
+                                frequency_hz,
+                                mode,
+                            })
+                            .map_err(|error| Error::runtime(error.to_string()))?;
+                        let label = format!("SCK `{sck}`");
+                        lua.create_userdata(SpiHandle::new(label, bus, Arc::clone(&active)))
+                    })();
+                    Some(result)
                 },
             )
         })
     }
 }
 
-impl<SpiSet> LuaPackage for SpiPackage<SpiSet>
+impl<Io> LuaPackage for SpiPackage<Io>
 where
-    SpiSet: ResourceSet + Send + 'static,
-    SpiSet::Resource: SpiBus + Send,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Io: SpiProvider + Send + Sync + 'static,
+    Io::Error: core::fmt::Display,
+    <Io::Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
     fn name(&self) -> &'static str {
         "spi"
@@ -168,110 +143,176 @@ where
     }
 }
 
-async fn spi_read<SpiSet>(
-    hardware: Option<SharedSpi<SpiSet>>,
+struct SpiHandle<Bus> {
+    label: String,
+    bus: Option<Bus>,
     active: Arc<AtomicBool>,
-    name: String,
-    length: usize,
-) -> Result<Vec<u8>>
+}
+
+impl<Bus> SpiHandle<Bus> {
+    fn new(label: String, bus: Bus, active: Arc<AtomicBool>) -> Self {
+        Self {
+            label,
+            bus: Some(bus),
+            active,
+        }
+    }
+
+    fn close(&mut self) {
+        self.bus.take();
+    }
+}
+
+impl<Bus> UserData for SpiHandle<Bus>
 where
-    SpiSet: ResourceSet,
-    SpiSet::Resource: SpiBus,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Bus: SpiBus + Send + 'static,
+    <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let mut bytes = vec![0; length];
-    let hardware = hardware.ok_or_else(|| Error::runtime("SPI is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
+    fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
+        methods.add_async_method("read", |handle, length: i64| async move {
+            Some(spi_read(handle, length).await)
+        });
+        methods.add_async_method("write", |handle, bytes: Vec<u8>| async move {
+            Some(spi_write(handle, bytes).await)
+        });
+        methods.add_async_method(
+            "transfer",
+            |handle, (bytes, read_length): (Vec<u8>, i64)| async move {
+                Some(spi_transfer(handle, bytes, read_length).await)
+            },
+        );
+        methods.add_async_method("transfer_in_place", |handle, bytes: Vec<u8>| async move {
+            Some(spi_transfer_in_place(handle, bytes).await)
+        });
+        methods.add_method("is_open", |handle, (): ()| {
+            Some(Ok(
+                handle.active.load(Ordering::Acquire) && handle.bus.is_some()
+            ))
+        });
+        methods.add_method_mut("close", |handle, (): ()| {
+            handle.close();
+            None::<Result<()>>
+        });
+        methods.add_meta_method_mut(MetaMethod::Close, |handle, _error: Option<String>| {
+            handle.close();
+            None::<Result<()>>
+        });
+    }
+}
+
+async fn spi_read<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, length: i64) -> Result<Vec<u8>>
+where
+    Bus: SpiBus + Send + 'static,
+    <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+{
+    let mut bytes = vec![0; parse_length(length)?];
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("SPI handle is closed"))?
         .read(&mut bytes)
         .await
-        .map_err(|error| bus_error(&name, error))?;
+        .map_err(|error| bus_error(&label, error))?;
     Ok(bytes)
 }
 
-async fn spi_write<SpiSet>(
-    hardware: Option<SharedSpi<SpiSet>>,
-    active: Arc<AtomicBool>,
-    name: String,
-    bytes: Vec<u8>,
-) -> Result<()>
+async fn spi_write<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, bytes: Vec<u8>) -> Result<()>
 where
-    SpiSet: ResourceSet,
-    SpiSet::Resource: SpiBus,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Bus: SpiBus + Send + 'static,
+    <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let hardware = hardware.ok_or_else(|| Error::runtime("SPI is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("SPI handle is closed"))?
         .write(&bytes)
         .await
-        .map_err(|error| bus_error(&name, error))
+        .map_err(|error| bus_error(&label, error))
 }
 
-async fn spi_transfer<SpiSet>(
-    hardware: Option<SharedSpi<SpiSet>>,
-    active: Arc<AtomicBool>,
-    name: String,
+async fn spi_transfer<Bus>(
+    handle: UserDataHandle<SpiHandle<Bus>>,
     write: Vec<u8>,
-    read_length: usize,
+    read_length: i64,
 ) -> Result<Vec<u8>>
 where
-    SpiSet: ResourceSet,
-    SpiSet::Resource: SpiBus,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Bus: SpiBus + Send + 'static,
+    <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let mut read = vec![0; read_length];
-    let hardware = hardware.ok_or_else(|| Error::runtime("SPI is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
+    let mut read = vec![0; parse_length(read_length)?];
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("SPI handle is closed"))?
         .transfer(&mut read, &write)
         .await
-        .map_err(|error| bus_error(&name, error))?;
+        .map_err(|error| bus_error(&label, error))?;
     Ok(read)
 }
 
-async fn spi_transfer_in_place<SpiSet>(
-    hardware: Option<SharedSpi<SpiSet>>,
-    active: Arc<AtomicBool>,
-    name: String,
+async fn spi_transfer_in_place<Bus>(
+    handle: UserDataHandle<SpiHandle<Bus>>,
     mut bytes: Vec<u8>,
 ) -> Result<Vec<u8>>
 where
-    SpiSet: ResourceSet,
-    SpiSet::Resource: SpiBus,
-    <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
+    Bus: SpiBus + Send + 'static,
+    <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let hardware = hardware.ok_or_else(|| Error::runtime("SPI is not exposed by this Board"))?;
-    let mut hardware = hardware.lock().await;
-    ensure_active(&active)?;
-    named_bus(&mut *hardware, &name)?
+    let mut handle = handle.borrow_mut()?;
+    ensure_handle(&handle.active, handle.bus.is_some())?;
+    let label = handle.label.clone();
+    handle
+        .bus
+        .as_mut()
+        .ok_or_else(|| Error::runtime("SPI handle is closed"))?
         .transfer_in_place(&mut bytes)
         .await
-        .map_err(|error| bus_error(&name, error))?;
+        .map_err(|error| bus_error(&label, error))?;
     Ok(bytes)
 }
 
-fn named_bus<'a, SpiSet>(hardware: &'a mut SpiSet, name: &str) -> Result<&'a mut SpiSet::Resource>
-where
-    SpiSet: ResourceSet,
-{
-    hardware
-        .get_mut(name)
-        .ok_or_else(|| Error::runtime(format!("SPI `{name}` is not exposed by this Board")))
-}
-
-fn bus_error(name: &str, error: impl core::fmt::Debug) -> Error {
-    Error::runtime(format!("SPI `{name}` transaction failed: {error:?}"))
-}
-
-fn ensure_active(active: &AtomicBool) -> Result<()> {
-    if active.load(Ordering::Acquire) {
-        Ok(())
+fn validate_data_pins(mosi: Option<&str>, miso: Option<&str>) -> Result<()> {
+    if mosi.is_none() && miso.is_none() {
+        Err(Error::runtime("SPI requires MOSI, MISO, or both"))
     } else {
-        Err(Error::runtime("SPI package has been revoked"))
+        Ok(())
+    }
+}
+
+fn validate_distinct_pins(sck: &str, mosi: Option<&str>, miso: Option<&str>) -> Result<()> {
+    if mosi == Some(sck) || miso == Some(sck) || (mosi.is_some() && mosi == miso) {
+        Err(Error::runtime("SPI signal roles must use different pins"))
+    } else {
+        Ok(())
+    }
+}
+
+fn parse_mode(value: i64) -> Result<Mode> {
+    match value {
+        0 => Ok(MODE_0),
+        1 => Ok(MODE_1),
+        2 => Ok(MODE_2),
+        3 => Ok(MODE_3),
+        _ => Err(Error::runtime("SPI mode must be 0, 1, 2, or 3")),
+    }
+}
+
+fn positive_u32(value: i64, field: &str) -> Result<u32> {
+    let value = u32::try_from(value)
+        .map_err(|_| Error::runtime(format!("{field} must be a positive 32-bit integer")))?;
+    if value == 0 {
+        Err(Error::runtime(format!("{field} must be greater than zero")))
+    } else {
+        Ok(value)
     }
 }
 
@@ -287,26 +328,84 @@ fn parse_length(value: i64) -> Result<usize> {
     }
 }
 
+fn ensure_handle(active: &AtomicBool, open: bool) -> Result<()> {
+    if !active.load(Ordering::Acquire) {
+        Err(Error::runtime("SPI package has been revoked"))
+    } else if !open {
+        Err(Error::runtime("SPI handle is closed"))
+    } else {
+        Ok(())
+    }
+}
+
+fn bus_error(label: &str, error: impl core::fmt::Debug) -> Error {
+    Error::runtime(format!("SPI bus ({label}) transaction failed: {error:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use barracuda_board_hal::NamedResources;
-    use core::convert::Infallible;
+    extern crate std;
+
+    use core::{convert::Infallible, sync::atomic::AtomicBool};
     use embedded_hal::spi::ErrorType;
-    use futures_lite::future::block_on;
 
     use super::*;
 
-    struct TestSpi;
+    struct TestProvider {
+        busy: Arc<AtomicBool>,
+    }
 
-    impl ErrorType for TestSpi {
+    #[derive(Debug)]
+    struct TestOpenError;
+
+    impl core::fmt::Display for TestOpenError {
+        fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            formatter.write_str("SPI resources are busy")
+        }
+    }
+
+    impl core::error::Error for TestOpenError {}
+
+    struct TestBus {
+        busy: Arc<AtomicBool>,
+    }
+
+    impl Drop for TestBus {
+        fn drop(&mut self) {
+            self.busy.store(false, Ordering::Release);
+        }
+    }
+
+    impl SpiProvider for TestProvider {
+        type Bus = TestBus;
+        type Error = TestOpenError;
+
+        fn open_spi(
+            &self,
+            request: SpiRequest<'_>,
+        ) -> core::result::Result<Self::Bus, Self::Error> {
+            if request.sck != "D1"
+                || request.mosi != Some("D2")
+                || request.miso != Some("D3")
+                || self.busy.swap(true, Ordering::AcqRel)
+            {
+                return Err(TestOpenError);
+            }
+            Ok(TestBus {
+                busy: Arc::clone(&self.busy),
+            })
+        }
+    }
+
+    impl ErrorType for TestBus {
         type Error = Infallible;
     }
 
-    impl SpiBus for TestSpi {
+    impl SpiBus for TestBus {
         async fn read(&mut self, words: &mut [u8]) -> core::result::Result<(), Self::Error> {
-            words.fill(0xA5);
+            words.fill(0x5a);
             Ok(())
         }
 
@@ -317,9 +416,9 @@ mod tests {
         async fn transfer(
             &mut self,
             read: &mut [u8],
-            write: &[u8],
+            _write: &[u8],
         ) -> core::result::Result<(), Self::Error> {
-            read.fill(write.first().copied().unwrap_or_default());
+            read.fill(0xa5);
             Ok(())
         }
 
@@ -337,50 +436,48 @@ mod tests {
     }
 
     #[test]
-    fn lua_uses_embedded_hal_async_spi_values() {
-        let package = SpiPackage::new(Some(NamedResources::new([("display-port", TestSpi)])));
+    fn lua_opens_uses_and_drops_an_spi_bus() {
+        let provider = Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
+        });
+        let package = SpiPackage::new(Arc::clone(&provider));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install SPI package");
 
-        let valid: bool = block_on(
+        let result: bool = futures_lite::future::block_on(
             lua.load(
                 "local spi = require('spi')\n\
-                 spi.write('display-port', '12')\n\
-                 local data = spi.transfer_in_place('display-port', '34')\n\
-                 return spi.available('display-port') and data == '43'",
+                 local bus <close> = spi.open_bus('D1', 'D2', 'D3', 10000000, 0)\n\
+                 local bytes = bus:read(3)\n\
+                 return bus:is_open() and #bytes == 3",
             )
             .eval_async(),
         )
-        .expect("run SPI script");
-        assert!(valid);
+        .expect("run SPI application");
+
+        assert!(result);
+        assert!(!provider.busy.load(Ordering::Acquire));
     }
 
     #[test]
-    fn rejects_transfers_that_can_exhaust_the_device_heap() {
-        assert_eq!(
-            parse_length(MAX_TRANSFER_BYTES as i64),
-            Ok(MAX_TRANSFER_BYTES)
-        );
-        assert!(parse_length(MAX_TRANSFER_BYTES as i64 + 1).is_err());
-        assert!(parse_length(i64::MAX).is_err());
-    }
-
-    #[test]
-    fn revocation_disables_callbacks_in_existing_lua_states() {
-        let package = SpiPackage::new(Some(NamedResources::new([("display-port", TestSpi)])));
+    fn lua_rejects_duplicate_spi_roles_before_opening() {
+        let provider = Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
+        });
+        let package = SpiPackage::new(Arc::clone(&provider));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install SPI package");
-        package.revoke();
 
-        let revoked: bool = block_on(
-            lua.load(
+        let rejected: bool = lua
+            .load(
                 "local spi = require('spi')\n\
-                 local value, err = spi.read('display-port', 1)\n\
-                 return not spi.available('display-port') and value == nil and type(err) == 'string'",
+                 local bus, err = spi.open_bus('D1', 'D1', nil, 10000000, 0)\n\
+                 return bus == nil and type(err) == 'string'",
             )
-            .eval_async(),
-        )
-        .expect("run revoked SPI script");
-        assert!(revoked);
+            .eval()
+            .expect("run invalid SPI application");
+
+        assert!(rejected);
+        assert!(!provider.busy.load(Ordering::Acquire));
     }
 }

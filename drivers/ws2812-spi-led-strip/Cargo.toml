@@ -1,0 +1,22 @@
+[package]
+name = "barracuda-ws2812-spi-led-strip"
+version = "0.1.0"
+edition = "2024"
+description = "WS2812 and SK6812 LED-strip Driver over embedded-hal SPI"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

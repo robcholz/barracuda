@@ -5,6 +5,11 @@
 
 #![no_std]
 
+extern crate alloc;
+
+mod providers;
+mod runtime;
+
 use core::{convert::Infallible, future::Future};
 
 use embassy_executor::Spawner;
@@ -13,7 +18,28 @@ use embedded_hal::{
     i2c, spi,
 };
 
-/// Input bias selected while a GPIO operates as a digital input.
+pub use providers::{
+    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, PwmProvider,
+    PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo, RuntimeOpenError,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig,
+    UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
+};
+pub use runtime::{LeaseError, ResourceKind};
+
+/// Stable built-in audio capability API implemented by codec Drivers.
+pub use barracuda_driver::audio;
+/// Stable built-in camera capability API implemented by Camera Drivers.
+pub use barracuda_driver::camera;
+/// Stable built-in display capability API implemented by display Drivers.
+pub use barracuda_driver::display;
+/// Stable built-in indicator capability API implemented by indicator Drivers.
+pub use barracuda_driver::indicator;
+/// Stable built-in LED-strip capability API implemented by LED Drivers.
+pub use barracuda_driver::led_strip;
+/// Stable factory contract implemented by every peripheral Driver.
+pub use barracuda_driver::PeripheralDriver;
+
+/// Input bias selected while a VM-exposed GPIO operates as an input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Pull {
     /// Leave the input electrically unbiased.
@@ -25,7 +51,7 @@ pub enum Pull {
     Down,
 }
 
-/// Electrical output driver selected for a digital GPIO.
+/// Electrical output driver selected for a VM-exposed GPIO.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputDrive {
     /// Actively drive both high and low levels.
@@ -35,7 +61,7 @@ pub enum OutputDrive {
     OpenDrain,
 }
 
-/// Digital latch level used while changing a GPIO into output mode.
+/// Digital latch level used while changing a VM-exposed GPIO to output mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DigitalLevel {
     /// Drive the logical low level.
@@ -45,39 +71,39 @@ pub enum DigitalLevel {
     High,
 }
 
-/// Runtime configuration for a digital input.
+/// Runtime configuration for a VM-exposed digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputConfig {
     /// Input bias.
     pub pull: Pull,
 }
 
-/// Runtime configuration for a digital output.
+/// Runtime configuration for a VM-exposed digital output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OutputConfig {
-    /// Output latch value installed before enabling the driver.
+    /// Output latch installed before enabling the driver.
     pub initial: DigitalLevel,
     /// Electrical output driver.
     pub drive: OutputDrive,
 }
 
-/// A GPIO whose owner may change its digital mode at runtime.
+/// An exposed GPIO whose runtime owner may change its digital mode.
 ///
-/// Reading and writing remain the standard [`InputPin`] and
-/// [`StatefulOutputPin`] operations. Implementations configure the selected
-/// mode before those operations are handed to a consumer.
+/// Reads and writes remain standard `embedded-hal` operations. This extension
+/// exists for the VM GPIO package because `embedded-hal` does not standardize
+/// runtime transitions between disabled, input, and output modes.
 pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
     /// Configures the pin as a digital input.
     fn configure_input(&mut self, config: InputConfig) -> Result<(), Self::Error>;
 
-    /// Installs the initial latch value and configures the pin as an output.
+    /// Installs the initial latch and configures the pin as an output.
     fn configure_output(&mut self, config: OutputConfig) -> Result<(), Self::Error>;
 
     /// Places the pin in its Platform-defined disconnected state.
     fn disable(&mut self) -> Result<(), Self::Error>;
 }
 
-/// Error family shared by one analog capability.
+/// Error family shared by one VM-exposed analog capability.
 pub trait AnalogErrorType {
     /// Error returned by analog conversions.
     type Error: core::error::Error;
@@ -85,7 +111,7 @@ pub trait AnalogErrorType {
 
 /// One Board-exposed analog input channel.
 pub trait AnalogInput: AnalogErrorType {
-    /// Highest raw sample value produced by this channel's current configuration.
+    /// Highest raw sample value produced by this channel.
     fn max_value(&self) -> u32;
 
     /// Samples the channel in its native integer range.
@@ -94,106 +120,19 @@ pub trait AnalogInput: AnalogErrorType {
 
 /// One Board-exposed analog output channel.
 pub trait AnalogOutput: AnalogErrorType {
-    /// Highest raw value accepted by this channel's current configuration.
+    /// Highest raw value accepted by this channel.
     fn max_value(&self) -> u32;
 
     /// Writes one value in the channel's native integer range.
     fn write(&mut self, value: u32) -> Result<(), Self::Error>;
 }
 
-/// A fixed-capacity set of concrete hardware values addressable by Board name.
+/// Unified owner of physical resources explicitly exposed by one Board.
 ///
-/// Naming is the only abstraction added here. Each stored value keeps its
-/// concrete type and implements the corresponding `embedded-hal` trait
-/// directly.
-pub struct NamedResources<T, const N: usize> {
-    entries: [Option<NamedResource<T>>; N],
-}
-
-struct NamedResource<T> {
-    name: &'static str,
-    resource: T,
-}
-
-impl<T, const N: usize> NamedResources<T, N> {
-    /// Creates a named set from Board-generated entries.
-    #[must_use]
-    pub fn new(entries: [(&'static str, T); N]) -> Self {
-        Self {
-            entries: entries.map(|(name, resource)| Some(NamedResource { name, resource })),
-        }
-    }
-}
-
-impl<T> NamedResources<T, 0> {
-    /// Creates an empty typed resource set.
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self { entries: [] }
-    }
-}
-
-/// Runtime name lookup over a set of otherwise concrete hardware values.
-pub trait ResourceSet {
-    /// Concrete hardware value stored in this set.
-    type Resource;
-
-    /// Returns whether the Board exposed `name` in this set.
-    fn contains(&self, name: &str) -> bool;
-
-    /// Borrows one exposed resource by Board name.
-    fn get(&self, name: &str) -> Option<&Self::Resource>;
-
-    /// Mutably borrows one exposed resource by Board name.
-    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource>;
-}
-
-impl<T, const N: usize> ResourceSet for NamedResources<T, N> {
-    type Resource = T;
-
-    fn contains(&self, name: &str) -> bool {
-        self.get(name).is_some()
-    }
-
-    fn get(&self, name: &str) -> Option<&Self::Resource> {
-        self.entries
-            .iter()
-            .filter_map(Option::as_ref)
-            .find(|entry| entry.name == name)
-            .map(|entry| &entry.resource)
-    }
-
-    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource> {
-        self.entries
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .find(|entry| entry.name == name)
-            .map(|entry| &mut entry.resource)
-    }
-}
-
-/// Move-only ownership access to the I/O explicitly exposed by one Board.
-///
-/// Implementations normally store each set in an `Option`. Calling a `take_*`
-/// method transfers the concrete set to its sole consumer and subsequent calls
-/// return `None`.
-pub trait ExposedIo {
-    /// Concrete named GPIO set.
-    type Gpio: ResourceSet;
-    /// Concrete named I2C set.
-    type I2c: ResourceSet;
-    /// Concrete named SPI set.
-    type Spi: ResourceSet;
-
-    /// Moves the Board-exposed GPIO set to its owner once.
-    fn take_gpio(&mut self) -> Option<Self::Gpio>;
-
-    /// Moves the Board-exposed I2C set to its owner once.
-    fn take_i2c(&mut self) -> Option<Self::I2c>;
-
-    /// Moves the Board-exposed SPI set to its owner once.
-    fn take_spi(&mut self) -> Option<Self::Spi>;
-}
+/// Protocol-specific provider traits are implemented on this same value. They
+/// atomically claim its move-only tokens before constructing standard HAL
+/// values, preventing protocol packages from creating conflicting views.
+pub trait ExposedIo: Send + Sync + 'static {}
 
 /// Resources produced by one selected Board HAL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -238,6 +177,163 @@ pub struct EmptyBoardHal;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoBuiltinCapabilities;
 
+/// Uninhabited LED-strip capability used when a Board has no built-in strip.
+pub struct UnavailableLedStrip {
+    never: Infallible,
+}
+
+impl led_strip::LedStrip for UnavailableLedStrip {
+    type Error = Infallible;
+
+    fn len(&self) -> usize {
+        match self.never {}
+    }
+
+    fn write(&mut self, _pixels: &[led_strip::Rgb8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl led_strip::BuiltinLedStrip for NoBuiltinCapabilities {
+    type LedStrip = UnavailableLedStrip;
+
+    fn take_led_strip(&mut self) -> Option<Self::LedStrip> {
+        None
+    }
+}
+
+/// Uninhabited camera capability used when a Board has no built-in camera.
+pub struct UnavailableCamera {
+    never: Infallible,
+}
+
+impl camera::Camera for UnavailableCamera {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> camera::CameraDescriptor {
+        match self.never {}
+    }
+
+    async fn capture<'a>(
+        &'a mut self,
+        _buffer: &'a mut [u8],
+    ) -> Result<camera::CapturedFrame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl camera::BuiltinCamera for NoBuiltinCapabilities {
+    type Camera = UnavailableCamera;
+
+    fn take_camera(&mut self) -> Option<Self::Camera> {
+        None
+    }
+}
+
+/// Uninhabited audio-codec capability used when a Board has no built-in codec.
+pub struct UnavailableAudioCodec {
+    never: Infallible,
+}
+
+impl audio::AudioCodec for UnavailableAudioCodec {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> audio::AudioDescriptor {
+        match self.never {}
+    }
+
+    fn set_output_volume(&mut self, _volume: u8) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _samples: &[i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _samples: &mut [i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl audio::BuiltinAudioCodec for NoBuiltinCapabilities {
+    type AudioCodec = UnavailableAudioCodec;
+
+    fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> {
+        None
+    }
+}
+
+/// Uninhabited display capability used when a Board has no built-in display.
+pub struct UnavailableDisplay {
+    never: Infallible,
+}
+
+impl embedded_graphics_core::geometry::OriginDimensions for UnavailableDisplay {
+    fn size(&self) -> embedded_graphics_core::geometry::Size {
+        match self.never {}
+    }
+}
+
+impl embedded_graphics_core::draw_target::DrawTarget for UnavailableDisplay {
+    type Color = embedded_graphics_core::pixelcolor::Rgb888;
+    type Error = Infallible;
+
+    fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = embedded_graphics_core::Pixel<Self::Color>>,
+    {
+        match self.never {}
+    }
+}
+
+impl display::Display for UnavailableDisplay {
+    type ControlError = Infallible;
+    type RenderError = Infallible;
+
+    fn descriptor(&self) -> display::DisplayDescriptor {
+        match self.never {}
+    }
+
+    fn draw_rgb888(
+        &mut self,
+        _area: embedded_graphics_core::primitives::Rectangle,
+        _pixels: &[embedded_graphics_core::pixelcolor::Rgb888],
+    ) -> Result<(), Self::RenderError> {
+        match self.never {}
+    }
+
+    async fn flush(&mut self, _request: display::RefreshRequest) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_power(&mut self, _power: display::DisplayPower) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_brightness(&mut self, _brightness: u8) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_orientation(
+        &mut self,
+        _orientation: display::DisplayOrientation,
+    ) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+}
+
+impl display::BuiltinDisplay for NoBuiltinCapabilities {
+    type Display = UnavailableDisplay;
+
+    fn take_display(&mut self) -> Option<Self::Display> {
+        None
+    }
+}
+
 /// Explicit absence of exposed Board I/O capabilities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;
@@ -245,6 +341,109 @@ pub struct NoExposedIo;
 /// Uninhabited GPIO value that makes an empty I/O surface fully typed.
 pub struct UnavailableGpio {
     never: Infallible,
+}
+
+/// Uninhabited analog input used by Boards without runtime analog support.
+pub struct UnavailableAnalogInput {
+    never: Infallible,
+}
+
+impl AnalogErrorType for UnavailableAnalogInput {
+    type Error = Infallible;
+}
+
+impl AnalogInput for UnavailableAnalogInput {
+    fn max_value(&self) -> u32 {
+        match self.never {}
+    }
+
+    fn read(&mut self) -> Result<u32, Self::Error> {
+        match self.never {}
+    }
+}
+
+/// Uninhabited analog output used by Boards without runtime analog support.
+pub struct UnavailableAnalogOutput {
+    never: Infallible,
+}
+
+/// Uninhabited PWM output used by Boards without runtime PWM support.
+pub struct UnavailablePwm {
+    never: Infallible,
+}
+
+/// Uninhabited UART stream used by Boards without runtime UART support.
+pub struct UnavailableUart {
+    never: Infallible,
+}
+
+impl embedded_io::ErrorType for UnavailableUart {
+    type Error = Infallible;
+}
+
+impl embedded_io_async::Read for UnavailableUart {
+    async fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl embedded_io_async::Write for UnavailableUart {
+    async fn write(&mut self, _buffer: &[u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+/// Uninhabited PCM stream used by Boards without runtime I2S support.
+pub struct UnavailableI2s {
+    never: Infallible,
+}
+
+impl audio::PcmStream for UnavailableI2s {
+    type Error = Infallible;
+
+    fn format(&self) -> audio::PcmFormat {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _samples: &[i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _samples: &mut [i16]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl embedded_hal::pwm::ErrorType for UnavailablePwm {
+    type Error = Infallible;
+}
+
+impl embedded_hal::pwm::SetDutyCycle for UnavailablePwm {
+    fn max_duty_cycle(&self) -> u16 {
+        match self.never {}
+    }
+
+    fn set_duty_cycle(&mut self, _duty: u16) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl AnalogErrorType for UnavailableAnalogOutput {
+    type Error = Infallible;
+}
+
+impl AnalogOutput for UnavailableAnalogOutput {
+    fn max_value(&self) -> u32 {
+        match self.never {}
+    }
+
+    fn write(&mut self, _value: u32) -> Result<(), Self::Error> {
+        match self.never {}
+    }
 }
 
 impl UnavailableGpio {
@@ -363,21 +562,93 @@ impl embedded_hal_async::spi::SpiBus for UnavailableSpi {
     }
 }
 
-impl ExposedIo for NoExposedIo {
-    type Gpio = NamedResources<UnavailableGpio, 0>;
-    type I2c = NamedResources<UnavailableI2c, 0>;
-    type Spi = NamedResources<UnavailableSpi, 0>;
+impl ExposedIo for NoExposedIo {}
 
-    fn take_gpio(&mut self) -> Option<Self::Gpio> {
-        None
+impl DigitalProvider for NoExposedIo {
+    type Pin = UnavailableGpio;
+    type Error = UnsupportedFunction;
+
+    fn digital_available(&self, _name: &str) -> bool {
+        false
     }
 
-    fn take_i2c(&mut self) -> Option<Self::I2c> {
-        None
+    fn acquire_digital(&self, _name: &str) -> Result<Self::Pin, Self::Error> {
+        Err(UnsupportedFunction::new("digital I/O"))
+    }
+}
+
+impl AnalogProvider for NoExposedIo {
+    type Input = UnavailableAnalogInput;
+    type Output = UnavailableAnalogOutput;
+    type Error = UnsupportedFunction;
+
+    fn analog_input_available(&self, _name: &str) -> bool {
+        false
     }
 
-    fn take_spi(&mut self) -> Option<Self::Spi> {
-        None
+    fn analog_output_available(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn acquire_analog_input(&self, _name: &str) -> Result<Self::Input, Self::Error> {
+        Err(UnsupportedFunction::new("analog input"))
+    }
+
+    fn acquire_analog_output(&self, _name: &str) -> Result<Self::Output, Self::Error> {
+        Err(UnsupportedFunction::new("analog output"))
+    }
+}
+
+impl PwmProvider for NoExposedIo {
+    type Output = UnavailablePwm;
+    type Error = UnsupportedFunction;
+
+    fn pwm_available(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn open_pwm(&self, _request: PwmRequest<'_>) -> Result<Self::Output, Self::Error> {
+        Err(UnsupportedFunction::new("PWM"))
+    }
+}
+
+impl UartProvider for NoExposedIo {
+    type Port = UnavailableUart;
+    type Error = UnsupportedFunction;
+
+    fn uart_available(&self, _tx: Option<&str>, _rx: Option<&str>) -> bool {
+        false
+    }
+
+    fn open_uart(&self, _request: UartRequest<'_>) -> Result<Self::Port, Self::Error> {
+        Err(UnsupportedFunction::new("UART"))
+    }
+}
+
+impl I2sProvider for NoExposedIo {
+    type Stream = UnavailableI2s;
+    type Error = UnsupportedFunction;
+
+    fn open_i2s(&self, _request: I2sRequest<'_>) -> Result<Self::Stream, Self::Error> {
+        Err(UnsupportedFunction::new("I2S"))
+    }
+}
+
+impl I2cProvider for NoExposedIo {
+    type Bus = UnavailableI2c;
+    type Error = UnsupportedFunction;
+
+    fn open_i2c(&self, _request: I2cRequest<'_>) -> Result<Self::Bus, Self::Error> {
+        Err(UnsupportedFunction::new("I2C"))
+    }
+}
+
+impl SpiProvider for NoExposedIo {
+    type Bus = UnavailableSpi;
+    type Error = UnsupportedFunction;
+
+    fn open_spi(&self, _request: SpiRequest<'_>) -> Result<Self::Bus, Self::Error> {
+        Err(UnsupportedFunction::new("SPI"))
     }
 }
 

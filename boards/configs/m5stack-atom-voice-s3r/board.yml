@@ -5,3 +5,33 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+internal-io:
+  i2c-device:
+    audio-control:
+      # M5Stack Atom VoiceS3R: ES8311 control bus.
+      peripheral: I2C0
+      scl: GPIO0
+      sda: GPIO45
+      frequency-hz: 400000
+  i2s-stream:
+    audio-stream:
+      # DOUT/DIN are named from the ESP32-S3 controller's perspective.
+      # Source: https://github.com/m5stack/esphome-yaml/blob/main/common/atom-echos3r-satellite-base.yaml
+      peripheral: I2S0
+      dma: DMA_CH0
+      bclk: GPIO17
+      ws: GPIO3
+      dout: GPIO48
+      din: GPIO4
+      mclk: GPIO11
+      sample-rate-hz: 16000
+      channels: 2
+      bits-per-sample: 16
+      dma-buffer-bytes: 4096
+builtin-peripherals:
+  audio-codec:
+    driver: es8311-audio-codec
+    bindings:
+      amplifier-enable: GPIO18
+      control: audio-control
+      stream: audio-stream

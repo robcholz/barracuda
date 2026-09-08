@@ -4,20 +4,33 @@ version = "0.1.0"
 edition = "2021"
 description = "ESP32-C3 Platform implementation for Barracuda"
 
+[features]
+default = ["runtime-pwm"]
+runtime-i2s = []
+runtime-pwm = []
+
 [dependencies]
 barracuda-board.workspace = true
 barracuda-platform.workspace = true
 log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
+barracuda-board-hal.workspace = true
 barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net.workspace = true
 embassy-sync = { version = "0.8.0", default-features = false }
-esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32c3"] }
+embedded-hal.workspace = true
+embedded-hal-bus.workspace = true
+embedded-hal-async = "1.0"
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32c3", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32c3", "jtag-serial", "log-04"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32c3", "embedded-storage"] }
+static_cell.workspace = true
+nb = "1"
 
 [build-dependencies]
 barracuda-board-config.workspace = true
