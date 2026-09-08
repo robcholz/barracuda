@@ -678,6 +678,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-analog-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+]
+
+[[package]]
 name = "barracuda-apa102-led-strip"
 version = "0.1.0"
 dependencies = [
@@ -1561,6 +1571,7 @@ dependencies = [
  "barracuda-agent-vm-plugin",
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
+ "barracuda-analog-plugin",
  "barracuda-board-hal",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",

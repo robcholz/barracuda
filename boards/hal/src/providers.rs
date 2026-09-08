@@ -7,7 +7,7 @@ use core::{cell::RefCell, fmt};
 
 use embedded_hal::spi::Mode;
 
-use crate::{ConfigurableDigitalPin, LeaseError, ResourceKind};
+use crate::{AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, ResourceKind};
 
 /// Platform adapter used by the Board-generated runtime I/O owner.
 ///
@@ -52,6 +52,25 @@ pub trait RuntimePlatform: Send + Sync + 'static {
         frequency_hz: u32,
         mode: Mode,
     ) -> Result<Self::SpiBus, Self::SpiError>;
+}
+
+/// Optional Platform construction contract for analog functions.
+pub trait RuntimeAnalogPlatform: RuntimePlatform {
+    /// Analog input returned to an application handle.
+    type AnalogInput: AnalogInput + Send + 'static;
+    /// Analog output returned to an application handle.
+    type AnalogOutput: AnalogOutput + Send + 'static;
+    /// Platform analog configuration failure.
+    type AnalogError: core::error::Error;
+
+    /// Returns whether this physical pin supports analog input.
+    fn supports_analog_input(pin: &Self::PinToken) -> bool;
+    /// Returns whether this physical pin supports analog output.
+    fn supports_analog_output(pin: &Self::PinToken) -> bool;
+    /// Consumes a physical pin as an analog input.
+    fn analog_input(pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError>;
+    /// Consumes a physical pin as an analog output.
+    fn analog_output(pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError>;
 }
 
 struct RuntimePin<Pin> {
@@ -140,6 +159,11 @@ pub enum RuntimeOpenError<E> {
     },
     /// SPI was requested without either data signal.
     MissingSpiData,
+    /// The selected physical resource cannot implement the requested function.
+    Unsupported {
+        /// Function rejected by the Platform.
+        function: &'static str,
+    },
     /// The selected Platform HAL rejected the requested configuration.
     Platform(E),
 }
@@ -155,6 +179,9 @@ impl<E: fmt::Display> fmt::Display for RuntimeOpenError<E> {
                 )
             }
             Self::MissingSpiData => formatter.write_str("SPI requires MOSI or MISO"),
+            Self::Unsupported { function } => {
+                write!(formatter, "the selected pin does not support {function}")
+            }
             Self::Platform(error) => {
                 write!(formatter, "Platform HAL configuration failed: {error}")
             }
@@ -167,7 +194,7 @@ impl<E: core::error::Error + 'static> core::error::Error for RuntimeOpenError<E>
         match self {
             Self::Resource(error) => Some(error),
             Self::Platform(error) => Some(error),
-            Self::NoController { .. } | Self::MissingSpiData => None,
+            Self::NoController { .. } | Self::MissingSpiData | Self::Unsupported { .. } => None,
         }
     }
 }
@@ -208,6 +235,94 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Digital
             Ok(token)
         })?;
         Ok(H::digital(token))
+    }
+}
+
+impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize> AnalogProvider
+    for RuntimeIo<H, P, I, S>
+{
+    type Input = H::AnalogInput;
+    type Output = H::AnalogOutput;
+    type Error = RuntimeOpenError<H::AnalogError>;
+
+    fn analog_input_available(&self, name: &str) -> bool {
+        let Ok(index) = self.resolve_pin(name) else {
+            return false;
+        };
+        critical_section::with(|section| {
+            let state = self.state.borrow(section).borrow();
+            state.pins[index]
+                .token
+                .as_ref()
+                .is_some_and(H::supports_analog_input)
+        })
+    }
+
+    fn analog_output_available(&self, name: &str) -> bool {
+        let Ok(index) = self.resolve_pin(name) else {
+            return false;
+        };
+        critical_section::with(|section| {
+            let state = self.state.borrow(section).borrow();
+            state.pins[index]
+                .token
+                .as_ref()
+                .is_some_and(H::supports_analog_output)
+        })
+    }
+
+    fn acquire_analog_input(&self, name: &str) -> Result<Self::Input, Self::Error> {
+        self.acquire_analog(
+            name,
+            "analog input",
+            H::supports_analog_input,
+            H::analog_input,
+        )
+    }
+
+    fn acquire_analog_output(&self, name: &str) -> Result<Self::Output, Self::Error> {
+        self.acquire_analog(
+            name,
+            "analog output",
+            H::supports_analog_output,
+            H::analog_output,
+        )
+    }
+}
+
+impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize>
+    RuntimeIo<H, P, I, S>
+{
+    fn acquire_analog<Value>(
+        &self,
+        name: &str,
+        function: &'static str,
+        supported: fn(&H::PinToken) -> bool,
+        construct: fn(H::PinToken) -> Result<Value, H::AnalogError>,
+    ) -> Result<Value, RuntimeOpenError<H::AnalogError>> {
+        let index = self.resolve_pin(name)?;
+        let token = critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            let pin = &mut state.pins[index];
+            let token = pin.token.as_ref().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: pin.name,
+                    owner: pin.owner.unwrap_or("runtime function"),
+                })
+            })?;
+            if !supported(token) {
+                return Err(RuntimeOpenError::Unsupported { function });
+            }
+            let token = pin.token.take().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: pin.name,
+                    owner: "runtime function",
+                })
+            })?;
+            pin.owner = Some(function);
+            Ok(token)
+        })?;
+        construct(token).map_err(RuntimeOpenError::Platform)
     }
 }
 
@@ -390,6 +505,25 @@ pub trait DigitalProvider {
     /// generated owner does not recreate the consumed physical pin token when
     /// the value is dropped.
     fn acquire_digital(&self, name: &str) -> Result<Self::Pin, Self::Error>;
+}
+
+/// Constructs analog functions from the shared exposed-I/O owner.
+pub trait AnalogProvider {
+    /// Analog input held by one application handle.
+    type Input: AnalogInput;
+    /// Analog output held by one application handle.
+    type Output: AnalogOutput;
+    /// Failure while resolving, claiming, or configuring an analog function.
+    type Error: core::error::Error;
+
+    /// Returns whether a free named pin supports analog input.
+    fn analog_input_available(&self, name: &str) -> bool;
+    /// Returns whether a free named pin supports analog output.
+    fn analog_output_available(&self, name: &str) -> bool;
+    /// Claims one exposed pin as an analog input.
+    fn acquire_analog_input(&self, name: &str) -> Result<Self::Input, Self::Error>;
+    /// Claims one exposed pin as an analog output.
+    fn acquire_analog_output(&self, name: &str) -> Result<Self::Output, Self::Error>;
 }
 
 /// Runtime request for an I2C function on two exposed pins.

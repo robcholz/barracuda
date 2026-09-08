@@ -19,8 +19,8 @@ use embedded_hal::{
 };
 
 pub use providers::{
-    DigitalProvider, I2cProvider, I2cRequest, RuntimeIo, RuntimeOpenError, RuntimePlatform,
-    SpiProvider, SpiRequest, UnsupportedFunction,
+    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, RuntimeAnalogPlatform, RuntimeIo,
+    RuntimeOpenError, RuntimePlatform, SpiProvider, SpiRequest, UnsupportedFunction,
 };
 pub use runtime::{LeaseError, ResourceKind};
 
@@ -308,6 +308,44 @@ pub struct UnavailableGpio {
     never: Infallible,
 }
 
+/// Uninhabited analog input used by Boards without runtime analog support.
+pub struct UnavailableAnalogInput {
+    never: Infallible,
+}
+
+impl AnalogErrorType for UnavailableAnalogInput {
+    type Error = Infallible;
+}
+
+impl AnalogInput for UnavailableAnalogInput {
+    fn max_value(&self) -> u32 {
+        match self.never {}
+    }
+
+    fn read(&mut self) -> Result<u32, Self::Error> {
+        match self.never {}
+    }
+}
+
+/// Uninhabited analog output used by Boards without runtime analog support.
+pub struct UnavailableAnalogOutput {
+    never: Infallible,
+}
+
+impl AnalogErrorType for UnavailableAnalogOutput {
+    type Error = Infallible;
+}
+
+impl AnalogOutput for UnavailableAnalogOutput {
+    fn max_value(&self) -> u32 {
+        match self.never {}
+    }
+
+    fn write(&mut self, _value: u32) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
 impl UnavailableGpio {
     fn unreachable<T>(&self) -> T {
         match self.never {}
@@ -436,6 +474,28 @@ impl DigitalProvider for NoExposedIo {
 
     fn acquire_digital(&self, _name: &str) -> Result<Self::Pin, Self::Error> {
         Err(UnsupportedFunction::new("digital I/O"))
+    }
+}
+
+impl AnalogProvider for NoExposedIo {
+    type Input = UnavailableAnalogInput;
+    type Output = UnavailableAnalogOutput;
+    type Error = UnsupportedFunction;
+
+    fn analog_input_available(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn analog_output_available(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn acquire_analog_input(&self, _name: &str) -> Result<Self::Input, Self::Error> {
+        Err(UnsupportedFunction::new("analog input"))
+    }
+
+    fn acquire_analog_output(&self, _name: &str) -> Result<Self::Output, Self::Error> {
+        Err(UnsupportedFunction::new("analog output"))
     }
 }
 

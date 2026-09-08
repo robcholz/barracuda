@@ -4,7 +4,8 @@ use core::convert::Infallible;
 
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
-    Pull as BoardPull, RuntimePlatform, UnavailableI2c, UnavailableSpi, UnsupportedFunction,
+    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, UnavailableAnalogInput,
+    UnavailableAnalogOutput, UnavailableI2c, UnavailableSpi, UnsupportedFunction,
 };
 use embassy_stm32::gpio::{AnyPin, Flex, Input, Level, Output, Pin, Pull, Speed};
 use embedded_hal::{
@@ -57,6 +58,28 @@ impl RuntimePlatform for RuntimeAdapter {
         _mode: Mode,
     ) -> Result<Self::SpiBus, Self::SpiError> {
         match controller {}
+    }
+}
+
+impl RuntimeAnalogPlatform for RuntimeAdapter {
+    type AnalogInput = UnavailableAnalogInput;
+    type AnalogOutput = UnavailableAnalogOutput;
+    type AnalogError = UnsupportedFunction;
+
+    fn supports_analog_input(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn supports_analog_output(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn analog_input(_pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError> {
+        Err(UnsupportedFunction::new("analog input"))
+    }
+
+    fn analog_output(_pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
+        Err(UnsupportedFunction::new("analog output"))
     }
 }
 

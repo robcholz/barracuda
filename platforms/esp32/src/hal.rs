@@ -2,7 +2,8 @@
 
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
-    Pull as BoardPull, RuntimePlatform,
+    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, UnavailableAnalogInput,
+    UnavailableAnalogOutput, UnsupportedFunction,
 };
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
@@ -113,6 +114,28 @@ impl RuntimePlatform for RuntimeAdapter {
             bus
         };
         Ok(bus.into_async())
+    }
+}
+
+impl RuntimeAnalogPlatform for RuntimeAdapter {
+    type AnalogInput = UnavailableAnalogInput;
+    type AnalogOutput = UnavailableAnalogOutput;
+    type AnalogError = UnsupportedFunction;
+
+    fn supports_analog_input(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn supports_analog_output(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn analog_input(_pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError> {
+        Err(UnsupportedFunction::new("analog input"))
+    }
+
+    fn analog_output(_pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
+        Err(UnsupportedFunction::new("analog output"))
     }
 }
 

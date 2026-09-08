@@ -13,8 +13,8 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, BoardHalResources,
-    DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
+    camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, AnalogProvider,
+    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -85,7 +85,12 @@ where
     <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
     Builtins::LedStrip: Send + 'static,
     <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
-    Io: ExposedIo + DigitalProvider + I2cProvider + SpiProvider + Unpin,
+    Io: ExposedIo + AnalogProvider + DigitalProvider + I2cProvider + SpiProvider + Unpin,
+    Io::Input: Send,
+    <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
+    Io::Output: Send,
+    <Io::Output as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
+    <Io as AnalogProvider>::Error: core::fmt::Display,
     Io::Pin: Send,
     <Io::Pin as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
     <Io as DigitalProvider>::Error: core::fmt::Display,
@@ -169,6 +174,7 @@ where
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
+            barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
             barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
             barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),

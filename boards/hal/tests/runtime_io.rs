@@ -5,9 +5,9 @@
 use core::convert::Infallible;
 
 use barracuda_board_hal::{
-    ConfigurableDigitalPin, DigitalLevel, DigitalProvider, I2cProvider, I2cRequest, InputConfig,
-    LeaseError, OutputConfig, RuntimeIo, RuntimeOpenError, RuntimePlatform, SpiProvider,
-    SpiRequest,
+    AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
+    DigitalProvider, I2cProvider, I2cRequest, InputConfig, LeaseError, OutputConfig,
+    RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform, SpiProvider, SpiRequest,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -127,6 +127,33 @@ impl embedded_hal_async::spi::SpiBus for FakeSpi {
 
 struct FakePlatform;
 
+struct FakeAnalog(u8);
+
+impl AnalogErrorType for FakeAnalog {
+    type Error = Infallible;
+}
+
+impl AnalogInput for FakeAnalog {
+    fn max_value(&self) -> u32 {
+        4095
+    }
+
+    fn read(&mut self) -> Result<u32, Self::Error> {
+        Ok(u32::from(self.0))
+    }
+}
+
+impl barracuda_board_hal::AnalogOutput for FakeAnalog {
+    fn max_value(&self) -> u32 {
+        255
+    }
+
+    fn write(&mut self, value: u32) -> Result<(), Self::Error> {
+        self.0 = value as u8;
+        Ok(())
+    }
+}
+
 impl RuntimePlatform for FakePlatform {
     type PinToken = u8;
     type DigitalPin = FakePin;
@@ -171,6 +198,28 @@ impl RuntimePlatform for FakePlatform {
             frequency_hz,
             mode,
         })
+    }
+}
+
+impl RuntimeAnalogPlatform for FakePlatform {
+    type AnalogInput = FakeAnalog;
+    type AnalogOutput = FakeAnalog;
+    type AnalogError = Infallible;
+
+    fn supports_analog_input(pin: &Self::PinToken) -> bool {
+        *pin == 1
+    }
+
+    fn supports_analog_output(pin: &Self::PinToken) -> bool {
+        *pin == 2
+    }
+
+    fn analog_input(pin: Self::PinToken) -> Result<Self::AnalogInput, Self::AnalogError> {
+        Ok(FakeAnalog(pin))
+    }
+
+    fn analog_output(pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
+        Ok(FakeAnalog(pin))
     }
 }
 
@@ -277,4 +326,22 @@ fn runtime_controller_exhaustion_does_not_consume_more_pins() {
     ));
     assert!(io.digital_available("D3"));
     assert!(io.digital_available("D4"));
+}
+
+#[test]
+fn analog_support_is_checked_before_the_shared_pin_is_consumed() {
+    let io = runtime_io();
+    assert!(io.analog_input_available("D1"));
+    assert!(!io.analog_input_available("D2"));
+    assert!(matches!(
+        io.acquire_analog_input("D2"),
+        Err(RuntimeOpenError::Unsupported {
+            function: "analog input"
+        })
+    ));
+    assert!(io.digital_available("D2"));
+
+    let mut input = io.acquire_analog_input("D1").expect("analog input");
+    assert_eq!(input.read(), Ok(1));
+    assert!(!io.digital_available("D1"));
 }
