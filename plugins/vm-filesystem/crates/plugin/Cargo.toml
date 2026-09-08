@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-vm-filesystem-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin adapting its scoped VFS to Lua filesystem APIs"
+license = "Apache-2.0"
+
+[features]
+default = []
+test-fixture = []
+
+[dependencies]
+barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
+barracuda-vm-plugin.workspace = true
+embedded-io-async = "0.7"
+
+[dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vfs-memfs.workspace = true
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

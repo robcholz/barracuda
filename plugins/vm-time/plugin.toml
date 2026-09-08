@@ -1,0 +1,3 @@
+id = "vm-time"
+depends-on = ["time", "vm"]
+description = "Exposes the UTC clock through Lua's standard os time APIs."

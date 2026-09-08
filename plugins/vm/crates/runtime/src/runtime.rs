@@ -18,7 +18,7 @@ pub(crate) const VM_TASK_SLOTS: usize = 4;
 /// Delay applied by the VM Embassy task after every instruction-hook yield.
 pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
 /// Default fixed Lua heap size owned by each VM memory-pool slot.
-pub(crate) const VM_MEMORY_BYTES_PER_SLOT: usize = 64 * 1024;
+pub(crate) const VM_MEMORY_BYTES_PER_SLOT: usize = 96 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);

@@ -212,6 +212,14 @@ impl Context<'_> {
                 lua_pushcclosure(self.thread().as_ptr(), userdata_gc::<T> as lua_CFunction, 0);
                 lua_setfield(self.thread().as_ptr(), metatable_index, c"__gc".as_ptr());
             }
+            self.thread().push_boolean(false);
+            unsafe {
+                lua_setfield(
+                    self.thread().as_ptr(),
+                    metatable_index,
+                    c"__metatable".as_ptr(),
+                );
+            }
             let mut methods = UserDataMethods {
                 lua: self.thread(),
                 methods_index,

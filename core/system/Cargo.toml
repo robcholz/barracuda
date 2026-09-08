@@ -32,10 +32,13 @@ barracuda-scheduler-plugin.workspace = true
 barracuda-time-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 barracuda-vm-agent-plugin.workspace = true
+barracuda-vm-filesystem-plugin.workspace = true
 barracuda-gpio-plugin.workspace = true
+barracuda-vm-http-plugin.workspace = true
 barracuda-i2c-plugin.workspace = true
 barracuda-message-queue-plugin.workspace = true
 barracuda-spi-plugin.workspace = true
+barracuda-vm-time-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 # END GENERATED PLUGINS

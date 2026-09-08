@@ -222,12 +222,7 @@ mod tests {
                 Some("vm-call"),
                 "vm_run",
                 &serde_json::to_string(&VmRunRequest {
-                    source: concat!(
-                        "local io = require('io'); ",
-                        "local value = io.input(); ",
-                        "io.print('detached', value)"
-                    )
-                    .into(),
+                    source: concat!("local value = io.read(); ", "print('detached', value)").into(),
                 })
                 .map_err(|error| error.to_string())?,
             )
