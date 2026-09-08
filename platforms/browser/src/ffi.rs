@@ -15,22 +15,27 @@ unsafe extern "C" {
     fn clear_alarm(token: i32);
     fn schedule_executor_poll();
     fn random_fill(bytes: *mut u8, length: u32) -> i32;
-    fn portal_request_len() -> i32;
-    fn portal_request_read(bytes: *mut u8, length: u32) -> i32;
-    fn portal_response_write(bytes: *const u8, length: u32) -> i32;
-    fn portal_response_finish() -> i32;
-    fn socket_event_kind() -> i32;
-    fn socket_event_id() -> u32;
-    fn socket_event_len() -> i32;
-    fn socket_event_read(bytes: *mut u8, length: u32) -> i32;
-    fn socket_opened(id: u32) -> i32;
+    fn http_request_port() -> u32;
+    fn http_request_len() -> i32;
+    fn http_request_read(bytes: *mut u8, length: u32) -> i32;
+    fn http_response_write(bytes: *const u8, length: u32) -> i32;
+    fn http_response_finish() -> i32;
+    fn socket_open_id() -> u32;
+    fn socket_open_port() -> u32;
+    fn socket_open_len() -> i32;
+    fn socket_open_read(bytes: *mut u8, length: u32) -> i32;
+    fn socket_event_kind(id: u32) -> i32;
+    fn socket_event_len(id: u32) -> i32;
+    fn socket_event_text(id: u32) -> i32;
+    fn socket_event_read(id: u32, bytes: *mut u8, length: u32) -> i32;
+    fn socket_opened(id: u32, protocol: *const u8, protocol_length: u32) -> i32;
     fn socket_message(id: u32, bytes: *const u8, length: u32, text: i32) -> i32;
+    fn socket_error(id: u32, bytes: *const u8, length: u32) -> i32;
     fn socket_closed(id: u32) -> i32;
     fn post_event(kind: u32, bytes: *const u8, length: u32);
 }
 
 const EVENT_STARTED: u32 = 1;
-const EVENT_DEVICE_URL: u32 = 2;
 const EVENT_ERROR: u32 = 3;
 
 pub(crate) fn system_image() -> Result<Vec<u8>, HostError> {
@@ -101,52 +106,75 @@ pub(crate) fn fill_random(bytes: &mut [u8]) -> Result<(), HostError> {
     })
 }
 
-pub(crate) fn take_portal_request() -> Result<Option<Vec<u8>>, HostError> {
-    let length = unsafe { portal_request_len() };
+pub(crate) fn take_http_request() -> Result<Option<HttpRequest>, HostError> {
+    let length = unsafe { http_request_len() };
     if length == 0 {
         return Ok(None);
     }
     let length =
         u32::try_from(length).map_err(|_| HostError::new("read page request length", length))?;
     let mut request = vec![0; length as usize];
-    let actual = unsafe { portal_request_read(request.as_mut_ptr(), length) };
+    let port = read_port("read HTTP target port", unsafe { http_request_port() })?;
+    let actual = unsafe { http_request_read(request.as_mut_ptr(), length) };
     transferred("read page request", actual, length)?;
-    Ok(Some(request))
+    Ok(Some(HttpRequest { port, request }))
 }
 
-pub(crate) fn write_portal_response(bytes: &[u8]) -> Result<(), HostError> {
+pub(crate) fn write_http_response(bytes: &[u8]) -> Result<(), HostError> {
     let length =
         u32::try_from(bytes.len()).map_err(|_| HostError::new("write page response", -1))?;
-    let actual = unsafe { portal_response_write(bytes.as_ptr(), length) };
+    let actual = unsafe { http_response_write(bytes.as_ptr(), length) };
     transferred("write page response", actual, length)
 }
 
-pub(crate) fn finish_portal_response() -> Result<(), HostError> {
-    completed("finish page response", unsafe { portal_response_finish() })
+pub(crate) fn finish_http_response() -> Result<(), HostError> {
+    completed("finish page response", unsafe { http_response_finish() })
 }
 
-pub(crate) fn take_socket_event() -> Result<Option<SocketEvent>, HostError> {
-    let kind = unsafe { socket_event_kind() };
+pub(crate) fn take_socket_open() -> Result<Option<SocketOpen>, HostError> {
+    let length = unsafe { socket_open_len() };
+    if length == 0 {
+        return Ok(None);
+    }
+    let length = u32::try_from(length)
+        .map_err(|_| HostError::new("read socket handshake length", length))?;
+    let id = unsafe { socket_open_id() };
+    let port = read_port("read socket target port", unsafe { socket_open_port() })?;
+    let mut handshake = vec![0; length as usize];
+    let actual = unsafe { socket_open_read(handshake.as_mut_ptr(), length) };
+    transferred("read socket handshake", actual, length)?;
+    Ok(Some(SocketOpen {
+        id,
+        port,
+        handshake,
+    }))
+}
+
+pub(crate) fn take_socket_event(id: u32) -> Result<Option<SocketEvent>, HostError> {
+    let kind = unsafe { socket_event_kind(id) };
     if kind == 0 {
         return Ok(None);
     }
-    let id = unsafe { socket_event_id() };
-    let length = unsafe { socket_event_len() };
+    let length = unsafe { socket_event_len(id) };
     let length = u32::try_from(length)
         .map_err(|_| HostError::new("read page socket event length", length))?;
     let mut payload = vec![0; length as usize];
-    let actual = unsafe { socket_event_read(payload.as_mut_ptr(), length) };
+    let text = unsafe { socket_event_text(id) } != 0;
+    let actual = unsafe { socket_event_read(id, payload.as_mut_ptr(), length) };
     transferred("read page socket event", actual, length)?;
     match kind {
-        1 => Ok(Some(SocketEvent::Open { id })),
-        2 => Ok(Some(SocketEvent::Send { id, payload })),
-        3 => Ok(Some(SocketEvent::Close { id })),
+        1 => Ok(Some(SocketEvent::Send { payload, text })),
+        2 => Ok(Some(SocketEvent::Close)),
         status => Err(HostError::new("decode page socket event", status)),
     }
 }
 
-pub(crate) fn report_socket_opened(id: u32) -> Result<(), HostError> {
-    completed("open page socket", unsafe { socket_opened(id) })
+pub(crate) fn report_socket_opened(id: u32, protocol: &str) -> Result<(), HostError> {
+    let length =
+        u32::try_from(protocol.len()).map_err(|_| HostError::new("open page socket", -1))?;
+    completed("open page socket", unsafe {
+        socket_opened(id, protocol.as_ptr(), length)
+    })
 }
 
 pub(crate) fn report_socket_message(id: u32, bytes: &[u8], text: bool) -> Result<(), HostError> {
@@ -157,23 +185,37 @@ pub(crate) fn report_socket_message(id: u32, bytes: &[u8], text: bool) -> Result
     })
 }
 
+pub(crate) fn report_socket_error(id: u32, message: &str) -> Result<(), HostError> {
+    let length =
+        u32::try_from(message.len()).map_err(|_| HostError::new("report page socket error", -1))?;
+    completed("report page socket error", unsafe {
+        socket_error(id, message.as_ptr(), length)
+    })
+}
+
 pub(crate) fn report_socket_closed(id: u32) -> Result<(), HostError> {
     completed("close page socket", unsafe { socket_closed(id) })
 }
 
+pub(crate) struct HttpRequest {
+    pub(crate) port: u16,
+    pub(crate) request: Vec<u8>,
+}
+
+pub(crate) struct SocketOpen {
+    pub(crate) id: u32,
+    pub(crate) port: u16,
+    pub(crate) handshake: Vec<u8>,
+}
+
 pub(crate) enum SocketEvent {
-    Open { id: u32 },
-    Send { id: u32, payload: Vec<u8> },
-    Close { id: u32 },
+    Send { payload: Vec<u8>, text: bool },
+    Close,
 }
 
 #[doc(hidden)]
 pub fn report_started() {
     report(EVENT_STARTED, &[]);
-}
-
-pub(crate) fn report_device_url(url: &str) {
-    report(EVENT_DEVICE_URL, url.as_bytes());
 }
 
 pub(crate) fn report_error(message: &str) {
@@ -201,6 +243,13 @@ fn transferred(operation: &'static str, actual: i32, expected: u32) -> Result<()
     } else {
         Err(HostError::new(operation, actual))
     }
+}
+
+fn read_port(operation: &'static str, port: u32) -> Result<u16, HostError> {
+    u16::try_from(port)
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| HostError::new(operation, i32::try_from(port).unwrap_or(-1)))
 }
 
 #[derive(Debug, thiserror::Error)]

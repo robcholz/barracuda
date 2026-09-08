@@ -1,7 +1,6 @@
 export async function bootBarracuda({
   wasmUrl,
   systemImageUrl,
-  onDeviceUrl = () => {},
   onError = () => {},
 }) {
   const serviceWorker = await installServiceWorker();
@@ -17,21 +16,27 @@ export async function bootBarracuda({
     type: "module",
   });
   worker.addEventListener("message", ({ data }) => {
-    if (data?.type === "device-url") onDeviceUrl(data.url);
     if (data?.type === "error") onError(data.message);
   });
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.ports.length !== 1) return;
-    if (event.data?.type === "portal-request") {
+    if (event.data?.type === "http-request") {
       const request = event.data.request;
-      worker.postMessage({ type: "portal-request", request }, [
-        request,
-        event.ports[0],
-      ]);
+      worker.postMessage(
+        { type: "http-request", port: event.data.port, request },
+        [request, event.ports[0]],
+      );
     } else if (event.data?.type === "socket-open") {
-      worker.postMessage({ type: "socket-open", id: event.data.id }, [
-        event.ports[0],
-      ]);
+      const handshake = event.data.handshake;
+      worker.postMessage(
+        {
+          type: "socket-open",
+          id: event.data.id,
+          port: event.data.port,
+          handshake,
+        },
+        [handshake, event.ports[0]],
+      );
     }
   });
   const started = new Promise((resolve, reject) => {

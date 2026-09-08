@@ -1,5 +1,4 @@
 const EVENT_STARTED = 1;
-const EVENT_DEVICE_URL = 2;
 const EVENT_ERROR = 3;
 
 export async function createBrowserHost({ systemImage }) {
@@ -13,10 +12,11 @@ export async function createBrowserHost({ systemImage }) {
   const decoder = new TextDecoder();
   let instance;
   let pollQueued = false;
-  const portalRequests = [];
-  let activePortalRequest;
-  let portalResponse = [];
-  const socketEvents = [];
+  const httpRequests = [];
+  let activeHttpRequest;
+  let httpResponse = [];
+  const socketOpens = [];
+  const socketEvents = new Map();
   const socketPorts = new Map();
 
   const memoryBytes = (pointer, length) =>
@@ -82,53 +82,65 @@ export async function createBrowserHost({ systemImage }) {
     random_fill(pointer, length) {
       return status(() => crypto.getRandomValues(memoryBytes(pointer, length)));
     },
-    portal_request_len: () =>
-      activePortalRequest || portalRequests.length === 0
+    http_request_port: () => httpRequests[0]?.targetPort ?? 0,
+    http_request_len: () =>
+      activeHttpRequest || httpRequests.length === 0
         ? 0
-        : portalRequests[0].request.byteLength,
-    portal_request_read(pointer, length) {
-      if (activePortalRequest || portalRequests.length === 0) return -1;
-      const next = portalRequests.shift();
+        : httpRequests[0].request.byteLength,
+    http_request_read(pointer, length) {
+      if (activeHttpRequest || httpRequests.length === 0) return -1;
+      const next = httpRequests.shift();
       if (next.request.byteLength !== length) return -1;
-      activePortalRequest = next;
-      portalResponse = [];
+      activeHttpRequest = next;
+      httpResponse = [];
       memoryBytes(pointer, length).set(new Uint8Array(next.request));
       return length;
     },
-    portal_response_write(pointer, length) {
-      if (!activePortalRequest) return -1;
-      portalResponse.push(memoryBytes(pointer, length).slice());
+    http_response_write(pointer, length) {
+      if (!activeHttpRequest) return -1;
+      httpResponse.push(memoryBytes(pointer, length).slice());
       return length;
     },
-    portal_response_finish() {
-      if (!activePortalRequest) return -1;
-      const length = portalResponse.reduce(
-        (sum, chunk) => sum + chunk.length,
-        0,
-      );
+    http_response_finish() {
+      if (!activeHttpRequest) return -1;
+      const length = httpResponse.reduce((sum, chunk) => sum + chunk.length, 0);
       const response = new Uint8Array(length);
       let offset = 0;
-      for (const chunk of portalResponse) {
+      for (const chunk of httpResponse) {
         response.set(chunk, offset);
         offset += chunk.length;
       }
-      activePortalRequest.port.postMessage(response.buffer, [response.buffer]);
-      activePortalRequest = undefined;
-      portalResponse = [];
+      activeHttpRequest.port.postMessage(response.buffer, [response.buffer]);
+      activeHttpRequest = undefined;
+      httpResponse = [];
       return 0;
     },
-    socket_event_kind: () => socketEvents[0]?.kind ?? 0,
-    socket_event_id: () => socketEvents[0]?.id ?? 0,
-    socket_event_len: () => socketEvents[0]?.payload?.byteLength ?? 0,
-    socket_event_read(pointer, length) {
-      const event = socketEvents.shift();
+    socket_open_id: () => socketOpens[0]?.id ?? 0,
+    socket_open_port: () => socketOpens[0]?.port ?? 0,
+    socket_open_len: () => socketOpens[0]?.handshake.byteLength ?? 0,
+    socket_open_read(pointer, length) {
+      const open = socketOpens.shift();
+      if (!open || open.handshake.byteLength !== length) return -1;
+      memoryBytes(pointer, length).set(new Uint8Array(open.handshake));
+      return length;
+    },
+    socket_event_kind: (id) => socketEvents.get(id)?.[0]?.kind ?? 0,
+    socket_event_len: (id) =>
+      socketEvents.get(id)?.[0]?.payload?.byteLength ?? 0,
+    socket_event_text: (id) => (socketEvents.get(id)?.[0]?.text ? 1 : 0),
+    socket_event_read(id, pointer, length) {
+      const events = socketEvents.get(id);
+      const event = events?.shift();
       if (!event || (event.payload?.byteLength ?? 0) !== length) return -1;
       if (length !== 0)
         memoryBytes(pointer, length).set(new Uint8Array(event.payload));
       return length;
     },
-    socket_opened(id) {
-      return socketStatus(id, (port) => port.postMessage({ type: "open" }));
+    socket_opened(id, pointer, length) {
+      const protocol = decoder.decode(memoryBytes(pointer, length));
+      return socketStatus(id, (port) =>
+        port.postMessage({ type: "open", protocol }),
+      );
     },
     socket_message(id, pointer, length, text) {
       return socketStatus(id, (port) => {
@@ -143,13 +155,18 @@ export async function createBrowserHost({ systemImage }) {
         port.postMessage({ type: "close" });
         port.close();
         socketPorts.delete(id);
+        socketEvents.delete(id);
       });
+    },
+    socket_error(id, pointer, length) {
+      const message = decoder.decode(memoryBytes(pointer, length));
+      return socketStatus(id, (port) =>
+        port.postMessage({ type: "error", message }),
+      );
     },
     post_event(kind, pointer, length) {
       const message = decoder.decode(memoryBytes(pointer, length));
       if (kind === EVENT_STARTED) self.postMessage({ type: "started" });
-      else if (kind === EVENT_DEVICE_URL)
-        self.postMessage({ type: "device-url", url: message });
       else if (kind === EVENT_ERROR)
         self.postMessage({ type: "error", message });
     },
@@ -166,29 +183,28 @@ export async function createBrowserHost({ systemImage }) {
     setInstance(value) {
       instance = value;
     },
-    enqueuePortalRequest(request, port) {
-      portalRequests.push({ request, port });
+    enqueueHttpRequest(targetPort, request, port) {
+      httpRequests.push({ targetPort, request, port });
       if (instance) requireInstance().exports.barracuda_browser_poll();
     },
-    openSocket(id, port) {
-      if (socketPorts.size !== 0) {
-        port.postMessage({
-          type: "error",
-          message: "page socket is already in use",
-        });
-        port.close();
-        return;
-      }
+    openSocket(id, targetPort, handshake, port) {
       socketPorts.set(id, port);
-      socketEvents.push({ kind: 1, id });
+      socketEvents.set(id, []);
+      socketOpens.push({ id, port: targetPort, handshake });
       port.onmessage = ({ data }) => {
         if (data?.type === "send" && data.payload instanceof ArrayBuffer) {
-          socketEvents.push({ kind: 2, id, payload: data.payload });
+          socketEvents.get(id)?.push({
+            kind: 1,
+            payload: data.payload,
+            text: data.text === true,
+          });
         } else if (data?.type === "close") {
-          socketEvents.push({ kind: 3, id });
+          socketEvents.get(id)?.push({ kind: 2 });
         }
+        if (instance) requireInstance().exports.barracuda_browser_poll();
       };
       port.start();
+      if (instance) requireInstance().exports.barracuda_browser_poll();
     },
   };
 

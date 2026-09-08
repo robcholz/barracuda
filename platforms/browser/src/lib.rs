@@ -122,7 +122,6 @@ mod implementation {
             let ip_stack = crate::network::create_stack(spawner)
                 .await
                 .map_err(BrowserPlatformError::Host)?;
-            crate::ffi::report_device_url("./");
             Ok(PlatformResources {
                 ip_stack,
                 tls: barracuda_tls::PlaintextTls,

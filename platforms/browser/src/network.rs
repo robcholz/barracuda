@@ -14,9 +14,9 @@ const MTU: usize = 1500;
 const RX_PACKETS: usize = 16;
 const TX_PACKETS: usize = 16;
 const SOCKETS: usize = 32;
-const PORTAL_PORT: u16 = 8787;
-const PORTAL_TCP_BUFFER: usize = 8 * 1024;
+const HTTP_TCP_BUFFER: usize = 8 * 1024;
 const WEBSOCKET_BUFFER: usize = 16 * 1024;
+const WEBSOCKET_CONNECTIONS: usize = 8;
 
 /// Address assigned to the System inside the page-local virtual network.
 pub(crate) const GUEST_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 2, 15);
@@ -24,7 +24,7 @@ pub(crate) const GUEST_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 2, 15);
 /// Creates the Embassy IP stack used by the complete Browser System.
 ///
 /// The driver loops traffic addressed to the System back into the same stack,
-/// allowing the page bridge to reach the WebServer without a native gateway.
+/// allowing the page bridge to reach any System TCP listener without a native gateway.
 /// The mechanism stays inside this Platform and does not change the System or
 /// Plugin network contracts.
 pub async fn create_stack(spawner: Spawner) -> Result<Stack<'static>, String> {
@@ -47,26 +47,27 @@ pub async fn create_stack(spawner: Spawner) -> Result<Stack<'static>, String> {
         .spawn(loopback_task(receive, transmit))
         .map_err(|error| error.to_string())?;
     spawner
-        .spawn(portal_task(stack))
+        .spawn(http_bridge_task(stack))
         .map_err(|error| error.to_string())?;
     spawner
-        .spawn(websocket_bridge_task(stack))
+        .spawn(websocket_bridge_task(spawner, stack))
         .map_err(|error| error.to_string())?;
     link.set_link_state(LinkState::Up);
     Ok(stack)
 }
 
 #[embassy_executor::task]
-async fn websocket_bridge_task(stack: Stack<'static>) -> ! {
+async fn websocket_bridge_task(spawner: Spawner, stack: Stack<'static>) -> ! {
     loop {
-        match crate::ffi::take_socket_event() {
-            Ok(Some(crate::ffi::SocketEvent::Open { id })) => {
-                if let Err(error) = run_websocket(stack, id).await {
-                    crate::ffi::report_error(&format!("page WebSocket failed: {error}"));
+        match crate::ffi::take_socket_open() {
+            Ok(Some(open)) => {
+                let id = open.id;
+                if let Err(error) = spawner.spawn(websocket_connection_task(stack, open)) {
+                    let message = format!("Browser WebSocket capacity is exhausted: {error}");
+                    let _result = crate::ffi::report_socket_error(id, &message);
+                    let _result = crate::ffi::report_socket_closed(id);
                 }
-                let _result = crate::ffi::report_socket_closed(id);
             }
-            Ok(Some(_event)) => {}
             Ok(None) => embassy_time::Timer::after_millis(5).await,
             Err(error) => {
                 crate::ffi::report_error(&error.to_string());
@@ -76,20 +77,25 @@ async fn websocket_bridge_task(stack: Stack<'static>) -> ! {
     }
 }
 
-async fn run_websocket(stack: Stack<'static>, id: u32) -> Result<(), String> {
+#[embassy_executor::task(pool_size = WEBSOCKET_CONNECTIONS)]
+async fn websocket_connection_task(stack: Stack<'static>, open: crate::ffi::SocketOpen) {
+    let id = open.id;
+    if let Err(error) = run_websocket(stack, open).await {
+        let _result = crate::ffi::report_socket_error(id, &error);
+    }
+    let _result = crate::ffi::report_socket_closed(id);
+}
+
+async fn run_websocket(stack: Stack<'static>, open: crate::ffi::SocketOpen) -> Result<(), String> {
     let mut receive_buffer = [0_u8; WEBSOCKET_BUFFER];
     let mut transmit_buffer = [0_u8; WEBSOCKET_BUFFER];
     let mut socket = TcpSocket::new(stack, &mut receive_buffer, &mut transmit_buffer);
     socket
-        .connect((GUEST_ADDRESS, PORTAL_PORT))
+        .connect((GUEST_ADDRESS, open.port))
         .await
         .map_err(|error| format!("connect failed: {error:?}"))?;
     let (mut reader, mut writer) = socket.split();
-    write_all(
-        &mut writer,
-        b"GET / HTTP/1.1\r\nHost: browser.barracuda\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
-    )
-    .await?;
+    write_all(&mut writer, &open.handshake).await?;
     writer
         .flush()
         .await
@@ -103,7 +109,9 @@ async fn run_websocket(stack: Stack<'static>, id: u32) -> Result<(), String> {
             .await
             .map_err(|error| format!("handshake read failed: {error:?}"))?;
         if count == 0 {
-            return Err(String::from("WebServer closed during WebSocket handshake"));
+            return Err(String::from(
+                "System service closed during WebSocket handshake",
+            ));
         }
         incoming.extend_from_slice(&chunk[..count]);
         if incoming.len() > 16 * 1024 {
@@ -118,8 +126,10 @@ async fn run_websocket(stack: Stack<'static>, id: u32) -> Result<(), String> {
     if !incoming.starts_with(b"HTTP/1.1 101") && !incoming.starts_with(b"HTTP/1.0 101") {
         return Err(String::from_utf8_lossy(&incoming[..header_end]).into_owned());
     }
+    let protocol = header_value(&incoming[..header_end], "sec-websocket-protocol")?;
     incoming.drain(..header_end);
-    crate::ffi::report_socket_opened(id).map_err(|error| error.to_string())?;
+    crate::ffi::report_socket_opened(open.id, protocol.as_deref().unwrap_or_default())
+        .map_err(|error| error.to_string())?;
 
     let mut fragmented_opcode = None;
     let mut fragmented = Vec::new();
@@ -130,13 +140,13 @@ async fn run_websocket(stack: Stack<'static>, id: u32) -> Result<(), String> {
                     fragmented.extend_from_slice(&frame.payload);
                     if frame.finished {
                         let opcode = fragmented_opcode.take().unwrap_or(2);
-                        crate::ffi::report_socket_message(id, &fragmented, opcode == 1)
+                        crate::ffi::report_socket_message(open.id, &fragmented, opcode == 1)
                             .map_err(|error| error.to_string())?;
                         fragmented.clear();
                     }
                 }
                 1 | 2 if frame.finished => {
-                    crate::ffi::report_socket_message(id, &frame.payload, frame.opcode == 1)
+                    crate::ffi::report_socket_message(open.id, &frame.payload, frame.opcode == 1)
                         .map_err(|error| error.to_string())?;
                 }
                 1 | 2 => {
@@ -162,20 +172,30 @@ async fn run_websocket(stack: Stack<'static>, id: u32) -> Result<(), String> {
                 }
                 incoming.extend_from_slice(&chunk[..count]);
             }
-            Either::Second(()) => match crate::ffi::take_socket_event() {
-                Ok(Some(crate::ffi::SocketEvent::Send {
-                    id: event_id,
-                    payload,
-                })) if event_id == id => write_websocket_frame(&mut writer, 1, &payload).await?,
-                Ok(Some(crate::ffi::SocketEvent::Close { id: event_id })) if event_id == id => {
+            Either::Second(()) => match crate::ffi::take_socket_event(open.id) {
+                Ok(Some(crate::ffi::SocketEvent::Send { payload, text })) => {
+                    write_websocket_frame(&mut writer, if text { 1 } else { 2 }, &payload).await?
+                }
+                Ok(Some(crate::ffi::SocketEvent::Close)) => {
                     write_websocket_frame(&mut writer, 8, &[]).await?;
                     return Ok(());
                 }
-                Ok(Some(_)) | Ok(None) => {}
+                Ok(None) => {}
                 Err(error) => return Err(error.to_string()),
             },
         }
     }
+}
+
+fn header_value(bytes: &[u8], expected: &str) -> Result<Option<String>, String> {
+    let headers = core::str::from_utf8(bytes)
+        .map_err(|_error| String::from("WebSocket handshake is not valid UTF-8"))?;
+    Ok(headers.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case(expected)
+            .then(|| value.trim().to_owned())
+    }))
 }
 
 struct WebSocketFrame {
@@ -282,10 +302,10 @@ async fn write_all(
 }
 
 #[embassy_executor::task]
-async fn portal_task(stack: Stack<'static>) -> ! {
+async fn http_bridge_task(stack: Stack<'static>) -> ! {
     loop {
-        match crate::ffi::take_portal_request() {
-            Ok(Some(request)) => forward_portal_request(stack, &request).await,
+        match crate::ffi::take_http_request() {
+            Ok(Some(request)) => forward_http_request(stack, request).await,
             Ok(None) => embassy_time::Timer::after_millis(5).await,
             Err(error) => {
                 crate::ffi::report_error(&error.to_string());
@@ -295,24 +315,29 @@ async fn portal_task(stack: Stack<'static>) -> ! {
     }
 }
 
-async fn forward_portal_request(stack: Stack<'static>, request: &[u8]) {
-    if let Err(error) = try_forward_portal_request(stack, request).await {
+async fn forward_http_request(stack: Stack<'static>, request: crate::ffi::HttpRequest) {
+    if let Err(error) = try_forward_http_request(stack, request.port, &request.request).await {
         let message = format!(
-            "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nBrowser Platform could not reach the System WebServer: {error}"
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nBrowser Platform could not reach System TCP port {}: {error}",
+            request.port,
         );
-        let _result = crate::ffi::write_portal_response(message.as_bytes());
+        let _result = crate::ffi::write_http_response(message.as_bytes());
     }
-    if let Err(error) = crate::ffi::finish_portal_response() {
+    if let Err(error) = crate::ffi::finish_http_response() {
         crate::ffi::report_error(&error.to_string());
     }
 }
 
-async fn try_forward_portal_request(stack: Stack<'static>, request: &[u8]) -> Result<(), String> {
-    let mut receive_buffer = [0_u8; PORTAL_TCP_BUFFER];
-    let mut transmit_buffer = [0_u8; PORTAL_TCP_BUFFER];
+async fn try_forward_http_request(
+    stack: Stack<'static>,
+    port: u16,
+    request: &[u8],
+) -> Result<(), String> {
+    let mut receive_buffer = [0_u8; HTTP_TCP_BUFFER];
+    let mut transmit_buffer = [0_u8; HTTP_TCP_BUFFER];
     let mut socket = TcpSocket::new(stack, &mut receive_buffer, &mut transmit_buffer);
     socket
-        .connect((GUEST_ADDRESS, PORTAL_PORT))
+        .connect((GUEST_ADDRESS, port))
         .await
         .map_err(|error| format!("connect failed: {error:?}"))?;
     let (mut reader, mut writer) = socket.split();
@@ -341,7 +366,7 @@ async fn try_forward_portal_request(stack: Stack<'static>, request: &[u8]) -> Re
         if count == 0 {
             return Ok(());
         }
-        crate::ffi::write_portal_response(&chunk[..count]).map_err(|error| error.to_string())?;
+        crate::ffi::write_http_response(&chunk[..count]).map_err(|error| error.to_string())?;
     }
 }
 
@@ -383,7 +408,7 @@ async fn loopback_task(
 
 #[cfg(test)]
 mod tests {
-    use super::{destination, GUEST_ADDRESS};
+    use super::{destination, header_value, GUEST_ADDRESS};
 
     #[test]
     fn reads_ipv4_destination() {
@@ -393,5 +418,15 @@ mod tests {
         assert_eq!(destination(&packet), Some(GUEST_ADDRESS.octets()));
         packet[0] = 0x60;
         assert_eq!(destination(&packet), None);
+    }
+
+    #[test]
+    fn reads_websocket_protocol_without_application_knowledge() {
+        let response =
+            b"HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Protocol: chat.v2\r\n\r\n";
+        assert_eq!(
+            header_value(response, "sec-websocket-protocol"),
+            Ok(Some(String::from("chat.v2")))
+        );
     }
 }

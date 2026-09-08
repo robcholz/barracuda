@@ -1,6 +1,9 @@
+import { parseGatewayUrl } from "./gateway.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 let bridgeClientId;
+const clientTargets = new Map();
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) =>
@@ -11,36 +14,53 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "register-bridge" && event.source?.id) {
     bridgeClientId = event.source.id;
   } else if (event.data?.type === "socket-open" && event.ports.length === 1) {
-    event.waitUntil(forwardSocket(event.data.id, event.ports[0]));
+    event.waitUntil(forwardSocket(event.data, event.ports[0]));
   }
 });
 
-async function forwardSocket(id, port) {
+async function forwardSocket(open, port) {
   const client = await findClient();
   if (!client) {
     port.postMessage({ type: "error", message: "Barracuda page is not open" });
     return;
   }
-  client.postMessage({ type: "socket-open", id }, [port]);
+  client.postMessage(
+    {
+      type: "socket-open",
+      id: open.id,
+      port: open.port,
+      handshake: open.handshake,
+    },
+    [open.handshake, port],
+  );
 }
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  const portalPath = new URL("portal/", self.registration.scope).pathname;
-  if (
-    url.origin === self.location.origin &&
-    url.pathname.startsWith(portalPath)
-  ) {
-    event.respondWith(forwardToSystem(event));
-  }
+  if (isPlatformAsset(url)) return;
+  const explicit = parseGatewayUrl(url, self.registration.scope);
+  const target = explicit ?? clientTargets.get(event.clientId);
+  if (!target) return;
+  if (event.resultingClientId)
+    clientTargets.set(event.resultingClientId, target);
+  event.respondWith(forwardToSystem(event, target, explicit !== undefined));
 });
 
-async function forwardToSystem(event) {
+function isPlatformAsset(url) {
+  const script = new URL("browser_websocket.js", self.registration.scope);
+  return url.origin === script.origin && url.pathname === script.pathname;
+}
+
+async function forwardToSystem(event, target, stripGatewayPrefix) {
   const client = await findClient();
   if (!client)
     return new Response("Barracuda page is not open", { status: 503 });
 
-  const request = await serializeRequest(event.request);
+  const request = await serializeRequest(
+    event.request,
+    target,
+    stripGatewayPrefix,
+  );
   const channel = new MessageChannel();
   const response = new Promise((resolve, reject) => {
     const timeout = setTimeout(
@@ -53,12 +73,12 @@ async function forwardToSystem(event) {
       else resolve(data);
     };
   });
-  client.postMessage({ type: "portal-request", request }, [
+  client.postMessage({ type: "http-request", port: target.port, request }, [
     request,
     channel.port2,
   ]);
   try {
-    return parseResponse(await response);
+    return parseResponse(await response, target.port);
   } catch (error) {
     return new Response(
       error instanceof Error ? error.message : String(error),
@@ -92,10 +112,9 @@ async function findClient() {
   return bridge;
 }
 
-async function serializeRequest(request) {
+async function serializeRequest(request, target, stripGatewayPrefix) {
   const url = new URL(request.url);
-  const portalPath = new URL("portal/", self.registration.scope).pathname;
-  const systemPath = `/portal/${url.pathname.slice(portalPath.length)}`;
+  const systemPath = stripGatewayPrefix ? target.pathname : url.pathname;
   const headers = [];
   for (const [name, value] of request.headers) {
     const lower = name.toLowerCase();
@@ -118,7 +137,7 @@ async function serializeRequest(request) {
   return result.buffer;
 }
 
-function parseResponse(buffer) {
+function parseResponse(buffer, port) {
   const bytes = new Uint8Array(buffer);
   const split = findSequence(bytes, [13, 10, 13, 10]);
   if (split < 0) throw new Error("System returned an invalid HTTP response");
@@ -145,7 +164,10 @@ function parseResponse(buffer) {
     const script = new URL("browser_websocket.js", self.registration.scope);
     const html = decoder
       .decode(body)
-      .replace("</head>", `<script src="${script.pathname}"></script></head>`);
+      .replace(
+        "</head>",
+        `<script src="${script.pathname}" data-barracuda-port="${port}"></script></head>`,
+      );
     body = encoder.encode(html);
   }
   return new Response(body, {

@@ -1,9 +1,8 @@
 # Browser Platform
 
-The Browser Platform runs the complete Barracuda System in a dedicated Web
-Worker. It uses the same selected application and fixed Plugin graph as the
-other Platforms, including Lua, LittleFS, the Captive Portal, and the shared
-WebServer.
+The Browser Platform runs the complete selected Barracuda application in a
+dedicated Web Worker. Its runtime and page bridge do not depend on a particular
+System or Plugin graph.
 
 Select and use it through the normal Board workflow:
 
@@ -26,9 +25,8 @@ is not part of the distributed Browser application.
 
 The browser owns only Platform mechanisms:
 
-- an in-page Embassy IP stack and Service Worker bridges for `/portal/*` HTTP
-  plus the Portal's WebSocket, both terminating at the System's unchanged
-  WebServer;
+- an in-page Embassy IP stack and Service Worker bridge to arbitrary System
+  HTTP and WebSocket listeners;
 - OPFS-backed native flash partitions;
 - a worker-backed Embassy monotonic time driver;
 - the Platform's explicitly selected plaintext TLS capability.
@@ -40,7 +38,13 @@ application. OPFS and Service Workers require a secure browser context, so a
 deployed bundle must use HTTPS (localhost is also accepted by browsers for
 development).
 
-The page-local network covers the System-owned HTTP and WebSocket endpoints.
+After startup, enter the port and path of any System HTTP service. The launcher
+opens a virtual URL whose `_barracuda/<port>/` prefix is owned by the Platform;
+the path presented to the System is unchanged. HTML loaded through that bridge
+can use same-origin WebSockets on any path, including concurrent connections.
+
+The page-local network covers System-owned HTTP and WebSocket endpoints without
+knowing which Plugin registered them.
 Browsers do not expose arbitrary raw internet TCP or UDP sockets, so the
 Platform does not pretend to provide those routes or require a hidden server
 proxy; Plugins that contact external services still remain selected, but such

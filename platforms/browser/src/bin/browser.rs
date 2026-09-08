@@ -35,6 +35,7 @@ mod host {
     const WORKER: &[u8] = include_bytes!("../../web/worker.js");
     const BROWSER_HOST: &[u8] = include_bytes!("../../web/browser_host.js");
     const BROWSER_WEBSOCKET: &[u8] = include_bytes!("../../web/browser_websocket.js");
+    const GATEWAY: &[u8] = include_bytes!("../../web/gateway.js");
     const SERVICE_WORKER: &[u8] = include_bytes!("../../web/service-worker.js");
     const WASI: &[u8] = include_bytes!("../../web/wasi_snapshot_preview1.js");
 
@@ -120,6 +121,7 @@ mod host {
             ("worker.js", WORKER),
             ("browser_host.js", BROWSER_HOST),
             ("browser_websocket.js", BROWSER_WEBSOCKET),
+            ("gateway.js", GATEWAY),
             ("service-worker.js", SERVICE_WORKER),
             ("wasi_snapshot_preview1.js", WASI),
         ] {
@@ -178,6 +180,7 @@ mod host {
             "/worker.js" => "worker.js",
             "/browser_host.js" => "browser_host.js",
             "/browser_websocket.js" => "browser_websocket.js",
+            "/gateway.js" => "gateway.js",
             "/service-worker.js" => "service-worker.js",
             "/wasi_snapshot_preview1.js" => "wasi_snapshot_preview1.js",
             "/barracuda_system.wasm" => "barracuda_system.wasm",

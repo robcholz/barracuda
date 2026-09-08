@@ -17,12 +17,12 @@ self.addEventListener("error", (event) => {
 });
 
 self.onmessage = async ({ data, ports }) => {
-  if (data?.type === "portal-request") {
+  if (data?.type === "http-request") {
     if (!browserHost) {
       ports[0]?.postMessage({ error: "Barracuda System is not ready" });
       return;
     }
-    browserHost.enqueuePortalRequest(data.request, ports[0]);
+    browserHost.enqueueHttpRequest(data.port, data.request, ports[0]);
     return;
   }
   if (data?.type === "socket-open") {
@@ -33,7 +33,7 @@ self.onmessage = async ({ data, ports }) => {
       });
       return;
     }
-    browserHost.openSocket(data.id, ports[0]);
+    browserHost.openSocket(data.id, data.port, data.handshake, ports[0]);
     return;
   }
   const { wasm, image } = data;
