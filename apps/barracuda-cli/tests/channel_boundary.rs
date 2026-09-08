@@ -17,7 +17,7 @@ fn terminal_channel_has_no_selected_target_or_system_dependencies() {
         );
     }
 
-    assert!(main.contains("client::run(url)"));
+    assert!(main.contains("client::run(&url)"));
 }
 
 #[test]

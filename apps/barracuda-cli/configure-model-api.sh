@@ -23,7 +23,6 @@ source "${env_file}"
 set +a
 
 for variable_name in \
-    BARRACUDA_ADDRESS \
     BARRACUDA_LLM_API_KEY \
     BARRACUDA_LLM_MODEL \
     BARRACUDA_LLM_BASE_URL; do
@@ -33,7 +32,24 @@ for variable_name in \
     fi
 done
 
-endpoint="${BARRACUDA_ADDRESS%/}/api/model-api"
+workspace_directory="$(cd -- "${script_directory}/../.." && pwd)"
+runtime_address_file="${BARRACUDA_ADDRESS_FILE:-${workspace_directory}/.barracuda/address}"
+address=""
+if [[ -f "${runtime_address_file}" ]]; then
+    IFS= read -r address < "${runtime_address_file}"
+fi
+if [[ -z "${address}" ]]; then
+    address="${BARRACUDA_ADDRESS:-}"
+fi
+if [[ -z "${address}" ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        printf 'no running Barracuda address found; start cargo run or set BARRACUDA_ADDRESS in %s\n' "${env_file}" >&2
+        exit 1
+    fi
+    address="http://10.42.0.2:8787"
+fi
+
+endpoint="${address%/}/api/model-api"
 backend="${BARRACUDA_LLM_BACKEND:-openai_compatible}"
 timeout_ms="${BARRACUDA_LLM_TIMEOUT_MS:-30000}"
 max_tokens="${BARRACUDA_LLM_MAX_TOKENS:-4096}"

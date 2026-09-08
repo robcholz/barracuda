@@ -1,6 +1,11 @@
 //! Host launcher for the macOS Platform's user-space network gateway.
 
-use std::{env, path::PathBuf, process::Stdio};
+use std::{
+    env, fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
 use anyhow::{anyhow, bail, Context as _};
 use barracuda_platform_macos_network_gateway::{serve as serve_gateway, GatewayConfig};
@@ -10,6 +15,34 @@ use tokio::{
 };
 
 const GATEWAY_ADDRESS: &str = "127.0.0.1:8787";
+const RUNTIME_ADDRESS_PATH: &str = ".barracuda/address";
+
+struct RuntimeAddressFile(PathBuf);
+
+impl RuntimeAddressFile {
+    fn prepare(workspace: &Path) -> anyhow::Result<Self> {
+        let path = workspace.join(RUNTIME_ADDRESS_PATH);
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("remove stale runtime address `{}`", path.display()));
+            }
+        }
+        Ok(Self(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for RuntimeAddressFile {
+    fn drop(&mut self) {
+        let _result = fs::remove_file(&self.0);
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,8 +67,10 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(GATEWAY_ADDRESS)
         .await
         .with_context(|| format!("bind macOS Platform network gateway at {GATEWAY_ADDRESS}"))?;
-    let gateway =
-        tokio::spawn(async move { serve_gateway(listener, GatewayConfig::native()).await });
+    let runtime_address = RuntimeAddressFile::prepare(&workspace)?;
+    let gateway_config =
+        GatewayConfig::native().with_runtime_address_file(runtime_address.path().to_path_buf());
+    let gateway = tokio::spawn(async move { serve_gateway(listener, gateway_config).await });
 
     let mut command = Command::new(&application);
     command
@@ -115,9 +150,28 @@ fn interrupted(_status: &std::process::ExitStatus) -> bool {
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use std::fs;
+
     use tokio::process::Command;
 
-    use super::terminate_child;
+    use super::{terminate_child, RuntimeAddressFile, RUNTIME_ADDRESS_PATH};
+
+    #[test]
+    fn runtime_address_file_removes_stale_state_and_cleans_up() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        let path = workspace.path().join(RUNTIME_ADDRESS_PATH);
+        fs::create_dir_all(path.parent().expect("runtime address parent"))
+            .expect("create runtime state directory");
+        fs::write(&path, "http://127.0.0.1:49152/\n").expect("write stale runtime address");
+
+        let runtime_address =
+            RuntimeAddressFile::prepare(workspace.path()).expect("prepare runtime address");
+        assert!(!path.exists());
+        fs::write(runtime_address.path(), "http://127.0.0.1:49153/\n")
+            .expect("write active runtime address");
+        drop(runtime_address);
+        assert!(!path.exists());
+    }
 
     #[cfg(unix)]
     #[tokio::test]

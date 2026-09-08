@@ -2,7 +2,11 @@
 
 mod session;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::{
     extract::{
@@ -52,6 +56,7 @@ struct GatewayState {
     forward_port: u16,
     dns_server: SocketAddr,
     allowed_origins: Arc<[String]>,
+    runtime_address_file: Option<Arc<Path>>,
 }
 
 /// Runs the standalone network-gateway command.
@@ -67,6 +72,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
         forward_port: arguments.forward_port,
         dns_server: arguments.dns_server,
         allowed_origins: arguments.allowed_origins.into(),
+        runtime_address_file: None,
     };
     let listener = tokio::net::TcpListener::bind(arguments.listen).await?;
     tracing::info!(address = %arguments.listen, "network gateway listening");
@@ -84,6 +90,7 @@ pub struct GatewayConfig {
     forward_port: u16,
     dns_server: SocketAddr,
     allowed_origins: Arc<[String]>,
+    runtime_address_file: Option<Arc<Path>>,
 }
 
 impl GatewayConfig {
@@ -96,6 +103,7 @@ impl GatewayConfig {
             forward_port: DEFAULT_FORWARD_PORT,
             dns_server: SocketAddr::from(([1, 1, 1, 1], 53)),
             allowed_origins: Arc::from([]),
+            runtime_address_file: None,
         }
     }
 
@@ -105,6 +113,13 @@ impl GatewayConfig {
         let mut config = Self::native();
         config.allowed_origins = Arc::from([allowed_origin]);
         config
+    }
+
+    /// Publishes the active guest forwarding URL to a local runtime file.
+    #[must_use]
+    pub fn with_runtime_address_file(mut self, path: PathBuf) -> Self {
+        self.runtime_address_file = Some(path.into());
+        self
     }
 }
 
@@ -119,6 +134,7 @@ pub fn serve(
         forward_port: config.forward_port,
         dns_server: config.dns_server,
         allowed_origins: config.allowed_origins,
+        runtime_address_file: config.runtime_address_file,
     };
     axum::serve(listener, router(state))
 }
@@ -173,6 +189,7 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
         state.forward_address,
         state.forward_port,
         state.dns_server,
+        state.runtime_address_file.as_deref(),
     )
     .await
     {
@@ -299,6 +316,7 @@ mod tests {
                     forward_port: DEFAULT_FORWARD_PORT,
                     dns_server: "127.0.0.1:53".parse().expect("DNS address"),
                     allowed_origins: Vec::new().into(),
+                    runtime_address_file: None,
                 }),
             )
             .await

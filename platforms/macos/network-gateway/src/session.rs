@@ -1,6 +1,11 @@
 //! Per-device user-space network session.
 
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use embassy_net::{
     tcp::TcpSocket as GuestTcpSocket, Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources,
@@ -49,6 +54,7 @@ pub(crate) struct NetworkSession {
     input: mpsc::Sender<Vec<u8>>,
     cancellation: CancellationToken,
     thread: Option<std::thread::JoinHandle<()>>,
+    published_address: Option<(PathBuf, String)>,
 }
 
 impl NetworkSession {
@@ -59,6 +65,7 @@ impl NetworkSession {
         forward_address: std::net::IpAddr,
         guest_port: u16,
         dns_server: SocketAddr,
+        runtime_address_file: Option<&Path>,
     ) -> Result<Self, SessionError> {
         let listener = std::net::TcpListener::bind((forward_address, 0))?;
         let forwarded_port = listener.local_addr()?.port();
@@ -100,7 +107,15 @@ impl NetworkSession {
             input: input_tx,
             cancellation,
             thread: Some(thread),
+            published_address: runtime_address_file
+                .map(|path| (path.to_path_buf(), forward_url.clone())),
         };
+        if let Some(path) = runtime_address_file {
+            if let Err(error) = publish_runtime_address(path, &forward_url).await {
+                session.close().await;
+                return Err(error);
+            }
+        }
         if url_responses
             .send(Outbound::ForwardUrl(forward_url))
             .await
@@ -129,6 +144,26 @@ impl NetworkSession {
         if let Some(thread) = self.thread.take() {
             let _result = tokio::task::spawn_blocking(move || thread.join()).await;
         }
+        if let Some((path, address)) = self.published_address.take() {
+            clear_runtime_address(&path, &address).await;
+        }
+    }
+}
+
+async fn publish_runtime_address(path: &Path, address: &str) -> Result<(), SessionError> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(path, format!("{address}\n")).await?;
+    Ok(())
+}
+
+async fn clear_runtime_address(path: &Path, address: &str) {
+    let Ok(current) = tokio::fs::read_to_string(path).await else {
+        return;
+    };
+    if current.trim() == address {
+        let _result = tokio::fs::remove_file(path).await;
     }
 }
 
@@ -536,6 +571,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use std::{
+        fs,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
@@ -588,6 +624,8 @@ mod tests {
 
     #[tokio::test]
     async fn session_starts_without_native_network_dependencies() {
+        let directory = tempfile::tempdir().expect("temporary runtime directory");
+        let address_file = directory.path().join("address");
         let (responses, mut events) = tokio::sync::mpsc::channel(4);
         let session = NetworkSession::new(
             responses,
@@ -595,16 +633,25 @@ mod tests {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             80,
             SocketAddr::from(([1, 1, 1, 1], 53)),
+            Some(&address_file),
         )
         .await;
         assert!(session.is_ok());
-        assert!(matches!(events.recv().await, Some(Outbound::ForwardUrl(_))));
+        let address = match events.recv().await {
+            Some(Outbound::ForwardUrl(address)) => address,
+            _ => String::new(),
+        };
+        assert_eq!(
+            fs::read_to_string(&address_file).expect("published runtime address"),
+            format!("{address}\n")
+        );
         if let Ok(session) = session {
             assert!(matches!(
                 session.input(&[0; MTU + 1]).await,
                 Err(SessionError::PacketTooLarge(_))
             ));
             session.close().await;
+            assert!(!address_file.exists());
         }
     }
 
@@ -648,6 +695,7 @@ mod tests {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             80,
             dns_address,
+            None,
         )
         .await
         .expect("start network session");

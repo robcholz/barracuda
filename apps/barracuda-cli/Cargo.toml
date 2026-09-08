@@ -23,3 +23,6 @@ unicode-width = "0.2.2"
 thiserror = "2"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+tempfile = "3"
