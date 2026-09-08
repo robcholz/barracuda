@@ -1059,12 +1059,19 @@ dependencies = [
 name = "barracuda-platform-browser"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board",
  "barracuda-net-gateway-protocol",
+ "barracuda-platform",
+ "barracuda-tls",
+ "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-net",
  "embassy-net-driver-channel",
+ "embassy-sync 0.7.2",
+ "embedded-storage",
  "heapless 0.9.3",
  "js-sys",
+ "thiserror 2.0.18",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

@@ -52,7 +52,7 @@ pub async fn resources_with_bindings(
 /// Constructs the statically selected host Target bindings for the application entry.
 #[doc(hidden)]
 #[must_use]
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_arch = "wasm32"))]
 pub fn __application_bindings() -> Bindings {
     TargetBindings::new(&barracuda_board_selected::BOARD, ())
 }

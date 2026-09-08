@@ -6,6 +6,7 @@ description = "Platform-owned TLS client capability for Barracuda"
 
 [features]
 default = ["mbedtls"]
+embedded-tls = ["http-client/embedded-tls"]
 mbedtls = [
     "http-client/mbedtls",
     "dep:mbedtls-rs",

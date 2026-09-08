@@ -9,11 +9,9 @@ selection:
     - triple: wasm32-unknown-unknown
 system-image:
   layout:
-    driver: command
-    program: wasm-pack
-    arguments: []
+    driver: file-regions
   flash:
-    driver: command
-    program: wasm-pack
-    arguments: []
+    driver: file
+    state-directory: .barracuda/browser
+    flash-image: board.flash
 application: {}

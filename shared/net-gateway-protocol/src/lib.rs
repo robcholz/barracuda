@@ -137,4 +137,30 @@ mod tests {
             Err(DecodeError::UnsupportedVersion(VERSION + 1))
         );
     }
+
+    #[test]
+    fn malformed_frames_are_rejected() {
+        assert_eq!(decode(&[]), Err(DecodeError::Truncated));
+        assert_eq!(decode(&[VERSION, 99]), Err(DecodeError::UnknownKind(99)));
+        assert_eq!(
+            decode(&[VERSION, Kind::Hello as u8]),
+            Err(DecodeError::InvalidHello)
+        );
+    }
+
+    #[test]
+    fn encoding_checks_capacity_and_packet_size() {
+        let mut short = [0; 2];
+        assert_eq!(
+            encode(Kind::Packet, &[1], &mut short),
+            Err(super::EncodeError::BufferTooSmall)
+        );
+
+        let payload = [0; super::MAX_PACKET_SIZE + 1];
+        let mut output = [0; super::MAX_PACKET_SIZE + 3];
+        assert_eq!(
+            encode(Kind::Packet, &payload, &mut output),
+            Err(super::EncodeError::PayloadTooLarge)
+        );
+    }
 }

@@ -7,15 +7,15 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    Router,
     extract::{
-        State,
         ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
     },
     response::IntoResponse,
     routing::get,
+    Router,
 };
-use barracuda_net_gateway_protocol::{Kind, VERSION, decode, encode};
+use barracuda_net_gateway_protocol::{decode, encode, Kind, VERSION};
 use clap::Parser;
 use futures_util::{SinkExt as _, StreamExt as _};
 use tokio::sync::mpsc;
@@ -71,6 +71,16 @@ async fn connect(
 async fn serve_device(socket: WebSocket, state: GatewayState) {
     let session_id = uuid::Uuid::new_v4();
     let (mut sender, mut receiver) = socket.split();
+
+    let Some(Ok(Message::Binary(message))) = receiver.next().await else {
+        tracing::warn!(%session_id, "device disconnected before protocol handshake");
+        return;
+    };
+    if !is_hello(&message) {
+        tracing::warn!(%session_id, "device did not begin with a valid hello frame");
+        return;
+    }
+
     let (responses_tx, mut responses_rx) = mpsc::channel::<Outbound>(32);
     let mut slirp = SlirpSession::new(responses_tx, state.device_web_port);
 
@@ -104,7 +114,6 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
 
     while let Some(Ok(Message::Binary(message))) = receiver.next().await {
         match decode(&message) {
-            Ok(frame) if frame.kind == Kind::Hello && frame.payload == [VERSION] => {}
             Ok(frame) if frame.kind == Kind::Packet => slirp.input(frame.payload),
             Ok(_) => break,
             Err(error) => {
@@ -116,6 +125,10 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
     slirp.close();
     send_task.abort();
     tracing::info!(%session_id, "device network session closed");
+}
+
+fn is_hello(message: &[u8]) -> bool {
+    decode(message).is_ok_and(|frame| frame.kind == Kind::Hello && frame.payload == [VERSION])
 }
 
 /// Reserves ownership for one user's future libslirp context.
@@ -156,4 +169,23 @@ enum Outbound {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use barracuda_net_gateway_protocol::{encode, encoded_len, Kind, VERSION};
+
+    use super::is_hello;
+
+    #[test]
+    fn session_requires_a_valid_hello_as_its_first_frame() {
+        let mut hello = [0; 3];
+        let hello_len = encode(Kind::Hello, &[VERSION], &mut hello).unwrap_or_default();
+        assert!(is_hello(&hello[..hello_len]));
+
+        let mut packet = vec![0; encoded_len(1)];
+        let packet_len = encode(Kind::Packet, &[0x45], &mut packet).unwrap_or_default();
+        assert!(!is_hello(&packet[..packet_len]));
+        assert!(!is_hello(&[VERSION + 1, Kind::Hello as u8, VERSION]));
+    }
 }

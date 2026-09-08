@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "format": "bun --bun run prettier --write 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
-    "format:check": "bun --bun run prettier --check 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
+    "format": "bun --bun run prettier --write 'platforms/browser/web/**/*.js' 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
+    "format:check": "bun --bun run prettier --check 'platforms/browser/web/**/*.js' 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
     "lint": "bun --bun run eslint 'plugins/*/resources/web/**/*.ts' 'tools/web/**/*.ts'",
     "check": "bun --bun run tsc --noEmit",
     "test": "bun test ./plugins ./tools/web",

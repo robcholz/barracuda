@@ -5,7 +5,10 @@ use std::cell::RefCell;
 use barracuda_net_gateway_protocol::{decode, encode, Kind};
 use embassy_executor::Spawner;
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
-use embassy_net_driver_channel::{driver::HardwareAddress, Device, State, TxRunner};
+use embassy_net_driver_channel::{
+    driver::{HardwareAddress, LinkState},
+    Device, State, TxRunner,
+};
 use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 use web_sys::{BinaryType, MessageEvent, WebSocket};
 
@@ -39,21 +42,36 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     socket.set_binary_type(BinaryType::Arraybuffer);
 
     let state = Box::leak(Box::new(State::<MTU, RX_PACKETS, TX_PACKETS>::new()));
-    let (mut runner, device): (_, Device<'static, MTU>) =
+    let (runner, device): (_, Device<'static, MTU>) =
         embassy_net_driver_channel::new(state, HardwareAddress::Ip);
-    runner.set_link_state(embassy_net_driver_channel::driver::LinkState::Up);
-    let (_state, mut rx, tx) = runner.split();
+    let (link, mut rx, tx) = runner.split();
 
     let hello_socket = socket.clone();
+    let transmit_socket = socket.clone();
+    let mut transmit_runner = Some(tx);
     let onopen = Closure::<dyn FnMut()>::new(move || {
         let mut hello = [0; 3];
-        if let Ok(length) = encode(
+        let hello_sent = encode(
             Kind::Hello,
             &[barracuda_net_gateway_protocol::VERSION],
             &mut hello,
-        ) {
-            let _ = hello_socket.send_with_u8_array(&hello[..length]);
+        )
+        .ok()
+        .and_then(|length| hello_socket.send_with_u8_array(&hello[..length]).ok())
+        .is_some();
+        let Some(tx) = transmit_runner.take() else {
+            return;
+        };
+        if !hello_sent
+            || spawner
+                .spawn(transmit_task(transmit_socket.clone(), link, tx))
+                .is_err()
+        {
+            link.set_link_state(LinkState::Down);
+            let _ = hello_socket.close();
+            return;
         }
+        link.set_link_state(LinkState::Up);
     });
     socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
     onopen.forget();
@@ -72,6 +90,20 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
 
+    let close_link = link;
+    let onclose = Closure::<dyn FnMut()>::new(move || {
+        close_link.set_link_state(LinkState::Down);
+    });
+    socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+    onclose.forget();
+
+    let error_link = link;
+    let onerror = Closure::<dyn FnMut()>::new(move || {
+        error_link.set_link_state(LinkState::Down);
+    });
+    socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+    onerror.forget();
+
     let mut dns = heapless::Vec::new();
     dns.push(Ipv4Address::new(10, 42, 0, 3))
         .map_err(|_| JsValue::from_str("DNS capacity is zero"))?;
@@ -82,12 +114,10 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     });
     let resources = Box::leak(Box::new(StackResources::<SOCKETS>::new()));
     let (stack, network_runner) = embassy_net::new(device, config, resources, random_seed()?);
-    spawner
-        .spawn(network_task(network_runner))
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    spawner
-        .spawn(transmit_task(socket, tx))
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    if let Err(error) = spawner.spawn(network_task(network_runner)) {
+        let _ = socket.close();
+        return Err(JsValue::from_str(&error.to_string()));
+    }
     Ok(stack)
 }
 
@@ -117,10 +147,18 @@ async fn network_task(mut runner: Runner<'static, BrowserDevice>) -> ! {
 }
 
 #[embassy_executor::task]
-async fn transmit_task(socket: WebSocket, mut runner: TxRunner<'static, MTU>) {
+async fn transmit_task(
+    socket: WebSocket,
+    link: embassy_net_driver_channel::StateRunner<'static>,
+    mut runner: TxRunner<'static, MTU>,
+) {
     loop {
         let packet = runner.tx_buf().await;
-        let _ = send_packet(&socket, packet);
+        if send_packet(&socket, packet).is_err() {
+            runner.tx_done();
+            link.set_link_state(LinkState::Down);
+            return;
+        }
         runner.tx_done();
     }
 }

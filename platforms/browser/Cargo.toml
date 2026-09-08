@@ -5,17 +5,24 @@ edition = "2021"
 description = "Browser Web Worker Platform implementation for Barracuda"
 
 [dependencies]
+barracuda-board.workspace = true
 barracuda-net-gateway-protocol.workspace = true
+barracuda-platform.workspace = true
+barracuda-tls = { workspace = true, features = ["embedded-tls"] }
+embassy-embedded-hal = "0.5.0"
 embassy-executor = { workspace = true, features = ["arch-wasm", "executor-thread"] }
 embassy-net.workspace = true
 embassy-net-driver-channel.workspace = true
+embassy-sync.workspace = true
+embedded-storage = "0.3"
 heapless = "0.9"
+thiserror = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Crypto", "DedicatedWorkerGlobalScope", "Event", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemSyncAccessHandle", "MessageEvent", "Request", "RequestInit", "RequestMode", "Response", "WebSocket", "WorkerGlobalScope", "WorkerNavigator"] }
+web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Crypto", "DedicatedWorkerGlobalScope", "Event", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetDirectoryOptions", "FileSystemGetFileOptions", "FileSystemReadWriteOptions", "FileSystemSyncAccessHandle", "MessageEvent", "Request", "RequestInit", "RequestMode", "Response", "StorageManager", "WebSocket", "WorkerGlobalScope", "WorkerNavigator"] }
 
 [lints.rust]
 unsafe_code = "forbid"

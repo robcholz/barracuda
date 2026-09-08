@@ -68,8 +68,10 @@ jobs:
           while IFS= read -r board_file; do
             board="$(basename "$(dirname "$board_file")")"
 
-            # Host Boards are already exercised by the two complete test jobs.
-            if [[ "$board" == "local-linux" || "$board" == "local-macos" ]]; then
+            # Host Boards are exercised by the two complete test jobs. Browser
+            # is compile-checked in the Platform matrix until the fixed System
+            # Plugin graph supports wasm32-unknown-unknown.
+            if [[ "$board" == "local-linux" || "$board" == "local-macos" || "$board" == "browser" ]]; then
               continue
             fi
 
@@ -256,6 +258,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: browser
+            board: browser
+            os: ubuntu-latest
+            package: barracuda-platform-browser
+            toolchain: stable
+            check_targets: --tests
+            clippy_targets: --all-targets
           - name: esp32
             board: esp32-devkitc-v4
             os: ubuntu-latest
@@ -328,7 +337,7 @@ jobs:
 
       - name: Check Platform
         if: matrix.toolchain == 'stable'
-        run: cargo check --package ${{ matrix.package }}
+        run: cargo check ${{ matrix.check_targets }} --package ${{ matrix.package }}
 
       - name: Check Platform (Xtensa)
         if: matrix.toolchain == 'esp'
@@ -336,7 +345,7 @@ jobs:
 
       - name: Clippy Platform
         if: matrix.toolchain == 'stable'
-        run: cargo clippy --package ${{ matrix.package }}
+        run: cargo clippy ${{ matrix.clippy_targets }} --package ${{ matrix.package }}
 
       - name: Clippy Platform (Xtensa)
         if: matrix.toolchain == 'esp'
