@@ -145,9 +145,10 @@ validation, QVGA window/scaler/PLL setup, and complete JPEG framing validation.
 It consumes the same frame-receiver binding as OV2640 without adding a sensor
 case to Board generation or the ESP32-S3 Platform.
 
-`es8311-audio-codec` owns codec reset, register initialization, volume, and PCM
-sample conversion. It consumes `embedded-hal` I2C for control and a full-duplex
-PCM binding for the data plane.
+`es8311-audio-codec` owns codec reset, register initialization, external
+amplifier enable, volume, and PCM sample conversion. It consumes `embedded-hal`
+I2C and digital output traits for control plus a full-duplex PCM binding for the
+data plane.
 
 `es8389-audio-codec` owns the ES8389 slave-mode initialization, BCLK-derived or
 external-MCLK clock selection, bias startup, dual-channel volume, and duplex

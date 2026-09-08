@@ -8,7 +8,7 @@ use barracuda_driver::{
     PeripheralDriver,
     audio::{AudioCodec, AudioDescriptor, PcmStream},
 };
-use embedded_hal::{delay::DelayNs, i2c::I2c};
+use embedded_hal::{delay::DelayNs, digital::OutputPin, i2c::I2c};
 
 const INITIAL_REGISTERS: &[(u8, u8)] = &[
     (0x00, 0x80),
@@ -43,19 +43,21 @@ impl Es8311Config {
 }
 
 /// Move-only resources consumed by the codec Driver.
-pub struct Es8311Bindings<I2C, I2S, DELAY> {
+pub struct Es8311Bindings<I2C, I2S, AMP, DELAY> {
     control: I2C,
     stream: I2S,
+    amplifier_enable: AMP,
     delay: DELAY,
 }
 
-impl<I2C, I2S, DELAY> Es8311Bindings<I2C, I2S, DELAY> {
-    /// Combines the codec control bus, PCM stream, and reset delay.
+impl<I2C, I2S, AMP, DELAY> Es8311Bindings<I2C, I2S, AMP, DELAY> {
+    /// Combines the codec control bus, PCM stream, amplifier, and reset delay.
     #[must_use]
-    pub const fn new(control: I2C, stream: I2S, delay: DELAY) -> Self {
+    pub const fn new(control: I2C, stream: I2S, amplifier_enable: AMP, delay: DELAY) -> Self {
         Self {
             control,
             stream,
+            amplifier_enable,
             delay,
         }
     }
@@ -63,11 +65,13 @@ impl<I2C, I2S, DELAY> Es8311Bindings<I2C, I2S, DELAY> {
 
 /// ES8311 initialization failure.
 #[derive(Debug)]
-pub enum Es8311InitError<ControlError> {
+pub enum Es8311InitError<ControlError, AmplifierError> {
     /// The configured I2S format is not 16-bit stereo PCM.
     UnsupportedFormat,
     /// Codec register programming failed.
     Control(ControlError),
+    /// The external speaker amplifier could not be enabled.
+    Amplifier(AmplifierError),
 }
 
 /// ES8311 control or stream failure.
@@ -80,30 +84,33 @@ pub enum Es8311Error<ControlError, StreamError> {
 }
 
 /// Initialized ES8311 codec and its full-duplex PCM stream.
-pub struct Es8311AudioCodec<I2C, I2S> {
+pub struct Es8311AudioCodec<I2C, I2S, AMP> {
     control: I2C,
     stream: I2S,
+    _amplifier_enable: AMP,
     address: u8,
     descriptor: AudioDescriptor,
 }
 
 /// Static factory used by generated Board composition.
-pub struct Es8311AudioCodecDriver<I2C, I2S, DELAY>(
+pub struct Es8311AudioCodecDriver<I2C, I2S, AMP, DELAY>(
     PhantomData<I2C>,
     PhantomData<I2S>,
+    PhantomData<AMP>,
     PhantomData<DELAY>,
 );
 
-impl<I2C, I2S, DELAY> PeripheralDriver for Es8311AudioCodecDriver<I2C, I2S, DELAY>
+impl<I2C, I2S, AMP, DELAY> PeripheralDriver for Es8311AudioCodecDriver<I2C, I2S, AMP, DELAY>
 where
     I2C: I2c + 'static,
     I2S: PcmStream + 'static,
+    AMP: OutputPin + 'static,
     DELAY: DelayNs + 'static,
 {
-    type Bindings = Es8311Bindings<I2C, I2S, DELAY>;
+    type Bindings = Es8311Bindings<I2C, I2S, AMP, DELAY>;
     type Config = Es8311Config;
-    type Capability = Es8311AudioCodec<I2C, I2S>;
-    type Error = Es8311InitError<I2C::Error>;
+    type Capability = Es8311AudioCodec<I2C, I2S, AMP>;
+    type Error = Es8311InitError<I2C::Error, AMP::Error>;
 
     async fn initialize(
         mut bindings: Self::Bindings,
@@ -122,9 +129,14 @@ where
             write_register(&mut bindings.control, config.address, register, value)
                 .map_err(Es8311InitError::Control)?;
         }
+        bindings
+            .amplifier_enable
+            .set_high()
+            .map_err(Es8311InitError::Amplifier)?;
         Ok(Es8311AudioCodec {
             control: bindings.control,
             stream: bindings.stream,
+            _amplifier_enable: bindings.amplifier_enable,
             address: config.address,
             descriptor: AudioDescriptor::new(
                 format.sample_rate_hz,
@@ -135,7 +147,7 @@ where
     }
 }
 
-impl<I2C, I2S> AudioCodec for Es8311AudioCodec<I2C, I2S>
+impl<I2C, I2S, AMP> AudioCodec for Es8311AudioCodec<I2C, I2S, AMP>
 where
     I2C: I2c,
     I2S: PcmStream,
@@ -176,7 +188,11 @@ fn write_register<I2C: I2c>(
 mod tests {
     extern crate std;
 
-    use core::{convert::Infallible, future::ready};
+    use core::{
+        convert::Infallible,
+        future::ready,
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     use barracuda_driver::{
         PeripheralDriver,
@@ -185,6 +201,7 @@ mod tests {
     use embassy_futures::block_on;
     use embedded_hal::{
         delay::DelayNs,
+        digital::{ErrorType as DigitalErrorType, OutputPin},
         i2c::{ErrorType, I2c, Operation},
     };
 
@@ -219,6 +236,23 @@ mod tests {
         fn delay_ns(&mut self, _: u32) {}
     }
 
+    static AMPLIFIER_ENABLED: AtomicBool = AtomicBool::new(false);
+
+    struct AmplifierEnable;
+    impl DigitalErrorType for AmplifierEnable {
+        type Error = Infallible;
+    }
+    impl OutputPin for AmplifierEnable {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            AMPLIFIER_ENABLED.store(false, Ordering::Relaxed);
+            Ok(())
+        }
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            AMPLIFIER_ENABLED.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
     struct Stream {
         written: std::vec::Vec<i16>,
     }
@@ -250,11 +284,13 @@ mod tests {
 
     #[test]
     fn initializes_registers_and_streams_pcm() {
+        AMPLIFIER_ENABLED.store(false, Ordering::Relaxed);
         let bindings = Es8311Bindings::new(
             ControlBus::default(),
             Stream {
                 written: std::vec::Vec::new(),
             },
+            AmplifierEnable,
             Delay,
         );
         let mut codec = block_on(Es8311AudioCodecDriver::initialize(
@@ -262,6 +298,7 @@ mod tests {
             Es8311Config::new(0x18),
         ))
         .expect("initialize codec");
+        assert!(AMPLIFIER_ENABLED.load(Ordering::Relaxed));
         assert_eq!(codec.descriptor().sample_rate_hz(), 16_000);
         block_on(codec.write(&[-1, 2])).expect("write PCM");
         let mut samples = [0_i16; 2];

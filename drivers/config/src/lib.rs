@@ -1371,7 +1371,9 @@ fn render_generic_hal(
     if rendered.is_empty() && state.binding_errors.is_empty() {
         source.push_str("type GeneratedBoardError = core::convert::Infallible;\n\n");
     } else {
-        source.push_str("#[derive(Debug)]\npub enum GeneratedBoardError {\n");
+        source.push_str(
+            "#[derive(Debug)]\n#[allow(clippy::enum_variant_names)]\npub enum GeneratedBoardError {\n",
+        );
         for (variant, ty) in &state.binding_errors {
             source.push_str(&format!("    {variant}({ty}),\n"));
         }
