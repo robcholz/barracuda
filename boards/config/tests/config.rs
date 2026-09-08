@@ -480,3 +480,39 @@ fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
         assert!(!yaml.contains("platform-features:"));
     }
 }
+
+#[test]
+fn atom_voice_s3r_audio_data_pins_follow_controller_direction() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let yaml =
+        std::fs::read_to_string(workspace.join("boards/configs/m5stack-atom-voice-s3r/board.yml"))
+            .expect("read Atom VoiceS3R Board YAML");
+    let board = parse(&yaml).expect("valid Atom VoiceS3R Board YAML");
+    let control = board
+        .internal_io()
+        .i2c_device("audio-control")
+        .expect("ES8311 control bus");
+    let stream = board
+        .internal_io()
+        .i2s_stream("audio-stream")
+        .expect("ES8311 PCM stream");
+    let codec = board
+        .builtin_peripheral("audio-codec")
+        .expect("ES8311 built-in");
+
+    assert_eq!(
+        (control.scl(), control.sda(), control.frequency_hz()),
+        ("GPIO0", "GPIO45", 400_000)
+    );
+    assert_eq!(
+        (
+            stream.bclk(),
+            stream.ws(),
+            stream.dout(),
+            stream.din(),
+            stream.mclk(),
+        ),
+        ("GPIO17", "GPIO3", "GPIO48", "GPIO4", Some("GPIO11"),)
+    );
+    assert_eq!(codec.binding("amplifier-enable"), Some("GPIO18"));
+}

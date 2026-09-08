@@ -16,12 +16,13 @@ internal-io:
   i2s-stream:
     audio-stream:
       # DOUT/DIN are named from the ESP32-S3 controller's perspective.
+      # Source: https://github.com/m5stack/esphome-yaml/blob/main/common/atom-echos3r-satellite-base.yaml
       peripheral: I2S0
       dma: DMA_CH0
       bclk: GPIO17
       ws: GPIO3
-      dout: GPIO4
-      din: GPIO48
+      dout: GPIO48
+      din: GPIO4
       mclk: GPIO11
       sample-rate-hz: 16000
       channels: 2
