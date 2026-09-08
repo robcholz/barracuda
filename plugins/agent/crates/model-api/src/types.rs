@@ -91,7 +91,7 @@ const DEFAULT_IMAGE_MAX_BYTES: usize = 512 * 1024;
 /// Backend wire details and capability flags are intentionally not configurable
 /// here: [`BackendKind`] owns those decisions. Callers choose the provider
 /// endpoint and request policy (`timeout_ms`, `max_tokens`, `image_max_bytes`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ModelApiConfig {
     /// Built-in backend kind.
     pub backend: BackendKind,

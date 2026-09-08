@@ -17,7 +17,9 @@ use barracuda_vfs::ScopedVfs;
 use futures_channel::oneshot;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 
-use barracuda_agent::{AgentCreateError, AgentManagerError, ApiPurpose, SharedApiManager};
+use barracuda_agent::{
+    AgentCreateError, AgentManagerError, ApiPurpose, ModelApiManager, SharedApiManager,
+};
 use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionPersistence, SessionStream,
@@ -151,6 +153,11 @@ impl RuntimeControl {
         default: bool,
     ) -> Result<(), InitError> {
         self.api_manager.borrow_mut().set_api(api, purpose, default)
+    }
+
+    /// Replaces the complete model API configuration snapshot.
+    pub(crate) fn replace_api_configuration(&self, configuration: ModelApiManager) {
+        *self.api_manager.borrow_mut() = configuration;
     }
 
     /// Open a Session's long-lived event stream.

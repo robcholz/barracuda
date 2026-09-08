@@ -392,6 +392,48 @@ struct EntryIteratorPlugin {
     observed: ObservedEntries,
 }
 
+struct ByteReaderPlugin {
+    observed: Rc<RefCell<Option<Vec<u8>>>>,
+}
+
+declare_plugin!(ByteReaderPlugin, "byte-reader");
+
+impl Plugin for ByteReaderPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        block_on(async {
+            context
+                .storage()
+                .put("configuration", br#"{"token":"secret"}"#.as_slice())
+                .await?;
+            *self.observed.borrow_mut() = context.storage().get_bytes("configuration").await?;
+            Ok::<(), PluginError>(())
+        })
+    }
+}
+
+#[test]
+fn plugin_storage_reads_owned_variable_length_bytes() {
+    let mut manager = manager();
+    let observed = Rc::new(RefCell::new(None));
+
+    manager
+        .register(ByteReaderPlugin {
+            observed: Rc::clone(&observed),
+        })
+        .expect("register byte reader");
+
+    assert_eq!(
+        observed.borrow().as_deref(),
+        Some(br#"{"token":"secret"}"#.as_slice())
+    );
+}
+
 declare_plugin!(EntryIteratorPlugin, "entry-iterator");
 
 impl Plugin for EntryIteratorPlugin {

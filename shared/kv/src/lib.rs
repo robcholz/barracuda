@@ -14,6 +14,7 @@ mod flash;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt::Debug;
 
 use ekv::{
@@ -180,6 +181,18 @@ where
             return Err(Error::InvalidValue);
         }
         T::try_read_from_bytes(&bytes).map_err(|_error| Error::InvalidValue)
+    }
+
+    /// Reads one variable-length value into owned bytes.
+    pub async fn read_bytes(&self, key: &str) -> Result<Vec<u8>, Error> {
+        let mut bytes = alloc::vec![0; MAX_VALUE_SIZE];
+        let length = self
+            .inner
+            .read(key.as_bytes(), &mut bytes)
+            .await
+            .map_err(map_read_error)?;
+        bytes.truncate(length);
+        Ok(bytes)
     }
 
     /// Opens a streaming iterator over every live key/value entry.
