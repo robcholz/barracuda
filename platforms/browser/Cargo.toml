@@ -10,7 +10,7 @@ path = "src/bin/browser.rs"
 
 [dependencies]
 barracuda-platform.workspace = true
-barracuda-tls = { workspace = true, features = ["embedded-tls"] }
+barracuda-tls.workspace = true
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
 embassy-executor.workspace = true
@@ -34,7 +34,6 @@ tokio = { version = "1.52.3", features = ["io-util", "macros", "net", "rt-multi-
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
-barracuda-board-config.workspace = true
 serde = { version = "1", features = ["derive"] }
 yaml-peg = { version = "1.0.8", features = ["serde"] }
 

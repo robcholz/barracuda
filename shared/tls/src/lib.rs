@@ -7,12 +7,9 @@
 
 extern crate alloc;
 
-#[cfg(feature = "mbedtls")]
 use alloc::{boxed::Box, string::String, string::ToString};
 
-#[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
 use http_client::TlsConfig;
-#[cfg(feature = "mbedtls")]
 use mbedtls_rs::{Certificate, Tls, TlsReference, TlsVersion, X509};
 
 /// TLS capability consumed by HTTP-client owners.
@@ -33,20 +30,17 @@ impl ClientTls for PlaintextTls {
 
 /// Reusable mbedTLS capability backed by Platform-selected trust roots.
 #[derive(Clone)]
-#[cfg(feature = "mbedtls")]
 pub struct MbedTls {
     certificates: Certificate<'static>,
     tls_reference: TlsReference<'static>,
 }
 
 /// Raw embedded inputs from which a Platform initializes its TLS capability.
-#[cfg(feature = "mbedtls")]
 pub struct MbedTlsInput {
     rng: &'static mut (dyn rand_core::CryptoRng + Send),
     trust_roots: &'static [u8],
 }
 
-#[cfg(feature = "mbedtls")]
 impl MbedTlsInput {
     /// Creates embedded mbedTLS inputs from a Platform RNG and DER trust roots.
     #[must_use]
@@ -67,7 +61,6 @@ impl MbedTlsInput {
     }
 }
 
-#[cfg(feature = "mbedtls")]
 impl MbedTls {
     /// Initializes mbedTLS from DER-encoded trust roots and a Platform RNG.
     ///
@@ -127,7 +120,6 @@ impl MbedTls {
     }
 }
 
-#[cfg(feature = "mbedtls")]
 impl ClientTls for MbedTls {
     fn config(&self) -> Option<TlsConfig<'static>> {
         Some(self.client_config())
@@ -136,7 +128,6 @@ impl ClientTls for MbedTls {
 
 /// Failure while preparing a Platform TLS capability.
 #[derive(Debug, thiserror::Error)]
-#[cfg(feature = "mbedtls")]
 pub enum TlsError {
     /// Trust roots could not be parsed.
     #[error("invalid TLS trust roots: {0}")]

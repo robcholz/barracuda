@@ -13,8 +13,6 @@ members = [
     "core/system",
     "plugins/*/crates/*",
     "platforms/*",
-    "platforms/macos/network-gateway",
-    "platforms/macos/network-gateway-protocol",
     "shared/*",
     "tools/plugin-tool",
     "tools/system-image",
@@ -87,7 +85,6 @@ barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-selected = { path = "platforms/selected" }
 barracuda-platform-test = { path = "platforms/test" }
 barracuda-platform-tool = { path = "platforms/tool" }
-barracuda-platform-macos-network-gateway-protocol = { path = "platforms/macos/network-gateway-protocol" }
 barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
@@ -95,7 +92,7 @@ barracuda-runtime-utils = { path = "shared/runtime-utils" }
 barracuda-system = { path = "core/system" }
 barracuda-target = { path = "composition/selected" }
 barracuda-target-api = { path = "composition/api" }
-barracuda-tls = { path = "shared/tls", default-features = false }
+barracuda-tls = { path = "shared/tls" }
 barracuda-vfs = { path = "shared/vfs" }
 barracuda-vfs-fat = { path = "shared/vfs-fat" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }

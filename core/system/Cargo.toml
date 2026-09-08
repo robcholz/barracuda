@@ -43,7 +43,7 @@ barracuda-plugin.workspace = true
 barracuda-platform.workspace = true
 barracuda-target-api.workspace = true
 barracuda-tls.workspace = true
-http-client.workspace = true
+http-client = { workspace = true, features = ["mbedtls"] }
 barracuda-vfs.workspace = true
 barracuda-vfs-fat.workspace = true
 barracuda-vfs-littlefs.workspace = true

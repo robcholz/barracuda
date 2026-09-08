@@ -26,8 +26,8 @@ use http_client::ClientFactory;
 use workflow::AgentWorkflowAdapter;
 
 pub use barracuda_agent_runtime::{
-    stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
-    SessionEvent, SessionPersistence, TurnEvent,
+    AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel, SessionEvent,
+    SessionPersistence, TurnEvent, stream, tools,
 };
 pub use model_api_http::SET_API_PATH;
 

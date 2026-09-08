@@ -87,6 +87,9 @@ fn select_persists_a_valid_board_for_the_next_build() {
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
     assert!(cargo.contains("[build]"));
+    assert!(cargo.contains(
+        "BARRACUDA_BOARD_NATIVE_LAYOUT = \"boards/configs/local-macos/file-layout.yml\""
+    ));
     assert!(cargo.contains("runner = ["));
     assert!(cargo.contains("\"__run\", \"macos\", \"--\"]"));
     assert!(root

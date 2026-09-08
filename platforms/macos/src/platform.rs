@@ -24,31 +24,15 @@ const PARTITION_CAPACITY: usize = 16;
 pub struct MacosSettings {
     state_directory: &'static str,
     flash_image: &'static str,
-    network_gateway: &'static str,
 }
 
 impl MacosSettings {
     /// Creates macOS Platform settings.
     #[must_use]
     pub const fn new(state_directory: &'static str, flash_image: &'static str) -> Self {
-        Self::with_gateway(
-            state_directory,
-            flash_image,
-            "ws://127.0.0.1:8787/v1/connect",
-        )
-    }
-
-    /// Creates macOS Platform settings with an explicit network gateway.
-    #[must_use]
-    pub const fn with_gateway(
-        state_directory: &'static str,
-        flash_image: &'static str,
-        network_gateway: &'static str,
-    ) -> Self {
         Self {
             state_directory,
             flash_image,
-            network_gateway,
         }
     }
 
@@ -63,12 +47,6 @@ impl MacosSettings {
     pub const fn flash_image(&self) -> &'static str {
         self.flash_image
     }
-
-    /// Returns the WebSocket endpoint used by the virtual network adapter.
-    #[must_use]
-    pub const fn network_gateway(&self) -> &'static str {
-        self.network_gateway
-    }
 }
 
 /// One macOS file-backed native partition.
@@ -80,7 +58,7 @@ pub type MacosPartitions = Partitions<MacosPartition, PARTITION_CAPACITY>;
 pub struct MacosPlatform;
 
 impl MacosPlatform {
-    /// Installs the macOS reactor used by gateway I/O on the Embassy executor thread.
+    /// Installs the macOS reactor used by UTUN I/O on the Embassy executor thread.
     ///
     /// # Errors
     /// Returns an error when the Tokio reactor threads cannot be created.
@@ -174,8 +152,7 @@ impl Platform for MacosPlatform {
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
         log::info!("initializing macOS Platform network");
-        let ip_stack =
-            crate::network::initialize(spawner, crate::PLATFORM_SETTINGS.network_gateway()).await?;
+        let ip_stack = crate::network::initialize(spawner).await?;
         log::info!("initializing macOS Platform TLS");
         let tls = Self::initialize_tls()?;
         log::info!("initialized macOS Platform");
@@ -199,7 +176,7 @@ pub enum MacosPlatformError {
     /// Tokio reactor initialization failed.
     #[error("failed to initialize macOS reactor: {0}")]
     Runtime(std::io::Error),
-    /// The gateway-backed Embassy network failed to initialize.
+    /// The real UTUN-backed Embassy network failed to initialize.
     #[error(transparent)]
     Network(#[from] MacosNetworkError),
     /// Host TLS initialization failed.

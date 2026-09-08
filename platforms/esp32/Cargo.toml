@@ -10,7 +10,7 @@ barracuda-platform.workspace = true
 log.workspace = true
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
-barracuda-tls = { workspace = true, features = ["mbedtls"] }
+barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net.workspace = true

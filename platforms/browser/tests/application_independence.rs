@@ -39,7 +39,9 @@ fn browser_platform_projects_board_layout_without_board_runtime_bindings(
     assert!(!platform.contains("barracuda_board::Board"));
     assert!(!platform.contains("const FLASH_CAPACITY"));
     assert!(!platform.contains("RESOURCES_OFFSET"));
-    assert!(build.contains("board.native_layout().artifact()"));
+    assert!(!build.contains("read_selected_board"));
+    assert!(!build.contains("board.yml"));
+    assert!(build.contains("BARRACUDA_BOARD_NATIVE_LAYOUT"));
     assert!(platform.contains("for region in regions"));
     Ok(())
 }

@@ -12,11 +12,6 @@ fn platform_mechanisms_are_not_standalone_pseudo_platforms() {
     assert!(!root.join("shared/embassy-net-tun").exists());
     assert!(!root.join("platforms/file-storage").exists());
     assert!(!root.join("platforms/tun").exists());
-    assert!(!root.join("platforms/net-gateway").exists());
-    assert!(!root.join("platforms/net-gateway-protocol").exists());
-    assert!(root
-        .join("platforms/macos/network-gateway/Cargo.toml")
-        .is_file());
     assert!(root.join("platforms/macos/platform.yml").is_file());
     assert!(root.join("platforms/linux/platform.yml").is_file());
     assert!(root.join("platforms/browser/platform.yml").is_file());

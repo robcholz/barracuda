@@ -2,8 +2,9 @@
 
 use std::{env, error::Error, fs, path::PathBuf};
 
-use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use serde::Deserialize;
+
+const BOARD_NATIVE_LAYOUT_ENV: &str = "BARRACUDA_BOARD_NATIVE_LAYOUT";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,26 +47,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn generate_board_layout() -> Result<(), Box<dyn Error>> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
-    let selection_path = root.join(SELECTED_BOARD_PATH);
-    println!("cargo:rerun-if-changed={}", selection_path.display());
-    let board_name =
-        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?;
-    let board_directory = root.join("boards/configs").join(board_name);
-    let board_path = board_directory.join("board.yml");
-    println!("cargo:rerun-if-changed={}", board_path.display());
-    let board = parse(&fs::read_to_string(board_path)?)?;
-
+    println!("cargo::rerun-if-env-changed={BOARD_NATIVE_LAYOUT_ENV}");
+    let layout_path = root.join(
+        env::var_os(BOARD_NATIVE_LAYOUT_ENV)
+            .ok_or("no Board native layout selected; run `cargo board select` first")?,
+    );
+    println!("cargo:rerun-if-changed={}", layout_path.display());
+    let mut layouts =
+        yaml_peg::serde::from_str::<FileLayoutDocument>(&fs::read_to_string(layout_path)?)?;
+    let layout = exactly_one(&mut layouts, "file-layout.yml")?;
     let mut generated = String::new();
-    if board.hardware().chip() == "browser" {
-        let layout_path = board_directory.join(board.native_layout().artifact());
-        println!("cargo:rerun-if-changed={}", layout_path.display());
-        let mut layouts =
-            yaml_peg::serde::from_str::<FileLayoutDocument>(&fs::read_to_string(layout_path)?)?;
-        let layout = exactly_one(&mut layouts, "file-layout.yml")?;
-        render_layout(&mut generated, layout);
-    } else {
-        render_inactive_layout(&mut generated);
-    }
+    render_layout(&mut generated, layout);
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     fs::write(output.join("browser_layout.rs"), generated)?;
     Ok(())
@@ -95,13 +87,6 @@ fn exactly_one<T>(documents: &mut Vec<T>, source: &str) -> Result<T, Box<dyn Err
     documents
         .pop()
         .ok_or_else(|| format!("{source} is empty").into())
-}
-
-fn render_inactive_layout(generated: &mut String) {
-    generated.push_str(
-        "const BOARD_FILE_REGIONS: &[FileRegion] = &[];\n\
-         const BOARD_FILE_LAYOUT: FileLayout = FileLayout::new(0, BOARD_FILE_REGIONS);\n",
-    );
 }
 
 fn render_layout(generated: &mut String, layout: FileLayoutDocument) {
