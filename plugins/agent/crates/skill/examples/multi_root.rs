@@ -1,16 +1,15 @@
-//! Scan several skills roots at once, and see how root priority resolves a
-//! clashing id.
+//! Scan several skills roots into one globally unique catalog.
 //!
 //! Run with: `cargo run --example multi_root --target x86_64-unknown-linux-gnu`
 //!
-//! Mirrors the firmware layout: user-installed skills under the writable DATA
-//! root can shadow firmware-baked skills under the read-only SYSTEM root.
+//! Mirrors the firmware layout: user-installed and firmware-baked skills have
+//! different lifecycles but share one namespace.
 
 #![allow(clippy::arc_with_non_send_sync)]
 
 use std::sync::Arc;
 
-use barracuda_agent_skill::{FsSkillRegistry, SkillName};
+use barracuda_agent_skill::FsSkillRegistry;
 use barracuda_platform_test::memory_vfs;
 use futures_lite::future::block_on;
 
@@ -40,17 +39,16 @@ async fn run() -> anyhow::Result<()> {
 
     let registry = Arc::new(
         FsSkillRegistry::new(filesystem.clone())
-            .set_root("data")
+            .add_root("data")
             .await?
-            .set_root("system")
+            .add_root("system")
             .await?,
     );
     let mut set = registry.skill_set();
     println!("== merged catalog from data + system ==");
     print!("{}", set.catalog_context());
 
-    // Now use a collision: the same id `time` exists in both roots, and the
-    // earlier DATA root shadows the later SYSTEM root.
+    // A collision is rejected regardless of root order.
     let filesystem = memory_vfs().await?;
     filesystem
         .write_atomic("system/time/SKILL.md", &skill_md("time", "baked"))
@@ -60,19 +58,15 @@ async fn run() -> anyhow::Result<()> {
         .await?;
 
     println!("\n== scanning roots with a clashing id ==");
-    let registry = Arc::new(
-        FsSkillRegistry::new(filesystem)
-            .set_root("data")
-            .await?
-            .set_root("system")
-            .await?,
-    );
-    let mut set = registry.skill_set();
-    let catalog = set.catalog_context().to_string();
-    println!("{catalog}");
-    assert!(catalog.contains("- time: installed"));
-    let document = set.read_skill(&SkillName::new("time")).await?;
-    assert!(document.content().contains("# body"));
+    let duplicate = FsSkillRegistry::new(filesystem)
+        .add_root("data")
+        .await?
+        .add_root("system")
+        .await;
+    assert!(duplicate.is_err());
+    if let Err(error) = duplicate {
+        println!("{error}");
+    }
 
     Ok(())
 }

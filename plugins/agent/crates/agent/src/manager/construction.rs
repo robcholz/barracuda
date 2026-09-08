@@ -120,7 +120,7 @@ where
     }
 }
 
-/// Build the shared skill catalog from the priority-ordered `skill_roots`.
+/// Build the shared, globally unique skill catalog from `skill_roots`.
 ///
 /// A missing root is skipped so the agent still starts; a real scan failure
 /// (e.g. a malformed `SKILL.md`) aborts construction.
@@ -141,11 +141,11 @@ async fn build_fs_skill_registry(
             tracing::warn!(name: "root_missing", "");
             continue;
         }
-        match registry.set_root(root).await {
+        match registry.add_root(root).await {
             Ok(next) => registry = next,
             Err(error) => {
                 log::warn!("skill catalog scan failed: {error}");
-                tracing::warn!(name: "scan_failed", kind = "set_root");
+                tracing::warn!(name: "scan_failed", kind = "add_root");
                 return Err(error);
             }
         }

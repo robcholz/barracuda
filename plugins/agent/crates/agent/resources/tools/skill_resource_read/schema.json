@@ -1,0 +1,34 @@
+{
+  "type": "function",
+  "function": {
+    "name": "skill_resource_read",
+    "description": "Read a bounded UTF-8 byte range from a relative resource file belonging to one available Agent Skill.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "trimmedNonEmpty": true,
+          "description": "The standard skill name shown by skill_list."
+        },
+        "path": {
+          "type": "string",
+          "trimmedNonEmpty": true,
+          "description": "A relative file path explicitly referenced by the skill instructions."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 16384
+        }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    }
+  }
+}

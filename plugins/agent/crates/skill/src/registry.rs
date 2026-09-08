@@ -11,7 +11,10 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use barracuda_vfs::{FsError, ScopedVfs};
 use getset::CopyGetters;
 
-use super::document::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
+use super::document::{
+    frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName, SkillResourcePage,
+    MAX_RESOURCE_READ_BYTES, MIN_RESOURCE_READ_BYTES,
+};
 use super::skill_set::SkillSet;
 
 pub type SkillRegistryVersion = u32;
@@ -43,7 +46,7 @@ impl CatalogSnapshot {
         }
     }
 
-    /// Skills sorted by id, with root priority already resolved.
+    /// Skills sorted by globally unique name.
     pub fn skills(&self) -> &[Skill] {
         &self.skills
     }
@@ -76,6 +79,15 @@ pub trait SkillRegistry: 'static {
         &'a self,
         name: &'a SkillName,
     ) -> SkillFuture<'a, Result<String, SkillError>>;
+
+    /// Read one bounded UTF-8 page from a relative file inside a skill.
+    fn read_resource<'a>(
+        &'a self,
+        name: &'a SkillName,
+        path: &'a str,
+        offset: u64,
+        limit: usize,
+    ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>>;
 }
 
 struct ErasedSkillRegistry<R: SkillRegistry + ?Sized>(Arc<R>);
@@ -98,6 +110,16 @@ impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
         name: &'a SkillName,
     ) -> SkillFuture<'a, Result<String, SkillError>> {
         self.0.read_document(name)
+    }
+
+    fn read_resource<'a>(
+        &'a self,
+        name: &'a SkillName,
+        path: &'a str,
+        offset: u64,
+        limit: usize,
+    ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>> {
+        self.0.read_resource(name, path, offset, limit)
     }
 }
 
@@ -125,9 +147,20 @@ impl SkillRegistry for EmptySkillRegistry {
         let name = name.clone();
         Box::pin(async move { Err(SkillError::NotFound(name)) })
     }
+
+    fn read_resource<'a>(
+        &'a self,
+        name: &'a SkillName,
+        _path: &'a str,
+        _offset: u64,
+        _limit: usize,
+    ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>> {
+        let name = name.clone();
+        Box::pin(async move { Err(SkillError::NotFound(name)) })
+    }
 }
 
-/// Filesystem-backed registry over one or more priority-ordered skill roots.
+/// Filesystem-backed registry over roots that form one globally unique catalog.
 pub struct FsSkillRegistry {
     filesystem: ScopedVfs,
     roots: Vec<String>,
@@ -146,10 +179,10 @@ impl FsSkillRegistry {
         }
     }
 
-    /// Append one skills root, rescan, and return the registry builder.
+    /// Append one skills root, rescan all roots, and return the registry builder.
     ///
-    /// Add roots in priority order, e.g. DATA before SYSTEM.
-    pub async fn set_root(mut self, root: impl Into<String>) -> Result<Self, SkillError> {
+    /// Root order does not affect selection. Duplicate skill names are errors.
+    pub async fn add_root(mut self, root: impl Into<String>) -> Result<Self, SkillError> {
         self.roots.push(root.into());
         let snapshot = self.scan_catalog_next_version().await?;
         *self.snapshot.borrow_mut() = Arc::new(snapshot);
@@ -191,6 +224,89 @@ impl FsSkillRegistry {
         Ok(body.trim().into())
     }
 
+    pub(crate) async fn read_resource(
+        &self,
+        name: &SkillName,
+        path: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<SkillResourcePage, SkillError> {
+        if !(MIN_RESOURCE_READ_BYTES..=MAX_RESOURCE_READ_BYTES).contains(&limit) {
+            return Err(SkillError::InvalidResourceLimit {
+                limit,
+                min: MIN_RESOURCE_READ_BYTES,
+                max: MAX_RESOURCE_READ_BYTES,
+            });
+        }
+        validate_resource_path(name, path)?;
+        let snapshot = self.catalog();
+        let skill = snapshot
+            .get(name)
+            .ok_or_else(|| SkillError::NotFound(name.clone()))?;
+        let directory = skill.directory().ok_or(SkillError::Backend {
+            operation: "read_resource",
+            code: -1,
+        })?;
+        let resource_path = format!("{directory}/{path}");
+        let metadata = self
+            .filesystem
+            .metadata(&resource_path)
+            .await
+            .map_err(|source| SkillError::ResourceReadFailed {
+                name: name.clone(),
+                path: path.into(),
+                source,
+            })?;
+        if !metadata.is_file() {
+            return Err(SkillError::ResourceNotFile {
+                name: name.clone(),
+                path: path.into(),
+            });
+        }
+        let length = metadata.len();
+        if offset > length {
+            return Err(SkillError::ResourceRangeOutOfBounds {
+                name: name.clone(),
+                path: path.into(),
+                offset,
+                length,
+            });
+        }
+        let amount_u64 = length
+            .saturating_sub(offset)
+            .min(u64::try_from(limit).unwrap_or(u64::MAX));
+        let amount = usize::try_from(amount_u64).map_err(|_| SkillError::Backend {
+            operation: "read_resource_range",
+            code: -1,
+        })?;
+        let bytes = if amount == 0 {
+            Vec::new()
+        } else {
+            self.filesystem
+                .read_at(&resource_path, offset, amount)
+                .await
+                .map_err(|source| SkillError::ResourceReadFailed {
+                    name: name.clone(),
+                    path: path.into(),
+                    source,
+                })?
+        };
+        let has_more = offset.saturating_add(amount_u64) < length;
+        let (content, consumed) = decode_resource_page(name, path, bytes, has_more)?;
+        let consumed_u64 = u64::try_from(consumed).map_err(|_| SkillError::Backend {
+            operation: "read_resource_range",
+            code: -1,
+        })?;
+        let next = offset.saturating_add(consumed_u64);
+        Ok(SkillResourcePage::new(
+            path.into(),
+            content,
+            offset,
+            consumed,
+            (next < length).then_some(next),
+        ))
+    }
+
     async fn scan_catalog_next_version(&self) -> Result<CatalogSnapshot, SkillError> {
         let version = self.next_version.fetch_add(1, Ordering::Relaxed);
         scan_catalog(&self.filesystem, &self.roots, version).await
@@ -220,6 +336,18 @@ impl SkillRegistry for FsSkillRegistry {
     ) -> SkillFuture<'a, Result<String, SkillError>> {
         Box::pin(FsSkillRegistry::read_document(self, name))
     }
+
+    fn read_resource<'a>(
+        &'a self,
+        name: &'a SkillName,
+        path: &'a str,
+        offset: u64,
+        limit: usize,
+    ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>> {
+        Box::pin(FsSkillRegistry::read_resource(
+            self, name, path, offset, limit,
+        ))
+    }
 }
 
 async fn scan_catalog(
@@ -229,16 +357,17 @@ async fn scan_catalog(
 ) -> Result<CatalogSnapshot, SkillError> {
     let mut skills = Vec::new();
     for root in roots {
-        let names = match filesystem.list_dir(root).await {
-            Ok(names) => names,
+        let entries = match filesystem.read_dir(root).await {
+            Ok(entries) => entries,
             Err(FsError::NotFound) => continue,
             Err(error) => return Err(SkillError::ScanFailed(root.clone(), error)),
         };
-        for name in names {
-            let name = SkillName::new(name);
-            if skills.iter().any(|skill: &Skill| skill.name() == &name) {
+        for entry in entries {
+            let entry = entry.map_err(|error| SkillError::ScanFailed(root.clone(), error))?;
+            if !entry.metadata().is_dir() {
                 continue;
             }
+            let name = SkillName::new(entry.file_name());
             let path = skill_document_path(root, name.as_str());
             if !filesystem
                 .exists(&path)
@@ -246,6 +375,15 @@ async fn scan_catalog(
                 .map_err(|error| SkillError::ScanFailed(root.clone(), error))?
             {
                 continue;
+            }
+            if let Some(existing) = skills.iter().find(|skill: &&Skill| skill.name() == &name) {
+                let first_directory = existing.directory().unwrap_or("").into();
+                let second_directory = skill_directory_path(root, name.as_str());
+                return Err(SkillError::DuplicateSkill {
+                    name,
+                    first_directory,
+                    second_directory,
+                });
             }
             let document = read_document(filesystem, &name, &path).await?;
             skills.push(parse_frontmatter(name, root, &document)?);
@@ -256,6 +394,55 @@ async fn scan_catalog(
         version,
         skills: Arc::from(skills),
     })
+}
+
+fn validate_resource_path(name: &SkillName, path: &str) -> Result<(), SkillError> {
+    let valid = !path.is_empty()
+        && !path.starts_with('/')
+        && !path.as_bytes().contains(&0)
+        && path
+            .split('/')
+            .all(|component| !component.is_empty() && component != "." && component != "..");
+    if valid {
+        Ok(())
+    } else {
+        Err(SkillError::InvalidResourcePath {
+            name: name.clone(),
+            path: path.into(),
+        })
+    }
+}
+
+fn decode_resource_page(
+    name: &SkillName,
+    path: &str,
+    bytes: Vec<u8>,
+    has_more: bool,
+) -> Result<(String, usize), SkillError> {
+    match String::from_utf8(bytes) {
+        Ok(content) => {
+            let consumed = content.len();
+            Ok((content, consumed))
+        }
+        Err(error) => {
+            let utf8_error = error.utf8_error();
+            let valid = utf8_error.valid_up_to();
+            if has_more && utf8_error.error_len().is_none() && valid > 0 {
+                let mut prefix = error.into_bytes();
+                prefix.truncate(valid);
+                let content =
+                    String::from_utf8(prefix).map_err(|_| SkillError::InvalidResourceUtf8 {
+                        name: name.clone(),
+                        path: path.into(),
+                    })?;
+                return Ok((content, valid));
+            }
+            Err(SkillError::InvalidResourceUtf8 {
+                name: name.clone(),
+                path: path.into(),
+            })
+        }
+    }
 }
 
 fn skill_document_path(root: &str, id: &str) -> String {

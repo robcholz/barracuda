@@ -41,13 +41,30 @@ async fn run() -> anyhow::Result<()> {
         )
         .await?;
 
-    let registry = Arc::new(FsSkillRegistry::new(filesystem).set_root("skills").await?);
+    filesystem
+        .write_atomic(
+            "skills/light-switch/references/examples.md",
+            b"# Examples\n\nTurn the status light on.",
+        )
+        .await?;
+
+    let registry = Arc::new(FsSkillRegistry::new(filesystem).add_root("skills").await?);
     let mut set = registry.skill_set();
 
     println!("== catalog context ==\n{}", set.catalog_context());
 
     let document = set.read_skill(&SkillName::new("light-switch")).await?;
     println!("== skill instructions ==\n{}", document.content());
+
+    let resource = set
+        .read_resource(
+            &SkillName::new("light-switch"),
+            "references/examples.md",
+            0,
+            4096,
+        )
+        .await?;
+    println!("== referenced examples ==\n{}", resource.content());
 
     Ok(())
 }
