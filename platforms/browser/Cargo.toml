@@ -1,0 +1,49 @@
+[package]
+name = "barracuda-platform-browser"
+version = "0.1.0"
+edition = "2021"
+description = "Browser Web Worker Platform implementation for Barracuda"
+
+[[bin]]
+name = "barracuda-browser"
+path = "src/bin/browser.rs"
+
+[dependencies]
+barracuda-platform.workspace = true
+barracuda-tls.workspace = true
+critical-section = { version = "1", features = ["std"] }
+embassy-embedded-hal = "0.5.0"
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+embassy-net.workspace = true
+embassy-net-driver-channel.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+embedded-storage = "0.3"
+heapless = "0.9"
+thiserror = "2"
+
+[target.'cfg(target_os = "wasi")'.dependencies]
+embassy-time-driver = { version = "0.2.2", features = ["tick-hz-1_000_000"] }
+embassy-time-queue-utils = "0.3.2"
+
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+anyhow = "1"
+barracuda-system-image = { path = "../../tools/system-image" }
+tokio = { version = "1.52.3", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+yaml-peg = { version = "1.0.8", features = ["serde"] }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

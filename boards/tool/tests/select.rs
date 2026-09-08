@@ -87,6 +87,9 @@ fn select_persists_a_valid_board_for_the_next_build() {
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
     assert!(cargo.contains("[build]"));
+    assert!(cargo.contains(
+        "BARRACUDA_BOARD_NATIVE_LAYOUT = \"boards/configs/local-macos/file-layout.yml\""
+    ));
     assert!(cargo.contains("runner = ["));
     assert!(cargo.contains("\"__run\", \"macos\", \"--\"]"));
     assert!(root
@@ -116,6 +119,28 @@ fn select_uses_platform_owned_features_for_the_board_chip() {
         .expect("selected Platform manifest");
     assert!(selected
         .contains("barracuda-platform-macos = { workspace = true, features = [\"native-chip\"] }"));
+}
+
+#[test]
+fn select_writes_platform_owned_rustflags_for_the_target() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace(
+            "    - os: macos\n",
+            "    - triple: '*'\n      rustflags: ['-C', 'link-arg=-zstack-size=8388608']\n",
+        ),
+    )
+    .expect("Platform manifest with target rustflags");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    assert!(cargo.contains("rustflags = [\"-C\", \"link-arg=-zstack-size=8388608\"]"));
 }
 
 #[test]

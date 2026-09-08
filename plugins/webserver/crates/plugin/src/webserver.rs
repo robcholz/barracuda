@@ -28,8 +28,13 @@ use picoserve::{Config, DisconnectionInfo, NoGracefulShutdown, Server};
 const WEBSOCKET_BUFFER_BYTES: usize = 8 * 1024;
 const WEBSOCKET_QUEUE_CAPACITY: usize = 4;
 
-type ReaderSpace = [usize; 16];
-type ReadSpace = [usize; 64];
+#[repr(C, align(16))]
+struct InlineSpace<const WORDS: usize> {
+    words: [usize; WORDS],
+}
+
+type ReaderSpace = InlineSpace<16>;
+type ReadSpace = InlineSpace<64>;
 type InlineFuture<'a, T, S> = smallbox::SmallBox<dyn Future<Output = T> + 'a, S>;
 
 fn inline_future<'a, T, F, S>(value: F) -> InlineFuture<'a, T, S>
@@ -190,7 +195,7 @@ impl HttpResponse {
     /// Streams exactly `length` bytes from an owned async reader using bounded buffers.
     /// Excess source bytes are not sent. Early EOF or read failure closes the connection.
     /// The reader must fit 16 machine words and its read future 64 machine words,
-    /// both with at most machine-word alignment (checked at compile time).
+    /// both with at most 16-byte alignment (checked at compile time).
     #[must_use]
     pub fn stream<R: Read + 'static>(
         status: u16,
@@ -242,7 +247,7 @@ pub trait HttpEndpoint: 'static {
 
 /// Resource provider receiving a borrowed encoded URL path (without its query).
 /// No request body is collected. Providers choose their own storage and path policy.
-/// The returned future must fit 256 machine words with machine-word alignment;
+/// The returned future must fit 256 machine words with at most 16-byte alignment;
 /// incompatible implementations fail to compile rather than allocating.
 ///
 /// ```
@@ -269,11 +274,11 @@ pub trait HttpProvider: 'static {
 }
 
 trait ErasedProvider<const WORDS: usize> {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]>;
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, InlineSpace<WORDS>>;
 }
 
 impl<P: HttpProvider, const WORDS: usize> ErasedProvider<WORDS> for P {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]> {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, InlineSpace<WORDS>> {
         inline_future(HttpProvider::serve(self, path))
     }
 }

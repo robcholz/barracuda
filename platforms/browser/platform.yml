@@ -1,0 +1,28 @@
+name: browser
+package: barracuda-platform-browser
+crate: barracuda_platform_browser
+type: BrowserPlatform
+selection:
+  board-chips:
+    - browser
+  targets:
+    - triple: wasm32-wasip1
+      rustflags:
+        - -C
+        - link-arg=-zstack-size=8388608
+system-image:
+  layout:
+    driver: file-regions
+  flash:
+    driver: file
+    state-directory: .barracuda/browser
+    flash-image: board.flash
+application:
+  support-binaries:
+    - barracuda-browser
+  launcher:
+    program: "{support:barracuda-browser}"
+    arguments:
+      - "{application}"
+      - "{workspace}"
+      - "{target-dir}"

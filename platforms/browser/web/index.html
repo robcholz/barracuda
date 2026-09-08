@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barracuda</title>
+    <style>
+      :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+      body { display: grid; min-height: 100vh; margin: 0; place-items: center; }
+      main { max-width: 42rem; padding: 2rem; text-align: center; }
+      a { font-weight: 650; }
+      #error { color: #d33; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Barracuda</h1>
+      <p id="status">Starting the Barracuda System…</p>
+      <form id="connect" hidden>
+        <label>Port <input id="port" type="number" min="1" max="65535" required /></label>
+        <label>Path <input id="path" value="/" required /></label>
+        <button type="submit">Open System service</button>
+      </form>
+      <pre id="error"></pre>
+    </main>
+    <script type="module">
+      import { bootBarracuda } from "./bootstrap.js";
+      import { gatewayUrl } from "./gateway.js";
+
+      const status = document.querySelector("#status");
+      const connect = document.querySelector("#connect");
+      const port = document.querySelector("#port");
+      const path = document.querySelector("#path");
+      const error = document.querySelector("#error");
+      try {
+        await bootBarracuda({
+          wasmUrl: "./barracuda_system.wasm",
+          systemImageUrl: "./board.flash",
+          onError(message) {
+            status.textContent = "Barracuda System stopped.";
+            if (!error.textContent) error.textContent = message;
+          },
+        });
+        status.textContent = "Barracuda System is running in this browser.";
+        connect.hidden = false;
+        connect.addEventListener("submit", (event) => {
+          event.preventDefault();
+          window.open(gatewayUrl(Number(port.value), path.value), "_blank");
+        });
+      } catch (reason) {
+        status.textContent = "Barracuda System failed to start.";
+        error.textContent = reason instanceof Error ? reason.stack : String(reason);
+      }
+    </script>
+  </body>
+</html>

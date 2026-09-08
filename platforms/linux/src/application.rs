@@ -1,3 +1,12 @@
+/// Projects the existing Linux file-layout Board descriptor into Platform bindings.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! platform_bindings {
+    ($board:expr) => {
+        $board
+    };
+}
+
 /// Generates the Linux process entry around one application future.
 #[macro_export]
 macro_rules! platform_entry {

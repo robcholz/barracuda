@@ -54,7 +54,7 @@ jobs:
       - name: Check CI covers every Platform
         run: |
           diff -u \
-            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(printf '%s\n' browser esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
             <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
               -exec dirname {} \; | xargs -n1 basename | sort)
 
@@ -68,8 +68,9 @@ jobs:
           while IFS= read -r board_file; do
             board="$(basename "$(dirname "$board_file")")"
 
-            # Host Boards are already exercised by the two complete test jobs.
-            if [[ "$board" == "local-linux" || "$board" == "local-macos" ]]; then
+            # Host Boards are exercised by the two complete test jobs. Browser
+            # is exercised as a complete selected System in the Platform matrix.
+            if [[ "$board" == "local-linux" || "$board" == "local-macos" || "$board" == "browser" ]]; then
               continue
             fi
 
@@ -256,6 +257,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: browser
+            board: browser
+            os: ubuntu-latest
+            package: barracuda-platform-browser
+            toolchain: stable
+            check_targets: --tests
+            clippy_targets: --all-targets
           - name: esp32
             board: esp32-devkitc-v4
             os: ubuntu-latest
@@ -326,9 +334,19 @@ jobs:
         with:
           shared-key: platform-${{ matrix.name }}
 
+      - name: Install Bun for Browser Plugin build hooks
+        if: matrix.name == 'browser'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install WASI SDK for Browser C sources
+        if: matrix.name == 'browser'
+        run: platforms/browser/ci/install-wasi-sdk.sh
+
       - name: Check Platform
         if: matrix.toolchain == 'stable'
-        run: cargo check --package ${{ matrix.package }}
+        run: cargo check ${{ matrix.check_targets }} --package ${{ matrix.package }}
 
       - name: Check Platform (Xtensa)
         if: matrix.toolchain == 'esp'
@@ -336,7 +354,7 @@ jobs:
 
       - name: Clippy Platform
         if: matrix.toolchain == 'stable'
-        run: cargo clippy --package ${{ matrix.package }}
+        run: cargo clippy ${{ matrix.clippy_targets }} --package ${{ matrix.package }}
 
       - name: Clippy Platform (Xtensa)
         if: matrix.toolchain == 'esp'
@@ -348,6 +366,10 @@ jobs:
       - name: Build Platform
         if: matrix.toolchain == 'stable'
         run: cargo build --package ${{ matrix.package }}
+
+      - name: Build complete selected Browser System
+        if: matrix.name == 'browser'
+        run: cargo build
 
       - name: Build Platform (Xtensa)
         if: matrix.toolchain == 'esp'

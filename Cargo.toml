@@ -26,6 +26,7 @@ default-members = [
 [workspace.dependencies]
 # Workspace crates
 # BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
+barracuda-platform-browser = { path = "platforms/browser" }
 barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
@@ -116,6 +117,7 @@ embedded-hal-async = "1.0.0"
 log = { version = "0.4", default-features = false }
 
 [patch.crates-io]
+littlefs2-sys = { path = "shared/littlefs2-sys" }
 # picoserve 0.19.0 gates core Error implementations on its `std` feature,
 # which breaks when another workspace crate enables serde/std. This upstream
 # commit keeps the same release API and derives portable Error implementations.

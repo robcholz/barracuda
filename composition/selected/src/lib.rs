@@ -49,12 +49,13 @@ pub async fn resources_with_bindings(
     })
 }
 
-/// Constructs the statically selected host Target bindings for the application entry.
+/// Constructs host Target bindings when expanded by a Host Platform entry.
 #[doc(hidden)]
-#[must_use]
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub fn __application_bindings() -> Bindings {
-    TargetBindings::new(&barracuda_board_selected::BOARD, ())
+#[macro_export]
+macro_rules! __host_application_bindings {
+    () => {
+        $crate::TargetBindings::new($crate::__platform::platform_bindings!(&$crate::BOARD), ())
+    };
 }
 
 /// Generates the selected Platform ABI entry and connects it to `application`.
@@ -65,7 +66,7 @@ pub fn __application_bindings() -> Bindings {
 macro_rules! application_entry {
     ($application:path) => {
         $crate::__platform::platform_entry!(|spawner| async {
-            $application(spawner, $crate::__application_bindings()).await
+            $application(spawner, $crate::__host_application_bindings!()).await
         });
     };
 }

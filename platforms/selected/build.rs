@@ -37,6 +37,13 @@ fn main() -> Result<(), Box<dyn Error>> {
              ($($tokens:tt)*) => {{\n\
                  $crate::__platform::platform_entry!($($tokens)*);\n\
              }};\n\
+         }}\n\n\
+         #[doc(hidden)]\n\
+         #[macro_export]\n\
+         macro_rules! platform_bindings {{\n\
+             ($board:expr) => {{\n\
+                 $crate::__platform::platform_bindings!($board)\n\
+             }};\n\
          }}\n",
         platform.name(),
         platform.crate_name(),

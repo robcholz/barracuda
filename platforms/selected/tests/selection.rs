@@ -42,6 +42,8 @@ fn platform_entry_is_forwarded_only_when_the_application_expands_it() -> Result<
 
     assert!(selection.contains("macro_rules! platform_entry"));
     assert!(selection.contains("$crate::__platform::platform_entry!"));
+    assert!(selection.contains("macro_rules! platform_bindings"));
+    assert!(selection.contains("$crate::__platform::platform_bindings!"));
     assert!(!selection.contains("pub use ::{}::platform_entry"));
     Ok(())
 }
