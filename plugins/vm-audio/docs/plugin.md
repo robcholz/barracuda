@@ -18,18 +18,24 @@ Lua API:
 
 - `audio.available() -> boolean`
 - `audio.open() -> handle`
+- `handle:descriptor() -> sample_rate_hz, channels, bits_per_sample`
 - `handle:format() -> sample_rate_hz, channels, bits_per_sample`
 - `handle:set_volume(percent)`
 - `handle:play(pcm_le_bytes)`
+- `handle:play_wav(wav_bytes)`
 - `handle:record(frames) -> pcm_le_bytes`
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
 `set_volume` accepts an integer percentage from 0 through 100 and maps it to
-the codec capability's portable 0-through-255 output scale. `play` and
-`record` use interleaved signed 16-bit little-endian PCM matching the format
-reported by `format`; the Plugin does not decode container or compressed audio
-formats. One operation transfers at most 256 KiB.
+the codec capability's portable 0-through-255 output scale. `descriptor`
+reports the required stream format; `format` is its compatibility alias.
+`play` and `record` use interleaved signed 16-bit little-endian PCM matching
+that format. `play_wav` accepts an uncompressed 16-bit integer PCM RIFF/WAVE
+file, validates its sample rate and channel count against the codec, skips
+unknown chunks, and plays its `data` chunk. Compressed WAV formats are not
+decoded. One PCM operation transfers at most 256 KiB, and a WAV file may carry
+at most 64 KiB of container overhead.
 
 Boards without a built-in codec report unavailable. The move-only built-in
 capability permits one handle per boot; explicit close, lexical `<close>`,
