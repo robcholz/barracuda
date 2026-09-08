@@ -49,10 +49,26 @@ commands or CI results are available.
 
 <Concrete behavior and architecture changes.>
 
-## Example
+## Behavior and Example
 
-<A caller-visible example, before/after, path mapping, request/response, or
-short code sample that makes the new behavior unambiguous.>
+### Before the Change
+
+**Behavior:** <The previous caller-visible behavior.>
+
+**Key code:** <The smallest relevant excerpt from before the change that
+produced or required that behavior.>
+
+### After the Change
+
+**Behavior:** <The new caller-visible behavior.>
+
+**Key code:** <The smallest relevant excerpt from the final code that
+implements or exposes that behavior.>
+
+### After-Change Example
+
+<A realistic example that uses the changed behavior and works against the
+final code.>
 
 ## Code Review
 
@@ -77,14 +93,24 @@ security, or operational consequences.>
 - State intentionally unavailable or deferred behavior only when it prevents a
   reviewer from assuming functionality that does not exist.
 
-### Example
+### Behavior and Example
 
-- Show one realistic, current example that demonstrates the core contract.
-- Prefer observable inputs and results over internal implementation snippets.
+- Use the three subsections `Before the Change`, `After the Change`, and
+  `After-Change Example` in that order.
+- In both change subsections, state the observable caller behavior first, then
+  include the smallest relevant code excerpt that makes the behavior concrete.
+  Use code from the corresponding side of the diff rather than pseudocode.
+- When the capability is net-new, describe the prior absence or caller
+  workaround and show the old integration point instead of inventing an old
+  API.
+- In `After-Change Example`, show one realistic use of the changed behavior
+  against the final code, including the observable result when it is not
+  obvious.
 - For path or namespace changes, show logical-to-physical mappings and the
   resulting errors or permissions.
-- Keep the example consistent with the final code; do not use pseudocode that
-  would fail against the actual API.
+- Keep excerpts focused on the contract under review; do not repeat the same
+  code in `After the Change` and `After-Change Example` unless the usage itself
+  is the behavior being changed.
 
 ### Code Review
 
