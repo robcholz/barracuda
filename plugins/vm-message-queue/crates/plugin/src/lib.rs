@@ -8,7 +8,7 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures_util::future::{AbortHandle, Abortable};
 use spin::Mutex;
@@ -76,12 +76,12 @@ impl MessageQueuePackage {
 struct SharedState {
     queues: Mutex<Vec<(String, Arc<Queue>)>>,
     lifecycle: Mutex<Lifecycle>,
-    next_operation: AtomicU64,
+    next_operation: AtomicUsize,
     active: AtomicBool,
 }
 
 struct Lifecycle {
-    operations: Vec<(u64, AbortHandle)>,
+    operations: Vec<(usize, AbortHandle)>,
 }
 
 impl SharedState {
@@ -91,7 +91,7 @@ impl SharedState {
             lifecycle: Mutex::new(Lifecycle {
                 operations: Vec::new(),
             }),
-            next_operation: AtomicU64::new(0),
+            next_operation: AtomicUsize::new(0),
             active: AtomicBool::new(true),
         }
     }
@@ -171,7 +171,7 @@ impl SharedState {
 
 struct OperationGuard {
     state: Arc<SharedState>,
-    id: u64,
+    id: usize,
 }
 
 impl Drop for OperationGuard {

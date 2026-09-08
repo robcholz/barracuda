@@ -1099,6 +1099,7 @@ dependencies = [
  "futures-lite",
  "getset",
  "lunka",
+ "lunka-src",
 ]
 
 [[package]]
@@ -4783,9 +4784,6 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "lunka"
 version = "0.14.0"
 source = "git+https://github.com/robcholz/lunka.git?rev=820b3d89a6ccfcdae3286f9b4548831dc568cf54#820b3d89a6ccfcdae3286f9b4548831dc568cf54"
-dependencies = [
- "lunka-src",
-]
 
 [[package]]
 name = "lunka-src"
