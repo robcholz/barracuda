@@ -4,7 +4,6 @@ set -euo pipefail
 
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${BARRACUDA_ENV_FILE:-${script_directory}/.env.local}"
-endpoint="${BARRACUDA_MODEL_API_ENDPOINT:-http://10.42.0.2:8787/api/model-api}"
 
 if [[ ! -f "${env_file}" ]]; then
     printf 'missing environment file: %s\n' "${env_file}" >&2
@@ -22,6 +21,8 @@ set -a
 # shellcheck disable=SC1090
 source "${env_file}"
 set +a
+
+endpoint="${BARRACUDA_MODEL_API_ENDPOINT:-http://10.42.0.2:8787/api/model-api}"
 
 for variable_name in \
     BARRACUDA_LLM_API_KEY \
