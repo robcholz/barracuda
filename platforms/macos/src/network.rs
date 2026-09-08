@@ -1,6 +1,6 @@
 //! macOS Embassy Net driver backed by the shared WebSocket packet gateway.
 
-use barracuda_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
+use barracuda_platform_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_net_driver_channel::{

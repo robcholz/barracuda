@@ -1,5 +1,5 @@
 [package]
-name = "barracuda-net-gateway-protocol"
+name = "barracuda-platform-net-gateway-protocol"
 version = "0.1.0"
 edition = "2021"
 description = "Wire protocol shared by Barracuda virtual NICs and the network gateway"

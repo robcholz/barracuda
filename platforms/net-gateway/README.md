@@ -1,11 +1,11 @@
 # Barracuda network gateway
 
-`barracuda-net-gateway` is an unprivileged, pure-Rust router for Platforms that
-cannot attach an Embassy stack directly to a physical network interface. Each
-WebSocket connection owns an isolated virtual-network session.
+`barracuda-platform-net-gateway` is an unprivileged, pure-Rust router for
+Platforms that cannot attach an Embassy stack directly to a physical network
+interface. Each WebSocket connection owns an isolated virtual-network session.
 
 ```sh
-cargo run -p barracuda-net-gateway --target "$(rustc -vV | sed -n 's/^host: //p')"
+cargo run -p barracuda-platform-net-gateway --target "$(rustc -vV | sed -n 's/^host: //p')"
 ```
 
 The default endpoint is `ws://127.0.0.1:8787/v1/connect`. A session translates
@@ -18,7 +18,7 @@ Native clients do not send a browser `Origin` header and work with the default
 command. Browser clients require an exact origin allowlist entry, for example:
 
 ```sh
-cargo run -p barracuda-net-gateway --target "$(rustc -vV | sed -n 's/^host: //p')" -- \
+cargo run -p barracuda-platform-net-gateway --target "$(rustc -vV | sed -n 's/^host: //p')" -- \
   --allowed-origin http://localhost:3000
 ```
 

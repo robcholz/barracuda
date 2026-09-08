@@ -1,6 +1,8 @@
 //! Concrete Platform mechanisms belong to concrete Platform crates.
 
-use std::path::Path;
+#![allow(clippy::expect_used)]
+
+use std::{fs, path::Path};
 
 #[test]
 fn platform_mechanisms_are_not_standalone_pseudo_platforms() {
@@ -20,5 +22,42 @@ fn platform_mechanisms_are_not_standalone_pseudo_platforms() {
             .join(chip)
             .join("platform.yml")
             .is_file());
+    }
+}
+
+#[test]
+fn portable_runtime_does_not_branch_on_browser_targets() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for layer in ["composition", "core", "plugins", "shared"] {
+        inspect_portable_sources(&root.join(layer));
+    }
+}
+
+fn inspect_portable_sources(directory: &Path) {
+    for entry in fs::read_dir(directory).expect("portable layer directory") {
+        let path = entry.expect("portable layer entry").path();
+        if path.is_dir() {
+            inspect_portable_sources(&path);
+            continue;
+        }
+        if !matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("rs" | "toml")
+        ) || path.file_name().and_then(|name| name.to_str()) == Some("build.rs")
+        {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("UTF-8 portable source");
+        for forbidden in [
+            "target_arch = \"wasm32\"",
+            "CARGO_CFG_TARGET_ARCH",
+            "wasm-static",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "portable runtime source {} contains Browser target branch `{forbidden}`",
+                path.display(),
+            );
+        }
     }
 }

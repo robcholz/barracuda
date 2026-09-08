@@ -10,7 +10,7 @@ path = "src/bin/browser.rs"
 
 [dependencies]
 barracuda-board.workspace = true
-barracuda-net-gateway-protocol.workspace = true
+barracuda-platform-net-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["embedded-tls"] }
 critical-section = { version = "1", features = ["std"] }
@@ -34,7 +34,7 @@ web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Crypto", "Dedica
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = "1"
-barracuda-net-gateway = { path = "../../tools/net-gateway" }
+barracuda-platform-net-gateway = { path = "../net-gateway" }
 barracuda-system-image = { path = "../../tools/system-image" }
 tokio = { version = "1.52.3", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

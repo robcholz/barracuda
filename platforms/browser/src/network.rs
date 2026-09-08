@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use barracuda_net_gateway_protocol::{decode, encode, Kind};
+use barracuda_platform_net_gateway_protocol::{decode, encode, Kind};
 use embassy_executor::Spawner;
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_net_driver_channel::{
@@ -112,7 +112,7 @@ pub async fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     let mut hello = [0; 3];
     let length = encode(
         Kind::Hello,
-        &[barracuda_net_gateway_protocol::VERSION],
+        &[barracuda_platform_net_gateway_protocol::VERSION],
         &mut hello,
     )
     .map_err(|_| JsValue::from_str("network gateway hello cannot be encoded"))?;
@@ -187,7 +187,7 @@ fn report_device_url(url: &str) {
 
 /// Sends one packet emitted by a channel [`embassy_net_driver_channel::TxRunner`].
 pub fn send_packet(socket: &WebSocket, packet: &[u8]) -> Result<(), JsValue> {
-    let mut framed = vec![0; barracuda_net_gateway_protocol::encoded_len(packet.len())];
+    let mut framed = vec![0; barracuda_platform_net_gateway_protocol::encoded_len(packet.len())];
     let length = encode(Kind::Packet, packet, &mut framed)
         .map_err(|_| JsValue::from_str("packet cannot be framed"))?;
     socket.send_with_u8_array(&framed[..length])

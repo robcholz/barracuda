@@ -986,6 +986,7 @@ dependencies = [
  "futures-lite",
  "getset",
  "lunka",
+ "lunka-src",
 ]
 
 [[package]]
@@ -1035,32 +1036,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-net-gateway"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "barracuda-net-gateway-protocol",
- "clap",
- "embassy-net",
- "embassy-net-driver-channel",
- "embassy-time",
- "futures-util",
- "netstack-smoltcp",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "barracuda-net-gateway-protocol"
-version = "0.1.0"
-
-[[package]]
 name = "barracuda-platform"
 version = "0.1.0"
 dependencies = [
@@ -1074,9 +1049,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "barracuda-board",
- "barracuda-net-gateway",
- "barracuda-net-gateway-protocol",
  "barracuda-platform",
+ "barracuda-platform-net-gateway",
+ "barracuda-platform-net-gateway-protocol",
  "barracuda-system-image",
  "barracuda-tls",
  "critical-section",
@@ -1259,9 +1234,9 @@ dependencies = [
  "anyhow",
  "barracuda-board",
  "barracuda-board-config",
- "barracuda-net-gateway",
- "barracuda-net-gateway-protocol",
  "barracuda-platform",
+ "barracuda-platform-net-gateway",
+ "barracuda-platform-net-gateway-protocol",
  "barracuda-system-image",
  "barracuda-tls",
  "critical-section",
@@ -1286,6 +1261,32 @@ dependencies = [
  "tracing-subscriber",
  "yaml-peg",
 ]
+
+[[package]]
+name = "barracuda-platform-net-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "barracuda-platform-net-gateway-protocol",
+ "clap",
+ "embassy-net",
+ "embassy-net-driver-channel",
+ "embassy-time",
+ "futures-util",
+ "netstack-smoltcp",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "barracuda-platform-net-gateway-protocol"
+version = "0.1.0"
 
 [[package]]
 name = "barracuda-platform-selected"
@@ -4658,9 +4659,6 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "lunka"
 version = "0.14.0"
 source = "git+https://github.com/robcholz/lunka.git?rev=820b3d89a6ccfcdae3286f9b4548831dc568cf54#820b3d89a6ccfcdae3286f9b4548831dc568cf54"
-dependencies = [
- "lunka-src",
-]
 
 [[package]]
 name = "lunka-src"

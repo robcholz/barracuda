@@ -5,21 +5,15 @@ edition = "2021"
 description = "Barracuda Plugin that publishes the Lua VM capability"
 
 [dependencies]
+barracuda-lua = { path = "../lua", features = ["vendored"] }
 barracuda-plugin.workspace = true
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
-barracuda-vm-runtime = { path = "../runtime" }
+barracuda-vm-runtime = { path = "../runtime", features = ["vendored"] }
 barracuda-vm-package-api = { path = "../package-api" }
 barracuda-workflow-plugin.workspace = true
 embassy-executor.workspace = true
 serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-barracuda-lua = { path = "../lua", features = ["wasm-static"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-barracuda-lua = { path = "../lua", features = ["vendored"] }
-barracuda-vm-runtime = { path = "../runtime", features = ["vendored"] }
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

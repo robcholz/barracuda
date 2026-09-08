@@ -32,8 +32,10 @@ shown on the page. Browser WebSocket origins are restricted to the launcher's
 exact ephemeral origin. The gateway and forwarded device listener bind to
 loopback by default and are not exposed to the LAN.
 
-Lua and LittleFS use checked-in `wasm32-wasip1` C archives, while the Rust
-System targets `wasm32-unknown-unknown`. The launcher supplies the small WASI
-Preview 1 surface retained by the linked image. Ordinary builds therefore do
-not require clang, a WASI SDK, or manual C dependency setup; CI reproducibly
-rebuilds the checked-in archives with pinned WASI SDK and Lua releases.
+Lua's existing `vendored` feature and LittleFS's existing feature set are used
+unchanged. Their low-level build scripts use checked-in `wasm32-wasip1` C
+archives when Cargo targets WebAssembly, while the Rust System targets
+`wasm32-unknown-unknown`. The launcher supplies the small WASI Preview 1 surface
+retained by the linked image. Ordinary builds therefore do not require clang,
+a WASI SDK, or manual C dependency setup; CI reproducibly rebuilds the archives
+with pinned WASI SDK and Lua releases.

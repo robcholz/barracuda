@@ -25,7 +25,7 @@ mod host {
     };
 
     use anyhow::{anyhow, bail, Context as _};
-    use barracuda_net_gateway::{serve as serve_gateway, GatewayConfig};
+    use barracuda_platform_net_gateway::{serve as serve_gateway, GatewayConfig};
     use tokio::{
         io::{AsyncReadExt as _, AsyncWriteExt as _},
         net::{TcpListener, TcpStream},

@@ -342,39 +342,7 @@ jobs:
 
       - name: Verify checked-in Browser C archives
         if: matrix.name == 'browser'
-        run: |
-          set -euo pipefail
-          wasi_archive="$RUNNER_TEMP/wasi-sdk-33.0-x86_64-linux.tar.gz"
-          wasi_root="$RUNNER_TEMP/wasi-sdk-33.0-x86_64-linux"
-          lua_archive="$RUNNER_TEMP/lua-5.4.8.tar.gz"
-          lua_root="$RUNNER_TEMP/lua-5.4.8"
-
-          curl --fail --location --retry 3 \
-            https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz \
-            --output "$wasi_archive"
-          echo "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce  $wasi_archive" \
-            | sha256sum --check
-          tar --extract --gzip --file "$wasi_archive" --directory "$RUNNER_TEMP"
-
-          curl --fail --location --retry 3 \
-            https://www.lua.org/ftp/lua-5.4.8.tar.gz \
-            --output "$lua_archive"
-          echo "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae  $lua_archive" \
-            | sha256sum --check
-          tar --extract --gzip --file "$lua_archive" --directory "$RUNNER_TEMP"
-
-          plugins/vm/crates/lua/vendor/wasm32-wasip1/rebuild.sh \
-            "$wasi_root" "$lua_root"
-          shared/littlefs2-sys/vendor/wasm32-wasip1/rebuild.sh "$wasi_root"
-
-          wasi_lib="$wasi_root/share/wasi-sysroot/lib/wasm32-wasip1"
-          cmp "$wasi_lib/libc.a" plugins/vm/crates/lua/vendor/wasm32-wasip1/libc.a
-          cmp "$wasi_lib/libsetjmp.a" plugins/vm/crates/lua/vendor/wasm32-wasip1/libsetjmp.a
-          cmp "$wasi_lib/libwasi-emulated-signal.a" \
-            plugins/vm/crates/lua/vendor/wasm32-wasip1/libwasi-emulated-signal.a
-          git diff --exit-code -- \
-            plugins/vm/crates/lua/vendor/wasm32-wasip1 \
-            shared/littlefs2-sys/vendor/wasm32-wasip1
+        run: platforms/browser/ci/verify-static.sh
 
       - name: Check Platform
         if: matrix.toolchain == 'stable'

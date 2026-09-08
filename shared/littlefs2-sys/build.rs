@@ -22,13 +22,17 @@ fn link_wasi_artifact() -> Result<(), Box<dyn std::error::Error>> {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     let artifact_dir = manifest_dir.join("vendor/wasm32-wasip1");
+    let bindings = artifact_dir.join("bindings.rs");
     println!("cargo::rerun-if-changed={}", artifact_dir.display());
+    std::fs::copy(
+        bindings,
+        PathBuf::from(env::var("OUT_DIR")?).join("bindings.rs"),
+    )?;
     println!("cargo::rustc-link-search=native={}", artifact_dir.display());
     println!("cargo::rustc-link-lib=static=lfs-sys");
     Ok(())
 }
 
-#[cfg(not(target_os = "wasi"))]
 fn build_native() -> Result<(), Box<dyn std::error::Error>> {
     let littlefs_path = if cfg!(feature = "unstable-littlefs-patched") {
         "littlefs-patched"
@@ -92,9 +96,4 @@ fn build_native() -> Result<(), Box<dyn std::error::Error>> {
         .generate()?
         .write_to_file(out_path.join("bindings.rs"))?;
     Ok(())
-}
-
-#[cfg(target_os = "wasi")]
-fn build_native() -> Result<(), Box<dyn std::error::Error>> {
-    unreachable!()
 }

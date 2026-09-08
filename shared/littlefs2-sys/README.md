@@ -1,9 +1,10 @@
 # littlefs2-sys WASI boundary
 
-This is a narrow fork of `littlefs2-sys` 0.4.0. Native targets retain the
-upstream C and bindgen build. `wasm32-wasip1` uses checked-in bindings and a
-static archive so selecting the Browser Board does not require a local C
-toolchain.
+This fork makes the ordinary `littlefs2-sys` feature set build on WebAssembly.
+Native targets retain the upstream C and bindgen build. On wasm32, the crate's
+build script uses checked-in bindings and the matching static archive, so the
+same `littlefs2` dependency and `c-stubs` behavior are used on every Platform
+without requiring a local C toolchain.
 
 The WASI archive is built from the unmodified upstream `littlefs/lfs.c` and
 `littlefs/lfs_util.c` with WASI SDK 33.0 and Barracuda's resolved feature set:

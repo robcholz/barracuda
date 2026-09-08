@@ -28,17 +28,13 @@ Rebuild the checked-in archive with:
 ```
 
 The source is distributed under the Lua license reproduced in `LICENSE`.
-The WASI libc, signal, and setjmp archives come from the official WASI SDK
-33.0 distribution and retain the licenses and notices of their upstream
-`wasi-libc` and LLVM compiler-rt sources. They are checked in so a normal
-Browser Platform build does not require clang or a separately installed WASI
-SDK.
+The Browser Platform supplies the WASI libc, signal, and setjmp archives as
+part of its execution environment. The Lua crate owns only its Lua archive.
+Both are checked in so a normal build does not require clang or a separately
+installed WASI SDK.
 
 SHA-256 checksums:
 
 ```text
 b5871baafa4ae3d73eac78bfa347ef867f057b16b8613f1b4dfcbfe48d53a564  liblua5.4.a
-5d8ba34d8c6fd0ac59e0efe37241143887f8f232864bbeacc4181ae739f63371  libc.a
-01df54b8698906ed4bb20072c7cc413d5152dcda538f2b1e2b86adfcf5cbd677  libwasi-emulated-signal.a
-40eefd1c9715677f95221f3ff6745a1239230c10af4102d82c9258fc843b32d6  libsetjmp.a
 ```

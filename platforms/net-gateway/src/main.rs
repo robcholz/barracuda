@@ -14,7 +14,7 @@ use axum::{
     routing::get,
     Router,
 };
-use barracuda_net_gateway_protocol::{decode, encode, Kind, VERSION};
+use barracuda_platform_net_gateway_protocol::{decode, encode, Kind, VERSION};
 use clap::Parser;
 use futures_util::{SinkExt as _, StreamExt as _};
 use session::{NetworkSession, Outbound};
@@ -192,7 +192,8 @@ async fn serve_device(socket: WebSocket, state: GatewayState) {
             if kind == Kind::DeviceUrl {
                 tracing::debug!(bytes = payload.len(), "sending device WebServer URL");
             }
-            let mut message = vec![0; barracuda_net_gateway_protocol::encoded_len(payload.len())];
+            let mut message =
+                vec![0; barracuda_platform_net_gateway_protocol::encoded_len(payload.len())];
             let Ok(length) = encode(kind, &payload, &mut message) else {
                 break;
             };
@@ -246,7 +247,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use axum::http::{header::ORIGIN, HeaderMap, HeaderValue};
-    use barracuda_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
+    use barracuda_platform_net_gateway_protocol::{decode, encode, encoded_len, Kind, VERSION};
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
