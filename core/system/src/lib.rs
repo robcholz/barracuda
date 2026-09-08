@@ -14,7 +14,7 @@ mod resources;
 
 use barracuda_board_hal::{
     camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, AnalogProvider,
-    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
+    BoardHalResources, DigitalProvider, ExposedIo, I2cProvider, PwmProvider, SpiProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -85,12 +85,22 @@ where
     <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
     Builtins::LedStrip: Send + 'static,
     <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
-    Io: ExposedIo + AnalogProvider + DigitalProvider + I2cProvider + SpiProvider + Unpin,
+    Io: ExposedIo
+        + AnalogProvider
+        + DigitalProvider
+        + I2cProvider
+        + PwmProvider
+        + SpiProvider
+        + Unpin,
     Io::Input: Send,
     <Io::Input as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
-    Io::Output: Send,
-    <Io::Output as barracuda_board_hal::AnalogErrorType>::Error: core::fmt::Debug,
+    <Io as AnalogProvider>::Output: Send,
+    <<Io as AnalogProvider>::Output as barracuda_board_hal::AnalogErrorType>::Error:
+        core::fmt::Debug,
     <Io as AnalogProvider>::Error: core::fmt::Display,
+    <Io as PwmProvider>::Output: Send,
+    <<Io as PwmProvider>::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
+    <Io as PwmProvider>::Error: core::fmt::Display,
     Io::Pin: Send,
     <Io::Pin as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
     <Io as DigitalProvider>::Error: core::fmt::Display,
@@ -181,6 +191,7 @@ where
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
+            barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),

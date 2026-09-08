@@ -73,6 +73,19 @@ pub trait RuntimeAnalogPlatform: RuntimePlatform {
     fn analog_output(pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError>;
 }
 
+/// Optional Platform construction contract for PWM functions.
+pub trait RuntimePwmPlatform: RuntimePlatform {
+    /// PWM output returned to an application handle.
+    type Pwm: embedded_hal::pwm::SetDutyCycle + Send + 'static;
+    /// Platform PWM construction failure.
+    type PwmError: core::error::Error;
+
+    /// Returns whether this physical pin can be routed to a PWM output.
+    fn supports_pwm(pin: &Self::PinToken) -> bool;
+    /// Consumes a pin and allocates a PWM timer/channel at the requested frequency.
+    fn pwm(pin: Self::PinToken, frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError>;
+}
+
 struct RuntimePin<Pin> {
     name: &'static str,
     token: Option<Pin>,
@@ -326,6 +339,52 @@ impl<H: RuntimeAnalogPlatform, const P: usize, const I: usize, const S: usize>
     }
 }
 
+impl<H: RuntimePwmPlatform, const P: usize, const I: usize, const S: usize> PwmProvider
+    for RuntimeIo<H, P, I, S>
+{
+    type Output = H::Pwm;
+    type Error = RuntimeOpenError<H::PwmError>;
+
+    fn pwm_available(&self, name: &str) -> bool {
+        let Ok(index) = self.resolve_pin(name) else {
+            return false;
+        };
+        critical_section::with(|section| {
+            let state = self.state.borrow(section).borrow();
+            state.pins[index]
+                .token
+                .as_ref()
+                .is_some_and(H::supports_pwm)
+        })
+    }
+
+    fn open_pwm(&self, request: PwmRequest<'_>) -> Result<Self::Output, Self::Error> {
+        let index = self.resolve_pin(request.pin)?;
+        let token = critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            let pin = &mut state.pins[index];
+            let token = pin.token.as_ref().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: pin.name,
+                    owner: pin.owner.unwrap_or("runtime function"),
+                })
+            })?;
+            if !H::supports_pwm(token) {
+                return Err(RuntimeOpenError::Unsupported { function: "PWM" });
+            }
+            let token = pin.token.take().ok_or_else(|| {
+                RuntimeOpenError::Resource(LeaseError::Busy {
+                    resource: pin.name,
+                    owner: "runtime function",
+                })
+            })?;
+            pin.owner = Some("PWM");
+            Ok(token)
+        })?;
+        H::pwm(token, request.frequency_hz).map_err(RuntimeOpenError::Platform)
+    }
+}
+
 impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> I2cProvider
     for RuntimeIo<H, P, I, S>
 {
@@ -524,6 +583,28 @@ pub trait AnalogProvider {
     fn acquire_analog_input(&self, name: &str) -> Result<Self::Input, Self::Error>;
     /// Claims one exposed pin as an analog output.
     fn acquire_analog_output(&self, name: &str) -> Result<Self::Output, Self::Error>;
+}
+
+/// Runtime request for one PWM output on an exposed pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PwmRequest<'a> {
+    /// Board-visible output pin.
+    pub pin: &'a str,
+    /// Requested carrier frequency.
+    pub frequency_hz: u32,
+}
+
+/// Constructs PWM outputs from the shared exposed-I/O owner.
+pub trait PwmProvider {
+    /// Output implementing the ecosystem PWM contract.
+    type Output: embedded_hal::pwm::SetDutyCycle + Send + 'static;
+    /// Failure while resolving, claiming, or configuring PWM.
+    type Error: core::error::Error;
+
+    /// Returns whether a free named pin supports PWM output.
+    fn pwm_available(&self, name: &str) -> bool;
+    /// Claims a pin and constructs one PWM output.
+    fn open_pwm(&self, request: PwmRequest<'_>) -> Result<Self::Output, Self::Error>;
 }
 
 /// Runtime request for an I2C function on two exposed pins.

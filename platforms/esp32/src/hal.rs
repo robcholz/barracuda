@@ -2,8 +2,8 @@
 
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
-    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, UnavailableAnalogInput,
-    UnavailableAnalogOutput, UnsupportedFunction,
+    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
+    UnavailableAnalogInput, UnavailableAnalogOutput, UnavailablePwm, UnsupportedFunction,
 };
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
@@ -136,6 +136,19 @@ impl RuntimeAnalogPlatform for RuntimeAdapter {
 
     fn analog_output(_pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
         Err(UnsupportedFunction::new("analog output"))
+    }
+}
+
+impl RuntimePwmPlatform for RuntimeAdapter {
+    type Pwm = UnavailablePwm;
+    type PwmError = UnsupportedFunction;
+
+    fn supports_pwm(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
+        Err(UnsupportedFunction::new("PWM"))
     }
 }
 

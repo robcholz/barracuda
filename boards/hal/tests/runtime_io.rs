@@ -6,8 +6,9 @@ use core::convert::Infallible;
 
 use barracuda_board_hal::{
     AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
-    DigitalProvider, I2cProvider, I2cRequest, InputConfig, LeaseError, OutputConfig,
-    RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform, SpiProvider, SpiRequest,
+    DigitalProvider, I2cProvider, I2cRequest, InputConfig, LeaseError, OutputConfig, PwmProvider,
+    PwmRequest, RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform,
+    RuntimePwmPlatform, SpiProvider, SpiRequest,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -129,6 +130,23 @@ struct FakePlatform;
 
 struct FakeAnalog(u8);
 
+struct FakePwm(u16);
+
+impl embedded_hal::pwm::ErrorType for FakePwm {
+    type Error = Infallible;
+}
+
+impl embedded_hal::pwm::SetDutyCycle for FakePwm {
+    fn max_duty_cycle(&self) -> u16 {
+        1023
+    }
+
+    fn set_duty_cycle(&mut self, duty: u16) -> Result<(), Self::Error> {
+        self.0 = duty;
+        Ok(())
+    }
+}
+
 impl AnalogErrorType for FakeAnalog {
     type Error = Infallible;
 }
@@ -220,6 +238,19 @@ impl RuntimeAnalogPlatform for FakePlatform {
 
     fn analog_output(pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
         Ok(FakeAnalog(pin))
+    }
+}
+
+impl RuntimePwmPlatform for FakePlatform {
+    type Pwm = FakePwm;
+    type PwmError = Infallible;
+
+    fn supports_pwm(pin: &Self::PinToken) -> bool {
+        *pin == 3
+    }
+
+    fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
+        Ok(FakePwm(0))
     }
 }
 
@@ -344,4 +375,17 @@ fn analog_support_is_checked_before_the_shared_pin_is_consumed() {
     let mut input = io.acquire_analog_input("D1").expect("analog input");
     assert_eq!(input.read(), Ok(1));
     assert!(!io.digital_available("D1"));
+}
+
+#[test]
+fn pwm_claims_the_same_physical_pin_seen_by_gpio() {
+    let io = runtime_io();
+    assert!(io.pwm_available("D3"));
+    let _pwm = io
+        .open_pwm(PwmRequest {
+            pin: "D3",
+            frequency_hz: 1_000,
+        })
+        .expect("PWM output");
+    assert!(!io.digital_available("D3"));
 }

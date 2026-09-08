@@ -4,8 +4,9 @@ use core::convert::Infallible;
 
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
-    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, UnavailableAnalogInput,
-    UnavailableAnalogOutput, UnavailableI2c, UnavailableSpi, UnsupportedFunction,
+    Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
+    UnavailableAnalogInput, UnavailableAnalogOutput, UnavailableI2c, UnavailablePwm,
+    UnavailableSpi, UnsupportedFunction,
 };
 use embassy_stm32::gpio::{AnyPin, Flex, Input, Level, Output, Pin, Pull, Speed};
 use embedded_hal::{
@@ -80,6 +81,19 @@ impl RuntimeAnalogPlatform for RuntimeAdapter {
 
     fn analog_output(_pin: Self::PinToken) -> Result<Self::AnalogOutput, Self::AnalogError> {
         Err(UnsupportedFunction::new("analog output"))
+    }
+}
+
+impl RuntimePwmPlatform for RuntimeAdapter {
+    type Pwm = UnavailablePwm;
+    type PwmError = UnsupportedFunction;
+
+    fn supports_pwm(_pin: &Self::PinToken) -> bool {
+        false
+    }
+
+    fn pwm(_pin: Self::PinToken, _frequency_hz: u32) -> Result<Self::Pwm, Self::PwmError> {
+        Err(UnsupportedFunction::new("PWM"))
     }
 }
 

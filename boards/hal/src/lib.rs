@@ -19,8 +19,9 @@ use embedded_hal::{
 };
 
 pub use providers::{
-    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, RuntimeAnalogPlatform, RuntimeIo,
-    RuntimeOpenError, RuntimePlatform, SpiProvider, SpiRequest, UnsupportedFunction,
+    AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, PwmProvider, PwmRequest,
+    RuntimeAnalogPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform,
+    SpiProvider, SpiRequest, UnsupportedFunction,
 };
 pub use runtime::{LeaseError, ResourceKind};
 
@@ -332,6 +333,25 @@ pub struct UnavailableAnalogOutput {
     never: Infallible,
 }
 
+/// Uninhabited PWM output used by Boards without runtime PWM support.
+pub struct UnavailablePwm {
+    never: Infallible,
+}
+
+impl embedded_hal::pwm::ErrorType for UnavailablePwm {
+    type Error = Infallible;
+}
+
+impl embedded_hal::pwm::SetDutyCycle for UnavailablePwm {
+    fn max_duty_cycle(&self) -> u16 {
+        match self.never {}
+    }
+
+    fn set_duty_cycle(&mut self, _duty: u16) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
 impl AnalogErrorType for UnavailableAnalogOutput {
     type Error = Infallible;
 }
@@ -496,6 +516,19 @@ impl AnalogProvider for NoExposedIo {
 
     fn acquire_analog_output(&self, _name: &str) -> Result<Self::Output, Self::Error> {
         Err(UnsupportedFunction::new("analog output"))
+    }
+}
+
+impl PwmProvider for NoExposedIo {
+    type Output = UnavailablePwm;
+    type Error = UnsupportedFunction;
+
+    fn pwm_available(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn open_pwm(&self, _request: PwmRequest<'_>) -> Result<Self::Output, Self::Error> {
+        Err(UnsupportedFunction::new("PWM"))
     }
 }
 

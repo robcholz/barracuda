@@ -1512,6 +1512,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-pwm-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
@@ -1592,6 +1603,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-tool",
+ "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
  "barracuda-spi-plugin",
  "barracuda-target-api",
