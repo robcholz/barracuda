@@ -706,6 +706,7 @@ dependencies = [
  "barracuda-driver",
  "critical-section",
  "embassy-executor",
+ "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
 ]
@@ -801,6 +802,18 @@ version = "0.1.0"
 dependencies = [
  "anstyle",
  "clap",
+]
+
+[[package]]
+name = "barracuda-display-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embedded-graphics-core",
+ "futures-lite",
 ]
 
 [[package]]
@@ -1551,6 +1564,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
+ "barracuda-display-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",

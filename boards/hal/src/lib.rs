@@ -228,6 +228,77 @@ impl camera::BuiltinCamera for NoBuiltinCapabilities {
     }
 }
 
+/// Uninhabited display capability used when a Board has no built-in display.
+pub struct UnavailableDisplay {
+    never: Infallible,
+}
+
+impl embedded_graphics_core::geometry::OriginDimensions for UnavailableDisplay {
+    fn size(&self) -> embedded_graphics_core::geometry::Size {
+        match self.never {}
+    }
+}
+
+impl embedded_graphics_core::draw_target::DrawTarget for UnavailableDisplay {
+    type Color = embedded_graphics_core::pixelcolor::Rgb888;
+    type Error = Infallible;
+
+    fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = embedded_graphics_core::Pixel<Self::Color>>,
+    {
+        match self.never {}
+    }
+}
+
+impl display::Display for UnavailableDisplay {
+    type ControlError = Infallible;
+    type RenderError = Infallible;
+
+    fn descriptor(&self) -> display::DisplayDescriptor {
+        match self.never {}
+    }
+
+    fn draw_rgb888(
+        &mut self,
+        _area: embedded_graphics_core::primitives::Rectangle,
+        _pixels: &[embedded_graphics_core::pixelcolor::Rgb888],
+    ) -> Result<(), Self::RenderError> {
+        match self.never {}
+    }
+
+    async fn flush(&mut self, _request: display::RefreshRequest) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_power(&mut self, _power: display::DisplayPower) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_brightness(&mut self, _brightness: u8) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn set_orientation(
+        &mut self,
+        _orientation: display::DisplayOrientation,
+    ) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+
+    async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
+        match self.never {}
+    }
+}
+
+impl display::BuiltinDisplay for NoBuiltinCapabilities {
+    type Display = UnavailableDisplay;
+
+    fn take_display(&mut self) -> Option<Self::Display> {
+        None
+    }
+}
+
 /// Explicit absence of exposed Board I/O capabilities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;

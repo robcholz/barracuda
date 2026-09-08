@@ -16,6 +16,7 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{OriginDimensions, Size},
+    pixelcolor::{Rgb888, RgbColor},
     primitives::Rectangle,
 };
 use embedded_hal::{
@@ -220,9 +221,23 @@ where
     DELAY: DelayNs,
 {
     type ControlError = Gdeh0154d67ControlError<SPI::Error, POWER::Error>;
+    type RenderError = Infallible;
 
     fn descriptor(&self) -> DisplayDescriptor {
         DESCRIPTOR
+    }
+
+    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+        self.fill_contiguous(
+            &area,
+            pixels.iter().map(|pixel| {
+                if u16::from(pixel.r()) + u16::from(pixel.g()) + u16::from(pixel.b()) >= 384 {
+                    Color::White
+                } else {
+                    Color::Black
+                }
+            }),
+        )
     }
 
     async fn flush(&mut self, request: RefreshRequest) -> Result<(), Self::ControlError> {

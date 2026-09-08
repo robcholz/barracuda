@@ -13,8 +13,8 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    camera::BuiltinCamera, led_strip::BuiltinLedStrip, BoardHalResources, DigitalProvider,
-    ExposedIo, I2cProvider, SpiProvider,
+    camera::BuiltinCamera, display::BuiltinDisplay, led_strip::BuiltinLedStrip, BoardHalResources,
+    DigitalProvider, ExposedIo, I2cProvider, SpiProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -77,7 +77,10 @@ impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: BuiltinCamera + BuiltinLedStrip + Unpin,
+    Builtins: BuiltinCamera + BuiltinDisplay + BuiltinLedStrip + Unpin,
+    Builtins::Display: Send + 'static,
+    <Builtins::Display as barracuda_board_hal::display::Display>::ControlError: core::fmt::Debug,
+    <Builtins::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
     Builtins::Camera: Send + 'static,
     <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
     Builtins::LedStrip: Send + 'static,
@@ -167,6 +170,7 @@ where
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
+            barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),

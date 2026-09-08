@@ -1209,6 +1209,11 @@ fn render_generic_hal(
                 "impl ::barracuda_board_hal::camera::BuiltinCamera for GeneratedBuiltins {\n    type Camera = ::barracuda_board_hal::UnavailableCamera;\n    fn take_camera(&mut self) -> Option<Self::Camera> { None }\n}\n\n",
             );
         }
+        if !primary_capabilities.contains("display") {
+            source.push_str(
+                "impl ::barracuda_board_hal::display::BuiltinDisplay for GeneratedBuiltins {\n    type Display = ::barracuda_board_hal::UnavailableDisplay;\n    fn take_display(&mut self) -> Option<Self::Display> { None }\n}\n\n",
+            );
+        }
     }
 
     source.push_str(&format!(

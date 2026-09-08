@@ -34,6 +34,7 @@ pub mod display {
     use embedded_graphics_core::{
         draw_target::DrawTarget,
         geometry::{OriginDimensions, Size},
+        pixelcolor::Rgb888,
         primitives::Rectangle,
     };
 
@@ -247,9 +248,18 @@ pub mod display {
     pub trait Display: DrawTarget + OriginDimensions {
         /// Failure returned by lifecycle and presentation operations.
         type ControlError: core::fmt::Debug;
+        /// Failure returned while converting and drawing portable RGB pixels.
+        type RenderError: core::fmt::Debug;
 
         /// Describes this initialized display.
         fn descriptor(&self) -> DisplayDescriptor;
+
+        /// Draws one row-major RGB888 region using Driver-owned color conversion.
+        fn draw_rgb888(
+            &mut self,
+            area: Rectangle,
+            pixels: &[Rgb888],
+        ) -> Result<(), Self::RenderError>;
 
         /// Presents pixels written through [`DrawTarget`].
         fn flush(

@@ -16,7 +16,8 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{OriginDimensions, Size},
-    pixelcolor::Rgb565,
+    pixelcolor::{Rgb565, Rgb888},
+    primitives::Rectangle,
 };
 
 #[derive(Default)]
@@ -48,6 +49,7 @@ impl DrawTarget for CustomDisplay {
 
 impl Display for CustomDisplay {
     type ControlError = Infallible;
+    type RenderError = Infallible;
 
     fn descriptor(&self) -> DisplayDescriptor {
         DisplayDescriptor::new(
@@ -58,6 +60,14 @@ impl Display for CustomDisplay {
                 | DisplayFeatures::PARTIAL_REFRESH
                 | DisplayFeatures::BRIGHTNESS,
         )
+    }
+
+    fn draw_rgb888(
+        &mut self,
+        _area: Rectangle,
+        _pixels: &[Rgb888],
+    ) -> Result<(), Self::RenderError> {
+        Ok(())
     }
 
     async fn flush(&mut self, _request: RefreshRequest) -> Result<(), Self::ControlError> {

@@ -12,7 +12,8 @@ use barracuda_driver::{
     },
 };
 use embedded_graphics_core::{
-    Pixel, draw_target::DrawTarget, geometry::OriginDimensions, primitives::Rectangle,
+    Pixel, draw_target::DrawTarget, geometry::OriginDimensions, pixelcolor::Rgb888,
+    primitives::Rectangle,
 };
 use embedded_hal::{delay::DelayNs, digital::OutputPin, spi::SpiDevice};
 use mipidsi::{
@@ -334,14 +335,20 @@ where
     DI: Interface,
     M: Model,
     M::ColorFormat: InterfacePixelFormat<DI::Word>,
+    M::ColorFormat: From<Rgb888>,
     RST: OutputPin,
     BL: OutputPin,
     DELAY: DelayNs,
 {
     type ControlError = MipiDbiControlError<DI::Error, BL::Error>;
+    type RenderError = DI::Error;
 
     fn descriptor(&self) -> DisplayDescriptor {
         self.config.descriptor()
+    }
+
+    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+        self.fill_contiguous(&area, pixels.iter().copied().map(Into::into))
     }
 
     async fn flush(&mut self, _request: RefreshRequest) -> Result<(), Self::ControlError> {
