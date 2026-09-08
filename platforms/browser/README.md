@@ -20,11 +20,13 @@ available. In particular:
   complete selected application is not built for this Board yet;
 - the Browser Platform currently exposes explicit plaintext HTTP rather than a
   verified browser-compatible TLS capability;
-- the gateway's packet session does not yet run libslirp or install a real
-  WebServer port forward;
-- macOS still uses its existing privileged UTUN launcher.
+- the complete browser System therefore still cannot be exercised until the
+  fixed Plugin graph builds for wasm.
 
 Consequently, compiling this Platform demonstrates its target composition and
-persistent storage boundary, but not Internet access, complete System startup,
-or macOS gateway compatibility. Do not deploy it until those paths have
-end-to-end coverage in a real browser and against a libslirp-enabled gateway.
+persistent storage boundary, but not complete System startup. The shared
+pure-Rust gateway now provides outbound TCP, UDP, DNS translation, and a host
+WebServer forward for both Browser and macOS virtual NICs. `bootBarracuda`
+accepts an `onDeviceUrl` callback that receives the assigned WebServer URL.
+Start the gateway with `--allowed-origin` set to the page's exact origin; browser
+WebSocket requests are rejected unless their `Origin` is explicitly allowed.

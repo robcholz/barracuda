@@ -79,11 +79,19 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
         let bytes = js_sys::Uint8Array::new(&event.data()).to_vec();
         if let Ok(frame) = decode(&bytes) {
-            if frame.kind == Kind::Packet && frame.payload.len() <= MTU {
-                if let Some(target) = rx.try_rx_buf() {
-                    target[..frame.payload.len()].copy_from_slice(frame.payload);
-                    rx.rx_done(frame.payload.len());
+            match frame.kind {
+                Kind::Packet if frame.payload.len() <= MTU => {
+                    if let Some(target) = rx.try_rx_buf() {
+                        target[..frame.payload.len()].copy_from_slice(frame.payload);
+                        rx.rx_done(frame.payload.len());
+                    }
                 }
+                Kind::DeviceUrl => {
+                    if let Ok(url) = core::str::from_utf8(frame.payload) {
+                        report_device_url(url);
+                    }
+                }
+                _ => {}
             }
         }
     });
@@ -105,11 +113,11 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
     onerror.forget();
 
     let mut dns = heapless::Vec::new();
-    dns.push(Ipv4Address::new(10, 42, 0, 3))
+    dns.push(Ipv4Address::new(10, 0, 2, 3))
         .map_err(|_| JsValue::from_str("DNS capacity is zero"))?;
     let config = Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(Ipv4Address::new(10, 42, 0, 2), 24),
-        gateway: Some(Ipv4Address::new(10, 42, 0, 1)),
+        address: Ipv4Cidr::new(Ipv4Address::new(10, 0, 2, 15), 24),
+        gateway: Some(Ipv4Address::new(10, 0, 2, 2)),
         dns_servers: dns,
     });
     let resources = Box::leak(Box::new(StackResources::<SOCKETS>::new()));
@@ -119,6 +127,20 @@ pub fn create_stack(spawner: Spawner) -> Result<Stack<'static>, JsValue> {
         return Err(JsValue::from_str(&error.to_string()));
     }
     Ok(stack)
+}
+
+fn report_device_url(url: &str) {
+    let Ok(worker) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() else {
+        return;
+    };
+    let event = js_sys::Object::new();
+    let _result = js_sys::Reflect::set(
+        &event,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("device-url"),
+    );
+    let _result = js_sys::Reflect::set(&event, &JsValue::from_str("url"), &JsValue::from_str(url));
+    let _result = worker.post_message(&event);
 }
 
 /// Sends one packet emitted by a channel [`embassy_net_driver_channel::TxRunner`].
