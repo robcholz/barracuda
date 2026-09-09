@@ -42,7 +42,7 @@ impl Plugin for AgentHttpPlugin {
         tools
             .register_group(ToolGroup::new(
                 "http",
-                true,
+                false,
                 [Tool::new(HttpRequestTool { http })],
             ))
             .map_err(PluginError::registration)

@@ -61,7 +61,7 @@ impl Plugin for AgentIMessageGatewayPlugin {
         tools
             .register_group(ToolGroup::new(
                 "gateway",
-                true,
+                false,
                 [
                     Tool::new(GatewaySendTool {
                         gateway: Rc::clone(&gateway),

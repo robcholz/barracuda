@@ -41,7 +41,7 @@ impl Plugin for AgentTimePlugin {
         tools
             .register_group(ToolGroup::new(
                 "time",
-                true,
+                false,
                 [Tool::new(TimeNowTool { clock })],
             ))
             .map_err(PluginError::registration)

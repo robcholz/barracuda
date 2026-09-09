@@ -12,7 +12,7 @@ use barracuda_vfs::ScopedVfs;
 pub(super) fn file_tools(filesystem: ScopedVfs) -> ToolGroup {
     ToolGroup::new(
         "file",
-        true,
+        false,
         [
             file_read::tool(filesystem.clone()),
             file_list::tool(filesystem.clone()),
