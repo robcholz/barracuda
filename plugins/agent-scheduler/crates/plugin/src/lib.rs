@@ -42,7 +42,7 @@ impl Plugin for AgentSchedulerPlugin {
         tools
             .register_group(ToolGroup::new(
                 "scheduler",
-                true,
+                false,
                 [
                     Tool::new(ScheduleTool {
                         scheduler: Rc::clone(&scheduler),

@@ -57,7 +57,7 @@ impl Plugin for AgentVmPlugin {
 fn vm_tool_group(vm: Rc<Vm>) -> ToolGroup {
     ToolGroup::new(
         "vm",
-        true,
+        false,
         [
             Tool::from_detached(VmRunTool { vm: Rc::clone(&vm) }),
             Tool::new(VmListTool { vm: Rc::clone(&vm) }),

@@ -47,7 +47,7 @@ impl Plugin for AgentWorkflowPlugin {
         tools
             .register_group(ToolGroup::new(
                 "workflow",
-                true,
+                false,
                 [
                     Tool::new(ActionsTool { actions }),
                     Tool::new(ListTool {

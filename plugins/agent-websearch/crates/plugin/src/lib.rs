@@ -81,7 +81,7 @@ impl Plugin for AgentWebsearchPlugin {
         tools
             .register_group(ToolGroup::new(
                 "websearch",
-                true,
+                false,
                 [Tool::new(WebSearchTool::new(
                     Rc::clone(&config),
                     self.http_clients.clone(),
