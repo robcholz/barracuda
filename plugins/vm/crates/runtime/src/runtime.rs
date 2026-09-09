@@ -86,6 +86,13 @@ impl RunSlot {
         }
     }
 
+    fn cancel(&self) {
+        self.cancelled.set(true);
+        self.input_open.set(false);
+        self.waiting_for_input.set(false);
+        self.wake();
+    }
+
     fn release(&self, id: u32) {
         if self.active.get() && self.id.get() == id {
             self.cancelled.set(true);
@@ -155,10 +162,7 @@ impl VmRuntime {
         self.state.spawner.set(None);
         for slot in &self.state.slots {
             if slot.active.get() {
-                slot.cancelled.set(true);
-                slot.input_open.set(false);
-                slot.waiting_for_input.set(false);
-                slot.wake();
+                slot.cancel();
             }
         }
     }
@@ -178,6 +182,7 @@ impl VmRuntime {
         let memory = self.memory_pool.acquire().ok_or(DispatchError::Busy)?;
         let control = self.reserve_run()?;
         let run_id = control.run_id;
+        let cancellation = control.cancellation();
         let (completion, result) = oneshot::channel();
         let (progress, updates) = vm_progress_channel();
         if spawner
@@ -196,7 +201,7 @@ impl VmRuntime {
         {
             return Err(DispatchError::Busy);
         }
-        Ok(VmRun::new(run_id, updates, result))
+        Ok(VmRun::new(run_id, updates, result, cancellation))
     }
 
     pub(crate) fn send_input(
@@ -230,10 +235,7 @@ impl VmRuntime {
 
     pub(crate) fn cancel(&self, run_id: u32) -> Result<(), ControlError> {
         let slot = self.active_slot(run_id)?;
-        slot.cancelled.set(true);
-        slot.input_open.set(false);
-        slot.waiting_for_input.set(false);
-        slot.wake();
+        slot.cancel();
         Ok(())
     }
 
@@ -305,6 +307,14 @@ pub(crate) struct RunControl {
 }
 
 impl RunControl {
+    fn cancellation(&self) -> RunCancellation {
+        RunCancellation {
+            state: Rc::clone(&self.state),
+            slot_index: self.slot_index,
+            run_id: self.run_id,
+        }
+    }
+
     fn slot(&self) -> Option<&RunSlot> {
         self.state
             .slots
@@ -348,6 +358,25 @@ impl RunControl {
             Poll::Pending
         })
         .await
+    }
+}
+
+pub(crate) struct RunCancellation {
+    state: Rc<RuntimeState>,
+    slot_index: usize,
+    run_id: u32,
+}
+
+impl RunCancellation {
+    pub(crate) fn cancel(&self) {
+        if let Some(slot) = self
+            .state
+            .slots
+            .get(self.slot_index)
+            .filter(|slot| slot.active.get() && slot.id.get() == self.run_id)
+        {
+            slot.cancel();
+        }
     }
 }
 
