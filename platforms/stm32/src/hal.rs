@@ -421,6 +421,7 @@ impl RuntimePlatform for RuntimeAdapter {
     type AdcResource = RuntimeAdcResource;
     type PwmResource = RuntimePwmResource;
     type I2sResource = RuntimeI2sResource;
+    type BleAdapter = barracuda_board_hal::UnavailableBleAdapter;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         DynamicPin {

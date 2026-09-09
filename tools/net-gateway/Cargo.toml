@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-net-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "WebSocket virtual router for Barracuda browser and macOS devices"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+barracuda-net-gateway-protocol.workspace = true
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

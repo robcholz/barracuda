@@ -7,6 +7,7 @@
 
 extern crate alloc;
 
+mod ble;
 mod providers;
 mod runtime;
 
@@ -18,6 +19,10 @@ use embedded_hal::{
     i2c, spi,
 };
 
+pub use ble::{
+    BleAdapter, BleAddress, BleAddressKind, BleAdvertisement, BleAdvertisementError, BleOpenError,
+    BleProvider, BleScanRequest, UnavailableBleAdapter, LEGACY_ADVERTISEMENT_MAX_BYTES,
+};
 pub use providers::{
     AnalogProvider, DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, PwmProvider,
     PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo, RuntimeOpenError,
@@ -563,6 +568,19 @@ impl embedded_hal_async::spi::SpiBus for UnavailableSpi {
 }
 
 impl ExposedIo for NoExposedIo {}
+
+impl BleProvider for NoExposedIo {
+    type Adapter = UnavailableBleAdapter;
+    type Error = UnsupportedFunction;
+
+    fn ble_available(&self) -> bool {
+        false
+    }
+
+    fn take_ble(&self) -> Result<Self::Adapter, Self::Error> {
+        Err(UnsupportedFunction::new("BLE"))
+    }
+}
 
 impl DigitalProvider for NoExposedIo {
     type Pin = UnavailableGpio;

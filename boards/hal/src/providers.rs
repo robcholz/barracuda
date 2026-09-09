@@ -7,7 +7,10 @@ use core::{cell::RefCell, fmt};
 
 use embedded_hal::spi::Mode;
 
-use crate::{audio, AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, ResourceKind};
+use crate::{
+    audio, AnalogInput, AnalogOutput, BleAdapter, BleOpenError, BleProvider,
+    ConfigurableDigitalPin, LeaseError, ResourceKind,
+};
 
 /// Platform adapter used by the Board-generated runtime I/O owner.
 ///
@@ -39,6 +42,8 @@ pub trait RuntimePlatform: Send + Sync + 'static {
     type PwmResource: Send + 'static;
     /// Platform-owned I2S controller, DMA channel, and bounded buffers.
     type I2sResource: Send + 'static;
+    /// Ready BLE adapter, or an uninhabited adapter on unsupported targets.
+    type BleAdapter: BleAdapter;
 
     /// Consumes one raw pin token as a configurable digital pin.
     fn digital(pin: Self::PinToken) -> Self::DigitalPin;
@@ -245,6 +250,8 @@ struct RuntimeIoState<
     adc: [Option<H::AdcResource>; A],
     pwm: [Option<H::PwmResource>; W],
     i2s: [Option<H::I2sResource>; T],
+    ble: Option<H::BleAdapter>,
+    ble_claimed: bool,
 }
 
 /// Board-generated owner of exposed pins and Platform-owned runtime controllers.
@@ -287,6 +294,8 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Runtime
                 adc: [],
                 pwm: [],
                 i2s: [],
+                ble: None,
+                ble_claimed: false,
             })),
         }
     }
@@ -316,6 +325,8 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U
                 adc: [],
                 pwm: [],
                 i2s: [],
+                ble: None,
+                ble_claimed: false,
             })),
         }
     }
@@ -357,8 +368,19 @@ impl<
                 adc: adc.map(Some),
                 pwm: pwm.map(Some),
                 i2s: i2s.map(Some),
+                ble: None,
+                ble_claimed: false,
             })),
         }
+    }
+
+    /// Installs one ready, singleton BLE adapter in the runtime owner.
+    #[must_use]
+    pub fn with_ble(self, adapter: H::BleAdapter) -> Self {
+        critical_section::with(|section| {
+            self.state.borrow(section).borrow_mut().ble = Some(adapter);
+        });
+        self
     }
 
     fn resolve_pin(&self, name: &str) -> Result<usize, LeaseError> {
@@ -1115,6 +1137,40 @@ impl<
         const T: usize,
     > crate::ExposedIo for RuntimeIo<H, P, I, S, U, A, W, T>
 {
+}
+
+impl<
+        H: RuntimePlatform,
+        const P: usize,
+        const I: usize,
+        const S: usize,
+        const U: usize,
+        const A: usize,
+        const W: usize,
+        const T: usize,
+    > BleProvider for RuntimeIo<H, P, I, S, U, A, W, T>
+{
+    type Adapter = H::BleAdapter;
+    type Error = BleOpenError;
+
+    fn ble_available(&self) -> bool {
+        critical_section::with(|section| self.state.borrow(section).borrow().ble.is_some())
+    }
+
+    fn take_ble(&self) -> Result<Self::Adapter, Self::Error> {
+        critical_section::with(|section| {
+            let mut state = self.state.borrow(section).borrow_mut();
+            if let Some(adapter) = state.ble.take() {
+                state.ble_claimed = true;
+                return Ok(adapter);
+            }
+            if state.ble_claimed {
+                Err(BleOpenError::Busy)
+            } else {
+                Err(BleOpenError::Unavailable)
+            }
+        })
+    }
 }
 
 /// Failure reported when a selected Board exposes no provider for a function.

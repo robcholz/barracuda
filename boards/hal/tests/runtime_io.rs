@@ -5,11 +5,12 @@
 use core::convert::Infallible;
 
 use barracuda_board_hal::{
-    audio, AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
-    DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, InputConfig, LeaseError,
-    OutputConfig, PwmProvider, PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo,
-    RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider,
-    SpiRequest, UartConfig, UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits,
+    audio, AnalogErrorType, AnalogInput, AnalogProvider, BleAdapter, BleOpenError, BleProvider,
+    BleScanRequest, ConfigurableDigitalPin, DigitalLevel, DigitalProvider, I2cProvider, I2cRequest,
+    I2sProvider, I2sRequest, InputConfig, LeaseError, OutputConfig, PwmProvider, PwmRequest,
+    RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo, RuntimeOpenError, RuntimePlatform,
+    RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig, UartDataBits,
+    UartParity, UartProvider, UartRequest, UartStopBits,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -129,6 +130,20 @@ impl embedded_hal_async::spi::SpiBus for FakeSpi {
 
 struct FakePlatform;
 
+#[derive(Debug, PartialEq, Eq)]
+struct FakeBleAdapter(u8);
+
+impl BleAdapter for FakeBleAdapter {
+    type Error = Infallible;
+
+    async fn scan(
+        &mut self,
+        _request: BleScanRequest,
+    ) -> Result<Option<barracuda_board_hal::BleAdvertisement>, Self::Error> {
+        Ok(None)
+    }
+}
+
 struct FakeAnalog(u8);
 
 struct FakePwm(u16);
@@ -241,6 +256,7 @@ impl RuntimePlatform for FakePlatform {
     type AdcResource = u8;
     type PwmResource = u8;
     type I2sResource = u8;
+    type BleAdapter = FakeBleAdapter;
 
     fn digital(pin: Self::PinToken) -> Self::DigitalPin {
         FakePin(pin)
@@ -464,6 +480,30 @@ fn runtime_io() -> RuntimeIo<FakePlatform, 4, 1, 1, 1, 1, 1, 1> {
         [50],
         [60],
     )
+}
+
+#[test]
+fn ble_adapter_is_claimed_once_per_boot() {
+    let io = runtime_io().with_ble(FakeBleAdapter(7));
+
+    assert!(io.ble_available());
+    assert_eq!(io.take_ble().expect("BLE adapter"), FakeBleAdapter(7));
+    assert!(!io.ble_available());
+    assert_eq!(
+        io.take_ble().expect_err("BLE is move-only"),
+        BleOpenError::Busy
+    );
+}
+
+#[test]
+fn runtime_owner_reports_unavailable_ble() {
+    let io = runtime_io();
+
+    assert!(!io.ble_available());
+    assert_eq!(
+        io.take_ble().expect_err("BLE is absent"),
+        BleOpenError::Unavailable
+    );
 }
 
 #[test]
