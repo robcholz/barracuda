@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2021"
 description = "macOS Platform implementation for Barracuda"
 
+[[bin]]
+name = "barracuda-macos"
+path = "src/bin/barracuda-macos.rs"
+
 [dependencies]
+anyhow = "1"
 barracuda-board.workspace = true
+barracuda-platform-macos-network-gateway = { path = "network-gateway" }
+barracuda-platform-macos-network-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
+barracuda-system-image = { path = "../../tools/system-image" }
 barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
@@ -17,13 +25,15 @@ embassy-sync.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 embedded-storage = "0.3"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+futures-util = { version = "0.3", features = ["sink"] }
 heapless = "0.9"
 log.workspace = true
 rand = "0.9"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 thiserror = "2"
-tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "rt-multi-thread"] }
-tun = { version = "0.7.13", features = ["async"] }
+tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3"

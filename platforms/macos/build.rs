@@ -20,6 +20,7 @@ struct PlatformDocument {
 struct PlatformSettings {
     state_directory: String,
     flash_image: String,
+    network_gateway: String,
 }
 
 #[derive(Deserialize)]
@@ -68,8 +69,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut generated = format!(
-        "/// macOS settings generated from `platform.yml`.\npub const PLATFORM_SETTINGS: MacosSettings = MacosSettings::new({:?}, {:?});\n",
-        platform.settings.state_directory, platform.settings.flash_image,
+        "/// macOS settings generated from `platform.yml`.\npub const PLATFORM_SETTINGS: MacosSettings = MacosSettings::with_gateway({:?}, {:?}, {:?});\n",
+        platform.settings.state_directory,
+        platform.settings.flash_image,
+        platform.settings.network_gateway,
     );
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");

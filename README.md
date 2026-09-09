@@ -89,10 +89,22 @@ for the development host, even when the selected Board uses an embedded target:
 
 ```bash
 cargo cli
-cargo cli ws://DEVICE_ADDRESS:8787
+cargo cli configure
 ```
 
-The default endpoint is `ws://10.42.0.2:8787`.
+`cargo cli` opens a Local/Remote selector. Local displays and uses the active
+workspace address published by the macOS launcher, or the Linux endpoint
+`http://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6 address and
+connects to its WebServer on port 8787.
+
+`cargo cli configure` uses the same Local/Remote selector, then opens the
+Barracuda Plugin portal. The portal lists the configuration pages contributed
+by the enabled Plugins, so new Plugin configuration surfaces do not require a
+new CLI release. Pass an explicit address to skip selection:
+
+```bash
+cargo cli configure http://DEVICE_ADDRESS:8787
+```
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:

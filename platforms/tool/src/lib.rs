@@ -143,7 +143,15 @@ pub fn launch(
         );
     let host = host_tuple(root)?;
     let binary_directory = target_directory.join(host).join("debug");
-    let program = resolve_program(launcher.program(), platform.directory());
+    let program = expand_launcher_argument(
+        &launcher.program().to_string_lossy(),
+        root,
+        &target_directory,
+        application,
+        &binary_directory,
+        platform.application().support_binaries(),
+    )?;
+    let program = resolve_program(Path::new(&program), platform.directory());
     let mut command = Command::new(program);
     for argument in launcher.arguments() {
         command.arg(expand_launcher_argument(
@@ -443,6 +451,25 @@ mod tests {
         )
         .expect_err("undeclared support binary");
         assert!(matches!(error, CommandError::UndeclaredSupportBinary(name) if name == "missing"));
+    }
+
+    #[test]
+    fn launcher_program_can_be_a_declared_support_binary() {
+        let support = [String::from("macos-launcher")];
+        let expanded = expand_launcher_argument(
+            "{support:macos-launcher}",
+            Path::new("/workspace"),
+            Path::new("/workspace/target"),
+            Path::new("/workspace/target/debug/app"),
+            Path::new("/workspace/target/host/debug"),
+            &support,
+        )
+        .expect("declared support binary");
+
+        assert_eq!(
+            PathBuf::from(expanded),
+            PathBuf::from("/workspace/target/host/debug/macos-launcher")
+        );
     }
 
     #[test]

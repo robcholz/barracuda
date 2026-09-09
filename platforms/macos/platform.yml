@@ -16,12 +16,13 @@ system-image:
     flash-image: board.flash
 application:
   support-binaries:
-    - barracuda-macos-network
+    - barracuda-macos
   launcher:
-    program: sudo
+    program: "{support:barracuda-macos}"
     arguments:
-      - "{support:barracuda-macos-network}"
       - "{application}"
+      - "{workspace}"
 settings:
   state-directory: .barracuda
   flash-image: board.flash
+  network-gateway: ws://127.0.0.1:8787/v1/connect
