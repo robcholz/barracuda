@@ -1,0 +1,13 @@
+id: sdmmc-storage
+api-version: 1
+peripheral: storage
+implementation:
+  package: barracuda-sdmmc-storage
+  crate: barracuda_sdmmc_storage
+  factory: "::{{crate}}::SdMmcStorageImplementation<{{binding.device.type}}>"
+  bindings-expression: "::{{crate}}::SdMmcStorageBindings::new({{binding.device.value}})"
+  config-expression: "()"
+bindings:
+  device:
+    kind: sdmmc-device
+parameters: {}

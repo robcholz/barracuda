@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-tab5-touch"
+version = "0.1.0"
+edition = "2024"
+description = "Hardware-revision-aware M5Stack Tab5 touch implementation"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver-gt911.workspace = true
+barracuda-driver-pi4ioe5v6408.workspace = true
+barracuda-driver-st712x.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

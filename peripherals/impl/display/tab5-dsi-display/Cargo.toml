@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-tab5-dsi-display"
+version = "0.1.0"
+edition = "2024"
+description = "Revision-aware MIPI DSI display implementation for the M5Stack Tab5"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver-gt911.workspace = true
+barracuda-driver-ili9881c.workspace = true
+barracuda-driver-pi4ioe5v6408.workspace = true
+barracuda-driver-st712x.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

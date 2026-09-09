@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-bmi270-imu"
+version = "0.1.0"
+edition = "2024"
+description = "BMI270 six-axis IMU implementation over embedded-hal I2C"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-peripheral.workspace = true
+bmi2 = "0.1.2"
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

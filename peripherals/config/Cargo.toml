@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-peripheral-config"
+version = "0.1.0"
+edition = "2024"
+description = "Build-time peripheral implementation manifest loading and Board composition validation"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-board-config.workspace = true
+barracuda-platform-config.workspace = true
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+yaml-peg = { version = "1.0.8", features = ["serde"] }
+
+[dev-dependencies]
+syn = { version = "2", features = ["full"] }
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

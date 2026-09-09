@@ -1,0 +1,22 @@
+[package]
+name = "barracuda-driver-st712x"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level Sitronix ST7121/ST7123 display-touch controller driver"
+license = "Apache-2.0"
+
+[dependencies]
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

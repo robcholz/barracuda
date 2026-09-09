@@ -1,0 +1,19 @@
+id: ina226-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-ina226-power-monitor
+  crate: barracuda_ina226_power_monitor
+  factory: "::{{crate}}::Ina226PowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Ina226Bindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Ina226Config::new({{parameter.address}}, {{parameter.shunt-micro-ohms}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 65
+  shunt-micro-ohms:
+    type: integer
+    default: 5000

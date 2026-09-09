@@ -1,0 +1,21 @@
+id: es8388-es7210-audio-codec
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: barracuda-es8388-es7210-audio-codec
+  crate: barracuda_es8388_es7210_audio_codec
+  factory: "::{{crate}}::Es8388Es7210AudioCodecImplementation<{{binding.control.type}}, {{binding.stream.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Es8388Es7210Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Es8388Es7210Config::new({{parameter.output-address}}, {{parameter.input-address}})"
+bindings:
+  control:
+    kind: i2c-device
+  stream:
+    kind: i2s-stream
+parameters:
+  output-address:
+    type: integer
+    default: 16
+  input-address:
+    type: integer
+    default: 64

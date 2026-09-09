@@ -94,6 +94,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "beb9e990c0a33699f1984d85a6abead615ccc72dd8130bf3e15dcabe2ca149c9"
 
 [[package]]
+name = "allocator-api2"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c583acf993cf4245c4acb0a2cc2ab1f9cc097de73411bb6d3647ff6af2b1013d"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -704,7 +710,8 @@ dependencies = [
 name = "barracuda-apa102-led-strip"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-apa102",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -718,6 +725,16 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+]
+
+[[package]]
+name = "barracuda-bmi270-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-peripheral",
+ "bmi2",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -738,12 +755,13 @@ dependencies = [
 name = "barracuda-board-hal"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "critical-section",
  "embassy-executor",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
 ]
@@ -752,13 +770,21 @@ dependencies = [
 name = "barracuda-board-selected"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bmi270-imu",
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-board-tool",
- "barracuda-driver-config",
+ "barracuda-es8388-es7210-audio-codec",
+ "barracuda-ina226-power-monitor",
+ "barracuda-peripheral",
+ "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-selected",
+ "barracuda-rx8130ce-rtc",
+ "barracuda-sdmmc-storage",
+ "barracuda-tab5-dsi-display",
+ "barracuda-tab5-touch",
  "embassy-executor",
 ]
 
@@ -770,7 +796,7 @@ dependencies = [
  "anstyle",
  "barracuda-board-config",
  "barracuda-cli-style",
- "barracuda-driver-config",
+ "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-tool",
  "clap",
@@ -861,30 +887,118 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-driver"
+name = "barracuda-driver-apa102"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
-name = "barracuda-driver-config"
+name = "barracuda-driver-es7210"
 version = "0.1.0"
 dependencies = [
- "barracuda-board-config",
- "barracuda-platform-config",
- "serde",
- "syn 2.0.118",
- "tempfile",
- "thiserror 2.0.18",
- "yaml-peg",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8311"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8388"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8389"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-gt911"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ili9881c"
+version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-ina226"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ov2640"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ov3660"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-pi4ioe5v6408"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-rx8130ce"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-st712x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ws2812-spi"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
 name = "barracuda-es8311-audio-codec"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-es8311",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-es8388-es7210-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-es7210",
+ "barracuda-driver-es8388",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -893,7 +1007,8 @@ dependencies = [
 name = "barracuda-es8389-audio-codec"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-es8389",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -902,7 +1017,7 @@ dependencies = [
 name = "barracuda-gdeh0154d67-display"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "epd-waveshare",
@@ -1096,10 +1211,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imu-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
+name = "barracuda-ina226-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ina226",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-indicator-led"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
 
@@ -1159,7 +1295,7 @@ version = "0.1.0"
 name = "barracuda-mipi-dbi-display"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "mipidsi",
@@ -1199,7 +1335,8 @@ dependencies = [
 name = "barracuda-ov2640-camera"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ov2640",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -1208,9 +1345,32 @@ dependencies = [
 name = "barracuda-ov3660-camera"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ov3660",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-peripheral"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics-core",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "barracuda-peripheral-config"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "barracuda-platform-config",
+ "serde",
+ "syn 2.0.118",
+ "tempfile",
+ "thiserror 2.0.18",
+ "yaml-peg",
 ]
 
 [[package]]
@@ -1318,23 +1478,32 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-peripheral",
  "barracuda-platform",
  "barracuda-tls",
+ "cc",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "sdio",
  "static_cell",
 ]
 
@@ -1372,7 +1541,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
- "barracuda-driver",
+ "barracuda-peripheral",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1490,7 +1659,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-platform",
  "barracuda-platform-config",
- "barracuda-platform-macos",
+ "barracuda-platform-esp32p4",
  "barracuda-platform-tool",
  "embassy-executor",
 ]
@@ -1512,6 +1681,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "log",
@@ -1666,6 +1836,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-rx8130ce-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-rx8130ce",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1685,6 +1865,15 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "zerocopy",
+]
+
+[[package]]
+name = "barracuda-sdmmc-storage"
+version = "0.1.0"
+dependencies = [
+ "barracuda-peripheral",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1730,6 +1919,7 @@ dependencies = [
  "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
+ "barracuda-imu-plugin",
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-platform",
@@ -1804,6 +1994,40 @@ dependencies = [
  "serde",
  "tempfile",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-tab5-dsi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-ili9881c",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-st712x",
+ "barracuda-peripheral",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-tab5-sc202cs-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-tab5-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-st712x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2098,7 +2322,8 @@ dependencies = [
 name = "barracuda-ws2812-spi-led-strip"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ws2812-spi",
+ "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
 
@@ -2296,6 +2521,16 @@ dependencies = [
  "http-client",
  "percent-encoding",
  "serde_json",
+]
+
+[[package]]
+name = "bmi2"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48eb062697fa0234a96acdc8ed34f141e9f2951d34e358ed449f312d7e5b6469"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "fixedvec",
 ]
 
 [[package]]
@@ -3722,6 +3957,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
+name = "esp-alloc"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f73e8d355019c740f6a5a78429633040617d28a378c271464caadc52c78216e3"
+dependencies = [
+ "allocator-api2",
+ "document-features",
+ "enumset",
+ "esp-config",
+ "esp-metadata-generated",
+ "esp-sync",
+ "linked_list_allocator",
+ "rlsf",
+]
+
+[[package]]
+name = "esp-backtrace"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fbfed00e884572d620a6958b13456fc2bb8ab75802b5adc8afc224f97cdebad"
+dependencies = [
+ "document-features",
+ "esp-config",
+ "esp-metadata-generated",
+ "esp-println",
+ "heapless 0.9.3",
+ "riscv",
+ "xtensa-lx",
+]
+
+[[package]]
+name = "esp-bootloader-esp-idf"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba0e487f6843419bb085d871f6e860da1bb8c267ce1c5db1051b83882e943054"
+dependencies = [
+ "document-features",
+ "esp-config",
+ "esp-hal-procmacros",
+ "esp-metadata-generated",
+ "esp-rom-sys",
+ "esp-storage",
+ "jiff",
+ "sha2 0.11.0",
+ "strum 0.27.2",
+]
+
+[[package]]
 name = "esp-config"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3768,11 +4051,16 @@ dependencies = [
  "esp-rom-sys",
  "esp-sync",
  "esp32",
+ "esp32c2",
  "esp32c3",
+ "esp32c5",
  "esp32c6",
+ "esp32c61",
+ "esp32h2",
  "esp32p4",
  "esp32s2",
  "esp32s3",
+ "esp32s31",
  "fugit",
  "instability",
  "nb 1.1.0",
@@ -3790,6 +4078,7 @@ dependencies = [
  "strum 0.27.2",
  "ufmt-write",
  "xtensa-lx",
+ "xtensa-lx-rt",
 ]
 
 [[package]]
@@ -3892,6 +4181,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-rtos"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f8e99f512a839c78a77c2e55e1f0d208851cfa48935847d5e0b5e8b2c5a6289"
+dependencies = [
+ "document-features",
+ "embassy-executor",
+ "embassy-sync 0.8.0",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
+ "esp-alloc",
+ "esp-config",
+ "esp-hal",
+ "esp-hal-procmacros",
+ "esp-metadata-generated",
+ "esp-rom-sys",
+ "esp-sync",
+ "portable-atomic",
+ "riscv",
+ "xtensa-lx",
+]
+
+[[package]]
 name = "esp-storage"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3937,6 +4249,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c2"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "496afd4a776ec7c96c90fb665894895a1a9f8a7fd5a9d75779fa09d63f9d40a1"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c3"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3946,10 +4267,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c5"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97afa80d8110c7234f840252baa8ee8de28f78e8dc233d2d430c0ccfbe59a2b5"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c6"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a207a5d6886ca89b4f220606dcf3779ca869803df192508314939186ae8de1ee"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c61"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8690ba8b6292db301db513bb9b24263499c9a1ecd22b263dd4210ef12d47fe1"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32h2"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "083a75597f85acaabc0b05998f22455d78c33c4d23ff5f12df2b9590e46f571b"
 dependencies = [
  "vcell",
 ]
@@ -3979,6 +4327,16 @@ version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab08eb1f516ba72b7eb272cdd88cd74899552292a294b831b2143a3e60f1666a"
 dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32s31"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0c27f1306a6588a4944e8e6dfd691ea4b675866fddd64e51be277f33ecd8ccf"
+dependencies = [
+ "critical-section",
  "vcell",
 ]
 
@@ -4065,6 +4423,12 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixedvec"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b395ef2adf62bdeefcd1b59ad0dd2225c6c333ec79656ea79ac5285c46d051ea"
 
 [[package]]
 name = "fnv"
@@ -7349,6 +7713,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e012d667b0aa6d2592ace8ef145a98bff3e76cca7a644f4181ecd7a916ed289b"
 dependencies = [
  "critical-section",
+]
+
+[[package]]
+name = "xtensa-lx-rt"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07933551193a68b5b0a94a7c428e9626adb559661e0f4b048ac5ec1fa4bed334"
+dependencies = [
+ "document-features",
+ "xtensa-lx",
+ "xtensa-lx-rt-proc-macros",
+]
+
+[[package]]
+name = "xtensa-lx-rt-proc-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96fb42cd29c42f8744c74276e9f5bee7b06685bbe5b88df891516d72cb320450"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
