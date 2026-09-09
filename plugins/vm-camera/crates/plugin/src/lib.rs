@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::{string::String, sync::Arc, vec, vec::Vec};
-use barracuda_board_hal::camera::{BuiltinCamera, Camera, CameraDescriptor, CameraPixelFormat};
+use barracuda_board_hal::camera::{Camera, CameraDescriptor, CameraPeripheral, CameraPixelFormat};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
@@ -30,10 +30,10 @@ impl<Device> CameraPlugin<Device> {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Builtins: BuiltinCamera<Camera = Device>,
+        Builtins: CameraPeripheral<Camera = Device>,
     {
         Self {
-            camera: context.hal.builtins.take_camera(),
+            camera: context.hal.peripherals.take_camera(),
         }
     }
 }
@@ -219,7 +219,7 @@ where
         .map_err(|error| Error::runtime(alloc::format!("camera capture failed: {error:?}")))?;
     if captured.bytes_used() > frame.len() {
         return Err(Error::runtime(
-            "camera Driver reported an invalid frame length",
+            "camera peripheral reported an invalid frame length",
         ));
     }
     frame.truncate(captured.bytes_used());

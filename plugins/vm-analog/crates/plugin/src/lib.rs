@@ -31,7 +31,7 @@ impl<Io> AnalogPlugin<Io> {
         Io: ExposedIo + AnalogProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

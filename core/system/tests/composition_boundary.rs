@@ -72,7 +72,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(system.contains("let mut plugin_context"));
     assert!(system.contains("PluginContext::from_hal("));
     assert!(system.contains("prepared.board_hal"));
-    assert!(plugin_api.contains("pub hal: BoardHalResources<Builtins, Arc<Io>>"));
+    assert!(plugin_api.contains("pub hal: BoardResources<Peripherals, Arc<ExposedIo>>"));
     assert!(!plugin_api.contains("Lua"));
     assert!(!system.contains("Lua"));
 

@@ -32,7 +32,7 @@ impl<Io> PwmPlugin<Io> {
         Io: ExposedIo + PwmProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

@@ -7,7 +7,7 @@
 
 This Plugin shares the Board's unified exposed-I/O owner and installs the
 `i2s` Lua package. It reuses the same `audio::PcmStream` contract implemented
-by Platform I2S adapters and consumed by built-in audio codec Drivers.
+by Platform I2S adapters and consumed by audio-codec implementations.
 
 Lua API:
 

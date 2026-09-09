@@ -39,7 +39,7 @@ impl<Io> I2sPlugin<Io> {
         Io: ExposedIo + I2sProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

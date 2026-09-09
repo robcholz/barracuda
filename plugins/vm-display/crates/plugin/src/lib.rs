@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use barracuda_board_hal::display::{
-    BuiltinDisplay, Display, DisplayDescriptor, DisplayOrientation, DisplayPower,
+    Display, DisplayDescriptor, DisplayOrientation, DisplayPeripheral, DisplayPower,
     DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
 };
 use barracuda_plugin::api::PluginContext;
@@ -38,10 +38,10 @@ impl<Device> DisplayPlugin<Device> {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Builtins: BuiltinDisplay<Display = Device>,
+        Builtins: DisplayPeripheral<Display = Device>,
     {
         Self {
-            display: context.hal.builtins.take_display(),
+            display: context.hal.peripherals.take_display(),
         }
     }
 }
