@@ -5,17 +5,18 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-output:
-    led-matrix-data:
-      # M5Stack Atom Matrix: 25 WS2812C LEDs driven from GPIO27.
-      data: GPIO27
-      frequency-hz: 2400000
-builtin-peripherals:
-  led-strip:
-    driver: ws2812-spi-led-strip
-    bindings:
-      spi: led-matrix-data
-    parameters:
-      led-count: 25
-      color-order: grb
+peripherals:
+  io:
+    spi-output:
+      led-matrix-data:
+        # M5Stack Atom Matrix: 25 WS2812C LEDs driven from GPIO27.
+        data: GPIO27
+        frequency-hz: 2400000
+  devices:
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: led-matrix-data
+      parameters:
+        led-count: 25
+        color-order: grb

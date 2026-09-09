@@ -5,29 +5,30 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  i2c-device:
-    camera-control:
-      # Espressif ESP32-S3-Korvo-2 BSP: OV3660 SCCB bus.
-      peripheral: I2C0
-      scl: GPIO18
-      sda: GPIO17
-      frequency-hz: 400000
-  camera-capture:
-    camera-data:
-      peripheral: LCD_CAM
-      dma: DMA_CH0
-      xclk: GPIO40
-      pclk: GPIO11
-      vsync: GPIO21
-      href: GPIO38
-      data: [GPIO13, GPIO47, GPIO14, GPIO3, GPIO12, GPIO42, GPIO41, GPIO39]
-      xclk-frequency-hz: 20000000
-      dma-buffer-bytes: 98304
-builtin-peripherals:
-  camera:
-    driver: ov3660-camera
-    bindings:
-      capture: camera-data
-      control: camera-control
-    # The official BSP declares RESET and PWDN as not connected.
+peripherals:
+  io:
+    i2c-device:
+      camera-control:
+        # Espressif ESP32-S3-Korvo-2 BSP: OV3660 SCCB bus.
+        peripheral: I2C0
+        scl: GPIO18
+        sda: GPIO17
+        frequency-hz: 400000
+    camera-capture:
+      camera-data:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        xclk: GPIO40
+        pclk: GPIO11
+        vsync: GPIO21
+        href: GPIO38
+        data: [GPIO13, GPIO47, GPIO14, GPIO3, GPIO12, GPIO42, GPIO41, GPIO39]
+        xclk-frequency-hz: 20000000
+        dma-buffer-bytes: 98304
+  devices:
+    camera:
+      implementation: ov3660-camera
+      bindings:
+        capture: camera-data
+        control: camera-control
+      # The official BSP declares RESET and PWDN as not connected.

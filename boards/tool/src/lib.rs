@@ -13,16 +13,18 @@ use barracuda_board_config::{
     parse, read_selected_board, validate_board_name, write_selected_board, BoardDefinition,
     ConfigError, SelectionError,
 };
-use barracuda_driver_config::{
+use barracuda_peripheral_config::{
     load_catalog, render_board_hal_for_platform, resolve_board, validate_platform_hal,
-    CatalogError, GenerateError, ResolveError as DriverResolveError,
+    CatalogError, GenerateError, ResolveError as PeripheralResolveError,
 };
 use barracuda_platform_config::{resolve_board_platform, ResolveError as PlatformResolveError};
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
-const DRIVER_WORKSPACE_BEGIN: &str = "# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES";
-const DRIVER_WORKSPACE_END: &str = "# END GENERATED DRIVER WORKSPACE DEPENDENCIES";
+const PERIPHERAL_WORKSPACE_BEGIN: &str =
+    "# BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES";
+const PERIPHERAL_WORKSPACE_END: &str =
+    "# END GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES";
 
 /// Whether Board registry synchronization changed generated files.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,7 +40,7 @@ pub enum SyncStatus {
 pub struct SyncReport {
     status: SyncStatus,
     boards: usize,
-    drivers: usize,
+    implementations: usize,
 }
 
 impl SyncReport {
@@ -54,10 +56,10 @@ impl SyncReport {
         self.boards
     }
 
-    /// Returns the number of discovered Driver manifests.
+    /// Returns the number of discovered peripheral implementation manifests.
     #[must_use]
-    pub const fn drivers(&self) -> usize {
-        self.drivers
+    pub const fn implementations(&self) -> usize {
+        self.implementations
     }
 }
 
@@ -79,7 +81,7 @@ pub struct Cli {
 /// Operations supported by `cargo board`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Validate Boards and synchronize Drivers into the workspace registry.
+    /// Validate Boards and synchronize peripheral implementations into the workspace registry.
     Sync {
         /// Check whether generated files are current without writing them.
         #[arg(long)]
@@ -100,6 +102,9 @@ pub enum Command {
     Run {
         /// Selected Platform name.
         platform: String,
+        /// Arguments inserted before user arguments when invoking the Platform launcher.
+        #[arg(long = "launcher-argument", hide = true, action = clap::ArgAction::Append)]
+        launcher_arguments: Vec<OsString>,
         /// Cargo-produced executable.
         application: PathBuf,
         /// Arguments forwarded to the executable.
@@ -139,15 +144,15 @@ pub enum CommandError {
     /// A Board configuration is invalid.
     #[error(transparent)]
     Config(#[from] ConfigError),
-    /// The Driver catalog is invalid or unavailable.
+    /// The peripheral implementation catalog is invalid or unavailable.
     #[error(transparent)]
-    DriverCatalog(#[from] CatalogError),
-    /// A Board does not satisfy its selected Driver schemas.
+    PeripheralCatalog(#[from] CatalogError),
+    /// A Board does not satisfy its selected peripheral implementation schemas.
     #[error(transparent)]
-    DriverComposition(#[from] DriverResolveError),
+    PeripheralComposition(#[from] PeripheralResolveError),
     /// A resolved Board cannot be rendered into static Rust bindings.
     #[error(transparent)]
-    DriverGeneration(#[from] GenerateError),
+    PeripheralGeneration(#[from] GenerateError),
     /// The Board's Platform could not be resolved.
     #[error(transparent)]
     Platform(#[from] PlatformResolveError),
@@ -284,11 +289,11 @@ where
             };
             writeln!(
                 output,
-                "{}{action} {} registry ({} Boards, {} Drivers).",
+                "{}{action} {} registry ({} Boards, {} peripheral implementations).",
                 prefix(color, barracuda_cli_style::SUCCESS, "✔"),
                 styled(color, barracuda_cli_style::EMPHASIS, "Board"),
                 report.boards(),
-                report.drivers()
+                report.implementations()
             )
             .map_err(CommandError::Output)
         }
@@ -320,9 +325,13 @@ where
         Command::Target { name: Some(name) } => print_target(workspace_root, &name, output),
         Command::Run {
             platform,
+            mut launcher_arguments,
             application,
             arguments,
-        } => run_selected_application(workspace_root, &platform, &application, &arguments),
+        } => {
+            launcher_arguments.extend(arguments);
+            run_selected_application(workspace_root, &platform, &application, &launcher_arguments)
+        }
     }
 }
 
@@ -364,7 +373,7 @@ pub fn sync(workspace_root: &Path, check: bool) -> Result<(), CommandError> {
     sync_with_report(workspace_root, check).map(|_report| ())
 }
 
-/// Validates discovered Boards and synchronizes Drivers into the workspace registry.
+/// Validates discovered Boards and synchronizes peripheral implementations into the workspace registry.
 ///
 /// # Errors
 ///
@@ -375,29 +384,33 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
         read_board(workspace_root, name)?;
     }
     let catalog = load_catalog(workspace_root)?;
-    let driver_count = catalog.drivers().count();
+    let implementation_count = catalog.implementations().count();
 
     let manifest_path = workspace_root.join("Cargo.toml");
     let old_manifest = fs::read_to_string(&manifest_path).map_err(|source| CommandError::Read {
         path: manifest_path.clone(),
         source,
     })?;
-    let driver_dependencies = catalog
-        .drivers()
-        .map(|driver| {
+    let implementation_dependencies = catalog
+        .implementations()
+        .map(|implementation| {
+            let directory = implementation
+                .directory()
+                .strip_prefix(workspace_root)
+                .unwrap_or_else(|_| implementation.directory());
             format!(
                 "{} = {{ path = {:?} }}",
-                driver.implementation().package(),
-                PathBuf::from("drivers").join(driver.id()).to_string_lossy()
+                implementation.implementation().package(),
+                directory.to_string_lossy()
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
     let manifest = replace_block(
         &old_manifest,
-        DRIVER_WORKSPACE_BEGIN,
-        DRIVER_WORKSPACE_END,
-        &driver_dependencies,
+        PERIPHERAL_WORKSPACE_BEGIN,
+        PERIPHERAL_WORKSPACE_END,
+        &implementation_dependencies,
     )?;
     let stale = manifest != old_manifest;
     if check && stale {
@@ -416,7 +429,7 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
             SyncStatus::Current
         },
         boards: boards.len(),
-        drivers: driver_count,
+        implementations: implementation_count,
     })
 }
 
@@ -666,13 +679,13 @@ fn write_selected_build(
         for peripheral in resolved.peripherals() {
             let dependency = format!(
                 "{}.workspace = true",
-                peripheral.driver().implementation().package()
+                peripheral.implementation().implementation().package()
             );
             if !board_dependencies.contains(&dependency) {
                 board_dependencies.push(dependency);
             }
         }
-        board_dependencies.push(String::from("barracuda-driver.workspace = true"));
+        board_dependencies.push(String::from("barracuda-peripheral.workspace = true"));
     }
     board_dependencies.sort();
     replace_file_block(
@@ -695,19 +708,59 @@ fn write_selected_build(
     let mut cargo = format!(
         "# Generated by `cargo board select`; do not edit.\n\n[build]\ntarget = {target:?}\n"
     );
+    if target == "riscv32imafc-unknown-none-elf" {
+        cargo.push_str(
+            "\n[env]\n\
+             CC_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }\n\
+             CXX_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }\n\
+             AR_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }\n\
+             AR = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }\n\
+             RANLIB = { value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }\n\
+             CMAKE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-cmake\", relative = true }\n\
+             CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }\n\
+             CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"\n",
+        );
+        cargo.push_str(&format!(
+            "\n[target.{target}]\nlinker = \"boards/tool/assets/esp32p4-linker\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
+        ));
+    }
     if platform.application().launcher().is_some() {
         let runner = install_runner(workspace_root, &host)?;
-        cargo.push_str(&format!(
-            "\n[target.{target}]\nrunner = [{:?}, \"__run\", {:?}, \"--\"]\n",
+        if target != "riscv32imafc-unknown-none-elf" {
+            cargo.push_str(&format!("\n[target.{target}]\n"));
+        }
+        let mut runner_arguments = format!(
+            "{:?}, \"__run\", {:?}",
             runner.to_string_lossy(),
             platform.name()
-        ));
+        );
+        if target == "riscv32imafc-unknown-none-elf" {
+            if let Some(flash_size) = board.hardware().flash_size() {
+                append_launcher_argument(&mut runner_arguments, "--flash-size");
+                append_launcher_argument(&mut runner_arguments, flash_size);
+            }
+            let layout = Path::new("boards/configs")
+                .join(board.name())
+                .join(board.native_layout().artifact());
+            append_launcher_argument(&mut runner_arguments, "--partition-table");
+            append_launcher_argument(&mut runner_arguments, &layout.to_string_lossy());
+            append_launcher_argument(&mut runner_arguments, "--target-app-partition");
+            append_launcher_argument(&mut runner_arguments, "ota_0");
+        }
+        cargo.push_str(&format!("runner = [{runner_arguments}]\n"));
     }
     write_file(&workspace_root.join(".barracuda/cargo.toml"), &cargo)?;
     write_file(
         &workspace_root.join(".barracuda/selected-platform"),
         &format!("{}\n", platform.name()),
     )
+}
+
+fn append_launcher_argument(runner: &mut String, argument: &str) {
+    runner.push_str(&format!(
+        ", {:?}",
+        format!("--launcher-argument={argument}")
+    ));
 }
 
 fn install_runner(workspace_root: &Path, host: &str) -> Result<PathBuf, CommandError> {
@@ -835,50 +888,51 @@ mod tests {
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
     }
 
-    fn add_driver(root: &Path, name: &str) {
-        let driver = root.join("drivers").join(name);
+    fn add_implementation(root: &Path, name: &str) {
+        let driver = root.join("peripherals/impl/indicator").join(name);
         let crate_name = name.replace('-', "_");
-        fs::create_dir_all(&driver).expect("Driver directory");
+        fs::create_dir_all(&driver).expect("peripheral implementation directory");
         fs::write(
-            driver.join("driver.yml"),
+            driver.join("peripheral.yml"),
             format!(
-                "id: {name}\napi-version: 1\ncapability: test\nimplementation:\n  package: barracuda-{name}\n  crate: barracuda_{crate_name}\n  factory: \"::{{{{crate}}}}::Driver\"\n  bindings-expression: \"()\"\n  config-expression: \"()\"\nbindings: {{}}\nparameters: {{}}\n"
+                "id: {name}\napi-version: 1\nperipheral: indicator\nimplementation:\n  package: barracuda-{name}\n  crate: barracuda_{crate_name}\n  factory: \"::{{{{crate}}}}::Implementation\"\n  bindings-expression: \"()\"\n  config-expression: \"()\"\nbindings: {{}}\nparameters: {{}}\n"
             ),
         )
-        .expect("Driver manifest");
+        .expect("peripheral implementation manifest");
     }
 
     fn add_workspace(root: &Path) {
-        fs::create_dir_all(root.join("drivers")).expect("Driver catalog");
+        fs::create_dir_all(root.join("peripherals/impl"))
+            .expect("peripheral implementation catalog");
         fs::write(
             root.join("Cargo.toml"),
-            "[workspace.dependencies]\n# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES\nold\n# END GENERATED DRIVER WORKSPACE DEPENDENCIES\n",
+            "[workspace.dependencies]\n# BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES\nold\n# END GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES\n",
         )
         .expect("workspace manifest");
     }
 
     #[test]
-    fn sync_discovers_drivers_and_validates_boards() {
+    fn sync_discovers_implementations_and_validates_boards() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
         add_catalog_board(root.path(), "zeta-board");
         add_catalog_board(root.path(), "alpha-board");
-        add_driver(root.path(), "zeta-driver");
-        add_driver(root.path(), "alpha-driver");
+        add_implementation(root.path(), "zeta-driver");
+        add_implementation(root.path(), "alpha-driver");
 
         let report = sync_with_report(root.path(), false).expect("Board sync");
 
         assert_eq!(report.status(), SyncStatus::Updated);
         assert_eq!(report.boards(), 2);
-        assert_eq!(report.drivers(), 2);
+        assert_eq!(report.implementations(), 2);
         let workspace =
             fs::read_to_string(root.path().join("Cargo.toml")).expect("workspace manifest");
         let alpha = workspace
-            .find("barracuda-alpha-driver = { path = \"drivers/alpha-driver\" }")
-            .expect("alpha Driver");
+            .find("barracuda-alpha-driver = { path = \"peripherals/impl/indicator/alpha-driver\" }")
+            .expect("alpha implementation");
         let zeta = workspace
-            .find("barracuda-zeta-driver = { path = \"drivers/zeta-driver\" }")
-            .expect("zeta Driver");
+            .find("barracuda-zeta-driver = { path = \"peripherals/impl/indicator/zeta-driver\" }")
+            .expect("zeta implementation");
         assert!(alpha < zeta);
     }
 
@@ -887,7 +941,7 @@ mod tests {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
         add_catalog_board(root.path(), "alpha-board");
-        add_driver(root.path(), "alpha-driver");
+        add_implementation(root.path(), "alpha-driver");
         let before = fs::read_to_string(root.path().join("Cargo.toml")).expect("before");
 
         let error = sync_with_report(root.path(), true).expect_err("stale registry");
@@ -900,20 +954,22 @@ mod tests {
     }
 
     #[test]
-    fn board_sync_rejects_an_invalid_driver_manifest() {
+    fn board_sync_rejects_an_invalid_implementation_manifest() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
         add_catalog_board(root.path(), "alpha-board");
-        add_driver(root.path(), "alpha-driver");
+        add_implementation(root.path(), "alpha-driver");
         fs::write(
-            root.path().join("drivers/alpha-driver/driver.yml"),
+            root.path()
+                .join("peripherals/impl/indicator/alpha-driver/peripheral.yml"),
             "id: wrong-id\n",
         )
-        .expect("replace Driver manifest");
+        .expect("replace peripheral implementation manifest");
 
-        let error = sync_with_report(root.path(), false).expect_err("invalid Driver manifest");
+        let error = sync_with_report(root.path(), false)
+            .expect_err("invalid peripheral implementation manifest");
 
-        assert!(matches!(error, CommandError::DriverCatalog(_)));
+        assert!(matches!(error, CommandError::PeripheralCatalog(_)));
     }
 
     #[test]
@@ -938,7 +994,7 @@ mod tests {
 
         let error = sync_with_report(root.path(), false).expect_err("missing Platform HAL binding");
 
-        assert!(matches!(error, CommandError::DriverGeneration(_)));
+        assert!(matches!(error, CommandError::PeripheralGeneration(_)));
     }
 
     #[test]

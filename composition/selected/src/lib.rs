@@ -5,6 +5,11 @@
 pub use barracuda_target_api::{TargetBindings, TargetResources};
 
 #[doc(hidden)]
+pub use barracuda_board_selected::__barracuda_generated_board_bindings as __board_bindings;
+#[doc(hidden)]
+pub use barracuda_board_selected::Bindings as __BoardBindings;
+
+#[doc(hidden)]
 pub use barracuda_platform_selected as __platform;
 
 /// Complete move-only bindings required by the selected target axes.
@@ -21,7 +26,7 @@ pub enum Error {
     /// The selected Platform failed to initialize its mechanisms.
     #[error("selected Platform initialization failed: {0}")]
     Platform(barracuda_platform_selected::Error),
-    /// The selected Board HAL failed to initialize its peripheral Drivers.
+    /// The selected Board HAL failed to initialize its peripherals.
     #[error("selected Board HAL initialization failed: {0}")]
     BoardHal(barracuda_board_selected::Error),
 }
@@ -64,9 +69,27 @@ pub fn __application_bindings() -> Bindings {
 #[macro_export]
 macro_rules! application_entry {
     ($application:path) => {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         $crate::__platform::platform_entry!(|spawner| async {
             $application(spawner, $crate::__application_bindings()).await
         });
+
+        #[cfg(target_arch = "riscv32")]
+        use $crate::__board_bindings;
+
+        #[cfg(target_arch = "riscv32")]
+        $crate::__platform::platform_entry!(
+            &$crate::BOARD,
+            __board_bindings,
+            $crate::__BoardBindings,
+            |spawner, platform_bindings, board_bindings| async {
+                $application(
+                    spawner,
+                    $crate::TargetBindings::new(platform_bindings, board_bindings),
+                )
+                .await
+            }
+        );
     };
 }
 

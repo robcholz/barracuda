@@ -88,7 +88,7 @@ fn select_persists_a_valid_board_for_the_next_build() {
         .expect("local Cargo selection");
     assert!(cargo.contains("[build]"));
     assert!(cargo.contains("runner = ["));
-    assert!(cargo.contains("\"__run\", \"macos\", \"--\"]"));
+    assert!(cargo.contains("\"__run\", \"macos\"]"));
     assert!(root
         .path()
         .join(".barracuda/bin/barracuda-runner")
@@ -119,6 +119,70 @@ fn select_uses_platform_owned_features_for_the_board_chip() {
 }
 
 #[test]
+fn select_configures_the_esp32p4_c_hard_float_abi() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board manifest");
+    fs::write(
+        &board_path,
+        board
+            .replace("chip: macos", "chip: macos\n  flash-size: 16mb")
+            .replace(
+                "native-layout:",
+                "toolchain:\n  target: riscv32imafc-unknown-none-elf\nnative-layout:",
+            ),
+    )
+    .expect("ESP32-P4 target");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace("- os: macos", "- triple: riscv32imafc-unknown-none-elf"),
+    )
+    .expect("ESP32-P4 platform target");
+    let mut output = Vec::new();
+
+    run(["select", "local-macos"], root.path(), &mut output).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    assert!(cargo.contains("[env]"));
+    assert!(cargo.contains(
+        "CC_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }"
+    ));
+    assert!(cargo.contains(
+        "CXX_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }"
+    ));
+    assert!(cargo.contains(
+        "AR_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }"
+    ));
+    assert!(cargo.contains(
+        "AR = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }"
+    ));
+    assert!(cargo.contains(
+        "RANLIB = { value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }"
+    ));
+    assert!(cargo.contains(
+        "CMAKE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-cmake\", relative = true }"
+    ));
+    assert!(cargo.contains(
+        "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }"
+    ));
+    assert!(
+        cargo.contains(
+            "CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\""
+        )
+    );
+    assert!(cargo.contains("rustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]"));
+    assert!(cargo.contains("linker = \"boards/tool/assets/esp32p4-linker\""));
+    assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
+    assert!(cargo.contains("\"--launcher-argument=16mb\""));
+    assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));
+    assert!(cargo.contains("\"--launcher-argument=ota_0\""));
+}
+
+#[test]
 fn select_uses_the_platform_hal_without_a_chip_adapter() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");
@@ -139,18 +203,19 @@ fn select_uses_the_platform_hal_without_a_chip_adapter() {
         platform.replace("board-chips: [macos]", "board-chips: [macos, esp32]"),
     )
     .expect("Platform chip selection");
-    fs::create_dir_all(root.path().join("drivers")).expect("Driver catalog");
+    fs::create_dir_all(root.path().join("peripherals/impl"))
+        .expect("peripheral implementation catalog");
 
     run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
     let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
         .expect("selected Board manifest");
-    assert!(!selected.contains("barracuda-driver-gpio"));
+    assert!(!selected.contains("barracuda-peripheral-gpio"));
     assert!(!selected.contains("barracuda-platform-"));
 }
 
 #[test]
-fn select_adds_only_an_unknown_peripheral_driver() {
+fn select_adds_only_an_unknown_implementation_of_a_registered_peripheral_api() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "sensor-board", "sensor-board");
     fs::write(
@@ -161,26 +226,27 @@ hardware:
   chip: esp32
 native-layout:
   artifact: file-layout.yml
-internal-io:
-  i2c-device:
-    sensor:
-      peripheral: I2C0
-      scl: GPIO1
-      sda: GPIO2
-      frequency-hz: 400000
-  spi-device:
-    auxiliary:
-      peripheral: SPI2
-      sck: GPIO3
-      mosi: GPIO4
-      chip-select: GPIO5
-      frequency-hz: 10000000
-builtin-peripherals:
-  environment:
-    driver: future-sensor
-    bindings:
-      i2c: sensor
-      spi: auxiliary
+peripherals:
+  io:
+    i2c-device:
+      sensor:
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
+    spi-device:
+      auxiliary:
+        peripheral: SPI2
+        sck: GPIO3
+        mosi: GPIO4
+        chip-select: GPIO5
+        frequency-hz: 10000000
+  devices:
+    environment:
+      implementation: future-sensor
+      bindings:
+        i2c: sensor
+        spi: auxiliary
 "#,
     )
     .expect("Board YAML");
@@ -191,18 +257,20 @@ builtin-peripherals:
         platform.replace("board-chips: [macos]", "board-chips: [macos, esp32]"),
     )
     .expect("Platform chip selection");
-    let driver = root.path().join("drivers/future-sensor");
-    fs::create_dir_all(&driver).expect("Driver directory");
+    let driver = root
+        .path()
+        .join("peripherals/impl/power-monitor/future-sensor");
+    fs::create_dir_all(&driver).expect("peripheral implementation directory");
     fs::write(
-        driver.join("driver.yml"),
+        driver.join("peripheral.yml"),
         r#"
 id: future-sensor
 api-version: 1
-capability: environment-sensor
+peripheral: power-monitor
 implementation:
   package: future-sensor
   crate: future_sensor
-  factory: "::{{crate}}::Driver<{{binding.i2c.type}}, {{binding.spi.type}}>"
+  factory: "::{{crate}}::Implementation<{{binding.i2c.type}}, {{binding.spi.type}}>"
   bindings-expression: "::{{crate}}::Bindings::new({{binding.i2c.value}}, {{binding.spi.value}})"
   config-expression: "()"
 bindings:
@@ -213,16 +281,16 @@ bindings:
 parameters: {}
 "#,
     )
-    .expect("Driver manifest");
+    .expect("peripheral implementation manifest");
 
     run(["select", "sensor-board"], root.path(), &mut Vec::new()).expect("select Board");
 
     let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
         .expect("selected Board manifest");
     assert!(selected.contains("future-sensor.workspace = true"));
-    assert!(!selected.contains("barracuda-driver-i2c"));
-    assert!(!selected.contains("barracuda-driver-spi"));
-    assert!(!selected.contains("barracuda-driver-gpio"));
+    assert!(!selected.contains("barracuda-peripheral-i2c"));
+    assert!(!selected.contains("barracuda-peripheral-spi"));
+    assert!(!selected.contains("barracuda-peripheral-gpio"));
 }
 
 #[test]

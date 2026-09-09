@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use barracuda_board_hal::{BoardHalResources, ExposedIo};
+use barracuda_board_hal::{BoardResources, ExposedIo};
 use barracuda_platform_test::never_embassy_stack;
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 
@@ -13,10 +13,10 @@ impl ExposedIo for TestIo {}
 #[test]
 fn plugin_context_carries_one_shared_runtime_io_owner() {
     let stack = never_embassy_stack();
-    let hal = BoardHalResources::new(7_u8, TestIo);
+    let hal = BoardResources::new(7_u8, TestIo);
     let context = PluginContext::from_hal(stack, ClientFactory::plaintext(stack), hal);
 
-    assert_eq!(context.hal.builtins, 7);
-    let shared = Arc::clone(&context.hal.io);
-    assert!(Arc::ptr_eq(&shared, &context.hal.io));
+    assert_eq!(context.hal.peripherals, 7);
+    let shared = Arc::clone(&context.hal.exposed_io);
+    assert!(Arc::ptr_eq(&shared, &context.hal.exposed_io));
 }

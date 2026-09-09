@@ -23,6 +23,12 @@ pub enum HalBinding {
     SpiBus,
     /// Data-only SPI waveform construction with a Platform-owned controller.
     SpiOutput,
+    /// MIPI DSI display-host construction.
+    DsiHost,
+    /// MIPI CSI camera-host construction.
+    MipiCsi,
+    /// SDMMC block-device construction.
+    SdmmcDevice,
     /// I2C-device construction.
     I2cDevice,
     /// Parallel camera receiver construction.

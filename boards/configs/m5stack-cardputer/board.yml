@@ -5,23 +5,24 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    display-spi:
-      peripheral: SPI3
-      sck: GPIO36
-      mosi: GPIO35
-      chip-select: GPIO37
-      frequency-hz: 40000000
-builtin-peripherals:
-  display:
-    driver: mipi-dbi-display
-    bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
-    parameters:
-      controller: st7789
-      width: 135
-      height: 240
-      offset-x: 52
-      offset-y: 40
-      invert-colors: true
-      orientation: deg90
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        peripheral: SPI3
+        sck: GPIO36
+        mosi: GPIO35
+        chip-select: GPIO37
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
+      parameters:
+        controller: st7789
+        width: 135
+        height: 240
+        offset-x: 52
+        offset-y: 40
+        invert-colors: true
+        orientation: deg90

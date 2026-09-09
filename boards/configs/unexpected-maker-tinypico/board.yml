@@ -5,20 +5,21 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-bus:
-    rgb-led:
-      # Unexpected Maker TinyPICO onboard APA102 clock and data wiring.
-      peripheral: SPI2
-      sck: GPIO12
-      mosi: GPIO2
-      frequency-hz: 1000000
-builtin-peripherals:
-  led-strip:
-    driver: apa102-led-strip
-    bindings:
-      power-enable: GPIO13
-      spi: rgb-led
-    parameters:
-      led-count: 1
-      global-brightness: 31
+peripherals:
+  io:
+    spi-bus:
+      rgb-led:
+        # Unexpected Maker TinyPICO onboard APA102 clock and data wiring.
+        peripheral: SPI2
+        sck: GPIO12
+        mosi: GPIO2
+        frequency-hz: 1000000
+  devices:
+    led-strip:
+      implementation: apa102-led-strip
+      bindings:
+        power-enable: GPIO13
+        spi: rgb-led
+      parameters:
+        led-count: 1
+        global-brightness: 31

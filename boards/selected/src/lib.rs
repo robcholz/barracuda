@@ -14,7 +14,7 @@ use selected::SelectedBoardHal;
 /// Board selected by the Board build input.
 pub use selected::BOARD;
 
-/// Board HAL capability bundle for the selected Board.
+/// Board resources for the selected Board.
 pub type Resources = <SelectedBoardHal as BoardHal>::Resources;
 
 /// Move-only chip bindings required by the selected Board HAL.
