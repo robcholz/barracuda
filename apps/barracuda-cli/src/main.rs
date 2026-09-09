@@ -14,10 +14,14 @@ mod configure;
 mod line_editor;
 mod protocol;
 
-use std::{net::IpAddr, path::Path};
+use std::{net::IpAddr, path::Path, process};
 
 use anyhow::{bail, Context as _, Result};
-use dialoguer::{console::Style, theme::ColorfulTheme, Input, Select};
+use dialoguer::{
+    console::{Style, Term},
+    theme::ColorfulTheme,
+    Input, Select,
+};
 
 const DEFAULT_ADDRESS: &str = "http://10.42.0.2:8787";
 const DEFAULT_REMOTE_PORT: u16 = 8787;
@@ -43,7 +47,12 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    match mode_from_args(&args.iter().skip(1).map(String::as_str).collect::<Vec<_>>())? {
+    let args = args.iter().skip(1).map(String::as_str).collect::<Vec<_>>();
+    let mode = mode_from_args(&args)?;
+    if matches!(mode, RunMode::Configure(_)) {
+        install_interrupt_handler().context("install Ctrl-C handler")?;
+    }
+    match mode {
         RunMode::Connect => {
             let url = websocket_url(&prompt_for_address()?)?;
             client::run(&url).await
@@ -56,6 +65,26 @@ async fn run() -> Result<()> {
             configure::run(&address).await
         }
     }
+}
+
+fn install_interrupt_handler() -> Result<(), ctrlc::Error> {
+    ctrlc::set_handler(|| {
+        handle_interrupt(
+            || {
+                let _ = Term::stderr().show_cursor();
+            },
+            process::exit,
+        );
+    })
+}
+
+fn handle_interrupt<R, E, T>(restore_cursor: R, exit: E) -> T
+where
+    R: FnOnce(),
+    E: FnOnce(i32) -> T,
+{
+    restore_cursor();
+    exit(130)
 }
 
 fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
@@ -169,7 +198,7 @@ fn remote_address(address: IpAddr) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{cell::RefCell, fs};
 
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -242,5 +271,20 @@ mod tests {
     fn unknown_subcommand_is_rejected() {
         let error = mode_from_args(&["chat"]).expect_err("unknown command");
         assert!(error.to_string().contains("unknown command `chat`"));
+    }
+
+    #[test]
+    fn interrupt_restores_cursor_before_exiting() {
+        let events = RefCell::new(Vec::new());
+
+        super::handle_interrupt(
+            || events.borrow_mut().push("cursor"),
+            |status| {
+                assert_eq!(status, 130);
+                events.borrow_mut().push("exit");
+            },
+        );
+
+        assert_eq!(*events.borrow(), ["cursor", "exit"]);
     }
 }

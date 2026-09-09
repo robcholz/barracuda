@@ -777,6 +777,7 @@ dependencies = [
  "anyhow",
  "barracuda-imessage-web-plugin",
  "bytes",
+ "ctrlc",
  "dialoguer",
  "futures-util",
  "http-body-util",
