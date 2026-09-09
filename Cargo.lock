@@ -721,6 +721,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-ble-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-board"
 version = "0.1.0"
 
@@ -1196,6 +1207,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-net-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "barracuda-net-gateway-protocol",
+ "clap",
+ "futures-util",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "barracuda-net-gateway-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "barracuda-ov2640-camera"
 version = "0.1.0"
 dependencies = [
@@ -1219,6 +1249,21 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-net",
+]
+
+[[package]]
+name = "barracuda-platform-browser"
+version = "0.1.0"
+dependencies = [
+ "barracuda-net-gateway-protocol",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-net-driver-channel",
+ "heapless 0.9.3",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -1715,6 +1760,7 @@ dependencies = [
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
  "barracuda-audio-plugin",
+ "barracuda-ble-plugin",
  "barracuda-board-hal",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
@@ -3178,6 +3224,8 @@ dependencies = [
  "document-features",
  "embassy-executor-macros",
  "embassy-executor-timer-queue",
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -7002,6 +7050,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-bindgen-futures"
+version = "0.4.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b7777d5cc23d0e91404e53ce2d5e8ec7acae3026b16233dba62cd3246457950"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "wasm-bindgen-macro"
 version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7047,6 +7105,16 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "web-sys"
+version = "0.3.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c435338968042f4f59a557f690a253676d47ce13ceb55d70100e7facf6620a30"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]

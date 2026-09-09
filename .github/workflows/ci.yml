@@ -54,7 +54,7 @@ jobs:
       - name: Check CI covers every Platform
         run: |
           diff -u \
-            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(printf '%s\n' browser esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
             <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
               -exec dirname {} \; | xargs -n1 basename | sort)
 

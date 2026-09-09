@@ -34,6 +34,7 @@ barracuda-vm-plugin.workspace = true
 barracuda-vm-agent-plugin.workspace = true
 barracuda-analog-plugin.workspace = true
 barracuda-audio-plugin.workspace = true
+barracuda-ble-plugin.workspace = true
 barracuda-camera-plugin.workspace = true
 barracuda-display-plugin.workspace = true
 barracuda-vm-filesystem-plugin.workspace = true

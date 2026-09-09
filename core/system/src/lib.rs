@@ -14,8 +14,8 @@ mod resources;
 
 use barracuda_board_hal::{
     audio::BuiltinAudioCodec, camera::BuiltinCamera, display::BuiltinDisplay,
-    led_strip::BuiltinLedStrip, AnalogProvider, BoardHalResources, DigitalProvider, ExposedIo,
-    I2cProvider, I2sProvider, PwmProvider, SpiProvider, UartProvider,
+    led_strip::BuiltinLedStrip, AnalogProvider, BleAdapter, BleProvider, BoardHalResources,
+    DigitalProvider, ExposedIo, I2cProvider, I2sProvider, PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -90,6 +90,7 @@ where
     <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Io: ExposedIo
         + AnalogProvider
+        + BleProvider
         + DigitalProvider
         + I2cProvider
         + I2sProvider
@@ -101,6 +102,8 @@ where
     <<Io as AnalogProvider>::Output as barracuda_board_hal::AnalogErrorType>::Error:
         core::fmt::Debug,
     <Io as AnalogProvider>::Error: core::fmt::Display,
+    <Io as BleProvider>::Error: core::fmt::Display,
+    <<Io as BleProvider>::Adapter as BleAdapter>::Error: core::fmt::Debug,
     <<Io as PwmProvider>::Output as embedded_hal::pwm::ErrorType>::Error: core::fmt::Debug,
     <Io as PwmProvider>::Error: core::fmt::Display,
     Io::Pin: Send,
@@ -194,6 +197,7 @@ where
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
             barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),
+            barracuda_ble_plugin::BlePlugin::new(&mut plugin_context),
             barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
             barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
             barracuda_vm_filesystem_plugin::VmFilesystemPlugin::new(&mut plugin_context),

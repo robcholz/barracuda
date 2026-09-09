@@ -47,6 +47,12 @@ A Platform is not a Board support package, a peripheral-driver collection, or a
 System dependency bag. Its HAL module contains reusable vendor adaptation, not
 product wiring.
 
+The read-only identity and observation model for the assembled image, selected
+Platform, current boot, and selected Board is defined in
+[`system-board-info.md`](system-board-info.md). Those facts preserve the two
+selection axes and are published by Plugins without moving discovery into the
+Plugin layer.
+
 ## Composition boundary
 
 Board and Platform selection are independent build inputs. A Board never

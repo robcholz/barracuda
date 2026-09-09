@@ -5,7 +5,9 @@
 Exposed I/O lets an application select a function for Board-visible physical
 resources at runtime. A package pin is the stable resource; digital GPIO,
 analog conversion, PWM, I2C, SPI, UART, and I2S are functions constructed from
-move-only pin and controller tokens.
+move-only pin and controller tokens. Application-visible singleton controllers
+such as BLE participate in the same runtime ownership model without requiring
+package pins.
 
 Built-in peripherals are outside this runtime model. Board composition
 constructs their Drivers before System starts and passes only the remaining,
@@ -54,9 +56,10 @@ separate Platform capability.
 ## Provider boundary
 
 Protocol construction is expressed as one provider trait per function family.
-The current contracts construct digital pins, asynchronous I2C buses, and
-asynchronous SPI buses. System requires these providers on one exposed-I/O
-owner, so every protocol sees the same physical token state.
+The contracts cover digital, analog, PWM, asynchronous I2C and SPI, UART, I2S,
+and an exclusive BLE adapter. System requires these providers on one exposed-I/O
+owner, so every protocol sees the same physical token state and controller
+inventory.
 
 The Platform implementation validates pin routing and configuration and then
 returns a concrete value implementing the ecosystem contract. Digital handles
@@ -72,6 +75,13 @@ The generated `RuntimeIo` is the single concrete owner. A Platform with runtime
 controller pools makes I2C and SPI construction available; a Platform with
 empty pools returns an explicit no-controller error. The VM packages therefore
 never pretend a controller exists merely because pins were exposed.
+
+BLE is a controller claim rather than a pin-function claim. A Platform may
+install one initialized adapter into `RuntimeIo`; `ble.open()` moves it into the
+application handle exactly once. Targets without a compatible controller and
+host stack install no adapter and report unavailable. Closing the handle drops
+the stack value but does not recreate the vendor radio singleton, matching the
+same boot-lifetime ownership rule used for pins and serial controllers.
 
 New function families add a focused provider beside their VM package. UART can
 return an `embedded-io-async` stream, PWM can return
@@ -126,6 +136,7 @@ The public shape is checked against several materially different consumers:
 | SPI register device | shared bus plus CS | async SPI device transactions |
 | UART console | controller, TX/RX and optional flow-control pins | async byte stream |
 | I2S audio | controller, clocks, data pins, DMA | PCM stream |
+| BLE observer | singleton radio/controller | bounded async advertisement scan |
 
 Single-pin, multi-wire, optional-role, shared-bus, and DMA-backed cases all use
 the same atomic move-only claim primitive. Their different configuration and
@@ -142,6 +153,8 @@ pin mux itself.
   GPIO, I2C, or SPI collection.
 - A physical token is consumed by at most one function during a boot.
 - Multi-resource acquisition either claims every role or none of them.
+- A singleton controller such as BLE is moved into at most one application
+  handle during a boot.
 - Platform routing and construction complete before a handle is returned.
 - Function handles operate through upstream HAL traits where those traits
   exist.
