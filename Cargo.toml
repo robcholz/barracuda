@@ -108,8 +108,6 @@ barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-cli-style = { path = "shared/cli-style" }
-barracuda-driver = { path = "drivers/api" }
-barracuda-driver-config = { path = "drivers/config" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
