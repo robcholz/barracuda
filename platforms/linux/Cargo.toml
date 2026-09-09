@@ -10,7 +10,7 @@ barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-net.workspace = true
 embassy-net-driver-channel.workspace = true
 embassy-sync.workspace = true

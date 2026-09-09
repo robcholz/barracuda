@@ -111,9 +111,9 @@ fn plugin_starts_its_embassy_server_task() {
         .spawn(move || {
             let executor = Box::leak(Box::new(Executor::new()));
             executor.run(|spawner| {
-                spawner
-                    .spawn(start_webserver_task(spawner, completed))
-                    .expect("spawn WebServer Plugin test");
+                spawner.spawn(
+                    start_webserver_task(spawner, completed).expect("spawn WebServer Plugin test"),
+                );
             });
         })
         .expect("spawn WebServer Plugin executor thread");

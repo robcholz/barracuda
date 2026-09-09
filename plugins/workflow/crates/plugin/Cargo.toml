@@ -19,7 +19,7 @@ thiserror = { version = "2", default-features = false }
 [dev-dependencies]
 barracuda-platform-test.workspace = true
 barracuda-vfs-memfs.workspace = true
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

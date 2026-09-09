@@ -20,16 +20,16 @@ barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-package-api = { path = "../package-api" }
 embassy-executor.workspace = true
 embassy-time.workspace = true
-embedded-alloc = { version = "0.7", default-features = false, features = ["tlsf"] }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 getset = "0.1"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
+embedded-alloc = { version = "0.7", default-features = false, features = ["tlsf"] }
 
 [dev-dependencies]
 barracuda-lua = { path = "../lua", features = ["vendored"] }
 critical-section = { version = "1", features = ["std"] }
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

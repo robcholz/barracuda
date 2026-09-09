@@ -83,10 +83,10 @@ impl Plugin for VmPlugin {
             .vm
             .start(context.task_spawner()?)
             .map_err(PluginError::registration)?;
-        context
-            .task_spawner()?
-            .spawn(vm_lifecycle_task(runtime.vm, context.task_token()))
-            .map_err(PluginError::registration)
+        let task = vm_lifecycle_task(runtime.vm, context.task_token())
+            .map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
     }
 }
 

@@ -296,9 +296,10 @@ impl Plugin for WorkflowPlugin {
             .ok_or_else(|| PluginError::registration(WorkflowRuntimeUnavailable))?;
         let spawner = context.task_spawner()?;
         let cancellation = context.task_token();
-        spawner
-            .spawn(workflow_task(runtime, service, cancellation))
-            .map_err(PluginError::registration)
+        let task =
+            workflow_task(runtime, service, cancellation).map_err(PluginError::registration)?;
+        spawner.spawn(task);
+        Ok(())
     }
 }
 

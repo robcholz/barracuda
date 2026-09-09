@@ -69,9 +69,9 @@ pub(crate) async fn initialize(
     let stack_resources = Box::leak(Box::new(StackResources::<STACK_SOCKET_CAPACITY>::new()));
     let (stack, network_runner) = embassy_net::new(device, config, stack_resources, rand::random());
 
-    spawner.spawn(network_task(network_runner))?;
-    spawner.spawn(receive_task(stream, link, rx_runner))?;
-    spawner.spawn(transmit_task(sink, link, tx_runner))?;
+    spawner.spawn(network_task(network_runner)?);
+    spawner.spawn(receive_task(stream, link, rx_runner)?);
+    spawner.spawn(transmit_task(sink, link, tx_runner)?);
     link.set_link_state(LinkState::Up);
     Ok(stack)
 }

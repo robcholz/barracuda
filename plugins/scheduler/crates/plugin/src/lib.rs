@@ -77,14 +77,10 @@ impl Plugin for SchedulerPlugin {
             .runtime
             .take()
             .ok_or_else(|| PluginError::registration(SchedulerRuntimeUnavailable))?;
-        context
-            .task_spawner()?
-            .spawn(scheduler_task(
-                runtime.scheduler,
-                runtime.workflow,
-                context.task_token(),
-            ))
-            .map_err(PluginError::registration)
+        let task = scheduler_task(runtime.scheduler, runtime.workflow, context.task_token())
+            .map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
     }
 }
 

@@ -139,9 +139,10 @@ mod tests {
         std::thread::spawn(move || {
             let executor = Box::leak(Box::new(Executor::new()));
             executor.run(|spawner| {
-                spawner
-                    .spawn(exercise_awaited_action(spawner, completed))
-                    .expect("spawn awaited Workflow Action test");
+                spawner.spawn(
+                    exercise_awaited_action(spawner, completed)
+                        .expect("spawn awaited Workflow Action test"),
+                );
             });
         });
 

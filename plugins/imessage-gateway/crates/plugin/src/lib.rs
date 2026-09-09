@@ -125,18 +125,12 @@ impl Plugin for IMessageGatewayPlugin {
             .ok_or_else(|| PluginError::registration(GatewayRuntimeUnavailable))?;
         let spawner = context.task_spawner()?;
         for _worker in 0..STREAM_WORKERS {
-            spawner
-                .spawn(gateway_event_worker(
-                    Rc::clone(&runtime),
-                    context.task_token(),
-                ))
+            let event = gateway_event_worker(Rc::clone(&runtime), context.task_token())
                 .map_err(PluginError::registration)?;
-            spawner
-                .spawn(gateway_media_worker(
-                    Rc::clone(&runtime),
-                    context.task_token(),
-                ))
+            spawner.spawn(event);
+            let media = gateway_media_worker(Rc::clone(&runtime), context.task_token())
                 .map_err(PluginError::registration)?;
+            spawner.spawn(media);
         }
         Ok(())
     }

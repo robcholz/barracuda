@@ -155,16 +155,16 @@ impl Plugin for AgentPlugin {
             .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
         let cancellation = context.task_token();
         let filesystem = context.filesystem()?.clone();
-        context
-            .task_spawner()?
-            .spawn(agent_task(
-                runtime_service,
-                workflow_adapter,
-                workflow_service,
-                filesystem,
-                cancellation,
-            ))
-            .map_err(PluginError::registration)
+        let task = agent_task(
+            runtime_service,
+            workflow_adapter,
+            workflow_service,
+            filesystem,
+            cancellation,
+        )
+        .map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
     }
 }
 

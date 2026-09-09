@@ -208,9 +208,9 @@ fn run_completion_is_awaited_and_contains_the_terminal_result() {
     std::thread::spawn(move || {
         let executor = Box::leak(Box::new(Executor::new()));
         executor.run(|spawner| {
-            spawner
-                .spawn(exercise_vm_completion(spawner, completed))
-                .expect("spawn VM completion test");
+            spawner.spawn(
+                exercise_vm_completion(spawner, completed).expect("spawn VM completion test"),
+            );
         });
     });
 
@@ -226,9 +226,9 @@ fn dropping_run_handle_cancels_the_execution() {
     std::thread::spawn(move || {
         let executor = Box::leak(Box::new(Executor::new()));
         executor.run(|spawner| {
-            spawner
-                .spawn(exercise_vm_handle_drop(spawner, completed))
-                .expect("spawn VM handle-drop test");
+            spawner.spawn(
+                exercise_vm_handle_drop(spawner, completed).expect("spawn VM handle-drop test"),
+            );
         });
     });
 
