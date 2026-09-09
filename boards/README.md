@@ -1,8 +1,9 @@
 # Boards
 
 `boards/` owns concrete product bundles and the build-time tooling that turns
-their common YAML into static Rust data. Reusable peripheral Drivers live in
-the workspace-level `drivers/` directory. Each Platform adapts its vendor HAL
+their common YAML into static Rust data. Semantic peripheral implementations live
+under `peripherals/impl`; reusable low-level chip drivers live under
+`drivers/chips`. Each Platform adapts its vendor HAL
 into upstream hardware traits; Board bundles contain no handwritten Rust HAL.
 
 ```text
@@ -22,85 +23,55 @@ explicit Board hardware surface, and native-layout binding. It must not contain
 a Rust Platform type or select `macos`, `linux`, `esp32`, or another Platform
 implementation.
 
-The optional hardware surface has three sections. `exposed-io` names physical
-pins once, without assigning their runtime function. `internal-io` names
-protocol resources reserved for fixed peripherals. `builtin-peripherals`
-selects a Driver by stable ID, binds its roles, and supplies typed construction
-parameters. The Platform HAL later consumes an exposed pin token as digital,
-analog, PWM, I2C, SPI, UART, I2S, or another supported function selected by the
-application.
+The hardware surface has exactly two sections. `peripherals` describes optional
+attached devices and the private I/O used to construct them. `exposed-io` names
+physical resources that applications may configure at runtime. The Platform
+HAL later consumes an exposed pin token as digital, analog, PWM, I2C, SPI,
+UART, I2S, or another supported function selected by the application.
 
 ```yaml
+peripherals:
+  io:
+    i2c-device:
+      sensor-i2c:
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        peripheral: SPI2
+        sck: GPIO6
+        mosi: GPIO5
+        chip-select: GPIO7
+        frequency-hz: 80000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        backlight: GPIO9
+        dc: GPIO4
+        reset: GPIO8
+        spi: display-spi
+      parameters:
+        controller: gc9a01
+        width: 240
+        height: 240
+
 exposed-io:
   pins:
-    expansion-1:
-      pin: GPIO1
-    expansion-2:
-      pin: GPIO2
-
-internal-io:
-  i2c-device:
-    sensor-i2c:
-      peripheral: I2C0
-      scl: GPIO1
-      sda: GPIO2
-      frequency-hz: 400000
-  spi-device:
-    display-spi:
-      peripheral: SPI2
-      sck: GPIO6
-      mosi: GPIO5
-      chip-select: GPIO7
-      frequency-hz: 80000000
-  spi-output:
-    status-pixels:
-      data: GPIO15
-      frequency-hz: 2400000
-  camera-capture:
-    camera:
-      peripheral: LCD_CAM
-      dma: DMA_CH0
-      xclk: GPIO15
-      pclk: GPIO13
-      vsync: GPIO6
-      href: GPIO7
-      data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
-      xclk-frequency-hz: 20000000
-      dma-buffer-bytes: 98304
-  i2s-stream:
-    audio:
-      peripheral: I2S0
-      dma: DMA_CH1
-      bclk: GPIO4
-      ws: GPIO5
-      dout: GPIO1
-      din: GPIO2
-      sample-rate-hz: 16000
-      channels: 2
-      bits-per-sample: 16
-      dma-buffer-bytes: 1024
-
-builtin-peripherals:
-  display:
-    driver: mipi-dbi-display
-    bindings:
-      backlight: GPIO9
-      dc: GPIO4
-      reset: GPIO8
-      spi: display-spi
-    parameters:
-      controller: gc9a01
-      width: 240
-      height: 240
+    expansion-1: { pin: GPIO3 }
+    expansion-2: { pin: GPIO4 }
 ```
 
-Every selectable peripheral Driver owns `drivers/<id>/driver.yml`, which
-declares its bindings, parameters, capability, and static construction
-templates. `cargo board sync` discovers Drivers by convention. `board.yml`
+Every selectable peripheral implementation owns
+`peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`, which declares its
+bindings, parameters, peripheral API, and static construction templates.
+`cargo board sync` discovers implementations by convention. `board.yml`
 remains hardware data and contains no Cargo package, crate path, Rust type, or
 Platform feature registration. Selection resolves and renders the complete
 composition before it writes selection state, then enables only the concrete
-peripheral Driver packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
+peripheral implementation packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
 construction comes from the independently selected Platform HAL.
 The generated `SelectedBoardHal` is monomorphized; no runtime registry or trait
 object is added.
@@ -128,7 +99,7 @@ native format:
 
 Those native files are the only physical source of truth. Platform build code
 validates `board.yml` bindings against them and projects the selected region
-into `embedded-storage`/Embassy capabilities. Do not add a generic Barracuda
+into `embedded-storage`/Embassy interfaces. Do not add a generic Barracuda
 partition table or a converter that emits vendor tables.
 
 Select a concrete Board once, then use the ordinary build command:
@@ -165,7 +136,7 @@ the self-described Platform catalog, then generates the two selected axes
 independently. Device entry code constructs the exact typed Platform and Board
 bindings.
 
-Adding a Board bundle or Driver is a maintainer operation. Run `cargo board sync`
+Adding a Board bundle or peripheral implementation is a maintainer operation. Run `cargo board sync`
 and commit its deterministic workspace dependency block. Use
 `cargo board sync --check` in CI to reject a stale registry. Consumers who pull
 that commit only run `cargo board select` followed by ordinary Cargo commands.
@@ -185,7 +156,7 @@ one development kit as an alias for every product built around the chip.
 
 `stm32f429zi-nucleo` demonstrates the same YAML-only composition outside the
 ESP family. Its config builds the active-high green LD1 on PB0 through the
-shared `indicator-led` Driver and explicitly exposes PC13 as the dynamic GPIO
+shared `indicator-led` implementation and explicitly exposes PC13 as the dynamic GPIO
 name `user-button`. The STM32 Platform HAL replaces its former Board-specific
 HAL crate. The name `user-button` identifies the physical PC13 pin; an
 application acquires its digital function at runtime.
@@ -197,11 +168,26 @@ ESP chip family currently implemented by the workspace: ESP32, ESP32-C3,
 ESP32-C6, ESP32-S3, and ESP32-P4. Run `cargo board select` and search for the
 `m5stack-` prefix to see the complete, current catalog.
 
+The M5Stack Tab5 selects `m5stack-tab5`. Its Board HAL instantiates the onboard
+ES8388/ES7210 audio path, BMI270 inertial measurement, INA226 power monitor,
+RX8130CE real-time clock, microSD storage, revision-aware touch and DSI display,
+with pure `esp-hal` bindings. Audio, display, and touch implementations
+privately compose the PI4IOE5V6408 chip driver for their enable or reset lines;
+the expander is not a System-visible peripheral. The Board also exposes
+HY2.0-4P PORT.A, rear M5-Bus, and available SIT3088 RS-485 signals through the
+shared runtime I/O owner. The
+`m5stack-tab5x` identity remains separate and must not be substituted based only
+on an ESP32-P4 silicon revision reported by the flashing tool.
+
+The fitted SC202CS camera remains absent from the Board peripheral set because
+`esp-hal` does not currently expose the ESP32-P4 MIPI-CSI/ISP data plane. It
+must not be advertised until a real bare-metal driver can own that hardware.
+
 All bundles establish Board identity, the correct Rust compilation target, and
-a native ESP partition layout. The built-in display matrix currently composes
+a native ESP partition layout. The display matrix currently composes
 ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, plus the
 GDEH0154D67 e-paper panels in CoreInk and AirQ through
-`gdeh0154d67-display`. Both families expose Barracuda's stable `BuiltinDisplay`
-API. Other fixed peripherals remain absent until their reusable Driver is
+`gdeh0154d67-display`. Both families expose Barracuda's stable `DisplayPeripheral`
+API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

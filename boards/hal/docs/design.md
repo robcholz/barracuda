@@ -8,7 +8,7 @@ analog conversion, PWM, I2C, SPI, UART, and I2S are functions constructed from
 move-only pin and controller tokens.
 
 Built-in peripherals are outside this runtime model. Board composition
-constructs their Drivers before System starts and passes only the remaining,
+constructs their peripheral implementations before System starts and passes only the remaining,
 explicitly exposed resources to the runtime I/O owner.
 
 ```text
@@ -49,7 +49,7 @@ but it cannot safely recreate the original vendor singleton tokens. Reopening
 that pin, including as another protocol, therefore fails until restart. This is
 an intentional safety boundary rather than an emulated hot-reconfiguration
 promise. Concurrent electrical fan-out and implicit pin sharing require a
-separate Platform capability.
+separate Platform resource.
 
 ## Provider boundary
 
