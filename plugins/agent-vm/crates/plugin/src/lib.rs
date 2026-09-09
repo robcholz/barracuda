@@ -202,6 +202,7 @@ mod tests {
     use barracuda_agent_tool::{ToolDetachUpdate, ToolInvocation, ToolRunner, ToolSet};
     use barracuda_vm_plugin::{LuaPackageRegistry, Vm, VmInputRequest, VmRunRequest};
     use embassy_executor::{Executor, Spawner};
+    use embassy_time::Timer;
     use futures_lite::StreamExt as _;
 
     use super::vm_tool_group;
@@ -306,7 +307,46 @@ mod tests {
             {
                 return Err(format!("invalid completion settlement: {completion}"));
             }
-            Ok(())
+
+            let invocation = ToolInvocation::try_new(
+                Some("abandoned-vm-call"),
+                "vm_run",
+                &serde_json::to_string(&VmRunRequest {
+                    source: "io.read()".into(),
+                })
+                .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let (mut joined, abandoned) = ToolRunner::new(&handle).run(alloc::vec![invocation]);
+            let mut abandoned = abandoned.ok_or("second vm_run did not detach")?;
+            let accepted = joined
+                .next()
+                .await
+                .ok_or("second vm_run did not return an accepted settlement")?
+                .1;
+            if !accepted.ok {
+                return Err(format!("second vm_run was not accepted: {accepted:?}"));
+            }
+            let update = abandoned
+                .next()
+                .await
+                .ok_or("second vm_run did not report input_required")?
+                .1;
+            if !matches!(update, ToolDetachUpdate::Progress(_)) {
+                return Err(format!("expected progress update, got: {update:?}"));
+            }
+
+            drop(abandoned);
+            for _attempt in 0..50 {
+                if vm.list().runs.is_empty() {
+                    return Ok(());
+                }
+                Timer::after_millis(10).await;
+            }
+            Err(format!(
+                "VM run remained active after detached handle drop: {:?}",
+                vm.list()
+            ))
         }
         .await;
         let _ignored = completed.send(result);

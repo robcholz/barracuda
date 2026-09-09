@@ -13,6 +13,9 @@ separate `agent-vm` adapter. Starting a run returns an awaitable `VmRun` handle
 whose identifier is available immediately. `VmRun::next_update` exposes typed
 non-terminal progress and terminal completion, while awaiting `VmRun` directly
 returns only the ordered output messages and terminal outcome.
+Dropping an incomplete `VmRun` requests cooperative cancellation and wakes a
+run that is waiting for input.
+
 `Vm::list` returns a bounded snapshot of active run IDs and their current
 `running` or `input_required` state without exposing Lua source.
 

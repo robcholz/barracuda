@@ -10,6 +10,20 @@ use barracuda_vm_runtime::{
     VmRunState, VmRunUpdate,
 };
 use embassy_executor::{Executor, Spawner};
+use embassy_time::Timer;
+
+async fn wait_for_no_active_runs(vm: &Vm) -> Result<(), String> {
+    for _attempt in 0..50 {
+        if vm.list().runs.is_empty() {
+            return Ok(());
+        }
+        Timer::after_millis(10).await;
+    }
+    Err(format!(
+        "VM runs remained active after handle drop: {:?}",
+        vm.list()
+    ))
+}
 
 #[embassy_executor::task]
 async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
@@ -164,6 +178,30 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
     let _ignored = completed.send(result);
 }
 
+#[embassy_executor::task]
+async fn exercise_vm_handle_drop(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
+    let result = async {
+        let vm = Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?;
+        vm.start(spawner).map_err(|error| error.to_string())?;
+        let mut run = vm
+            .run(VmRunRequest {
+                source: "local value = io.read(); print(value)".into(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run_id = run.run_id();
+        let update = run.next_update().await.map_err(|error| error.to_string())?;
+        if update != VmRunUpdate::Progress(VmRunProgress::InputRequired { run_id }) {
+            return Err(format!("unexpected VM progress: {update:?}"));
+        }
+
+        drop(run);
+        wait_for_no_active_runs(&vm).await?;
+        Ok(())
+    }
+    .await;
+    let _ignored = completed.send(result);
+}
+
 #[test]
 fn run_completion_is_awaited_and_contains_the_terminal_result() {
     let (completed, result) = sync_channel(1);
@@ -180,4 +218,22 @@ fn run_completion_is_awaited_and_contains_the_terminal_result() {
         .recv_timeout(Duration::from_secs(10))
         .expect("VM completion test timed out")
         .expect("VM completion test failed");
+}
+
+#[test]
+fn dropping_run_handle_cancels_the_execution() {
+    let (completed, result) = sync_channel(1);
+    std::thread::spawn(move || {
+        let executor = Box::leak(Box::new(Executor::new()));
+        executor.run(|spawner| {
+            spawner
+                .spawn(exercise_vm_handle_drop(spawner, completed))
+                .expect("spawn VM handle-drop test");
+        });
+    });
+
+    result
+        .recv_timeout(Duration::from_secs(10))
+        .expect("VM handle-drop test timed out")
+        .expect("VM handle-drop test failed");
 }

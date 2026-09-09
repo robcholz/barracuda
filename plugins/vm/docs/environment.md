@@ -102,6 +102,9 @@ impose a transport-derived length limit. Starting a run returns `VmRun`: its
 input and later returns `VmRunUpdate::Completed`; directly awaiting the handle
 returns `VmRunCompletion` with ordered output and the terminal outcome. See
 [action.md](action.md) for Workflow behavior.
+Dropping an incomplete `VmRun` requests cancellation and wakes an execution
+that is waiting for input. The runtime retains the task until cooperative
+cancellation finishes, then releases its execution and memory-pool slots.
 
 `Vm::list()` returns the active executions in fixed runtime-slot order. Each
 entry contains only its `run_id` and a `running` or `input_required` state;

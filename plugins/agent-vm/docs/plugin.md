@@ -16,6 +16,10 @@ with the ordered `print(...)` lines and terminal result. `vm_list` returns
 the `run_id` and `running` or `input_required` state of every active execution.
 The other control Tools are ordinary awaited Tools.
 
+The Agent owns the detached Tool handle for the lifetime of the accepted VM
+run. Cancelling or deleting that Agent drops the handle, which cancels an
+incomplete VM execution and releases its runtime slot.
+
 The adapter owns no VM runtime or execution state. Both settlements come from
 the `VmRun` handle returned by the `Vm` typed capability; it does not translate
 VM state into Workflow Events.

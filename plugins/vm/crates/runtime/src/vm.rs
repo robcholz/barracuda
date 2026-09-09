@@ -13,7 +13,7 @@ use futures_channel::oneshot;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::{ControlError, DispatchError};
+use crate::runtime::{ControlError, DispatchError, RunCancellation};
 use crate::{VmMemoryPoolError, VmRuntime, VmRuntimeStartError};
 
 /// Default instruction interval between cooperative executor yields.
@@ -153,6 +153,7 @@ pub struct VmRun {
     run_id: u32,
     progress: VmProgressReceiver,
     completion: oneshot::Receiver<VmRunCompletion>,
+    cancellation: RunCancellation,
 }
 
 impl VmRun {
@@ -160,11 +161,13 @@ impl VmRun {
         run_id: u32,
         progress: VmProgressReceiver,
         completion: oneshot::Receiver<VmRunCompletion>,
+        cancellation: RunCancellation,
     ) -> Self {
         Self {
             run_id,
             progress,
             completion,
+            cancellation,
         }
     }
 
@@ -181,6 +184,12 @@ impl VmRun {
             })
         })
         .await
+    }
+}
+
+impl Drop for VmRun {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
     }
 }
 
