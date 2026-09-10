@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+compiler="$workspace_root/.barracuda/toolchains/riscv32-esp-elf/bin/riscv32-esp-elf-gcc"
+
+if [ ! -x "$compiler" ]; then
+    echo "missing Espressif RISC-V toolchain: $compiler" >&2
+    exit 1
+fi
+
+exec "$compiler" "$@" -mabi=ilp32f

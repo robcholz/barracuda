@@ -876,6 +876,46 @@ peripherals:
 }
 
 #[test]
+fn tab5_generates_standard_peripheral_interfaces() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let catalog = load_catalog(root).expect("repository Implementation catalog");
+    let yaml = fs::read_to_string(root.join("boards/configs/m5stack-tab5/board.yml"))
+        .expect("Tab5 Board YAML");
+    let board = parse(&yaml).expect("valid Tab5 Board");
+    let resolved = resolve_board(&board, &catalog).expect("Tab5 resolves");
+    assert_eq!(resolved.peripherals().count(), 7);
+
+    let rust = render_board_hal(&board, &resolved).expect("Tab5 HAL generates");
+    assert_valid_rust(&rust);
+    for interface in [
+        "audio::AudioCodecPeripheral for GeneratedPeripherals",
+        "display::DisplayPeripheral for GeneratedPeripherals",
+        "imu::ImuPeripheral for GeneratedPeripherals",
+        "power::PowerMonitorPeripheral for GeneratedPeripherals",
+        "real_time_clock::RealTimeClockPeripheral for GeneratedPeripherals",
+        "removable_storage::RemovableStoragePeripheral for GeneratedPeripherals",
+        "touch::TouchPeripheral for GeneratedPeripherals",
+    ] {
+        assert!(rust.contains(interface), "missing `{interface}`");
+    }
+    assert!(rust.contains("camera::CameraPeripheral for GeneratedPeripherals"));
+    assert!(rust.contains("type Camera = ::barracuda_board_hal::UnavailableCamera"));
+    assert!(rust.contains("imu::ImuPeripheral for GeneratedPeripherals"));
+    assert!(rust.contains("type Imu = InertialMeasurementPeripheral"));
+    assert!(rust.contains("barracuda_bmi270_imu::Bmi270ImuImplementation"));
+    assert!(rust.contains("power::PowerMonitorPeripheral for GeneratedPeripherals"));
+    assert!(rust.contains("type PowerMonitor = PowerMonitorPeripheral"));
+    assert!(rust.contains("barracuda_ina226_power_monitor::Ina226PowerMonitorImplementation"));
+    assert!(rust.contains("SdMmcFatRemovableStorageConfig::new(\"micro-sd\")"));
+    assert!(!rust.contains("SystemController"));
+    assert!(!rust.contains("system_controller"));
+    assert!(!rust.contains("pi4ioe5v6408"));
+}
+
+#[test]
 fn every_repository_peripheral_composition_resolves_and_generates() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+compiler="$workspace_root/.barracuda/toolchains/riscv32-esp-elf/bin/riscv32-esp-elf-gcc"
+rust_sysroot=$(rustc --print sysroot)
+rust_host=$(rustc -vV | sed -n 's/^host: //p')
+rust_lld="$rust_sysroot/lib/rustlib/$rust_host/bin/rust-lld"
+
+if [ ! -x "$compiler" ]; then
+    echo "missing Espressif RISC-V toolchain: $compiler" >&2
+    exit 1
+fi
+if [ ! -x "$rust_lld" ]; then
+    echo "missing Rust linker: $rust_lld" >&2
+    exit 1
+fi
+
+libc=$($compiler -march=rv32imafc -mabi=ilp32f -print-file-name=libc.a)
+libm=$($compiler -march=rv32imafc -mabi=ilp32f -print-file-name=libm.a)
+libgcc=$($compiler -march=rv32imafc -mabi=ilp32f -print-file-name=libgcc.a)
+libnosys=$($compiler -march=rv32imafc -mabi=ilp32f -print-file-name=libnosys.a)
+
+export DYLD_LIBRARY_PATH="$rust_sysroot/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+exec "$rust_lld" "$@" --start-group "$libc" "$libm" "$libgcc" "$libnosys" --end-group

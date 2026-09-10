@@ -1,7 +1,135 @@
 name: m5stack-tab5
 hardware:
   chip: esp32p4
+  flash-size: 16mb
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+
+peripherals:
+  io:
+    dsi-host:
+      display-link:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        backlight: GPIO22
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+    i2c-device:
+      internal-peripherals:
+        # Shared ES8388, ES7210, PI4IOE5V6408, BMI270, RX8130CE, INA226, and
+        # revision-dependent touch-controller bus.
+        peripheral: I2C0
+        scl: GPIO32
+        sda: GPIO31
+        frequency-hz: 400000
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+    i2s-stream:
+      audio-stream:
+        # DOUT/DIN are named from the ESP32-P4 controller's perspective.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO27
+        ws: GPIO29
+        dout: GPIO26
+        din: GPIO28
+        mclk: GPIO30
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+  devices:
+    audio-codec:
+      implementation: es8388-es7210-audio-codec
+      bindings:
+        control: internal-peripherals
+        stream: audio-stream
+      parameters:
+        output-address: 16
+        input-address: 64
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        address: 104
+        accelerometer-range: 4g
+        gyroscope-range: 500dps
+        sample-rate: 100hz
+    power-monitor:
+      implementation: ina226-power-monitor
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        address: 65
+        # Tab5's battery-current shunt is 5 milliohms.
+        shunt-micro-ohms: 5000
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings:
+        device: micro-sd
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        address: 50
+    touch:
+      implementation: tab5-touch
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        gt911-address: 20
+        st712x-address: 85
+    video-display:
+      implementation: tab5-dsi-display
+      bindings:
+        host: display-link
+        i2c: internal-peripherals
+      parameters:
+        gt911-address: 20
+        st712x-address: 85
+  # Expansion pins remain available only when they do not overlap the fixed
+  # onboard audio resources above.
+exposed-io:
+  pins:
+    # HY2.0-4P PORT.A external I2C bus.
+    port-a-sda: { pin: GPIO53 }
+    port-a-scl: { pin: GPIO54 }
+
+    # Rear M5-Bus signal pins, named by their documented connector roles.
+    m5-bus-gpio16: { pin: GPIO16 }
+    m5-bus-pb-in: { pin: GPIO17 }
+    m5-bus-mosi: { pin: GPIO18 }
+    m5-bus-gpio45: { pin: GPIO45 }
+    # GPIO19/GPIO20 are reserved by the on-board USB-A host data pair. They
+    # also reach alternate M5-Bus/RS-485 functions electrically, but cannot be
+    # handed out as GPIO while the built-in USB host is active.
+    m5-bus-pb-out: { pin: GPIO52 }
+    m5-bus-sck: { pin: GPIO5 }
+    m5-bus-rxd0: { pin: GPIO38 }
+    m5-bus-txd0: { pin: GPIO37 }
+    m5-bus-pc-rx: { pin: GPIO7 }
+    m5-bus-pc-tx: { pin: GPIO6 }
+    m5-bus-gpio3: { pin: GPIO3 }
+    m5-bus-gpio4: { pin: GPIO4 }
+    m5-bus-gpio2: { pin: GPIO2 }
+    m5-bus-gpio48: { pin: GPIO48 }
+    m5-bus-gpio47: { pin: GPIO47 }
+    m5-bus-gpio35: { pin: GPIO35 }
+    m5-bus-gpio51: { pin: GPIO51 }
+
+    # The remaining RS-485 pins stay visible for diagnostics, but the
+    # transceiver is not advertised as a usable UART without its USB-shared TX.
+    rs485-rx: { pin: GPIO21 }
+    rs485-direction: { pin: GPIO34 }

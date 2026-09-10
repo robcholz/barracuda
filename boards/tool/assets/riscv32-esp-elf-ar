@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+exec "$workspace_root/.barracuda/toolchains/riscv32-esp-elf/bin/riscv32-esp-elf-ar" "$@"
