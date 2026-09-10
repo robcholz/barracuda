@@ -185,22 +185,19 @@ impl VmRuntime {
         let cancellation = control.cancellation();
         let (completion, result) = oneshot::channel();
         let (progress, updates) = vm_progress_channel();
-        if spawner
-            .spawn(vm_execution_task(ExecutionJob {
-                run_id,
-                source,
-                control,
-                memory,
-                limits,
-                builtin_packages,
-                package_registry,
-                progress,
-                completion,
-            }))
-            .is_err()
-        {
-            return Err(DispatchError::Busy);
-        }
+        let task = vm_execution_task(ExecutionJob {
+            run_id,
+            source,
+            control,
+            memory,
+            limits,
+            builtin_packages,
+            package_registry,
+            progress,
+            completion,
+        })
+        .map_err(|_error| DispatchError::Busy)?;
+        spawner.spawn(task);
         Ok(VmRun::new(run_id, updates, result, cancellation))
     }
 

@@ -98,10 +98,9 @@ impl Plugin for VmHttpPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(HttpRuntimeUnavailable))?;
         let cancellation = context.task_token();
-        context
-            .task_spawner()?
-            .spawn(vm_http_task(runtime, cancellation))
-            .map_err(PluginError::registration)
+        let task = vm_http_task(runtime, cancellation).map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
     }
 }
 

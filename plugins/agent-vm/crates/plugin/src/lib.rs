@@ -358,9 +358,10 @@ mod tests {
         std::thread::spawn(move || {
             let executor = Box::leak(Box::new(Executor::new()));
             executor.run(|spawner| {
-                spawner
-                    .spawn(exercise_detached_tool(spawner, completed))
-                    .expect("spawn detached VM Tool test");
+                spawner.spawn(
+                    exercise_detached_tool(spawner, completed)
+                        .expect("spawn detached VM Tool test"),
+                );
             });
         });
 

@@ -77,9 +77,9 @@ impl Plugin for WebServerPlugin {
             .ok_or_else(|| PluginError::registration(WebServerRuntimeUnavailable))?;
         let spawner = context.task_spawner()?;
         let cancellation = context.task_token();
-        spawner
-            .spawn(task::web_server(webserver, self.stack, cancellation))
+        let task = task::web_server(webserver, self.stack, cancellation)
             .map_err(PluginError::registration)?;
+        spawner.spawn(task);
         Ok(())
     }
 }

@@ -99,10 +99,9 @@ impl Plugin for VmAgentPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(VmAgentRuntimeUnavailable))?;
         let cancellation = context.task_token();
-        context
-            .task_spawner()?
-            .spawn(vm_agent_task(runtime, cancellation))
-            .map_err(PluginError::registration)
+        let task = vm_agent_task(runtime, cancellation).map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
     }
 }
 
