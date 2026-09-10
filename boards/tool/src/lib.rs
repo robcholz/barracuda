@@ -724,9 +724,30 @@ fn write_selected_build(
             "\n[target.{target}]\nlinker = \"boards/tool/assets/esp32p4-linker\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
         ));
     }
+    if let Some(tool_prefix) = target
+        .strip_suffix("-none-elf")
+        .filter(|target| target.starts_with("xtensa-esp32"))
+    {
+        let environment_suffix = target.replace('-', "_");
+        let bindgen_include = workspace_root.join("boards/tool/assets/xtensa-include");
+        cargo.push_str(&format!(
+            "\n[env]\n\
+             CC_{environment_suffix} = \"{tool_prefix}-elf-gcc\"\n\
+             AR_{environment_suffix} = \"{tool_prefix}-elf-ar\"\n\
+             CFLAGS_{environment_suffix} = \"-mlongcalls\"\n\
+             BINDGEN_EXTRA_CLANG_ARGS_{environment_suffix} = {bindgen_arguments:?}\n",
+            bindgen_arguments = format!(
+                "--target=xtensa-esp-elf -I{:?}",
+                bindgen_include.to_string_lossy()
+            )
+        ));
+        cargo.push_str(&format!(
+            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-Wl,--allow-multiple-definition\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
+        ));
+    }
     if platform.application().launcher().is_some() {
         let runner = install_runner(workspace_root, &host)?;
-        if target != "riscv32imafc-unknown-none-elf" {
+        if target != "riscv32imafc-unknown-none-elf" && !target.starts_with("xtensa-esp32") {
             cargo.push_str(&format!("\n[target.{target}]\n"));
         }
         let mut runner_arguments = format!(
@@ -734,7 +755,7 @@ fn write_selected_build(
             runner.to_string_lossy(),
             platform.name()
         );
-        if target == "riscv32imafc-unknown-none-elf" {
+        if target == "riscv32imafc-unknown-none-elf" || target.starts_with("xtensa-esp32") {
             if let Some(flash_size) = board.hardware().flash_size() {
                 append_launcher_argument(&mut runner_arguments, "--flash-size");
                 append_launcher_argument(&mut runner_arguments, flash_size);

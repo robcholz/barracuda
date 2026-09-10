@@ -1,0 +1,27 @@
+id: es8311-es7210-audio-codec
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: barracuda-es8311-es7210-audio-codec
+  crate: barracuda_es8311_es7210_audio_codec
+  factory: "::{{crate}}::Es8311Es7210AudioCodecImplementation<{{binding.control.type}}, {{binding.stream.type}}, {{binding.codec-power-enable.type}}, {{binding.amplifier-enable.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Es8311Es7210Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{binding.codec-power-enable.value}}, {{binding.amplifier-enable.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Es8311Es7210Config::new({{parameter.output-address}}, {{parameter.input-address}})"
+bindings:
+  control:
+    kind: i2c-device
+  stream:
+    kind: i2s-stream
+  codec-power-enable:
+    kind: digital-output
+    initial: low
+  amplifier-enable:
+    kind: digital-output
+    initial: low
+parameters:
+  output-address:
+    type: integer
+    default: 24
+  input-address:
+    type: integer
+    default: 64

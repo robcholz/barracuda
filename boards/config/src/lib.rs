@@ -268,12 +268,16 @@ pub struct PeripheralIoDefinition {
     spi_outputs: BTreeMap<String, SpiOutputDefinition>,
     #[serde(default, rename = "spi-device")]
     spi_devices: BTreeMap<String, SpiDeviceDefinition>,
+    #[serde(default, rename = "quad-spi-device")]
+    quad_spi_devices: BTreeMap<String, QuadSpiDeviceDefinition>,
     #[serde(default, rename = "i2c-device")]
     i2c_devices: BTreeMap<String, I2cDefinition>,
     #[serde(default, rename = "camera-capture")]
     camera_captures: BTreeMap<String, CameraCaptureDefinition>,
     #[serde(default, rename = "i2s-stream")]
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
+    #[serde(default, rename = "capacitive-touch")]
+    capacitive_touch: BTreeMap<String, CapacitiveTouchDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -286,9 +290,11 @@ impl PeripheralIoDefinition {
             && self.spi_buses.is_empty()
             && self.spi_outputs.is_empty()
             && self.spi_devices.is_empty()
+            && self.quad_spi_devices.is_empty()
             && self.i2c_devices.is_empty()
             && self.camera_captures.is_empty()
             && self.i2s_streams.is_empty()
+            && self.capacitive_touch.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -327,6 +333,12 @@ impl PeripheralIoDefinition {
         self.spi_devices.get(name)
     }
 
+    /// Finds one statically selected four-data-line SPI device.
+    #[must_use]
+    pub fn quad_spi_device(&self, name: &str) -> Option<&QuadSpiDeviceDefinition> {
+        self.quad_spi_devices.get(name)
+    }
+
     /// Finds one statically selected I2C bus reserved by a peripheral implementation.
     #[must_use]
     pub fn i2c_device(&self, name: &str) -> Option<&I2cDefinition> {
@@ -343,6 +355,12 @@ impl PeripheralIoDefinition {
     #[must_use]
     pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
         self.i2s_streams.get(name)
+    }
+
+    /// Finds one fixed capacitive-touch channel group.
+    #[must_use]
+    pub fn capacitive_touch(&self, name: &str) -> Option<&CapacitiveTouchDefinition> {
+        self.capacitive_touch.get(name)
     }
 
     /// Returns whether a fixed built-in declaration consumes this controller.
@@ -371,6 +389,10 @@ impl PeripheralIoDefinition {
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
             || self
+                .quad_spi_devices
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
                 .i2c_devices
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
@@ -380,6 +402,10 @@ impl PeripheralIoDefinition {
                 .any(|binding| binding.peripheral == peripheral)
             || self
                 .i2s_streams
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .capacitive_touch
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
     }
@@ -441,6 +467,10 @@ impl PeripheralIoDefinition {
             validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
             validate_frequency(name, spi.frequency_hz)?;
         }
+        for (name, spi) in &self.quad_spi_devices {
+            validate_resource_name("internal quad-spi-device", name)?;
+            spi.validate(name)?;
+        }
         for (name, i2c) in &self.i2c_devices {
             validate_resource_name("internal i2c-device", name)?;
             i2c.validate(name)?;
@@ -452,6 +482,58 @@ impl PeripheralIoDefinition {
         for (name, stream) in &self.i2s_streams {
             validate_resource_name("internal i2s-stream", name)?;
             stream.validate(name)?;
+        }
+        for (name, touch) in &self.capacitive_touch {
+            validate_resource_name("internal capacitive-touch", name)?;
+            touch.validate(name)?;
+        }
+        Ok(())
+    }
+}
+
+/// One fixed pair of SoC capacitive-touch channels.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CapacitiveTouchDefinition {
+    peripheral: String,
+    #[serde(rename = "rtc-control")]
+    rtc_control: String,
+    #[serde(rename = "rtc-io")]
+    rtc_io: String,
+    pins: [String; 2],
+}
+
+impl CapacitiveTouchDefinition {
+    /// Returns the chip-native touch controller singleton.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the low-power controller containing the touch FSM.
+    #[must_use]
+    pub fn rtc_control(&self) -> &str {
+        &self.rtc_control
+    }
+
+    /// Returns the RTC-I/O controller containing the touch pad muxes.
+    #[must_use]
+    pub fn rtc_io(&self) -> &str {
+        &self.rtc_io
+    }
+
+    /// Returns the two touch-capable pins in stable button order.
+    #[must_use]
+    pub fn pins(&self) -> &[String; 2] {
+        &self.pins
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_identifier(name, "rtc-control", &self.rtc_control)?;
+        validate_identifier(name, "rtc-io", &self.rtc_io)?;
+        for pin in &self.pins {
+            validate_identifier(name, "pin", pin)?;
         }
         Ok(())
     }
@@ -564,20 +646,20 @@ impl DsiHostDefinition {
     }
 }
 
-/// One fixed-width SDMMC card slot and its on-chip power supply.
+/// One fixed-width SDMMC card slot and optional on-chip power supply.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SdmmcDeviceDefinition {
     peripheral: String,
     clk: String,
     cmd: String,
-    data: [String; 4],
+    data: Vec<String>,
     #[serde(rename = "bus-width")]
     bus_width: u8,
     #[serde(rename = "power-channel")]
-    power_channel: u8,
+    power_channel: Option<u8>,
     #[serde(rename = "power-millivolts")]
-    power_millivolts: u16,
+    power_millivolts: Option<u16>,
 }
 
 impl SdmmcDeviceDefinition {
@@ -601,7 +683,7 @@ impl SdmmcDeviceDefinition {
 
     /// Returns D0 through D3 in protocol order.
     #[must_use]
-    pub fn data(&self) -> &[String; 4] {
+    pub fn data(&self) -> &[String] {
         &self.data
     }
 
@@ -613,13 +695,13 @@ impl SdmmcDeviceDefinition {
 
     /// Returns the on-chip LDO channel supplying the card slot.
     #[must_use]
-    pub const fn power_channel(&self) -> u8 {
+    pub const fn power_channel(&self) -> Option<u8> {
         self.power_channel
     }
 
     /// Returns the card-slot supply voltage in millivolts.
     #[must_use]
-    pub const fn power_millivolts(&self) -> u16 {
+    pub const fn power_millivolts(&self) -> Option<u16> {
         self.power_millivolts
     }
 
@@ -630,7 +712,16 @@ impl SdmmcDeviceDefinition {
         for pin in &self.data {
             validate_identifier(name, "data", pin)?;
         }
-        if self.bus_width != 4 || self.power_channel == 0 || self.power_millivolts == 0 {
+        let power_valid = match (self.power_channel, self.power_millivolts) {
+            (Some(channel), Some(millivolts)) => channel != 0 && millivolts != 0,
+            (None, None) => true,
+            _ => false,
+        };
+        if !matches!(self.bus_width, 1 | 4)
+            || usize::from(self.bus_width) != self.data.len()
+            || !power_valid
+            || (self.bus_width == 4 && self.power_channel.is_none())
+        {
             return Err(ConfigError::InvalidSdmmcDevice {
                 resource: name.to_owned(),
             });
@@ -985,6 +1076,61 @@ pub struct SpiDeviceDefinition {
     chip_select: String,
     #[serde(rename = "frequency-hz")]
     frequency_hz: u32,
+}
+
+/// One internal four-data-line half-duplex SPI device.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct QuadSpiDeviceDefinition {
+    peripheral: String,
+    sck: String,
+    data: [String; 4],
+    #[serde(rename = "chip-select")]
+    chip_select: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl QuadSpiDeviceDefinition {
+    /// Returns the chip-native SPI controller identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the clock pin identifier.
+    #[must_use]
+    pub fn sck(&self) -> &str {
+        &self.sck
+    }
+
+    /// Returns SIO0 through SIO3 in protocol order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 4] {
+        &self.data
+    }
+
+    /// Returns the chip-select pin identifier.
+    #[must_use]
+    pub fn chip_select(&self) -> &str {
+        &self.chip_select
+    }
+
+    /// Returns the bus frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_identifier(name, "sck", &self.sck)?;
+        validate_identifier(name, "chip-select", &self.chip_select)?;
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        validate_frequency(name, self.frequency_hz)
+    }
 }
 
 impl SpiDeviceDefinition {

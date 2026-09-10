@@ -28,6 +28,8 @@ pub use runtime::{LeaseError, ResourceKind};
 
 /// Stable attached audio peripheral API.
 pub use barracuda_peripheral::audio;
+/// Stable attached-button peripheral API.
+pub use barracuda_peripheral::buttons;
 /// Stable attached camera peripheral API.
 pub use barracuda_peripheral::camera;
 /// Stable attached display peripheral API.
@@ -143,6 +145,29 @@ pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
 
     /// Places the pin in its Platform-defined disconnected state.
     fn disable(&mut self) -> Result<(), Self::Error>;
+}
+
+/// One selected half-duplex SPI device with four bidirectional data lines.
+///
+/// The opcode and 24-bit address phases are transmitted on one data line;
+/// payload bytes are transmitted on all four lines. This narrow contract keeps
+/// controller-specific QSPI details in the Platform while display protocols
+/// remain ordinary chip and peripheral implementations.
+pub trait QuadSpiBus {
+    /// Transport failure returned by the Platform adapter.
+    type Error: core::fmt::Debug;
+
+    /// Writes one opcode, one 24-bit address, and an optional payload.
+    fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// Two-channel capacitive-touch sampling transport supplied by a Platform.
+pub trait CapacitiveTouchChannels {
+    /// Sampling failure returned by the Platform adapter.
+    type Error: core::fmt::Debug;
+
+    /// Reads the two hardware capacitance counters together.
+    fn read(&mut self) -> Result<[u32; 2], Self::Error>;
 }
 
 /// Error family shared by one VM-exposed analog peripheral.
@@ -502,6 +527,27 @@ impl touch::TouchPeripheral for NoPeripherals {
     type Touch = UnavailableTouch;
 
     fn take_touch(&mut self) -> Option<Self::Touch> {
+        None
+    }
+}
+
+/// Uninhabited attached-button input used when a Board declares no buttons.
+pub struct UnavailableButtons {
+    never: Infallible,
+}
+
+impl buttons::Buttons for UnavailableButtons {
+    type Error = Infallible;
+
+    fn read(&mut self) -> Result<buttons::ButtonSnapshot, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl buttons::ButtonsPeripheral for NoPeripherals {
+    type Buttons = UnavailableButtons;
+
+    fn take_buttons(&mut self) -> Option<Self::Buttons> {
         None
     }
 }

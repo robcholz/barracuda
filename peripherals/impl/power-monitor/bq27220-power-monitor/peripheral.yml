@@ -1,0 +1,16 @@
+id: bq27220-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-bq27220-power-monitor
+  crate: barracuda_bq27220_power_monitor
+  factory: "::{{crate}}::Bq27220PowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Bq27220Bindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Bq27220Config::new({{parameter.address}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 85

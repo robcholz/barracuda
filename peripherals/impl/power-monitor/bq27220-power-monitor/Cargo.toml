@@ -1,0 +1,23 @@
+[package]
+name = "barracuda-bq27220-power-monitor"
+version = "0.1.0"
+edition = "2024"
+description = "BQ27220 battery power-monitor peripheral implementation"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver-bq27220.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

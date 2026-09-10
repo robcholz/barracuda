@@ -183,6 +183,50 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
 }
 
 #[test]
+fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board manifest");
+    fs::write(
+        &board_path,
+        board
+            .replace("chip: macos", "chip: macos\n  flash-size: 16mb")
+            .replace(
+                "native-layout:",
+                "toolchain:\n  target: xtensa-esp32s3-none-elf\nnative-layout:",
+            ),
+    )
+    .expect("ESP32-S3 target");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace("- os: macos", "- triple: xtensa-esp32s3-none-elf"),
+    )
+    .expect("ESP32-S3 platform target");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    assert!(cargo.contains("CC_xtensa_esp32s3_none_elf = \"xtensa-esp32s3-elf-gcc\""));
+    assert!(cargo.contains("AR_xtensa_esp32s3_none_elf = \"xtensa-esp32s3-elf-ar\""));
+    assert!(cargo.contains("CFLAGS_xtensa_esp32s3_none_elf = \"-mlongcalls\""));
+    assert!(cargo.contains("BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf ="));
+    assert!(cargo.contains("--target=xtensa-esp-elf -I"));
+    assert!(cargo.contains("boards/tool/assets/xtensa-include"));
+    assert!(cargo.contains("link-arg=-Tlinkall.x"));
+    assert!(cargo.contains("link-arg=-Wl,--allow-multiple-definition"));
+    assert!(cargo.contains("link-arg=-lgcc"));
+    assert!(!cargo.contains("link-arg=-lnosys"));
+    assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
+    assert!(cargo.contains("\"--launcher-argument=16mb\""));
+    assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));
+    assert!(cargo.contains("\"--launcher-argument=ota_0\""));
+}
+
+#[test]
 fn select_uses_the_platform_hal_without_a_chip_adapter() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");

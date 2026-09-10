@@ -1,0 +1,25 @@
+id: st77916-qspi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-st77916-qspi-display
+  crate: barracuda_st77916_qspi_display
+  factory: "::{{crate}}::St77916DisplayImplementation<{{binding.bus.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{binding.power_enable.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::St77916DisplayBindings::new({{binding.bus.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.backlight.value}}, {{binding.power_enable.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::St77916DisplayConfig::new()"
+bindings:
+  bus:
+    kind: quad-spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: low
+  backlight:
+    kind: digital-output
+    initial: low
+  power_enable:
+    kind: digital-output
+    # The shared LCD/microSD rail is enabled low on ESP-VoCat.
+    initial: high
