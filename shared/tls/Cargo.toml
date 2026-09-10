@@ -11,6 +11,7 @@ mbedtls = [
     "dep:mbedtls-rs",
 ]
 force-esp-riscv-gcc = ["mbedtls", "mbedtls-rs/force-esp-riscv-gcc"]
+gcc = ["mbedtls", "mbedtls-rs/use-gcc"]
 pem = ["mbedtls", "mbedtls-rs/pem-parse"]
 std = ["mbedtls", "mbedtls-rs/std"]
 

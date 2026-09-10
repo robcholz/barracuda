@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+archive_tool="$workspace_root/boards/tool/assets/riscv32-esp-elf-ar"
+index_tool="$workspace_root/boards/tool/assets/riscv32-esp-elf-ranlib"
+
+case "${1-}" in
+    --build|--install)
+        exec cmake "$@"
+        ;;
+    *)
+        exec cmake "$@" \
+            "-DCMAKE_AR:FILEPATH=$archive_tool" \
+            "-DCMAKE_RANLIB:FILEPATH=$index_tool"
+        ;;
+esac

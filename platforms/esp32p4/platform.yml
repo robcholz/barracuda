@@ -3,10 +3,14 @@ package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, i2s-stream, dsi-host, sdmmc-device]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA_CH0]
+      dma-buffer-bytes: 4096
   runtime-adc-controllers:
     - controller: ADC1
       channels:

@@ -38,6 +38,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    let compiler_builtins = manifest.join("compiler-builtins.S");
+    println!("cargo:rerun-if-changed={}", compiler_builtins.display());
+    cc::Build::new()
+        .file(compiler_builtins)
+        .compile("barracuda_esp32p4_compiler_builtins");
+
     let table_path = bundle.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", table_path.display());
     let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
