@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::{format, sync::Arc, vec, vec::Vec};
-use barracuda_board_hal::audio::{AudioCodec, AudioDescriptor, BuiltinAudioCodec};
+use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
@@ -32,10 +32,10 @@ impl<Device> AudioPlugin<Device> {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Builtins: BuiltinAudioCodec<AudioCodec = Device>,
+        Builtins: AudioCodecPeripheral<AudioCodec = Device>,
     {
         Self {
-            codec: context.hal.builtins.take_audio_codec(),
+            codec: context.hal.peripherals.take_audio_codec(),
         }
     }
 }

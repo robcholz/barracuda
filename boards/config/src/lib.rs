@@ -98,12 +98,10 @@ pub struct BoardDefinition {
     toolchain: Option<ToolchainDefinition>,
     #[serde(rename = "native-layout")]
     native_layout: NativeLayoutDefinition,
+    #[serde(default)]
+    peripherals: PeripheralsDefinition,
     #[serde(default, rename = "exposed-io")]
     exposed_io: ExposedIoDefinition,
-    #[serde(default, rename = "internal-io")]
-    internal_io: InternalIoDefinition,
-    #[serde(default, rename = "builtin-peripherals")]
-    builtin_peripherals: BTreeMap<String, BuiltinPeripheralDefinition>,
 }
 
 impl BoardDefinition {
@@ -137,45 +135,48 @@ impl BoardDefinition {
         &self.native_layout
     }
 
-    /// Returns the I/O capabilities explicitly exposed by this Board.
+    /// Returns the Board's optional attached peripherals and their private I/O.
+    #[must_use]
+    pub const fn peripherals(&self) -> &PeripheralsDefinition {
+        &self.peripherals
+    }
+
+    /// Returns the I/O entries explicitly exposed by this Board.
     #[must_use]
     pub const fn exposed_io(&self) -> &ExposedIoDefinition {
         &self.exposed_io
     }
 
-    /// Returns move-only I/O resources reserved for built-in peripheral Drivers.
+    /// Returns the fixed I/O resources consumed by attached peripheral implementations.
     #[must_use]
-    pub const fn internal_io(&self) -> &InternalIoDefinition {
-        &self.internal_io
+    pub const fn peripheral_io(&self) -> &PeripheralIoDefinition {
+        &self.peripherals.io
     }
 
-    /// Finds a built-in peripheral declaration by its Board-level name.
+    /// Finds an attached peripheral declaration by its Board-level name.
     #[must_use]
-    pub fn builtin_peripheral(&self, name: &str) -> Option<&BuiltinPeripheralDefinition> {
-        self.builtin_peripherals.get(name)
+    pub fn peripheral(&self, name: &str) -> Option<&PeripheralDefinition> {
+        self.peripherals.devices.get(name)
     }
 
-    /// Returns the number of built-in peripheral declarations.
+    /// Returns the number of attached peripheral declarations.
     #[must_use]
-    pub fn builtin_peripheral_count(&self) -> usize {
-        self.builtin_peripherals.len()
+    pub fn peripheral_count(&self) -> usize {
+        self.peripherals.devices.len()
     }
 
-    /// Iterates built-in peripherals in stable Board-name order.
-    pub fn builtin_peripherals(
-        &self,
-    ) -> impl Iterator<Item = (&str, &BuiltinPeripheralDefinition)> {
-        self.builtin_peripherals
+    /// Iterates attached peripherals in stable Board-name order.
+    pub fn peripheral_devices(&self) -> impl Iterator<Item = (&str, &PeripheralDefinition)> {
+        self.peripherals
+            .devices
             .iter()
             .map(|(name, peripheral)| (name.as_str(), peripheral))
     }
 
-    /// Returns whether this Board declares any built-in or exposed hardware.
+    /// Returns whether this Board declares any attached peripherals or exposed I/O.
     #[must_use]
     pub fn has_hardware_surface(&self) -> bool {
-        !self.builtin_peripherals.is_empty()
-            || !self.exposed_io.is_empty()
-            || !self.internal_io.is_empty()
+        !self.peripherals.is_empty() || !self.exposed_io.is_empty()
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -199,31 +200,68 @@ impl BoardDefinition {
         {
             return Err(ConfigError::InvalidNativeLayoutArtifact);
         }
+        self.peripherals.io.validate()?;
         self.exposed_io.validate()?;
-        self.internal_io.validate()?;
-        for (name, peripheral) in &self.builtin_peripherals {
-            validate_resource_name("builtin-peripherals", name)?;
-            validate_identifier(name, "driver", &peripheral.driver)?;
+        for (name, peripheral) in &self.peripherals.devices {
+            validate_resource_name("peripherals", name)?;
+            validate_identifier(name, "implementation", &peripheral.implementation)?;
             for (binding, identifier) in &peripheral.bindings {
-                validate_resource_name("builtin binding", binding)?;
+                validate_resource_name("peripheral binding", binding)?;
                 validate_identifier(name, "binding", identifier)?;
             }
             for parameter in peripheral.parameters.keys() {
-                validate_resource_name("builtin parameter", parameter)?;
+                validate_resource_name("peripheral parameter", parameter)?;
             }
         }
         Ok(())
     }
 }
 
-/// Named protocol resources consumed exclusively by built-in peripheral Drivers.
+/// Attached peripherals and the private I/O resources used to construct them.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PeripheralsDefinition {
+    #[serde(default)]
+    io: PeripheralIoDefinition,
+    #[serde(default)]
+    devices: BTreeMap<String, PeripheralDefinition>,
+}
+
+impl PeripheralsDefinition {
+    /// Returns private I/O resources consumed by peripheral implementations.
+    #[must_use]
+    pub const fn io(&self) -> &PeripheralIoDefinition {
+        &self.io
+    }
+
+    /// Iterates optional attached peripherals in stable Board-name order.
+    pub fn devices(&self) -> impl Iterator<Item = (&str, &PeripheralDefinition)> {
+        self.devices
+            .iter()
+            .map(|(name, peripheral)| (name.as_str(), peripheral))
+    }
+
+    /// Returns whether neither peripheral devices nor private I/O are declared.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.io.is_empty() && self.devices.is_empty()
+    }
+}
+
+/// Named protocol resources consumed exclusively by attached peripheral implementations.
 ///
 /// Internal resources are never returned through [`ExposedIoDefinition`]. A
-/// built-in binds to one by its stable Board-local name, allowing chip-native
+/// peripheral binds to one by its stable Board-local name, allowing chip-native
 /// controller and pin tokens to remain in `board.yml`.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct InternalIoDefinition {
+pub struct PeripheralIoDefinition {
+    #[serde(default, rename = "dsi-host")]
+    dsi_hosts: BTreeMap<String, DsiHostDefinition>,
+    #[serde(default, rename = "mipi-csi")]
+    mipi_csi_hosts: BTreeMap<String, MipiCsiDefinition>,
+    #[serde(default, rename = "sdmmc-device")]
+    sdmmc_devices: BTreeMap<String, SdmmcDeviceDefinition>,
     #[serde(default, rename = "spi-bus")]
     spi_buses: BTreeMap<String, SpiDefinition>,
     #[serde(default, rename = "spi-output")]
@@ -238,11 +276,14 @@ pub struct InternalIoDefinition {
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
 }
 
-impl InternalIoDefinition {
+impl PeripheralIoDefinition {
     /// Returns whether no internal resources are declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.spi_buses.is_empty()
+        self.dsi_hosts.is_empty()
+            && self.mipi_csi_hosts.is_empty()
+            && self.sdmmc_devices.is_empty()
+            && self.spi_buses.is_empty()
             && self.spi_outputs.is_empty()
             && self.spi_devices.is_empty()
             && self.i2c_devices.is_empty()
@@ -250,7 +291,25 @@ impl InternalIoDefinition {
             && self.i2s_streams.is_empty()
     }
 
-    /// Finds one SPI bus reserved by a built-in Driver.
+    /// Finds one MIPI DSI host reserved by a display implementation.
+    #[must_use]
+    pub fn dsi_host(&self, name: &str) -> Option<&DsiHostDefinition> {
+        self.dsi_hosts.get(name)
+    }
+
+    /// Finds one MIPI CSI host reserved by a camera implementation.
+    #[must_use]
+    pub fn mipi_csi(&self, name: &str) -> Option<&MipiCsiDefinition> {
+        self.mipi_csi_hosts.get(name)
+    }
+
+    /// Finds one SDMMC device reserved by a storage implementation.
+    #[must_use]
+    pub fn sdmmc_device(&self, name: &str) -> Option<&SdmmcDeviceDefinition> {
+        self.sdmmc_devices.get(name)
+    }
+
+    /// Finds one SPI bus reserved by a peripheral implementation.
     #[must_use]
     pub fn spi_bus(&self, name: &str) -> Option<&SpiDefinition> {
         self.spi_buses.get(name)
@@ -268,19 +327,19 @@ impl InternalIoDefinition {
         self.spi_devices.get(name)
     }
 
-    /// Finds one statically selected I2C bus reserved by a built-in Driver.
+    /// Finds one statically selected I2C bus reserved by a peripheral implementation.
     #[must_use]
     pub fn i2c_device(&self, name: &str) -> Option<&I2cDefinition> {
         self.i2c_devices.get(name)
     }
 
-    /// Finds one parallel camera receiver reserved by a built-in Driver.
+    /// Finds one parallel camera receiver reserved by a peripheral implementation.
     #[must_use]
     pub fn camera_capture(&self, name: &str) -> Option<&CameraCaptureDefinition> {
         self.camera_captures.get(name)
     }
 
-    /// Finds one I2S stream reserved by a built-in Driver.
+    /// Finds one I2S stream reserved by a peripheral implementation.
     #[must_use]
     pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
         self.i2s_streams.get(name)
@@ -289,12 +348,24 @@ impl InternalIoDefinition {
     /// Returns whether a fixed built-in declaration consumes this controller.
     ///
     /// Runtime I/O controller pools use this to exclude singleton tokens that
-    /// are already assigned to statically composed Driver bindings.
+    /// are already assigned to statically composed peripheral bindings.
     #[must_use]
     pub fn uses_controller(&self, peripheral: &str) -> bool {
-        self.spi_buses
+        self.dsi_hosts
             .values()
             .any(|binding| binding.peripheral == peripheral)
+            || self
+                .mipi_csi_hosts
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .sdmmc_devices
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .spi_buses
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
             || self
                 .spi_devices
                 .values()
@@ -316,7 +387,7 @@ impl InternalIoDefinition {
     /// Returns whether a fixed built-in declaration consumes this DMA channel.
     ///
     /// Platform-owned runtime DMA pools use this to remove channels already
-    /// moved into camera or I2S Driver bindings.
+    /// moved into camera or I2S peripheral bindings.
     #[must_use]
     pub fn uses_dma(&self, dma: &str) -> bool {
         self.camera_captures
@@ -326,6 +397,18 @@ impl InternalIoDefinition {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        for (name, host) in &self.dsi_hosts {
+            validate_resource_name("internal dsi-host", name)?;
+            host.validate(name)?;
+        }
+        for (name, host) in &self.mipi_csi_hosts {
+            validate_resource_name("internal mipi-csi", name)?;
+            host.validate(name, &self.i2c_devices)?;
+        }
+        for (name, device) in &self.sdmmc_devices {
+            validate_resource_name("internal sdmmc-device", name)?;
+            device.validate(name)?;
+        }
         for (name, spi) in &self.spi_buses {
             validate_resource_name("internal spi-bus", name)?;
             validate_identifier(name, "peripheral", &spi.peripheral)?;
@@ -369,6 +452,188 @@ impl InternalIoDefinition {
         for (name, stream) in &self.i2s_streams {
             validate_resource_name("internal i2s-stream", name)?;
             stream.validate(name)?;
+        }
+        Ok(())
+    }
+}
+
+/// One MIPI CSI host sharing the Board's camera-control I2C bus.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MipiCsiDefinition {
+    peripheral: String,
+    i2c: String,
+}
+
+impl MipiCsiDefinition {
+    /// Returns the chip-native CSI receiver singleton.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the Board-local shared I2C bus used for SCCB discovery.
+    #[must_use]
+    pub fn i2c(&self) -> &str {
+        &self.i2c
+    }
+
+    fn validate(
+        &self,
+        name: &str,
+        i2c_devices: &BTreeMap<String, I2cDefinition>,
+    ) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_resource_name("MIPI CSI I2C", &self.i2c)?;
+        if !i2c_devices.contains_key(&self.i2c) {
+            return Err(ConfigError::UnknownInternalI2c {
+                resource: name.to_owned(),
+                i2c: self.i2c.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One MIPI DSI host and its fixed Board power/backlight resources.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DsiHostDefinition {
+    peripheral: String,
+    dma: String,
+    backlight: String,
+    #[serde(rename = "data-lanes")]
+    data_lanes: u8,
+    #[serde(rename = "phy-power-channel")]
+    phy_power_channel: u8,
+    #[serde(rename = "phy-power-millivolts")]
+    phy_power_millivolts: u16,
+}
+
+impl DsiHostDefinition {
+    /// Returns the chip-native DSI controller singleton.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the VDMA channel dedicated to display scanout.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+
+    /// Returns the panel backlight PWM pin.
+    #[must_use]
+    pub fn backlight(&self) -> &str {
+        &self.backlight
+    }
+
+    /// Returns the physical MIPI DSI data-lane count.
+    #[must_use]
+    pub const fn data_lanes(&self) -> u8 {
+        self.data_lanes
+    }
+
+    /// Returns the on-chip LDO channel supplying the DSI PHY.
+    #[must_use]
+    pub const fn phy_power_channel(&self) -> u8 {
+        self.phy_power_channel
+    }
+
+    /// Returns the DSI PHY supply voltage in millivolts.
+    #[must_use]
+    pub const fn phy_power_millivolts(&self) -> u16 {
+        self.phy_power_millivolts
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_identifier(name, "dma", &self.dma)?;
+        validate_identifier(name, "backlight", &self.backlight)?;
+        if self.data_lanes == 0
+            || self.data_lanes > 4
+            || self.phy_power_channel == 0
+            || self.phy_power_millivolts == 0
+        {
+            return Err(ConfigError::InvalidDsiHost {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One fixed-width SDMMC card slot and its on-chip power supply.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SdmmcDeviceDefinition {
+    peripheral: String,
+    clk: String,
+    cmd: String,
+    data: [String; 4],
+    #[serde(rename = "bus-width")]
+    bus_width: u8,
+    #[serde(rename = "power-channel")]
+    power_channel: u8,
+    #[serde(rename = "power-millivolts")]
+    power_millivolts: u16,
+}
+
+impl SdmmcDeviceDefinition {
+    /// Returns the chip-native SDMMC controller singleton.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the SD clock pin.
+    #[must_use]
+    pub fn clk(&self) -> &str {
+        &self.clk
+    }
+
+    /// Returns the bidirectional SD command pin.
+    #[must_use]
+    pub fn cmd(&self) -> &str {
+        &self.cmd
+    }
+
+    /// Returns D0 through D3 in protocol order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 4] {
+        &self.data
+    }
+
+    /// Returns the configured SD bus width.
+    #[must_use]
+    pub const fn bus_width(&self) -> u8 {
+        self.bus_width
+    }
+
+    /// Returns the on-chip LDO channel supplying the card slot.
+    #[must_use]
+    pub const fn power_channel(&self) -> u8 {
+        self.power_channel
+    }
+
+    /// Returns the card-slot supply voltage in millivolts.
+    #[must_use]
+    pub const fn power_millivolts(&self) -> u16 {
+        self.power_millivolts
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        validate_identifier(name, "peripheral", &self.peripheral)?;
+        validate_identifier(name, "clk", &self.clk)?;
+        validate_identifier(name, "cmd", &self.cmd)?;
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        if self.bus_width != 4 || self.power_channel == 0 || self.power_millivolts == 0 {
+            return Err(ConfigError::InvalidSdmmcDevice {
+                resource: name.to_owned(),
+            });
         }
         Ok(())
     }
@@ -569,7 +834,7 @@ impl I2sStreamDefinition {
     }
 }
 
-/// I/O declarations that become visible outside built-in peripheral Drivers.
+/// I/O declarations that become visible outside attached peripherals.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ExposedIoDefinition {
@@ -625,7 +890,7 @@ impl PinDefinition {
     }
 }
 
-/// One statically wired I2C controller used by a built-in Driver.
+/// One statically wired I2C controller used by a peripheral implementation.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct I2cDefinition {
@@ -669,7 +934,7 @@ impl I2cDefinition {
     }
 }
 
-/// One statically wired SPI controller used by a built-in Driver.
+/// One statically wired SPI controller used by a peripheral implementation.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SpiDefinition {
@@ -706,7 +971,7 @@ impl SpiOutputDefinition {
     }
 }
 
-/// One internal SPI device, including the chip-select owned by its Driver.
+/// One internal SPI device, including the chip-select owned by its implementation.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SpiDeviceDefinition {
@@ -792,25 +1057,25 @@ impl SpiDefinition {
     }
 }
 
-/// One fixed Board peripheral and the Driver bindings used to construct it.
+/// One optional Board peripheral and the implementation used to construct it.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct BuiltinPeripheralDefinition {
-    driver: String,
+pub struct PeripheralDefinition {
+    implementation: String,
     #[serde(default)]
     bindings: BTreeMap<String, String>,
     #[serde(default)]
     parameters: BTreeMap<String, PeripheralParameter>,
 }
 
-impl BuiltinPeripheralDefinition {
-    /// Returns the stable peripheral Driver identifier.
+impl PeripheralDefinition {
+    /// Returns the stable peripheral implementation identifier.
     #[must_use]
-    pub fn driver(&self) -> &str {
-        &self.driver
+    pub fn implementation(&self) -> &str {
+        &self.implementation
     }
 
-    /// Finds one chip-native binding by its Driver-defined role.
+    /// Finds one chip-native binding by its implementation-defined role.
     #[must_use]
     pub fn binding(&self, role: &str) -> Option<&str> {
         self.bindings.get(role).map(String::as_str)
@@ -823,13 +1088,13 @@ impl BuiltinPeripheralDefinition {
             .map(|(role, identifier)| (role.as_str(), identifier.as_str()))
     }
 
-    /// Finds one Driver-defined construction parameter.
+    /// Finds one implementation-defined construction parameter.
     #[must_use]
     pub fn parameter(&self, name: &str) -> Option<&PeripheralParameter> {
         self.parameters.get(name)
     }
 
-    /// Iterates Driver parameters in stable name order.
+    /// Iterates implementation parameters in stable name order.
     pub fn parameters(&self) -> impl Iterator<Item = (&str, &PeripheralParameter)> {
         self.parameters
             .iter()
@@ -837,7 +1102,7 @@ impl BuiltinPeripheralDefinition {
     }
 }
 
-/// Build-time value passed to a built-in peripheral Driver constructor.
+/// Build-time value passed to a peripheral implementation constructor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum PeripheralParameter {
@@ -845,7 +1110,7 @@ pub enum PeripheralParameter {
     Boolean(bool),
     /// Signed integer setting.
     Integer(i64),
-    /// Text setting or chip-native identifier interpreted by the Driver.
+    /// Text setting or chip-native identifier interpreted by the implementation.
     String(String),
     /// Ordered collection of settings.
     Sequence(Vec<PeripheralParameter>),
@@ -905,6 +1170,8 @@ fn validate_spi_data_pin(
 #[serde(deny_unknown_fields)]
 pub struct HardwareDefinition {
     chip: String,
+    #[serde(default, rename = "flash-size")]
+    flash_size: Option<String>,
 }
 
 impl HardwareDefinition {
@@ -912,6 +1179,13 @@ impl HardwareDefinition {
     #[must_use]
     pub fn chip(&self) -> &str {
         &self.chip
+    }
+
+    /// Returns the physical flash capacity in the syntax expected by the
+    /// Platform flasher, when the Board declares one.
+    #[must_use]
+    pub fn flash_size(&self) -> Option<&str> {
+        self.flash_size.as_deref()
     }
 }
 
@@ -991,6 +1265,26 @@ pub enum ConfigError {
     MissingSpiDataPin {
         /// Board-level SPI resource name.
         resource: String,
+    },
+    /// A DSI host declared no lanes, no PHY supply, or an unsupported lane count.
+    #[error("Board DSI host `{resource}` has an invalid lane or PHY-power configuration")]
+    InvalidDsiHost {
+        /// Board-level DSI host resource name.
+        resource: String,
+    },
+    /// An SDMMC slot has an unsupported width or no power supply.
+    #[error("Board SDMMC device `{resource}` has an invalid bus or power configuration")]
+    InvalidSdmmcDevice {
+        /// Board-level SDMMC resource name.
+        resource: String,
+    },
+    /// A MIPI CSI host references an undeclared shared I2C bus.
+    #[error("Board MIPI CSI host `{resource}` references unknown I2C bus `{i2c}`")]
+    UnknownInternalI2c {
+        /// Board-level MIPI CSI resource name.
+        resource: String,
+        /// Missing Board-local I2C resource name.
+        i2c: String,
     },
     /// An I2S stream has no channels or no valid sample bits.
     #[error("Board I2S stream `{resource}` must have channels and sample bits")]

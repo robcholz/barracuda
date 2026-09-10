@@ -1,0 +1,22 @@
+[package]
+name = "barracuda-driver-pi4ioe5v6408"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level PI4IOE5V6408 I2C digital I/O expander Driver"
+license = "Apache-2.0"
+
+[dependencies]
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

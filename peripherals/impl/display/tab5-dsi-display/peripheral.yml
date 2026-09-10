@@ -1,0 +1,21 @@
+id: tab5-dsi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-tab5-dsi-display
+  crate: barracuda_tab5_dsi_display
+  factory: "::{{crate}}::Tab5DsiDisplayImplementation<{{binding.host.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Tab5DsiDisplayBindings::new({{binding.host.value}}, {{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Tab5DsiDisplayConfig::new({{parameter.gt911-address}}, {{parameter.st712x-address}})"
+bindings:
+  host:
+    kind: dsi-host
+  i2c:
+    kind: i2c-device
+parameters:
+  gt911-address:
+    type: integer
+    default: 20
+  st712x-address:
+    type: integer
+    default: 85

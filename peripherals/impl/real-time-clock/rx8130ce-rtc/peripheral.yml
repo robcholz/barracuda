@@ -1,0 +1,16 @@
+id: rx8130ce-rtc
+api-version: 1
+peripheral: real-time-clock
+implementation:
+  package: barracuda-rx8130ce-rtc
+  crate: barracuda_rx8130ce_rtc
+  factory: "::{{crate}}::Rx8130ceRtcImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Rx8130ceBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Rx8130ceConfig::new({{parameter.address}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 50

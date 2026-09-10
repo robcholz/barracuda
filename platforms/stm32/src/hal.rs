@@ -8,8 +8,8 @@ use core::{any::Any, convert::Infallible, fmt};
 use barracuda_board_hal::{
     audio, AnalogErrorType, AnalogInput, ConfigurableDigitalPin, DigitalLevel, InputConfig,
     OutputConfig, OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform, RuntimeI2sPlatform,
-    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, UartConfig, UartDataBits, UartParity,
-    UartStopBits, UnavailableAnalogOutput,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, UartConfig,
+    UartDataBits, UartParity, UartStopBits, UnavailableAnalogOutput,
 };
 use embassy_stm32::{
     adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
@@ -46,13 +46,30 @@ pub use static_cell::StaticCell as __StaticCell;
 #[doc(hidden)]
 pub use embassy_stm32 as __vendor;
 
-/// Type-erased push-pull output consumed by peripheral Drivers.
+/// Type-erased push-pull output consumed by peripheral implementations.
 pub type DigitalOutput = Output<'static>;
-/// Type-erased digital input consumed by peripheral Drivers.
+/// Type-erased digital input consumed by peripheral implementations.
 pub type DigitalInput = Input<'static>;
-/// Blocking I2C1 bus consumed by statically selected peripheral Drivers.
+/// Blocking I2C1 bus consumed by statically selected peripheral implementations.
 pub type I2cBus = I2c<'static, Blocking, I2cMaster>;
-/// Blocking SPI1 bus consumed by statically selected peripheral Drivers.
+/// Static owner of one I2C bus shared by peripheral implementations.
+pub type I2cBusManager = SharedI2cBus<I2cBus>;
+/// Blocking I2C view handed to one peripheral implementation.
+pub type I2cDevice = embedded_hal_bus::i2c::CriticalSectionDevice<'static, I2cBus>;
+
+/// Statically allocates one shared built-in I2C bus owner at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_stm32_i2c_bus_manager {
+    ($bus:expr) => {{
+        static MANAGER: $crate::hal::__StaticCell<$crate::hal::I2cBusManager> =
+            $crate::hal::__StaticCell::new();
+        MANAGER.init($crate::hal::I2cBusManager::new($bus))
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_stm32_i2c_bus_manager as i2c_bus_manager;
+/// Blocking SPI1 bus consumed by statically selected peripheral implementations.
 pub type SpiBus = Spi<'static, Blocking, embassy_stm32::spi::mode::Master>;
 
 /// Move-only STM32 pin token retaining the concrete singleton type.
@@ -1017,7 +1034,7 @@ pub fn runtime_i2s_resource(
     }
 }
 
-/// Constructs a blocking I2C1 bus for a statically selected peripheral Driver.
+/// Constructs a blocking I2C1 bus for a statically selected peripheral implementation.
 ///
 /// # Errors
 ///
@@ -1036,7 +1053,7 @@ pub fn i2c_device<T: embassy_stm32::i2c::Instance>(
     Ok(I2c::new_blocking(controller, scl, sda, config))
 }
 
-/// Constructs a blocking transmit-only SPI1 bus for a selected Driver.
+/// Constructs a blocking transmit-only SPI1 bus for a selected peripheral implementation.
 ///
 /// # Errors
 ///

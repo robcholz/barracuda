@@ -6,7 +6,7 @@
 - Provided typed capabilities: none
 
 This Plugin takes the Board's primary built-in `LedStrip` capability exactly
-once and installs the `led_strip` Lua package. It consumes the semantic Driver
+once and installs the `led_strip` Lua package. It consumes the semantic peripheral
 capability and never exposes or reconstructs its SPI transport.
 
 Lua API:

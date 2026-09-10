@@ -5,33 +5,34 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  i2c-device:
-    audio-control:
-      # Espressif ESP32-S3-BOX-2 Board Manager: ES8389 control bus.
-      peripheral: I2C0
-      scl: GPIO47
-      sda: GPIO48
-      frequency-hz: 100000
-  i2s-stream:
-    audio-stream:
-      # DOUT/DIN are named from the ESP32-S3 controller's perspective.
-      peripheral: I2S0
-      dma: DMA_CH0
-      bclk: GPIO40
-      ws: GPIO42
-      dout: GPIO41
-      din: GPIO39
-      mclk: GPIO38
-      sample-rate-hz: 16000
-      channels: 2
-      bits-per-sample: 16
-      dma-buffer-bytes: 4096
-builtin-peripherals:
-  audio-codec:
-    driver: es8389-audio-codec
-    bindings:
-      control: audio-control
-      stream: audio-stream
-    parameters:
-      address: 32
+peripherals:
+  io:
+    i2c-device:
+      audio-control:
+        # Espressif ESP32-S3-BOX-2 Board Manager: ES8389 control bus.
+        peripheral: I2C0
+        scl: GPIO47
+        sda: GPIO48
+        frequency-hz: 100000
+    i2s-stream:
+      audio-stream:
+        # DOUT/DIN are named from the ESP32-S3 controller's perspective.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO40
+        ws: GPIO42
+        dout: GPIO41
+        din: GPIO39
+        mclk: GPIO38
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+  devices:
+    audio-codec:
+      implementation: es8389-audio-codec
+      bindings:
+        control: audio-control
+        stream: audio-stream
+      parameters:
+        address: 32

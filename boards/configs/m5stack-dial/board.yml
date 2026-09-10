@@ -5,28 +5,29 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    display-spi:
-      peripheral: SPI2
-      # M5Stack Dial schematic/M5GFX wiring.
-      sck: GPIO6
-      mosi: GPIO5
-      chip-select: GPIO7
-      frequency-hz: 80000000
-builtin-peripherals:
-  display:
-    driver: mipi-dbi-display
-    bindings:
-      backlight: GPIO9
-      dc: GPIO4
-      reset: GPIO8
-      spi: display-spi
-    parameters:
-      backlight-active-high: true
-      color-order: bgr
-      controller: gc9a01
-      height: 240
-      invert-colors: true
-      orientation: deg0
-      width: 240
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        peripheral: SPI2
+        # M5Stack Dial schematic/M5GFX wiring.
+        sck: GPIO6
+        mosi: GPIO5
+        chip-select: GPIO7
+        frequency-hz: 80000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        backlight: GPIO9
+        dc: GPIO4
+        reset: GPIO8
+        spi: display-spi
+      parameters:
+        backlight-active-high: true
+        color-order: bgr
+        controller: gc9a01
+        height: 240
+        invert-colors: true
+        orientation: deg0
+        width: 240

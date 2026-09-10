@@ -1,0 +1,43 @@
+id: bmi270-imu
+api-version: 1
+peripheral: inertial-measurement
+implementation:
+  package: barracuda-bmi270-imu
+  crate: barracuda_bmi270_imu
+  factory: "::{{crate}}::Bmi270ImuImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Bmi270Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Bmi270Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::IDENTITY)"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 104
+  accelerometer-range:
+    type: enum
+    values: [2g, 4g, 8g, 16g]
+    default: 4g
+    rust-values:
+      2g: "::barracuda_bmi270_imu::AccelerometerRange::G2"
+      4g: "::barracuda_bmi270_imu::AccelerometerRange::G4"
+      8g: "::barracuda_bmi270_imu::AccelerometerRange::G8"
+      16g: "::barracuda_bmi270_imu::AccelerometerRange::G16"
+  gyroscope-range:
+    type: enum
+    values: [250dps, 500dps, 1000dps, 2000dps]
+    default: 500dps
+    rust-values:
+      250dps: "::barracuda_bmi270_imu::GyroscopeRange::Dps250"
+      500dps: "::barracuda_bmi270_imu::GyroscopeRange::Dps500"
+      1000dps: "::barracuda_bmi270_imu::GyroscopeRange::Dps1000"
+      2000dps: "::barracuda_bmi270_imu::GyroscopeRange::Dps2000"
+  sample-rate:
+    type: enum
+    values: [50hz, 100hz, 200hz, 400hz]
+    default: 100hz
+    rust-values:
+      50hz: "::barracuda_bmi270_imu::SampleRate::Hz50"
+      100hz: "::barracuda_bmi270_imu::SampleRate::Hz100"
+      200hz: "::barracuda_bmi270_imu::SampleRate::Hz200"
+      400hz: "::barracuda_bmi270_imu::SampleRate::Hz400"

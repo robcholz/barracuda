@@ -42,7 +42,7 @@ board-hal:
 }
 
 #[test]
-fn parses_explicit_io_and_builtin_peripheral_declarations() {
+fn parses_explicit_io_and_peripheral_declarations() {
     let yaml = r#"
 name: product-a
 hardware:
@@ -57,15 +57,16 @@ exposed-io:
       pin: gpio6
     expansion-data:
       pin: gpio7
-builtin-peripherals:
-  indicator:
-    driver: gpio-indicator
-    bindings:
-      pin: gpio2
-    parameters:
-      active-low: true
-      brightness: 128
-      modes: [steady, pulse]
+peripherals:
+  devices:
+    indicator:
+      implementation: gpio-indicator
+      bindings:
+        pin: gpio2
+      parameters:
+        active-low: true
+        brightness: 128
+        modes: [steady, pulse]
 "#;
 
     let board = parse(yaml).expect("valid hardware surface");
@@ -76,12 +77,12 @@ builtin-peripherals:
     assert_eq!(io.pins().count(), 3);
     assert_eq!(
         board
-            .builtin_peripheral("indicator")
-            .map(|builtin| (builtin.driver(), builtin.binding("pin"))),
+            .peripheral("indicator")
+            .map(|builtin| (builtin.implementation(), builtin.binding("pin"))),
         Some(("gpio-indicator", Some("gpio2")))
     );
     let indicator = board
-        .builtin_peripheral("indicator")
+        .peripheral("indicator")
         .expect("indicator declaration");
     assert_eq!(
         indicator.parameter("active-low"),
@@ -101,7 +102,7 @@ builtin-peripherals:
 }
 
 #[test]
-fn internal_io_reports_controllers_reserved_from_runtime_pools() {
+fn peripheral_io_reports_controllers_reserved_from_runtime_pools() {
     let board = parse(
         r#"
 name: reserved-controllers
@@ -109,61 +110,63 @@ hardware:
   chip: esp32s3
 native-layout:
   artifact: partitions.csv
-internal-io:
-  i2c-device:
-    codec-control:
-      peripheral: I2C0
-      scl: GPIO1
-      sda: GPIO2
-      frequency-hz: 400000
-  spi-bus:
-    pixels:
-      peripheral: SPI2
-      sck: GPIO3
-      mosi: GPIO4
-      frequency-hz: 8000000
+peripherals:
+  io:
+    i2c-device:
+      codec-control:
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
+    spi-bus:
+      pixels:
+        peripheral: SPI2
+        sck: GPIO3
+        mosi: GPIO4
+        frequency-hz: 8000000
 "#,
     )
-    .expect("valid internal resources");
+    .expect("valid peripheral I/O resources");
 
-    assert!(board.internal_io().uses_controller("I2C0"));
-    assert!(board.internal_io().uses_controller("SPI2"));
-    assert!(!board.internal_io().uses_controller("I2C1"));
-    assert!(!board.internal_io().uses_dma("DMA_CH0"));
+    assert!(board.peripheral_io().uses_controller("I2C0"));
+    assert!(board.peripheral_io().uses_controller("SPI2"));
+    assert!(!board.peripheral_io().uses_controller("I2C1"));
+    assert!(!board.peripheral_io().uses_dma("DMA_CH0"));
 }
 
 #[test]
-fn parses_internal_spi_device_reserved_for_a_builtin_driver() {
+fn parses_spi_device_reserved_for_a_peripheral() {
     let yaml = r#"
 name: display-board
 hardware:
   chip: esp32s3
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    display-bus:
-      peripheral: SPI2
-      sck: GPIO6
-      mosi: GPIO5
-      chip-select: GPIO7
-      frequency-hz: 80000000
-builtin-peripherals:
-  display:
-    driver: mipi-dbi-display
-    bindings:
-      spi: display-bus
-      dc: GPIO4
-      reset: GPIO8
-    parameters:
-      controller: gc9a01
-      width: 240
-      height: 240
+peripherals:
+  io:
+    spi-device:
+      display-bus:
+        peripheral: SPI2
+        sck: GPIO6
+        mosi: GPIO5
+        chip-select: GPIO7
+        frequency-hz: 80000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        spi: display-bus
+        dc: GPIO4
+        reset: GPIO8
+      parameters:
+        controller: gc9a01
+        width: 240
+        height: 240
 "#;
 
     let board = parse(yaml).expect("valid internal display bus");
     let spi = board
-        .internal_io()
+        .peripheral_io()
         .spi_device("display-bus")
         .expect("display SPI device");
 
@@ -177,7 +180,7 @@ builtin-peripherals:
 }
 
 #[test]
-fn parses_driver_data_plane_resources() {
+fn parses_peripheral_data_plane_resources() {
     let board = parse(
         r#"
 name: media-board
@@ -185,52 +188,53 @@ hardware:
   chip: test-chip
 native-layout:
   artifact: memory.x
-internal-io:
-  spi-output:
-    status-pixels:
-      data: GPIO20
-      frequency-hz: 2400000
-  spi-bus:
-    pixels:
-      peripheral: SPI2
-      sck: GPIO1
-      mosi: GPIO2
-      frequency-hz: 2400000
-  camera-capture:
-    camera:
-      peripheral: LCD_CAM
-      dma: DMA_CH0
-      xclk: GPIO3
-      pclk: GPIO4
-      vsync: GPIO5
-      href: GPIO6
-      data: [GPIO7, GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14]
-      xclk-frequency-hz: 20000000
-      dma-buffer-bytes: 98304
-  i2s-stream:
-    audio:
-      peripheral: I2S0
-      dma: DMA_CH1
-      bclk: GPIO15
-      ws: GPIO16
-      dout: GPIO17
-      din: GPIO18
-      mclk: GPIO19
-      sample-rate-hz: 16000
-      channels: 2
-      bits-per-sample: 16
-      dma-buffer-bytes: 1024
+peripherals:
+  io:
+    spi-output:
+      status-pixels:
+        data: GPIO20
+        frequency-hz: 2400000
+    spi-bus:
+      pixels:
+        peripheral: SPI2
+        sck: GPIO1
+        mosi: GPIO2
+        frequency-hz: 2400000
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        xclk: GPIO3
+        pclk: GPIO4
+        vsync: GPIO5
+        href: GPIO6
+        data: [GPIO7, GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14]
+        xclk-frequency-hz: 20000000
+        dma-buffer-bytes: 98304
+    i2s-stream:
+      audio:
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO15
+        ws: GPIO16
+        dout: GPIO17
+        din: GPIO18
+        mclk: GPIO19
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 1024
 "#,
     )
-    .expect("valid Driver data planes");
+    .expect("valid peripheral data planes");
 
-    let pixels = board.internal_io().spi_bus("pixels").expect("SPI bus");
+    let pixels = board.peripheral_io().spi_bus("pixels").expect("SPI bus");
     assert_eq!(
         (pixels.peripheral(), pixels.frequency_hz()),
         ("SPI2", 2_400_000)
     );
     let status_pixels = board
-        .internal_io()
+        .peripheral_io()
         .spi_output("status-pixels")
         .expect("SPI waveform output");
     assert_eq!(
@@ -238,14 +242,17 @@ internal-io:
         ("GPIO20", 2_400_000)
     );
     let camera = board
-        .internal_io()
+        .peripheral_io()
         .camera_capture("camera")
         .expect("camera receiver");
     assert_eq!(
         (camera.data()[7].as_str(), camera.dma_buffer_bytes()),
         ("GPIO14", 98_304)
     );
-    let audio = board.internal_io().i2s_stream("audio").expect("I2S stream");
+    let audio = board
+        .peripheral_io()
+        .i2s_stream("audio")
+        .expect("I2S stream");
     assert_eq!(
         (
             audio.sample_rate_hz(),
@@ -258,7 +265,7 @@ internal-io:
 }
 
 #[test]
-fn parses_internal_i2c_device_reserved_for_a_builtin_driver() {
+fn parses_i2c_device_reserved_for_a_peripheral() {
     let board = parse(
         r#"
 name: sensor-board
@@ -266,18 +273,19 @@ hardware:
   chip: esp32s3
 native-layout:
   artifact: partitions.csv
-internal-io:
-  i2c-device:
-    environment-bus:
-      peripheral: I2C0
-      scl: GPIO1
-      sda: GPIO2
-      frequency-hz: 400000
+peripherals:
+  io:
+    i2c-device:
+      environment-bus:
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
 "#,
     )
     .expect("valid internal I2C bus");
     let i2c = board
-        .internal_io()
+        .peripheral_io()
         .i2c_device("environment-bus")
         .expect("environment I2C bus");
 
@@ -288,7 +296,7 @@ internal-io:
 }
 
 #[test]
-fn board_without_io_or_builtins_has_no_hardware_surface() {
+fn board_without_peripherals_or_exposed_io_has_no_hardware_surface() {
     let board = parse(VALID).expect("valid Board YAML");
 
     assert!(!board.has_hardware_surface());
@@ -346,13 +354,14 @@ hardware:
   chip: esp32c6
 native-layout:
   artifact: partitions.csv
-internal-io:
-  i2c-device:
-    expansion:
-      peripheral: i2c0
-      scl: gpio6
-      sda: gpio7
-      frequency-hz: 0
+peripherals:
+  io:
+    i2c-device:
+      expansion:
+        peripheral: i2c0
+        scl: gpio6
+        sda: gpio7
+        frequency-hz: 0
 "#;
 
     assert_eq!(
@@ -364,25 +373,26 @@ internal-io:
 }
 
 #[test]
-fn rejects_zero_driver_dma_buffer() {
+fn rejects_zero_peripheral_dma_buffer() {
     let yaml = r#"
 name: product-a
 hardware:
   chip: esp32s3
 native-layout:
   artifact: partitions.csv
-internal-io:
-  camera-capture:
-    camera:
-      peripheral: LCD_CAM
-      dma: DMA_CH0
-      xclk: GPIO15
-      pclk: GPIO13
-      vsync: GPIO6
-      href: GPIO7
-      data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
-      xclk-frequency-hz: 20000000
-      dma-buffer-bytes: 0
+peripherals:
+  io:
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        xclk: GPIO15
+        pclk: GPIO13
+        vsync: GPIO6
+        href: GPIO7
+        data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
+        xclk-frequency-hz: 20000000
+        dma-buffer-bytes: 0
 "#;
 
     assert_eq!(
@@ -401,13 +411,14 @@ hardware:
   chip: esp32c6
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    sensor:
-      peripheral: SPI2
-      sck: GPIO6
-      chip-select: GPIO7
-      frequency-hz: 10000000
+peripherals:
+  io:
+    spi-device:
+      sensor:
+        peripheral: SPI2
+        sck: GPIO6
+        chip-select: GPIO7
+        frequency-hz: 10000000
 "#;
 
     assert_eq!(
@@ -489,16 +500,14 @@ fn atom_voice_s3r_audio_data_pins_follow_controller_direction() {
             .expect("read Atom VoiceS3R Board YAML");
     let board = parse(&yaml).expect("valid Atom VoiceS3R Board YAML");
     let control = board
-        .internal_io()
+        .peripheral_io()
         .i2c_device("audio-control")
         .expect("ES8311 control bus");
     let stream = board
-        .internal_io()
+        .peripheral_io()
         .i2s_stream("audio-stream")
         .expect("ES8311 PCM stream");
-    let codec = board
-        .builtin_peripheral("audio-codec")
-        .expect("ES8311 built-in");
+    let codec = board.peripheral("audio-codec").expect("ES8311 attached");
 
     assert_eq!(
         (control.scl(), control.sda(), control.frequency_hz()),

@@ -3,7 +3,10 @@ resolver = "2"
 members = [
     "boards/api",
     "boards/config",
-    "drivers/*",
+    "peripherals/api",
+    "peripherals/config",
+    "peripherals/impl/*/*",
+    "drivers/chips/*",
     "boards/tool",
     "bench/crates/*",
     "composition/*",
@@ -37,17 +40,25 @@ barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
-# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES
-barracuda-apa102-led-strip = { path = "drivers/apa102-led-strip" }
-barracuda-es8311-audio-codec = { path = "drivers/es8311-audio-codec" }
-barracuda-es8389-audio-codec = { path = "drivers/es8389-audio-codec" }
-barracuda-gdeh0154d67-display = { path = "drivers/gdeh0154d67-display" }
-barracuda-indicator-led = { path = "drivers/indicator-led" }
-barracuda-mipi-dbi-display = { path = "drivers/mipi-dbi-display" }
-barracuda-ov2640-camera = { path = "drivers/ov2640-camera" }
-barracuda-ov3660-camera = { path = "drivers/ov3660-camera" }
-barracuda-ws2812-spi-led-strip = { path = "drivers/ws2812-spi-led-strip" }
-# END GENERATED DRIVER WORKSPACE DEPENDENCIES
+# BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES
+barracuda-apa102-led-strip = { path = "peripherals/impl/led-strip/apa102-led-strip" }
+barracuda-bmi270-imu = { path = "peripherals/impl/inertial-measurement/bmi270-imu" }
+barracuda-es8311-audio-codec = { path = "peripherals/impl/audio-codec/es8311-audio-codec" }
+barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8388-es7210-audio-codec" }
+barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
+barracuda-gdeh0154d67-display = { path = "peripherals/impl/display/gdeh0154d67-display" }
+barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
+barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
+barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
+barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
+barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
+barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
+barracuda-sdmmc-storage = { path = "peripherals/impl/storage/sdmmc-storage" }
+barracuda-tab5-dsi-display = { path = "peripherals/impl/display/tab5-dsi-display" }
+barracuda-tab5-sc202cs-camera = { path = "peripherals/impl/camera/tab5-sc202cs-camera" }
+barracuda-tab5-touch = { path = "peripherals/impl/touch/tab5-touch" }
+barracuda-ws2812-spi-led-strip = { path = "peripherals/impl/led-strip/ws2812-spi-led-strip" }
+# END GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
 barracuda-agent-file-plugin = { path = "plugins/agent-file/crates/plugin" }
@@ -80,6 +91,7 @@ barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
 barracuda-vm-http-plugin = { path = "plugins/vm-http/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
+barracuda-imu-plugin = { path = "plugins/vm-imu/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
@@ -96,8 +108,22 @@ barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-cli-style = { path = "shared/cli-style" }
-barracuda-driver = { path = "drivers/api" }
-barracuda-driver-config = { path = "drivers/config" }
+barracuda-peripheral = { path = "peripherals/api" }
+barracuda-peripheral-config = { path = "peripherals/config" }
+barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
+barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
+barracuda-driver-es7210 = { path = "drivers/chips/es7210" }
+barracuda-driver-es8388 = { path = "drivers/chips/es8388" }
+barracuda-driver-es8389 = { path = "drivers/chips/es8389" }
+barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
+barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
+barracuda-driver-ina226 = { path = "drivers/chips/ina226" }
+barracuda-driver-ov2640 = { path = "drivers/chips/ov2640" }
+barracuda-driver-ov3660 = { path = "drivers/chips/ov3660" }
+barracuda-driver-pi4ioe5v6408 = { path = "drivers/chips/pi4ioe5v6408" }
+barracuda-driver-rx8130ce = { path = "drivers/chips/rx8130ce" }
+barracuda-driver-st712x = { path = "drivers/chips/st712x" }
+barracuda-driver-ws2812-spi = { path = "drivers/chips/ws2812-spi" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-minimal-yaml = { path = "shared/minimal-yaml" }
 barracuda-platform = { path = "platforms/api" }

@@ -1,4 +1,4 @@
-//! Board HAL I/O capability behavior.
+//! Board HAL exposed-I/O behavior.
 
 use core::convert::Infallible;
 
@@ -138,7 +138,7 @@ impl AnalogOutput for TestAnalog {
 }
 
 #[test]
-fn analog_capabilities_report_their_native_range() {
+fn analog_interfaces_report_their_native_range() {
     let mut analog = TestAnalog {
         value: 512,
         maximum: 4095,

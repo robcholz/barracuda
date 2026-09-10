@@ -1,0 +1,24 @@
+id: gdeh0154d67-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-gdeh0154d67-display
+  crate: barracuda_gdeh0154d67_display
+  factory: "::{{crate}}::Gdeh0154d67DisplayImplementation<{{binding.spi.type}}, {{binding.busy.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{binding.power-hold.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Gdeh0154d67Bindings::new({{binding.spi.value}}, {{binding.busy.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.power-hold.value}}, {{hal.delay.value}})"
+  config-expression: "()"
+bindings:
+  spi:
+    kind: spi-device
+  busy:
+    kind: digital-input
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+  power-hold:
+    kind: digital-output
+    initial: low
+parameters: {}

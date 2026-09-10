@@ -1,0 +1,21 @@
+id: tab5-sc202cs-camera
+api-version: 1
+peripheral: camera
+implementation:
+  package: barracuda-tab5-sc202cs-camera
+  crate: barracuda_tab5_sc202cs_camera
+  factory: "::{{crate}}::Tab5Sc202csCameraImplementation<{{binding.host.type}}, {{binding.control.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Tab5Sc202csCameraBindings::new({{binding.host.value}}, {{binding.control.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Tab5Sc202csCameraConfig::new({{parameter.width}}, {{parameter.height}})"
+bindings:
+  host:
+    kind: mipi-csi
+  control:
+    kind: i2c-device
+parameters:
+  width:
+    type: integer
+    default: 1280
+  height:
+    type: integer
+    default: 720

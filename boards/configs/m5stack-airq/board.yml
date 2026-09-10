@@ -5,20 +5,21 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    display-spi:
-      peripheral: SPI2
-      sck: GPIO5
-      mosi: GPIO6
-      chip-select: GPIO4
-      frequency-hz: 40000000
-builtin-peripherals:
-  display:
-    driver: gdeh0154d67-display
-    bindings:
-      busy: GPIO1
-      dc: GPIO3
-      power-hold: GPIO46
-      reset: GPIO2
-      spi: display-spi
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        peripheral: SPI2
+        sck: GPIO5
+        mosi: GPIO6
+        chip-select: GPIO4
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: gdeh0154d67-display
+      bindings:
+        busy: GPIO1
+        dc: GPIO3
+        power-hold: GPIO46
+        reset: GPIO2
+        spi: display-spi

@@ -11,7 +11,7 @@
 
 This Plugin takes the Board's primary built-in `AudioCodec` capability exactly
 once and installs the `audio` Lua package. Codec register control stays in the
-ES8311/ES8389 Driver, while I2S controller, DMA, and bounded buffers stay in
+ES8311/ES8389 implementation, while I2S controller, DMA, and bounded buffers stay in
 the Platform HAL composition.
 
 Lua API:

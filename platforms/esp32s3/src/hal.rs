@@ -2,7 +2,7 @@
 
 include!("../../esp32/src/hal.rs");
 
-use barracuda_driver::{
+use barracuda_peripheral::{
     audio::{PcmFormat, PcmStream},
     camera::{FrameReceiver, FrameReceiverErrorType},
 };

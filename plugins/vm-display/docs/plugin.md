@@ -7,7 +7,7 @@
 
 This Plugin takes the Board's primary built-in `Display` capability exactly
 once and installs the `display` Lua package. Panel buses and control pins stay
-inside the selected Driver. Portable RGB888 input is converted by the Driver
+inside the selected implementation. Portable RGB888 input is converted by the implementation
 to its native LCD or e-paper pixel representation.
 
 Lua API:
@@ -25,5 +25,5 @@ Lua API:
 - `handle:close()`
 
 Boards without a display report unavailable. Region dimensions and payload
-lengths are checked before the Driver is called. The built-in capability is
+lengths are checked before the implementation is called. The optional peripheral is
 move-only, so one handle may be opened per boot.

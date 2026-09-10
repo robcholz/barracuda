@@ -1,0 +1,23 @@
+id: ws2812-spi-led-strip
+api-version: 1
+peripheral: led-strip
+implementation:
+  package: barracuda-ws2812-spi-led-strip
+  crate: barracuda_ws2812_spi_led_strip
+  factory: "::{{crate}}::Ws2812SpiLedStripImplementation<{{binding.spi.type}}>"
+  bindings-expression: "{{binding.spi.value}}"
+  config-expression: "::{{crate}}::Ws2812Config::new({{parameter.led-count}}, {{parameter.color-order}})"
+bindings:
+  spi:
+    kind: spi-output
+parameters:
+  led-count:
+    type: integer
+    required: true
+  color-order:
+    type: enum
+    values: [grb, rgb]
+    default: grb
+    rust-values:
+      grb: "::barracuda_ws2812_spi_led_strip::ColorOrder::Grb"
+      rgb: "::barracuda_ws2812_spi_led_strip::ColorOrder::Rgb"

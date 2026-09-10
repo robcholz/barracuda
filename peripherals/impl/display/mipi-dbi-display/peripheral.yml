@@ -1,0 +1,68 @@
+id: mipi-dbi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-mipi-dbi-display
+  crate: barracuda_mipi_dbi_display
+  factory: "::{{crate}}::MipiDbiDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{parameter.controller}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{hal.delay.type}}, 512>"
+  bindings-expression: "::{{crate}}::MipiDbiDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, Some({{binding.backlight.value}}), {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  config-expression: "::{{crate}}::MipiDbiDriverConfig::new({{parameter.controller}}, ::{{crate}}::MipiDbiDisplayConfig::new(::{{crate}}::Size::new({{parameter.width}}, {{parameter.height}}), ::barracuda_peripheral::display::PixelFormat::Rgb565, {{parameter.orientation}}).with_offset({{parameter.offset-x}}, {{parameter.offset-y}}).with_color_order({{parameter.color-order}}).with_inverted_colors({{parameter.invert-colors}}).with_digital_backlight({{parameter.backlight-active-high}}))"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+  backlight:
+    kind: digital-output
+    initial-from:
+      parameter: backlight-active-high
+      values: { "true": low, "false": high }
+parameters:
+  controller:
+    type: enum
+    values: [ili9342c, st7789, st7735s, gc9107, gc9a01]
+    rust-values:
+      ili9342c: "::barracuda_mipi_dbi_display::ILI9342CRgb565"
+      st7789: "::barracuda_mipi_dbi_display::ST7789"
+      st7735s: "::barracuda_mipi_dbi_display::ST7735s"
+      gc9107: "::barracuda_mipi_dbi_display::GC9107"
+      gc9a01: "::barracuda_mipi_dbi_display::GC9A01"
+    required: true
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  offset-x:
+    type: integer
+    default: 0
+  offset-y:
+    type: integer
+    default: 0
+  color-order:
+    type: enum
+    values: [rgb, bgr]
+    rust-values:
+      rgb: "::barracuda_mipi_dbi_display::MipiDbiColorOrder::Rgb"
+      bgr: "::barracuda_mipi_dbi_display::MipiDbiColorOrder::Bgr"
+    default: bgr
+  invert-colors:
+    type: boolean
+    default: false
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0
+  backlight-active-high:
+    type: boolean
+    default: true

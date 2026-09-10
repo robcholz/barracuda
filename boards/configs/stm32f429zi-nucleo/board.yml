@@ -5,14 +5,15 @@ toolchain:
   target: thumbv7em-none-eabihf
 native-layout:
   artifact: memory.x
-builtin-peripherals:
-  status-led:
-    driver: indicator-led
-    bindings:
-      # NUCLEO-F429ZI UM1974 default SB120/SB127 routing: green LD1 is PB0.
-      pin: PB0
-    parameters:
-      active-level: high
+peripherals:
+  devices:
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # NUCLEO-F429ZI UM1974 default SB120/SB127 routing: green LD1 is PB0.
+        pin: PB0
+      parameters:
+        active-level: high
 exposed-io:
   pins:
     user-button:

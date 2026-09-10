@@ -1,0 +1,19 @@
+id: tab5-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-tab5-touch
+  crate: barracuda_tab5_touch
+  factory: "::{{crate}}::Tab5TouchImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Tab5TouchBindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Tab5TouchConfig::new({{parameter.gt911-address}}, {{parameter.st712x-address}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  gt911-address:
+    type: integer
+    default: 20
+  st712x-address:
+    type: integer
+    default: 85

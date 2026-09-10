@@ -1,7 +1,7 @@
 //! Board HAL composition contract.
 //!
-//! A Board HAL owns peripheral Driver construction and returns semantic
-//! capabilities. It does not construct or contain Platform resources.
+//! A Board HAL owns peripheral implementation construction and returns semantic
+//! peripherals. It does not construct or contain Platform resources.
 
 #![no_std]
 
@@ -10,7 +10,7 @@ extern crate alloc;
 mod providers;
 mod runtime;
 
-use core::{convert::Infallible, future::Future};
+use core::{cell::RefCell, convert::Infallible, future::Future};
 
 use embassy_executor::Spawner;
 use embedded_hal::{
@@ -26,18 +26,60 @@ pub use providers::{
 };
 pub use runtime::{LeaseError, ResourceKind};
 
-/// Stable built-in audio capability API implemented by codec Drivers.
-pub use barracuda_driver::audio;
-/// Stable built-in camera capability API implemented by Camera Drivers.
-pub use barracuda_driver::camera;
-/// Stable built-in display capability API implemented by display Drivers.
-pub use barracuda_driver::display;
-/// Stable built-in indicator capability API implemented by indicator Drivers.
-pub use barracuda_driver::indicator;
-/// Stable built-in LED-strip capability API implemented by LED Drivers.
-pub use barracuda_driver::led_strip;
-/// Stable factory contract implemented by every peripheral Driver.
-pub use barracuda_driver::PeripheralDriver;
+/// Stable attached audio peripheral API.
+pub use barracuda_peripheral::audio;
+/// Stable attached camera peripheral API.
+pub use barracuda_peripheral::camera;
+/// Stable attached display peripheral API.
+pub use barracuda_peripheral::display;
+/// Stable attached inertial-measurement peripheral API.
+pub use barracuda_peripheral::imu;
+/// Stable attached indicator peripheral API.
+pub use barracuda_peripheral::indicator;
+/// Stable attached LED-strip peripheral API.
+pub use barracuda_peripheral::led_strip;
+/// Stable attached electrical-power monitoring API.
+pub use barracuda_peripheral::power;
+/// Stable real-time clock API.
+pub use barracuda_peripheral::real_time_clock;
+/// Stable attached removable-storage peripheral API.
+pub use barracuda_peripheral::storage;
+/// Stable touch-input API.
+pub use barracuda_peripheral::touch;
+/// Stable factory contract implemented by every peripheral implementation.
+pub use barracuda_peripheral::PeripheralImplementation;
+
+/// Statically allocated owner for one blocking I2C bus shared by attached peripherals.
+pub struct SharedI2cBus<Bus> {
+    bus: critical_section::Mutex<RefCell<Bus>>,
+}
+
+impl<Bus> SharedI2cBus<Bus> {
+    /// Wraps one exclusively owned bus for address-level sharing.
+    #[must_use]
+    pub const fn new(bus: Bus) -> Self {
+        Self {
+            bus: critical_section::Mutex::new(RefCell::new(bus)),
+        }
+    }
+
+    /// Creates another standard blocking I2C view over this owner.
+    #[must_use]
+    pub fn device(&'static self) -> embedded_hal_bus::i2c::CriticalSectionDevice<'static, Bus> {
+        embedded_hal_bus::i2c::CriticalSectionDevice::new(&self.bus)
+    }
+
+    /// Borrows the underlying bus while holding its critical-section lock.
+    ///
+    /// Platform adapters use this only to obtain stable vendor handles needed
+    /// by non-standard data planes such as MIPI-CSI sensor discovery.
+    pub fn with_bus<R>(&self, use_bus: impl FnOnce(&Bus) -> R) -> R {
+        critical_section::with(|critical_section| {
+            let bus = self.bus.borrow(critical_section).borrow();
+            use_bus(&bus)
+        })
+    }
+}
 
 /// Input bias selected while a VM-exposed GPIO operates as an input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -103,7 +145,7 @@ pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
     fn disable(&mut self) -> Result<(), Self::Error>;
 }
 
-/// Error family shared by one VM-exposed analog capability.
+/// Error family shared by one VM-exposed analog peripheral.
 pub trait AnalogErrorType {
     /// Error returned by analog conversions.
     type Error: core::error::Error;
@@ -136,48 +178,51 @@ pub trait ExposedIo: Send + Sync + 'static {}
 
 /// Resources produced by one selected Board HAL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BoardHalResources<Builtins, Io> {
-    /// Fully constructed built-in peripheral capabilities.
-    pub builtins: Builtins,
-    /// Explicitly exposed Board I/O capabilities.
-    pub io: Io,
+pub struct BoardResources<Peripherals, ExposedIo> {
+    /// Optional initialized peripherals physically attached to the Board.
+    pub peripherals: Peripherals,
+    /// Explicitly exposed Board I/O resources.
+    pub exposed_io: ExposedIo,
 }
 
-impl<Builtins, Io> BoardHalResources<Builtins, Io> {
+impl<Peripherals, ExposedIo> BoardResources<Peripherals, ExposedIo> {
     /// Combines the two independently named Board hardware surfaces.
     #[must_use]
-    pub const fn new(builtins: Builtins, io: Io) -> Self {
-        Self { builtins, io }
+    pub const fn new(peripherals: Peripherals, exposed_io: ExposedIo) -> Self {
+        Self {
+            peripherals,
+            exposed_io,
+        }
     }
 }
 
 /// Result of initializing one statically selected [`BoardHal`].
 pub type BoardHalInitResult<H> = Result<<H as BoardHal>::Resources, <H as BoardHal>::Error>;
 
-/// Statically composed Board matrix and peripheral Drivers.
+/// Statically composed Board matrix and peripheral implementations.
 pub trait BoardHal: Sized + 'static {
     /// Move-only chip resources assigned to this Board HAL by Target.
     type Bindings;
-    /// Semantic hardware capabilities exposed to System or Plugins.
+    /// Semantic hardware peripherals exposed to System or Plugins.
     type Resources;
     /// Board HAL initialization failure.
     type Error;
 
-    /// Initializes peripheral Drivers for one concrete Board matrix.
+    /// Initializes peripherals for one concrete Board matrix.
     fn initialize(
         spawner: Spawner,
         bindings: Self::Bindings,
     ) -> impl Future<Output = BoardHalInitResult<Self>>;
 }
 
-/// HAL for desktop Boards that declare no peripheral Drivers.
+/// HAL for desktop Boards that declare no peripherals.
 pub struct EmptyBoardHal;
 
-/// Explicit absence of built-in peripheral capabilities.
+/// Explicit absence of attached peripherals.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct NoBuiltinCapabilities;
+pub struct NoPeripherals;
 
-/// Uninhabited LED-strip capability used when a Board has no built-in strip.
+/// Uninhabited LED-strip peripheral used when a Board has no attached strip.
 pub struct UnavailableLedStrip {
     never: Infallible,
 }
@@ -194,7 +239,7 @@ impl led_strip::LedStrip for UnavailableLedStrip {
     }
 }
 
-impl led_strip::BuiltinLedStrip for NoBuiltinCapabilities {
+impl led_strip::LedStripPeripheral for NoPeripherals {
     type LedStrip = UnavailableLedStrip;
 
     fn take_led_strip(&mut self) -> Option<Self::LedStrip> {
@@ -202,7 +247,7 @@ impl led_strip::BuiltinLedStrip for NoBuiltinCapabilities {
     }
 }
 
-/// Uninhabited camera capability used when a Board has no built-in camera.
+/// Uninhabited camera peripheral used when a Board has no attached camera.
 pub struct UnavailableCamera {
     never: Infallible,
 }
@@ -222,7 +267,7 @@ impl camera::Camera for UnavailableCamera {
     }
 }
 
-impl camera::BuiltinCamera for NoBuiltinCapabilities {
+impl camera::CameraPeripheral for NoPeripherals {
     type Camera = UnavailableCamera;
 
     fn take_camera(&mut self) -> Option<Self::Camera> {
@@ -230,7 +275,32 @@ impl camera::BuiltinCamera for NoBuiltinCapabilities {
     }
 }
 
-/// Uninhabited audio-codec capability used when a Board has no built-in codec.
+/// Uninhabited IMU peripheral used when a Board has no attached sensor.
+pub struct UnavailableImu {
+    never: Infallible,
+}
+
+impl imu::Imu for UnavailableImu {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> imu::ImuDescriptor {
+        match self.never {}
+    }
+
+    async fn read_sample(&mut self) -> Result<imu::ImuSample, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl imu::ImuPeripheral for NoPeripherals {
+    type Imu = UnavailableImu;
+
+    fn take_imu(&mut self) -> Option<Self::Imu> {
+        None
+    }
+}
+
+/// Uninhabited audio-codec peripheral used when a Board has no attached codec.
 pub struct UnavailableAudioCodec {
     never: Infallible,
 }
@@ -255,7 +325,7 @@ impl audio::AudioCodec for UnavailableAudioCodec {
     }
 }
 
-impl audio::BuiltinAudioCodec for NoBuiltinCapabilities {
+impl audio::AudioCodecPeripheral for NoPeripherals {
     type AudioCodec = UnavailableAudioCodec;
 
     fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> {
@@ -263,7 +333,7 @@ impl audio::BuiltinAudioCodec for NoBuiltinCapabilities {
     }
 }
 
-/// Uninhabited display capability used when a Board has no built-in display.
+/// Uninhabited display peripheral used when a Board has no attached display.
 pub struct UnavailableDisplay {
     never: Infallible,
 }
@@ -326,7 +396,7 @@ impl display::Display for UnavailableDisplay {
     }
 }
 
-impl display::BuiltinDisplay for NoBuiltinCapabilities {
+impl display::DisplayPeripheral for NoPeripherals {
     type Display = UnavailableDisplay;
 
     fn take_display(&mut self) -> Option<Self::Display> {
@@ -334,7 +404,127 @@ impl display::BuiltinDisplay for NoBuiltinCapabilities {
     }
 }
 
-/// Explicit absence of exposed Board I/O capabilities.
+/// Uninhabited storage peripheral used when a Board has no removable media.
+pub struct UnavailableStorage {
+    never: Infallible,
+}
+
+impl embedded_io::ErrorType for UnavailableStorage {
+    type Error = Infallible;
+}
+
+impl embedded_io_async::Read for UnavailableStorage {
+    async fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl embedded_io_async::Write for UnavailableStorage {
+    async fn write(&mut self, _buffer: &[u8]) -> Result<usize, Self::Error> {
+        match self.never {}
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl embedded_io_async::Seek for UnavailableStorage {
+    async fn seek(&mut self, _position: embedded_io::SeekFrom) -> Result<u64, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl storage::Storage for UnavailableStorage {
+    fn capacity(&self) -> u64 {
+        match self.never {}
+    }
+}
+
+impl storage::StoragePeripheral for NoPeripherals {
+    type Storage = UnavailableStorage;
+
+    fn take_storage(&mut self) -> Option<Self::Storage> {
+        None
+    }
+}
+
+/// Uninhabited power-monitor peripheral used when a Board has no attached monitor.
+pub struct UnavailablePowerMonitor {
+    never: Infallible,
+}
+
+impl power::PowerMonitor for UnavailablePowerMonitor {
+    type Error = Infallible;
+
+    fn measure(&mut self) -> Result<power::PowerMeasurement, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl power::PowerMonitorPeripheral for NoPeripherals {
+    type PowerMonitor = UnavailablePowerMonitor;
+
+    fn take_power_monitor(&mut self) -> Option<Self::PowerMonitor> {
+        None
+    }
+}
+
+/// Uninhabited real-time clock used when a Board has no attached clock.
+pub struct UnavailableRealTimeClock {
+    never: Infallible,
+}
+
+impl real_time_clock::RealTimeClock for UnavailableRealTimeClock {
+    type Error = Infallible;
+
+    fn lost_power(&mut self) -> Result<bool, Self::Error> {
+        match self.never {}
+    }
+
+    fn read_datetime(&mut self) -> Result<real_time_clock::DateTime, Self::Error> {
+        match self.never {}
+    }
+
+    fn set_datetime(&mut self, _datetime: real_time_clock::DateTime) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl real_time_clock::RealTimeClockPeripheral for NoPeripherals {
+    type RealTimeClock = UnavailableRealTimeClock;
+
+    fn take_real_time_clock(&mut self) -> Option<Self::RealTimeClock> {
+        None
+    }
+}
+
+/// Uninhabited touch input used when a Board has no attached touch controller.
+pub struct UnavailableTouch {
+    never: Infallible,
+}
+
+impl touch::Touch for UnavailableTouch {
+    type Error = Infallible;
+
+    fn descriptor(&self) -> touch::TouchDescriptor {
+        match self.never {}
+    }
+
+    fn read_frame(&mut self) -> Result<touch::TouchFrame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl touch::TouchPeripheral for NoPeripherals {
+    type Touch = UnavailableTouch;
+
+    fn take_touch(&mut self) -> Option<Self::Touch> {
+        None
+    }
+}
+
+/// Explicit absence of exposed Board I/O peripherals.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;
 
@@ -653,14 +843,14 @@ impl SpiProvider for NoExposedIo {
 }
 
 /// Complete empty Board hardware surface.
-pub type NoBoardCapabilities = BoardHalResources<NoBuiltinCapabilities, NoExposedIo>;
+pub type NoBoardResources = BoardResources<NoPeripherals, NoExposedIo>;
 
 impl BoardHal for EmptyBoardHal {
     type Bindings = ();
-    type Resources = NoBoardCapabilities;
+    type Resources = NoBoardResources;
     type Error = Infallible;
 
     async fn initialize(_spawner: Spawner, _bindings: ()) -> BoardHalInitResult<Self> {
-        Ok(BoardHalResources::new(NoBuiltinCapabilities, NoExposedIo))
+        Ok(BoardResources::new(NoPeripherals, NoExposedIo))
     }
 }

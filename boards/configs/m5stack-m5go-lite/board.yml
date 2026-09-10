@@ -5,16 +5,17 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
-internal-io:
-  spi-device:
-    display-spi:
-      peripheral: SPI3
-      sck: GPIO18
-      mosi: GPIO23
-      chip-select: GPIO14
-      frequency-hz: 40000000
-builtin-peripherals:
-  display:
-    driver: mipi-dbi-display
-    bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
-    parameters: { controller: ili9342c, width: 320, height: 240, invert-colors: true }
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        chip-select: GPIO14
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
+      parameters: { controller: ili9342c, width: 320, height: 240, invert-colors: true }

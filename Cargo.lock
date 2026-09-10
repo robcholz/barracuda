@@ -704,7 +704,8 @@ dependencies = [
 name = "barracuda-apa102-led-strip"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-apa102",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -718,6 +719,16 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+]
+
+[[package]]
+name = "barracuda-bmi270-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-peripheral",
+ "bmi2",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -738,12 +749,13 @@ dependencies = [
 name = "barracuda-board-hal"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "critical-section",
  "embassy-executor",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
 ]
@@ -756,7 +768,7 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-board-tool",
- "barracuda-driver-config",
+ "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-selected",
  "embassy-executor",
@@ -770,7 +782,7 @@ dependencies = [
  "anstyle",
  "barracuda-board-config",
  "barracuda-cli-style",
- "barracuda-driver-config",
+ "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-tool",
  "clap",
@@ -861,30 +873,118 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-driver"
+name = "barracuda-driver-apa102"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
-name = "barracuda-driver-config"
+name = "barracuda-driver-es7210"
 version = "0.1.0"
 dependencies = [
- "barracuda-board-config",
- "barracuda-platform-config",
- "serde",
- "syn 2.0.118",
- "tempfile",
- "thiserror 2.0.18",
- "yaml-peg",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8311"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8388"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-es8389"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-gt911"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ili9881c"
+version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-ina226"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ov2640"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ov3660"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-pi4ioe5v6408"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-rx8130ce"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-st712x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ws2812-spi"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
 name = "barracuda-es8311-audio-codec"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-es8311",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-es8388-es7210-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-es7210",
+ "barracuda-driver-es8388",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -893,7 +993,8 @@ dependencies = [
 name = "barracuda-es8389-audio-codec"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-es8389",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -902,7 +1003,7 @@ dependencies = [
 name = "barracuda-gdeh0154d67-display"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "epd-waveshare",
@@ -1096,10 +1197,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imu-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "futures-lite",
+]
+
+[[package]]
+name = "barracuda-ina226-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ina226",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-indicator-led"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
 
@@ -1159,7 +1281,7 @@ version = "0.1.0"
 name = "barracuda-mipi-dbi-display"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "mipidsi",
@@ -1199,7 +1321,8 @@ dependencies = [
 name = "barracuda-ov2640-camera"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ov2640",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
 ]
@@ -1208,9 +1331,32 @@ dependencies = [
 name = "barracuda-ov3660-camera"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ov3660",
+ "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-peripheral"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics-core",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "barracuda-peripheral-config"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "barracuda-platform-config",
+ "serde",
+ "syn 2.0.118",
+ "tempfile",
+ "thiserror 2.0.18",
+ "yaml-peg",
 ]
 
 [[package]]
@@ -1372,7 +1518,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
- "barracuda-driver",
+ "barracuda-peripheral",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1512,6 +1658,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "log",
@@ -1666,6 +1813,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-rx8130ce-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-rx8130ce",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1685,6 +1842,15 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "zerocopy",
+]
+
+[[package]]
+name = "barracuda-sdmmc-storage"
+version = "0.1.0"
+dependencies = [
+ "barracuda-peripheral",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1730,6 +1896,7 @@ dependencies = [
  "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
+ "barracuda-imu-plugin",
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-platform",
@@ -1804,6 +1971,40 @@ dependencies = [
  "serde",
  "tempfile",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-tab5-dsi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-ili9881c",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-st712x",
+ "barracuda-peripheral",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-tab5-sc202cs-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-tab5-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-st712x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2098,7 +2299,8 @@ dependencies = [
 name = "barracuda-ws2812-spi-led-strip"
 version = "0.1.0"
 dependencies = [
- "barracuda-driver",
+ "barracuda-driver-ws2812-spi",
+ "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
 
@@ -2296,6 +2498,16 @@ dependencies = [
  "http-client",
  "percent-encoding",
  "serde_json",
+]
+
+[[package]]
+name = "bmi2"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48eb062697fa0234a96acdc8ed34f141e9f2951d34e358ed449f312d7e5b6469"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "fixedvec",
 ]
 
 [[package]]
@@ -4065,6 +4277,12 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixedvec"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b395ef2adf62bdeefcd1b59ad0dd2225c6c333ec79656ea79ac5285c46d051ea"
 
 [[package]]
 name = "fnv"

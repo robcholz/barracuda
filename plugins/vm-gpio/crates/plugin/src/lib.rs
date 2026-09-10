@@ -35,7 +35,7 @@ impl<Io> GpioPlugin<Io> {
         Io: ExposedIo + DigitalProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

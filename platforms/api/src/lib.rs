@@ -218,7 +218,7 @@ pub type PlatformInitResult<P> = Result<
 /// One statically selected Barracuda execution platform.
 ///
 /// Implementations initialize platform mechanisms and spawn their permanent
-/// tasks. Board-specific peripheral Driver construction remains outside this
+/// tasks. Board-specific peripheral construction remains outside this
 /// trait in the selected Target composition.
 pub trait Platform: Sized + 'static {
     /// Board/HAL-produced inputs required by this Platform implementation.

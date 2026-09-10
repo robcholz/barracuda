@@ -1,6 +1,6 @@
 //! `no_std` aggregation of Barracuda's fixed Plugin set.
 //!
-//! The selected-target crate supplies initialized capabilities. System consumes
+//! The selected-target crate supplies initialized resources. System consumes
 //! those handles, constructs the fixed Plugin set, and owns their shared runtime
 //! services. Its build script watches `plugins/` and rejects stale generated
 //! registry blocks before compiling System.
@@ -13,9 +13,11 @@ mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{
-    audio::BuiltinAudioCodec, camera::BuiltinCamera, display::BuiltinDisplay,
-    led_strip::BuiltinLedStrip, AnalogProvider, BoardHalResources, DigitalProvider, ExposedIo,
-    I2cProvider, I2sProvider, PwmProvider, SpiProvider, UartProvider,
+    audio::AudioCodecPeripheral, camera::CameraPeripheral, display::DisplayPeripheral,
+    imu::ImuPeripheral, led_strip::LedStripPeripheral, power::PowerMonitorPeripheral,
+    real_time_clock::RealTimeClockPeripheral, storage::StoragePeripheral, touch::TouchPeripheral,
+    AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
+    PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin::api::PluginContext;
@@ -25,6 +27,7 @@ use barracuda_plugin::manager::{
 use barracuda_target_api::TargetResources;
 use barracuda_tls::ClientTls;
 use barracuda_vfs::{create_dir_all, global_namespace, mount, mount_scoped, FsError, MountOptions};
+use barracuda_vfs_fat::FatFs;
 use barracuda_vfs_littlefs::mount_or_format_partition;
 use barracuda_vfs_memfs::MemFs;
 use embassy_embedded_hal::adapter::BlockingAsync;
@@ -47,10 +50,10 @@ pub use resources::SystemResourceError;
 ///
 /// Platform owns the executor-facing runners and concrete implementations;
 /// System owns the portable handles and fixed Plugin graph.
-pub struct System<Region: NorFlash + Send + 'static, Builtins, Io, const P: usize> {
+pub struct System<Region: NorFlash + Send + 'static, Peripherals, Io, const P: usize> {
     plugins: PluginManager<BlockingAsync<Region>>,
     _remaining_partitions: Partitions<Region, P>,
-    _plugin_context: PluginContext<Builtins, Io>,
+    _plugin_context: PluginContext<Peripherals, Io>,
 }
 
 /// Failure while constructing the System or registering its fixed Plugins.
@@ -74,20 +77,33 @@ pub enum SystemCreateError {
     PluginManager(#[from] PluginManagerInitError),
 }
 
-impl<Region, Builtins, Io, const P: usize> System<Region, Builtins, Io, P>
+impl<Region, Peripherals, Io, const P: usize> System<Region, Peripherals, Io, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    Builtins: BuiltinAudioCodec + BuiltinCamera + BuiltinDisplay + BuiltinLedStrip + Unpin,
-    Builtins::AudioCodec: Send + 'static,
-    <Builtins::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
-    Builtins::Display: Send + 'static,
-    <Builtins::Display as barracuda_board_hal::display::Display>::ControlError: core::fmt::Debug,
-    <Builtins::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
-    Builtins::Camera: Send + 'static,
-    <Builtins::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
-    Builtins::LedStrip: Send + 'static,
-    <Builtins::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
+    Peripherals: AudioCodecPeripheral
+        + CameraPeripheral
+        + DisplayPeripheral
+        + ImuPeripheral
+        + LedStripPeripheral
+        + PowerMonitorPeripheral
+        + RealTimeClockPeripheral
+        + StoragePeripheral
+        + TouchPeripheral
+        + Unpin,
+    Peripherals::AudioCodec: Send + 'static,
+    <Peripherals::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
+    Peripherals::Display: Send + 'static,
+    <Peripherals::Display as barracuda_board_hal::display::Display>::ControlError: core::fmt::Debug,
+    <Peripherals::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
+    Peripherals::Camera: Send + 'static,
+    <Peripherals::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
+    Peripherals::LedStrip: Send + 'static,
+    <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
+    Peripherals::Imu: Send + 'static,
+    <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
+    Peripherals::Storage: Send + 'static,
+    <Peripherals::Storage as embedded_io::ErrorType>::Error: core::fmt::Debug,
     Io: ExposedIo
         + AnalogProvider
         + DigitalProvider
@@ -121,7 +137,7 @@ where
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
-    /// The caller supplies capabilities from the selected-target resource
+    /// The caller supplies resources from the selected-target resource
     /// factory and the current Embassy executor spawner. System consumes them,
     /// owns the complete Plugin registration order, and exposes the spawner
     /// only to Plugin startup hooks.
@@ -132,12 +148,12 @@ where
     pub async fn new<Tls: ClientTls>(
         resources: TargetResources<
             PlatformResources<Tls, Partitions<Region, P>>,
-            BoardHalResources<Builtins, Io>,
+            BoardResources<Peripherals, Io>,
         >,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
-        let prepared = resources::prepare(resources)?;
+        let mut prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/data", backend.clone(), MountOptions::read_write()).await?;
@@ -157,6 +173,17 @@ where
         let cache = MemFs::new().into_backend();
         mount("/cache", cache, MountOptions::read_write()).await?;
         log::info!("mounted System cache filesystem");
+        if let Some(storage) = prepared.board_hal.peripherals.take_storage() {
+            match FatFs::mount(storage).await {
+                Ok(filesystem) => {
+                    mount("/sd", filesystem.into_backend(), MountOptions::read_write()).await?;
+                    log::info!("mounted Tab5 microSD filesystem at /sd");
+                }
+                Err(error) => {
+                    log::warn!("microSD is unavailable or does not contain FAT: {error}");
+                }
+            }
+        }
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
@@ -201,6 +228,7 @@ where
             barracuda_vm_http_plugin::VmHttpPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_i2s_plugin::I2sPlugin::new(&mut plugin_context),
+            barracuda_imu_plugin::ImuPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),

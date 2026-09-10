@@ -38,7 +38,7 @@ impl<Io> SpiPlugin<Io> {
         Io: ExposedIo + SpiProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

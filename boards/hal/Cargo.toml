@@ -5,10 +5,11 @@ edition = "2021"
 description = "Board HAL composition contract for Barracuda"
 
 [dependencies]
-barracuda-driver.workspace = true
+barracuda-peripheral.workspace = true
 critical-section = "1"
 embassy-executor.workspace = true
 embedded-hal.workspace = true
+embedded-hal-bus.workspace = true
 embedded-hal-async.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"

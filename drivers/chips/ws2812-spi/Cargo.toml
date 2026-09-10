@@ -1,0 +1,21 @@
+[package]
+name = "barracuda-driver-ws2812-spi"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level WS2812/SK6812 encoded-SPI protocol driver"
+license = "Apache-2.0"
+
+[dependencies]
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

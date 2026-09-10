@@ -37,7 +37,7 @@ impl<Io> I2cPlugin<Io> {
         Io: ExposedIo + I2cProvider,
     {
         Self {
-            io: Arc::clone(&context.hal.io),
+            io: Arc::clone(&context.hal.exposed_io),
         }
     }
 }

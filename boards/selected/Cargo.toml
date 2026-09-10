@@ -16,7 +16,7 @@ embassy-executor.workspace = true
 [build-dependencies]
 barracuda-board-config.workspace = true
 barracuda-board-tool.workspace = true
-barracuda-driver-config.workspace = true
+barracuda-peripheral-config.workspace = true
 barracuda-platform-config.workspace = true
 
 [lints.rust]

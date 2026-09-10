@@ -7,7 +7,7 @@
 
 This Plugin takes the Board's primary built-in `Camera` capability exactly
 once and installs the `camera` Lua package. OV2640/OV3660 control buses,
-parallel capture, and DMA remain owned by the Driver and Platform HAL.
+parallel capture, and DMA remain owned by the implementation and Platform HAL.
 
 Lua API:
 

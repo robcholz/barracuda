@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
-use barracuda_board_hal::led_strip::{BuiltinLedStrip, LedStrip, Rgb8};
+use barracuda_board_hal::led_strip::{LedStrip, LedStripPeripheral, Rgb8};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
@@ -28,10 +28,10 @@ impl<Strip> LedStripPlugin<Strip> {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
-        Builtins: BuiltinLedStrip<LedStrip = Strip>,
+        Builtins: LedStripPeripheral<LedStrip = Strip>,
     {
         Self {
-            strip: context.hal.builtins.take_led_strip(),
+            strip: context.hal.peripherals.take_led_strip(),
         }
     }
 }

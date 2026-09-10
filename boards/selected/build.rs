@@ -3,7 +3,7 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, render_rust, SELECTED_BOARD_PATH};
-use barracuda_driver_config::{
+use barracuda_peripheral_config::{
     load_catalog, render_board_hal_for_platform, resolve_board, validate_platform_hal,
 };
 use barracuda_platform_config::resolve_board_platform;
