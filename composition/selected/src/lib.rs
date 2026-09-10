@@ -2,7 +2,7 @@
 
 #![no_std]
 
-pub use barracuda_target_api::{TargetBindings, TargetResources};
+pub use barracuda_target_api::{TargetBindings, TargetIdentity, TargetResources};
 
 #[doc(hidden)]
 pub use barracuda_board_selected::__barracuda_generated_board_bindings as __board_bindings;
@@ -19,6 +19,12 @@ pub type Bindings =
 /// Resources produced for the independently selected target axes.
 pub type Resources =
     TargetResources<barracuda_platform_selected::Resources, barracuda_board_selected::Resources>;
+
+/// Fixed identity of the independently selected Target axes.
+pub const TARGET_IDENTITY: TargetIdentity = TargetIdentity::new(
+    barracuda_platform_selected::PLATFORM_INFO,
+    barracuda_board_selected::BOARD_INFO,
+);
 
 /// Failure while composing the independently selected target axes.
 #[derive(Debug, thiserror::Error)]

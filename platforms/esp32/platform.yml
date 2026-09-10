@@ -1,4 +1,7 @@
 name: esp32
+info:
+  family: esp
+  environment: bare-metal
 package: barracuda-platform-esp32
 crate: barracuda_platform_esp32
 type: Esp32Platform

@@ -1,4 +1,7 @@
 name: linux
+info:
+  family: linux
+  environment: hosted
 package: barracuda-platform-linux
 crate: barracuda_platform_linux
 type: LinuxPlatform

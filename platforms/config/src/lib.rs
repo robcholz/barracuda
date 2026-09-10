@@ -448,6 +448,7 @@ impl FlashDriver {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlatformDefinition {
     name: String,
+    info: PlatformInfoDefinition,
     package: String,
     crate_name: String,
     type_name: String,
@@ -463,6 +464,12 @@ impl PlatformDefinition {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the fixed semantic identity declared by the Platform.
+    #[must_use]
+    pub const fn info(&self) -> &PlatformInfoDefinition {
+        &self.info
     }
 
     /// Returns the Platform Cargo package name.
@@ -517,6 +524,28 @@ impl PlatformDefinition {
     }
 }
 
+/// Fixed semantic identity declared by one Platform manifest.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PlatformInfoDefinition {
+    family: String,
+    environment: String,
+}
+
+impl PlatformInfoDefinition {
+    /// Returns the semantic Platform family.
+    #[must_use]
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    /// Returns the execution environment class.
+    #[must_use]
+    pub fn environment(&self) -> &str {
+        &self.environment
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SelectionConfig {
@@ -540,6 +569,7 @@ struct TargetSelector {
 #[derive(Deserialize)]
 struct PlatformDocument {
     name: String,
+    info: PlatformInfoDefinition,
     package: String,
     #[serde(rename = "crate")]
     crate_name: String,
@@ -807,6 +837,12 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
             message: String::from("package and selection.board-chips must not be empty"),
         });
     }
+    if document.info.family.trim().is_empty() || document.info.environment.trim().is_empty() {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: String::from("info.family and info.environment must not be empty"),
+        });
+    }
     if document
         .selection
         .features_by_chip
@@ -827,6 +863,7 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
     document.hal.validate(&path)?;
     Ok(PlatformDefinition {
         name: document.name,
+        info: document.info,
         package: document.package,
         crate_name: document.crate_name,
         type_name: document.type_name,

@@ -96,6 +96,7 @@ barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
+barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
 barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
 barracuda-uart-plugin = { path = "plugins/vm-uart/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }

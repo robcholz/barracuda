@@ -6,6 +6,7 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use barracuda_board_hal::{BoardResources, NoExposedIo, NoPeripherals};
+pub use barracuda_target_api::{BoardInfo, Hardware, PlatformInfo, TargetIdentity};
 pub use embassy_net::Stack;
 pub use http_client::ClientFactory;
 
@@ -14,6 +15,8 @@ pub use http_client::ClientFactory;
 /// Plugins move owned resources or copy shared capabilities during `new` and
 /// do not retain a reference to the context itself.
 pub struct PluginContext<Peripherals = NoPeripherals, ExposedIo = NoExposedIo> {
+    /// Fixed identity of the selected Platform and Board.
+    pub target_identity: TargetIdentity,
     /// Platform IP stack shared by network consumers.
     pub ip_stack: Stack<'static>,
     /// Factory for constructing HTTP clients over the Platform network and TLS
@@ -27,6 +30,7 @@ impl<Peripherals, ExposedIo> PluginContext<Peripherals, ExposedIo> {
     /// Creates the unified Plugin construction context with the selected HAL.
     #[must_use]
     pub fn from_hal(
+        target_identity: TargetIdentity,
         ip_stack: Stack<'static>,
         http_clients: ClientFactory<'static>,
         hal: BoardResources<Peripherals, ExposedIo>,
@@ -36,6 +40,7 @@ impl<Peripherals, ExposedIo> PluginContext<Peripherals, ExposedIo> {
             exposed_io,
         } = hal;
         Self {
+            target_identity,
             ip_stack,
             http_clients,
             hal: BoardResources::new(peripherals, Arc::new(exposed_io)),
@@ -46,8 +51,13 @@ impl<Peripherals, ExposedIo> PluginContext<Peripherals, ExposedIo> {
 impl PluginContext {
     /// Creates a construction context carrying an explicitly empty HAL.
     #[must_use]
-    pub fn new(ip_stack: Stack<'static>, http_clients: ClientFactory<'static>) -> Self {
+    pub fn new(
+        target_identity: TargetIdentity,
+        ip_stack: Stack<'static>,
+        http_clients: ClientFactory<'static>,
+    ) -> Self {
         Self::from_hal(
+            target_identity,
             ip_stack,
             http_clients,
             BoardResources::new(NoPeripherals, NoExposedIo),

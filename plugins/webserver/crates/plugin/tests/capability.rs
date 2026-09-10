@@ -10,7 +10,9 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 use std::time::Duration;
 
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::api::{
+    BoardInfo, ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity,
+};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
 };
@@ -22,7 +24,11 @@ const EXECUTOR_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn plugin_context() -> PluginContext {
     let stack = never_embassy_stack();
-    PluginContext::new(stack, ClientFactory::plaintext(stack))
+    let info = TargetIdentity::new(
+        PlatformInfo::new("test", "test", "test-arch", "hosted"),
+        BoardInfo::new("test-board", Hardware::new("test-chip")),
+    );
+    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
 }
 
 struct Consumer {

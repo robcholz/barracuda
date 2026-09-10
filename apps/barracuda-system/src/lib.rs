@@ -26,7 +26,7 @@ pub async fn run(
     spawner: Spawner,
     resources: barracuda_target::Resources,
 ) -> Result<(), ApplicationError> {
-    let system = System::new(resources, spawner).await?;
+    let system = System::new(resources, barracuda_target::TARGET_IDENTITY, spawner).await?;
     core::future::pending::<()>().await;
     drop(system);
     Ok(())

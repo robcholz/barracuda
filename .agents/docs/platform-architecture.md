@@ -50,6 +50,12 @@ A Platform is not a Board support package, a peripheral-driver collection, or a
 System dependency bag. Its HAL module contains reusable vendor adaptation, not
 product wiring.
 
+`TargetIdentity` is immutable build-time metadata describing the independently
+selected Platform and Board. It is composed alongside, but never inside,
+`TargetResources`: it grants no hardware authority and does not change the
+exact `BoardResources { peripherals, exposed_io }` shape. System may copy this
+metadata into observational adapters such as `vm-systeminfo`.
+
 ## Composition boundary
 
 Board and Platform selection are independent build inputs. A Board never

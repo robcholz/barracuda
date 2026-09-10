@@ -3,6 +3,18 @@
 use barracuda_target::TargetResources;
 
 #[test]
+fn target_identity_preserves_the_selected_axes() {
+    assert_eq!(
+        barracuda_target::TARGET_IDENTITY.platform(),
+        &barracuda_platform_selected::PLATFORM_INFO
+    );
+    assert_eq!(
+        barracuda_target::TARGET_IDENTITY.board(),
+        &barracuda_board_selected::BOARD_INFO
+    );
+}
+
+#[test]
 fn target_resources_do_not_flatten_the_two_axes() {
     let resources = TargetResources {
         platform: 1_u8,

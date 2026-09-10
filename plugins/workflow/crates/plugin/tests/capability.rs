@@ -85,7 +85,14 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
             .expect("mount Plugin data volume");
         manager.install_vfs(filesystem);
         let stack = never_embassy_stack();
-        let mut plugin_context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let info = barracuda_plugin::api::TargetIdentity::new(
+            barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
+            barracuda_plugin::api::BoardInfo::new(
+                "test-board",
+                barracuda_plugin::api::Hardware::new("test-chip"),
+            ),
+        );
+        let mut plugin_context = PluginContext::new(info, stack, ClientFactory::plaintext(stack));
         let actions = Rc::new(RefCell::new(None));
         let service = Rc::new(RefCell::new(None));
 

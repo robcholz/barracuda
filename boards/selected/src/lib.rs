@@ -14,6 +14,9 @@ use selected::SelectedBoardHal;
 /// Board selected by the Board build input.
 pub use selected::BOARD;
 
+/// Fixed identity of the selected Board.
+pub const BOARD_INFO: barracuda_board::BoardInfo = BOARD.info();
+
 /// Board resources for the selected Board.
 pub type Resources = <SelectedBoardHal as BoardHal>::Resources;
 

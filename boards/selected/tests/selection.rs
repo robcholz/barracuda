@@ -1,6 +1,22 @@
 //! Board selection is independent from Platform selection.
 
 #[test]
+fn selected_board_exports_its_fixed_identity() {
+    assert_eq!(
+        barracuda_board_selected::BOARD_INFO,
+        barracuda_board_selected::BOARD.info()
+    );
+    assert_eq!(
+        barracuda_board_selected::BOARD_INFO.name(),
+        barracuda_board_selected::BOARD.name()
+    );
+    assert_eq!(
+        barracuda_board_selected::BOARD_INFO.hardware().chip(),
+        barracuda_board_selected::BOARD.hardware().chip()
+    );
+}
+
+#[test]
 fn selected_board_exports_no_platform_identity() -> Result<(), std::io::Error> {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))?;

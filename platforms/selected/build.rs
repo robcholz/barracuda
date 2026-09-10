@@ -23,10 +23,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or_else(|| format!("selected Platform `{selected}` is not registered"))?;
     let platform_path = platform.directory().join("platform.yml");
     println!("cargo:rerun-if-changed={}", platform_path.display());
+    let architecture = env::var("CARGO_CFG_TARGET_ARCH")
+        .map_err(|error| format!("Cargo did not provide the target architecture: {error}"))?;
 
     let generated = format!(
         "/// Name of the independently selected Platform.\n\
          pub const PLATFORM_NAME: &str = {:?};\n\n\
+         /// Fixed identity of the independently selected Platform.\n\
+         pub const PLATFORM_INFO: ::barracuda_platform::PlatformInfo =\n\
+             ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?});\n\n\
          /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::{}::{};\n\n\
          #[doc(hidden)]\n\
@@ -39,6 +44,10 @@ fn main() -> Result<(), Box<dyn Error>> {
              }};\n\
          }}\n",
         platform.name(),
+        platform.name(),
+        platform.info().family(),
+        architecture,
+        platform.info().environment(),
         platform.crate_name(),
         platform.type_name(),
         platform.crate_name(),

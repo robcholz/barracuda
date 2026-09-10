@@ -42,7 +42,7 @@ fn select_host_board(root: &Path, chip: &str) {
     fs::write(
         platform.join("platform.yml"),
         format!(
-            "name: {chip}\npackage: test-platform-{chip}\ncrate: test_platform_{chip}\ntype: TestPlatform\nselection:\n  board-chips: [{chip}]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state-{chip}\n    flash-image: physical.flash\n"
+            "name: {chip}\ninfo:\n  family: test\n  environment: hosted\npackage: test-platform-{chip}\ncrate: test_platform_{chip}\ntype: TestPlatform\nselection:\n  board-chips: [{chip}]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state-{chip}\n    flash-image: physical.flash\n"
         ),
     )
     .expect("Platform definition");
