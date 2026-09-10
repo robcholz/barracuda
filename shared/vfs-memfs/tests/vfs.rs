@@ -5,7 +5,7 @@ use barracuda_vfs_memfs::MemFs;
 use embedded_io_async::{Read, Seek, Write};
 
 async fn mounted(path: &str) -> Vfs {
-    let mut vfs = Vfs::new();
+    let vfs = Vfs::new();
     vfs.mount(
         path,
         MemFs::new().into_backend(),
@@ -45,7 +45,7 @@ fn longest_mount_point_wins() {
         root.write_file("/marker", b"root").unwrap();
         nested.write_file("/marker", b"nested").unwrap();
 
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/data", root.into_backend(), MountOptions::read_write())
             .await
             .unwrap();
@@ -68,7 +68,7 @@ fn read_only_mount_rejects_every_mutation() {
         let memory = MemFs::new();
         memory.write_file("/asset.txt", b"asset").unwrap();
 
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/web", memory.into_backend(), MountOptions::read_only())
             .await
             .unwrap();
@@ -95,7 +95,7 @@ fn scoped_mounts_share_storage_without_sharing_namespace() {
         storage.write_file("/sandboxes/b/id", b"b").unwrap();
         let backend = storage.into_backend();
 
-        let mut a = Vfs::new();
+        let a = Vfs::new();
         a.mount_scoped(
             "/workspace",
             backend.clone(),
@@ -105,7 +105,7 @@ fn scoped_mounts_share_storage_without_sharing_namespace() {
         .await
         .unwrap();
 
-        let mut b = Vfs::new();
+        let b = Vfs::new();
         b.mount_scoped(
             "/workspace",
             backend,
@@ -142,7 +142,7 @@ fn paths_cannot_escape_the_vfs_root() {
 #[test]
 fn rename_cannot_cross_mounts() {
     embassy_futures::block_on(async {
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount(
             "/a",
             MemFs::new().into_backend(),
@@ -169,7 +169,7 @@ fn rename_cannot_cross_mounts() {
 #[test]
 fn mount_cannot_be_removed_while_a_file_is_open() {
     embassy_futures::block_on(async {
-        let mut vfs = mounted("/data").await;
+        let vfs = mounted("/data").await;
         let file = vfs.create("/data/file").await.unwrap();
 
         assert_eq!(vfs.unmount("/data").await.unwrap_err(), FsError::Busy);
@@ -179,6 +179,73 @@ fn mount_cannot_be_removed_while_a_file_is_open() {
             vfs.metadata("/data/file").await.unwrap_err(),
             FsError::NotMounted
         );
+    });
+}
+
+#[test]
+fn cloned_and_scoped_namespaces_observe_live_mount_changes() {
+    embassy_futures::block_on(async {
+        let root = MemFs::new();
+        root.create_dir_all("/workspace/removable").unwrap();
+        let vfs = Vfs::new();
+        vfs.mount("/", root.into_backend(), MountOptions::read_write())
+            .await
+            .unwrap();
+        let clone = vfs.clone();
+        let scoped = vfs
+            .scoped_mounts([("/workspace/removable", "/workspace/removable")])
+            .unwrap();
+
+        let volume = MemFs::new();
+        volume.write_file("/identity", b"card").unwrap();
+        clone
+            .mount(
+                "/workspace/removable/micro-sd",
+                volume.into_backend(),
+                MountOptions::read_write(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            scoped
+                .read("/workspace/removable/micro-sd/identity")
+                .await
+                .unwrap(),
+            b"card"
+        );
+        assert_eq!(
+            scoped.list_dir("/workspace/removable").await.unwrap(),
+            ["micro-sd"]
+        );
+
+        vfs.unmount("/workspace/removable/micro-sd").await.unwrap();
+        assert_eq!(
+            scoped
+                .metadata("/workspace/removable/micro-sd")
+                .await
+                .unwrap_err(),
+            FsError::NotFound
+        );
+    });
+}
+
+#[test]
+fn detached_mount_disappears_while_an_open_file_keeps_its_backend() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/data").await;
+        vfs.write("/data/file", b"before").await.unwrap();
+        let mut file = vfs.open("/data/file").await.unwrap();
+
+        vfs.detach("/data").await.unwrap();
+        assert_eq!(
+            vfs.metadata("/data/file").await.unwrap_err(),
+            FsError::NotMounted
+        );
+
+        let mut bytes = [0; 6];
+        file.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(&bytes, b"before");
     });
 }
 

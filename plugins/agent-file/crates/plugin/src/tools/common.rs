@@ -91,7 +91,7 @@ pub(super) async fn filesystem()
     use barracuda_vfs::{MountOptions, Vfs};
     use barracuda_vfs_memfs::MemFs;
 
-    let mut vfs = Vfs::new();
+    let vfs = Vfs::new();
     vfs.mount("/", MemFs::new().into_backend(), MountOptions::read_write())
         .await?;
     Ok(vfs.scoped("/workspace")?)
