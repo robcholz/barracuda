@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use barracuda_board_hal::{
     AnalogErrorType, AnalogInput, ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig,
     OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
-    RuntimeUartPlatform, UartConfig, UartDataBits, UartParity, UartStopBits,
+    RuntimeUartPlatform, SharedI2cBus, UartConfig, UartDataBits, UartParity, UartStopBits,
     UnavailableAnalogOutput,
 };
 use embedded_hal::{
@@ -69,16 +69,33 @@ type PlatformPwmResource = core::convert::Infallible;
 #[doc(hidden)]
 pub use esp_hal as __vendor;
 
-/// Type-erased push-pull output consumed by peripheral Drivers.
+/// Type-erased push-pull output consumed by peripheral implementations.
 pub type DigitalOutput = Output<'static>;
-/// Type-erased digital input consumed by peripheral Drivers.
+/// Type-erased digital input consumed by peripheral implementations.
 pub type DigitalInput = Input<'static>;
 /// Blocking SPI bus used by statically selected devices.
 pub type SpiBus = Spi<'static, Blocking>;
 /// Standards-compliant single-owner SPI device.
 pub type SpiDevice = ExclusiveDevice<SpiBus, DigitalOutput, Delay>;
-/// Blocking I2C controller passed to a peripheral Driver.
+/// Blocking I2C controller passed to a peripheral implementation.
 pub type I2cBus = I2c<'static, Blocking>;
+/// Static owner of one I2C bus shared by peripheral implementations.
+pub type I2cBusManager = SharedI2cBus<I2cBus>;
+/// Blocking I2C view handed to one peripheral implementation.
+pub type I2cDevice = embedded_hal_bus::i2c::CriticalSectionDevice<'static, I2cBus>;
+
+/// Statically allocates one shared built-in I2C bus owner at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp_i2c_bus_manager {
+    ($bus:expr) => {{
+        static MANAGER: $crate::hal::__StaticCell<$crate::hal::I2cBusManager> =
+            $crate::hal::__StaticCell::new();
+        MANAGER.init($crate::hal::I2cBusManager::new($bus))
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_i2c_bus_manager as i2c_bus_manager;
 /// Send-safe I2C adapter exposed through the async ecosystem contract.
 ///
 /// ESP HAL's interrupt-backed async marker is intentionally `!Send`, while a
@@ -296,8 +313,8 @@ impl embedded_io_async::Write for ExposedUart {
         embedded_io::Write::flush(&mut self.0)
     }
 }
-/// Delay provider used during peripheral Driver initialization.
-pub type DriverDelay = Delay;
+/// Delay provider used during peripheral initialization.
+pub type PeripheralDelay = Delay;
 /// SPI configuration failure surfaced by generated Board initialization.
 pub type SpiConfigError = SpiConfigErrorInner;
 /// I2C configuration failure surfaced by generated Board initialization.
@@ -1209,9 +1226,9 @@ pub fn exposed_spi_bus_full_duplex(
     )?))
 }
 
-/// Constructs the delay provider used by synchronous peripheral Drivers.
+/// Constructs the delay provider used by synchronous peripheral implementations.
 #[must_use]
-pub fn delay() -> DriverDelay {
+pub fn delay() -> PeripheralDelay {
     Delay::new()
 }
 

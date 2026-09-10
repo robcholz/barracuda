@@ -1,11 +1,7 @@
-//! ESP32-S3 adaptation from Board-selected tokens to hardware resources.
+// Shared ESP I2S adaptation included by Platforms whose SoC exposes the
+// esp-hal master I2S API.
 
-include!("../../esp32/src/hal.rs");
-
-use barracuda_peripheral::{
-    audio::{PcmFormat, PcmStream},
-    camera::{FrameReceiver, FrameReceiverErrorType},
-};
+use barracuda_peripheral::audio::{PcmFormat, PcmStream};
 use esp_hal::{
     dma::{DmaBufError, DmaError, DmaRxBuf, DmaTxBuf},
     gpio::NoPin,
@@ -13,27 +9,11 @@ use esp_hal::{
         Channels, ConfigError as VendorI2sConfigError, DataFormat, Error as VendorI2sError, I2s,
         I2sMasterDmaChannel, I2sRx, I2sTx, Instance as I2sInstance, TdmConfig,
     },
-    lcd_cam::{
-        cam::{
-            Camera as VendorCamera, Config as VendorCameraConfig,
-            ConfigError as VendorCameraConfigError,
-        },
-        CamDmaRxChannel, LcdCam,
-    },
 };
-
-/// Statically allocates one ESP32-S3 DVP DMA buffer at the generated Board call site.
-#[macro_export]
-macro_rules! __barracuda_esp32s3_camera_dma_buffer {
-    ($bytes:expr) => {
-        $crate::hal::__vendor::dma_rx_buffer!($bytes)
-            .map_err($crate::hal::CameraConfigError::DmaBuffer)
-    };
-}
 
 /// Statically allocates independent transmit and receive I2S DMA buffers.
 #[macro_export]
-macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
+macro_rules! __barracuda_esp_i2s_dma_buffers {
     ($bytes:expr) => {{
         match (
             $crate::hal::__vendor::dma_tx_buffer!($bytes),
@@ -46,142 +26,11 @@ macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
 }
 
 #[doc(hidden)]
-pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
+pub use __barracuda_esp_i2s_dma_buffers as i2s_dma_buffers;
 #[doc(hidden)]
-pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
-#[doc(hidden)]
-pub use __barracuda_esp32s3_i2s_dma_buffers as runtime_i2s_dma_buffers;
+pub use __barracuda_esp_i2s_dma_buffers as runtime_i2s_dma_buffers;
 
-/// ESP32-S3 camera receiver construction failure.
-#[derive(Debug)]
-pub enum CameraConfigError {
-    /// The Board-selected DMA storage cannot be used by the controller.
-    DmaBuffer(DmaBufError),
-    /// The requested camera clock or signal configuration is unsupported.
-    Peripheral(VendorCameraConfigError),
-}
-
-impl core::fmt::Display for CameraConfigError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::DmaBuffer(_) => formatter.write_str("invalid camera DMA buffer"),
-            Self::Peripheral(_) => formatter.write_str("invalid ESP32-S3 camera configuration"),
-        }
-    }
-}
-
-impl core::error::Error for CameraConfigError {}
-
-/// ESP32-S3 frame-capture failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CameraCaptureError {
-    /// A capture is already in progress or the receiver lost ownership state.
-    Busy,
-    /// The caller supplied no destination storage.
-    EmptyBuffer,
-    /// The ESP32-S3 DMA engine rejected or aborted the transfer.
-    Dma(DmaError),
-}
-
-impl core::fmt::Display for CameraCaptureError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Busy => formatter.write_str("camera receiver is busy"),
-            Self::EmptyBuffer => formatter.write_str("camera destination buffer is empty"),
-            Self::Dma(_) => formatter.write_str("camera DMA transfer failed"),
-        }
-    }
-}
-
-impl core::error::Error for CameraCaptureError {}
-
-/// ESP32-S3 LCD_CAM receiver and its statically allocated DMA storage.
-pub struct CameraReceiver {
-    camera: Option<VendorCamera<'static>>,
-    buffer: Option<DmaRxBuf>,
-}
-
-impl FrameReceiverErrorType for CameraReceiver {
-    type Error = CameraCaptureError;
-}
-
-impl FrameReceiver for CameraReceiver {
-    async fn receive(&mut self, frame: &mut [u8]) -> Result<usize, Self::Error> {
-        if frame.is_empty() {
-            return Err(CameraCaptureError::EmptyBuffer);
-        }
-        let Some(camera) = self.camera.take() else {
-            return Err(CameraCaptureError::Busy);
-        };
-        let Some(mut buffer) = self.buffer.take() else {
-            self.camera = Some(camera);
-            return Err(CameraCaptureError::Busy);
-        };
-        buffer.set_length(frame.len().min(buffer.capacity()));
-
-        let transfer = match camera.receive(buffer) {
-            Ok(transfer) => transfer,
-            Err((error, camera, buffer)) => {
-                self.camera = Some(camera);
-                self.buffer = Some(buffer);
-                return Err(CameraCaptureError::Dma(error));
-            }
-        };
-        let (result, camera, buffer) = transfer.wait();
-        self.camera = Some(camera);
-        let received = buffer.number_of_received_bytes().min(frame.len());
-        buffer.read_received_data(&mut frame[..received]);
-        self.buffer = Some(buffer);
-        result.map_err(CameraCaptureError::Dma)?;
-        Ok(received)
-    }
-}
-
-/// Constructs the ESP32-S3 DVP receiver from Board-selected resources.
-#[allow(clippy::too_many_arguments)]
-pub fn camera_capture(
-    controller: esp_hal::peripherals::LCD_CAM<'static>,
-    dma: impl CamDmaRxChannel<'static>,
-    xclk: impl PeripheralOutput<'static>,
-    pclk: impl PeripheralInput<'static>,
-    vsync: impl PeripheralInput<'static>,
-    href: impl PeripheralInput<'static>,
-    data0: impl PeripheralInput<'static>,
-    data1: impl PeripheralInput<'static>,
-    data2: impl PeripheralInput<'static>,
-    data3: impl PeripheralInput<'static>,
-    data4: impl PeripheralInput<'static>,
-    data5: impl PeripheralInput<'static>,
-    data6: impl PeripheralInput<'static>,
-    data7: impl PeripheralInput<'static>,
-    xclk_frequency_hz: u32,
-    buffer: DmaRxBuf,
-) -> Result<CameraReceiver, CameraConfigError> {
-    let camera = VendorCamera::new(
-        LcdCam::new(controller).cam,
-        dma,
-        VendorCameraConfig::default().with_frequency(Rate::from_hz(xclk_frequency_hz)),
-    )
-    .map_err(CameraConfigError::Peripheral)?
-    .with_master_clock(xclk)
-    .with_pixel_clock(pclk)
-    .with_vsync(vsync)
-    .with_h_enable(href)
-    .with_data0(data0)
-    .with_data1(data1)
-    .with_data2(data2)
-    .with_data3(data3)
-    .with_data4(data4)
-    .with_data5(data5)
-    .with_data6(data6)
-    .with_data7(data7);
-    Ok(CameraReceiver {
-        camera: Some(camera),
-        buffer: Some(buffer),
-    })
-}
-
-/// ESP32-S3 I2S construction failure.
+/// ESP I2S construction failure.
 #[derive(Debug)]
 pub enum I2sConfigError {
     /// The Platform manifest did not provide an I2S DMA channel.
@@ -197,10 +46,10 @@ pub enum I2sConfigError {
 impl core::fmt::Display for I2sConfigError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::MissingDma => formatter.write_str("missing ESP32-S3 I2S DMA channel"),
+            Self::MissingDma => formatter.write_str("missing ESP I2S DMA channel"),
             Self::DmaBuffer(_) => formatter.write_str("invalid I2S DMA buffer"),
             Self::UnsupportedFormat => formatter.write_str("unsupported I2S PCM format"),
-            Self::Peripheral(_) => formatter.write_str("invalid ESP32-S3 I2S configuration"),
+            Self::Peripheral(_) => formatter.write_str("invalid ESP I2S configuration"),
         }
     }
 }
@@ -210,7 +59,7 @@ impl core::error::Error for I2sConfigError {}
 /// Error surfaced while generated runtime I2S DMA storage is created.
 pub type RuntimeI2sResourceError = I2sConfigError;
 
-/// Platform-owned ESP32-S3 I2S controller, DMA channel, and bounded buffers.
+/// Platform-owned ESP I2S controller, DMA channel, and bounded buffers.
 pub struct RuntimeI2sResource {
     controller: esp_hal::peripherals::I2S0<'static>,
     dma: Option<esp_hal::peripherals::DMA_CH0<'static>>,
@@ -218,7 +67,7 @@ pub struct RuntimeI2sResource {
     rx_buffer: DmaRxBuf,
 }
 
-/// ESP32-S3 I2S transfer failure.
+/// ESP I2S transfer failure.
 #[derive(Debug)]
 pub enum I2sTransferError {
     /// A transfer is already in progress or the stream lost ownership state.
@@ -244,7 +93,7 @@ impl core::fmt::Display for I2sTransferError {
 
 impl core::error::Error for I2sTransferError {}
 
-/// ESP32-S3 full-duplex I2S stream and its Board-sized DMA storage.
+/// Full-duplex ESP I2S stream and its Board-sized DMA storage.
 pub struct I2sDevice {
     tx: Option<I2sTx<'static, Blocking>>,
     rx: Option<I2sRx<'static, Blocking>>,
@@ -276,7 +125,10 @@ impl PcmStream for I2sDevice {
                 self.tx = Some(tx);
                 return Err(I2sTransferError::Busy);
             };
-            for (sample, bytes) in chunk.iter().zip(buffer.as_mut_slice().chunks_exact_mut(2)) {
+            for (sample, bytes) in chunk
+                .iter()
+                .zip(buffer.as_mut_slice().as_chunks_mut::<2>().0)
+            {
                 bytes.copy_from_slice(&sample.to_le_bytes());
             }
             buffer.set_length(chunk.len() * 2);
@@ -328,7 +180,10 @@ impl PcmStream for I2sDevice {
                 self.rx_buffer = Some(buffer);
                 return Err(I2sTransferError::ShortRead);
             }
-            for (sample, bytes) in chunk.iter_mut().zip(buffer.as_slice().chunks_exact(2)) {
+            for (sample, bytes) in chunk
+                .iter_mut()
+                .zip(buffer.as_slice().as_chunks::<2>().0)
+            {
                 *sample = i16::from_le_bytes([bytes[0], bytes[1]]);
             }
             self.rx_buffer = Some(buffer);
@@ -337,7 +192,7 @@ impl PcmStream for I2sDevice {
     }
 }
 
-/// Constructs a full-duplex ESP32-S3 I2S stream without an MCLK output.
+/// Constructs a full-duplex ESP I2S stream without an MCLK output.
 #[allow(clippy::too_many_arguments)]
 pub fn i2s_stream<I: I2sInstance + 'static>(
     controller: I,
@@ -357,7 +212,7 @@ pub fn i2s_stream<I: I2sInstance + 'static>(
     finish_i2s(i2s, bclk, ws, dout, din, tx_buffer, rx_buffer, format)
 }
 
-/// Constructs a full-duplex ESP32-S3 I2S stream with an MCLK output.
+/// Constructs a full-duplex ESP I2S stream with an MCLK output.
 #[allow(clippy::too_many_arguments)]
 pub fn i2s_stream_with_mclk<I: I2sInstance + 'static>(
     controller: I,
@@ -574,7 +429,7 @@ impl barracuda_board_hal::RuntimeI2sPlatform for RuntimeAdapter {
     }
 }
 
-/// Preserves ownership of one generated ESP32-S3 I2S DMA channel token.
+/// Preserves ownership of one generated ESP I2S DMA channel token.
 #[must_use]
 pub fn runtime_i2s_dma(
     dma: esp_hal::peripherals::DMA_CH0<'static>,

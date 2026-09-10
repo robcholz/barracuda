@@ -15,6 +15,7 @@ stm32f429zi = [
     "dep:embassy-stm32",
     "dep:embassy-sync",
     "dep:embedded-hal",
+    "dep:embedded-hal-bus",
     "dep:embedded-hal-async",
     "dep:embedded-io",
     "dep:embedded-io-async",
@@ -39,6 +40,7 @@ embassy-net = { workspace = true, optional = true }
 embassy-stm32 = { version = "0.6.0", default-features = false, optional = true }
 embassy-sync = { version = "0.8.0", default-features = false, optional = true }
 embedded-hal = { workspace = true, optional = true }
+embedded-hal-bus = { workspace = true, optional = true }
 embedded-hal-async = { workspace = true, optional = true }
 embedded-io = { version = "0.7", optional = true }
 embedded-io-async = { version = "0.7", optional = true }
