@@ -1341,9 +1341,8 @@ dependencies = [
 name = "barracuda-peripheral"
 version = "0.1.0"
 dependencies = [
+ "barracuda-vfs",
  "embedded-graphics-core",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1845,10 +1844,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-sdmmc-storage"
+name = "barracuda-sdmmc-fat-removable-storage"
 version = "0.1.0"
 dependencies = [
  "barracuda-peripheral",
+ "barracuda-vfs",
+ "barracuda-vfs-fat",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
 ]
@@ -1923,7 +1929,9 @@ dependencies = [
  "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",

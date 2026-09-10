@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-sdmmc-fat-removable-storage"
+version = "0.1.0"
+edition = "2024"
+description = "FAT removable-filesystem peripheral over a Board-selected SDMMC device"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-peripheral.workspace = true
+barracuda-vfs.workspace = true
+barracuda-vfs-fat.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-futures.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

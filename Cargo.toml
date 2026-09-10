@@ -53,7 +53,7 @@ barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display
 barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
 barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
-barracuda-sdmmc-storage = { path = "peripherals/impl/storage/sdmmc-storage" }
+barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
 barracuda-tab5-dsi-display = { path = "peripherals/impl/display/tab5-dsi-display" }
 barracuda-tab5-sc202cs-camera = { path = "peripherals/impl/camera/tab5-sc202cs-camera" }
 barracuda-tab5-touch = { path = "peripherals/impl/touch/tab5-touch" }

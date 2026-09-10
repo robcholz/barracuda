@@ -12,10 +12,22 @@ extern crate alloc;
 mod read_only_flash;
 mod resources;
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::sync::Arc;
+use core::future::Future;
+use core::pin::Pin;
+
 use barracuda_board_hal::{
-    audio::AudioCodecPeripheral, camera::CameraPeripheral, display::DisplayPeripheral,
-    imu::ImuPeripheral, led_strip::LedStripPeripheral, power::PowerMonitorPeripheral,
-    real_time_clock::RealTimeClockPeripheral, storage::StoragePeripheral, touch::TouchPeripheral,
+    audio::AudioCodecPeripheral,
+    camera::CameraPeripheral,
+    display::DisplayPeripheral,
+    imu::ImuPeripheral,
+    led_strip::LedStripPeripheral,
+    power::PowerMonitorPeripheral,
+    real_time_clock::RealTimeClockPeripheral,
+    removable_storage::{RemovableStorage, RemovableStorageEvent, RemovableStoragePeripheral},
+    touch::TouchPeripheral,
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
     PwmProvider, SpiProvider, UartProvider,
 };
@@ -26,12 +38,16 @@ use barracuda_plugin::manager::{
 };
 use barracuda_target_api::TargetResources;
 use barracuda_tls::ClientTls;
-use barracuda_vfs::{create_dir_all, global_namespace, mount, mount_scoped, FsError, MountOptions};
-use barracuda_vfs_fat::FatFs;
+use barracuda_vfs::{
+    create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
+};
 use barracuda_vfs_littlefs::mount_or_format_partition;
 use barracuda_vfs_memfs::MemFs;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
 use read_only_flash::mount_resources_partition;
 
@@ -44,6 +60,119 @@ macro_rules! register_plugins {
     };
 }
 
+type BoxedSystemTask = Pin<Box<dyn Future<Output = ()> + 'static>>;
+
+struct RemovableStorageTaskControl {
+    cancel: Signal<CriticalSectionRawMutex, ()>,
+    stopped: Signal<CriticalSectionRawMutex, ()>,
+}
+
+impl RemovableStorageTaskControl {
+    const fn new() -> Self {
+        Self {
+            cancel: Signal::new(),
+            stopped: Signal::new(),
+        }
+    }
+}
+
+struct RemovableStorageTask {
+    control: Arc<RemovableStorageTaskControl>,
+}
+
+impl RemovableStorageTask {
+    async fn shutdown(self) {
+        self.control.cancel.signal(());
+        self.control.stopped.wait().await;
+    }
+}
+
+impl Drop for RemovableStorageTask {
+    fn drop(&mut self) {
+        self.control.cancel.signal(());
+    }
+}
+
+#[embassy_executor::task]
+async fn run_boxed_system_task(task: BoxedSystemTask) {
+    task.await;
+}
+
+async fn manage_removable_storage<Storage>(
+    mut storage: Storage,
+    control: Arc<RemovableStorageTaskControl>,
+) where
+    Storage: RemovableStorage,
+{
+    let mount_point = format!("/removable/{}", storage.slot_id());
+    let mut mounted = false;
+    loop {
+        match select(storage.next_event(), control.cancel.wait()).await {
+            Either::First(RemovableStorageEvent::Mounted {
+                generation,
+                filesystem,
+            }) => match mount(&mount_point, filesystem, MountOptions::read_write()).await {
+                Ok(()) => {
+                    mounted = true;
+                    log::info!(
+                        "mounted removable filesystem {} generation {}",
+                        mount_point,
+                        generation
+                    );
+                }
+                Err(error) => {
+                    log::error!("failed to mount removable filesystem {mount_point}: {error}");
+                }
+            },
+            Either::First(RemovableStorageEvent::Removed { generation }) => {
+                if mounted {
+                    match detach(&mount_point).await {
+                        Ok(()) | Err(FsError::NotMounted) => {}
+                        Err(error) => {
+                            log::error!(
+                                "failed to detach removable filesystem {mount_point}: {error}"
+                            );
+                        }
+                    }
+                    mounted = false;
+                }
+                log::info!(
+                    "removed removable filesystem {} generation {}",
+                    mount_point,
+                    generation
+                );
+            }
+            Either::Second(()) => break,
+        }
+    }
+    if mounted {
+        match unmount(&mount_point).await {
+            Ok(()) | Err(FsError::NotMounted) => {}
+            Err(FsError::Busy) => {
+                let _ignored = detach(&mount_point).await;
+            }
+            Err(error) => log::error!(
+                "failed to unmount removable filesystem {mount_point} during shutdown: {error}"
+            ),
+        }
+    }
+    control.stopped.signal(());
+}
+
+fn start_removable_storage_task<Storage>(
+    storage: Storage,
+    spawner: Spawner,
+) -> Result<RemovableStorageTask, embassy_executor::SpawnError>
+where
+    Storage: RemovableStorage,
+{
+    let control = Arc::new(RemovableStorageTaskControl::new());
+    let future = Box::pin(manage_removable_storage(storage, Arc::clone(&control)));
+    let token = run_boxed_system_task(future)?;
+    spawner.spawn(token);
+    Ok(RemovableStorageTask { control })
+}
+
 pub use resources::SystemResourceError;
 
 /// Fully assembled portable Barracuda system.
@@ -52,6 +181,7 @@ pub use resources::SystemResourceError;
 /// System owns the portable handles and fixed Plugin graph.
 pub struct System<Region: NorFlash + Send + 'static, Peripherals, Io, const P: usize> {
     plugins: PluginManager<BlockingAsync<Region>>,
+    removable_storage_task: Option<RemovableStorageTask>,
     _remaining_partitions: Partitions<Region, P>,
     _plugin_context: PluginContext<Peripherals, Io>,
 }
@@ -75,6 +205,9 @@ pub enum SystemCreateError {
     /// Plugin persistence could not be opened from its validated partition.
     #[error(transparent)]
     PluginManager(#[from] PluginManagerInitError),
+    /// The System-owned removable-filesystem lifecycle task could not start.
+    #[error("failed to start removable-filesystem lifecycle task")]
+    RemovableStorageTask,
 }
 
 impl<Region, Peripherals, Io, const P: usize> System<Region, Peripherals, Io, P>
@@ -88,7 +221,7 @@ where
         + LedStripPeripheral
         + PowerMonitorPeripheral
         + RealTimeClockPeripheral
-        + StoragePeripheral
+        + RemovableStoragePeripheral
         + TouchPeripheral
         + Unpin,
     Peripherals::AudioCodec: Send + 'static,
@@ -102,8 +235,7 @@ where
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
-    Peripherals::Storage: Send + 'static,
-    <Peripherals::Storage as embedded_io::ErrorType>::Error: core::fmt::Debug,
+    Peripherals::RemovableStorage: Send + 'static,
     Io: ExposedIo
         + AnalogProvider
         + DigitalProvider
@@ -173,17 +305,15 @@ where
         let cache = MemFs::new().into_backend();
         mount("/cache", cache, MountOptions::read_write()).await?;
         log::info!("mounted System cache filesystem");
-        if let Some(storage) = prepared.board_hal.peripherals.take_storage() {
-            match FatFs::mount(storage).await {
-                Ok(filesystem) => {
-                    mount("/sd", filesystem.into_backend(), MountOptions::read_write()).await?;
-                    log::info!("mounted Tab5 microSD filesystem at /sd");
-                }
-                Err(error) => {
-                    log::warn!("microSD is unavailable or does not contain FAT: {error}");
-                }
-            }
-        }
+        let removable_namespace = MemFs::new().into_backend();
+        mount(
+            "/removable",
+            removable_namespace,
+            MountOptions::read_write(),
+        )
+        .await?;
+        log::info!("mounted removable-filesystem namespace");
+        let removable_storage = prepared.board_hal.peripherals.take_removable_storage();
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
@@ -239,11 +369,21 @@ where
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS
-        plugins.start()?;
+        let mut removable_storage_task = removable_storage
+            .map(|storage| start_removable_storage_task(storage, spawner))
+            .transpose()
+            .map_err(|_error| SystemCreateError::RemovableStorageTask)?;
+        if let Err(error) = plugins.start() {
+            if let Some(task) = removable_storage_task.take() {
+                task.shutdown().await;
+            }
+            return Err(error.into());
+        }
         log::info!("Barracuda System started");
 
         Ok(Self {
             plugins,
+            removable_storage_task,
             _remaining_partitions: prepared.partitions.remaining,
             _plugin_context: plugin_context,
         })
@@ -258,6 +398,10 @@ where
     ///
     /// Returns the first Plugin unload failure.
     pub async fn shutdown(mut self) -> Result<(), PluginUnloadError> {
-        self.plugins.shutdown().await
+        let result = self.plugins.shutdown().await;
+        if let Some(task) = self.removable_storage_task.take() {
+            task.shutdown().await;
+        }
+        result
     }
 }

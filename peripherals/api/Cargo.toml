@@ -6,9 +6,8 @@ description = "Stable chip-independent peripheral APIs for Barracuda"
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-vfs.workspace = true
 embedded-graphics-core.workspace = true
-embedded-io = "0.7"
-embedded-io-async = "0.7"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -41,6 +41,10 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
         .contains("mount_scoped(\"/media\", backend, \"/media\", MountOptions::read_write())"));
     assert!(system.contains("MemFs::new().into_backend()"));
     assert!(system.contains("mount(\"/cache\", cache, MountOptions::read_write())"));
+    assert!(system.contains("\"/removable\""));
+    assert!(system.contains("take_removable_storage()"));
+    assert!(system.contains("start_removable_storage_task"));
+    assert!(system.contains("detach(&mount_point)"));
     assert!(system.contains("$manager.register_all()"));
     assert!(system.contains("plugins.start()"));
     assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
