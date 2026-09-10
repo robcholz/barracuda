@@ -87,7 +87,7 @@ fn mounted_fat(bytes: Vec<u8>) -> Vfs {
         let fat = FatFs::mount(FatImageDisk { bytes, cursor: 0 })
             .await
             .expect("mount generated FAT image");
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/", fat.into_backend(), MountOptions::read_only())
             .await
             .expect("mount FAT backend");
@@ -157,7 +157,7 @@ fn mounted_littlefs(bytes: Vec<u8>) -> Vfs {
     .expect("LittleFS storage geometry");
     let littlefs = LittleFs::mount(storage).expect("mount generated LittleFS image");
     futures_lite::future::block_on(async {
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/", littlefs.into_backend(), MountOptions::read_only())
             .await
             .expect("mount LittleFS backend");

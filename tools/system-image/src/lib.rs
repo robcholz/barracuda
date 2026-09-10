@@ -544,7 +544,7 @@ fn build_fat_entries(capacity: usize, entries: &[SourceEntry]) -> Result<Vec<u8>
             .map_err(|_error| ImageBuildError::Filesystem {
                 path: String::from("/"),
             })?;
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/", fat.into_backend(), MountOptions::read_write())
             .await
             .map_err(|_error| ImageBuildError::Filesystem {

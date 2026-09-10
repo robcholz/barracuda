@@ -27,27 +27,60 @@ pub trait PeripheralImplementation: Sized + 'static {
     ) -> impl Future<Output = Result<Self::Peripheral, Self::Error>>;
 }
 
-/// Stable removable-storage peripheral API.
-pub mod storage {
-    use embedded_io::ErrorType;
-    use embedded_io_async::{Read, Seek, Write};
+/// Stable removable-filesystem peripheral API.
+pub mod removable_storage {
+    use core::future::Future;
 
-    /// Byte-addressed, seekable storage suitable for a filesystem implementation.
-    pub trait Storage: ErrorType + Read + Write + Seek + Send + 'static
-    where
-        Self::Error: embedded_io::Error,
-    {
-        /// Returns the media capacity in bytes, or zero before media discovery.
-        fn capacity(&self) -> u64;
+    use barracuda_vfs::Backend;
+
+    /// Runtime availability of the medium in one Board-attached slot.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum RemovableStorageStatus {
+        /// The slot exists but currently has no mounted filesystem.
+        #[default]
+        Absent,
+        /// One filesystem is mounted from the current medium generation.
+        Mounted {
+            /// Identity of this insertion, changed whenever the medium changes.
+            generation: u32,
+        },
     }
 
-    /// Move-only access to the Board's primary removable storage device.
-    pub trait StoragePeripheral {
-        /// Concrete, statically dispatched media peripheral.
-        type Storage: Storage;
+    /// One filesystem lifecycle transition reported by a removable slot.
+    pub enum RemovableStorageEvent {
+        /// A newly inserted and recognized filesystem is ready to mount.
+        Mounted {
+            /// Identity of this insertion.
+            generation: u32,
+            /// Type-erased filesystem backend owned by the VFS mount.
+            filesystem: Backend,
+        },
+        /// The current medium disappeared or stopped responding.
+        Removed {
+            /// Identity of the insertion that disappeared.
+            generation: u32,
+        },
+    }
 
-        /// Transfers the primary storage device to its sole consumer once.
-        fn take_storage(&mut self) -> Option<Self::Storage>;
+    /// One Board-attached slot that produces mountable filesystems.
+    pub trait RemovableStorage: Send + 'static {
+        /// Stable Board peripheral instance name used beneath `/removable`.
+        fn slot_id(&self) -> &'static str;
+
+        /// Returns the current runtime state without waiting.
+        fn status(&self) -> RemovableStorageStatus;
+
+        /// Waits until the slot produces its next filesystem lifecycle event.
+        fn next_event(&mut self) -> impl Future<Output = RemovableStorageEvent>;
+    }
+
+    /// Move-only access to the Board's optional removable filesystem slot.
+    pub trait RemovableStoragePeripheral {
+        /// Concrete, statically dispatched slot implementation.
+        type RemovableStorage: RemovableStorage;
+
+        /// Transfers the removable slot to its sole lifecycle owner once.
+        fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage>;
     }
 }
 

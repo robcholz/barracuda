@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn complete_standard_capability_set_fits_one_bounded_vm_heap() -> Result<()> {
         futures_lite::future::block_on(async {
-            let mut vfs = Vfs::new();
+            let vfs = Vfs::new();
             vfs.mount(
                 "/data",
                 MemFs::new().into_backend(),

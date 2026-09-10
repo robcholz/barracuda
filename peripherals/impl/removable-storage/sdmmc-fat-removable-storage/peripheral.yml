@@ -1,0 +1,13 @@
+id: sdmmc-fat-removable-storage
+api-version: 1
+peripheral: removable-storage
+implementation:
+  package: barracuda-sdmmc-fat-removable-storage
+  crate: barracuda_sdmmc_fat_removable_storage
+  factory: "::{{crate}}::SdMmcFatRemovableStorageImplementation<{{binding.device.type}}>"
+  bindings-expression: "::{{crate}}::SdMmcFatRemovableStorageBindings::new({{binding.device.value}})"
+  config-expression: "::{{crate}}::SdMmcFatRemovableStorageConfig::new({{peripheral.name}})"
+bindings:
+  device:
+    kind: sdmmc-device
+parameters: {}

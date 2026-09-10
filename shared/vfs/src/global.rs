@@ -1,19 +1,22 @@
+use core::cell::RefCell;
+
 use alloc::vec::Vec;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
+use embassy_sync::blocking_mutex::Mutex;
 
 use crate::{Backend, File, FsError, Metadata, MountOptions, OpenOptions, ReadDir, Vfs};
 
-static GLOBAL: Mutex<CriticalSectionRawMutex, Vfs> = Mutex::new(Vfs::new());
+static GLOBAL: Mutex<CriticalSectionRawMutex, RefCell<Option<Vfs>>> =
+    Mutex::new(RefCell::new(None));
 
-/// Returns a clone of the process-wide mount namespace.
-///
-/// System uses this after completing its mounts to derive restricted views for
-/// consumers. Later global mount-table changes are not reflected in the clone;
-/// mounted backends and their stored data remain shared.
+fn process_namespace() -> Vfs {
+    GLOBAL.lock(|namespace| namespace.borrow_mut().get_or_insert_with(Vfs::new).clone())
+}
+
+/// Returns a clone of the process-wide live mount namespace.
 pub async fn global_namespace() -> Vfs {
-    GLOBAL.lock().await.clone()
+    process_namespace()
 }
 
 /// Mounts a backend root into the process-wide VFS namespace.
@@ -22,9 +25,7 @@ pub async fn mount(
     backend: Backend,
     options: MountOptions,
 ) -> Result<(), FsError> {
-    GLOBAL
-        .lock()
-        .await
+    process_namespace()
         .mount(mount_point, backend, options)
         .await
 }
@@ -36,69 +37,72 @@ pub async fn mount_scoped(
     source_root: &str,
     options: MountOptions,
 ) -> Result<(), FsError> {
-    GLOBAL
-        .lock()
-        .await
+    process_namespace()
         .mount_scoped(mount_point, backend, source_root, options)
         .await
 }
 
 /// Removes an exact process-wide mount point.
 pub async fn unmount(mount_point: &str) -> Result<(), FsError> {
-    GLOBAL.lock().await.unmount(mount_point).await
+    process_namespace().unmount(mount_point).await
+}
+
+/// Detaches an exact process-wide mount point without waiting for open files.
+pub async fn detach(mount_point: &str) -> Result<(), FsError> {
+    process_namespace().detach(mount_point).await
 }
 
 /// Opens an existing global VFS file for reading.
 pub async fn open(path: &str) -> Result<File, FsError> {
-    GLOBAL.lock().await.open(path).await
+    process_namespace().open(path).await
 }
 
 /// Creates or truncates a global VFS file.
 pub async fn create(path: &str) -> Result<File, FsError> {
-    GLOBAL.lock().await.create(path).await
+    process_namespace().create(path).await
 }
 
 /// Opens a global VFS file with explicit options.
 pub async fn open_with(path: &str, options: &OpenOptions) -> Result<File, FsError> {
-    GLOBAL.lock().await.open_with(path, options).await
+    process_namespace().open_with(path, options).await
 }
 
 /// Reads an entire global VFS file.
 pub async fn read(path: &str) -> Result<Vec<u8>, FsError> {
-    GLOBAL.lock().await.read(path).await
+    process_namespace().read(path).await
 }
 
 /// Replaces a global VFS file with `bytes`.
 pub async fn write(path: &str, bytes: &[u8]) -> Result<(), FsError> {
-    GLOBAL.lock().await.write(path, bytes).await
+    process_namespace().write(path, bytes).await
 }
 
 /// Returns metadata from the global VFS.
 pub async fn metadata(path: &str) -> Result<Metadata, FsError> {
-    GLOBAL.lock().await.metadata(path).await
+    process_namespace().metadata(path).await
 }
 
 /// Lists a directory from the global VFS.
 pub async fn read_dir(path: &str) -> Result<ReadDir, FsError> {
-    GLOBAL.lock().await.read_dir(path).await
+    process_namespace().read_dir(path).await
 }
 
 /// Recursively creates a directory in the global VFS.
 pub async fn create_dir_all(path: &str) -> Result<(), FsError> {
-    GLOBAL.lock().await.create_dir_all(path).await
+    process_namespace().create_dir_all(path).await
 }
 
 /// Removes one global VFS file.
 pub async fn remove_file(path: &str) -> Result<(), FsError> {
-    GLOBAL.lock().await.remove_file(path).await
+    process_namespace().remove_file(path).await
 }
 
 /// Removes one empty global VFS directory.
 pub async fn remove_dir(path: &str) -> Result<(), FsError> {
-    GLOBAL.lock().await.remove_dir(path).await
+    process_namespace().remove_dir(path).await
 }
 
 /// Renames a path in the global VFS.
 pub async fn rename(from: &str, to: &str) -> Result<(), FsError> {
-    GLOBAL.lock().await.rename(from, to).await
+    process_namespace().rename(from, to).await
 }

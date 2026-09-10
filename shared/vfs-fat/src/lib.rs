@@ -631,12 +631,17 @@ fn map_device_error(error: impl embedded_io::Error) -> FsError {
     match error.kind() {
         embedded_io::ErrorKind::InvalidInput => FsError::InvalidInput,
         embedded_io::ErrorKind::PermissionDenied => FsError::PermissionDenied,
+        embedded_io::ErrorKind::NotConnected => FsError::MediaRemoved,
         _ => FsError::Io,
     }
 }
 
 fn map_fat_error(error: FatError) -> FsError {
     match error {
+        FatError::Io(error) => map_device_error(embedded_io::ErrorKind::from(error.kind())),
+        FatError::IoContext { source, .. } => {
+            map_device_error(embedded_io::ErrorKind::from(source.kind()))
+        }
         FatError::EntryNotFound => FsError::NotFound,
         FatError::NotAFile => FsError::IsDirectory,
         FatError::NotADirectory => FsError::NotDirectory,

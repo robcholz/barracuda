@@ -499,8 +499,9 @@ unchanged.
 ## Filesystems and database
 
 System constructs application storage from Platform partitions, memory, and
-storage capabilities supplied by the selected Target. Filesystem and database
-objects are System-owned software services rather than Platform resources.
+filesystem-producing peripherals supplied by the selected Target. Filesystem
+and database objects are System-owned software services rather than Platform
+resources.
 
 `shared/vfs` is the filesystem mechanism layer. It defines the backend
 contract, independent mount namespaces, path resolution, portable file
@@ -514,7 +515,7 @@ by Platform. It never reads image bytes or boot-sector magic to guess whether
 the partition contains FATFS or LittleFS.
 
 ~~~text
-Target storage and memory
+Target partitions, memory, and removable filesystem peripherals
           |
           v
 System application composition
@@ -537,14 +538,29 @@ backend:
 | `/resources` | FATFS or LittleFS selected by native partition metadata | Read-only image content. An upgrade may replace the complete filesystem. |
 | `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
 | `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
-| `/media` | System LittleFS subtree | Durable read-write runtime content. It shares the System storage partition with `/data` but is exposed as a distinct VFS mount. |
+| `/media` | Target-selected installed filesystem; currently a System LittleFS subtree | Stable, durable, high-volume runtime content. Its physical medium may be soldered storage, installed storage, or FATFS on flash, but its namespace does not disappear while System is running. |
+| `/removable` | MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted at `/removable/<slot-id>`. |
 
 System mounts `/resources` read-only regardless of the filesystem selected by
 the native Board layout. The default `/media` mount scopes the `/media` subtree
 of the same persistent LittleFS backend mounted at `/data`; the separate VFS
 mount preserves lifecycle boundaries and cross-mount rename behavior without
 inventing another native partition. A future Target may supply a dedicated
-bulk or removable media backend while preserving the same logical contract.
+installed bulk-media backend while preserving the same logical contract.
+
+`Media` describes the stable large-storage role, not a bus or filesystem
+format. `RemovableStorage` describes a Board-attached slot whose implementation
+recognizes a filesystem and reports insertion and removal events. It does not
+expose the SDMMC device, block operations, FAT driver, card-detect signal, or IO
+expander to System. Those details remain inside the peripheral implementation
+and chip drivers.
+
+The generated Board peripheral instance name is the stable `slot-id`; for
+example, a peripheral named `micro-sd` appears at `/removable/micro-sd`.
+System owns the slot lifecycle task and dynamically mounts and detaches the
+filesystem. Detach immediately removes the path from new lookups; handles that
+outlive physical removal report `MediaRemoved` when their backend observes the
+disconnected medium.
 
 The VFS API exposes only each root's semantic contract. Filesystem selection,
 formatting, mounting, and recovery remain in System composition. The ekv
@@ -564,6 +580,8 @@ The global VFS separates private Plugin trees from one shared Workspace:
 /resources/workspace/...
 /cache/workspace/...
 /media/workspace/...
+
+/removable/<slot-id>/...
 ~~~
 
 Plugin Manager derives one `ScopedVfs` for each filesystem-enabled Plugin:
@@ -577,19 +595,23 @@ Plugin Manager derives one `ScopedVfs` for each filesystem-enabled Plugin:
 | `/workspace/resources` | `/resources/workspace` | Shared, read-only |
 | `/workspace/cache` | `/cache/workspace` | Shared, disposable |
 | `/workspace/media` | `/media/workspace` | Shared, durable |
+| `/workspace/removable` | `/removable` | Shared, dynamically available |
 
 Every filesystem-enabled Plugin sees the same Workspace content at the same
 logical paths. Private paths remain isolated by Plugin identity. Shared state
 required for correctness retains an explicit owner and belongs in that
 Plugin's `/data` tree or scoped KV storage, so Workspace exposes only
-`resources`, `cache`, and `media`.
+`resources`, `cache`, `media`, and currently inserted removable filesystems.
 
 `/workspace/resources` contains immutable common inputs supplied by the System
 image. `/workspace/cache` is the short-lived exchange area for VM output and
 other files passed among Plugins; System may clear it by run, by session, under
 memory pressure, or during restart. `/workspace/media` contains shared user
 uploads and generated files that must outlive the producing run; System does
-not automatically evict it.
+not automatically evict it. `/workspace/removable/<slot-id>` exposes the root
+of a currently inserted filesystem. It requires no capability beyond the
+Plugin's ordinary filesystem declaration and disappears when that medium is
+removed.
 
 ### Composition and operation invariants
 
@@ -598,10 +620,12 @@ The image builder places `filesystem/resources` contributions below
 `filesystem/workspace/resources` contributions below
 `/resources/workspace`. A shared-path collision fails the image build.
 
-System completes the process-wide mount table before Plugin Manager derives
-any `ScopedVfs`. A scoped view supports file operations and path translation;
-mount, unmount, backend inspection, and concrete filesystem selection stay at
-the System boundary.
+System installs the stable semantic roots before Plugin Manager derives any
+`ScopedVfs`. All VFS clones and scoped views share one live mount table, so a
+later removable-filesystem mount is visible to already-running Plugins.
+A scoped view supports file operations and path translation; mount, unmount,
+backend inspection, concrete filesystem selection, and removable-media
+lifecycle stay at the System boundary.
 
 Path normalization contains operations within exposed logical mounts. Rename
 is confined to one mounted filesystem, so moving from `/workspace/cache` to

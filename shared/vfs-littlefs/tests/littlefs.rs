@@ -79,7 +79,7 @@ fn partition_backed_littlefs_supports_streaming_file_io() {
     embassy_futures::block_on(async {
         let storage = Storage::new(MemoryFlash::new()).unwrap();
         let littlefs = LittleFs::format(storage).unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/data", littlefs.into_backend(), MountOptions::read_write())
             .await
             .unwrap();
@@ -116,7 +116,7 @@ fn littlefs_backend_supports_namespace_mutations_and_append() {
     embassy_futures::block_on(async {
         let storage = Storage::new(MemoryFlash::new()).unwrap();
         let littlefs = LittleFs::mount_or_format(storage).unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/data", littlefs.into_backend(), MountOptions::read_write())
             .await
             .unwrap();
@@ -148,7 +148,7 @@ fn littlefs_backend_supports_namespace_mutations_and_append() {
 fn generic_partition_entry_mounts_the_complete_supported_region() {
     embassy_futures::block_on(async {
         let backend = mount_or_format_partition(MemoryFlash::new()).unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/", backend, MountOptions::read_write())
             .await
             .unwrap();
@@ -174,7 +174,7 @@ fn provisioned_partition_entry_mounts_without_formatting() {
         littlefs.write_file("/resource", b"bundled").unwrap();
         let flash = littlefs.into_storage().unwrap().into_inner();
         let backend = mount_partition(flash).unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/", backend, MountOptions::read_only())
             .await
             .unwrap();

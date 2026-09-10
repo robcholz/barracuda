@@ -15,14 +15,14 @@ use barracuda_vfs::{FsError, MountOptions, OpenOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use futures_lite::future::block_on;
 
-async fn manager() -> PluginManager<MemoryPartition> {
+async fn manager_with_vfs() -> (PluginManager<MemoryPartition>, Vfs) {
     let partition = memory_partition(MAX_CAPACITY)
         .await
         .expect("create database partition");
     let mut manager = PluginManager::open(partition)
         .await
         .expect("open Plugin storage");
-    let mut filesystem = Vfs::new();
+    let filesystem = Vfs::new();
     let durable = MemFs::new().into_backend();
     filesystem
         .mount("/data", durable.clone(), MountOptions::read_write())
@@ -65,8 +65,69 @@ async fn manager() -> PluginManager<MemoryPartition> {
         )
         .await
         .expect("mount cache volume");
+    filesystem
+        .mount(
+            "/removable",
+            MemFs::new().into_backend(),
+            MountOptions::read_write(),
+        )
+        .await
+        .expect("mount removable namespace");
+    let system_vfs = filesystem.clone();
     manager.install_vfs(filesystem);
-    manager
+    (manager, system_vfs)
+}
+
+async fn manager() -> PluginManager<MemoryPartition> {
+    manager_with_vfs().await.0
+}
+
+#[test]
+fn existing_plugin_view_observes_removable_filesystems_mounted_by_system() {
+    block_on(async {
+        let (mut manager, system_vfs) = manager_with_vfs().await;
+        let filesystem = Rc::new(RefCell::new(None));
+        manager
+            .register(FilesystemPlugin::<0> {
+                filesystem: Rc::clone(&filesystem),
+            })
+            .unwrap();
+        let filesystem = filesystem.borrow().clone().unwrap();
+
+        let card = MemFs::new();
+        card.write_file("/identity", b"micro-sd").unwrap();
+        system_vfs
+            .mount(
+                "/removable/micro-sd",
+                card.into_backend(),
+                MountOptions::read_write(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            filesystem
+                .read("/workspace/removable/micro-sd/identity")
+                .await
+                .unwrap(),
+            b"micro-sd"
+        );
+        assert_eq!(
+            filesystem
+                .read_dir("/workspace/removable")
+                .await
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_owned())
+                .collect::<Vec<_>>(),
+            ["micro-sd"]
+        );
+
+        system_vfs.detach("/removable/micro-sd").await.unwrap();
+        assert_eq!(
+            filesystem.metadata("/workspace/removable/micro-sd").await,
+            Err(FsError::NotFound)
+        );
+    });
 }
 
 struct FilesystemPlugin<const KIND: u8> {

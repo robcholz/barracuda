@@ -76,7 +76,7 @@ fn fat_backend_preserves_long_names_and_normal_file_semantics() {
         let fat = FatFs::format(MemoryDisk::new(), IMAGE_SIZE as u64)
             .await
             .unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/web", fat.into_backend(), MountOptions::read_write())
             .await
             .unwrap();
@@ -116,7 +116,7 @@ fn fat_backend_supports_namespace_mutations_and_append() {
         let fat = FatFs::format(MemoryDisk::new(), IMAGE_SIZE as u64)
             .await
             .unwrap();
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount("/sd", fat.into_backend(), MountOptions::read_write())
             .await
             .unwrap();

@@ -860,7 +860,7 @@ mod tests {
 
     async fn filesystem()
     -> core::result::Result<barracuda_vfs::ScopedVfs, Box<dyn core::error::Error>> {
-        let mut vfs = Vfs::new();
+        let vfs = Vfs::new();
         vfs.mount(
             "/data",
             MemFs::new().into_backend(),

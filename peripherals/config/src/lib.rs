@@ -27,7 +27,7 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "led-strip",
     "power-monitor",
     "real-time-clock",
-    "storage",
+    "removable-storage",
     "touch",
 ];
 
@@ -853,7 +853,7 @@ fn validate_template_placeholders(
         };
         let placeholder_end = placeholder_start + end;
         let placeholder = remaining[placeholder_start..placeholder_end].trim();
-        let valid = placeholder == "crate"
+        let valid = matches!(placeholder, "crate" | "peripheral.name")
             || matches!(placeholder, "hal.delay.type" | "hal.delay.value")
             || placeholder
                 .strip_prefix("parameter.")
@@ -1175,6 +1175,10 @@ fn render_generic_hal(
                 .implementation()
                 .crate_name()
                 .to_owned(),
+        );
+        substitutions.insert(
+            String::from("peripheral.name"),
+            format!("{:?}", peripheral.name()),
         );
         substitutions.insert(
             String::from("hal.delay.type"),
@@ -1499,8 +1503,8 @@ fn render_generic_hal(
                     "impl ::barracuda_board_hal::power::PowerMonitorPeripheral for GeneratedPeripherals {{\n    type PowerMonitor = {};\n    fn take_power_monitor(&mut self) -> Option<Self::PowerMonitor> {{ self.{}.take() }}\n}}\n\n",
                     peripheral.alias, peripheral.field
                 )),
-                "storage" => source.push_str(&format!(
-                    "impl ::barracuda_board_hal::storage::StoragePeripheral for GeneratedPeripherals {{\n    type Storage = {};\n    fn take_storage(&mut self) -> Option<Self::Storage> {{ self.{}.take() }}\n}}\n\n",
+                "removable-storage" => source.push_str(&format!(
+                    "impl ::barracuda_board_hal::removable_storage::RemovableStoragePeripheral for GeneratedPeripherals {{\n    type RemovableStorage = {};\n    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> {{ self.{}.take() }}\n}}\n\n",
                     peripheral.alias, peripheral.field
                 )),
                 "real-time-clock" => source.push_str(&format!(
@@ -1539,9 +1543,9 @@ fn render_generic_hal(
                 "impl ::barracuda_board_hal::imu::ImuPeripheral for GeneratedPeripherals {\n    type Imu = ::barracuda_board_hal::UnavailableImu;\n    fn take_imu(&mut self) -> Option<Self::Imu> { None }\n}\n\n",
             );
         }
-        if !primary_peripherals.contains("storage") {
+        if !primary_peripherals.contains("removable-storage") {
             source.push_str(
-                "impl ::barracuda_board_hal::storage::StoragePeripheral for GeneratedPeripherals {\n    type Storage = ::barracuda_board_hal::UnavailableStorage;\n    fn take_storage(&mut self) -> Option<Self::Storage> { None }\n}\n\n",
+                "impl ::barracuda_board_hal::removable_storage::RemovableStoragePeripheral for GeneratedPeripherals {\n    type RemovableStorage = ::barracuda_board_hal::UnavailableRemovableStorage;\n    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> { None }\n}\n\n",
             );
         }
         if !primary_peripherals.contains("power-monitor") {

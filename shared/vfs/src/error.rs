@@ -22,6 +22,8 @@ pub enum FsError {
     CrossMount,
     /// The mount still owns open file handles.
     Busy,
+    /// A removable filesystem disappeared while the operation was active.
+    MediaRemoved,
     /// A file operation addressed a directory.
     IsDirectory,
     /// A directory operation addressed a non-directory.
@@ -48,6 +50,7 @@ impl fmt::Display for FsError {
             Self::MountConflict => "mount point is already occupied",
             Self::CrossMount => "operation crosses a mount boundary",
             Self::Busy => "filesystem is busy",
+            Self::MediaRemoved => "removable filesystem is no longer present",
             Self::IsDirectory => "path is a directory",
             Self::NotDirectory => "path is not a directory",
             Self::DirectoryNotEmpty => "directory is not empty",
@@ -67,6 +70,7 @@ impl embedded_io::Error for FsError {
             Self::AlreadyExists => embedded_io::ErrorKind::AlreadyExists,
             Self::PermissionDenied | Self::ReadOnly => embedded_io::ErrorKind::PermissionDenied,
             Self::InvalidPath | Self::InvalidInput => embedded_io::ErrorKind::InvalidInput,
+            Self::MediaRemoved => embedded_io::ErrorKind::NotConnected,
             _ => embedded_io::ErrorKind::Other,
         }
     }

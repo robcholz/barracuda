@@ -7,7 +7,7 @@ use barracuda_vfs::{mount, FsError, MountOptions, ScopedVfs, Vfs};
 /// Tests that exercise System or Plugin Manager composition use this form;
 /// ordinary consumers should prefer [`memory_vfs`].
 pub async fn memory_vfs_root() -> Result<Vfs, FsError> {
-    let mut vfs = Vfs::new();
+    let vfs = Vfs::new();
     vfs.mount(
         "/",
         barracuda_vfs_memfs::MemFs::new().into_backend(),

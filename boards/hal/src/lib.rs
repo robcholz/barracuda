@@ -42,8 +42,8 @@ pub use barracuda_peripheral::led_strip;
 pub use barracuda_peripheral::power;
 /// Stable real-time clock API.
 pub use barracuda_peripheral::real_time_clock;
-/// Stable attached removable-storage peripheral API.
-pub use barracuda_peripheral::storage;
+/// Stable attached removable-filesystem peripheral API.
+pub use barracuda_peripheral::removable_storage;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
 /// Stable factory contract implemented by every peripheral implementation.
@@ -404,47 +404,29 @@ impl display::DisplayPeripheral for NoPeripherals {
     }
 }
 
-/// Uninhabited storage peripheral used when a Board has no removable media.
-pub struct UnavailableStorage {
+/// Uninhabited slot used when a Board has no removable filesystem.
+pub struct UnavailableRemovableStorage {
     never: Infallible,
 }
 
-impl embedded_io::ErrorType for UnavailableStorage {
-    type Error = Infallible;
-}
+impl removable_storage::RemovableStorage for UnavailableRemovableStorage {
+    fn slot_id(&self) -> &'static str {
+        match self.never {}
+    }
 
-impl embedded_io_async::Read for UnavailableStorage {
-    async fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, Self::Error> {
+    fn status(&self) -> removable_storage::RemovableStorageStatus {
+        match self.never {}
+    }
+
+    async fn next_event(&mut self) -> removable_storage::RemovableStorageEvent {
         match self.never {}
     }
 }
 
-impl embedded_io_async::Write for UnavailableStorage {
-    async fn write(&mut self, _buffer: &[u8]) -> Result<usize, Self::Error> {
-        match self.never {}
-    }
+impl removable_storage::RemovableStoragePeripheral for NoPeripherals {
+    type RemovableStorage = UnavailableRemovableStorage;
 
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        match self.never {}
-    }
-}
-
-impl embedded_io_async::Seek for UnavailableStorage {
-    async fn seek(&mut self, _position: embedded_io::SeekFrom) -> Result<u64, Self::Error> {
-        match self.never {}
-    }
-}
-
-impl storage::Storage for UnavailableStorage {
-    fn capacity(&self) -> u64 {
-        match self.never {}
-    }
-}
-
-impl storage::StoragePeripheral for NoPeripherals {
-    type Storage = UnavailableStorage;
-
-    fn take_storage(&mut self) -> Option<Self::Storage> {
+    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> {
         None
     }
 }

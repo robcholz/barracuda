@@ -1,12 +1,16 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use embedded_io_async::{Read, Write};
 
 use crate::path::{backend_path, matches_mount, normalize};
-use crate::{Backend, DirEntry, File, FsError, Metadata, MountOptions, OpenOptions, ReadDir};
+use crate::{
+    Backend, DirEntry, File, FileType, FsError, Metadata, MountOptions, OpenOptions, ReadDir,
+};
 
 #[derive(Clone)]
 struct Mount {
@@ -23,15 +27,21 @@ struct Resolved {
 }
 
 /// One independent virtual-filesystem mount namespace.
+///
+/// Clones share one live mount registry. Mounts and unmounts performed through
+/// any clone are therefore visible to every scoped view derived from this
+/// namespace.
 #[derive(Clone)]
 pub struct Vfs {
-    mounts: Vec<Mount>,
+    mounts: Arc<Mutex<CriticalSectionRawMutex, RefCell<Vec<Mount>>>>,
 }
 
 impl Vfs {
     /// Creates an empty namespace with no implicit fallback filesystem.
-    pub const fn new() -> Self {
-        Self { mounts: Vec::new() }
+    pub fn new() -> Self {
+        Self {
+            mounts: Arc::new(Mutex::new(RefCell::new(Vec::new()))),
+        }
     }
 
     /// Creates a mount-management-free view rooted beneath `root`.
@@ -73,7 +83,7 @@ impl Vfs {
 
     /// Mounts a backend root at `mount_point`.
     pub async fn mount(
-        &mut self,
+        &self,
         mount_point: &str,
         backend: Backend,
         options: MountOptions,
@@ -83,7 +93,7 @@ impl Vfs {
 
     /// Mounts `source_root` from a backend at `mount_point`.
     pub async fn mount_scoped(
-        &mut self,
+        &self,
         mount_point: &str,
         backend: Backend,
         source_root: &str,
@@ -91,9 +101,6 @@ impl Vfs {
     ) -> Result<(), FsError> {
         let point = normalize(mount_point)?;
         let source_root = normalize(source_root)?;
-        if self.mounts.iter().any(|mount| mount.point == point) {
-            return Err(FsError::MountConflict);
-        }
         backend
             .inner
             .metadata(&source_root)
@@ -105,29 +112,56 @@ impl Vfs {
                     Err(FsError::NotDirectory)
                 }
             })?;
-        self.mounts.push(Mount {
-            point,
-            source_root,
-            backend,
-            options,
-            open_files: Arc::new(AtomicUsize::new(0)),
-        });
-        Ok(())
+        self.mounts.lock(|mounts| {
+            let mut mounts = mounts.borrow_mut();
+            if mounts.iter().any(|mount| mount.point == point) {
+                return Err(FsError::MountConflict);
+            }
+            mounts.push(Mount {
+                point,
+                source_root,
+                backend,
+                options,
+                open_files: Arc::new(AtomicUsize::new(0)),
+            });
+            Ok(())
+        })
     }
 
     /// Removes an exact mount point when it owns no open files.
-    pub async fn unmount(&mut self, mount_point: &str) -> Result<(), FsError> {
+    pub async fn unmount(&self, mount_point: &str) -> Result<(), FsError> {
         let point = normalize(mount_point)?;
-        let index = self
-            .mounts
-            .iter()
-            .position(|mount| mount.point == point)
-            .ok_or(FsError::NotMounted)?;
-        if self.mounts[index].open_files.load(Ordering::Acquire) != 0 {
-            return Err(FsError::Busy);
-        }
-        self.mounts.remove(index);
-        Ok(())
+        self.mounts.lock(|mounts| {
+            let mut mounts = mounts.borrow_mut();
+            let index = mounts
+                .iter()
+                .position(|mount| mount.point == point)
+                .ok_or(FsError::NotMounted)?;
+            let mount = mounts.get(index).ok_or(FsError::NotMounted)?;
+            if mount.open_files.load(Ordering::Acquire) != 0 {
+                return Err(FsError::Busy);
+            }
+            mounts.remove(index);
+            Ok(())
+        })
+    }
+
+    /// Detaches an exact mount point while existing file handles retain their backend.
+    ///
+    /// New path resolution stops reaching the backend immediately. Existing
+    /// handles remain owned by their callers and observe any backend-level
+    /// failure independently.
+    pub async fn detach(&self, mount_point: &str) -> Result<(), FsError> {
+        let point = normalize(mount_point)?;
+        self.mounts.lock(|mounts| {
+            let mut mounts = mounts.borrow_mut();
+            let index = mounts
+                .iter()
+                .position(|mount| mount.point == point)
+                .ok_or(FsError::NotMounted)?;
+            mounts.remove(index);
+            Ok(())
+        })
     }
 
     /// Opens an existing file for reading.
@@ -201,13 +235,22 @@ impl Vfs {
     /// Lists immediate children of a mounted directory.
     pub async fn read_dir(&self, path: &str) -> Result<ReadDir, FsError> {
         let resolved = self.resolve(path)?;
-        resolved
+        let mut entries = resolved
             .mount
             .backend
             .inner
             .read_dir(&resolved.path)
-            .await
-            .map(ReadDir::new)
+            .await?;
+        let normalized = normalize(path)?;
+        for name in self.immediate_mount_children(&normalized) {
+            let mounted = DirEntry::new(name.as_str(), Metadata::new(FileType::Directory, 0));
+            if let Some(entry) = entries.iter_mut().find(|entry| entry.file_name() == name) {
+                *entry = mounted;
+            } else {
+                entries.push(mounted);
+            }
+        }
+        Ok(ReadDir::new(entries))
     }
 
     /// Recursively creates a directory and missing ancestors.
@@ -260,15 +303,41 @@ impl Vfs {
 
     fn resolve(&self, path: &str) -> Result<Resolved, FsError> {
         let normalized = normalize(path)?;
-        let mount = self
-            .mounts
-            .iter()
-            .filter(|mount| matches_mount(&normalized, &mount.point))
-            .max_by_key(|mount| mount.point.len())
-            .cloned()
-            .ok_or(FsError::NotMounted)?;
+        let mount = self.mounts.lock(|mounts| {
+            mounts
+                .borrow()
+                .iter()
+                .filter(|mount| matches_mount(&normalized, &mount.point))
+                .max_by_key(|mount| mount.point.len())
+                .cloned()
+        });
+        let mount = mount.ok_or(FsError::NotMounted)?;
         let path = backend_path(&normalized, &mount.point, &mount.source_root);
         Ok(Resolved { mount, path })
+    }
+
+    fn immediate_mount_children(&self, parent: &str) -> Vec<String> {
+        self.mounts.lock(|mounts| {
+            let mut children = Vec::new();
+            for mount in mounts.borrow().iter() {
+                let relative = if parent == "/" {
+                    mount.point.strip_prefix('/')
+                } else {
+                    mount
+                        .point
+                        .strip_prefix(parent)
+                        .and_then(|path| path.strip_prefix('/'))
+                };
+                let Some(relative) = relative.filter(|relative| !relative.is_empty()) else {
+                    continue;
+                };
+                let name = relative.split('/').next().unwrap_or(relative);
+                if children.iter().all(|child| child != name) {
+                    children.push(String::from(name));
+                }
+            }
+            children
+        })
     }
 }
 

@@ -74,7 +74,7 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
         let mut manager = PluginManager::open(partition)
             .await
             .expect("open Plugin storage");
-        let mut filesystem = Vfs::new();
+        let filesystem = Vfs::new();
         filesystem
             .mount(
                 "/data",
