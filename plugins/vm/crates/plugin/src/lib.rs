@@ -17,7 +17,7 @@ use barracuda_plugin::manager::{
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
-    Context, Error, Lua, MetaMethod, Package, Result, Table, UserData, UserDataHandle,
+    Context, Error, Function, Lua, MetaMethod, Package, Result, Table, UserData, UserDataHandle,
     UserDataMethods,
 };
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};

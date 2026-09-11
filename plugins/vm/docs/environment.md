@@ -132,14 +132,17 @@ input/output. It also installs only the filesystem-shaped `os.remove`,
 Plugin's private `ScopedVfs` without vm-filesystem path rewriting. Paths remain
 confined by the VFS namespace, and mount permissions still apply.
 
-The `gpio`, `i2c`, `spi`, and `vm-http` Plugins register require-only modules
-through `LuaPackageRegistry`. `vm-http` provides the bounded high-level
-`require("http").request` operation without exposing sockets or the Platform
-network stack. Hardware modules expose only logical resource names from the
-selected Board's explicit exposed-I/O config. Other module names still fail
-unless another enabled Plugin registers them. VM-owned built-ins belong in
-`plugins/vm/crates/builtin-packages`; optional Plugin-owned packages belong in
-their owning Plugin and register through the VM capability.
+The `gpio`, `i2c`, `spi`, `vm-http`, and `vm-webserver` Plugins register
+require-only modules through `LuaPackageRegistry`. `vm-http` provides the
+bounded high-level `require("http").request` operation without exposing sockets
+or the Platform network stack. `vm-webserver` provides bounded inbound HTTP
+handlers below `/vm` and can transfer an existing readable `io.open` file into
+a streamed response without reopening its path. Hardware modules expose only
+logical resource names from the selected Board's explicit exposed-I/O config.
+Other module names still fail unless another enabled Plugin registers them.
+VM-owned built-ins belong in `plugins/vm/crates/builtin-packages`; optional
+Plugin-owned packages belong in their owning Plugin and register through the VM
+capability.
 
 Repeated `require` calls for a registered module return the cached module table
 for that Lua state.
@@ -173,10 +176,11 @@ Consequently, a script has no ambient host filesystem, raw network stack,
 process, terminal, dynamic-code-loading, hardware-registry, or debug-reflection
 capability. Filesystem access exists only when `vm-filesystem` is enabled and
 remains inside that Plugin's scoped VFS. UTC calendar access exists only through
-`vm-time`; bounded outbound HTTP exists only through `vm-http`. Hardware access
-is limited to the logical resources explicitly exposed through the registered
-`gpio`, `i2c`, and `spi` modules. Any other access must arrive through an
-explicitly registered Rust module.
+`vm-time`; bounded outbound HTTP exists only through `vm-http`; bounded inbound
+HTTP serving exists only through `vm-webserver`. Hardware access is limited to
+the logical resources explicitly exposed through the registered `gpio`, `i2c`,
+and `spi` modules. Any other access must arrive through an explicitly registered
+Rust module.
 
 The full `debug` library is intentionally excluded because it can expose the
 Lua registry, recover private upvalues such as `require`'s package state,

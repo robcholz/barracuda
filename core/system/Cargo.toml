@@ -48,6 +48,7 @@ barracuda-pwm-plugin.workspace = true
 barracuda-spi-plugin.workspace = true
 barracuda-vm-time-plugin.workspace = true
 barracuda-uart-plugin.workspace = true
+barracuda-vm-webserver-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 # END GENERATED PLUGINS

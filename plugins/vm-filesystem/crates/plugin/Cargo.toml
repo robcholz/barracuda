@@ -16,6 +16,7 @@ barracuda-vm-plugin.workspace = true
 embedded-io-async = "0.7"
 
 [dev-dependencies]
+barracuda-platform-test.workspace = true
 barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
 barracuda-vfs-memfs.workspace = true
 barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }

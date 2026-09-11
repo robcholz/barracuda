@@ -129,6 +129,12 @@ impl HttpRequest {
     pub fn body(&self) -> &[u8] {
         &self.body
     }
+
+    /// Consumes the request and returns its complete body without copying it.
+    #[must_use]
+    pub fn into_body(self) -> Vec<u8> {
+        self.body
+    }
 }
 
 /// Owned HTTP response returned by a portable endpoint.

@@ -1,0 +1,3 @@
+id = "vm-webserver"
+depends-on = ["vm", "vm-filesystem", "webserver"]
+description = "Exposes bounded inbound HTTP handling and VM file streaming to Lua."

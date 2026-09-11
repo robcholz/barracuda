@@ -1,0 +1,39 @@
+[package]
+name = "barracuda-vm-webserver-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Bounded WebServer adapter for Barracuda Lua VMs"
+license = "Apache-2.0"
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+barracuda-plugin.workspace = true
+barracuda-vm-filesystem-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+barracuda-webserver-plugin.workspace = true
+embassy-time.workspace = true
+embedded-io-async = "0.7"
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+
+[dev-dependencies]
+barracuda-vm-filesystem-plugin = { path = "../../../vm-filesystem/crates/plugin", features = ["test-fixture"] }
+barracuda-vfs.workspace = true
+barracuda-vfs-memfs.workspace = true
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

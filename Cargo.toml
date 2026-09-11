@@ -98,6 +98,7 @@ barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
 barracuda-uart-plugin = { path = "plugins/vm-uart/crates/plugin" }
+barracuda-vm-webserver-plugin = { path = "plugins/vm-webserver/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }
 barracuda-workflow-plugin = { path = "plugins/workflow/crates/plugin" }
 # END GENERATED PLUGIN WORKSPACE DEPENDENCIES

@@ -3,7 +3,7 @@
 - Plugin ID: `vm-filesystem`
 - Direct Plugin dependencies: `vm`
 - Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Provided typed capabilities: `barracuda_vm_filesystem_plugin::VmFileTransfer`
 - Owned tasks: none
 
 This Plugin adapts its Plugin Manager-provided private `ScopedVfs` to Lua's
@@ -48,10 +48,17 @@ standard streams. It provides:
   non-negative byte counts, including multiple formats in one call;
 - only `os.remove`, `os.rename`, and `os.tmpname` from the standard `os` table.
 
-File handle metatables and their backing Rust userdata are private. Lua can use
-ordinary metatables, but cannot extract or rewrite native userdata finalizers.
-Package revocation is checked again by callbacks that were already installed
-in a running Lua state.
+File handle metatables and their backing Rust userdata remain controlled by the
+package. `VmFileTransfer` lets a declared dependent Plugin consume an already
+open readable file as an owned async reader; it never opens a path or expands
+the file's authority. Package revocation is checked again by callbacks that
+were already installed in a running Lua state.
+
+Transferring a file closes its Lua handle and moves the remaining logical bytes,
+including bytes already buffered by Lua reads, into the reader. That reader
+retains the same open-file lease until it is dropped. Consumers finish a
+transferred reader with `VmFileReader::close`; this also removes an underlying
+`io.tmpfile` path after the last streamed byte.
 
 ## Intentional limits and deviations
 
@@ -61,8 +68,9 @@ in a running Lua state.
 - Writes are flushed immediately. `setvbuf` validates the standard modes but is
   otherwise a compatibility no-op.
 - `os.tmpname` atomically creates an empty name under `/cache` instead of merely
-  predicting a path. `io.tmpfile` removes that file on explicit `close`; a temp
-  file discarded by Lua collection remains in disposable `/cache` until normal
+  predicting a path. `io.tmpfile` removes that file on explicit Lua `close` or
+  when a transferred reader completes `VmFileReader::close`; a temp file
+  discarded without either close remains in disposable `/cache` until normal
   cache eviction.
 - This Plugin does not provide `io.popen` or process, environment, locale,
   wall-clock, dynamic-loader, and host-file-descriptor APIs. `vm-time` may

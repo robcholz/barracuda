@@ -8,6 +8,7 @@ use alloc::{
     boxed::Box,
     collections::VecDeque,
     format,
+    rc::Rc,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -24,12 +25,133 @@ use barracuda_vm_plugin::{
     Context, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, UserData, UserDataHandle,
     UserDataMethods,
 };
-use embedded_io_async::{Read, Seek, Write};
+use embedded_io_async::{ErrorType, Read, Seek, Write};
 
 const MAX_OPEN_FILES: usize = 16;
 const MAX_IO_BYTES: usize = 32 * 1024;
 const READ_BUFFER_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 1024;
+
+/// Typed transfer capability for consuming an already-open VM file as a reader.
+///
+/// The capability never opens a path. It only transfers the existing file
+/// handle and therefore preserves the exact authority granted by `io.open`.
+#[derive(Clone, Copy, Default)]
+pub struct VmFileTransfer;
+
+impl VmFileTransfer {
+    /// Creates the stateless VM file transfer capability.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    /// Consumes the readable portion of an open VM file.
+    ///
+    /// The Lua file becomes closed as soon as the transfer begins. The returned
+    /// reader owns the open-file lease until it is dropped.
+    pub async fn take_reader(&self, file: UserDataHandle<VmFile>) -> Result<VmFileStream> {
+        let (mut state, lease, temporary_path) = file.with_mut(|file| {
+            ensure_active(&file.package)?;
+            let state = file
+                .file
+                .take()
+                .ok_or_else(|| Error::runtime("attempt to use a closed file"))?;
+            if !state.readable {
+                file.file = Some(state);
+                return Err(Error::runtime("file is not open for reading"));
+            }
+            let lease = file
+                .lease
+                .take()
+                .ok_or_else(|| Error::runtime("VM file lease is unavailable"))?;
+            let temporary_path = file.temporary_path.take();
+            Ok::<_, Error>((state, lease, temporary_path))
+        })??;
+        let length = match remaining_length(&mut state).await {
+            Ok(length) => length,
+            Err(error) => {
+                let reader = VmFileReader {
+                    state,
+                    lease,
+                    temporary_path,
+                };
+                let _cleanup = reader.close().await;
+                return Err(error);
+            }
+        };
+        Ok(VmFileStream {
+            length,
+            reader: VmFileReader {
+                state,
+                lease,
+                temporary_path,
+            },
+        })
+    }
+}
+
+/// One transferred VM file and its exact remaining byte length.
+pub struct VmFileStream {
+    length: usize,
+    reader: VmFileReader,
+}
+
+impl VmFileStream {
+    /// Splits the stream into the declared response length and owned reader.
+    #[must_use]
+    pub fn into_parts(self) -> (usize, VmFileReader) {
+        (self.length, self.reader)
+    }
+}
+
+/// Reader owning a VM file after it has been transferred out of Lua.
+pub struct VmFileReader {
+    state: FileState,
+    lease: OpenFileLease,
+    temporary_path: Option<String>,
+}
+
+impl VmFileReader {
+    /// Closes the transferred file and removes it when it came from `io.tmpfile`.
+    pub async fn close(self) -> core::result::Result<(), FsError> {
+        let Self {
+            state,
+            lease,
+            temporary_path,
+        } = self;
+        drop(state);
+        let cleanup = if let Some(path) = temporary_path {
+            lease.0.filesystem.remove_file(&path).await
+        } else {
+            Ok(())
+        };
+        drop(lease);
+        cleanup
+    }
+}
+
+impl ErrorType for VmFileReader {
+    type Error = FsError;
+}
+
+impl Read for VmFileReader {
+    async fn read(&mut self, buffer: &mut [u8]) -> core::result::Result<usize, Self::Error> {
+        let mut copied = 0_usize;
+        while copied < buffer.len() {
+            let Some(byte) = self.state.pending.pop_front() else {
+                break;
+            };
+            buffer[copied] = byte;
+            copied = copied.saturating_add(1);
+        }
+        if copied == buffer.len() || self.state.eof {
+            return Ok(copied);
+        }
+        let read = self.state.file.read(&mut buffer[copied..]).await?;
+        copied.checked_add(read).ok_or(FsError::Io)
+    }
+}
 
 const INSTALL_ADAPTER: &str = r##"
 local io = io
@@ -163,6 +285,10 @@ function methods:lines(...)
     end
 end
 
+function methods:__barracuda_take_reader()
+    return raw_file(self)
+end
+
 function io.open(filename, mode)
     local raw, message = native_open(filename, mode)
     if raw == nil then return nil, message end
@@ -285,6 +411,7 @@ impl Plugin for VmFilesystemPlugin {
     {
         let registry = context.require::<LuaPackageRegistry>("vm")?;
         let package = FilePackage::new(context.filesystem()?.clone());
+        context.provide(Rc::new(VmFileTransfer::new()))?;
         let registration = registry
             .register(package)
             .map_err(PluginError::registration)?;
@@ -372,7 +499,7 @@ struct FilePackageState {
 }
 
 struct PreparedFile {
-    handle: UserDataHandle<LuaFile>,
+    handle: UserDataHandle<VmFile>,
     state: Arc<FilePackageState>,
     path: String,
     options: OpenOptions,
@@ -415,10 +542,10 @@ fn prepare(
             (open < MAX_OPEN_FILES).then_some(open.saturating_add(1))
         })
         .map_err(|_open| Error::runtime("Lua open file limit reached"))?;
-    let handle = lua.create_userdata(LuaFile {
+    let handle = lua.create_userdata(VmFile {
         package: Arc::clone(&state),
         file: None,
-        counted: true,
+        lease: Some(OpenFileLease(Arc::clone(&state))),
         temporary_path: temporary.then(|| path.clone()),
     })?;
     Ok(PreparedFile {
@@ -431,13 +558,13 @@ fn prepare(
     })
 }
 
-async fn open_prepared(prepared: Result<PreparedFile>) -> Option<Result<UserDataHandle<LuaFile>>> {
+async fn open_prepared(prepared: Result<PreparedFile>) -> Option<Result<UserDataHandle<VmFile>>> {
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return Some(Err(error)),
     };
     if let Err(error) = ensure_active(&prepared.state) {
-        let _ignored = prepared.handle.with_mut(LuaFile::release);
+        let _ignored = prepared.handle.with_mut(VmFile::release);
         return Some(Err(error));
     }
     let file = match prepared
@@ -448,7 +575,7 @@ async fn open_prepared(prepared: Result<PreparedFile>) -> Option<Result<UserData
     {
         Ok(file) => file,
         Err(error) => {
-            let _ignored = prepared.handle.with_mut(LuaFile::release);
+            let _ignored = prepared.handle.with_mut(VmFile::release);
             return Some(Err(file_error(error)));
         }
     };
@@ -467,30 +594,28 @@ async fn open_prepared(prepared: Result<PreparedFile>) -> Option<Result<UserData
     }
 }
 
-struct LuaFile {
+/// Opaque native handle backing one Lua `file` object.
+pub struct VmFile {
     package: Arc<FilePackageState>,
     file: Option<FileState>,
-    counted: bool,
+    lease: Option<OpenFileLease>,
     temporary_path: Option<String>,
 }
 
-impl LuaFile {
+impl VmFile {
     fn release(&mut self) {
         self.file.take();
-        if self.counted {
-            self.package.open_files.fetch_sub(1, Ordering::AcqRel);
-            self.counted = false;
-        }
+        self.lease.take();
     }
 }
 
-impl Drop for LuaFile {
+impl Drop for VmFile {
     fn drop(&mut self) {
         self.release();
     }
 }
 
-impl UserData for LuaFile {
+impl UserData for VmFile {
     fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
         methods.add_async_method("read_line", |file, include_newline: bool| async move {
             Some(with_file(&file, |state| Box::pin(read_line(state, include_newline))).await)
@@ -539,9 +664,43 @@ struct FileState {
     eof: bool,
 }
 
+async fn remaining_length(state: &mut FileState) -> Result<usize> {
+    let cursor = state
+        .file
+        .seek(SeekFrom::Current(0))
+        .await
+        .map_err(file_error)?;
+    let end = state
+        .file
+        .seek(SeekFrom::End(0))
+        .await
+        .map_err(file_error)?;
+    state
+        .file
+        .seek(SeekFrom::Start(cursor))
+        .await
+        .map_err(file_error)?;
+    let unread = end
+        .checked_sub(cursor)
+        .ok_or_else(|| Error::runtime("VM file cursor exceeds its length"))?;
+    let unread = usize::try_from(unread)
+        .map_err(|_error| Error::runtime("VM file length does not fit memory size"))?;
+    unread
+        .checked_add(state.pending.len())
+        .ok_or_else(|| Error::runtime("VM file length does not fit memory size"))
+}
+
+struct OpenFileLease(Arc<FilePackageState>);
+
+impl Drop for OpenFileLease {
+    fn drop(&mut self) {
+        self.0.open_files.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 type FileOperation<'a, T> = Pin<Box<dyn core::future::Future<Output = Result<T>> + 'a>>;
 
-async fn with_file<T, F>(file: &UserDataHandle<LuaFile>, operation: F) -> Result<T>
+async fn with_file<T, F>(file: &UserDataHandle<VmFile>, operation: F) -> Result<T>
 where
     F: for<'a> FnOnce(&'a mut FileState) -> FileOperation<'a, T>,
 {
@@ -560,7 +719,7 @@ where
     result
 }
 
-async fn close_file(file: &UserDataHandle<LuaFile>) -> Result<bool> {
+async fn close_file(file: &UserDataHandle<VmFile>) -> Result<bool> {
     let (state, package, temporary) = file.with_mut(|file| {
         ensure_active(&file.package)?;
         let state = file
@@ -585,7 +744,7 @@ async fn close_file(file: &UserDataHandle<LuaFile>) -> Result<bool> {
     } else {
         Ok(())
     };
-    file.with_mut(LuaFile::release)?;
+    file.with_mut(VmFile::release)?;
     flush?;
     cleanup?;
     Ok(true)
@@ -848,15 +1007,17 @@ fn file_error(error: FsError) -> Error {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use alloc::boxed::Box;
+    use alloc::{boxed::Box, sync::Arc, vec};
+    use core::sync::atomic::Ordering;
 
     use barracuda_plugin::manager::{Plugin, PluginDeclaration, PluginFilesystem};
-    use barracuda_vfs::{MountOptions, Vfs};
+    use barracuda_vfs::{FsError, MountOptions, Vfs};
     use barracuda_vfs_memfs::MemFs;
-    use barracuda_vm_plugin::{Lua, LuaPackage, Package, Result};
+    use barracuda_vm_plugin::{Lua, LuaPackage, Package, Result, UserDataHandle};
+    use embedded_io_async::Read as _;
     use futures_lite::future::block_on;
 
-    use super::{FilePackage, VmFilesystemPlugin};
+    use super::{FilePackage, VmFile, VmFileTransfer, VmFilesystemPlugin};
 
     async fn filesystem()
     -> core::result::Result<barracuda_vfs::ScopedVfs, Box<dyn core::error::Error>> {
@@ -924,6 +1085,78 @@ mod tests {
             PluginFilesystem::Private
         );
         assert_eq!(VmFilesystemPlugin::DEPENDS_ON, ["vm"]);
+    }
+
+    #[test]
+    fn transfers_the_remaining_vm_file_and_retains_its_open_lease() {
+        block_on(async {
+            let filesystem = filesystem().await?;
+            filesystem.write("/data/value.txt", b"abcdef").await?;
+            let package = FilePackage::new(filesystem);
+            let state = Arc::clone(&package.state);
+            let mut lua = Lua::new()?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            package.install(&mut lua)?;
+            let file: UserDataHandle<VmFile> = lua
+                .load(
+                    "local file=assert(io.open('/data/value.txt', 'rb')) \
+                     assert(file:read(2) == 'ab') \
+                     return file:__barracuda_take_reader()",
+                )
+                .eval_async()
+                .await?;
+            assert_eq!(state.open_files.load(Ordering::Acquire), 1);
+            let (length, mut reader) = VmFileTransfer::new().take_reader(file).await?.into_parts();
+            assert_eq!(length, 4);
+            assert_eq!(state.open_files.load(Ordering::Acquire), 1);
+            let mut bytes = vec![0; length];
+            let mut offset = 0;
+            while offset < bytes.len() {
+                let read = reader.read(&mut bytes[offset..]).await?;
+                if read == 0 {
+                    break;
+                }
+                offset += read;
+            }
+            assert_eq!(bytes, b"cdef");
+            drop(reader);
+            assert_eq!(state.open_files.load(Ordering::Acquire), 0);
+            Ok::<_, Box<dyn core::error::Error>>(())
+        })
+        .expect("transfer VM file reader");
+    }
+
+    #[test]
+    fn transferred_temporary_file_is_removed_when_reader_closes() {
+        block_on(async {
+            let filesystem = filesystem().await?;
+            let package = FilePackage::new(filesystem.clone());
+            let mut lua = Lua::new()?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            package.install(&mut lua)?;
+            let file: UserDataHandle<VmFile> = lua
+                .load(
+                    "local file=assert(io.tmpfile()) \
+                     assert(file:write('value')) \
+                     assert(file:seek('set', 0) == 0) \
+                     return file:__barracuda_take_reader()",
+                )
+                .eval_async()
+                .await?;
+            let reader = VmFileTransfer::new()
+                .take_reader(file)
+                .await?
+                .into_parts()
+                .1;
+            assert!(filesystem.metadata("/cache/lua-tmp-0").await.is_ok());
+            reader.close().await?;
+            assert!(matches!(
+                filesystem.metadata("/cache/lua-tmp-0").await,
+                Err(FsError::NotFound)
+            ));
+            Ok::<_, Box<dyn core::error::Error>>(())
+        })
+        .expect("clean up transferred temporary file");
     }
 
     #[test]

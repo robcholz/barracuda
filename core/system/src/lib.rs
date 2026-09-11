@@ -365,6 +365,7 @@ where
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_vm_time_plugin::VmTimePlugin::new(&mut plugin_context),
             barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
+            barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
