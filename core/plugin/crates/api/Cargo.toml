@@ -10,6 +10,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-board-hal.workspace = true
+barracuda-target-api.workspace = true
 embassy-net.workspace = true
 http-client.workspace = true
 

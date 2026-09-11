@@ -11,6 +11,60 @@ use core::future::Future;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 
+/// Fixed identity of one compiled execution Platform.
+///
+/// Concrete Platform manifests provide these semantic values. The selected
+/// Platform projection adds the final Cargo target architecture at build time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlatformInfo {
+    name: &'static str,
+    family: &'static str,
+    architecture: &'static str,
+    environment: &'static str,
+}
+
+impl PlatformInfo {
+    /// Creates one static Platform descriptor.
+    #[must_use]
+    pub const fn new(
+        name: &'static str,
+        family: &'static str,
+        architecture: &'static str,
+        environment: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            family,
+            architecture,
+            environment,
+        }
+    }
+
+    /// Returns the stable Platform bundle name.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Returns the semantic Platform family.
+    #[must_use]
+    pub const fn family(&self) -> &'static str {
+        self.family
+    }
+
+    /// Returns the compiled Rust target architecture.
+    #[must_use]
+    pub const fn architecture(&self) -> &'static str {
+        self.architecture
+    }
+
+    /// Returns the execution environment class.
+    #[must_use]
+    pub const fn environment(&self) -> &'static str {
+        self.environment
+    }
+}
+
 /// Whether consumers may mutate one native partition at runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PartitionAccess {

@@ -1,4 +1,7 @@
 name: macos
+info:
+  family: macos
+  environment: hosted
 package: barracuda-platform-macos
 crate: barracuda_platform_macos
 type: MacosPlatform

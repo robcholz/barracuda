@@ -1,4 +1,7 @@
 name: esp32s3
+info:
+  family: esp
+  environment: bare-metal
 package: barracuda-platform-esp32s3
 crate: barracuda_platform_esp32s3
 type: Esp32S3Platform

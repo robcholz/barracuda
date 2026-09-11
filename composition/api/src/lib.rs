@@ -2,6 +2,36 @@
 
 #![no_std]
 
+pub use barracuda_board::{BoardInfo, Hardware};
+pub use barracuda_platform::PlatformInfo;
+
+/// Fixed identity of the independently selected Platform and Board.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TargetIdentity {
+    platform: PlatformInfo,
+    board: BoardInfo,
+}
+
+impl TargetIdentity {
+    /// Combines the two independently selected identity axes.
+    #[must_use]
+    pub const fn new(platform: PlatformInfo, board: BoardInfo) -> Self {
+        Self { platform, board }
+    }
+
+    /// Returns the selected execution Platform identity.
+    #[must_use]
+    pub const fn platform(&self) -> &PlatformInfo {
+        &self.platform
+    }
+
+    /// Returns the selected Board identity.
+    #[must_use]
+    pub const fn board(&self) -> &BoardInfo {
+        &self.board
+    }
+}
+
 /// Move-only resources acquired once and split between the selected axes.
 pub struct TargetBindings<Platform, BoardHal> {
     /// Raw resources assigned to Platform initialization.

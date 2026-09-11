@@ -1,12 +1,13 @@
 [package]
-name = "barracuda-target-api"
+name = "barracuda-vm-systeminfo-plugin"
 version = "0.1.0"
-edition = "2021"
-description = "Platform and Board HAL target resource boundary for Barracuda"
+edition = "2024"
+description = "Lua adapter for Barracuda's fixed Platform and Board identity"
+license = "Apache-2.0"
 
 [dependencies]
-barracuda-board.workspace = true
-barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1713,6 +1713,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-platform-test",
+ "barracuda-target-api",
  "embassy-net",
  "embassy-time",
  "http-client",
@@ -1924,6 +1925,7 @@ dependencies = [
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-http-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-systeminfo-plugin",
  "barracuda-vm-time-plugin",
  "barracuda-vm-webserver-plugin",
  "barracuda-webserver-plugin",
@@ -2030,6 +2032,10 @@ dependencies = [
 [[package]]
 name = "barracuda-target-api"
 version = "0.1.0"
+dependencies = [
+ "barracuda-board",
+ "barracuda-platform",
+]
 
 [[package]]
 name = "barracuda-time-plugin"
@@ -2231,6 +2237,14 @@ dependencies = [
  "getset",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm-systeminfo-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
 ]
 
 [[package]]

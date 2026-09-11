@@ -5,8 +5,7 @@
 /// One concrete product's fixed, platform-neutral settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Board {
-    name: &'static str,
-    hardware: Hardware,
+    info: BoardInfo,
     native_layout: NativeLayout,
 }
 
@@ -15,28 +14,60 @@ impl Board {
     #[must_use]
     pub const fn new(name: &'static str, hardware: Hardware, native_layout: NativeLayout) -> Self {
         Self {
-            name,
-            hardware,
+            info: BoardInfo::new(name, hardware),
             native_layout,
         }
+    }
+
+    /// Returns the fixed identity exported to runtime observers.
+    #[must_use]
+    pub const fn info(&self) -> BoardInfo {
+        self.info
     }
 
     /// Returns the stable Board name.
     #[must_use]
     pub const fn name(&self) -> &'static str {
-        self.name
+        self.info.name()
     }
 
     /// Returns the concrete hardware identity declared by this Board.
     #[must_use]
     pub const fn hardware(&self) -> &Hardware {
-        &self.hardware
+        self.info.hardware()
     }
 
     /// Returns the native physical-layout artifact bundled with this Board.
     #[must_use]
     pub const fn native_layout(&self) -> &NativeLayout {
         &self.native_layout
+    }
+}
+
+/// Fixed identity of one compiled Board matrix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoardInfo {
+    name: &'static str,
+    hardware: Hardware,
+}
+
+impl BoardInfo {
+    /// Creates one static Board descriptor.
+    #[must_use]
+    pub const fn new(name: &'static str, hardware: Hardware) -> Self {
+        Self { name, hardware }
+    }
+
+    /// Returns the stable Board bundle name.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Returns the Board's concrete hardware identity.
+    #[must_use]
+    pub const fn hardware(&self) -> &Hardware {
+        &self.hardware
     }
 }
 

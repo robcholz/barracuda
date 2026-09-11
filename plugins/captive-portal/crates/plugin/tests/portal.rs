@@ -184,7 +184,14 @@ fn scaffold_paths_are_separate_from_plugin_assets() {
 #[tokio::test(flavor = "current_thread")]
 async fn plugin_unload_updates_the_http_manifest_and_assets() {
     let stack = never_embassy_stack();
-    let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+    let info = barracuda_plugin::api::TargetIdentity::new(
+        barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
+        barracuda_plugin::api::BoardInfo::new(
+            "test-board",
+            barracuda_plugin::api::Hardware::new("test-chip"),
+        ),
+    );
+    let mut context = PluginContext::new(info, stack, ClientFactory::plaintext(stack));
     let resources = barracuda_vfs_memfs::MemFs::new();
     resources
         .create_dir_all("/plugins/captive-portal")

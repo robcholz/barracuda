@@ -1,4 +1,7 @@
 name: esp32p4
+info:
+  family: esp
+  environment: bare-metal
 package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform

@@ -17,7 +17,7 @@ fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
     fs::write(
         directory.join("platform.yml"),
         format!(
-            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\n  runtime-uart-controllers: [UART1]\n  runtime-adc-controllers:\n    - controller: ADC1\n      channels:\n        - channel: CHANNEL0\n          pin: GPIO1\n  runtime-pwm-controllers:\n    - controller: PWM0\n      timers: [TIMER0]\n      channels: [CHANNEL0]\n  runtime-i2s-controllers:\n    - controller: I2S0\n      dma-channels: [DMA_CH0]\n      dma-buffer-bytes: 4096\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
+            "name: {name}\ninfo:\n  family: acme\n  environment: bare-metal\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nhal:\n  bindings: [digital-output, i2c-device]\n  runtime-i2c-controllers: [I2C0, I2C1]\n  runtime-spi-controllers: [SPI2]\n  runtime-uart-controllers: [UART1]\n  runtime-adc-controllers:\n    - controller: ADC1\n      channels:\n        - channel: CHANNEL0\n          pin: GPIO1\n  runtime-pwm-controllers:\n    - controller: PWM0\n      timers: [TIMER0]\n      channels: [CHANNEL0]\n  runtime-i2s-controllers:\n    - controller: I2S0\n      dma-channels: [DMA_CH0]\n      dma-buffer-bytes: 4096\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
     )
     .expect("Platform manifest");
@@ -47,6 +47,8 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     .expect("Platform selected from Cargo target");
 
     assert_eq!(board.name(), "acme-rv");
+    assert_eq!(board.info().family(), "acme");
+    assert_eq!(board.info().environment(), "bare-metal");
     assert_eq!(board.package(), "barracuda-platform-acme-rv");
     assert_eq!(target.name(), board.name());
     assert_eq!(board.directory(), root.path().join("platforms/acme-rv"));
@@ -86,7 +88,7 @@ fn platform_owns_cargo_features_for_supported_chips() {
     fs::create_dir_all(&directory).expect("Platform directory");
     fs::write(
         directory.join("platform.yml"),
-        "name: acme-rv\npackage: barracuda-platform-acme-rv\ncrate: barracuda_platform_acme_rv\ntype: AcmePlatform\nselection:\n  board-chips: ['acme*']\n  targets:\n    - triple: 'riscv64acme-unknown-none-elf'\n  features-by-chip:\n    acme123: [acme123-hal]\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+        "name: acme-rv\ninfo:\n  family: acme\n  environment: bare-metal\npackage: barracuda-platform-acme-rv\ncrate: barracuda_platform_acme_rv\ntype: AcmePlatform\nselection:\n  board-chips: ['acme*']\n  targets:\n    - triple: 'riscv64acme-unknown-none-elf'\n  features-by-chip:\n    acme123: [acme123-hal]\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
     )
     .expect("Platform manifest");
 
@@ -115,13 +117,29 @@ fn rejects_unbounded_runtime_i2s_storage() {
 }
 
 #[test]
+fn rejects_a_platform_without_fixed_identity() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace("info:\n  family: acme\n  environment: bare-metal\n", ""),
+    )
+    .expect("Platform manifest without identity");
+
+    let error = discover_platforms(root.path()).expect_err("missing identity must fail");
+    assert!(error.to_string().contains("info"));
+}
+
+#[test]
 fn legacy_application_source_is_rejected() {
     let root = tempdir().expect("temporary workspace");
     let directory = root.path().join("platforms/acme");
     fs::create_dir_all(&directory).expect("Platform directory");
     fs::write(
         directory.join("platform.yml"),
-        "name: acme\npackage: barracuda-platform-acme\ncrate: barracuda_platform_acme\ntype: AcmePlatform\nselection:\n  board-chips: [acme]\n  targets:\n    - os: acme\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\napplication:\n  entry:\n    source: application.rs\n",
+        "name: acme\ninfo:\n  family: acme\n  environment: hosted\npackage: barracuda-platform-acme\ncrate: barracuda_platform_acme\ntype: AcmePlatform\nselection:\n  board-chips: [acme]\n  targets:\n    - os: acme\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\napplication:\n  entry:\n    source: application.rs\n",
     )
     .expect("Platform manifest");
 

@@ -17,6 +17,19 @@ fn source_workspace_uses_the_persisted_platform_selection() -> Result<(), std::i
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let selected = std::fs::read_to_string(root.join(".barracuda/selected-platform"))?;
     assert_eq!(barracuda_platform_selected::PLATFORM_NAME, selected.trim());
+    assert_eq!(
+        barracuda_platform_selected::PLATFORM_INFO.name(),
+        selected.trim()
+    );
+    assert!(!barracuda_platform_selected::PLATFORM_INFO
+        .family()
+        .is_empty());
+    assert!(!barracuda_platform_selected::PLATFORM_INFO
+        .architecture()
+        .is_empty());
+    assert!(!barracuda_platform_selected::PLATFORM_INFO
+        .environment()
+        .is_empty());
     Ok(())
 }
 

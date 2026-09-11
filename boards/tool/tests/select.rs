@@ -31,7 +31,7 @@ fn add_selection_files(root: &Path) {
     fs::create_dir_all(&platform).expect("Platform directory");
     fs::write(
         platform.join("platform.yml"),
-        "name: macos\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nhal:\n  bindings: [digital-input, digital-output, gpio, spi-device, i2c-device]\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
+        "name: macos\ninfo:\n  family: macos\n  environment: hosted\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nhal:\n  bindings: [digital-input, digital-output, gpio, spi-device, i2c-device]\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
     )
     .expect("Platform manifest");
     fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");

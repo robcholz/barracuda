@@ -858,7 +858,7 @@ mod tests {
         fs::create_dir_all(&platform).expect("Platform directory");
         fs::write(
             platform.join("platform.yml"),
-            "name: test\npackage: barracuda-platform-test\ncrate: barracuda_platform_test\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+            "name: test\ninfo:\n  family: test\n  environment: hosted\npackage: barracuda-platform-test\ncrate: barracuda_platform_test\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
         )
         .expect("Platform manifest");
         fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");
@@ -980,7 +980,7 @@ mod tests {
         fs::create_dir_all(&platform).expect("Platform directory");
         fs::write(
             platform.join("platform.yml"),
-            "name: test\npackage: test-platform\ncrate: test_platform\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+            "name: test\ninfo:\n  family: test\n  environment: hosted\npackage: test-platform\ncrate: test_platform\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
         )
         .expect("Platform manifest");
         let directory = root.path().join("boards/configs/alpha-board");

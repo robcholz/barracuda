@@ -13,6 +13,8 @@ mod selected {
 pub use selected::__platform;
 /// Independently selected concrete Platform.
 pub use selected::SelectedPlatform;
+/// Fixed identity of the independently selected Platform.
+pub use selected::PLATFORM_INFO;
 /// Name of the independently selected Platform.
 pub use selected::PLATFORM_NAME;
 

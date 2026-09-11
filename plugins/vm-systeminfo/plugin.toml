@@ -1,0 +1,3 @@
+id = "vm-systeminfo"
+depends-on = ["vm"]
+description = "Exposes the selected Platform and Board identity as a require-only Lua package."

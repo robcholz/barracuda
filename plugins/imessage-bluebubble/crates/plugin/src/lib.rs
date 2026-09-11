@@ -302,7 +302,14 @@ mod tests {
 
     fn plugin_context() -> PluginContext {
         let stack = never_embassy_stack();
-        PluginContext::new(stack, ClientFactory::plaintext(stack))
+        let info = barracuda_plugin::api::TargetIdentity::new(
+            barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
+            barracuda_plugin::api::BoardInfo::new(
+                "test-board",
+                barracuda_plugin::api::Hardware::new("test-chip"),
+            ),
+        );
+        PluginContext::new(info, stack, ClientFactory::plaintext(stack))
     }
 
     #[test]

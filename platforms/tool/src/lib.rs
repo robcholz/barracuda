@@ -366,7 +366,7 @@ mod tests {
         fs::write(
             directory.join("platform.yml"),
             format!(
-                "name: {name}\npackage: {package}\ncrate: {}\ntype: TestPlatform\nselection:\n  board-chips: [{name}]\n  targets:\n    - os: {name}\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+                "name: {name}\ninfo:\n  family: test\n  environment: hosted\npackage: {package}\ncrate: {}\ntype: TestPlatform\nselection:\n  board-chips: [{name}]\n  targets:\n    - os: {name}\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
                 package.replace('-', "_")
             ),
         )

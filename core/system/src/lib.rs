@@ -36,7 +36,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
-use barracuda_target_api::TargetResources;
+use barracuda_target_api::{TargetIdentity, TargetResources};
 use barracuda_tls::ClientTls;
 use barracuda_vfs::{
     create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
@@ -282,6 +282,7 @@ where
             PlatformResources<Tls, Partitions<Region, P>>,
             BoardResources<Peripherals, Io>,
         >,
+        target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
@@ -322,8 +323,12 @@ where
 
         let http_clients =
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
-        let mut plugin_context =
-            PluginContext::from_hal(prepared.ip_stack, http_clients, prepared.board_hal);
+        let mut plugin_context = PluginContext::from_hal(
+            target_identity,
+            prepared.ip_stack,
+            http_clients,
+            prepared.board_hal,
+        );
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins;
@@ -363,6 +368,7 @@ where
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
+            barracuda_vm_systeminfo_plugin::VmSystemInfoPlugin::new(&mut plugin_context),
             barracuda_vm_time_plugin::VmTimePlugin::new(&mut plugin_context),
             barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
