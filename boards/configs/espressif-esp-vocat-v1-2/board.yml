@@ -1,0 +1,118 @@
+name: espressif-esp-vocat-v1-2
+hardware:
+  chip: esp32s3
+  flash-size: 16mb
+toolchain:
+  target: xtensa-esp32s3-none-elf
+native-layout:
+  artifact: partitions.csv
+
+peripherals:
+  io:
+    i2c-device:
+      internal-peripherals:
+        # Shared ES8311, ES7210, BMI270, BQ27220, and CST816T control bus.
+        # The external I2C connector is an electrical extension of this same bus.
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
+    i2s-stream:
+      audio-stream:
+        # DOUT/DIN are named from the ESP32-S3 controller's perspective.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO40
+        ws: GPIO39
+        dout: GPIO41
+        din: GPIO3
+        mclk: GPIO42
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    quad-spi-device:
+      display-link:
+        peripheral: SPI2
+        sck: GPIO18
+        data: [GPIO46, GPIO13, GPIO11, GPIO12]
+        chip-select: GPIO14
+        frequency-hz: 40000000
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        clk: GPIO16
+        cmd: GPIO38
+        data: [GPIO17]
+        bus-width: 1
+    capacitive-touch:
+      front-buttons:
+        peripheral: SENS
+        rtc-control: RTC_CNTL
+        rtc-io: RTC_IO
+        pins: [GPIO6, GPIO7]
+  devices:
+    audio-codec:
+      implementation: es8311-es7210-audio-codec
+      bindings:
+        control: internal-peripherals
+        stream: audio-stream
+        codec-power-enable: GPIO48
+        amplifier-enable: GPIO15
+      parameters:
+        output-address: 24
+        input-address: 64
+    front-buttons:
+      implementation: capacitive-touch-buttons
+      bindings:
+        channels: front-buttons
+      parameters:
+        threshold-basis-points: 150
+    green-status-led:
+      implementation: indicator-led
+      bindings:
+        pin: GPIO43
+      parameters:
+        active-level: low
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        address: 104
+        accelerometer-range: 4g
+        gyroscope-range: 500dps
+        sample-rate: 100hz
+    power-monitor:
+      implementation: bq27220-power-monitor
+      bindings:
+        i2c: internal-peripherals
+      parameters:
+        address: 85
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings:
+        device: micro-sd
+    touch:
+      implementation: cst816t-touch
+      bindings:
+        i2c: internal-peripherals
+        interrupt: GPIO10
+      parameters:
+        address: 21
+        width: 360
+        height: 360
+    video-display:
+      implementation: st77916-qspi-display
+      bindings:
+        bus: display-link
+        dc: GPIO45
+        reset: GPIO47
+        backlight: GPIO44
+        power_enable: GPIO9
+
+exposed-io:
+  pins:
+    # Magnetic accessory UART connector.
+    magnetic-uart-rx: { pin: GPIO4 }
+    magnetic-uart-tx: { pin: GPIO5 }

@@ -1,0 +1,23 @@
+[package]
+name = "barracuda-cst816t-touch"
+version = "0.1.0"
+edition = "2024"
+description = "CST816T single-touch peripheral implementation"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver-cst816t.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

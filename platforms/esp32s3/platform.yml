@@ -6,7 +6,7 @@ package: barracuda-platform-esp32s3
 crate: barracuda_platform_esp32s3
 type: Esp32S3Platform
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, camera-capture, i2s-stream]
+  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, i2s-stream, capacitive-touch]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]

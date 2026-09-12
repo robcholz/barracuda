@@ -1,0 +1,18 @@
+[package]
+name = "barracuda-driver-st77916"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level ST77916 QSPI panel command driver"
+license = "Apache-2.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

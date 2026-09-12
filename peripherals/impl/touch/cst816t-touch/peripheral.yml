@@ -1,0 +1,24 @@
+id: cst816t-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-cst816t-touch
+  crate: barracuda_cst816t_touch
+  factory: "::{{crate}}::Cst816tTouchImplementation<{{binding.i2c.type}}, {{binding.interrupt.type}}>"
+  bindings-expression: "::{{crate}}::Cst816tBindings::new({{binding.i2c.value}}, {{binding.interrupt.value}})"
+  config-expression: "::{{crate}}::Cst816tConfig::new({{parameter.address}}, {{parameter.width}}, {{parameter.height}})"
+bindings:
+  i2c:
+    kind: i2c-device
+  interrupt:
+    kind: digital-input
+parameters:
+  address:
+    type: integer
+    default: 21
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true

@@ -1,0 +1,17 @@
+id: capacitive-touch-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-capacitive-touch-buttons
+  crate: barracuda_capacitive_touch_buttons
+  factory: "::{{crate}}::CapacitiveTouchButtonsImplementation<{{binding.channels.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::CapacitiveTouchButtonsBindings::new({{binding.channels.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::CapacitiveTouchButtonsConfig::new({{parameter.threshold-basis-points}})"
+bindings:
+  channels:
+    kind: capacitive-touch
+parameters:
+  threshold-basis-points:
+    type: integer
+    # 150 basis points is the 1.5% delta used by Espressif's ESP-VoCat BSP.
+    default: 150

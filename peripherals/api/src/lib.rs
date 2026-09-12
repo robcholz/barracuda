@@ -272,6 +272,72 @@ pub mod touch {
     }
 }
 
+/// Stable attached-button peripheral API.
+pub mod buttons {
+    /// Maximum buttons represented by one portable snapshot.
+    pub const MAX_BUTTONS: usize = 8;
+
+    /// Simultaneously sampled attached-button state.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct ButtonSnapshot {
+        pressed: [bool; MAX_BUTTONS],
+        count: u8,
+    }
+
+    impl ButtonSnapshot {
+        /// Creates a snapshot from a dense prefix of button states.
+        #[must_use]
+        pub fn new(states: &[bool]) -> Self {
+            let mut snapshot = Self::default();
+            for (target, source) in snapshot.pressed.iter_mut().zip(states) {
+                *target = *source;
+                snapshot.count = snapshot.count.saturating_add(1);
+            }
+            snapshot
+        }
+
+        /// Returns the number of attached buttons.
+        #[must_use]
+        pub const fn len(self) -> usize {
+            self.count as usize
+        }
+
+        /// Returns whether no buttons are attached.
+        #[must_use]
+        pub const fn is_empty(self) -> bool {
+            self.count == 0
+        }
+
+        /// Returns one button state by stable zero-based index.
+        #[must_use]
+        pub const fn is_pressed(self, index: usize) -> Option<bool> {
+            if index < self.count as usize {
+                Some(self.pressed[index])
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Semantic attached-button input peripheral.
+    pub trait Buttons {
+        /// Concrete sampling failure.
+        type Error: core::fmt::Debug;
+
+        /// Reads all button states from one hardware sample.
+        fn read(&mut self) -> Result<ButtonSnapshot, Self::Error>;
+    }
+
+    /// Move-only access to the Board's attached buttons.
+    pub trait ButtonsPeripheral {
+        /// Concrete, statically dispatched button implementation.
+        type Buttons: Buttons;
+
+        /// Transfers the button peripheral to its sole consumer once.
+        fn take_buttons(&mut self) -> Option<Self::Buttons>;
+    }
+}
+
 /// Stable display peripheral API.
 pub mod display {
     use core::{future::Future, ops::BitOr};

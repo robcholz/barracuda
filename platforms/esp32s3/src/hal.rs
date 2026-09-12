@@ -1,7 +1,14 @@
 //! ESP32-S3 adaptation from Board-selected tokens to hardware resources.
 
+mod capacitive_touch;
+mod sdmmc;
+
+pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
+pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
+
 include!("../../esp32/src/hal.rs");
 
+use barracuda_board_hal::QuadSpiBus;
 use barracuda_peripheral::{
     audio::{PcmFormat, PcmStream},
     camera::{FrameReceiver, FrameReceiverErrorType},
@@ -20,7 +27,59 @@ use esp_hal::{
         },
         CamDmaRxChannel, LcdCam,
     },
+    spi::master::{Address as SpiAddress, Command as SpiCommand, DataMode},
 };
+
+/// ESP32-S3 four-data-line half-duplex SPI construction failure.
+pub type QuadSpiConfigError = SpiConfigError;
+
+/// ESP32-S3 selected QSPI device.
+pub struct QuadSpiDevice {
+    spi: Spi<'static, Blocking>,
+}
+
+impl QuadSpiBus for QuadSpiDevice {
+    type Error = esp_hal::spi::Error;
+
+    fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error> {
+        self.spi.half_duplex_write(
+            DataMode::Quad,
+            SpiCommand::_8Bit(u16::from(opcode), DataMode::Single),
+            SpiAddress::_24Bit(address, DataMode::Single),
+            0,
+            data,
+        )
+    }
+}
+
+/// Constructs one ESP32-S3 QSPI device from Board-selected resources.
+///
+/// # Errors
+///
+/// Returns [`QuadSpiConfigError`] when the requested clock cannot be configured.
+#[allow(clippy::too_many_arguments)]
+pub fn quad_spi_device(
+    spi: impl SpiInstance + 'static,
+    sck: impl PeripheralOutput<'static> + 'static,
+    data0: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    data1: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    data2: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    data3: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    chip_select: impl PeripheralOutput<'static> + 'static,
+    frequency_hz: u32,
+) -> Result<QuadSpiDevice, QuadSpiConfigError> {
+    let spi = Spi::new(
+        spi,
+        SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+    )?
+    .with_sck(sck)
+    .with_sio0(data0)
+    .with_sio1(data1)
+    .with_sio2(data2)
+    .with_sio3(data3)
+    .with_cs(chip_select);
+    Ok(QuadSpiDevice { spi })
+}
 
 /// Statically allocates one ESP32-S3 DVP DMA buffer at the generated Board call site.
 #[macro_export]

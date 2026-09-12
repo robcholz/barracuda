@@ -6,6 +6,10 @@
 #[cfg(target_arch = "xtensa")]
 pub mod hal;
 
+#[cfg(target_arch = "xtensa")]
+#[doc(hidden)]
+pub mod application;
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32S3RegionAccess {
@@ -158,7 +162,6 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32S3Platform`].
     pub struct Esp32S3PlatformBindings {
         ip_stack: Stack<'static>,
-        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S3Flash<'static>>>,
     }
 
@@ -175,17 +178,12 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S3Flash<'static>>>,
         ) -> Result<Self, Esp32S3PlatformError> {
             if board.hardware().chip() != "esp32s3" {
                 return Err(Esp32S3PlatformError::IncompatibleChip);
             }
-            Ok(Self {
-                ip_stack,
-                tls,
-                flash,
-            })
+            Ok(Self { ip_stack, flash })
         }
     }
 
@@ -222,7 +220,7 @@ mod internal_flash {
 
     impl Platform for Esp32S3Platform {
         type Bindings = Esp32S3PlatformBindings;
-        type Tls = barracuda_tls::MbedTls;
+        type Tls = barracuda_tls::PlaintextTls;
         type Partitions = Esp32S3Partitions;
         type Error = Esp32S3PlatformError;
 
@@ -238,12 +236,10 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing ESP32-S3 Platform partitions");
             let partitions = partitions(bindings.flash)?;
-            log::info!("initializing ESP32-S3 Platform TLS");
-            let tls = bindings.tls.initialize()?;
             log::info!("initialized ESP32-S3 Platform");
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
-                tls,
+                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }
@@ -256,8 +252,6 @@ mod internal_flash {
         IncompatibleChip,
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
-        /// Platform TLS initialization failed.
-        Tls(barracuda_tls::TlsError),
     }
 
     impl From<PartitionsInsertError> for Esp32S3PlatformError {
@@ -266,18 +260,11 @@ mod internal_flash {
         }
     }
 
-    impl From<barracuda_tls::TlsError> for Esp32S3PlatformError {
-        fn from(error: barracuda_tls::TlsError) -> Self {
-            Self::Tls(error)
-        }
-    }
-
     impl core::fmt::Display for Esp32S3PlatformError {
         fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
-                Self::Tls(error) => write!(formatter, "failed to initialize ESP32 TLS: {error}"),
             }
         }
     }

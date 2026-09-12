@@ -19,6 +19,8 @@ pub enum HalBinding {
     Gpio,
     /// Exclusive SPI-device construction.
     SpiDevice,
+    /// Exclusive four-data-line half-duplex SPI-device construction.
+    QuadSpiDevice,
     /// Exclusively owned SPI-bus construction.
     SpiBus,
     /// Data-only SPI waveform construction with a Platform-owned controller.
@@ -35,6 +37,8 @@ pub enum HalBinding {
     CameraCapture,
     /// Full-duplex I2S stream construction.
     I2sStream,
+    /// Fixed capacitive-touch channel group construction.
+    CapacitiveTouch,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.
