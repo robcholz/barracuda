@@ -199,8 +199,14 @@ declaration, applies the workspace rustup override, and writes the Cargo
 configuration needed by ordinary `cargo check`, `cargo build`, and `cargo run`
 commands. Host-side Cargo tools use a complete host standard library and an
 isolated artifact directory while an embedded `build-std` policy is active.
-The build reads persistent workspace state; it does not require shell setup or
-a Board-aware wrapper.
+The selector crates keep stable source manifests. `cargo board` bootstraps
+ignored local dependency packages under `.barracuda/selection` before Cargo
+resolves the source workspace, then activates only the concrete Platform and
+peripheral implementation dependencies required by the chosen Board. Every
+local package declares the complete optional dependency catalog, so changing
+the selected default features does not rewrite `Cargo.lock`. The build reads
+persistent workspace state; it does not require shell setup or a Board-aware
+build wrapper.
 `boards/selected` must not inspect `target_os` or `target_arch`, and the outer
 Target composition must not infer a default Board or activate a Board feature
 from them. A missing selection is a build error that points back to the select

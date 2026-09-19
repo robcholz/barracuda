@@ -24,7 +24,8 @@ fn selected_board_exports_no_platform_identity() -> Result<(), std::io::Error> {
     let manifest = std::fs::read_to_string(manifest_dir.join("Cargo.toml"))?;
     assert!(!source.contains("SelectedPlatform"));
     assert!(!source.contains("PLATFORM_NAME"));
-    assert!(!manifest.contains("barracuda-platform"));
+    assert!(manifest.contains("barracuda-platform-selected.workspace = true"));
+    assert!(!manifest.contains("barracuda-platform-esp"));
     assert!(!manifest.contains("platforms/"));
     assert!(!build.contains("CARGO_CFG_TARGET_OS"));
     assert!(!build.contains("CARGO_CFG_TARGET_ARCH"));
@@ -39,5 +40,7 @@ fn selected_board_exports_no_platform_identity() -> Result<(), std::io::Error> {
     assert!(!build.contains("board.board_hal()"));
     assert!(!build.contains("stm32f429zi-nucleo"));
     assert!(!manifest.contains("[features]"));
+    assert!(manifest
+        .contains("barracuda-board-selection = { path = \"../../.barracuda/selection/board\" }"));
     Ok(())
 }

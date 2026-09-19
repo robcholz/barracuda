@@ -21,6 +21,8 @@ use barracuda_platform_config::{resolve_board_platform, ResolveError as Platform
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
+mod selection_packages;
+
 const PERIPHERAL_WORKSPACE_BEGIN: &str =
     "# BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES";
 const PERIPHERAL_WORKSPACE_END: &str =
@@ -760,49 +762,34 @@ fn write_selected_build(
     platform: &barracuda_platform_config::PlatformDefinition,
 ) -> Result<(), CommandError> {
     let platform_features = platform.cargo_features_for_chip(board.hardware().chip());
-    let platform_dependency = if platform_features.is_empty() {
-        format!("{}.workspace = true", platform.package())
-    } else {
-        let features = platform_features
-            .iter()
-            .map(|feature| format!("{feature:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "{} = {{ workspace = true, features = [{}] }}",
-            platform.package(),
-            features
-        )
-    };
     let mut board_dependencies = Vec::new();
     if board.has_hardware_surface() {
         let catalog = load_catalog(workspace_root)?;
         let resolved = resolve_board(board, &catalog)?;
         validate_platform_hal(board, &resolved, platform)?;
         for peripheral in resolved.peripherals() {
-            let dependency = format!(
-                "{}.workspace = true",
-                peripheral.implementation().implementation().package()
-            );
+            let dependency = peripheral
+                .implementation()
+                .implementation()
+                .package()
+                .to_owned();
             if !board_dependencies.contains(&dependency) {
                 board_dependencies.push(dependency);
             }
         }
-        board_dependencies.push(String::from("barracuda-peripheral.workspace = true"));
     }
     board_dependencies.sort();
-    replace_file_block(
-        &workspace_root.join("platforms/selected/Cargo.toml"),
-        "# BEGIN GENERATED SELECTED PLATFORM",
-        "# END GENERATED SELECTED PLATFORM",
-        &platform_dependency,
-    )?;
-    replace_file_block(
-        &workspace_root.join("boards/selected/Cargo.toml"),
-        "# BEGIN GENERATED SELECTED BOARD HAL",
-        "# END GENERATED SELECTED BOARD HAL",
-        &board_dependencies.join("\n"),
-    )?;
+    selection_packages::write(
+        workspace_root,
+        Some(platform.package()),
+        platform_features,
+        &board_dependencies,
+    )
+    .map_err(|source| {
+        CommandError::Generated(format!(
+            "failed to write local selection packages: {source}"
+        ))
+    })?;
 
     let host = barracuda_platform_tool::host_tuple(workspace_root)?;
     let target = board
@@ -1105,15 +1092,6 @@ fn install_runner(workspace_root: &Path, host: &str) -> Result<PathBuf, CommandE
     Ok(runner)
 }
 
-fn replace_file_block(path: &Path, begin: &str, end: &str, body: &str) -> Result<(), CommandError> {
-    let old = fs::read_to_string(path).map_err(|source| CommandError::Read {
-        path: path.to_owned(),
-        source,
-    })?;
-    let new = replace_block(&old, begin, end, body)?;
-    write_file(path, &new)
-}
-
 fn write_file(path: &Path, contents: &str) -> Result<(), CommandError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| CommandError::Read {
@@ -1167,6 +1145,11 @@ mod tests {
     fn add_selection_files(root: &Path) {
         let platform = root.join("platforms/test");
         fs::create_dir_all(&platform).expect("Platform directory");
+        fs::write(
+            platform.join("Cargo.toml"),
+            "[package]\nname = \"barracuda-platform-test\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("Platform Cargo manifest");
         fs::write(
             platform.join("platform.yml"),
             "name: test\ninfo:\n  family: test\n  environment: hosted\npackage: barracuda-platform-test\ncrate: barracuda_platform_test\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",

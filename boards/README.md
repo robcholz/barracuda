@@ -124,10 +124,11 @@ dispatch.
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
 currently selected Board. It validates the complete bundle before writing the
 ignored workspace-local Board, Platform, and Cargo selection files. Scripts
-may pass an explicit name as `cargo board select <board-name>`. The command also
-updates the selected dependency blocks, so native Cargo sees a complete static
-dependency graph before compilation starts. It verifies and activates the
-resolved Platform's rustup toolchain and writes its optional `build-std` and
+may pass an explicit name as `cargo board select <board-name>`. The command
+writes ignored local dependency packages under `.barracuda/selection`, so
+native Cargo sees a complete static dependency graph without modifying tracked
+selector manifests or `Cargo.lock`. It verifies and activates the resolved
+Platform's rustup toolchain and writes its optional `build-std` and
 installer-generated environment configuration, keeping all later checks,
 builds, and runs on ordinary Cargo commands without shell setup. When the
 toolchain is unavailable, selection reports the Platform-owned installation

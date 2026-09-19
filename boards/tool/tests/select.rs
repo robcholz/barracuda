@@ -30,6 +30,11 @@ fn add_selection_files(root: &Path) {
     let platform = root.join("platforms/macos");
     fs::create_dir_all(&platform).expect("Platform directory");
     fs::write(
+        platform.join("Cargo.toml"),
+        "[package]\nname = \"barracuda-platform-macos\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("Platform Cargo manifest");
+    fs::write(
         platform.join("platform.yml"),
         "name: macos\ninfo:\n  family: macos\n  environment: hosted\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nhal:\n  bindings: [digital-input, digital-output, gpio, spi-device, i2c-device]\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
     )
@@ -37,13 +42,13 @@ fn add_selection_files(root: &Path) {
     fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");
     fs::write(
         root.join("platforms/selected/Cargo.toml"),
-        "[dependencies]\n# BEGIN GENERATED SELECTED PLATFORM\nold\n# END GENERATED SELECTED PLATFORM\n",
+        "[dependencies]\nbarracuda-platform-selection = { path = \"../../.barracuda/selection/platform\" }\n",
     )
     .expect("selected Platform manifest");
     fs::create_dir_all(root.join("boards/selected")).expect("selected Board directory");
     fs::write(
         root.join("boards/selected/Cargo.toml"),
-        "[dependencies]\n# BEGIN GENERATED SELECTED BOARD HAL\nold\n# END GENERATED SELECTED BOARD HAL\n",
+        "[dependencies]\nbarracuda-board-selection = { path = \"../../.barracuda/selection/board\" }\n",
     )
     .expect("selected Board manifest");
 }
@@ -67,6 +72,11 @@ fn select_persists_a_valid_board_for_the_next_build() {
     add_board(root.path(), "local-macos", "local-macos");
     let mut output = Vec::new();
 
+    let platform_manifest = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
+        .expect("selected Platform manifest");
+    let board_manifest = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+        .expect("selected Board manifest");
+
     run(["select", "local-macos"], root.path(), &mut output).expect("select Board");
 
     assert_eq!(
@@ -77,13 +87,19 @@ fn select_persists_a_valid_board_for_the_next_build() {
         String::from_utf8(output).expect("UTF-8 output"),
         "Selected Board `local-macos`.\nRun `cargo run` to build and start it.\n"
     );
-    let platform = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
-        .expect("selected Platform manifest");
-    assert!(platform.contains("barracuda-platform-macos.workspace = true"));
-    assert!(!platform.contains("\nold\n"));
-    let board = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
-        .expect("selected Board manifest");
-    assert!(!board.contains("\nold\n"));
+    assert_eq!(
+        fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
+            .expect("selected Platform manifest after selection"),
+        platform_manifest
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+            .expect("selected Board manifest after selection"),
+        board_manifest
+    );
+    let platform = fs::read_to_string(root.path().join(".barracuda/selection/platform/Cargo.toml"))
+        .expect("local Platform selection package");
+    assert!(platform.contains("default = [\"barracuda-platform-macos\"]"));
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
     assert!(cargo.contains("[build]"));
@@ -112,10 +128,11 @@ fn select_uses_platform_owned_features_for_the_board_chip() {
 
     run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
-    let selected = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
-        .expect("selected Platform manifest");
-    assert!(selected
-        .contains("barracuda-platform-macos = { workspace = true, features = [\"native-chip\"] }"));
+    let selected = fs::read_to_string(root.path().join(".barracuda/selection/platform/Cargo.toml"))
+        .expect("local Platform selection package");
+    assert!(selected.contains(
+        "default = [\"barracuda-platform-macos\", \"barracuda-platform-macos/native-chip\"]"
+    ));
 }
 
 #[test]
@@ -252,8 +269,8 @@ fn select_uses_the_platform_hal_without_a_chip_adapter() {
 
     run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
-    let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
-        .expect("selected Board manifest");
+    let selected = fs::read_to_string(root.path().join(".barracuda/selection/board/Cargo.toml"))
+        .expect("local Board selection package");
     assert!(!selected.contains("barracuda-peripheral-gpio"));
     assert!(!selected.contains("barracuda-platform-"));
 }
@@ -326,12 +343,17 @@ parameters: {}
 "#,
     )
     .expect("peripheral implementation manifest");
+    fs::write(
+        driver.join("Cargo.toml"),
+        "[package]\nname = \"future-sensor\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("peripheral Cargo manifest");
 
     run(["select", "sensor-board"], root.path(), &mut Vec::new()).expect("select Board");
 
-    let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
-        .expect("selected Board manifest");
-    assert!(selected.contains("future-sensor.workspace = true"));
+    let selected = fs::read_to_string(root.path().join(".barracuda/selection/board/Cargo.toml"))
+        .expect("local Board selection package");
+    assert!(selected.contains("default = [\"future-sensor\"]"));
     assert!(!selected.contains("barracuda-peripheral-i2c"));
     assert!(!selected.contains("barracuda-peripheral-spi"));
     assert!(!selected.contains("barracuda-peripheral-gpio"));
@@ -469,9 +491,14 @@ fn cargo_config_exposes_board_without_replacing_builtin_build() {
             .lines()
             .find(|line| line.starts_with(&format!("{alias} = ")))
             .expect("host Cargo alias");
+        let isolated_target = if alias == "board" {
+            "target/board-bootstrap"
+        } else {
+            "target/host-tools"
+        };
         assert!(
             line.contains("unstable.build-std=[\\\"std\\\"]")
-                && line.contains("target/host-tools")
+                && line.contains(isolated_target)
                 && line.contains("host-tuple"),
             "host alias `{alias}` must build a complete host standard library in an isolated target directory"
         );
