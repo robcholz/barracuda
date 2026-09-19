@@ -838,6 +838,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-bulk-memory"
+version = "0.1.0"
+dependencies = [
+ "allocator-api2",
+ "bytemuck",
+]
+
+[[package]]
 name = "barracuda-camera-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1473,6 +1481,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1500,6 +1509,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1527,6 +1537,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1554,6 +1565,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1581,6 +1593,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
@@ -1608,6 +1621,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-peripheral",
  "barracuda-platform",
  "barracuda-tls",
@@ -1642,6 +1656,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "critical-section",
@@ -1672,6 +1687,7 @@ dependencies = [
  "anyhow",
  "barracuda-board",
  "barracuda-board-config",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-platform-macos-network-gateway",
  "barracuda-platform-macos-network-gateway-protocol",
@@ -1760,6 +1776,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
  "cortex-m-rt",

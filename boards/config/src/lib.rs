@@ -183,6 +183,14 @@ impl BoardDefinition {
         if self.hardware.chip.trim().is_empty() {
             return Err(ConfigError::EmptyChip);
         }
+        if self
+            .hardware
+            .external_memory
+            .as_ref()
+            .is_some_and(|memory| memory.size_bytes == 0)
+        {
+            return Err(ConfigError::ZeroExternalMemory);
+        }
         if let Some(toolchain) = &self.toolchain {
             if toolchain.target.trim().is_empty() {
                 return Err(ConfigError::EmptyToolchainTarget);
@@ -1318,6 +1326,8 @@ pub struct HardwareDefinition {
     chip: String,
     #[serde(default, rename = "flash-size")]
     flash_size: Option<String>,
+    #[serde(default, rename = "external-memory")]
+    external_memory: Option<ExternalMemoryDefinition>,
 }
 
 impl HardwareDefinition {
@@ -1333,6 +1343,60 @@ impl HardwareDefinition {
     pub fn flash_size(&self) -> Option<&str> {
         self.flash_size.as_deref()
     }
+
+    /// Returns directly addressable external memory installed on the Board.
+    #[must_use]
+    pub const fn external_memory(&self) -> Option<&ExternalMemoryDefinition> {
+        self.external_memory.as_ref()
+    }
+}
+
+/// Directly addressable external memory installed on a Board.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalMemoryDefinition {
+    technology: ExternalMemoryTechnologyDefinition,
+    interface: ExternalMemoryInterfaceDefinition,
+    #[serde(rename = "size-bytes")]
+    size_bytes: usize,
+}
+
+impl ExternalMemoryDefinition {
+    /// Returns the physical memory technology.
+    #[must_use]
+    pub const fn technology(&self) -> ExternalMemoryTechnologyDefinition {
+        self.technology
+    }
+
+    /// Returns the physical interface used by the chip.
+    #[must_use]
+    pub const fn interface(&self) -> ExternalMemoryInterfaceDefinition {
+        self.interface
+    }
+
+    /// Returns the installed capacity in bytes.
+    #[must_use]
+    pub const fn size_bytes(&self) -> usize {
+        self.size_bytes
+    }
+}
+
+/// Parsed external-memory technology.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExternalMemoryTechnologyDefinition {
+    /// Pseudo-static RAM.
+    Psram,
+}
+
+/// Parsed external-memory electrical interface.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExternalMemoryInterfaceDefinition {
+    /// Four-data-line SPI.
+    QuadSpi,
+    /// Eight-data-line SPI.
+    OctalSpi,
 }
 
 /// Toolchain policy a Board carries so selection can configure Cargo's target.
@@ -1377,6 +1441,9 @@ pub enum ConfigError {
     /// A Board must identify its concrete chip or native operating-system runtime.
     #[error("Board hardware chip must not be empty")]
     EmptyChip,
+    /// A Board declared an external-memory device with no capacity.
+    #[error("Board external-memory size must be greater than zero bytes")]
+    ZeroExternalMemory,
     /// A Board declared a toolchain section without a target triple.
     #[error("Board toolchain target must not be empty")]
     EmptyToolchainTarget,
@@ -1469,11 +1536,35 @@ pub fn parse(yaml: &str) -> Result<BoardDefinition, ConfigError> {
 /// that Platform's initializer.
 #[must_use]
 pub fn render_rust(board: &BoardDefinition) -> String {
+    let hardware = if let Some(memory) = board.hardware().external_memory() {
+        let technology = match memory.technology() {
+            ExternalMemoryTechnologyDefinition::Psram => {
+                "::barracuda_board::ExternalMemoryTechnology::Psram"
+            }
+        };
+        let interface = match memory.interface() {
+            ExternalMemoryInterfaceDefinition::QuadSpi => {
+                "::barracuda_board::ExternalMemoryInterface::QuadSpi"
+            }
+            ExternalMemoryInterfaceDefinition::OctalSpi => {
+                "::barracuda_board::ExternalMemoryInterface::OctalSpi"
+            }
+        };
+        format!(
+            "::barracuda_board::Hardware::new({:?}).with_external_memory(\n        ::barracuda_board::ExternalMemory::new({technology}, {interface}, {}),\n    )",
+            board.hardware().chip(),
+            memory.size_bytes(),
+        )
+    } else {
+        format!(
+            "::barracuda_board::Hardware::new({:?})",
+            board.hardware().chip()
+        )
+    };
     format!(
         "/// Board selected by the build configuration.\n\
-         pub const BOARD: ::barracuda_board::Board = ::barracuda_board::Board::new(\n    {:?},\n    ::barracuda_board::Hardware::new({:?}),\n    ::barracuda_board::NativeLayout::new({:?}),\n);\n",
+         pub const BOARD: ::barracuda_board::Board = ::barracuda_board::Board::new(\n    {:?},\n    {hardware},\n    ::barracuda_board::NativeLayout::new({:?}),\n);\n",
         board.name(),
-        board.hardware().chip(),
         board.native_layout().artifact(),
     )
 }

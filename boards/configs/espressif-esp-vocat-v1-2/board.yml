@@ -2,6 +2,10 @@ name: espressif-esp-vocat-v1-2
 hardware:
   chip: esp32s3
   flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 16777216
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

@@ -114,6 +114,7 @@ barracuda-board-config = { path = "boards/config" }
 barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
+barracuda-bulk-memory = { path = "shared/bulk-memory" }
 barracuda-cli-style = { path = "shared/cli-style" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }

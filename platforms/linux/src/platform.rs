@@ -154,6 +154,7 @@ impl Platform for LinuxPlatform {
     type Error = LinuxPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
+        barracuda_bulk_memory::platform::install_global();
         crate::logging::install();
         log::info!("preparing Linux Platform");
         Self::install_reactor()

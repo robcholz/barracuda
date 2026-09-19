@@ -711,6 +711,27 @@ dependency.
 Logs must identify lifecycle boundaries and failures without including API
 keys, credentials, message bodies, or other secret-bearing payloads.
 
+## Bulk memory
+
+Bulk memory is a process-global allocation domain for large plain-data buffers.
+It is runtime support rather than a consumable business capability, so it does
+not become a `PlatformResources` field, `PluginContext` field, Workflow
+contract, or Board peripheral.
+
+The Board matrix declares directly addressable external memory as a hardware
+fact, including its technology, interface, and installed capacity. The selected
+Platform owns initialization of that memory and installs the allocator used by
+the shared bulk-memory mechanism. Platforms without a distinct external-memory
+domain install their normal global allocator behind the same API.
+
+Callers allocate through `BulkVec<T>` and `BulkBox<T>`. Their element boundary
+requires `bytemuck::Pod`; the underlying allocator is private and cannot be
+recovered by safe caller code. This keeps atomics, locks, futures, pointers,
+and other control state out of external memory on chips where those values
+cannot be accessed safely. Bulk containers remain explicit: the Platform does
+not add external memory to the ordinary global allocator used by arbitrary
+System and Plugin state.
+
 ## TLS and HTTP clients
 
 TLS is a Platform capability because each Platform owns its randomness,

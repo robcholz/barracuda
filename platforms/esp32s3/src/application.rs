@@ -12,6 +12,10 @@ use static_cell::StaticCell;
 
 use crate::{Esp32S3PlatformBindings, Esp32S3PlatformError};
 
+static EXTERNAL_MEMORY_ALLOCATOR: esp_alloc::ExternalMemory = esp_alloc::ExternalMemory;
+static BULK_MEMORY_BACKEND: barracuda_bulk_memory::platform::Backend =
+    barracuda_bulk_memory::platform::Backend::new(&EXTERNAL_MEMORY_ALLOCATOR);
+
 #[doc(hidden)]
 pub use esp_backtrace as __backtrace;
 #[doc(hidden)]
@@ -90,6 +94,29 @@ pub fn initialize_allocator() {
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
 }
 
+/// Initializes Board-declared external memory as the explicit-use bulk domain.
+#[doc(hidden)]
+pub fn initialize_bulk_memory(
+    board: &barracuda_board::Board,
+    psram: esp_hal::peripherals::PSRAM<'static>,
+) {
+    barracuda_bulk_memory::platform::install_global();
+    let Some(memory) = board.hardware().external_memory() else {
+        return;
+    };
+    let mode = match memory.interface() {
+        barracuda_board::ExternalMemoryInterface::QuadSpi => esp_hal::psram::PsramMode::QuadSpi,
+        barracuda_board::ExternalMemoryInterface::OctalSpi => esp_hal::psram::PsramMode::OctalSpi,
+    };
+    let config = esp_hal::psram::PsramConfig {
+        mode,
+        size: esp_hal::psram::PsramSize::Size(memory.size_bytes()),
+        ..Default::default()
+    };
+    esp_alloc::psram_allocator!(psram, esp_hal::psram, config);
+    barracuda_bulk_memory::platform::install(&BULK_MEMORY_BACKEND);
+}
+
 /// Creates the process-lifetime mechanisms needed by the selected S3 Platform.
 pub fn bindings(
     board: &barracuda_board::Board,
@@ -152,6 +179,7 @@ macro_rules! platform_entry {
             $crate::application::initialize_allocator();
             let peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
             let timer_group =

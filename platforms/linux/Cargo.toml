@@ -6,6 +6,7 @@ description = "Linux Platform implementation for Barracuda"
 
 [dependencies]
 barracuda-board.workspace = true
+barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }

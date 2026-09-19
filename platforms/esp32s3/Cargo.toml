@@ -16,6 +16,7 @@ log.workspace = true
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 barracuda-board-hal.workspace = true
+barracuda-bulk-memory.workspace = true
 barracuda-peripheral.workspace = true
 barracuda-tls.workspace = true
 embassy-executor.workspace = true
