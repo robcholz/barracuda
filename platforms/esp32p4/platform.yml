@@ -5,6 +5,11 @@ info:
 package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform
+build:
+  rustup-toolchain: stable
+  missing-toolchain-prompt: |
+    The stable Rust toolchain is required. Install it with:
+      rustup toolchain install stable
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1]

@@ -191,9 +191,16 @@ cargo build
 
 The selection command presents a colored fuzzy-searchable list, validates the
 chosen Board bundle, and records its name in workspace-local ignored state. It
-also accepts an explicit Board name for automation. The ordinary Cargo build
-reads that state; it does not require an environment variable or a Board-aware
-build wrapper.
+also accepts an explicit Board name for automation. Each Platform declares the
+rustup toolchain used to compile it, any standard-library crates Cargo must
+build for its target, an optional installer-generated environment file, and
+the prompt shown when that toolchain is unavailable. Selection verifies that
+declaration, applies the workspace rustup override, and writes the Cargo
+configuration needed by ordinary `cargo check`, `cargo build`, and `cargo run`
+commands. Host-side Cargo tools use a complete host standard library and an
+isolated artifact directory while an embedded `build-std` policy is active.
+The build reads persistent workspace state; it does not require shell setup or
+a Board-aware wrapper.
 `boards/selected` must not inspect `target_os` or `target_arch`, and the outer
 Target composition must not infer a default Board or activate a Board feature
 from them. A missing selection is a build error that points back to the select

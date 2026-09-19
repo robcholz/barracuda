@@ -82,6 +82,62 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
 }
 
 #[test]
+fn platform_declares_the_rustup_toolchain_for_ordinary_cargo_commands() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(
+        root.path(),
+        "acme-rv",
+        "acme123",
+        "riscv64acme-unknown-none-elf",
+    );
+    let manifest = root.path().join("platforms/acme-rv/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace(
+            "selection:\n",
+            "build:\n  rustup-toolchain: acme\n  build-std: [core, alloc]\n  environment-file: ~/export-acme.sh\n  missing-toolchain-prompt: |\n    Install the Acme Rust toolchain first.\nselection:\n",
+        ),
+    )
+    .expect("Platform build policy");
+
+    let platform =
+        resolve_board_platform(root.path(), "acme123", Some("riscv64acme-unknown-none-elf"))
+            .expect("Platform selected from Board");
+
+    assert_eq!(platform.build().rustup_toolchain(), Some("acme"));
+    assert_eq!(platform.build().build_std(), ["core", "alloc"]);
+    assert_eq!(
+        platform.build().environment_file(),
+        Some(Path::new("~/export-acme.sh"))
+    );
+    assert_eq!(
+        platform.build().missing_toolchain_prompt(),
+        Some("Install the Acme Rust toolchain first.\n")
+    );
+}
+
+#[test]
+fn rejects_an_incomplete_platform_toolchain_policy() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace(
+            "selection:\n",
+            "build:\n  rustup-toolchain: acme\nselection:\n",
+        ),
+    )
+    .expect("incomplete Platform build policy");
+
+    let error = discover_platforms(root.path()).expect_err("missing prompt must fail");
+
+    assert!(error.to_string().contains("missing-toolchain-prompt"));
+}
+
+#[test]
 fn platform_owns_cargo_features_for_supported_chips() {
     let root = tempdir().expect("temporary workspace");
     let directory = root.path().join("platforms/acme-rv");
@@ -200,5 +256,20 @@ fn esp32p4_does_not_advertise_an_unimplemented_ledc_pool() {
             .find(|platform| platform.name() == name)
             .expect("LEDC-capable ESP Platform");
         assert!(!platform.hal().runtime_pwm_controllers().is_empty());
+    }
+}
+
+#[test]
+fn every_repository_platform_declares_its_rustup_toolchain() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let platforms = discover_platforms(&root).expect("workspace Platform catalog");
+
+    assert!(!platforms.is_empty());
+    for platform in platforms {
+        assert!(
+            platform.build().rustup_toolchain().is_some(),
+            "Platform `{}` must declare build.rustup-toolchain",
+            platform.name()
+        );
     }
 }

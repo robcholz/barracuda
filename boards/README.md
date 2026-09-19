@@ -126,7 +126,12 @@ currently selected Board. It validates the complete bundle before writing the
 ignored workspace-local Board, Platform, and Cargo selection files. Scripts
 may pass an explicit name as `cargo board select <board-name>`. The command also
 updates the selected dependency blocks, so native Cargo sees a complete static
-dependency graph before compilation starts. A build with no selection stops
+dependency graph before compilation starts. It verifies and activates the
+resolved Platform's rustup toolchain and writes its optional `build-std` and
+installer-generated environment configuration, keeping all later checks,
+builds, and runs on ordinary Cargo commands without shell setup. When the
+toolchain is unavailable, selection reports the Platform-owned installation
+prompt without changing the selected Board. A build with no selection stops
 with the command needed to select one; it never guesses a Board from the Rust
 target.
 

@@ -5,6 +5,11 @@ info:
 package: barracuda-platform-macos
 crate: barracuda_platform_macos
 type: MacosPlatform
+build:
+  rustup-toolchain: stable
+  missing-toolchain-prompt: |
+    The stable Rust toolchain is required. Install it with:
+      rustup toolchain install stable
 selection:
   board-chips:
     - macos

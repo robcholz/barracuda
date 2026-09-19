@@ -302,6 +302,15 @@ jobs:
         with:
           components: clippy
 
+      - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp'
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          default: false
+          ldproxy: false
+          override: false
+
       - name: Select representative Board
         run: |
           cargo board select ${{ matrix.board }}
@@ -311,15 +320,6 @@ jobs:
       - name: Install stable Rust target
         if: matrix.toolchain == 'stable'
         run: rustup target add "$target"
-
-      - name: Install Rust for Xtensa
-        if: matrix.toolchain == 'esp'
-        uses: esp-rs/xtensa-toolchain@v1.7
-        with:
-          buildtargets: ${{ matrix.chip }}
-          default: false
-          ldproxy: false
-          override: false
 
       - name: Cache Platform build
         uses: Swatinem/rust-cache@v2
@@ -332,7 +332,7 @@ jobs:
 
       - name: Check Platform (Xtensa)
         if: matrix.toolchain == 'esp'
-        run: cargo +esp check -Zbuild-std=core,alloc --package ${{ matrix.package }}
+        run: cargo check --package ${{ matrix.package }}
 
       - name: Clippy Platform
         if: matrix.toolchain == 'stable'
@@ -340,7 +340,7 @@ jobs:
 
       - name: Clippy Platform (Xtensa)
         if: matrix.toolchain == 'esp'
-        run: cargo +esp clippy -Zbuild-std=core,alloc --package ${{ matrix.package }}
+        run: cargo clippy --package ${{ matrix.package }}
 
       - name: Test Platform on host
         run: cargo test --target host-tuple --package ${{ matrix.package }}
@@ -351,7 +351,7 @@ jobs:
 
       - name: Build Platform (Xtensa)
         if: matrix.toolchain == 'esp'
-        run: cargo +esp build -Zbuild-std=core,alloc --package ${{ matrix.package }}
+        run: cargo build --package ${{ matrix.package }}
 
   frontend:
     name: Frontend formatting, lint, types & tests
@@ -523,11 +523,11 @@ jobs:
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo +esp check, clippy, build"
-            if cargo +esp board select "$board" &&
-              cargo +esp check -Zbuild-std=core,alloc &&
-              cargo +esp clippy -Zbuild-std=core,alloc &&
-              cargo +esp build -Zbuild-std=core,alloc; then
+            echo "::group::$board: cargo check, clippy, build"
+            if cargo board select "$board" &&
+              cargo check &&
+              cargo clippy &&
+              cargo build; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"

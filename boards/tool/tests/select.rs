@@ -464,8 +464,18 @@ fn cargo_config_exposes_board_without_replacing_builtin_build() {
     .expect("workspace Cargo config");
 
     assert!(config.contains("include = [{ path = \"../.barracuda/cargo.toml\", optional = true }]"));
-    assert!(config
-        .contains("board = \"run --target host-tuple --quiet --package barracuda-board-tool --\""));
+    for alias in ["board", "cli", "platform", "plugin", "image"] {
+        let line = config
+            .lines()
+            .find(|line| line.starts_with(&format!("{alias} = ")))
+            .expect("host Cargo alias");
+        assert!(
+            line.contains("unstable.build-std=[\\\"std\\\"]")
+                && line.contains("target/host-tools")
+                && line.contains("host-tuple"),
+            "host alias `{alias}` must build a complete host standard library in an isolated target directory"
+        );
+    }
     assert!(!config
         .lines()
         .any(|line| line.trim_start().starts_with("build =")));

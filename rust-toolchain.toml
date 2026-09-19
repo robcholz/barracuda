@@ -1,5 +1,4 @@
-# Default to the stable host toolchain for normal `cargo check`/`cargo test`.
-# ESP32-S3 firmware builds call `cargo +esp ...` explicitly because xtensa is
-# only supported by Espressif's fork of Rust. Install it with `espup install`.
+# Board selection applies each Platform's rustup override, so ordinary Cargo
+# commands use its declared toolchain. Stable remains the unselected default.
 [toolchain]
 channel = "stable"

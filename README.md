@@ -79,10 +79,14 @@ to fuzzy-search, and press Enter to select. It validates the Board bundle and
 records the selection in ignored local state. It resolves the matching
 self-described Platform, updates the static selected-Platform and
 selected-Board-HAL dependency blocks, and writes the target and runner
-configuration locally. After that, ordinary `cargo build` and `cargo run`
-operate directly on the standalone System application through native Cargo;
-there is no Board-aware build wrapper. System, Platform, Core, and Plugin logs
-remain in that terminal.
+configuration locally. The resolved Platform supplies its rustup toolchain,
+optional `build-std` policy and installer-generated environment, and the
+installation prompt used when that toolchain is unavailable. Selection
+activates the toolchain as a workspace override and imports its environment,
+so ordinary `cargo build` and `cargo run` operate directly on the standalone
+System application through native Cargo; there is no Board-aware build wrapper
+or shell setup step. System, Platform, Core, and Plugin logs remain in that
+terminal.
 
 Run the external terminal Channel separately. This command is always compiled
 for the development host, even when the selected Board uses an embedded target:

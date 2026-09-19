@@ -5,6 +5,14 @@ info:
 package: barracuda-platform-esp32
 crate: barracuda_platform_esp32
 type: Esp32Platform
+build:
+  rustup-toolchain: esp
+  build-std: [core, alloc]
+  environment-file: ~/export-esp.sh
+  missing-toolchain-prompt: |
+    The Espressif Rust toolchain is required. Install it with:
+      cargo install espup
+      espup install
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1]
