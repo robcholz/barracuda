@@ -26,7 +26,6 @@ struct Plugin {
     package: String,
     crate_name: String,
     entry: String,
-    system_resources: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -492,7 +491,6 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
             // the directory, package, and entry point.
             id: metadata.id().to_owned(),
             dependencies: metadata.dependencies().to_owned(),
-            system_resources: metadata.system_resources().to_owned(),
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
@@ -653,14 +651,15 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
     let entries = plugins
         .iter()
         .map(|plugin| {
-            let resources = plugin
-                .system_resources
-                .iter()
-                .map(|resource| format!(", prepared.{resource}"))
-                .collect::<String>();
+            // Platform resource routing is part of the fixed System composition,
+            // not author-controlled Plugin metadata.
+            let platform_resources = match plugin.id.as_str() {
+                "wifi" => ", prepared.wifi",
+                _ => "",
+            };
             format!(
                 "            {}::{}::new(&mut plugin_context{}),",
-                plugin.crate_name, plugin.entry, resources
+                plugin.crate_name, plugin.entry, platform_resources
             )
         })
         .collect::<Vec<_>>()
@@ -729,7 +728,6 @@ mod tests {
             package: format!("barracuda-{directory}-plugin"),
             crate_name: format!("barracuda_{directory}_plugin"),
             entry: String::from("TestPlugin"),
-            system_resources: Vec::new(),
         }
     }
 
@@ -1011,9 +1009,8 @@ mod tests {
     }
 
     #[test]
-    fn renders_declared_system_resources_as_constructor_arguments() {
-        let mut demo = plugin("wifi", "wifi", &[]);
-        demo.system_resources.push(String::from("wifi"));
+    fn renders_platform_owned_wifi_constructor_argument() {
+        let demo = plugin("wifi", "wifi", &[]);
 
         assert_eq!(
             render_registrations(&[&demo]),

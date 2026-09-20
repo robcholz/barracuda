@@ -1,7 +1,6 @@
 id = "wifi"
 depends-on = ["webserver", "captive-portal"]
 description = "Owns Wi-Fi AP and station lifecycle, persistence, and configuration."
-system-resources = ["wifi"]
 
 [tasks.build]
 cwd = "."

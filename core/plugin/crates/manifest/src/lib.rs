@@ -23,9 +23,6 @@ pub struct PluginManifest {
     #[serde(rename = "depends-on")]
     dependencies: Vec<String>,
     description: String,
-    /// System-owned resources moved into the Plugin constructor.
-    #[serde(default, rename = "system-resources")]
-    system_resources: Vec<String>,
     /// Author-declared host tasks, keyed by task name.
     #[serde(default)]
     pub tasks: BTreeMap<String, PluginTask>,
@@ -81,12 +78,6 @@ impl PluginManifest {
     pub fn description(&self) -> &str {
         &self.description
     }
-
-    /// Returns System resource field names consumed by the Plugin constructor.
-    #[must_use]
-    pub fn system_resources(&self) -> &[String] {
-        &self.system_resources
-    }
 }
 
 /// Failure while parsing a Plugin declaration.
@@ -121,12 +112,6 @@ pub enum ManifestError {
     /// The same direct dependency is declared more than once.
     #[error("Plugin dependency `{0}` is declared more than once")]
     DuplicateDependency(String),
-    /// A System resource name is not a Rust field identifier.
-    #[error("Plugin System resource `{0}` must be a lowercase Rust field identifier")]
-    InvalidSystemResource(String),
-    /// The same System resource is declared more than once.
-    #[error("Plugin System resource `{0}` is declared more than once")]
-    DuplicateSystemResource(String),
     /// A Plugin declares itself as a dependency.
     #[error("Plugin `{0}` cannot depend on itself")]
     SelfDependency(String),
@@ -186,21 +171,6 @@ pub fn parse(contents: &str) -> Result<PluginManifest, ManifestError> {
         }
         if dependency == &manifest.id {
             return Err(ManifestError::SelfDependency(manifest.id.clone()));
-        }
-    }
-    for (index, resource) in manifest.system_resources.iter().enumerate() {
-        let mut characters = resource.chars();
-        let valid = characters
-            .next()
-            .is_some_and(|character| character.is_ascii_lowercase())
-            && characters.all(|character| {
-                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-            });
-        if !valid {
-            return Err(ManifestError::InvalidSystemResource(resource.clone()));
-        }
-        if manifest.system_resources[..index].contains(resource) {
-            return Err(ManifestError::DuplicateSystemResource(resource.clone()));
         }
     }
     let description = manifest.description.trim();
