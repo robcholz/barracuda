@@ -6,7 +6,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
-use barracuda_platform::HostWifiDevice;
+use barracuda_platform::{HostWifiDevice, WifiCapabilities};
 use barracuda_platform_test::{loopback_network, memory_partition};
 use barracuda_plugin::{
     api::{ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity},
@@ -15,15 +15,18 @@ use barracuda_plugin::{
 use barracuda_vfs::{MountOptions, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
-use barracuda_wifi_plugin::WifiPlugin;
+use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
 use embassy_net::{Ipv4Address, tcp::TcpSocket};
 use embedded_io_async::Write as _;
 
-struct Observer(Rc<RefCell<Option<Rc<WebServer>>>>);
+struct Observer {
+    webserver: Rc<RefCell<Option<Rc<WebServer>>>>,
+    wifi: Rc<RefCell<Option<Rc<WifiControl>>>>,
+}
 
 impl PluginDeclaration for Observer {
     const ID: &'static str = "observer";
-    const DEPENDS_ON: &'static [&'static str] = &["webserver"];
+    const DEPENDS_ON: &'static [&'static str] = &["webserver", "wifi"];
 }
 
 impl Plugin for Observer {
@@ -31,8 +34,10 @@ impl Plugin for Observer {
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()> {
-        self.0
+        self.webserver
             .replace(Some(context.require::<WebServer>(Self::DEPENDS_ON[0])?));
+        self.wifi
+            .replace(Some(context.require::<WifiControl>(Self::DEPENDS_ON[1])?));
         Ok(())
     }
 }
@@ -89,10 +94,22 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         .register(WifiPlugin::new(&mut context, HostWifiDevice::new(stack)))
         .expect("wifi");
     let observed = Rc::new(RefCell::new(None));
+    let observed_wifi = Rc::new(RefCell::new(None));
     manager
-        .register(Observer(Rc::clone(&observed)))
+        .register(Observer {
+            webserver: Rc::clone(&observed),
+            wifi: Rc::clone(&observed_wifi),
+        })
         .expect("observer");
     let server = observed.borrow().as_ref().expect("server").clone();
+    assert_eq!(
+        observed_wifi
+            .borrow()
+            .as_ref()
+            .expect("Wi-Fi capability")
+            .capabilities(),
+        WifiCapabilities::host_managed()
+    );
 
     let manifest = request(
         Rc::clone(&server),

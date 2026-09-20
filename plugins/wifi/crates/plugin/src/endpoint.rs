@@ -3,7 +3,6 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use alloc::rc::Rc;
 use barracuda_platform::{
     AccessPointState, StationConfiguration, StationState, VisibleNetwork, WifiCapabilities,
-    WifiDevice,
 };
 use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
@@ -39,15 +38,15 @@ impl From<StoredConfiguration> for StationConfiguration {
     }
 }
 
-pub(crate) struct WifiEndpoint<Storage, Device: WifiDevice> {
-    control: WifiControl<Device>,
+pub(crate) struct WifiEndpoint<Storage> {
+    control: WifiControl,
     access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
     storage: Storage,
 }
 
-impl<Storage, Device: WifiDevice> WifiEndpoint<Storage, Device> {
+impl<Storage> WifiEndpoint<Storage> {
     pub(crate) const fn new(
-        control: WifiControl<Device>,
+        control: WifiControl,
         access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
         storage: Storage,
     ) -> Self {
@@ -73,7 +72,7 @@ impl<Storage, Device: WifiDevice> WifiEndpoint<Storage, Device> {
     }
 }
 
-impl<Storage: PluginStorage, Device: WifiDevice> HttpEndpoint for WifiEndpoint<Storage, Device> {
+impl<Storage: PluginStorage> HttpEndpoint for WifiEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
@@ -154,33 +153,33 @@ impl<Storage: PluginStorage, Device: WifiDevice> HttpEndpoint for WifiEndpoint<S
     }
 }
 
-pub(crate) struct ScanEndpoint<Device: WifiDevice> {
-    control: WifiControl<Device>,
+pub(crate) struct ScanEndpoint {
+    control: WifiControl,
 }
 
-impl<Device: WifiDevice> ScanEndpoint<Device> {
-    pub(crate) const fn new(control: WifiControl<Device>) -> Self {
+impl ScanEndpoint {
+    pub(crate) const fn new(control: WifiControl) -> Self {
         Self { control }
     }
 }
 
-impl<Device: WifiDevice> HttpEndpoint for ScanEndpoint<Device> {
+impl HttpEndpoint for ScanEndpoint {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             if request.method() != HttpMethod::Get {
-                return WifiEndpoint::<(), Device>::static_response(
+                return WifiEndpoint::<()>::static_response(
                     405,
                     br#"{"error":"method_not_allowed"}"#,
                 );
             }
             if !self.control.capabilities().scanning {
-                return WifiEndpoint::<(), Device>::static_response(
+                return WifiEndpoint::<()>::static_response(
                     409,
                     br#"{"error":"platform_managed"}"#,
                 );
             }
             match self.control.scan().await {
-                Ok(networks) => WifiEndpoint::<(), Device>::json_response(
+                Ok(networks) => WifiEndpoint::<()>::json_response(
                     200,
                     &networks
                         .into_iter()
@@ -189,7 +188,7 @@ impl<Device: WifiDevice> HttpEndpoint for ScanEndpoint<Device> {
                 ),
                 Err(error) => {
                     log::warn!("Wi-Fi scan failed: {error}");
-                    WifiEndpoint::<(), Device>::static_response(500, br#"{"error":"wifi"}"#)
+                    WifiEndpoint::<()>::static_response(500, br#"{"error":"wifi"}"#)
                 }
             }
         })

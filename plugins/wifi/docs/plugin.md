@@ -5,7 +5,7 @@
 - Required typed capabilities: `barracuda_webserver_plugin::WebServer` from
   `webserver`, `barracuda_captive_portal_plugin::CaptivePortal` from
   `captive-portal`
-- Provided typed capabilities: none
+- Provided typed capability: `barracuda_wifi_plugin::WifiControl`
 - Workflow Actions: none
 - Workflow Events: none
 - Agent Tools: none
@@ -16,6 +16,11 @@
 - Retained registrations: the Wi-Fi Portal entry, Wi-Fi HTTP routes, captive
   detection routes, and the AP-side WebServer listener
 - Storage: station credentials under the Plugin-scoped KV key `station`
+
+Dependent Plugins can require `WifiControl` from `wifi` to inspect support and
+state, scan networks, start or stop the access point, and connect or disconnect
+station mode. The capability erases the selected Platform's concrete
+`WifiDevice` type and serializes all radio operations.
 
 The Plugin owns Wi-Fi policy rather than a specific radio driver. On a managed
 embedded Platform it restores persisted station credentials during startup. A

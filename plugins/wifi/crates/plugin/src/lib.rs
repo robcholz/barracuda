@@ -27,7 +27,7 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::Timer;
 use endpoint::{ScanEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WifiEndpoint, load_configuration};
 
-pub use control::{WifiControl, WifiStatus};
+pub use control::{WifiControl, WifiControlError, WifiStatus};
 
 const SETUP_AP_SSID: &str = "Barracuda Setup";
 const SETUP_AP_PASSWORD: &str = "";
@@ -48,17 +48,20 @@ type BoxedWifiRuntime = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
 /// Plugin owning Wi-Fi provisioning, access-point fallback, and station policy.
 #[barracuda_plugin::macros::plugin]
-pub struct WifiPlugin<Device: WifiDevice> {
-    control: WifiControl<Device>,
+pub struct WifiPlugin {
+    control: WifiControl,
     initial_configuration: Option<StationConfiguration>,
     access_point_stack: Stack<'static>,
     access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
 }
 
-impl<Device: WifiDevice> WifiPlugin<Device> {
+impl WifiPlugin {
     /// Takes ownership of the selected Platform's Wi-Fi mechanism.
     #[must_use]
-    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>, device: Device) -> Self {
+    pub fn new<Builtins, Io, Device: WifiDevice>(
+        _context: &mut PluginContext<Builtins, Io>,
+        device: Device,
+    ) -> Self {
         let access_point_stack = device.access_point_stack();
         Self {
             control: WifiControl::new(device),
@@ -69,7 +72,7 @@ impl<Device: WifiDevice> WifiPlugin<Device> {
     }
 }
 
-impl<Device: WifiDevice> Plugin for WifiPlugin<Device> {
+impl Plugin for WifiPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
 
@@ -124,6 +127,7 @@ impl<Device: WifiDevice> Plugin for WifiPlugin<Device> {
                 .serve_http(WIFI_SCAN_API_PATH, ScanEndpoint::new(self.control.clone()))
                 .map_err(PluginError::registration)?,
         );
+        context.provide(Rc::new(self.control.clone()))?;
         Ok(())
     }
 
@@ -183,10 +187,7 @@ fn cancellable(cancellation: PluginTaskToken, runtime: BoxedWifiRuntime) -> Boxe
     })
 }
 
-async fn initialize_wifi<Device: WifiDevice>(
-    control: WifiControl<Device>,
-    configuration: Option<StationConfiguration>,
-) {
+async fn initialize_wifi(control: WifiControl, configuration: Option<StationConfiguration>) {
     if let Some(configuration) = configuration {
         match control
             .connect_station(configuration.ssid(), configuration.password())
@@ -214,8 +215,8 @@ async fn initialize_wifi<Device: WifiDevice>(
     }
 }
 
-async fn run_wifi_policy<Device: WifiDevice>(
-    control: WifiControl<Device>,
+async fn run_wifi_policy(
+    control: WifiControl,
     configuration: Option<StationConfiguration>,
     access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
 ) {
