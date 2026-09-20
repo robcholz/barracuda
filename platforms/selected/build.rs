@@ -33,9 +33,9 @@ fn main() -> Result<(), Box<dyn Error>> {
          pub const PLATFORM_INFO: ::barracuda_platform::PlatformInfo =\n\
              ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?});\n\n\
          /// Independently selected Platform implementation.\n\
-         pub type SelectedPlatform = ::{}::{};\n\n\
+         pub type SelectedPlatform = ::barracuda_platform_selection::{};\n\n\
          #[doc(hidden)]\n\
-         pub use ::{} as __platform;\n\n\
+         pub use ::barracuda_platform_selection as __platform;\n\n\
          #[doc(hidden)]\n\
          #[macro_export]\n\
          macro_rules! platform_entry {{\n\
@@ -48,9 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         platform.info().family(),
         architecture,
         platform.info().environment(),
-        platform.crate_name(),
         platform.type_name(),
-        platform.crate_name(),
     );
     fs::write(output.join("selected_platform.rs"), generated)?;
     Ok(())

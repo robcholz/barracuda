@@ -5,6 +5,11 @@ info:
 package: barracuda-platform-linux
 crate: barracuda_platform_linux
 type: LinuxPlatform
+build:
+  rustup-toolchain: stable
+  missing-toolchain-prompt: |
+    The stable Rust toolchain is required. Install it with:
+      rustup toolchain install stable
 selection:
   board-chips:
     - linux

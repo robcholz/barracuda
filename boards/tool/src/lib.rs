@@ -6,7 +6,7 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
+    process::{Command as ProcessCommand, Stdio},
 };
 
 use barracuda_board_config::{
@@ -20,6 +20,8 @@ use barracuda_peripheral_config::{
 use barracuda_platform_config::{resolve_board_platform, ResolveError as PlatformResolveError};
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
+
+mod selection_packages;
 
 const PERIPHERAL_WORKSPACE_BEGIN: &str =
     "# BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES";
@@ -225,6 +227,33 @@ pub enum CommandError {
     /// Platform launch orchestration failed.
     #[error(transparent)]
     PlatformLaunch(#[from] barracuda_platform_tool::CommandError),
+    /// The Platform's required rustup toolchain is not installed.
+    #[error("required rustup toolchain `{toolchain}` is unavailable\n\n{prompt}")]
+    ToolchainMissing {
+        /// rustup toolchain selected by the Platform.
+        toolchain: String,
+        /// Platform-owned installation guidance.
+        prompt: String,
+    },
+    /// rustup could not be started while applying the Platform build policy.
+    #[error("failed to run rustup for toolchain `{toolchain}`: {source}\n\n{prompt}")]
+    ToolchainStart {
+        /// rustup toolchain selected by the Platform.
+        toolchain: String,
+        /// Platform-owned installation guidance.
+        prompt: String,
+        /// Underlying process error.
+        #[source]
+        source: io::Error,
+    },
+    /// rustup could not activate the Platform's toolchain for this workspace.
+    #[error("rustup could not activate toolchain `{toolchain}` for `{path}`")]
+    ToolchainActivation {
+        /// rustup toolchain selected by the Platform.
+        toolchain: String,
+        /// Workspace that should receive the override.
+        path: PathBuf,
+    },
 }
 
 /// Runs the workspace Board command against `workspace_root`.
@@ -616,6 +645,26 @@ fn select_board<W: Write>(
     output: &mut W,
     color: bool,
 ) -> Result<(), CommandError> {
+    select_board_with_toolchain(
+        workspace_root,
+        name,
+        output,
+        color,
+        activate_rustup_toolchain,
+    )
+}
+
+fn select_board_with_toolchain<W, F>(
+    workspace_root: &Path,
+    name: &str,
+    output: &mut W,
+    color: bool,
+    activate_toolchain: F,
+) -> Result<(), CommandError>
+where
+    W: Write,
+    F: FnOnce(&Path, &str, &str) -> Result<(), CommandError>,
+{
     let bundle = workspace_root.join("boards/configs").join(name);
     let board = read_board(workspace_root, name)?;
     let native_layout = bundle.join(board.native_layout().artifact());
@@ -625,8 +674,20 @@ fn select_board<W: Write>(
             path: native_layout,
         });
     }
+    let platform = resolve_board_platform(
+        workspace_root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )?;
+    if let Some(toolchain) = platform.build().rustup_toolchain() {
+        let prompt = platform
+            .build()
+            .missing_toolchain_prompt()
+            .unwrap_or_default();
+        activate_toolchain(workspace_root, toolchain, prompt)?;
+    }
 
-    write_selected_build(workspace_root, &board)?;
+    write_selected_build(workspace_root, &board, &platform)?;
     write_selected_board(workspace_root, name)?;
     writeln!(
         output,
@@ -647,59 +708,88 @@ fn select_board<W: Write>(
     .map_err(CommandError::Output)
 }
 
+fn activate_rustup_toolchain(
+    workspace_root: &Path,
+    toolchain: &str,
+    prompt: &str,
+) -> Result<(), CommandError> {
+    let workspace_root = workspace_root
+        .canonicalize()
+        .map_err(|source| CommandError::Read {
+            path: workspace_root.to_owned(),
+            source,
+        })?;
+    let available = ProcessCommand::new("rustup")
+        .args(["run", toolchain, "rustc", "--version"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|source| CommandError::ToolchainStart {
+            toolchain: toolchain.to_owned(),
+            prompt: prompt.to_owned(),
+            source,
+        })?;
+    if !available.success() {
+        return Err(CommandError::ToolchainMissing {
+            toolchain: toolchain.to_owned(),
+            prompt: prompt.to_owned(),
+        });
+    }
+    let activated = ProcessCommand::new("rustup")
+        .args(["override", "set", toolchain, "--path"])
+        .arg(&workspace_root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|source| CommandError::ToolchainStart {
+            toolchain: toolchain.to_owned(),
+            prompt: prompt.to_owned(),
+            source,
+        })?;
+    if activated.success() {
+        Ok(())
+    } else {
+        Err(CommandError::ToolchainActivation {
+            toolchain: toolchain.to_owned(),
+            path: workspace_root,
+        })
+    }
+}
+
 fn write_selected_build(
     workspace_root: &Path,
     board: &BoardDefinition,
+    platform: &barracuda_platform_config::PlatformDefinition,
 ) -> Result<(), CommandError> {
-    let platform = resolve_board_platform(
-        workspace_root,
-        board.hardware().chip(),
-        board.toolchain().map(|toolchain| toolchain.target()),
-    )?;
     let platform_features = platform.cargo_features_for_chip(board.hardware().chip());
-    let platform_dependency = if platform_features.is_empty() {
-        format!("{}.workspace = true", platform.package())
-    } else {
-        let features = platform_features
-            .iter()
-            .map(|feature| format!("{feature:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "{} = {{ workspace = true, features = [{}] }}",
-            platform.package(),
-            features
-        )
-    };
     let mut board_dependencies = Vec::new();
     if board.has_hardware_surface() {
         let catalog = load_catalog(workspace_root)?;
         let resolved = resolve_board(board, &catalog)?;
-        validate_platform_hal(board, &resolved, &platform)?;
+        validate_platform_hal(board, &resolved, platform)?;
         for peripheral in resolved.peripherals() {
-            let dependency = format!(
-                "{}.workspace = true",
-                peripheral.implementation().implementation().package()
-            );
+            let dependency = peripheral
+                .implementation()
+                .implementation()
+                .package()
+                .to_owned();
             if !board_dependencies.contains(&dependency) {
                 board_dependencies.push(dependency);
             }
         }
-        board_dependencies.push(String::from("barracuda-peripheral.workspace = true"));
     }
     board_dependencies.sort();
-    replace_file_block(
-        &workspace_root.join("platforms/selected/Cargo.toml"),
-        "# BEGIN GENERATED SELECTED PLATFORM",
-        "# END GENERATED SELECTED PLATFORM",
-        &platform_dependency,
-    )?;
-    replace_file_block(
-        &workspace_root.join("boards/selected/Cargo.toml"),
-        "# BEGIN GENERATED SELECTED BOARD HAL",
-        "# END GENERATED SELECTED BOARD HAL",
-        &board_dependencies.join("\n"),
-    )?;
+    selection_packages::write(
+        workspace_root,
+        Some(platform.package()),
+        platform_features,
+        &board_dependencies,
+    )
+    .map_err(|source| {
+        CommandError::Generated(format!(
+            "failed to write local selection packages: {source}"
+        ))
+    })?;
 
     let host = barracuda_platform_tool::host_tuple(workspace_root)?;
     let target = board
@@ -708,18 +798,64 @@ fn write_selected_build(
     let mut cargo = format!(
         "# Generated by `cargo board select`; do not edit.\n\n[build]\ntarget = {target:?}\n"
     );
+    if !platform.build().build_std().is_empty() {
+        let crates = platform
+            .build()
+            .build_std()
+            .iter()
+            .map(|crate_name| format!("{crate_name:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        cargo.push_str(&format!("\n[unstable]\nbuild-std = [{crates}]\n"));
+    }
+    let mut has_environment = false;
+    if let Some(environment_file) = platform.build().environment_file() {
+        for (name, value) in read_environment_file(workspace_root, environment_file)? {
+            append_cargo_environment(
+                &mut cargo,
+                &mut has_environment,
+                &name,
+                &format!("{{ value = {value:?}, force = true }}"),
+            );
+        }
+    }
     if target == "riscv32imafc-unknown-none-elf" {
-        cargo.push_str(
-            "\n[env]\n\
-             CC_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }\n\
-             CXX_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }\n\
-             AR_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }\n\
-             AR = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }\n\
-             RANLIB = { value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }\n\
-             CMAKE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-cmake\", relative = true }\n\
-             CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }\n\
-             CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"\n",
-        );
+        for (name, value) in [
+            (
+                "CC_riscv32imafc_unknown_none_elf",
+                "{ value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }",
+            ),
+            (
+                "CXX_riscv32imafc_unknown_none_elf",
+                "{ value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }",
+            ),
+            (
+                "AR_riscv32imafc_unknown_none_elf",
+                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }",
+            ),
+            (
+                "AR",
+                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }",
+            ),
+            (
+                "RANLIB",
+                "{ value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }",
+            ),
+            (
+                "CMAKE_riscv32imafc_unknown_none_elf",
+                "{ value = \"boards/tool/assets/esp32p4-cmake\", relative = true }",
+            ),
+            (
+                "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf",
+                "{ value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }",
+            ),
+            (
+                "CFLAGS_riscv32imafc_unknown_none_elf",
+                "\"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"",
+            ),
+        ] {
+            append_cargo_environment(&mut cargo, &mut has_environment, name, value);
+        }
         cargo.push_str(&format!(
             "\n[target.{target}]\nlinker = \"boards/tool/assets/esp32p4-linker\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
         ));
@@ -730,17 +866,34 @@ fn write_selected_build(
     {
         let environment_suffix = target.replace('-', "_");
         let bindgen_include = workspace_root.join("boards/tool/assets/xtensa-include");
-        cargo.push_str(&format!(
-            "\n[env]\n\
-             CC_{environment_suffix} = \"{tool_prefix}-elf-gcc\"\n\
-             AR_{environment_suffix} = \"{tool_prefix}-elf-ar\"\n\
-             CFLAGS_{environment_suffix} = \"-mlongcalls\"\n\
-             BINDGEN_EXTRA_CLANG_ARGS_{environment_suffix} = {bindgen_arguments:?}\n",
-            bindgen_arguments = format!(
-                "--target=xtensa-esp-elf -I{:?}",
-                bindgen_include.to_string_lossy()
-            )
-        ));
+        for (name, value) in [
+            (
+                format!("CC_{environment_suffix}"),
+                format!("{tool_prefix}-elf-gcc"),
+            ),
+            (
+                format!("AR_{environment_suffix}"),
+                format!("{tool_prefix}-elf-ar"),
+            ),
+            (
+                format!("CFLAGS_{environment_suffix}"),
+                String::from("-mlongcalls"),
+            ),
+            (
+                format!("BINDGEN_EXTRA_CLANG_ARGS_{environment_suffix}"),
+                format!(
+                    "--target=xtensa-esp-elf -I{:?}",
+                    bindgen_include.to_string_lossy()
+                ),
+            ),
+        ] {
+            append_cargo_environment(
+                &mut cargo,
+                &mut has_environment,
+                &name,
+                &format!("{value:?}"),
+            );
+        }
         cargo.push_str(&format!(
             "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-Wl,--allow-multiple-definition\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
         ));
@@ -775,6 +928,129 @@ fn write_selected_build(
         &workspace_root.join(".barracuda/selected-platform"),
         &format!("{}\n", platform.name()),
     )
+}
+
+fn append_cargo_environment(
+    cargo: &mut String,
+    has_environment: &mut bool,
+    name: &str,
+    value: &str,
+) {
+    if !*has_environment {
+        cargo.push_str("\n[env]\n");
+        *has_environment = true;
+    }
+    cargo.push_str(&format!("{name} = {value}\n"));
+}
+
+fn read_environment_file(
+    workspace_root: &Path,
+    configured_path: &Path,
+) -> Result<Vec<(String, String)>, CommandError> {
+    let path = expand_environment_path(workspace_root, configured_path);
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(CommandError::Read {
+                path: path.clone(),
+                source,
+            });
+        }
+    };
+    let mut environment = Vec::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let assignment = line.strip_prefix("export ").ok_or_else(|| {
+            CommandError::Generated(format!(
+                "toolchain environment `{}` contains an unsupported line: `{line}`",
+                path.display()
+            ))
+        })?;
+        let (name, value) = assignment.split_once('=').ok_or_else(|| {
+            CommandError::Generated(format!(
+                "toolchain environment `{}` contains an invalid export: `{line}`",
+                path.display()
+            ))
+        })?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(CommandError::Generated(format!(
+                "toolchain environment `{}` contains an invalid variable: `{name}`",
+                path.display()
+            )));
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            })
+            .unwrap_or(value);
+        environment.push((name.to_owned(), expand_environment_value(value)));
+    }
+    Ok(environment)
+}
+
+fn expand_environment_path(workspace_root: &Path, configured_path: &Path) -> PathBuf {
+    let configured = configured_path.to_string_lossy();
+    if let Some(relative) = configured.strip_prefix("~/") {
+        return env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| workspace_root.to_owned())
+            .join(relative);
+    }
+    if configured_path.is_absolute() {
+        configured_path.to_owned()
+    } else {
+        workspace_root.join(configured_path)
+    }
+}
+
+fn expand_environment_value(value: &str) -> String {
+    let mut expanded = String::new();
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '$' {
+            expanded.push(character);
+            continue;
+        }
+        let braced = characters.next_if_eq(&'{').is_some();
+        let mut name = String::new();
+        while characters
+            .peek()
+            .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '_')
+        {
+            if let Some(character) = characters.next() {
+                name.push(character);
+            }
+        }
+        if braced && characters.next_if_eq(&'}').is_none() {
+            expanded.push_str("${");
+            expanded.push_str(&name);
+            continue;
+        }
+        if name.is_empty() {
+            expanded.push('$');
+            if braced {
+                expanded.push('{');
+            }
+            continue;
+        }
+        if let Some(current) = env::var_os(&name) {
+            expanded.push_str(&current.to_string_lossy());
+        }
+    }
+    expanded
 }
 
 fn append_launcher_argument(runner: &mut String, argument: &str) {
@@ -816,15 +1092,6 @@ fn install_runner(workspace_root: &Path, host: &str) -> Result<PathBuf, CommandE
     Ok(runner)
 }
 
-fn replace_file_block(path: &Path, begin: &str, end: &str, body: &str) -> Result<(), CommandError> {
-    let old = fs::read_to_string(path).map_err(|source| CommandError::Read {
-        path: path.to_owned(),
-        source,
-    })?;
-    let new = replace_block(&old, begin, end, body)?;
-    write_file(path, &new)
-}
-
 fn write_file(path: &Path, contents: &str) -> Result<(), CommandError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| CommandError::Read {
@@ -848,7 +1115,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        requires_platform_launcher, run_with_selector, sync_with_report, CommandError, SyncStatus,
+        requires_platform_launcher, run_with_selector, select_board_with_toolchain,
+        sync_with_report, CommandError, SyncStatus,
     };
 
     #[test]
@@ -878,6 +1146,11 @@ mod tests {
         let platform = root.join("platforms/test");
         fs::create_dir_all(&platform).expect("Platform directory");
         fs::write(
+            platform.join("Cargo.toml"),
+            "[package]\nname = \"barracuda-platform-test\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("Platform Cargo manifest");
+        fs::write(
             platform.join("platform.yml"),
             "name: test\ninfo:\n  family: test\n  environment: hosted\npackage: barracuda-platform-test\ncrate: barracuda_platform_test\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
         )
@@ -894,6 +1167,89 @@ mod tests {
             "# BEGIN GENERATED SELECTED BOARD HAL\nold\n# END GENERATED SELECTED BOARD HAL\n",
         )
         .expect("selected Board manifest");
+    }
+
+    #[test]
+    fn selection_activates_the_platform_toolchain_and_configures_build_std() {
+        let root = tempdir().expect("temporary workspace");
+        add_board(root.path(), "device");
+        let manifest = root.path().join("platforms/test/platform.yml");
+        let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+        fs::write(
+            &manifest,
+            yaml.replace(
+                "selection:\n",
+                "build:\n  rustup-toolchain: vendor\n  build-std: [core, alloc]\n  environment-file: vendor.env\n  missing-toolchain-prompt: |\n    Install the vendor toolchain.\nselection:\n",
+            ),
+        )
+        .expect("Platform build policy");
+        fs::write(
+            root.path().join("vendor.env"),
+            "export LIBRARY_PATH=\"/opt/vendor/lib\"\nexport PATH=\"/opt/vendor/bin:$PATH\"\n",
+        )
+        .expect("toolchain environment");
+        let activated = Cell::new(false);
+
+        select_board_with_toolchain(
+            root.path(),
+            "device",
+            &mut Vec::new(),
+            false,
+            |workspace, toolchain, prompt| {
+                assert_eq!(workspace, root.path());
+                assert_eq!(toolchain, "vendor");
+                assert_eq!(prompt, "Install the vendor toolchain.\n");
+                activated.set(true);
+                Ok(())
+            },
+        )
+        .expect("select Board");
+
+        assert!(activated.get());
+        let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+            .expect("local Cargo selection");
+        assert!(cargo.contains("[unstable]"));
+        assert!(cargo.contains("build-std = [\"core\", \"alloc\"]"));
+        assert!(cargo.contains("LIBRARY_PATH = { value = \"/opt/vendor/lib\", force = true }"));
+        assert!(cargo.contains("PATH = { value = \"/opt/vendor/bin:"));
+        assert!(!cargo.contains("$PATH"));
+    }
+
+    #[test]
+    fn missing_toolchain_prompt_prevents_selection_changes() {
+        let root = tempdir().expect("temporary workspace");
+        add_board(root.path(), "device");
+        let manifest = root.path().join("platforms/test/platform.yml");
+        let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+        fs::write(
+            &manifest,
+            yaml.replace(
+                "selection:\n",
+                "build:\n  rustup-toolchain: vendor\n  missing-toolchain-prompt: |\n    Install the vendor toolchain.\nselection:\n",
+            ),
+        )
+        .expect("Platform build policy");
+
+        let error = select_board_with_toolchain(
+            root.path(),
+            "device",
+            &mut Vec::new(),
+            false,
+            |_workspace, toolchain, prompt| {
+                Err(CommandError::ToolchainMissing {
+                    toolchain: toolchain.to_owned(),
+                    prompt: prompt.to_owned(),
+                })
+            },
+        )
+        .expect_err("missing toolchain must stop selection");
+
+        assert!(error.to_string().contains("Install the vendor toolchain."));
+        assert_eq!(
+            read_selected_board(root.path()).expect("read selection"),
+            None
+        );
+        assert!(!root.path().join(".barracuda/cargo.toml").exists());
     }
 
     fn add_catalog_board(root: &Path, name: &str) {

@@ -9,9 +9,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-platform.workspace = true
-# BEGIN GENERATED SELECTED PLATFORM
-barracuda-platform-macos.workspace = true
-# END GENERATED SELECTED PLATFORM
+barracuda-platform-selection = { path = "../../.barracuda/selection/platform" }
 embassy-executor.workspace = true
 
 [build-dependencies]

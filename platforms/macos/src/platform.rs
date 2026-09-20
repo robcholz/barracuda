@@ -164,6 +164,7 @@ impl Platform for MacosPlatform {
     type Error = MacosPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
+        barracuda_bulk_memory::platform::install_global();
         crate::logging::install();
         log::info!("preparing macOS Platform");
         Self::install_reactor()

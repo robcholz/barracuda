@@ -28,8 +28,11 @@ use picoserve::{Config, DisconnectionInfo, NoGracefulShutdown, Server};
 const WEBSOCKET_BUFFER_BYTES: usize = 8 * 1024;
 const WEBSOCKET_QUEUE_CAPACITY: usize = 4;
 
-type ReaderSpace = [usize; 16];
-type ReadSpace = [usize; 64];
+#[repr(align(16))]
+struct InlineSpace<const WORDS: usize>([usize; WORDS]);
+
+type ReaderSpace = InlineSpace<16>;
+type ReadSpace = InlineSpace<64>;
 type InlineFuture<'a, T, S> = smallbox::SmallBox<dyn Future<Output = T> + 'a, S>;
 
 fn inline_future<'a, T, F, S>(value: F) -> InlineFuture<'a, T, S>
@@ -275,11 +278,11 @@ pub trait HttpProvider: 'static {
 }
 
 trait ErasedProvider<const WORDS: usize> {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]>;
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, InlineSpace<WORDS>>;
 }
 
 impl<P: HttpProvider, const WORDS: usize> ErasedProvider<WORDS> for P {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]> {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, InlineSpace<WORDS>> {
         inline_future(HttpProvider::serve(self, path))
     }
 }

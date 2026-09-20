@@ -1,4 +1,5 @@
-use alloc::{boxed::Box, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
+use barracuda_bulk_memory::{BulkBox, BulkVec};
 use core::cell::RefCell;
 use embassy_time::{Duration, with_timeout};
 
@@ -170,17 +171,17 @@ impl HttpError {
 }
 
 struct HttpWorkspace {
-    header_buffer: Box<[u8]>,
-    read_buffer: Box<[u8]>,
-    response_body: Vec<u8>,
+    header_buffer: BulkBox<[u8]>,
+    read_buffer: BulkBox<[u8]>,
+    response_body: BulkVec<u8>,
 }
 
 impl HttpWorkspace {
     fn new() -> Self {
         Self {
-            header_buffer: vec![0; HEADER_BUFFER_SIZE].into_boxed_slice(),
-            read_buffer: vec![0; READ_BUFFER_SIZE].into_boxed_slice(),
-            response_body: Vec::with_capacity(READ_BUFFER_SIZE),
+            header_buffer: BulkBox::new_zeroed_slice(HEADER_BUFFER_SIZE),
+            read_buffer: BulkBox::new_zeroed_slice(READ_BUFFER_SIZE),
+            response_body: BulkVec::with_capacity(READ_BUFFER_SIZE),
         }
     }
 }

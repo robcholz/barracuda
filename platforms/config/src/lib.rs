@@ -453,6 +453,7 @@ impl FlashDriver {
 pub struct PlatformDefinition {
     name: String,
     info: PlatformInfoDefinition,
+    build: BuildConfig,
     package: String,
     crate_name: String,
     type_name: String,
@@ -474,6 +475,12 @@ impl PlatformDefinition {
     #[must_use]
     pub const fn info(&self) -> &PlatformInfoDefinition {
         &self.info
+    }
+
+    /// Returns the host build policy required by this Platform.
+    #[must_use]
+    pub const fn build(&self) -> &BuildConfig {
+        &self.build
     }
 
     /// Returns the Platform Cargo package name.
@@ -528,6 +535,99 @@ impl PlatformDefinition {
     }
 }
 
+/// Host build policy required before compiling one Platform.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct BuildConfig {
+    #[serde(default)]
+    rustup_toolchain: Option<String>,
+    #[serde(default)]
+    build_std: Vec<String>,
+    #[serde(default)]
+    environment_file: Option<PathBuf>,
+    #[serde(default)]
+    missing_toolchain_prompt: Option<String>,
+}
+
+impl BuildConfig {
+    /// Returns the rustup toolchain that ordinary Cargo commands must use.
+    #[must_use]
+    pub fn rustup_toolchain(&self) -> Option<&str> {
+        self.rustup_toolchain.as_deref()
+    }
+
+    /// Returns standard-library crates Cargo must build for the target.
+    #[must_use]
+    pub fn build_std(&self) -> &[String] {
+        &self.build_std
+    }
+
+    /// Returns the optional toolchain environment exported by its installer.
+    #[must_use]
+    pub fn environment_file(&self) -> Option<&Path> {
+        self.environment_file.as_deref()
+    }
+
+    /// Returns the actionable message shown when the toolchain is unavailable.
+    #[must_use]
+    pub fn missing_toolchain_prompt(&self) -> Option<&str> {
+        self.missing_toolchain_prompt.as_deref()
+    }
+
+    fn validate(&self, path: &Path) -> Result<(), ResolveError> {
+        let Some(toolchain) = self.rustup_toolchain() else {
+            if self.build_std.is_empty()
+                && self.environment_file.is_none()
+                && self.missing_toolchain_prompt.is_none()
+            {
+                return Ok(());
+            }
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from(
+                    "build.rustup-toolchain is required when build policy is declared",
+                ),
+            });
+        };
+        if toolchain.trim().is_empty() {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from("build.rustup-toolchain must not be empty"),
+            });
+        }
+        if self
+            .environment_file()
+            .is_some_and(|environment_file| environment_file.as_os_str().is_empty())
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from("build.environment-file must not be empty"),
+            });
+        }
+        if self
+            .missing_toolchain_prompt()
+            .is_none_or(|prompt| prompt.trim().is_empty())
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from("build.missing-toolchain-prompt must not be empty"),
+            });
+        }
+        let mut crates = BTreeSet::new();
+        if self
+            .build_std
+            .iter()
+            .any(|crate_name| crate_name.trim().is_empty() || !crates.insert(crate_name.as_str()))
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from("build.build-std entries must be non-empty and unique"),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Fixed semantic identity declared by one Platform manifest.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -574,6 +674,8 @@ struct TargetSelector {
 struct PlatformDocument {
     name: String,
     info: PlatformInfoDefinition,
+    #[serde(default)]
+    build: BuildConfig,
     package: String,
     #[serde(rename = "crate")]
     crate_name: String,
@@ -864,10 +966,12 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
             ),
         });
     }
+    document.build.validate(&path)?;
     document.hal.validate(&path)?;
     Ok(PlatformDefinition {
         name: document.name,
         info: document.info,
+        build: document.build,
         package: document.package,
         crate_name: document.crate_name,
         type_name: document.type_name,

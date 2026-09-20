@@ -41,9 +41,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     validate_platform_hal(&board, &resolved, &platform)?;
     let mut generated = render_rust(&board);
     generated.push('\n');
-    generated.push_str(&render_board_hal_for_platform(
-        &board, &resolved, &platform,
-    )?);
+    let mut board_hal = render_board_hal_for_platform(&board, &resolved, &platform)?;
+    for implementation in catalog.implementations() {
+        let crate_name = implementation.implementation().crate_name();
+        board_hal = board_hal.replace(
+            &format!("::{crate_name}::"),
+            &format!("::barracuda_board_selection::{crate_name}::"),
+        );
+    }
+    generated.push_str(&board_hal);
     fs::write(output.join("selected_board.rs"), generated)?;
     Ok(())
 }

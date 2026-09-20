@@ -1,7 +1,8 @@
-use alloc::{borrow::Cow, boxed::Box, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{cell::RefCell, fmt};
 
 use barracuda_agent_plugin::tools::{ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec};
+use barracuda_bulk_memory::{BulkBox, BulkVec};
 use http_client::ClientFactory;
 use http_client::reqwless::request::RequestBuilder as _;
 use serde::{Deserialize, Deserializer, Serialize, de::SeqAccess, de::Visitor};
@@ -18,19 +19,19 @@ pub(crate) struct TavilyConfig {
 }
 
 struct SearchWorkspace {
-    header_buffer: Box<[u8]>,
-    read_buffer: Box<[u8]>,
-    request_body: Box<[u8]>,
-    response_body: Vec<u8>,
+    header_buffer: BulkBox<[u8]>,
+    read_buffer: BulkBox<[u8]>,
+    request_body: BulkBox<[u8]>,
+    response_body: BulkVec<u8>,
 }
 
 impl SearchWorkspace {
     fn new() -> Self {
         Self {
-            header_buffer: vec![0; HEADER_BUFFER_SIZE].into_boxed_slice(),
-            read_buffer: vec![0; READ_BUFFER_SIZE].into_boxed_slice(),
-            request_body: vec![0; API_REQUEST_BUFFER_SIZE].into_boxed_slice(),
-            response_body: Vec::with_capacity(READ_BUFFER_SIZE),
+            header_buffer: BulkBox::new_zeroed_slice(HEADER_BUFFER_SIZE),
+            read_buffer: BulkBox::new_zeroed_slice(READ_BUFFER_SIZE),
+            request_body: BulkBox::new_zeroed_slice(API_REQUEST_BUFFER_SIZE),
+            response_body: BulkVec::with_capacity(READ_BUFFER_SIZE),
         }
     }
 }
@@ -309,10 +310,7 @@ async fn fetch<'a>(
     workspace.response_body.clear();
     if let Some(length) = response.content_length {
         let additional = length.saturating_sub(workspace.response_body.capacity());
-        workspace
-            .response_body
-            .try_reserve_exact(additional)
-            .map_err(|_error| SearchFailure::InvalidResponse)?;
+        workspace.response_body.reserve_exact(additional);
     }
     let mut reader = response.body().reader();
     loop {
@@ -331,10 +329,7 @@ async fn fetch<'a>(
             return Err(SearchFailure::InvalidResponse);
         }
         let additional = length.saturating_sub(workspace.response_body.capacity());
-        workspace
-            .response_body
-            .try_reserve_exact(additional)
-            .map_err(|_error| SearchFailure::InvalidResponse)?;
+        workspace.response_body.reserve_exact(additional);
         workspace.response_body.extend_from_slice(
             workspace
                 .read_buffer

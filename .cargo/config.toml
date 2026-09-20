@@ -1,8 +1,8 @@
 include = [{ path = "../.barracuda/cargo.toml", optional = true }]
 
 [alias]
-board = "run --target host-tuple --quiet --package barracuda-board-tool --"
-cli = "run --target host-tuple --package barracuda-cli --"
-platform = "run --target host-tuple --quiet --package barracuda-platform-tool --"
-plugin = "run --target host-tuple --quiet --package barracuda-plugin-tool --"
-image = "run --target host-tuple --quiet --package barracuda-system-image --"
+board = ["run", "--config", "unstable.build-std=[\"std\"]", "--manifest-path", "boards/tool/bootstrap/Cargo.toml", "--target-dir", "target/board-bootstrap", "--target", "host-tuple", "--quiet", "--"]
+cli = ["run", "--config", "unstable.build-std=[\"std\"]", "--target-dir", "target/host-tools", "--target", "host-tuple", "--package", "barracuda-cli", "--"]
+platform = ["run", "--config", "unstable.build-std=[\"std\"]", "--target-dir", "target/host-tools", "--target", "host-tuple", "--quiet", "--package", "barracuda-platform-tool", "--"]
+plugin = ["run", "--config", "unstable.build-std=[\"std\"]", "--target-dir", "target/host-tools", "--target", "host-tuple", "--quiet", "--package", "barracuda-plugin-tool", "--"]
+image = ["run", "--config", "unstable.build-std=[\"std\"]", "--target-dir", "target/host-tools", "--target", "host-tuple", "--quiet", "--package", "barracuda-system-image", "--"]

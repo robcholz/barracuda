@@ -227,6 +227,7 @@ mod internal_flash {
         type Error = Esp32S2PlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
+            barracuda_bulk_memory::platform::install_global();
             esp_println::logger::init_logger(crate::PLATFORM_LOG_LEVEL);
             log::info!("preparing ESP32-S2 Platform");
             Ok(())

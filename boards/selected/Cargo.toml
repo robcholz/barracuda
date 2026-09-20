@@ -7,10 +7,9 @@ description = "Compile-time selected Barracuda Board HAL"
 [dependencies]
 barracuda-board.workspace = true
 barracuda-board-hal.workspace = true
+barracuda-board-selection = { path = "../../.barracuda/selection/board" }
+barracuda-peripheral.workspace = true
 barracuda-platform-selected.workspace = true
-# BEGIN GENERATED SELECTED BOARD HAL
-
-# END GENERATED SELECTED BOARD HAL
 embassy-executor.workspace = true
 
 [build-dependencies]

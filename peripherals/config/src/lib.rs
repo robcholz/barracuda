@@ -1007,7 +1007,12 @@ pub fn render_board_hal(
     if !board.has_hardware_surface() {
         return Ok(String::from(
             "/// Board HAL selected independently from Platform.\n\
-             pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n",
+             pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n\n\
+             #[doc(hidden)]\n\
+             #[macro_export]\n\
+             macro_rules! __barracuda_generated_board_bindings {\n\
+                 ($hardware:ident) => { () };\n\
+             }\n",
         ));
     }
     render_generic_hal(board, resolved, RuntimeResources::default())

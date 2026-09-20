@@ -75,13 +75,24 @@ impl BoardInfo {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Hardware {
     chip: &'static str,
+    external_memory: Option<ExternalMemory>,
 }
 
 impl Hardware {
     /// Creates a hardware identity from the canonical HAL chip name.
     #[must_use]
     pub const fn new(chip: &'static str) -> Self {
-        Self { chip }
+        Self {
+            chip,
+            external_memory: None,
+        }
+    }
+
+    /// Adds the Board's directly addressable external memory.
+    #[must_use]
+    pub const fn with_external_memory(mut self, external_memory: ExternalMemory) -> Self {
+        self.external_memory = Some(external_memory);
+        self
     }
 
     /// Returns the canonical HAL chip name.
@@ -89,6 +100,70 @@ impl Hardware {
     pub const fn chip(&self) -> &'static str {
         self.chip
     }
+
+    /// Returns the Board's directly addressable external memory, when present.
+    #[must_use]
+    pub const fn external_memory(&self) -> Option<&ExternalMemory> {
+        self.external_memory.as_ref()
+    }
+}
+
+/// One directly addressable external-memory device installed on a Board.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExternalMemory {
+    technology: ExternalMemoryTechnology,
+    interface: ExternalMemoryInterface,
+    size_bytes: usize,
+}
+
+impl ExternalMemory {
+    /// Creates a fixed external-memory hardware declaration.
+    #[must_use]
+    pub const fn new(
+        technology: ExternalMemoryTechnology,
+        interface: ExternalMemoryInterface,
+        size_bytes: usize,
+    ) -> Self {
+        Self {
+            technology,
+            interface,
+            size_bytes,
+        }
+    }
+
+    /// Returns the physical memory technology.
+    #[must_use]
+    pub const fn technology(&self) -> ExternalMemoryTechnology {
+        self.technology
+    }
+
+    /// Returns the physical interface used by the chip.
+    #[must_use]
+    pub const fn interface(&self) -> ExternalMemoryInterface {
+        self.interface
+    }
+
+    /// Returns the installed capacity in bytes.
+    #[must_use]
+    pub const fn size_bytes(&self) -> usize {
+        self.size_bytes
+    }
+}
+
+/// Technology used by directly addressable external memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExternalMemoryTechnology {
+    /// Pseudo-static RAM.
+    Psram,
+}
+
+/// Electrical interface used by directly addressable external memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExternalMemoryInterface {
+    /// Four-data-line SPI.
+    QuadSpi,
+    /// Eight-data-line SPI.
+    OctalSpi,
 }
 
 /// Board-bundled native physical-layout artifact.

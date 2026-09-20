@@ -191,8 +191,21 @@ cargo build
 
 The selection command presents a colored fuzzy-searchable list, validates the
 chosen Board bundle, and records its name in workspace-local ignored state. It
-also accepts an explicit Board name for automation. The ordinary Cargo build
-reads that state; it does not require an environment variable or a Board-aware
+also accepts an explicit Board name for automation. Each Platform declares the
+rustup toolchain used to compile it, any standard-library crates Cargo must
+build for its target, an optional installer-generated environment file, and
+the prompt shown when that toolchain is unavailable. Selection verifies that
+declaration, applies the workspace rustup override, and writes the Cargo
+configuration needed by ordinary `cargo check`, `cargo build`, and `cargo run`
+commands. Host-side Cargo tools use a complete host standard library and an
+isolated artifact directory while an embedded `build-std` policy is active.
+The selector crates keep stable source manifests. `cargo board` bootstraps
+ignored local dependency packages under `.barracuda/selection` before Cargo
+resolves the source workspace, then activates only the concrete Platform and
+peripheral implementation dependencies required by the chosen Board. Every
+local package declares the complete optional dependency catalog, so changing
+the selected default features does not rewrite `Cargo.lock`. The build reads
+persistent workspace state; it does not require shell setup or a Board-aware
 build wrapper.
 `boards/selected` must not inspect `target_os` or `target_arch`, and the outer
 Target composition must not infer a default Board or activate a Board feature
@@ -697,6 +710,27 @@ dependency.
 
 Logs must identify lifecycle boundaries and failures without including API
 keys, credentials, message bodies, or other secret-bearing payloads.
+
+## Bulk memory
+
+Bulk memory is a process-global allocation domain for large plain-data buffers.
+It is runtime support rather than a consumable business capability, so it does
+not become a `PlatformResources` field, `PluginContext` field, Workflow
+contract, or Board peripheral.
+
+The Board matrix declares directly addressable external memory as a hardware
+fact, including its technology, interface, and installed capacity. The selected
+Platform owns initialization of that memory and installs the allocator used by
+the shared bulk-memory mechanism. Platforms without a distinct external-memory
+domain install their normal global allocator behind the same API.
+
+Callers allocate through `BulkVec<T>` and `BulkBox<T>`. Their element boundary
+requires `bytemuck::Pod`; the underlying allocator is private and cannot be
+recovered by safe caller code. This keeps atomics, locks, futures, pointers,
+and other control state out of external memory on chips where those values
+cannot be accessed safely. Bulk containers remain explicit: the Platform does
+not add external memory to the ordinary global allocator used by arbitrary
+System and Plugin state.
 
 ## TLS and HTTP clients
 

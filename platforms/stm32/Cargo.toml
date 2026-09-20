@@ -27,6 +27,7 @@ stm32f429zi = [
 
 [dependencies]
 barracuda-board.workspace = true
+barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
 log.workspace = true
 

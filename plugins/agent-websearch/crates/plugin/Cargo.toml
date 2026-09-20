@@ -11,6 +11,7 @@ barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
 [dependencies]
 barracuda-captive-portal-plugin.workspace = true
 barracuda-agent-plugin.workspace = true
+barracuda-bulk-memory.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 embassy-futures.workspace = true
