@@ -671,6 +671,7 @@ name = "barracuda-agent-websearch-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-bulk-memory",
  "barracuda-captive-portal-plugin",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1124,6 +1125,7 @@ dependencies = [
 name = "barracuda-http-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "barracuda-plugin",
  "barracuda-workflow-plugin",
  "embassy-time",
@@ -1393,6 +1395,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "barracuda-agent-trace",
+ "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "base64 0.22.1",
@@ -4775,6 +4778,7 @@ dependencies = [
 name = "gateway-http"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",

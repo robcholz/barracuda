@@ -6,6 +6,7 @@ description = "Typed outbound HTTP capability and Workflow Action for Barracuda"
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-bulk-memory.workspace = true
 barracuda-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embedded-io-async = "0.7"

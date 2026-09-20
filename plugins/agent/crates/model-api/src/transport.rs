@@ -3,11 +3,11 @@
 use alloc::{
     boxed::Box,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use core::{future::Future, pin::Pin};
 
+use barracuda_bulk_memory::BulkVec;
 use barracuda_runtime_utils::yield_stream::try_yield_stream;
 use embedded_io::Error as _;
 use embedded_io_async::Read as _;
@@ -70,8 +70,8 @@ where
     connected: Option<Connected<'net, Tcp, Resolver>>,
     connected_origin: Option<String>,
     connection_healthy: bool,
-    header_buffer: Vec<u8>,
-    read_buffer: Vec<u8>,
+    header_buffer: BulkVec<u8>,
+    read_buffer: BulkVec<u8>,
     tls_configured: bool,
 }
 
@@ -88,10 +88,19 @@ where
             connected: None,
             connected_origin: None,
             connection_healthy: true,
-            header_buffer: vec![0; HEADER_BUFFER_SIZE],
-            read_buffer: vec![0; READ_BUFFER_SIZE],
+            header_buffer: BulkVec::new(),
+            read_buffer: BulkVec::new(),
             tls_configured,
         }
+    }
+
+    fn ensure_buffers(&mut self) -> Result<(), Error> {
+        self.header_buffer
+            .try_resize(HEADER_BUFFER_SIZE, 0)
+            .map_err(|_error| Error::Allocation)?;
+        self.read_buffer
+            .try_resize(READ_BUFFER_SIZE, 0)
+            .map_err(|_error| Error::Allocation)
     }
 
     fn disconnect(&mut self) {
@@ -143,6 +152,7 @@ where
         body: &str,
         headers: &[(&str, &str)],
     ) -> Result<Response, Error> {
+        self.ensure_buffers()?;
         if url.starts_with("https://") && !self.tls_configured {
             return Err(Error::TlsNotConfigured);
         }
@@ -216,6 +226,7 @@ where
         headers: Vec<(String, String)>,
     ) -> ResponseStream<'a> {
         try_yield_stream(|yielder| async move {
+            self.ensure_buffers()?;
             if url.starts_with("https://") && !self.tls_configured {
                 return Err(Error::TlsNotConfigured);
             }

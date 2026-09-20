@@ -157,6 +157,18 @@ impl<T: Pod> BulkVec<T> {
         self.inner.capacity()
     }
 
+    /// Returns the initialized elements as a shared slice.
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        self.inner.as_slice()
+    }
+
+    /// Returns the initialized elements as a mutable slice.
+    #[must_use]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self.inner.as_mut_slice()
+    }
+
     /// Removes all elements while retaining allocated storage.
     pub fn clear(&mut self) {
         self.inner.clear();
@@ -203,6 +215,20 @@ impl<T: Pod> BulkVec<T> {
     pub fn try_extend_from_slice(&mut self, values: &[T]) -> Result<(), BulkMemoryError> {
         self.inner.try_reserve(values.len())?;
         self.inner.extend_from_slice(values);
+        Ok(())
+    }
+
+    /// Resizes the sequence, copying `value` into newly initialized elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error without growing the sequence when additional storage
+    /// cannot be allocated.
+    pub fn try_resize(&mut self, new_len: usize, value: T) -> Result<(), BulkMemoryError> {
+        if new_len > self.inner.len() {
+            self.inner.try_reserve(new_len - self.inner.len())?;
+        }
+        self.inner.resize(new_len, value);
         Ok(())
     }
 

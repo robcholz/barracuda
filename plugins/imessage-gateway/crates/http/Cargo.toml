@@ -7,6 +7,7 @@ description = "HTTP request helpers owned by the IMessage Gateway"
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-bulk-memory.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }

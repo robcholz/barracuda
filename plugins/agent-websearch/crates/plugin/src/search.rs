@@ -1,7 +1,8 @@
-use alloc::{borrow::Cow, boxed::Box, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{cell::RefCell, fmt};
 
 use barracuda_agent_plugin::tools::{ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec};
+use barracuda_bulk_memory::{BulkBox, BulkMemoryError, BulkVec};
 use http_client::ClientFactory;
 use http_client::reqwless::request::RequestBuilder as _;
 use serde::{Deserialize, Deserializer, Serialize, de::SeqAccess, de::Visitor};
@@ -18,20 +19,20 @@ pub(crate) struct TavilyConfig {
 }
 
 struct SearchWorkspace {
-    header_buffer: Box<[u8]>,
-    read_buffer: Box<[u8]>,
-    request_body: Box<[u8]>,
-    response_body: Vec<u8>,
+    header_buffer: BulkBox<[u8]>,
+    read_buffer: BulkBox<[u8]>,
+    request_body: BulkBox<[u8]>,
+    response_body: BulkVec<u8>,
 }
 
 impl SearchWorkspace {
-    fn new() -> Self {
-        Self {
-            header_buffer: vec![0; HEADER_BUFFER_SIZE].into_boxed_slice(),
-            read_buffer: vec![0; READ_BUFFER_SIZE].into_boxed_slice(),
-            request_body: vec![0; API_REQUEST_BUFFER_SIZE].into_boxed_slice(),
-            response_body: Vec::with_capacity(READ_BUFFER_SIZE),
-        }
+    fn try_new() -> Result<Self, BulkMemoryError> {
+        Ok(Self {
+            header_buffer: BulkBox::try_zeroed_slice(HEADER_BUFFER_SIZE)?,
+            read_buffer: BulkBox::try_zeroed_slice(READ_BUFFER_SIZE)?,
+            request_body: BulkBox::try_zeroed_slice(API_REQUEST_BUFFER_SIZE)?,
+            response_body: BulkVec::try_with_capacity(READ_BUFFER_SIZE)?,
+        })
     }
 }
 
@@ -74,15 +75,15 @@ pub(crate) struct WebSearchTool {
 }
 
 impl WebSearchTool {
-    pub(crate) fn new(
+    pub(crate) fn try_new(
         config: Rc<RefCell<Option<Rc<TavilyConfig>>>>,
         http_clients: ClientFactory<'static>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BulkMemoryError> {
+        Ok(Self {
             config,
             http_clients,
-            workspace: Rc::new(RefCell::new(Some(SearchWorkspace::new()))),
-        }
+            workspace: Rc::new(RefCell::new(Some(SearchWorkspace::try_new()?))),
+        })
     }
 }
 
@@ -335,12 +336,15 @@ async fn fetch<'a>(
             .response_body
             .try_reserve_exact(additional)
             .map_err(|_error| SearchFailure::InvalidResponse)?;
-        workspace.response_body.extend_from_slice(
-            workspace
-                .read_buffer
-                .get(..read)
-                .ok_or(SearchFailure::InvalidResponse)?,
-        );
+        workspace
+            .response_body
+            .try_extend_from_slice(
+                workspace
+                    .read_buffer
+                    .get(..read)
+                    .ok_or(SearchFailure::InvalidResponse)?,
+            )
+            .map_err(|_error| SearchFailure::InvalidResponse)?;
     }
     serde_json::from_slice(&workspace.response_body)
         .map_err(|_error| SearchFailure::InvalidResponse)
