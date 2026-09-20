@@ -5,6 +5,7 @@
 //! no concrete Platform or Board implementation.
 
 #![no_std]
+#![recursion_limit = "256"]
 
 use barracuda_system::{System, SystemCreateError};
 use embassy_executor::Spawner;

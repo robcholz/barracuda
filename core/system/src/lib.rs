@@ -373,6 +373,7 @@ where
             barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
+            barracuda_wifi_plugin::WifiPlugin::new(&mut plugin_context, prepared.wifi),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS
