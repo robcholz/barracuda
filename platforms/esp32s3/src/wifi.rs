@@ -62,18 +62,17 @@ impl Esp32S3WifiDevice {
             .with_authentication(authentication))
     }
 
-    fn active_config(&self) -> Config {
-        match (
-            self.station_configuration.as_ref(),
-            self.access_point_configuration.as_ref(),
-        ) {
-            (Some(station), Some(access_point)) => {
-                Config::AccessPointStation(station.clone(), access_point.clone())
-            }
-            (Some(station), None) => Config::Station(station.clone()),
-            (None, Some(access_point)) => Config::AccessPoint(access_point.clone()),
-            (None, None) => Config::Station(StationConfig::default()),
+    fn apply_config(&mut self, config: &Config) -> Result<(), Esp32S3WifiError> {
+        if let Err(error) = self.controller.set_config(config) {
+            // esp-radio stops the controller and resets its mode after a
+            // configuration failure, so cached state must reflect that reset.
+            self.station_configuration = None;
+            self.access_point_configuration = None;
+            self.station_state = StationState::Disconnected;
+            self.access_point_state = AccessPointState::Stopped;
+            return Err(error.into());
         }
+        Ok(())
     }
 }
 
@@ -119,12 +118,11 @@ impl WifiDevice for Esp32S3WifiDevice {
                 }
                 None => Config::Station(StationConfig::default()),
             };
-            self.controller.set_config(&scan_config)?;
+            self.apply_config(&scan_config)?;
         }
         let scanned = self.controller.scan_async(&ScanConfig::default()).await;
         if let Some(access_point) = restore_access_point {
-            self.controller
-                .set_config(&Config::AccessPoint(access_point))?;
+            self.apply_config(&Config::AccessPoint(access_point))?;
         }
         Ok(scanned?
             .into_iter()
@@ -140,16 +138,13 @@ impl WifiDevice for Esp32S3WifiDevice {
         &mut self,
         configuration: &AccessPointConfiguration,
     ) -> Result<(), Self::Error> {
-        self.access_point_state = AccessPointState::Starting;
         let access_point = Self::access_point_config(configuration)?;
         let config = match self.station_configuration.as_ref() {
             Some(station) => Config::AccessPointStation(station.clone(), access_point.clone()),
             None => Config::AccessPoint(access_point.clone()),
         };
-        if let Err(error) = self.controller.set_config(&config) {
-            self.access_point_state = AccessPointState::Stopped;
-            return Err(error.into());
-        }
+        self.access_point_state = AccessPointState::Starting;
+        self.apply_config(&config)?;
         self.access_point_configuration = Some(access_point);
         self.access_point_state = AccessPointState::Started {
             ssid: configuration.ssid().to_string(),
@@ -158,8 +153,12 @@ impl WifiDevice for Esp32S3WifiDevice {
     }
 
     async fn stop_access_point(&mut self) -> Result<(), Self::Error> {
+        let config = match self.station_configuration.as_ref() {
+            Some(station) => Config::Station(station.clone()),
+            None => Config::Station(StationConfig::default()),
+        };
+        self.apply_config(&config)?;
         self.access_point_configuration = None;
-        self.controller.set_config(&self.active_config())?;
         self.access_point_state = AccessPointState::Stopped;
         Ok(())
     }
@@ -181,10 +180,7 @@ impl WifiDevice for Esp32S3WifiDevice {
             Some(access_point) => Config::AccessPointStation(station.clone(), access_point.clone()),
             None => Config::Station(station.clone()),
         };
-        if let Err(error) = self.controller.set_config(&config) {
-            self.station_state = StationState::Disconnected;
-            return Err(error.into());
-        }
+        self.apply_config(&config)?;
         if let Err(error) = self.controller.connect_async().await {
             self.station_state = StationState::Disconnected;
             return Err(error.into());
@@ -213,8 +209,12 @@ impl WifiDevice for Esp32S3WifiDevice {
                 Err(error) => return Err(error.into()),
             }
         }
+        let config = match self.access_point_configuration.as_ref() {
+            Some(access_point) => Config::AccessPoint(access_point.clone()),
+            None => Config::Station(StationConfig::default()),
+        };
+        self.apply_config(&config)?;
         self.station_configuration = None;
-        self.controller.set_config(&self.active_config())?;
         self.station_state = StationState::Disconnected;
         Ok(())
     }

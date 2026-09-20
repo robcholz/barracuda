@@ -337,9 +337,10 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
         }
     }
 
-    fn next_access_point_generation(&self) {
-        self.access_point_generation
-            .set(self.access_point_generation.get().wrapping_add(1));
+    fn next_access_point_generation(&self) -> u64 {
+        let generation = self.access_point_generation.get().wrapping_add(1);
+        self.access_point_generation.set(generation);
+        generation
     }
 
     async fn load_configuration(
@@ -414,7 +415,9 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
             .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
             .await
         {
-            Ok(()) => self.next_access_point_generation(),
+            Ok(()) => {
+                self.next_access_point_generation();
+            }
             Err(error) => log::error!("failed to keep the provisioning AP available: {error}"),
         }
     }
@@ -507,8 +510,8 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
                 .put(CONFIGURATION_STORAGE_KEY, encoded.as_slice())
                 .await
                 .map_err(WifiControlError::storage)?;
-            self.access_point_shutdown
-                .signal(self.access_point_generation.get());
+            let generation = self.next_access_point_generation();
+            self.access_point_shutdown.signal(generation);
             log::info!("configured Wi-Fi station for {ssid}");
             Ok(())
         })

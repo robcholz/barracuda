@@ -218,6 +218,7 @@ async fn run_dhcp(stack: Stack<'static>) {
 
     let mut packet = [0_u8; 1500];
     let mut gateways = [Ipv4Addr::UNSPECIFIED];
+    let dns_servers = [SETUP_AP_ADDRESS];
     let buffers = UdpBuffers::<1, 1500, 1500, 2>::new();
     let udp = Udp::new(stack, &buffers);
     loop {
@@ -232,9 +233,11 @@ async fn run_dhcp(stack: Stack<'static>) {
             Timer::after_millis(500).await;
             continue;
         };
+        let mut options = ServerOptions::new(SETUP_AP_ADDRESS, Some(&mut gateways));
+        options.dns = &dns_servers;
         let result = io::server::run(
             &mut Server::<_, 64>::new_with_et(SETUP_AP_ADDRESS),
-            &ServerOptions::new(SETUP_AP_ADDRESS, Some(&mut gateways)),
+            &options,
             &mut socket,
             &mut packet,
         )
