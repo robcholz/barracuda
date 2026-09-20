@@ -12,7 +12,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 
-use barracuda_bulk_memory::{BulkBox, BulkMemoryError};
+use barracuda_bulk_memory::BulkBox;
 use futures_lite::StreamExt as _;
 use gateway::BinaryBody;
 use reqwless::request::RequestBuilder as _;
@@ -24,8 +24,6 @@ const READ_BUFFER_SIZE: usize = 8 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
-    BulkMemory(#[from] BulkMemoryError),
     #[error("HTTPS requested without a TLS configuration")]
     TlsNotConfigured,
     #[error(transparent)]
@@ -53,13 +51,13 @@ where
     if url.starts_with("https://") && !tls_configured {
         return Err(Error::TlsNotConfigured);
     }
-    let mut header_buffer = BulkBox::<[u8]>::try_zeroed_slice(HEADER_BUFFER_SIZE)?;
+    let mut header_buffer = BulkBox::<[u8]>::new_zeroed_slice(HEADER_BUFFER_SIZE);
     let request = client.request(method, url).await?;
     let mut request = request.headers(headers).body(body);
     let response = request.send(&mut header_buffer[..]).await?;
     let status = response.status.0;
     let mut reader = response.body().reader();
-    let mut read_buffer = BulkBox::<[u8]>::try_zeroed_slice(READ_BUFFER_SIZE)?;
+    let mut read_buffer = BulkBox::<[u8]>::new_zeroed_slice(READ_BUFFER_SIZE);
     let mut bytes = Vec::new();
     loop {
         let read = embedded_io_async::Read::read(&mut reader, &mut read_buffer)

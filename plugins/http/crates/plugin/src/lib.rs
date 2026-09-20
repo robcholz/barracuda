@@ -41,7 +41,7 @@ impl Plugin for HttpPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
-        let http = Rc::new(Http::try_new(self.clients.clone()).map_err(PluginError::registration)?);
+        let http = Rc::new(Http::new(self.clients.clone()));
         let registration = workflow::register_action(&actions, Rc::clone(&http))
             .map_err(PluginError::registration)?;
         context.retain(registration);

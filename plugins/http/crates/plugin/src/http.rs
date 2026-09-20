@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_bulk_memory::{BulkBox, BulkMemoryError, BulkVec};
+use barracuda_bulk_memory::{BulkBox, BulkVec};
 use core::cell::RefCell;
 use embassy_time::{Duration, with_timeout};
 
@@ -150,9 +150,6 @@ pub enum HttpError {
     /// Upstream body exceeds the defensive bound.
     #[error("response body is too large")]
     ResponseTooLarge,
-    /// Bulk scratch memory could not be allocated.
-    #[error("HTTP scratch memory allocation failed")]
-    Allocation,
 }
 
 impl HttpError {
@@ -169,7 +166,6 @@ impl HttpError {
             Self::Transport => "transport",
             Self::InvalidResponseText => "invalid_response_text",
             Self::ResponseTooLarge => "response_too_large",
-            Self::Allocation => "allocation",
         }
     }
 }
@@ -181,12 +177,12 @@ struct HttpWorkspace {
 }
 
 impl HttpWorkspace {
-    fn try_new() -> Result<Self, BulkMemoryError> {
-        Ok(Self {
-            header_buffer: BulkBox::try_zeroed_slice(HEADER_BUFFER_SIZE)?,
-            read_buffer: BulkBox::try_zeroed_slice(READ_BUFFER_SIZE)?,
-            response_body: BulkVec::try_with_capacity(READ_BUFFER_SIZE)?,
-        })
+    fn new() -> Self {
+        Self {
+            header_buffer: BulkBox::new_zeroed_slice(HEADER_BUFFER_SIZE),
+            read_buffer: BulkBox::new_zeroed_slice(READ_BUFFER_SIZE),
+            response_body: BulkVec::with_capacity(READ_BUFFER_SIZE),
+        }
     }
 }
 
@@ -195,14 +191,12 @@ struct WorkspacePool {
 }
 
 impl WorkspacePool {
-    fn try_new() -> Result<Self, BulkMemoryError> {
-        let mut slots = core::array::from_fn(|_| None);
-        for slot in &mut slots {
-            *slot = Some(Box::new(HttpWorkspace::try_new()?));
+    fn new() -> Self {
+        Self {
+            slots: RefCell::new(core::array::from_fn(|_| {
+                Some(Box::new(HttpWorkspace::new()))
+            })),
         }
-        Ok(Self {
-            slots: RefCell::new(slots),
-        })
     }
 
     fn acquire(self: &Rc<Self>) -> Result<WorkspaceLease, HttpError> {
@@ -255,16 +249,12 @@ pub struct Http<T: 'static = http_client::Tcp, D: 'static = http_client::Resolve
 
 impl<T, D> Http<T, D> {
     /// Creates the capability from System's shared HTTP client factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the reusable bulk-memory workspaces cannot be
-    /// allocated.
-    pub fn try_new(clients: ClientFactory<'static, T, D>) -> Result<Self, HttpError> {
-        Ok(Self {
+    #[must_use]
+    pub fn new(clients: ClientFactory<'static, T, D>) -> Self {
+        Self {
             clients,
-            workspaces: Rc::new(WorkspacePool::try_new().map_err(|_error| HttpError::Allocation)?),
-        })
+            workspaces: Rc::new(WorkspacePool::new()),
+        }
     }
 }
 
@@ -319,15 +309,12 @@ impl<T: TcpConnect + 'static, D: Dns + 'static> Http<T, D> {
             if next_len > MAX_RESPONSE_BODY_BYTES {
                 return Err(HttpError::ResponseTooLarge);
             }
-            workspace
-                .response_body
-                .try_extend_from_slice(
-                    workspace
-                        .read_buffer
-                        .get(..read)
-                        .ok_or(HttpError::Transport)?,
-                )
-                .map_err(|_error| HttpError::Allocation)?;
+            workspace.response_body.extend_from_slice(
+                workspace
+                    .read_buffer
+                    .get(..read)
+                    .ok_or(HttpError::Transport)?,
+            );
         }
         let body = core::str::from_utf8(&workspace.response_body)
             .map_err(|_error| HttpError::InvalidResponseText)?;

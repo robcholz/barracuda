@@ -94,13 +94,9 @@ where
         }
     }
 
-    fn ensure_buffers(&mut self) -> Result<(), Error> {
-        self.header_buffer
-            .try_resize(HEADER_BUFFER_SIZE, 0)
-            .map_err(|_error| Error::Allocation)?;
-        self.read_buffer
-            .try_resize(READ_BUFFER_SIZE, 0)
-            .map_err(|_error| Error::Allocation)
+    fn ensure_buffers(&mut self) {
+        self.header_buffer.resize(HEADER_BUFFER_SIZE, 0);
+        self.read_buffer.resize(READ_BUFFER_SIZE, 0);
     }
 
     fn disconnect(&mut self) {
@@ -152,7 +148,7 @@ where
         body: &str,
         headers: &[(&str, &str)],
     ) -> Result<Response, Error> {
-        self.ensure_buffers()?;
+        self.ensure_buffers();
         if url.starts_with("https://") && !self.tls_configured {
             return Err(Error::TlsNotConfigured);
         }
@@ -226,7 +222,7 @@ where
         headers: Vec<(String, String)>,
     ) -> ResponseStream<'a> {
         try_yield_stream(|yielder| async move {
-            self.ensure_buffers()?;
+            self.ensure_buffers();
             if url.starts_with("https://") && !self.tls_configured {
                 return Err(Error::TlsNotConfigured);
             }

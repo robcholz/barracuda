@@ -28,9 +28,6 @@ pub enum Error {
     #[error("HTTP codec error")]
     #[strum(serialize = "http_codec")]
     HttpCodec,
-    #[error("HTTP scratch memory allocation failed")]
-    #[strum(serialize = "allocation")]
-    Allocation,
     #[error("connection was aborted")]
     #[strum(serialize = "connection_aborted")]
     ConnectionAborted,

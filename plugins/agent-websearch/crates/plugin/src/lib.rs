@@ -78,8 +78,7 @@ impl Plugin for AgentWebsearchPlugin {
         let config = Rc::new(RefCell::new(
             embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
         ));
-        let web_search = WebSearchTool::try_new(Rc::clone(&config), self.http_clients.clone())
-            .map_err(PluginError::registration)?;
+        let web_search = WebSearchTool::new(Rc::clone(&config), self.http_clients.clone());
         tools
             .register_group(ToolGroup::new("websearch", false, [Tool::new(web_search)]))
             .map_err(PluginError::registration)?;

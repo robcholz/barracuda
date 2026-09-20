@@ -80,38 +80,6 @@ pub trait BulkData: private::Sealed {}
 impl<T: Pod> BulkData for T {}
 impl<T: Pod> BulkData for [T] {}
 
-/// A fallible bulk-memory construction failure.
-#[derive(Debug)]
-pub enum BulkMemoryError {
-    /// The allocator rejected a direct allocation.
-    Allocation(AllocError),
-    /// A vector capacity request overflowed or could not be allocated.
-    Capacity(TryReserveError),
-}
-
-impl fmt::Display for BulkMemoryError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Allocation(error) => error.fmt(formatter),
-            Self::Capacity(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl core::error::Error for BulkMemoryError {}
-
-impl From<AllocError> for BulkMemoryError {
-    fn from(error: AllocError) -> Self {
-        Self::Allocation(error)
-    }
-}
-
-impl From<TryReserveError> for BulkMemoryError {
-    fn from(error: TryReserveError) -> Self {
-        Self::Capacity(error)
-    }
-}
-
 /// A growable POD sequence allocated from the active Platform bulk-memory
 /// domain.
 pub struct BulkVec<T: Pod> {
@@ -128,15 +96,11 @@ impl<T: Pod> BulkVec<T> {
     }
 
     /// Creates an empty sequence with at least `capacity` elements of storage.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the requested capacity overflows or the active
-    /// bulk-memory allocator cannot satisfy it.
-    pub fn try_with_capacity(capacity: usize) -> Result<Self, BulkMemoryError> {
-        let mut value = Self::new();
-        value.inner.try_reserve_exact(capacity)?;
-        Ok(value)
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: AllocVec::with_capacity_in(capacity, BulkAllocator::active()),
+        }
     }
 
     /// Returns the number of initialized elements.
@@ -175,61 +139,46 @@ impl<T: Pod> BulkVec<T> {
     }
 
     /// Reserves capacity for at least `additional` more elements.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the new capacity overflows or cannot be allocated.
-    pub fn try_reserve(&mut self, additional: usize) -> Result<(), BulkMemoryError> {
-        self.inner.try_reserve(additional)?;
-        Ok(())
+    pub fn reserve(&mut self, additional: usize) {
+        self.inner.reserve(additional);
     }
 
     /// Reserves the minimum capacity for `additional` more elements.
+    pub fn reserve_exact(&mut self, additional: usize) {
+        self.inner.reserve_exact(additional);
+    }
+
+    /// Attempts to reserve capacity for at least `additional` more elements.
     ///
     /// # Errors
     ///
     /// Returns an error when the new capacity overflows or cannot be allocated.
-    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), BulkMemoryError> {
-        self.inner.try_reserve_exact(additional)?;
-        Ok(())
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        self.inner.try_reserve(additional)
+    }
+
+    /// Attempts to reserve the minimum capacity for `additional` more elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the new capacity overflows or cannot be allocated.
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        self.inner.try_reserve_exact(additional)
     }
 
     /// Appends one element, growing the allocation when necessary.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error without appending when growth cannot be allocated.
-    pub fn try_push(&mut self, value: T) -> Result<(), BulkMemoryError> {
-        if self.inner.len() == self.inner.capacity() {
-            self.inner.try_reserve(1)?;
-        }
+    pub fn push(&mut self, value: T) {
         self.inner.push(value);
-        Ok(())
     }
 
     /// Appends a copied slice, growing the allocation when necessary.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error without appending when growth cannot be allocated.
-    pub fn try_extend_from_slice(&mut self, values: &[T]) -> Result<(), BulkMemoryError> {
-        self.inner.try_reserve(values.len())?;
+    pub fn extend_from_slice(&mut self, values: &[T]) {
         self.inner.extend_from_slice(values);
-        Ok(())
     }
 
     /// Resizes the sequence, copying `value` into newly initialized elements.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error without growing the sequence when additional storage
-    /// cannot be allocated.
-    pub fn try_resize(&mut self, new_len: usize, value: T) -> Result<(), BulkMemoryError> {
-        if new_len > self.inner.len() {
-            self.inner.try_reserve(new_len - self.inner.len())?;
-        }
+    pub fn resize(&mut self, new_len: usize, value: T) {
         self.inner.resize(new_len, value);
-        Ok(())
     }
 
     /// Removes and returns the final element, if present.
@@ -280,31 +229,23 @@ pub struct BulkBox<T: BulkData + ?Sized> {
 
 impl<T: Pod> BulkBox<T> {
     /// Allocates and stores one POD value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the active bulk-memory allocator cannot satisfy
-    /// the value's layout.
-    pub fn try_new(value: T) -> Result<Self, BulkMemoryError> {
-        Ok(Self {
-            inner: AllocBox::try_new_in(value, BulkAllocator::active())?,
-        })
+    #[must_use]
+    pub fn new(value: T) -> Self {
+        Self {
+            inner: AllocBox::new_in(value, BulkAllocator::active()),
+        }
     }
 }
 
 impl<T: Pod> BulkBox<[T]> {
     /// Allocates a zero-filled POD slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the length overflows or the active bulk-memory
-    /// allocator cannot satisfy the slice layout.
-    pub fn try_zeroed_slice(length: usize) -> Result<Self, BulkMemoryError> {
-        let value = AllocBox::<[T], _>::try_new_zeroed_slice_in(length, BulkAllocator::active())?;
+    #[must_use]
+    pub fn new_zeroed_slice(length: usize) -> Self {
+        let value = AllocBox::<[T], _>::new_zeroed_slice_in(length, BulkAllocator::active());
         // SAFETY: `Pod` extends `Zeroable`, so an all-zero value is valid for
         // every element in the allocation.
         let value = unsafe { value.assume_init() };
-        Ok(Self { inner: value })
+        Self { inner: value }
     }
 }
 
