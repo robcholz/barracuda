@@ -6,10 +6,19 @@
 
 #![no_std]
 
+extern crate alloc;
+
+mod wifi;
+
 use core::future::Future;
 
 use embassy_executor::Spawner;
 use embassy_net::Stack;
+
+pub use wifi::{
+    AccessPointConfiguration, AccessPointState, HostWifiDevice, StationConfiguration, StationState,
+    UnavailableWifiDevice, VisibleNetwork, WifiCapabilities, WifiDevice,
+};
 
 /// Fixed identity of one compiled execution Platform.
 ///
@@ -254,9 +263,11 @@ impl core::fmt::Display for PartitionsInsertError {
 impl core::error::Error for PartitionsInsertError {}
 
 /// Portable mechanisms produced by one concrete Platform.
-pub struct PlatformResources<Tls, Partitions> {
+pub struct PlatformResources<Tls, Partitions, Wifi> {
     /// Embassy IP stack. Its device runner remains Platform-owned.
     pub ip_stack: Stack<'static>,
+    /// Platform Wi-Fi mechanism consumed by the Wi-Fi Plugin.
+    pub wifi: Wifi,
     /// Platform-owned TLS client capability.
     pub tls: Tls,
     /// Arbitrarily named regions projected from the Platform's native layout.
@@ -265,7 +276,7 @@ pub struct PlatformResources<Tls, Partitions> {
 
 /// Result of initializing one statically selected [`Platform`].
 pub type PlatformInitResult<P> = Result<
-    PlatformResources<<P as Platform>::Tls, <P as Platform>::Partitions>,
+    PlatformResources<<P as Platform>::Tls, <P as Platform>::Partitions, <P as Platform>::Wifi>,
     <P as Platform>::Error,
 >;
 
@@ -283,6 +294,8 @@ pub trait Platform: Sized + 'static {
     type Bindings;
     /// TLS client capability initialized and owned by this Platform.
     type Tls;
+    /// Concrete Wi-Fi mechanism supplied to System composition.
+    type Wifi: WifiDevice;
     /// Generic named partition collection produced from the native layout.
     type Partitions;
     /// Platform initialization failure.

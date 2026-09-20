@@ -1,0 +1,52 @@
+[package]
+name = "barracuda-wifi-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Wi-Fi provisioning and lifecycle Plugin for Barracuda"
+license = "Apache-2.0"
+
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
+[dependencies]
+barracuda-captive-portal-plugin.workspace = true
+barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
+barracuda-webserver-plugin.workspace = true
+embassy-futures.workspace = true
+embassy-executor.workspace = true
+embassy-net.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+edge-captive = { version = "0.8.0", default-features = false, features = ["io", "log"] }
+edge-dhcp = { version = "0.8.0", default-features = false, features = ["io", "log"] }
+edge-nal = { version = "0.7.0", default-features = false }
+edge-nal-embassy = { version = "0.9.0", default-features = false, features = ["proto-ipv4", "udp"] }
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+barracuda-vfs.workspace = true
+barracuda-vfs-memfs.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-net.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+embedded-io-async = "0.7"
+futures-lite = "2"
+picoserve = { version = "0.19.0", default-features = false, features = ["alloc", "embassy"] }
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

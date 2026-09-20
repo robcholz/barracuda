@@ -3,14 +3,15 @@
 mod c_abi;
 
 use core::cell::RefCell;
-use core::task::Context;
+use core::net::Ipv4Addr;
 
-use embassy_net::{Runner, StackResources};
-use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
+use embassy_net::{Ipv4Cidr, Runner, StackResources, StaticConfigV4};
 use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
+use esp_hal::rng::Rng;
+use esp_radio::wifi::{ControllerConfig, Interface, WifiController};
 use static_cell::StaticCell;
 
-use crate::{Esp32S3PlatformBindings, Esp32S3PlatformError};
+use crate::{Esp32S3PlatformBindings, Esp32S3PlatformError, Esp32S3WifiDevice, Esp32S3WifiError};
 
 static EXTERNAL_MEMORY_ALLOCATOR: esp_alloc::ExternalMemory = esp_alloc::ExternalMemory;
 static BULK_MEMORY_BACKEND: barracuda_bulk_memory::platform::Backend =
@@ -29,57 +30,8 @@ pub use esp_rtos as __rtos;
 #[doc(hidden)]
 pub use static_cell::StaticCell as __StaticCell;
 
-struct OfflineDriver;
-
-enum NeverToken {}
-
-impl RxToken for NeverToken {
-    fn consume<R, F>(self, _f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        match self {}
-    }
-}
-
-impl TxToken for NeverToken {
-    fn consume<R, F>(self, _len: usize, _f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        match self {}
-    }
-}
-
-impl Driver for OfflineDriver {
-    type RxToken<'a> = NeverToken;
-    type TxToken<'a> = NeverToken;
-
-    fn receive(&mut self, _cx: &mut Context<'_>) -> Option<(NeverToken, NeverToken)> {
-        None
-    }
-
-    fn transmit(&mut self, _cx: &mut Context<'_>) -> Option<NeverToken> {
-        None
-    }
-
-    fn link_state(&mut self, _cx: &mut Context<'_>) -> LinkState {
-        LinkState::Down
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        let mut capabilities = Capabilities::default();
-        capabilities.max_transmission_unit = 1514;
-        capabilities
-    }
-
-    fn hardware_address(&self) -> HardwareAddress {
-        HardwareAddress::Ethernet([0x02, 0, 0, 0, 0, 1])
-    }
-}
-
-#[embassy_executor::task]
-async fn run_offline_network(mut runner: Runner<'static, OfflineDriver>) -> ! {
+#[embassy_executor::task(pool_size = 2)]
+async fn run_wifi_network(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
 }
 
@@ -122,21 +74,47 @@ pub fn bindings(
     board: &barracuda_board::Board,
     spawner: embassy_executor::Spawner,
     flash_token: esp_hal::peripherals::FLASH<'static>,
+    wifi_token: esp_hal::peripherals::WIFI<'static>,
 ) -> Result<Esp32S3PlatformBindings, Esp32S3PlatformError> {
-    static NETWORK: StaticCell<StackResources<16>> = StaticCell::new();
+    static STATION_NETWORK: StaticCell<StackResources<16>> = StaticCell::new();
+    static ACCESS_POINT_NETWORK: StaticCell<StackResources<8>> = StaticCell::new();
     static FLASH: StaticCell<
         Mutex<CriticalSectionRawMutex, RefCell<crate::Esp32S3Flash<'static>>>,
     > = StaticCell::new();
 
-    let network = NETWORK.init(StackResources::new());
-    let (ip_stack, runner) = embassy_net::new(OfflineDriver, Default::default(), network, 0);
-    if let Ok(task) = run_offline_network(runner) {
-        spawner.spawn(task);
-    } else {
-        log::error!("failed to spawn ESP32-S3 network runner");
-    }
+    let station_interface = Interface::station();
+    let access_point_interface = Interface::access_point();
+    let controller = WifiController::new(wifi_token, ControllerConfig::default())
+        .map_err(Esp32S3WifiError::from)?;
+    let rng = Rng::new();
+    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let station_config = embassy_net::Config::dhcpv4(Default::default());
+    let access_point_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(Ipv4Addr::new(192, 168, 4, 1), 24),
+        gateway: Some(Ipv4Addr::new(192, 168, 4, 1)),
+        dns_servers: Default::default(),
+    });
+    let (ip_stack, station_runner) = embassy_net::new(
+        station_interface,
+        station_config,
+        STATION_NETWORK.init(StackResources::new()),
+        seed,
+    );
+    let (access_point_stack, access_point_runner) = embassy_net::new(
+        access_point_interface,
+        access_point_config,
+        ACCESS_POINT_NETWORK.init(StackResources::new()),
+        seed,
+    );
+    let station_task =
+        run_wifi_network(station_runner).map_err(|_error| Esp32S3PlatformError::NetworkTask)?;
+    let access_point_task = run_wifi_network(access_point_runner)
+        .map_err(|_error| Esp32S3PlatformError::NetworkTask)?;
+    spawner.spawn(station_task);
+    spawner.spawn(access_point_task);
+    let wifi = Esp32S3WifiDevice::new(controller, ip_stack, access_point_stack);
     let flash = FLASH.init(Mutex::new(RefCell::new(crate::flash(flash_token))));
-    Esp32S3PlatformBindings::from_initialized_services(board, ip_stack, flash)
+    Esp32S3PlatformBindings::from_initialized_services(board, ip_stack, wifi, flash)
 }
 
 /// Generates the ESP32-S3 async entry around one selected application.
@@ -152,19 +130,21 @@ macro_rules! platform_entry {
             $spawner: embassy_executor::Spawner,
             $board_bindings_value: $board_bindings_type,
             flash: $crate::application::__hal::peripherals::FLASH<'static>,
+            wifi: $crate::application::__hal::peripherals::WIFI<'static>,
         ) {
-            let $platform_bindings = match $crate::application::bindings($board, $spawner, flash) {
-                Ok(bindings) => bindings,
-                Err(error) => {
-                    $crate::application::__println::println!(
-                        "failed to bootstrap ESP32-S3 Platform: {}",
-                        error
-                    );
-                    loop {
-                        core::hint::spin_loop();
+            let $platform_bindings =
+                match $crate::application::bindings($board, $spawner, flash, wifi) {
+                    Ok(bindings) => bindings,
+                    Err(error) => {
+                        $crate::application::__println::println!(
+                            "failed to bootstrap ESP32-S3 Platform: {}",
+                            error
+                        );
+                        loop {
+                            core::hint::spin_loop();
+                        }
                     }
-                }
-            };
+                };
             if let Err(error) = $application.await {
                 $crate::application::__println::println!("application exited: {}", error);
                 loop {
@@ -182,6 +162,7 @@ macro_rules! platform_entry {
             $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
+            let wifi = peripherals.WIFI;
             let timer_group =
                 $crate::application::__hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
             $crate::application::__rtos::start(timer_group.timer0, peripherals.FROM_CPU_INTR0);
@@ -192,7 +173,7 @@ macro_rules! platform_entry {
                 .init($crate::application::__rtos::embassy::Executor::new())
                 .run(move |spawner| {
                     if let Ok(task) =
-                        __barracuda_application_task(spawner, $board_bindings_value, flash)
+                        __barracuda_application_task(spawner, $board_bindings_value, flash, wifi)
                     {
                         spawner.spawn(task);
                     } else {

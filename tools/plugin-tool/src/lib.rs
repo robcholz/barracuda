@@ -651,9 +651,15 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
     let entries = plugins
         .iter()
         .map(|plugin| {
+            // Platform resource routing is part of the fixed System composition,
+            // not author-controlled Plugin metadata.
+            let platform_resources = match plugin.id.as_str() {
+                "wifi" => ", prepared.wifi",
+                _ => "",
+            };
             format!(
-                "            {}::{}::new(&mut plugin_context),",
-                plugin.crate_name, plugin.entry
+                "            {}::{}::new(&mut plugin_context{}),",
+                plugin.crate_name, plugin.entry, platform_resources
             )
         })
         .collect::<Vec<_>>()
@@ -997,6 +1003,20 @@ mod tests {
             concat!(
                 "        register_plugins!(plugins;\n",
                 "            barracuda_demo_plugin::TestPlugin::new(&mut plugin_context),\n",
+                "        );"
+            )
+        );
+    }
+
+    #[test]
+    fn renders_platform_owned_wifi_constructor_argument() {
+        let demo = plugin("wifi", "wifi", &[]);
+
+        assert_eq!(
+            render_registrations(&[&demo]),
+            concat!(
+                "        register_plugins!(plugins;\n",
+                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context, prepared.wifi),\n",
                 "        );"
             )
         );

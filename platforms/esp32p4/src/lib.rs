@@ -223,6 +223,7 @@ mod internal_flash {
     impl Platform for Esp32P4Platform {
         type Bindings = Esp32P4PlatformBindings;
         type Tls = barracuda_tls::MbedTls;
+        type Wifi = barracuda_platform::UnavailableWifiDevice;
         type Partitions = Esp32P4Partitions;
         type Error = Esp32P4PlatformError;
 
@@ -242,8 +243,10 @@ mod internal_flash {
             log::info!("initializing ESP32-P4 Platform TLS");
             let tls = bindings.tls.initialize()?;
             log::info!("initialized ESP32-P4 Platform");
+            let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
-                ip_stack: bindings.ip_stack,
+                ip_stack,
+                wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
                 tls,
                 partitions,
             })

@@ -24,6 +24,20 @@ WebServer task concurrently polls four fixed connection workers, each with its
 own TCP and HTTP buffers. A long-lived WebSocket therefore uses one worker
 without blocking ordinary HTTP requests in the remaining workers.
 
+`WebServer::listen_on_stack` lets a dependent network-owner Plugin register the
+same route table on an additional Platform stack and port during registration.
+The WebServer Plugin still owns and cancels the resulting listener task; the
+dependent Plugin retains a `WebListenerRegistration` that stops that listener
+when dropped. Capacity is one additional interface with one connection worker;
+another registration fails during Plugin registration. The Wi-Fi
+Plugin uses this contract for captive HTTP on its access-point stack.
+
+Each worker's 4 KiB receive buffer, 4 KiB transmit buffer, and 8 KiB HTTP
+buffer are POD-only `BulkBox<[u8]>` allocations. Platforms with a separate
+bulk-memory domain may place those buffers in external memory, while socket
+state, futures, synchronization, and other control data remain in the normal
+allocator.
+
 HTTP consumers may also register a subtree with `serve_http_prefix`. Exact
 HTTP and WebSocket routes take precedence, then the longest matching prefix
 wins. Prefixes respect path segments: `/assets` matches `/assets` and

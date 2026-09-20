@@ -6,10 +6,12 @@ description = "Barracuda Plugin that provides the portable WebServer capability"
 
 [dependencies]
 async-channel = { version = "2", default-features = false }
+barracuda-bulk-memory.workspace = true
 barracuda-plugin.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-net.workspace = true
+embassy-sync.workspace = true
 embassy-time.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 log.workspace = true

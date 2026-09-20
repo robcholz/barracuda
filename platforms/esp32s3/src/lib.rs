@@ -10,6 +10,12 @@ pub mod hal;
 #[doc(hidden)]
 pub mod application;
 
+#[cfg(target_arch = "xtensa")]
+mod wifi;
+
+#[cfg(target_arch = "xtensa")]
+pub use wifi::{Esp32S3WifiDevice, Esp32S3WifiError};
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32S3RegionAccess {
@@ -162,6 +168,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32S3Platform`].
     pub struct Esp32S3PlatformBindings {
         ip_stack: Stack<'static>,
+        wifi: crate::Esp32S3WifiDevice,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S3Flash<'static>>>,
     }
 
@@ -178,12 +185,17 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
+            wifi: crate::Esp32S3WifiDevice,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S3Flash<'static>>>,
         ) -> Result<Self, Esp32S3PlatformError> {
             if board.hardware().chip() != "esp32s3" {
                 return Err(Esp32S3PlatformError::IncompatibleChip);
             }
-            Ok(Self { ip_stack, flash })
+            Ok(Self {
+                ip_stack,
+                wifi,
+                flash,
+            })
         }
     }
 
@@ -221,6 +233,7 @@ mod internal_flash {
     impl Platform for Esp32S3Platform {
         type Bindings = Esp32S3PlatformBindings;
         type Tls = barracuda_tls::PlaintextTls;
+        type Wifi = crate::Esp32S3WifiDevice;
         type Partitions = Esp32S3Partitions;
         type Error = Esp32S3PlatformError;
 
@@ -237,8 +250,10 @@ mod internal_flash {
             log::info!("initializing ESP32-S3 Platform partitions");
             let partitions = partitions(bindings.flash)?;
             log::info!("initialized ESP32-S3 Platform");
+            let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
-                ip_stack: bindings.ip_stack,
+                ip_stack,
+                wifi: bindings.wifi,
                 tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
@@ -252,6 +267,10 @@ mod internal_flash {
         IncompatibleChip,
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
+        /// ESP radio initialization failed.
+        Wifi(crate::Esp32S3WifiError),
+        /// An Embassy network runner could not be allocated.
+        NetworkTask,
     }
 
     impl From<PartitionsInsertError> for Esp32S3PlatformError {
@@ -265,11 +284,19 @@ mod internal_flash {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
+                Self::Wifi(error) => write!(formatter, "failed to initialize ESP32 Wi-Fi: {error}"),
+                Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
             }
         }
     }
 
     impl core::error::Error for Esp32S3PlatformError {}
+
+    impl From<crate::Esp32S3WifiError> for Esp32S3PlatformError {
+        fn from(error: crate::Esp32S3WifiError) -> Self {
+            Self::Wifi(error)
+        }
+    }
 }
 
 #[cfg(target_arch = "xtensa")]

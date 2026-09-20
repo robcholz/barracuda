@@ -1,0 +1,9 @@
+id = "wifi"
+depends-on = ["webserver", "captive-portal"]
+description = "Owns Wi-Fi AP and station lifecycle, persistence, and configuration."
+
+[tasks.build]
+cwd = "."
+command = ["bun", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
+outputs = ["filesystem/resources/entry.js"]

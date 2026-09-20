@@ -14,6 +14,8 @@ use core::pin::Pin;
 use core::task::Poll;
 
 use async_channel::{Receiver, Sender};
+use embassy_net::Stack;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use futures_lite::future;
 use picoserve::futures::Either;
 use picoserve::io::Write;
@@ -606,6 +608,9 @@ pub enum WebServerError {
     /// An endpoint is already registered at this path.
     #[error("WebServer endpoint path is already registered")]
     DuplicatePath,
+    /// The single additional listener slot is already registered.
+    #[error("WebServer additional listener capacity is exhausted")]
+    AdditionalListenerCapacity,
 }
 
 /// Scoped registration of one WebSocket or ordinary HTTP endpoint.
@@ -629,6 +634,43 @@ impl Drop for WebRouteRegistration {
     }
 }
 
+pub(crate) struct WebListener {
+    pub(crate) stack: Stack<'static>,
+    pub(crate) port: u16,
+    pub(crate) stopped: Rc<Signal<NoopRawMutex, ()>>,
+}
+
+impl Clone for WebListener {
+    fn clone(&self) -> Self {
+        Self {
+            stack: self.stack,
+            port: self.port,
+            stopped: Rc::clone(&self.stopped),
+        }
+    }
+}
+
+/// Scoped registration of one additional network interface listener.
+///
+/// Dropping this value stops the listener. The WebServer Plugin owns the
+/// listener task; the dependent Plugin owns only the registration lifetime.
+#[must_use = "dropping the registration immediately stops the listener"]
+pub struct WebListenerRegistration {
+    listeners: Weak<RefCell<Vec<WebListener>>>,
+    stopped: Rc<Signal<NoopRawMutex, ()>>,
+}
+
+impl Drop for WebListenerRegistration {
+    fn drop(&mut self) {
+        self.stopped.signal(());
+        if let Some(listeners) = self.listeners.upgrade() {
+            listeners
+                .borrow_mut()
+                .retain(|listener| !Rc::ptr_eq(&listener.stopped, &self.stopped));
+        }
+    }
+}
+
 /// Failure while serving one Platform-provided connection.
 #[derive(Debug, thiserror::Error)]
 pub enum ServeConnectionError<E: picoserve::io::Error + 'static> {
@@ -646,6 +688,7 @@ pub enum ServeConnectionError<E: picoserve::io::Error + 'static> {
 /// The single cross-platform Web server shared by registered Plugins.
 pub struct WebServer {
     endpoints: Rc<RefCell<Vec<RegisteredEndpoint>>>,
+    listeners: Rc<RefCell<Vec<WebListener>>>,
     config: Config,
 }
 
@@ -654,6 +697,40 @@ impl WebServer {
     #[must_use]
     pub fn new() -> Self {
         Config::const_default().into()
+    }
+
+    /// Registers the same route table on an additional Platform network stack.
+    ///
+    /// The WebServer Plugin starts and owns one single-connection listener for
+    /// this interface after every Plugin has registered. Retain the returned
+    /// guard for as long as the interface should accept HTTP connections.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WebServerError::AdditionalListenerCapacity`] when another
+    /// Plugin already owns the single additional listener slot.
+    pub fn listen_on_stack(
+        &self,
+        stack: Stack<'static>,
+        port: u16,
+    ) -> Result<WebListenerRegistration, WebServerError> {
+        if !self.listeners.borrow().is_empty() {
+            return Err(WebServerError::AdditionalListenerCapacity);
+        }
+        let stopped = Rc::new(Signal::new());
+        self.listeners.borrow_mut().push(WebListener {
+            stack,
+            port,
+            stopped: Rc::clone(&stopped),
+        });
+        Ok(WebListenerRegistration {
+            listeners: Rc::downgrade(&self.listeners),
+            stopped,
+        })
+    }
+
+    pub(crate) fn listeners(&self) -> Vec<WebListener> {
+        self.listeners.borrow().clone()
     }
 
     /// Registers one portable WebSocket endpoint during Plugin registration.
@@ -839,6 +916,7 @@ impl From<Config> for WebServer {
     fn from(config: Config) -> Self {
         Self {
             endpoints: Rc::new(RefCell::new(Vec::new())),
+            listeners: Rc::new(RefCell::new(Vec::new())),
             config,
         }
     }

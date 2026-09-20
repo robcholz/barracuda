@@ -31,7 +31,7 @@ use barracuda_board_hal::{
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
     PwmProvider, SpiProvider, UartProvider,
 };
-use barracuda_platform::{Partitions, PlatformResources};
+use barracuda_platform::{Partitions, PlatformResources, WifiDevice};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
@@ -277,9 +277,9 @@ where
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Tls: ClientTls>(
+    pub async fn new<Tls: ClientTls, Wifi: WifiDevice>(
         resources: TargetResources<
-            PlatformResources<Tls, Partitions<Region, P>>,
+            PlatformResources<Tls, Partitions<Region, P>, Wifi>,
             BoardResources<Peripherals, Io>,
         >,
         target_identity: TargetIdentity,
@@ -373,6 +373,7 @@ where
             barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
+            barracuda_wifi_plugin::WifiPlugin::new(&mut plugin_context, prepared.wifi),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS

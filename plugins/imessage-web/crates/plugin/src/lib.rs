@@ -102,10 +102,10 @@ impl Plugin for IMessageWebPlugin {
         });
         let bridge = WebBridge::new(web, sink, route.conversation_id.clone());
         let web_registration = webserver
-            .serve_websocket("/", bridge)
+            .serve_websocket("/ws/message", bridge)
             .map_err(PluginError::registration)?;
         log::info!(
-            "registered IMessage Web channel `{WEB_CHANNEL}` for conversation `{WEB_CONVERSATION}` at WebSocket route `/`"
+            "registered IMessage Web channel `{WEB_CHANNEL}` for conversation `{WEB_CONVERSATION}` at WebSocket route `/ws/message`"
         );
 
         context.retain(channel_registration);

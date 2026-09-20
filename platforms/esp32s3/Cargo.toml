@@ -21,7 +21,7 @@ barracuda-peripheral.workspace = true
 barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
-embassy-net.workspace = true
+embassy-net = { workspace = true, features = ["dhcpv4"] }
 embassy-net-driver = "0.2.0"
 embassy-sync = { version = "0.8.0", default-features = false }
 embassy-time.workspace = true
@@ -33,9 +33,10 @@ embedded-io-async = "0.7"
 esp-alloc = { version = "0.11.0", features = ["esp32s3"] }
 esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
-esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32s3", "exception-handler", "rt", "unstable"] }
+esp-hal = { version = "1.2.0", default-features = false, features = ["critical-section", "esp32s3", "exception-handler", "rt", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
-esp-rtos = { version = "0.4.0", features = ["embassy", "esp32s3"] }
+esp-radio = { version = "1.0.0-beta.1", default-features = false, features = ["esp-alloc", "esp32s3", "log-04", "wifi"] }
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32s3"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32s3", "embedded-storage"] }
 sdio = "0.5.1"
 static_cell.workspace = true

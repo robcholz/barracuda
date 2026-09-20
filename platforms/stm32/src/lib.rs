@@ -266,6 +266,7 @@ mod internal_flash {
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
         type Tls = barracuda_tls::MbedTls;
+        type Wifi = barracuda_platform::UnavailableWifiDevice;
         type Partitions = Stm32Partitions;
         type Error = Stm32PlatformError;
 
@@ -285,8 +286,10 @@ mod internal_flash {
             log::info!("initializing STM32 Platform TLS");
             let tls = bindings.tls.initialize()?;
             log::info!("initialized STM32 Platform");
+            let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
-                ip_stack: bindings.ip_stack,
+                ip_stack,
+                wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
                 tls,
                 partitions,
             })
