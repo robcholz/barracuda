@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 
 use barracuda_plugin::manager::PluginTaskToken;
-use embassy_futures::join::join_array;
+use embassy_futures::join::{join, join_array};
 use embassy_futures::select::select;
 use embassy_net::{tcp::TcpSocket, Stack};
 use picoserve::time::EmbassyTimer;
@@ -22,8 +22,19 @@ pub(crate) async fn web_server(
     );
     let workers: [_; WEB_SERVER_CONNECTION_SLOTS] =
         core::array::from_fn(|worker| serve_worker(Rc::clone(&webserver), stack, worker));
-    let _completed = select(cancellation.cancelled(), join_array(workers)).await;
+    let serving = join(log_listening_url(stack), join_array(workers));
+    let _completed = select(cancellation.cancelled(), serving).await;
     log::info!("stopped WebServer task");
+}
+
+async fn log_listening_url(stack: Stack<'static>) {
+    stack.wait_config_up().await;
+    if let Some(config) = stack.config_v4() {
+        log::info!(
+            "WebServer listening at http://{}:{WEB_SERVER_PORT}/",
+            config.address.address()
+        );
+    }
 }
 
 async fn serve_worker(webserver: Rc<WebServer>, stack: Stack<'static>, worker: usize) {
