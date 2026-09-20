@@ -18,9 +18,11 @@
 - Storage: station credentials under the Plugin-scoped KV key `station`
 
 Dependent Plugins can require `WifiControl` from `wifi` to inspect support and
-state, scan networks, start or stop the access point, and connect or disconnect
-station mode. The capability erases the selected Platform's concrete
-`WifiDevice` type and serializes all radio operations.
+state, scan networks, start or stop the access point, configure a persisted
+station connection, or forget it and return to the setup AP. The capability
+owns these policy transitions, erases the selected Platform's concrete
+`WifiDevice` type, and serializes storage and radio operations. The HTTP routes
+are adapters over the same capability rather than a separate policy path.
 
 The Plugin owns Wi-Fi policy rather than a specific radio driver. On a managed
 embedded Platform it restores persisted station credentials during startup. A

@@ -15,7 +15,7 @@ use barracuda_plugin::{
 use barracuda_vfs::{MountOptions, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
-use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
+use barracuda_wifi_plugin::{WifiControl, WifiPlugin, WifiStatus};
 use embassy_net::{Ipv4Address, tcp::TcpSocket};
 use embedded_io_async::Write as _;
 
@@ -102,14 +102,22 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         })
         .expect("observer");
     let server = observed.borrow().as_ref().expect("server").clone();
-    assert_eq!(
-        observed_wifi
-            .borrow()
-            .as_ref()
-            .expect("Wi-Fi capability")
-            .capabilities(),
-        WifiCapabilities::host_managed()
-    );
+    let wifi = observed_wifi
+        .borrow()
+        .as_ref()
+        .expect("Wi-Fi capability")
+        .clone();
+    assert_eq!(wifi.capabilities(), WifiCapabilities::host_managed());
+    assert!(wifi.scan().await.expect("scan noop").is_empty());
+    wifi.start_access_point("setup", "secret")
+        .await
+        .expect("AP noop");
+    wifi.stop_access_point().await.expect("AP noop");
+    wifi.configure_station("home", "secret")
+        .await
+        .expect("station noop");
+    wifi.forget_station().await.expect("station noop");
+    assert_eq!(wifi.status(), WifiStatus::platform_managed());
 
     let manifest = request(
         Rc::clone(&server),

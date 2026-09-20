@@ -1,60 +1,30 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 
 use alloc::rc::Rc;
-use barracuda_platform::{
-    AccessPointState, StationConfiguration, StationState, VisibleNetwork, WifiCapabilities,
-};
-use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
+use barracuda_platform::{AccessPointState, StationState, VisibleNetwork, WifiCapabilities};
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use serde::{Deserialize, Serialize};
 
-use crate::{SETUP_AP_PASSWORD, SETUP_AP_SSID, WifiControl};
+use crate::{WifiControl, WifiControlErrorKind};
 
 pub(crate) const WIFI_API_PATH: &str = "/api/wifi";
 pub(crate) const WIFI_SCAN_API_PATH: &str = "/api/wifi/scan";
-const CONFIGURATION_STORAGE_KEY: &str = "station";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StoredConfiguration {
+struct StationRequest {
     ssid: String,
     password: String,
 }
 
-impl StoredConfiguration {
-    fn valid(&self) -> bool {
-        let ssid_length = self.ssid.len();
-        let password_length = self.password.len();
-        (1..=32).contains(&ssid_length)
-            && (password_length == 0 || (8..=63).contains(&password_length))
-    }
+pub(crate) struct WifiEndpoint {
+    control: Rc<WifiControl>,
 }
 
-impl From<StoredConfiguration> for StationConfiguration {
-    fn from(configuration: StoredConfiguration) -> Self {
-        Self::new(configuration.ssid, configuration.password)
-    }
-}
-
-pub(crate) struct WifiEndpoint<Storage> {
-    control: WifiControl,
-    access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
-    storage: Storage,
-}
-
-impl<Storage> WifiEndpoint<Storage> {
-    pub(crate) const fn new(
-        control: WifiControl,
-        access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
-        storage: Storage,
-    ) -> Self {
-        Self {
-            control,
-            access_point_shutdown,
-            storage,
-        }
+impl WifiEndpoint {
+    pub(crate) const fn new(control: Rc<WifiControl>) -> Self {
+        Self { control }
     }
 
     fn static_response(status: u16, body: &'static [u8]) -> HttpResponse {
@@ -72,7 +42,7 @@ impl<Storage> WifiEndpoint<Storage> {
     }
 }
 
-impl<Storage: PluginStorage> HttpEndpoint for WifiEndpoint<Storage> {
+impl HttpEndpoint for WifiEndpoint {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
@@ -84,66 +54,45 @@ impl<Storage: PluginStorage> HttpEndpoint for WifiEndpoint<Storage> {
                         return Self::static_response(409, br#"{"error":"platform_managed"}"#);
                     }
                     let Ok(configuration) =
-                        serde_json::from_slice::<StoredConfiguration>(request.body())
+                        serde_json::from_slice::<StationRequest>(request.body())
                     else {
                         return Self::static_response(400, br#"{"error":"invalid_request"}"#);
                     };
-                    if !configuration.valid() {
-                        return Self::static_response(422, br#"{"error":"invalid_configuration"}"#);
-                    }
                     if let Err(error) = self
                         .control
-                        .connect_station(&configuration.ssid, &configuration.password)
+                        .configure_station(&configuration.ssid, &configuration.password)
                         .await
                     {
                         log::warn!("Wi-Fi station connection failed: {error}");
-                        if let Err(access_point_error) = self
-                            .control
-                            .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-                            .await
-                        {
-                            log::error!(
-                                "failed to keep the provisioning AP available: {access_point_error}"
-                            );
-                        }
-                        return Self::static_response(422, br#"{"error":"connection_failed"}"#);
-                    }
-                    let Ok(encoded) = serde_json::to_vec(&configuration) else {
-                        return Self::static_response(500, br#"{"error":"encoding"}"#);
+                        return match error.kind() {
+                            WifiControlErrorKind::InvalidConfiguration => {
+                                Self::static_response(422, br#"{"error":"invalid_configuration"}"#)
+                            }
+                            WifiControlErrorKind::Storage => {
+                                Self::static_response(500, br#"{"error":"storage"}"#)
+                            }
+                            WifiControlErrorKind::Device => {
+                                Self::static_response(422, br#"{"error":"connection_failed"}"#)
+                            }
+                        };
                     };
-                    if let Err(error) = self
-                        .storage
-                        .put(CONFIGURATION_STORAGE_KEY, encoded.as_slice())
-                        .await
-                    {
-                        log::error!("failed to persist Wi-Fi station configuration: {error}");
-                        return Self::static_response(500, br#"{"error":"storage"}"#);
-                    }
-                    self.access_point_shutdown.signal(());
-                    log::info!("configured Wi-Fi station for {}", configuration.ssid);
                     Self::static_response(204, b"")
                 }
                 HttpMethod::Delete => {
                     if !self.control.capabilities().station_configuration {
                         return Self::static_response(409, br#"{"error":"platform_managed"}"#);
                     }
-                    if let Err(error) = self.storage.delete(CONFIGURATION_STORAGE_KEY).await {
-                        log::error!("failed to forget Wi-Fi station configuration: {error}");
-                        return Self::static_response(500, br#"{"error":"storage"}"#);
-                    }
-                    if let Err(error) = self.control.disconnect_station().await {
-                        log::warn!("failed to disconnect Wi-Fi station: {error}");
-                        return Self::static_response(500, br#"{"error":"wifi"}"#);
-                    }
-                    if let Err(error) = self
-                        .control
-                        .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-                        .await
-                    {
-                        log::warn!(
-                            "failed to start provisioning AP after forgetting network: {error}"
-                        );
-                        return Self::static_response(500, br#"{"error":"wifi"}"#);
+                    if let Err(error) = self.control.forget_station().await {
+                        log::warn!("failed to forget Wi-Fi station: {error}");
+                        return match error.kind() {
+                            WifiControlErrorKind::Storage => {
+                                Self::static_response(500, br#"{"error":"storage"}"#)
+                            }
+                            WifiControlErrorKind::InvalidConfiguration
+                            | WifiControlErrorKind::Device => {
+                                Self::static_response(500, br#"{"error":"wifi"}"#)
+                            }
+                        };
                     }
                     Self::static_response(204, b"")
                 }
@@ -154,11 +103,11 @@ impl<Storage: PluginStorage> HttpEndpoint for WifiEndpoint<Storage> {
 }
 
 pub(crate) struct ScanEndpoint {
-    control: WifiControl,
+    control: Rc<WifiControl>,
 }
 
 impl ScanEndpoint {
-    pub(crate) const fn new(control: WifiControl) -> Self {
+    pub(crate) const fn new(control: Rc<WifiControl>) -> Self {
         Self { control }
     }
 }
@@ -167,19 +116,13 @@ impl HttpEndpoint for ScanEndpoint {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             if request.method() != HttpMethod::Get {
-                return WifiEndpoint::<()>::static_response(
-                    405,
-                    br#"{"error":"method_not_allowed"}"#,
-                );
+                return WifiEndpoint::static_response(405, br#"{"error":"method_not_allowed"}"#);
             }
             if !self.control.capabilities().scanning {
-                return WifiEndpoint::<()>::static_response(
-                    409,
-                    br#"{"error":"platform_managed"}"#,
-                );
+                return WifiEndpoint::static_response(409, br#"{"error":"platform_managed"}"#);
             }
             match self.control.scan().await {
-                Ok(networks) => WifiEndpoint::<()>::json_response(
+                Ok(networks) => WifiEndpoint::json_response(
                     200,
                     &networks
                         .into_iter()
@@ -188,7 +131,7 @@ impl HttpEndpoint for ScanEndpoint {
                 ),
                 Err(error) => {
                     log::warn!("Wi-Fi scan failed: {error}");
-                    WifiEndpoint::<()>::static_response(500, br#"{"error":"wifi"}"#)
+                    WifiEndpoint::static_response(500, br#"{"error":"wifi"}"#)
                 }
             }
         })
@@ -284,24 +227,3 @@ impl From<VisibleNetwork> for NetworkResponse {
         }
     }
 }
-
-pub(crate) async fn load_configuration<Storage: PluginStorage>(
-    storage: &Storage,
-) -> PluginResult<Option<StationConfiguration>> {
-    storage
-        .get_bytes(CONFIGURATION_STORAGE_KEY)
-        .await?
-        .map(|bytes| serde_json::from_slice::<StoredConfiguration>(&bytes))
-        .transpose()
-        .map_err(PluginError::registration)
-        .and_then(|configuration| match configuration {
-            Some(configuration) if !configuration.valid() => {
-                Err(PluginError::registration(InvalidStoredConfiguration))
-            }
-            configuration => Ok(configuration.map(StationConfiguration::from)),
-        })
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("stored Wi-Fi configuration is invalid")]
-struct InvalidStoredConfiguration;

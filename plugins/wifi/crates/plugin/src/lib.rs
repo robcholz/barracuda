@@ -12,7 +12,7 @@ use alloc::{boxed::Box, rc::Rc};
 use core::{future::Future, net::Ipv4Addr, pin::Pin, time::Duration};
 
 use barracuda_captive_portal_plugin::{AssetsProvider, CaptivePortal, ResourceFiles, WebEntry};
-use barracuda_platform::{StationConfiguration, StationState, WifiDevice};
+use barracuda_platform::{StationState, WifiDevice};
 use barracuda_plugin::{
     api::PluginContext,
     manager::{
@@ -21,13 +21,14 @@ use barracuda_plugin::{
     },
 };
 use barracuda_webserver_plugin::{HttpResponse, WebServer};
+use control::RadioControl;
 use embassy_futures::select::select;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::Timer;
-use endpoint::{ScanEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WifiEndpoint, load_configuration};
+use endpoint::{ScanEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WifiEndpoint};
 
-pub use control::{WifiControl, WifiControlError, WifiStatus};
+pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatus};
 
 const SETUP_AP_SSID: &str = "Barracuda Setup";
 const SETUP_AP_PASSWORD: &str = "";
@@ -49,10 +50,10 @@ type BoxedWifiRuntime = Pin<Box<dyn Future<Output = ()> + 'static>>;
 /// Plugin owning Wi-Fi provisioning, access-point fallback, and station policy.
 #[barracuda_plugin::macros::plugin]
 pub struct WifiPlugin {
-    control: WifiControl,
-    initial_configuration: Option<StationConfiguration>,
+    radio: Option<RadioControl>,
+    control: Option<Rc<WifiControl>>,
     access_point_stack: Stack<'static>,
-    access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
+    access_point_shutdown: Rc<Signal<NoopRawMutex, u64>>,
 }
 
 impl WifiPlugin {
@@ -64,8 +65,8 @@ impl WifiPlugin {
     ) -> Self {
         let access_point_stack = device.access_point_stack();
         Self {
-            control: WifiControl::new(device),
-            initial_configuration: None,
+            radio: Some(RadioControl::new(device)),
+            control: None,
             access_point_stack,
             access_point_shutdown: Rc::new(Signal::new()),
         }
@@ -82,6 +83,15 @@ impl Plugin for WifiPlugin {
     ) -> PluginResult<()> {
         let webserver = context.require::<WebServer>("webserver")?;
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let radio = self
+            .radio
+            .take()
+            .ok_or_else(|| PluginError::registration(WifiRuntimeUnavailable))?;
+        let control = Rc::new(WifiControl::new(
+            radio,
+            context.storage().clone(),
+            Rc::clone(&self.access_point_shutdown),
+        ));
         let entry = portal
             .register(
                 WebEntry {
@@ -100,7 +110,7 @@ impl Plugin for WifiPlugin {
                     .map_err(PluginError::registration)?,
             );
         }
-        if self.control.capabilities().access_point {
+        if control.capabilities().access_point {
             context.retain(
                 webserver
                     .listen_on_stack(self.access_point_stack, CAPTIVE_HTTP_PORT)
@@ -108,26 +118,18 @@ impl Plugin for WifiPlugin {
             );
         }
 
-        self.initial_configuration =
-            embassy_futures::block_on(load_configuration(context.storage()))?;
         context.retain(
             webserver
-                .serve_http(
-                    WIFI_API_PATH,
-                    WifiEndpoint::new(
-                        self.control.clone(),
-                        Rc::clone(&self.access_point_shutdown),
-                        context.storage().clone(),
-                    ),
-                )
+                .serve_http(WIFI_API_PATH, WifiEndpoint::new(Rc::clone(&control)))
                 .map_err(PluginError::registration)?,
         );
         context.retain(
             webserver
-                .serve_http(WIFI_SCAN_API_PATH, ScanEndpoint::new(self.control.clone()))
+                .serve_http(WIFI_SCAN_API_PATH, ScanEndpoint::new(Rc::clone(&control)))
                 .map_err(PluginError::registration)?,
         );
-        context.provide(Rc::new(self.control.clone()))?;
+        context.provide(Rc::clone(&control))?;
+        self.control = Some(control);
         Ok(())
     }
 
@@ -135,28 +137,23 @@ impl Plugin for WifiPlugin {
         &mut self,
         context: &mut PluginStartContext<'_, Storage>,
     ) -> PluginResult<()> {
-        if !self.control.capabilities().station_configuration {
-            if matches!(
-                self.control.status().station(),
-                StationState::Connected { .. }
-            ) {
+        let control = self
+            .control
+            .take()
+            .ok_or_else(|| PluginError::registration(WifiRuntimeUnavailable))?;
+        if !control.capabilities().station_configuration {
+            if matches!(control.status().station(), StationState::Connected { .. }) {
                 log::info!("network is managed by the Platform host");
             } else {
                 log::warn!("selected Platform does not provide a Wi-Fi implementation");
             }
             return Ok(());
         }
-        let control = self.control.clone();
-        let configuration = self.initial_configuration.take();
         let stack = self.access_point_stack;
         let access_point_shutdown = Rc::clone(&self.access_point_shutdown);
         let policy = cancellable(
             context.task_token(),
-            Box::pin(run_wifi_policy(
-                control,
-                configuration,
-                access_point_shutdown,
-            )),
+            Box::pin(run_wifi_policy(control, access_point_shutdown)),
         );
         let dhcp = cancellable(context.task_token(), Box::pin(run_dhcp(stack)));
         let dns = cancellable(context.task_token(), Box::pin(run_captive_dns(stack)));
@@ -187,47 +184,24 @@ fn cancellable(cancellation: PluginTaskToken, runtime: BoxedWifiRuntime) -> Boxe
     })
 }
 
-async fn initialize_wifi(control: WifiControl, configuration: Option<StationConfiguration>) {
-    if let Some(configuration) = configuration {
-        match control
-            .connect_station(configuration.ssid(), configuration.password())
-            .await
-        {
-            Ok(()) => {
-                log::info!("connected Wi-Fi station to {}", configuration.ssid());
-                return;
-            }
-            Err(error) => {
-                log::warn!(
-                    "failed to restore Wi-Fi station connection to {}: {error}",
-                    configuration.ssid()
-                );
-            }
-        }
-    }
-    if let Err(error) = control
-        .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-        .await
-    {
-        log::error!("failed to start Wi-Fi provisioning access point: {error}");
-    } else {
-        log::info!("started Wi-Fi provisioning access point {SETUP_AP_SSID}");
-    }
-}
-
 async fn run_wifi_policy(
-    control: WifiControl,
-    configuration: Option<StationConfiguration>,
-    access_point_shutdown: Rc<Signal<NoopRawMutex, ()>>,
+    control: Rc<WifiControl>,
+    access_point_shutdown: Rc<Signal<NoopRawMutex, u64>>,
 ) {
-    initialize_wifi(control.clone(), configuration).await;
+    if let Err(error) = control.initialize().await {
+        log::error!("failed to initialize Wi-Fi policy: {error}");
+    }
     loop {
-        access_point_shutdown.wait().await;
+        let generation = access_point_shutdown.wait().await;
         Timer::after_secs(1).await;
-        if let Err(error) = control.stop_access_point().await {
-            log::warn!("failed to stop Wi-Fi provisioning access point: {error}");
-        } else {
-            log::info!("stopped Wi-Fi provisioning access point after station configuration");
+        match control.stop_access_point_if_current(generation).await {
+            Ok(true) => {
+                log::info!("stopped Wi-Fi provisioning access point after station configuration");
+            }
+            Ok(false) => {}
+            Err(error) => {
+                log::warn!("failed to stop Wi-Fi provisioning access point: {error}");
+            }
         }
     }
 }
@@ -299,3 +273,7 @@ async fn run_captive_dns(stack: Stack<'static>) {
 async fn run_wifi_runtime(runtime: BoxedWifiRuntime) {
     runtime.await;
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("Wi-Fi runtime was not prepared during Plugin registration")]
+struct WifiRuntimeUnavailable;
