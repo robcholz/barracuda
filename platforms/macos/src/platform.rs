@@ -160,6 +160,7 @@ impl MacosPlatform {
 impl Platform for MacosPlatform {
     type Bindings = &'static Board;
     type Tls = barracuda_tls::MbedTls;
+    type Wifi = barracuda_platform::HostWifiDevice;
     type Partitions = MacosPartitions;
     type Error = MacosPlatformError;
 
@@ -182,6 +183,7 @@ impl Platform for MacosPlatform {
         log::info!("initialized macOS Platform");
         Ok(PlatformResources {
             ip_stack,
+            wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
             tls,
             partitions,
         })

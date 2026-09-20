@@ -25,6 +25,7 @@ pub type Bindings = <SelectedPlatform as Platform>::Bindings;
 pub type Resources = PlatformResources<
     <SelectedPlatform as Platform>::Tls,
     <SelectedPlatform as Platform>::Partitions,
+    <SelectedPlatform as Platform>::Wifi,
 >;
 
 /// Initialization error produced only by the selected Platform.

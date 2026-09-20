@@ -33,6 +33,33 @@ fn parses_a_canonical_manifest() {
     assert_eq!(manifest.id(), "web-search");
     assert_eq!(manifest.dependencies(), ["webserver", "agent"]);
     assert_eq!(manifest.description(), "Provides Web search.");
+    assert!(manifest.system_resources().is_empty());
+}
+
+#[test]
+fn parses_declared_system_resources() {
+    let manifest = parse(
+        "id = \"wifi\"\ndepends-on = []\ndescription = \"Controls Wi-Fi.\"\nsystem-resources = [\"wifi\"]\n",
+    )
+    .expect("System resource manifest");
+
+    assert_eq!(manifest.system_resources(), ["wifi"]);
+}
+
+#[test]
+fn rejects_invalid_or_duplicate_system_resources() {
+    for resources in [
+        "[\"\"]",
+        "[\"Wifi\"]",
+        "[\"wifi-device\"]",
+        "[\"wifi.device\"]",
+        "[\"wifi\", \"wifi\"]",
+    ] {
+        let manifest = format!(
+            "id = \"wifi\"\ndepends-on = []\ndescription = \"Controls Wi-Fi.\"\nsystem-resources = {resources}\n"
+        );
+        assert!(parse(&manifest).is_err(), "accepted resources {resources}");
+    }
 }
 
 #[test]
