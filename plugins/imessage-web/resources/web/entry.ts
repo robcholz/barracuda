@@ -114,7 +114,7 @@ export function mount(root: HTMLElement, { signal }: { signal: AbortSignal }) {
     send.disabled = true;
     reconnect.disabled = true;
     status.textContent = "正在连接…";
-    const url = new URL("/", document.baseURI);
+    const url = new URL("/ws/message", document.baseURI);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     try {
       const connection = new WebSocket(url);

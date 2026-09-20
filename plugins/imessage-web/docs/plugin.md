@@ -27,7 +27,7 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page connects to WebSocket `/`, sends `WebClientFrame` JSON, and renders the
+The page connects to WebSocket `/ws/message`, sends `WebClientFrame` JSON, and renders the
 SSE-formatted text events returned by the bridge, including `output_delta`.
 It supports text messages, not attachment playback or upload. It receives live
 events only, retains at most 100 visible messages with 65,536 UTF-16 code units per remote

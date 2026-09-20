@@ -29,7 +29,7 @@ test("chat uses SSE-framed WebSocket events, sends content and closes on unload"
   const controller = new AbortController();
   try {
     mount(root as unknown as HTMLElement, { signal: controller.signal });
-    expect(String(sockets.at(-1)!.url)).toBe("ws://localhost/");
+    expect(String(sockets.at(-1)!.url)).toBe("ws://localhost/ws/message");
     sockets.at(-1)!.dispatchEvent(new Event("open"));
     const input = root.querySelector("textarea")!;
     input.value = "hello";
