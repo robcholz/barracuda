@@ -16,6 +16,7 @@ mbedtls = ["reqwless/mbedtls-rs"]
 [dependencies]
 embassy-net.workspace = true
 embedded-nal-async = "0.9"
+static_cell.workspace = true
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 
 [lints.rust]

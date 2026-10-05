@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use embedded_io_async::{Read, Seek, Write};
 use portable_atomic::{AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
 use crate::path::{backend_path, matches_mount, normalize};
 use crate::{File, FsError, Metadata, OpenOptions, ReadDir, SeekFrom, Vfs};
@@ -12,16 +13,20 @@ static TEMP_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 /// A cloneable filesystem view exposing selected paths from an existing VFS.
 ///
 /// It exposes file operations only; mount-table ownership remains with the
-/// [`Vfs`] that created the view.
+/// [`Vfs`] that created the view. A view's mounts never change after it is
+/// created, so clones share them instead of copying every path.
 #[derive(Clone)]
 pub struct ScopedVfs {
     vfs: Vfs,
-    mounts: Vec<ScopedMount>,
+    mounts: Arc<[ScopedMount]>,
 }
 
 impl ScopedVfs {
     pub(crate) fn with_mounts(vfs: Vfs, mounts: Vec<ScopedMount>) -> Self {
-        Self { vfs, mounts }
+        Self {
+            vfs,
+            mounts: Arc::from(mounts),
+        }
     }
 
     fn path(&self, path: &str) -> Result<String, FsError> {

@@ -11,6 +11,8 @@ use embassy_net::{
     Stack,
 };
 
+use static_cell::ConstStaticCell;
+
 pub use embedded_nal_async;
 pub use reqwless;
 #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
@@ -21,6 +23,11 @@ const TCP_TX_BYTES: usize = 4 * 1024;
 const TCP_RX_BYTES: usize = 4 * 1024;
 
 pub type Tcp = TcpClient<'static, TCP_CONNECTIONS, TCP_TX_BYTES, TCP_RX_BYTES>;
+type TcpState = TcpClientState<TCP_CONNECTIONS, TCP_TX_BYTES, TCP_RX_BYTES>;
+
+/// The System's TCP connection pool, socket buffers included, placed in static
+/// memory at link time instead of being allocated from the heap at startup.
+static TCP_STATE: ConstStaticCell<TcpState> = ConstStaticCell::new(TcpState::new());
 pub type Resolver = DnsSocket<'static>;
 
 enum TlsMode {
@@ -64,7 +71,12 @@ impl ClientFactory<'static> {
     }
 
     fn from_stack(stack: Stack<'static>, tls: TlsMode) -> Self {
-        let state = Box::leak(Box::new(TcpClientState::new()));
+        // The System builds one factory. Further factories in one process
+        // (host tests) fall back to a leaked heap pool.
+        let state: &'static TcpState = match TCP_STATE.try_take() {
+            Some(state) => state,
+            None => Box::leak(Box::new(TcpState::new())),
+        };
         let tcp = Box::leak(Box::new(TcpClient::new(stack, state)));
         let resolver = Box::leak(Box::new(DnsSocket::new(stack)));
         Self {
