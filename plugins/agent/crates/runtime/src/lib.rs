@@ -276,18 +276,6 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// Registers one tool group discovered during Plugin startup.
-    ///
-    /// If durable runtime state is still loading, the group is installed into
-    /// the Tool Registry as soon as it becomes available.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuntimeError::Tool`] when the Tool Registry rejects the group.
-    pub fn register_tool_group(&self, group: ToolGroup) -> RuntimeResult<()> {
-        self.tool_registry.register_group(group)
-    }
-
     /// Start every registered tool.
     ///
     /// # Errors

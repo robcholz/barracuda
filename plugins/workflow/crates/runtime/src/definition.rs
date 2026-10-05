@@ -155,16 +155,6 @@ impl WorkflowDefinition {
         Self::from_parts(id, event, None, steps, false)
     }
 
-    /// Creates a Workflow whose Event match also requires a matching topic.
-    pub fn with_topic(
-        id: WorkflowId,
-        event: Rule,
-        topic: Topic,
-        steps: Vec<WorkflowStep>,
-    ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, Some(topic), steps, false)
-    }
-
     fn from_parts(
         id: WorkflowId,
         event: Rule,

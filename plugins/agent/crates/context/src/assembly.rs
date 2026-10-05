@@ -104,17 +104,6 @@ impl Context {
         }
     }
 
-    /// Declare a context item. Blocks and reminders are stored in this context;
-    /// message items belong to a [`ContextSink`] because they are per-request
-    /// history contributions.
-    pub fn with_item(&mut self, item: ContextItem<'_>) -> &mut Self {
-        match item {
-            ContextItem::Block(block) => self.with(block),
-            ContextItem::Reminder { kind, text } => self.with_reminder(kind, text.as_deref()),
-            ContextItem::Message { .. } => self,
-        }
-    }
-
     /// Declare a block (set or replace the content for its [`BlockKind`]).
     /// Chainable; meant to be called freely — re-declaring identical content is a
     /// no-op (no version bump, no re-render).
@@ -270,11 +259,6 @@ impl<'a> ContextItem<'a> {
             kind,
             text: Some(text.into()),
         }
-    }
-
-    /// Construct a reminder clear item.
-    pub fn clear_reminder(kind: BlockKind) -> Self {
-        Self::Reminder { kind, text: None }
     }
 }
 

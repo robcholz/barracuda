@@ -34,7 +34,6 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
 [dev-dependencies]
-barracuda-platform-test = { workspace = true, features = ["std"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

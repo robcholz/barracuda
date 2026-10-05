@@ -4,7 +4,6 @@
 - Direct dependency: `workflow`
 - Provided typed capabilities: `Vm`, `LuaPackageRegistry`
 - Required typed capabilities: `WorkflowActionRegistry` from `workflow`
-- Owned Components: none
 - Plugin-owned tasks: one lifecycle task and up to four Lua execution tasks
 - Workflow Actions: `vm.run`, `vm.input`, `vm.cancel`
 

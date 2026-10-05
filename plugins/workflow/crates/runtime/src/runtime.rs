@@ -770,9 +770,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use crate::{
-        parse_definition, workflow_action_schema_inline, Event, WorkflowActionError,
-        WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
-        WorkflowRuntime,
+        parse_definition, workflow_action_schema_inline, Event, WorkflowActionFuture,
+        WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema, WorkflowRuntime,
     };
 
     struct Trigger;
@@ -1006,10 +1005,5 @@ mod tests {
             assert_eq!(runtime.view().info().completed_count, 1);
             drop(registrations);
         });
-    }
-
-    #[allow(dead_code)]
-    fn action_error_is_public() -> WorkflowActionError {
-        WorkflowActionError::new("failed")
     }
 }

@@ -4,8 +4,6 @@
 //! a [`TurnEvent`] bracket, and each root Agent iteration is nested inside it as
 //! an [`IterationEvent`] bracket. Only the root Agent is externally visible, so
 //! content events need no Agent id.
-//!
-//! See `.agents/design/sse.md` for the full model (ordering, SSE forward-compat).
 
 use alloc::{boxed::Box, string::String};
 use core::error::Error;

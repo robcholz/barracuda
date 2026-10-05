@@ -52,13 +52,6 @@ pub fn parse_definition(json: &str) -> Result<WorkflowDefinition, WorkflowContro
     document.try_into()
 }
 
-/// Parses one Workflow ID request document.
-pub fn parse_workflow_id(json: &str) -> Result<WorkflowId, WorkflowControlRejection> {
-    let document: WorkflowIdDocument =
-        serde_json::from_str(json).map_err(|_error| WorkflowControlRejection::InvalidJson)?;
-    WorkflowId::try_from(document.id).map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkflowDocument {
@@ -147,12 +140,6 @@ enum WorkflowStepDocument {
     Call(WorkflowCallDocument),
     Return(WorkflowReturnDocument),
     Branch(WorkflowBranchDocument),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WorkflowIdDocument {
-    id: String,
 }
 
 impl TryFrom<WorkflowDocument> for WorkflowDefinition {

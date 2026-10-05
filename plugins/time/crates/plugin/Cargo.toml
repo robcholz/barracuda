@@ -18,11 +18,8 @@ sntpc = { version = "0.11.0", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-platform-test.workspace = true
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-futures-lite = "2"
-static_cell = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

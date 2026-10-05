@@ -411,8 +411,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        WorkflowActionAddress, WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler,
-        WorkflowActionRegistry, WorkflowActionSchema,
+        WorkflowActionAddress, WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry,
+        WorkflowActionSchema,
     };
     #[derive(Deserialize)]
     struct EchoRequest {
@@ -465,10 +465,5 @@ mod tests {
                 .expect_err("reject request before Serde conversion");
             assert!(error.message().contains("invalid Workflow Action request"));
         });
-    }
-
-    #[allow(dead_code)]
-    fn action_error_is_public() -> WorkflowActionError {
-        WorkflowActionError::new("failed")
     }
 }

@@ -33,7 +33,6 @@ barracuda-vfs.workspace = true
 barracuda-runtime-utils.workspace = true
 barracuda-model-api = { path = "../model-api" }
 http-client.workspace = true
-embassy-time.workspace = true
 embassy-sync.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
@@ -43,7 +42,6 @@ async-channel = { version = "2", default-features = false }
 # `SessionEventStream` can poll it. `default-features = false` keeps this
 # `no_std`-friendly for the device.
 futures-core = { version = "0.3", default-features = false }
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 # `SelectAll` fairly merges the per-batch detached-tool completion streams the
 # Agent wrapper tracks, replacing a hand-written round-robin poll queue.

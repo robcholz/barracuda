@@ -13,7 +13,6 @@
   `/workspace/resources/skills`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
   `purpose.{root_agent,sub_agent,memory,compaction}`
-- Owned Components: none
 - Plugin-owned tasks: Agent runtime and `session.event` forwarding
 
 System constructs the Agent Plugin from the common `PluginContext`. During

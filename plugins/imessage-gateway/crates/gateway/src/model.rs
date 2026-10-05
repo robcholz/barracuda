@@ -392,13 +392,6 @@ impl SendMessageRequest {
             kind: MessageKind::Reply,
         }
     }
-
-    /// Sets the presentation role for this message.
-    #[must_use]
-    pub fn with_kind(mut self, kind: MessageKind) -> Self {
-        self.kind = kind;
-        self
-    }
 }
 
 /// A file, image, audio, or video send operation.

@@ -85,7 +85,7 @@ standard stream I/O shape:
   writes a trailing newline.
 
 As in standard Lua, `io` and `print` are globals, and `require("io")` returns
-the same `io` table. The nonstandard former name `io.print()` is not installed.
+the same `io` table.
 
 These functions are message flows, not process standard input or standard
 output. They do not read a terminal, write a console, or grant access to host

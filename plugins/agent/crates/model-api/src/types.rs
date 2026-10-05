@@ -324,7 +324,7 @@ pub struct ChatRequest<'a> {
     /// Ephemeral trailing messages appended after `messages` for this request
     /// only (never persisted). Kept as a separate segment so the history is not
     /// cloned to append them; the backend iterates `messages` then `reminders`.
-    /// Defaults to empty; set with [`with_reminders`](Self::with_reminders).
+    /// Defaults to empty.
     pub reminders: &'a [serde_json::Value],
     /// Optional OpenAI-style tools JSON array.
     pub tools_json: Option<&'a str>,
@@ -350,13 +350,6 @@ impl<'a> ChatRequest<'a> {
     #[must_use]
     pub fn with_tools(mut self, tools_json: &'a str) -> Self {
         self.tools_json = Some(tools_json);
-        self
-    }
-
-    /// Attach ephemeral trailing reminder messages for this request only.
-    #[must_use]
-    pub fn with_reminders(mut self, reminders: &'a [serde_json::Value]) -> Self {
-        self.reminders = reminders;
         self
     }
 

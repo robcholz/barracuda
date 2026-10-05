@@ -4,7 +4,6 @@
 - Direct dependencies: `agent`, `vm`
 - Provided typed capabilities: none
 - Required typed capabilities: `AgentToolRegistry` from `agent`, `Vm` from `vm`
-- Owned Components: none
 - Plugin-owned tasks: none
 
 During Plugin registration, `agent-vm` adds `vm_run`, `vm_list`, `vm_input`,

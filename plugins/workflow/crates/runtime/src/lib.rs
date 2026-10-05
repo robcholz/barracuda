@@ -18,7 +18,7 @@ pub use action::{
     WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistration,
     WorkflowActionRegistry, WorkflowActionRegistryError, WorkflowActionSchema,
 };
-pub use control::{parse_definition, parse_workflow_id, WorkflowControlRejection};
+pub use control::{parse_definition, WorkflowControlRejection};
 pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
     WorkflowStep, WorkflowUnloadError,

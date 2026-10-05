@@ -341,7 +341,6 @@ dependencies = [
  "barracuda-vfs",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -458,7 +457,6 @@ version = "0.1.0"
 dependencies = [
  "getset",
  "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -489,19 +487,14 @@ dependencies = [
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
- "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
- "json-validator",
  "log",
- "picoserve",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -546,7 +539,6 @@ dependencies = [
  "log",
  "serde_json",
  "static_cell",
- "tempdir",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -575,7 +567,6 @@ dependencies = [
  "barracuda-agent-persistence",
  "barracuda-agent-tool",
  "barracuda-model-api",
- "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "embassy-time",
@@ -1388,7 +1379,6 @@ name = "barracuda-model-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-agent-trace",
  "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
@@ -1408,7 +1398,6 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.28.0",
- "tempdir",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -1950,7 +1939,6 @@ dependencies = [
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-time-plugin",
  "barracuda-workflow-plugin",
@@ -1958,7 +1946,6 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-lite",
  "getset",
  "log",
  "serde",
@@ -2174,18 +2161,15 @@ dependencies = [
 name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
  "barracuda-plugin",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-lite",
  "getset",
  "log",
  "sntpc",
- "static_cell",
  "thiserror 2.0.18",
 ]
 
@@ -2464,7 +2448,6 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.7.0",
- "futures-lite",
  "log",
  "picoserve",
  "serde",
@@ -4139,7 +4122,7 @@ dependencies = [
  "home",
  "log",
  "regex",
- "remove_dir_all 0.8.4",
+ "remove_dir_all",
  "serde",
  "serde_json",
  "shlex 1.3.0",
@@ -4903,12 +4886,6 @@ name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
-
-[[package]]
-name = "fuchsia-cprng"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
 
 [[package]]
 name = "fugit"
@@ -6464,19 +6441,6 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293"
-dependencies = [
- "fuchsia-cprng",
- "libc",
- "rand_core 0.3.1",
- "rdrand",
- "winapi",
-]
-
-[[package]]
-name = "rand"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
@@ -6518,21 +6482,6 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a6fdeb83b075e8266dcc8762c22776f6877a63111121f5f8c7411e5be7eed4b"
-dependencies = [
- "rand_core 0.4.2",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c33a3c44ca05fa6f1807d8e6743f3824e8509beca625669633be0acbdf509dc"
-
-[[package]]
-name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
@@ -6554,15 +6503,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "rdrand"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
-dependencies = [
- "rand_core 0.3.1",
-]
 
 [[package]]
 name = "redox_syscall"
@@ -6601,15 +6541,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "remove_dir_all"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
-dependencies = [
- "winapi",
-]
 
 [[package]]
 name = "remove_dir_all"
@@ -7404,16 +7335,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tempdir"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8"
-dependencies = [
- "rand 0.4.6",
- "remove_dir_all 0.5.3",
-]
-
-[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7996,22 +7917,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winapi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
-dependencies = [
- "winapi-i686-pc-windows-gnu",
- "winapi-x86_64-pc-windows-gnu",
-]
-
-[[package]]
-name = "winapi-i686-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8019,12 +7924,6 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "winapi-x86_64-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"
