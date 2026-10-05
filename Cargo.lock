@@ -635,6 +635,7 @@ name = "barracuda-agent-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-agent-message",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-platform-test",

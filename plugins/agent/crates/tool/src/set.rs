@@ -4,6 +4,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use barracuda_agent_message::json::Sink;
+use barracuda_agent_message::Text;
 use barracuda_agent_permission::Action;
 use portable_atomic_util::Arc;
 use serde::Serialize;
@@ -17,12 +19,22 @@ const NO_SCHEMAS: &str = "no schemas";
 const NO_TOOL_CONTEXT: &str = "no tool context";
 const NO_EXTRA_TOOL_CONTEXT: &str = "no extra tool context";
 
+/// Model-facing renderings of the current tool surface, each held as exactly
+/// sized bulk text.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ToolSetCache {
-    static_schemas: Option<String>,
-    static_context: Option<String>,
-    deferred_context: Option<String>,
-    extra_tool_context: Option<String>,
+    static_schemas: Option<Text>,
+    static_context: Option<Text>,
+    deferred_context: Option<Text>,
+    extra_tool_context: Option<Text>,
+}
+
+impl ToolSetCache {
+    fn text(text: &Option<Text>) -> Option<&str> {
+        text.as_ref()
+            .map(Text::as_str)
+            .filter(|text| !text.is_empty())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -560,95 +572,81 @@ impl ToolSet {
         self.discovery.borrow_mut().catalog = catalog;
     }
 
-    fn render_static_tools(&mut self) {
-        let schemas = self.cache.static_schemas.get_or_insert_with(String::new);
-        render_schemas(
-            schemas,
-            self.state.tools.iter().filter(|(_, entry)| {
-                entry.default_visibility
+    /// Tools on the default (`true`) or deferred (`false`) surface that the
+    /// model can currently see.
+    fn surface(&self, default_visibility: bool) -> Vec<&Tool> {
+        self.state
+            .tools
+            .iter()
+            .filter(|(_, entry)| {
+                entry.default_visibility == default_visibility
                     && matches!(
                         entry.state,
                         ToolState::Enabled | ToolState::TemporarilyDisabled
                     )
-            }),
-            &self.tools,
-        );
+            })
+            .filter_map(|(name, _)| self.tools.get(name))
+            .collect()
+    }
 
-        let context = self.cache.static_context.get_or_insert_with(String::new);
-        render_context(
-            context,
-            self.state.tools.iter().filter(|(_, entry)| {
-                entry.default_visibility
-                    && matches!(
-                        entry.state,
-                        ToolState::Enabled | ToolState::TemporarilyDisabled
-                    )
-            }),
-            &self.tools,
-        );
+    fn render_static_tools(&mut self) {
+        let (schemas, context) = {
+            let tools = self.surface(true);
+            (
+                Text::encode(|sink| write_schemas(sink, &tools)),
+                Text::encode(|sink| {
+                    write_usages(sink, &tools);
+                }),
+            )
+        };
+        self.cache.static_schemas = Some(schemas);
+        self.cache.static_context = Some(context);
     }
 
     fn render_deferred_tools(&mut self) {
-        let context = self.cache.deferred_context.get_or_insert_with(String::new);
-        render_context(
-            context,
-            self.state.tools.iter().filter(|(_, entry)| {
-                !entry.default_visibility
-                    && matches!(
-                        entry.state,
-                        ToolState::Enabled | ToolState::TemporarilyDisabled
-                    )
-            }),
-            &self.tools,
-        );
-        append_schemas(
-            context,
-            self.state.tools.iter().filter(|(_, entry)| {
-                !entry.default_visibility
-                    && matches!(
-                        entry.state,
-                        ToolState::Enabled | ToolState::TemporarilyDisabled
-                    )
-            }),
-            &self.tools,
-        );
+        let context = {
+            let tools = self.surface(false);
+            Text::encode(|sink| {
+                let wrote_usage = write_usages(sink, &tools);
+                if !tools.is_empty() {
+                    if wrote_usage {
+                        sink.put(b"\n\n");
+                    }
+                    write_schemas(sink, &tools);
+                }
+            })
+        };
+        self.cache.deferred_context = Some(context);
     }
 
     fn render_extra_tool_context(&mut self) {
-        let extra_context = self
-            .cache
-            .extra_tool_context
-            .get_or_insert_with(String::new);
-        extra_context.clear();
-
-        for (name, entry) in &self.state.tools {
-            match entry.state {
-                ToolState::TemporarilyEnabled => {
-                    let Some(tool) = self.tools.get(name) else {
-                        continue;
-                    };
-                    if !extra_context.is_empty() {
-                        extra_context.push_str("\n\n");
-                    }
-                    extra_context.push_str("Tool `");
-                    extra_context.push_str(name);
-                    extra_context.push_str("` is temporarily available.\n");
-                    match tool.usage() {
-                        Some(usage) => extra_context.push_str(usage),
-                        None => extra_context.push_str(tool.schema()),
-                    }
+        let context = Text::encode(|sink| {
+            let mut first = true;
+            for (name, entry) in &self.state.tools {
+                let tool = match entry.state {
+                    ToolState::TemporarilyEnabled => match self.tools.get(name) {
+                        Some(tool) => Some(tool),
+                        None => continue,
+                    },
+                    ToolState::TemporarilyDisabled => None,
+                    ToolState::Enabled | ToolState::Disabled => continue,
+                };
+                if !first {
+                    sink.put(b"\n\n");
                 }
-                ToolState::TemporarilyDisabled => {
-                    if !extra_context.is_empty() {
-                        extra_context.push_str("\n\n");
+                first = false;
+                sink.put(b"Tool `");
+                sink.put(name.as_bytes());
+                match tool {
+                    Some(tool) => {
+                        sink.put(b"` is temporarily available.\n");
+                        sink.put(tool.usage().unwrap_or(tool.schema()).as_bytes());
                     }
-                    extra_context.push_str("Tool `");
-                    extra_context.push_str(name);
-                    extra_context.push_str("` is temporarily unavailable.");
+                    None => sink.put(b"` is temporarily unavailable."),
                 }
-                ToolState::Enabled | ToolState::Disabled => {}
             }
-        }
+        });
+        self.cache.extra_tool_context = Some(context);
     }
 }
 
@@ -661,50 +659,22 @@ pub struct ToolSetHandle<'a> {
 impl<'a> ToolSetHandle<'a> {
     /// Schemas for tools present in the default, immutable tool surface.
     pub fn static_schemas(&self) -> &str {
-        match self
-            .cache
-            .static_schemas
-            .as_deref()
-            .filter(|text| !text.is_empty())
-        {
-            Some(schemas) => schemas,
-            None => NO_SCHEMAS,
-        }
+        ToolSetCache::text(&self.cache.static_schemas).unwrap_or(NO_SCHEMAS)
     }
 
     /// Usage context for tools present in the default, immutable tool surface.
     pub fn static_context(&self) -> &str {
-        match self
-            .cache
-            .static_context
-            .as_deref()
-            .filter(|text| !text.is_empty())
-        {
-            Some(context) => context,
-            None => NO_TOOL_CONTEXT,
-        }
+        ToolSetCache::text(&self.cache.static_context).unwrap_or(NO_TOOL_CONTEXT)
     }
 
     /// Usage and schemas for hidden tools revealed through `tool_load`.
     pub fn deferred_context(&self) -> &str {
-        self.cache
-            .deferred_context
-            .as_deref()
-            .filter(|text| !text.is_empty())
-            .unwrap_or_default()
+        ToolSetCache::text(&self.cache.deferred_context).unwrap_or_default()
     }
 
     /// Per-iteration status for temporarily enabled or disabled tools.
     pub fn reminders(&self) -> &str {
-        match self
-            .cache
-            .extra_tool_context
-            .as_deref()
-            .filter(|text| !text.is_empty())
-        {
-            Some(reminders) => reminders,
-            None => NO_EXTRA_TOOL_CONTEXT,
-        }
+        ToolSetCache::text(&self.cache.extra_tool_context).unwrap_or(NO_EXTRA_TOOL_CONTEXT)
     }
 
     /// Classify one call for a caller-owned permission evaluation phase.
@@ -743,72 +713,33 @@ impl<'a> ToolSetHandle<'a> {
     }
 }
 
-fn render_schemas<'a>(
-    output: &mut String,
-    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a BTreeMap<ToolName, Tool>,
-) {
-    output.clear();
-    output.push('[');
-    let mut has_tool = false;
-    for (name, _) in entries {
-        let Some(tool) = tools.get(name) else {
-            continue;
-        };
-        if has_tool {
-            output.push(',');
+/// Writes `[schema,schema,...]`, or nothing when `tools` is empty.
+fn write_schemas(sink: &mut dyn Sink, tools: &[&Tool]) {
+    if tools.is_empty() {
+        return;
+    }
+    sink.put(b"[");
+    for (index, tool) in tools.iter().enumerate() {
+        if index > 0 {
+            sink.put(b",");
         }
-        output.push_str(tool.schema());
-        has_tool = true;
+        sink.put(tool.schema().as_bytes());
     }
-    if has_tool {
-        output.push(']');
-    } else {
-        output.clear();
-    }
+    sink.put(b"]");
 }
 
-fn append_schemas<'a>(
-    output: &mut String,
-    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a BTreeMap<ToolName, Tool>,
-) {
-    let mut has_tool = false;
-    for (name, _) in entries {
-        let Some(tool) = tools.get(name) else {
-            continue;
-        };
-        if has_tool {
-            output.push(',');
-        } else {
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push('[');
+/// Writes each tool's usage text separated by blank lines; returns whether
+/// any usage was written.
+fn write_usages(sink: &mut dyn Sink, tools: &[&Tool]) -> bool {
+    let mut wrote = false;
+    for usage in tools.iter().filter_map(|tool| tool.usage()) {
+        if wrote {
+            sink.put(b"\n\n");
         }
-        output.push_str(tool.schema());
-        has_tool = true;
+        sink.put(usage.as_bytes());
+        wrote = true;
     }
-    if has_tool {
-        output.push(']');
-    }
-}
-
-fn render_context<'a>(
-    output: &mut String,
-    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a BTreeMap<ToolName, Tool>,
-) {
-    output.clear();
-    for (name, _) in entries {
-        let Some(usage) = tools.get(name).and_then(Tool::usage) else {
-            continue;
-        };
-        if !output.is_empty() {
-            output.push_str("\n\n");
-        }
-        output.push_str(usage);
-    }
+    wrote
 }
 
 /// Short, schema-free description of a hidden tool for the discovery catalog:

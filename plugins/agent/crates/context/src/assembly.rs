@@ -24,7 +24,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-use barracuda_agent_message::ChatMessage;
+use barracuda_agent_message::{ChatMessage, Text};
 use getset::CopyGetters;
 
 use crate::block::{Block, BlockKind, Scope};
@@ -69,10 +69,11 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 pub struct Context {
     /// One owned content string per declared kind. Only ever holds non-absent
     /// content — empty content drops the key (see [`with`](Self::with)).
-    blocks: BTreeMap<BlockKind, String>,
-    /// Cached rendered system prefix. Rebuilt by [`request`](Self::request) only
-    /// when `content_version != rendered_version`.
-    rendered: String,
+    /// Block text lives in bulk memory, sized exactly.
+    blocks: BTreeMap<BlockKind, Text>,
+    /// Cached rendered system prefix in bulk memory. Rebuilt by
+    /// [`request`](Self::request) only when `content_version != rendered_version`.
+    rendered: Text,
     /// Bumped on every real block change. The `version()` surface, and the gate
     /// for re-rendering.
     content_version: u64,
@@ -97,7 +98,7 @@ impl Context {
 
         Self {
             blocks: BTreeMap::new(),
-            rendered: String::new(),
+            rendered: Text::default(),
             content_version: 0,
             rendered_version: 0,
             reminders: Reminders::new(),
@@ -125,7 +126,7 @@ impl Context {
             if is_empty {
                 self.blocks.remove(&kind);
             } else {
-                self.blocks.insert(kind, content.into_owned());
+                self.blocks.insert(kind, Text::new(&content));
             }
             self.content_version = self.content_version.saturating_add(1);
         }
@@ -164,7 +165,7 @@ impl Context {
             .blocks
             .iter()
             .filter(|(kind, _)| matches!(kind.scope(), Scope::Global | Scope::Session))
-            .map(|(kind, content)| Block::new(kind.clone(), content.clone()))
+            .map(|(kind, content)| Block::new(kind.clone(), String::from(content.as_str())))
             .collect::<Vec<_>>();
         blocks.sort_by(|left, right| block_order(&left.kind, &right.kind));
         blocks
@@ -194,26 +195,25 @@ impl Context {
                 history.iter().map(ChatMessage::to_value).collect(),
             );
         }
-        RequestContext::new(&self.rendered, history, self.reminders.as_slice())
+        RequestContext::new(self.rendered.as_str(), history, self.reminders.as_slice())
     }
 
     /// Re-render the cached prefix from the current blocks, in wire order
     /// (`band`, then `scope`, then in-band order), reusing the buffer.
     fn rebuild(&mut self) {
-        let mut entries: Vec<(&BlockKind, &String)> = self.blocks.iter().collect();
+        let mut entries: Vec<(&BlockKind, &Text)> = self.blocks.iter().collect();
         // Sort by the wire-order key; the full `BlockKind` Ord breaks ties between
         // custom blocks sharing a key, keeping the render deterministic.
         entries.sort_by(|left, right| block_order(left.0, right.0));
 
-        let mut buffer = core::mem::take(&mut self.rendered);
-        buffer.clear();
-        for (_, content) in entries {
-            if !buffer.is_empty() {
-                buffer.push_str(BLOCK_SEPARATOR);
+        self.rendered = Text::encode(|sink| {
+            for (index, (_, content)) in entries.iter().enumerate() {
+                if index > 0 {
+                    sink.put(BLOCK_SEPARATOR.as_bytes());
+                }
+                sink.put(content.as_str().trim().as_bytes());
             }
-            buffer.push_str(content.trim());
-        }
-        self.rendered = buffer;
+        });
     }
 }
 
