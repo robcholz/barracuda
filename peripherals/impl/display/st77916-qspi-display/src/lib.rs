@@ -107,9 +107,22 @@ pub struct St77916Display<BUS, DC, RESET, BACKLIGHT, POWER, DELAY> {
     orientation: DisplayOrientation,
 }
 
+/// [`St77916Error`] specialized to one concrete set of bindings.
+type BindingError<BUS, DC, RESET, BACKLIGHT, POWER> = St77916Error<
+    <BUS as QuadSpiBus>::Error,
+    <DC as embedded_hal::digital::ErrorType>::Error,
+    <RESET as embedded_hal::digital::ErrorType>::Error,
+    <BACKLIGHT as embedded_hal::digital::ErrorType>::Error,
+    <POWER as embedded_hal::digital::ErrorType>::Error,
+>;
+
+/// Bindings carried only at the type level by the static factory.
+type Bindings<BUS, DC, RESET, BACKLIGHT, POWER, DELAY> =
+    PhantomData<fn() -> (BUS, DC, RESET, BACKLIGHT, POWER, DELAY)>;
+
 /// Static factory used by generated Board composition.
 pub struct St77916DisplayImplementation<BUS, DC, RESET, BACKLIGHT, POWER, DELAY>(
-    PhantomData<fn() -> (BUS, DC, RESET, BACKLIGHT, POWER, DELAY)>,
+    Bindings<BUS, DC, RESET, BACKLIGHT, POWER, DELAY>,
 );
 
 impl<BUS, DC, RESET, BACKLIGHT, POWER, DELAY> PeripheralImplementation
@@ -184,8 +197,7 @@ where
         &mut self,
         command: u8,
         data: &[u8],
-    ) -> Result<(), St77916Error<BUS::Error, DC::Error, RESET::Error, BACKLIGHT::Error, POWER::Error>>
-    {
+    ) -> Result<(), BindingError<BUS, DC, RESET, BACKLIGHT, POWER>> {
         self.dc.set_low().map_err(St77916Error::Dc)?;
         self.bus
             .write(COMMAND_WRITE_OPCODE, u32::from(command) << 8, data)
@@ -199,8 +211,7 @@ where
         width: u16,
         height: u16,
         pixels: &[u8],
-    ) -> Result<(), St77916Error<BUS::Error, DC::Error, RESET::Error, BACKLIGHT::Error, POWER::Error>>
-    {
+    ) -> Result<(), BindingError<BUS, DC, RESET, BACKLIGHT, POWER>> {
         let x_end = x + width - 1;
         let y_end = y + height - 1;
         self.write_command(

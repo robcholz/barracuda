@@ -95,9 +95,12 @@ pub struct Es8311Es7210AudioCodec<I2C, I2S, POWER, AMP> {
     descriptor: AudioDescriptor,
 }
 
+/// Bindings carried only at the type level by the static factory.
+type Bindings<I2C, I2S, POWER, AMP, DELAY> = PhantomData<fn() -> (I2C, I2S, POWER, AMP, DELAY)>;
+
 /// Static factory used by generated Board composition.
 pub struct Es8311Es7210AudioCodecImplementation<I2C, I2S, POWER, AMP, DELAY>(
-    PhantomData<fn() -> (I2C, I2S, POWER, AMP, DELAY)>,
+    Bindings<I2C, I2S, POWER, AMP, DELAY>,
 );
 
 impl<I2C, I2S, POWER, AMP, DELAY> PeripheralImplementation

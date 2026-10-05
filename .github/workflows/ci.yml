@@ -146,7 +146,6 @@ jobs:
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-macos
         --exclude barracuda-platform-stm32
-        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
       - uses: actions/checkout@v7
 
@@ -203,7 +202,6 @@ jobs:
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-linux
         --exclude barracuda-platform-stm32
-        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
       - uses: actions/checkout@v7
 

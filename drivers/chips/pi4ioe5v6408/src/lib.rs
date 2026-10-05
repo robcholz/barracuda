@@ -198,16 +198,9 @@ mod tests {
     use super::{DIRECTION, OUTPUT, OUTPUT_HIGH_IMPEDANCE, PULL_ENABLE, PULL_SELECTION};
     use super::{Error, Pi4ioe5v6408, Pull};
 
+    #[derive(Default)]
     struct Bus {
         registers: [u8; 0x12],
-    }
-
-    impl Default for Bus {
-        fn default() -> Self {
-            Self {
-                registers: [0; 0x12],
-            }
-        }
     }
 
     impl ErrorType for Bus {

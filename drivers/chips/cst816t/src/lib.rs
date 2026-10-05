@@ -59,7 +59,7 @@ impl Cst816t {
 
     /// Returns whether the device reports a known CST816-family identifier.
     pub fn is_present<I2C: I2c>(&self, i2c: &mut I2C) -> Result<bool, I2C::Error> {
-        self.chip_id(i2c).map(|id| matches!(id, 0xb4 | 0xb5 | 0xb6))
+        self.chip_id(i2c).map(|id| matches!(id, 0xb4..=0xb6))
     }
 
     /// Reads the latest gesture and single-contact coordinates.
