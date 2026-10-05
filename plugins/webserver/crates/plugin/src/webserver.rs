@@ -6,7 +6,6 @@
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use alloc::string::{String, ToString};
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::future::Future;
@@ -14,6 +13,7 @@ use core::pin::Pin;
 use core::task::Poll;
 
 use async_channel::{Receiver, Sender};
+use barracuda_bulk_memory::BulkBox;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use futures_lite::future;
@@ -566,7 +566,7 @@ where
     R: picoserve::io::Read,
     W: picoserve::io::Write<Error = R::Error>,
 {
-    let mut buffer = vec![0_u8; WEBSOCKET_BUFFER_BYTES];
+    let mut buffer = BulkBox::<[u8]>::new_zeroed_slice(WEBSOCKET_BUFFER_BYTES);
     loop {
         match rx.next_message(&mut buffer, outgoing.recv()).await? {
             Either::First(Ok(Message::Text(text))) => {
