@@ -489,7 +489,7 @@ where
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
         let reason = self.lifecycle.reason()?;
-        if self.agents.values().any(AgentSlot::is_in_flight) {
+        if self.agents.values().any(|slot| slot.is_in_flight()) {
             return None;
         }
         if reason != StopReason::Delete && self.orchestration.has_live_children() {
@@ -710,7 +710,7 @@ where
         };
         let previous = self
             .agents
-            .insert(id, AgentSlot::new(agent, reasoning_handle));
+            .insert(id, Box::new(AgentSlot::new(agent, reasoning_handle)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(id);
         if !self.orchestration.register_root(id, kind) {
@@ -987,7 +987,7 @@ where
 
     fn root_mut(&mut self) -> Option<&mut AgentSlot<Tcp, Resolver>> {
         let root = self.root_id()?;
-        self.agents.get_mut(&root)
+        self.agents.get_mut(&root).map(|slot| &mut **slot)
     }
 
     fn accepts(&self, lease: u64) -> bool {
@@ -1078,14 +1078,18 @@ where
             .map_err(|error| OrchestrationPhysicalError::new(error.to_string()))?;
         let previous = self
             .agents
-            .insert(agent, AgentSlot::new(created_agent, reasoning));
+            .insert(agent, Box::new(AgentSlot::new(created_agent, reasoning)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(agent);
         Ok(())
     }
 
     fn rollback_agent(&mut self, agent: AgentId) -> ReapStatus {
-        if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+        if self
+            .agents
+            .get(&agent)
+            .is_some_and(|slot| slot.is_in_flight())
+        {
             if let Some(slot) = self.agents.get_mut(&agent) {
                 slot.begin_reaping();
             }
@@ -1143,7 +1147,11 @@ where
         agents
             .into_iter()
             .map(|agent| {
-                if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+                if self
+                    .agents
+                    .get(&agent)
+                    .is_some_and(|slot| slot.is_in_flight())
+                {
                     if let Some(slot) = self.agents.get_mut(&agent) {
                         slot.begin_reaping();
                     }

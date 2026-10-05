@@ -131,7 +131,9 @@ where
     state: DurableState<SessionManagerState>,
     agent_manager: SharedAgentManager<Tcp, Resolver>,
     approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
-    sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>>,
+    /// Boxed so one live session does not allocate a full B-tree leaf of
+    /// inline entries.
+    sessions: BTreeMap<SessionId, Box<SessionEntry<Tcp, Resolver>>>,
     actor_poll_queue: VecDeque<SessionId>,
 }
 
@@ -170,7 +172,7 @@ where
         let approval_resolver: SharedApprovalResolver<Tcp, Resolver> =
             Rc::new(LlmApprovalResolver::new(api_manager, llm_factory));
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>> = BTreeMap::new();
+        let mut sessions: BTreeMap<SessionId, Box<SessionEntry<Tcp, Resolver>>> = BTreeMap::new();
         for instance in states.list().await? {
             let session = SessionId::from_wire(instance.as_str())?;
             let persisted = states
@@ -181,11 +183,11 @@ where
             states.register(&instance, &state)?;
             sessions.insert(
                 session,
-                SessionEntry {
+                Box::new(SessionEntry {
                     persistence: SessionPersistence::Persistent,
                     state,
                     actor: None,
-                },
+                }),
             );
         }
         let next_session_id = sessions
@@ -220,11 +222,11 @@ where
         }
         let previous = self.sessions.insert(
             session,
-            SessionEntry {
+            Box::new(SessionEntry {
                 persistence,
                 state,
                 actor: None,
-            },
+            }),
         );
         debug_assert!(previous.is_none());
         Ok(session)

@@ -53,25 +53,29 @@ pub enum LinkError {
     MalformedReference,
 }
 
-pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError> {
+/// Classifies a step's arguments, moving literal values into the link.
+pub(crate) fn classify(arguments: Option<Value>) -> Result<LinkKind, LinkError> {
     let Some(arguments) = arguments else {
         return Ok(LinkKind::Direct);
     };
-    let object = arguments.as_object().ok_or(LinkError::ArgumentsNotObject)?;
+    let Value::Object(object) = arguments else {
+        return Err(LinkError::ArgumentsNotObject);
+    };
     let mut literal = Map::new();
     let mut references = Vec::new();
     for (key, value) in object {
         if let Some(body) = value.as_str().and_then(|text| text.strip_prefix('$')) {
             let (selector, source_field) = parse_reference(body)?;
             references.push(FieldRef {
-                dest_field: key.clone(),
+                dest_field: key,
                 selector,
                 source_field,
             });
         } else {
-            literal.insert(key.clone(), value.clone());
+            literal.insert(key, value);
         }
     }
+    references.shrink_to_fit();
     let arguments = Value::Object(literal);
     if references.is_empty() {
         Ok(LinkKind::Literal { arguments })
