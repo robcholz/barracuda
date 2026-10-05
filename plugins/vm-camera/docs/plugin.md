@@ -18,7 +18,7 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-Capture storage is caller-sized and bounded to 4 MiB. Boards without a camera
+Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards without a camera
 report unavailable. The move-only built-in capability permits one handle per
 boot; explicit close, lexical `<close>`, collection, and Plugin revocation
 prevent further operations.

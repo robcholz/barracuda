@@ -202,16 +202,20 @@ Normal system composition constructs both through `VmPlugin`.
 
 ## Lua memory pool
 
-`VmRuntime` preallocates four reusable allocator slots, matching the four
-Embassy VM task slots. Each slot uses an `embedded_alloc::TlsfHeap` with a
-default 96 KiB backing buffer. Starting one execution leases one slot and
-passes that external Rust allocator to Lua through `Lua::new_with_allocator`.
+`VmRuntime` has four execution slots, matching the four Embassy VM task
+slots. Starting one execution claims a slot and allocates a 1 MiB Lua heap
+from Platform bulk memory (PSRAM on ESP32-S3), managed by an
+`embedded_alloc::TlsfHeap` and passed to Lua through `Lua::new_with_allocator`.
 Lua allocation, reallocation, garbage collection, and state destruction all
-use that allocator; dropping the Lua state returns the allocator slot to the
-pool.
+use that allocator; the heap is released when the execution ends. Idle slots
+hold no memory.
 
-Exceeding the fixed per-execution Lua heap completes the execution with
-`outcome: "error"` and `error: "lua_memory"`.
+Lua keeps only plain data in that heap. Native userdata, callbacks, and
+futures are boxed in the ordinary allocator, so atomics and other control
+state never reach bulk memory.
+
+If bulk memory cannot supply the heap, or a script exceeds it, the execution
+completes with `outcome: "error"` and `error: "lua_memory"`.
 The Lua heap limit does not include owned source and
 input strings, native callback objects, or Embassy task storage.
 

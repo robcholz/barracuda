@@ -1371,6 +1371,7 @@ name = "barracuda-lua"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "barracuda-bulk-memory",
  "futures-lite",
  "getset",
  "lunka",
@@ -2403,6 +2404,7 @@ dependencies = [
 name = "barracuda-vm-runtime"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "barracuda-lua",
  "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",

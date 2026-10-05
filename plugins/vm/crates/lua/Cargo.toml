@@ -11,6 +11,7 @@ default = []
 vendored = ["dep:lunka-src"]
 
 [dependencies]
+barracuda-bulk-memory.workspace = true
 getset = "0.1.7"
 lunka = { git = "https://github.com/robcholz/lunka.git", rev = "820b3d89a6ccfcdae3286f9b4548831dc568cf54", default-features = false, features = ["alloc", "auxlib", "stdlibs"] }
 

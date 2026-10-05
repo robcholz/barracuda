@@ -4,12 +4,12 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, string::ToString, vec, vec::Vec};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{ExposedIo, I2cProvider, I2cRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use embedded_hal_async::i2c::I2c;
@@ -159,13 +159,13 @@ where
         });
         methods.add_async_method(
             "write",
-            |handle, (address, bytes): (i64, Vec<u8>)| async move {
+            |handle, (address, bytes): (i64, Bytes)| async move {
                 Some(i2c_write(handle, address, bytes).await)
             },
         );
         methods.add_async_method(
             "write_read",
-            |handle, (address, bytes, length): (i64, Vec<u8>, i64)| async move {
+            |handle, (address, bytes, length): (i64, Bytes, i64)| async move {
                 Some(i2c_write_read(handle, address, bytes, length).await)
             },
         );
@@ -189,14 +189,14 @@ async fn i2c_read<Bus>(
     handle: UserDataHandle<I2cHandle<Bus>>,
     address: i64,
     length: i64,
-) -> Result<Vec<u8>>
+) -> Result<Bytes>
 where
     Bus: I2c + Send + 'static,
     <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     let address = parse_address(address)?;
     let length = parse_length(length)?;
-    let mut bytes = vec![0; length];
+    let mut bytes = Bytes::zeroed(length)?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -213,13 +213,14 @@ where
 async fn i2c_write<Bus>(
     handle: UserDataHandle<I2cHandle<Bus>>,
     address: i64,
-    bytes: Vec<u8>,
+    bytes: Bytes,
 ) -> Result<()>
 where
     Bus: I2c + Send + 'static,
     <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     let address = parse_address(address)?;
+    check_length(bytes.len())?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -235,16 +236,17 @@ where
 async fn i2c_write_read<Bus>(
     handle: UserDataHandle<I2cHandle<Bus>>,
     address: i64,
-    bytes: Vec<u8>,
+    bytes: Bytes,
     length: i64,
-) -> Result<Vec<u8>>
+) -> Result<Bytes>
 where
     Bus: I2c + Send + 'static,
     <Bus as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
 {
     let address = parse_address(address)?;
+    check_length(bytes.len())?;
     let length = parse_length(length)?;
-    let mut read = vec![0; length];
+    let mut read = Bytes::zeroed(length)?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -293,6 +295,10 @@ fn parse_address(value: i64) -> Result<u8> {
 fn parse_length(value: i64) -> Result<usize> {
     let length = usize::try_from(value)
         .map_err(|_| Error::runtime("transfer length must be non-negative"))?;
+    check_length(length)
+}
+
+fn check_length(length: usize) -> Result<usize> {
     if length <= MAX_TRANSFER_BYTES {
         Ok(length)
     } else {

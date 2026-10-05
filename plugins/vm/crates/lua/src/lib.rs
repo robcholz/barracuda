@@ -42,7 +42,7 @@ mod runtime;
 #[allow(unsafe_code)]
 mod userdata;
 
-pub use convert::{FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Variadic};
+pub use convert::{Bytes, FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Variadic};
 pub use environment::{Environment, Package};
 pub use error::{Error, ErrorKind, Result};
 pub use object::{Context, Function, FunctionCall, RegistryKey, Table};

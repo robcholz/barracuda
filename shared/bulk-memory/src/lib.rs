@@ -75,6 +75,18 @@ pub trait BulkData: private::Sealed {}
 impl<T: Pod> BulkData for T {}
 impl<T: Pod> BulkData for [T] {}
 
+/// The active bulk-memory domain could not satisfy an allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BulkAllocError;
+
+impl fmt::Display for BulkAllocError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("bulk memory allocation failed")
+    }
+}
+
+impl core::error::Error for BulkAllocError {}
+
 /// A growable POD sequence allocated from the active Platform bulk-memory
 /// domain.
 pub struct BulkVec<T: Pod> {
@@ -96,6 +108,30 @@ impl<T: Pod> BulkVec<T> {
         Self {
             inner: AllocVec::with_capacity_in(capacity, BulkAllocator::active()),
         }
+    }
+
+    /// Creates an empty sequence with storage for exactly `capacity` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, BulkAllocError> {
+        let mut values = Self::new();
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|_error| BulkAllocError)?;
+        Ok(values)
+    }
+
+    /// Copies `values` into a new exactly sized sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_from_slice(values: &[T]) -> Result<Self, BulkAllocError> {
+        let mut copy = Self::try_with_capacity(values.len())?;
+        copy.extend_from_slice(values);
+        Ok(copy)
     }
 
     /// Returns the number of initialized elements.
@@ -242,6 +278,17 @@ impl<T: Pod> BulkBox<[T]> {
         let value = unsafe { value.assume_init() };
         Self { inner: value }
     }
+
+    /// Attempts to allocate a zero-filled POD slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_new_zeroed_slice(length: usize) -> Result<Self, BulkAllocError> {
+        let mut values = BulkVec::try_with_capacity(length)?;
+        values.resize(length, bytemuck::Zeroable::zeroed());
+        Ok(values.into_boxed_slice())
+    }
 }
 
 impl<T: BulkData + ?Sized> Deref for BulkBox<T> {
@@ -302,5 +349,28 @@ pub mod platform {
     /// use this backend while preserving the same caller-facing container API.
     pub fn install_global() {
         install(&super::GLOBAL_BACKEND);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::{BulkBox, BulkVec};
+
+    #[test]
+    fn fallible_constructors_allocate_exact_storage() {
+        let values = BulkVec::try_from_slice(&[1_u8, 2, 3]).expect("allocate copy");
+        assert_eq!(values.as_slice(), &[1, 2, 3]);
+        assert_eq!(values.capacity(), 3);
+
+        let zeroed = BulkBox::<[u16]>::try_new_zeroed_slice(4).expect("allocate zeroed slice");
+        assert_eq!(&*zeroed, &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn impossible_allocations_report_errors() {
+        assert!(BulkVec::<u64>::try_with_capacity(usize::MAX).is_err());
+        assert!(BulkBox::<[u64]>::try_new_zeroed_slice(usize::MAX).is_err());
     }
 }

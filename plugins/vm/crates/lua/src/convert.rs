@@ -4,6 +4,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+use barracuda_bulk_memory::BulkVec;
 use lunka::{Thread, cdef::Type};
 
 use crate::{Error, ErrorKind, Result};
@@ -150,6 +151,109 @@ impl FromLua for Vec<u8> {
 impl IntoLua for Vec<u8> {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
         lua.managed().push_string(&self);
+        Ok(())
+    }
+}
+
+/// Byte string held in Platform bulk memory while crossing the Lua boundary.
+///
+/// Use this instead of `Vec<u8>` for payloads that may be large (PCM, frames,
+/// file contents, bus transfers), so they never occupy the ordinary heap.
+#[derive(Debug, Default)]
+pub struct Bytes(BulkVec<u8>);
+
+impl Bytes {
+    /// Allocates an empty byte string with room for `capacity` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a memory error when bulk memory cannot supply the buffer.
+    pub fn with_capacity(capacity: usize) -> Result<Self> {
+        BulkVec::try_with_capacity(capacity)
+            .map(Self)
+            .map_err(|_error| Error::memory("byte buffer could not be allocated"))
+    }
+
+    /// Allocates a zero-filled byte string of `length` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a memory error when bulk memory cannot supply the buffer.
+    pub fn zeroed(length: usize) -> Result<Self> {
+        let mut bytes = Self::with_capacity(length)?;
+        bytes.0.resize(length, 0);
+        Ok(bytes)
+    }
+
+    /// Copies `bytes` into a new bulk-memory byte string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a memory error when bulk memory cannot supply the buffer.
+    pub fn copy_from(bytes: &[u8]) -> Result<Self> {
+        let mut copy = Self::with_capacity(bytes.len())?;
+        copy.0.extend_from_slice(bytes);
+        Ok(copy)
+    }
+
+    /// Appends bytes within the already reserved capacity when possible.
+    ///
+    /// # Errors
+    ///
+    /// Returns a memory error when growing the buffer fails.
+    pub fn extend_from_slice(&mut self, bytes: &[u8]) -> Result<()> {
+        self.0
+            .try_reserve(bytes.len())
+            .map_err(|_error| Error::memory("byte buffer could not grow"))?;
+        self.0.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// Shortens the byte string to `length` bytes.
+    pub fn truncate(&mut self, length: usize) {
+        if length < self.0.len() {
+            self.0.resize(length, 0);
+        }
+    }
+}
+
+impl Deref for Bytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Bytes {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl FromLua for Bytes {
+    fn from_lua(lua: &mut Thread, index: c_int) -> Result<Self> {
+        if lua.type_of(index) != Type::String {
+            return Err(wrong_type("string"));
+        }
+        let mut managed = lua.managed();
+        let bytes = managed
+            .to_string(index)
+            .ok_or_else(|| wrong_type("string"))?;
+        Self::copy_from(bytes)
+    }
+}
+
+impl IntoLua for Bytes {
+    fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
+        lua.managed().push_string(&*self);
+        Ok(())
+    }
+}
+
+impl IntoLua for &[u8] {
+    fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
+        lua.managed().push_string(self);
         Ok(())
     }
 }

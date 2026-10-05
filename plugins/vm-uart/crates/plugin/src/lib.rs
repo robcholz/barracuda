@@ -4,14 +4,14 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, string::ToString, vec, vec::Vec};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{
     ExposedIo, UartConfig, UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits,
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use embedded_io_async::{Read, Write};
@@ -164,7 +164,7 @@ where
         methods.add_async_method("read", |handle, length: i64| async move {
             Some(uart_read(handle, length).await)
         });
-        methods.add_async_method("write", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("write", |handle, bytes: Bytes| async move {
             Some(uart_write(handle, bytes).await)
         });
         methods.add_async_method("flush", |handle, (): ()| async move {
@@ -186,12 +186,12 @@ where
     }
 }
 
-async fn uart_read<Port>(handle: UserDataHandle<UartHandle<Port>>, length: i64) -> Result<Vec<u8>>
+async fn uart_read<Port>(handle: UserDataHandle<UartHandle<Port>>, length: i64) -> Result<Bytes>
 where
     Port: Read + Write + Send + 'static,
     Port::Error: core::fmt::Debug,
 {
-    let mut bytes = vec![0; parse_length(length)?];
+    let mut bytes = Bytes::zeroed(parse_length(length)?)?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.port.is_some())?;
     let read = handle
@@ -205,7 +205,7 @@ where
     Ok(bytes)
 }
 
-async fn uart_write<Port>(handle: UserDataHandle<UartHandle<Port>>, bytes: Vec<u8>) -> Result<()>
+async fn uart_write<Port>(handle: UserDataHandle<UartHandle<Port>>, bytes: Bytes) -> Result<()>
 where
     Port: Read + Write + Send + 'static,
     Port::Error: core::fmt::Debug,

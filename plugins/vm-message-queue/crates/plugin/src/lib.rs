@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{format, string::String, vec::Vec};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
+use barracuda_vm_plugin::{Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures_util::future::{AbortHandle, Abortable};
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -54,7 +54,8 @@ impl Plugin for MessageQueuePlugin {
     }
 }
 
-type Queue = Channel<CriticalSectionRawMutex, Vec<u8>, QUEUE_DEPTH>;
+/// Queued payloads live in bulk memory; the channel itself holds only handles.
+type Queue = Channel<CriticalSectionRawMutex, Bytes, QUEUE_DEPTH>;
 
 struct MessageQueuePackage {
     state: Arc<SharedState>,
@@ -118,7 +119,7 @@ impl SharedState {
         Ok(queue)
     }
 
-    async fn push(&self, key: String, message: Vec<u8>) -> Result<()> {
+    async fn push(&self, key: String, message: Bytes) -> Result<()> {
         if message.len() > MESSAGE_MAX_LEN {
             return Err(Error::runtime(format!(
                 "message exceeds {MESSAGE_MAX_LEN} bytes"
@@ -128,7 +129,7 @@ impl SharedState {
         self.run(async move { queue.send(message).await }).await
     }
 
-    async fn receive(&self, key: String) -> Result<Vec<u8>> {
+    async fn receive(&self, key: String) -> Result<Bytes> {
         let queue = self.queue(key)?;
         self.run(async move { queue.receive().await }).await
     }
@@ -178,7 +179,7 @@ impl Package for MessageQueuePackage {
         let push = Arc::clone(&self.state);
         let receive = Arc::clone(&self.state);
         lua.register_lib("message_queue", move |package| {
-            package.register_async("push", move |(key, message): (String, Vec<u8>)| {
+            package.register_async("push", move |(key, message): (String, Bytes)| {
                 let state = Arc::clone(&push);
                 async move { Some(state.push(key, message).await) }
             })?;
@@ -215,6 +216,10 @@ mod tests {
     use futures_lite::future::{block_on, poll_once, zip};
 
     use super::*;
+
+    fn bytes(value: &[u8]) -> Bytes {
+        Bytes::copy_from(value).expect("allocate message")
+    }
 
     fn lua_with(package: &MessageQueuePackage) -> Lua {
         let mut lua = Lua::new().expect("create Lua");
@@ -264,12 +269,12 @@ mod tests {
             let receive = state.receive("key".into());
             let push = async {
                 state
-                    .push("key".into(), b"ready".to_vec())
+                    .push("key".into(), bytes(b"ready"))
                     .await
                     .expect("push");
             };
             let (message, ()) = zip(receive, push).await;
-            assert_eq!(message.expect("receive"), b"ready");
+            assert_eq!(&*message.expect("receive"), b"ready");
         });
     }
 
@@ -279,13 +284,13 @@ mod tests {
         block_on(async {
             for value in 0..QUEUE_DEPTH {
                 state
-                    .push("key".into(), vec![value as u8])
+                    .push("key".into(), bytes(&[value as u8]))
                     .await
                     .expect("fill");
             }
-            let mut blocked = pin!(state.push("key".into(), b"last".to_vec()));
+            let mut blocked = pin!(state.push("key".into(), bytes(b"last")));
             assert!(poll_once(blocked.as_mut()).await.is_none());
-            assert_eq!(state.receive("key".into()).await.expect("receive"), vec![0]);
+            assert_eq!(&*state.receive("key".into()).await.expect("receive"), [0]);
             blocked.await.expect("unblocked push");
         });
     }
@@ -294,26 +299,26 @@ mod tests {
     fn limits_return_clear_errors() {
         let state = Arc::new(SharedState::new());
         block_on(async {
-            assert!(state.push(String::new(), vec![]).await.is_err());
+            assert!(state.push(String::new(), bytes(&[])).await.is_err());
             assert!(
                 state
-                    .push("k".repeat(KEY_MAX_LEN + 1), vec![])
+                    .push("k".repeat(KEY_MAX_LEN + 1), bytes(&[]))
                     .await
                     .is_err()
             );
             assert!(
                 state
-                    .push("large".into(), vec![0; MESSAGE_MAX_LEN + 1])
+                    .push("large".into(), bytes(&[0; MESSAGE_MAX_LEN + 1]))
                     .await
                     .is_err()
             );
             for index in 0..MAX_KEYS {
                 state
-                    .push(format!("key-{index}"), vec![])
+                    .push(format!("key-{index}"), bytes(&[]))
                     .await
                     .expect("create key");
             }
-            assert!(state.push("overflow".into(), vec![]).await.is_err());
+            assert!(state.push("overflow".into(), bytes(&[])).await.is_err());
         });
     }
 
@@ -330,9 +335,9 @@ mod tests {
         let state = Arc::new(SharedState::new());
         block_on(async {
             for _ in 0..QUEUE_DEPTH {
-                state.push("full".into(), vec![]).await.expect("fill");
+                state.push("full".into(), bytes(&[])).await.expect("fill");
             }
-            let mut push = pin!(state.push("full".into(), vec![]));
+            let mut push = pin!(state.push("full".into(), bytes(&[])));
             let mut receive = pin!(state.receive("empty".into()));
             assert!(poll_once(push.as_mut()).await.is_none());
             assert!(poll_once(receive.as_mut()).await.is_none());
@@ -351,7 +356,7 @@ mod tests {
                 async move {
                     for value in range {
                         state
-                            .push("shared".into(), vec![value])
+                            .push("shared".into(), bytes(&[value]))
                             .await
                             .expect("push");
                     }

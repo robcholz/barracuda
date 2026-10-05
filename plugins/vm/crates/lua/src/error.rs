@@ -33,6 +33,11 @@ impl Error {
         Self::new(ErrorKind::Runtime, message)
     }
 
+    /// Reports that a Lua state or a native buffer exceeded its memory budget.
+    pub fn memory(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Memory, message)
+    }
+
     pub fn message(&self) -> &str {
         &self.message
     }

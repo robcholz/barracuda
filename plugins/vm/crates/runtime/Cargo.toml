@@ -15,6 +15,7 @@ vendored = [
 ]
 
 [dependencies]
+barracuda-bulk-memory.workspace = true
 barracuda-runtime-utils.workspace = true
 barracuda-lua = { path = "../lua" }
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }

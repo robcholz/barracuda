@@ -17,8 +17,11 @@ use crate::{VmLimits, VmRun, VmRunInfo, VmRunState};
 pub(crate) const VM_TASK_SLOTS: usize = 4;
 /// Delay applied by the VM Embassy task after every instruction-hook yield.
 pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
-/// Default fixed Lua heap size owned by each VM memory-pool slot.
-pub(crate) const VM_MEMORY_BYTES_PER_SLOT: usize = 96 * 1024;
+/// Lua heap allocated from bulk memory for each execution while it runs.
+///
+/// One MiB holds a full 360x360 RGB565 frame or a 256 KiB PCM transfer as a
+/// Lua string with room for the script that produces or consumes it.
+pub(crate) const VM_MEMORY_BYTES_PER_RUN: usize = 1024 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);
@@ -120,11 +123,11 @@ pub struct VmRuntime {
 }
 
 impl VmRuntime {
-    /// Creates an unstarted VM runtime with the default per-VM Lua heap size.
+    /// Creates an unstarted VM runtime; each execution allocates its Lua heap on start.
     ///
     /// # Errors
     ///
-    /// Returns an error when backing storage for the memory pool cannot be reserved.
+    /// Returns an error when the fixed execution-slot configuration is invalid.
     pub fn new() -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
             state: Rc::new(RuntimeState {
@@ -132,7 +135,7 @@ impl VmRuntime {
                 slots: core::array::from_fn(|_index| RunSlot::new()),
                 next_run_id: Cell::new(1),
             }),
-            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, VM_MEMORY_BYTES_PER_SLOT)?,
+            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, VM_MEMORY_BYTES_PER_RUN)?,
         })
     }
 

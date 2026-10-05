@@ -1,76 +1,74 @@
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use core::{cell::Cell, mem::MaybeUninit};
+use alloc::{boxed::Box, rc::Rc};
+use core::cell::{Cell, OnceCell};
 
+use barracuda_bulk_memory::BulkBox;
 use barracuda_lua::Lua;
 use embedded_alloc::TlsfHeap;
 
 const MINIMUM_HEAP_BYTES: usize = 1_024;
 
-struct MemorySlot {
+/// One Lua heap: a TLSF allocator over a bulk-memory backing buffer.
+///
+/// Lua stores only plain data in its heap; Rust userdata, callbacks, and
+/// futures are boxed in the ordinary allocator. The backing buffer can
+/// therefore live in the Platform bulk-memory domain (PSRAM on ESP32-S3).
+struct Arena {
     allocator: TlsfHeap,
-    _backing: Box<[MaybeUninit<u8>]>,
-    claimed: Cell<bool>,
+    _backing: BulkBox<[u8]>,
 }
 
-impl MemorySlot {
-    fn new(bytes: usize) -> Result<Self, VmMemoryPoolError> {
-        let mut backing = Vec::new();
-        backing
-            .try_reserve_exact(bytes)
-            .map_err(|_error| VmMemoryPoolError::Allocation)?;
-        backing.resize(bytes, MaybeUninit::uninit());
-        let mut backing = backing.into_boxed_slice();
+impl Arena {
+    fn new(bytes: usize) -> Option<Box<Self>> {
+        let mut backing = BulkBox::<[u8]>::try_new_zeroed_slice(bytes).ok()?;
         let allocator = TlsfHeap::empty();
-        unsafe { allocator.init(backing.as_mut_ptr().cast::<u8>() as usize, backing.len()) };
-        Ok(Self {
+        // SAFETY: the backing buffer is exclusively owned by this arena and
+        // outlives the allocator, which is initialized exactly once.
+        unsafe { allocator.init(backing.as_mut_ptr() as usize, backing.len()) };
+        Some(Box::new(Self {
             allocator,
             _backing: backing,
-            claimed: Cell::new(false),
-        })
+        }))
     }
 }
 
 struct MemoryPoolInner {
-    slots: Box<[MemorySlot]>,
+    claimed: Box<[Cell<bool>]>,
+    heap_bytes: usize,
 }
 
+/// Fixed number of execution slots whose Lua heaps are allocated per run.
 #[derive(Clone)]
 pub(crate) struct VmMemoryPool {
     inner: Rc<MemoryPoolInner>,
 }
 
 impl VmMemoryPool {
-    pub(crate) fn new(slot_count: usize, bytes: usize) -> Result<Self, VmMemoryPoolError> {
+    pub(crate) fn new(slot_count: usize, heap_bytes: usize) -> Result<Self, VmMemoryPoolError> {
         if slot_count == 0 {
             return Err(VmMemoryPoolError::Empty);
         }
-        if bytes < MINIMUM_HEAP_BYTES {
+        if heap_bytes < MINIMUM_HEAP_BYTES {
             return Err(VmMemoryPoolError::TooSmall);
-        }
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(slot_count)
-            .map_err(|_error| VmMemoryPoolError::Allocation)?;
-        for _index in 0..slot_count {
-            slots.push(MemorySlot::new(bytes)?);
         }
         Ok(Self {
             inner: Rc::new(MemoryPoolInner {
-                slots: slots.into_boxed_slice(),
+                claimed: (0..slot_count).map(|_index| Cell::new(false)).collect(),
+                heap_bytes,
             }),
         })
     }
 
+    /// Claims one execution slot; its heap is allocated by [`VmMemoryLease::create_lua`].
     pub(crate) fn acquire(&self) -> Option<VmMemoryLease> {
-        let (index, _slot) = self
+        let index = self
             .inner
-            .slots
+            .claimed
             .iter()
-            .enumerate()
-            .find(|(_index, slot)| !slot.claimed.replace(true))?;
+            .position(|claimed| !claimed.replace(true))?;
         Some(VmMemoryLease {
             pool: self.clone(),
             index,
+            arena: OnceCell::new(),
         })
     }
 }
@@ -78,21 +76,37 @@ impl VmMemoryPool {
 pub(crate) struct VmMemoryLease {
     pool: VmMemoryPool,
     index: usize,
+    arena: OnceCell<Box<Arena>>,
 }
 
 impl VmMemoryLease {
+    /// Allocates this lease's Lua heap and creates a Lua state inside it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a memory error when the bulk-memory domain cannot supply the heap.
+    ///
     /// # Safety
     ///
     /// The lease must outlive the returned Lua state and all executions that own it.
     pub(crate) unsafe fn create_lua(&self) -> barracuda_lua::Result<Lua> {
-        let allocator = &raw const self.pool.inner.slots[self.index].allocator;
+        let arena = match self.arena.get() {
+            Some(arena) => arena,
+            None => {
+                let arena = Arena::new(self.pool.inner.heap_bytes).ok_or_else(|| {
+                    barracuda_lua::Error::memory("VM Lua heap could not be allocated")
+                })?;
+                self.arena.get_or_init(|| arena)
+            }
+        };
+        let allocator = &raw const arena.allocator;
         unsafe { Lua::new_with_allocator(allocator) }
     }
 }
 
 impl Drop for VmMemoryLease {
     fn drop(&mut self) {
-        self.pool.inner.slots[self.index].claimed.set(false);
+        self.pool.inner.claimed[self.index].set(false);
     }
 }
 
@@ -111,6 +125,11 @@ impl FixedMemoryLua {
         let lease = pool.acquire().ok_or(FixedMemoryLuaError::Unavailable)?;
         let lua = unsafe { lease.create_lua() }?;
         Ok(Self { lua, _lease: lease })
+    }
+
+    /// Creates one Lua state with the production per-run heap size.
+    pub fn with_default_heap() -> Result<Self, FixedMemoryLuaError> {
+        Self::new(crate::runtime::VM_MEMORY_BYTES_PER_RUN)
     }
 
     /// Mutably borrows the fixed-memory Lua state.
@@ -134,18 +153,15 @@ pub enum FixedMemoryLuaError {
     Lua(#[from] barracuda_lua::Error),
 }
 
-/// Failure while creating the VM's reusable Lua memory pool.
+/// Invalid VM memory pool configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum VmMemoryPoolError {
-    /// At least one allocator slot is required.
+    /// At least one execution slot is required.
     #[error("VM memory pool must contain at least one slot")]
     Empty,
-    /// The requested per-VM heap is too small for the allocator.
-    #[error("per-VM Lua heap is too small")]
+    /// The requested per-run heap is too small for the allocator.
+    #[error("per-run Lua heap is too small")]
     TooSmall,
-    /// Backing memory for the allocator pool could not be reserved.
-    #[error("failed to reserve VM memory pool backing storage")]
-    Allocation,
 }
 
 #[cfg(test)]
@@ -177,5 +193,16 @@ mod tests {
         drop(lease);
 
         assert!(pool.acquire().is_some());
+    }
+
+    #[test]
+    fn unavailable_heap_is_a_lua_memory_error() {
+        let pool = VmMemoryPool::new(1, usize::MAX).expect("create memory pool");
+        let lease = pool.acquire().expect("acquire allocator slot");
+        let result = unsafe { lease.create_lua() };
+        assert!(matches!(
+            result.map(drop).map_err(|error| error.kind()),
+            Err(barracuda_lua::ErrorKind::Memory)
+        ));
     }
 }

@@ -392,7 +392,7 @@ mod tests {
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
 
             let (http, _requests) = HttpPackage::new();
-            let mut fixed = FixedMemoryLua::new(96 * 1024)
+            let mut fixed = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
             let _io =
                 barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;

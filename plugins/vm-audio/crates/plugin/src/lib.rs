@@ -4,12 +4,12 @@
 
 extern crate alloc;
 
-use alloc::{format, vec, vec::Vec};
+use alloc::format;
 use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use core::cell::RefCell;
@@ -19,6 +19,8 @@ use portable_atomic_util::Arc;
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
 const MAX_WAV_HEADER_BYTES: usize = 64 * 1024;
 const MAX_WAV_BYTES: usize = MAX_TRANSFER_BYTES + MAX_WAV_HEADER_BYTES;
+/// Samples converted per codec call, staged on the stack instead of the heap.
+const PCM_CHUNK_SAMPLES: usize = 512;
 
 /// Owns the Board's primary audio codec and publishes playback to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -157,10 +159,10 @@ where
         methods.add_method_mut("set_volume", |handle, percent: i64| {
             Some(handle.set_volume(percent))
         });
-        methods.add_async_method("play", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("play", |handle, bytes: Bytes| async move {
             Some(play(handle, bytes).await)
         });
-        methods.add_async_method("play_wav", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("play_wav", |handle, bytes: Bytes| async move {
             Some(play_wav(handle, bytes).await)
         });
         methods.add_async_method("record", |handle, frames: i64| async move {
@@ -227,7 +229,7 @@ impl<Device> Drop for AudioHandle<Device> {
     }
 }
 
-async fn play<Device>(handle: UserDataHandle<AudioHandle<Device>>, bytes: Vec<u8>) -> Result<()>
+async fn play<Device>(handle: UserDataHandle<AudioHandle<Device>>, bytes: Bytes) -> Result<()>
 where
     Device: AudioCodec + Send + 'static,
     Device::Error: core::fmt::Debug,
@@ -235,15 +237,14 @@ where
     if bytes.len() > MAX_TRANSFER_BYTES {
         return Err(Error::runtime("audio playback exceeds 262144 bytes"));
     }
-    let samples = decode_pcm_le(&bytes)?;
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
     let descriptor = handle.codec.as_ref().ok_or_else(closed)?.descriptor();
-    validate_sample_count(samples.len(), descriptor.channels())?;
-    write_samples(&mut handle, &samples).await
+    validate_pcm(&bytes, descriptor.channels())?;
+    write_pcm_le(&mut handle, &bytes).await
 }
 
-async fn play_wav<Device>(handle: UserDataHandle<AudioHandle<Device>>, bytes: Vec<u8>) -> Result<()>
+async fn play_wav<Device>(handle: UserDataHandle<AudioHandle<Device>>, bytes: Bytes) -> Result<()>
 where
     Device: AudioCodec + Send + 'static,
     Device::Error: core::fmt::Debug,
@@ -255,16 +256,16 @@ where
     if wav.data_len > MAX_TRANSFER_BYTES {
         return Err(Error::runtime("audio WAV payload exceeds 262144 bytes"));
     }
-    let samples = decode_pcm_le(&bytes[wav.data_start..wav.data_start + wav.data_len])?;
+    let pcm = &bytes[wav.data_start..wav.data_start + wav.data_len];
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
     let descriptor = handle.codec.as_ref().ok_or_else(closed)?.descriptor();
     validate_wav_format(wav, descriptor)?;
-    validate_sample_count(samples.len(), descriptor.channels())?;
-    write_samples(&mut handle, &samples).await
+    validate_pcm(pcm, descriptor.channels())?;
+    write_pcm_le(&mut handle, pcm).await
 }
 
-async fn record<Device>(handle: UserDataHandle<AudioHandle<Device>>, frames: i64) -> Result<Vec<u8>>
+async fn record<Device>(handle: UserDataHandle<AudioHandle<Device>>, frames: i64) -> Result<Bytes>
 where
     Device: AudioCodec + Send + 'static,
     Device::Error: core::fmt::Debug,
@@ -283,17 +284,22 @@ where
     if byte_len > MAX_TRANSFER_BYTES {
         return Err(Error::runtime("audio recording exceeds 262144 bytes"));
     }
-    let mut samples = vec![0_i16; samples_len];
-    handle
-        .codec
-        .as_mut()
-        .ok_or_else(closed)?
-        .read(&mut samples)
-        .await
-        .map_err(codec_error)?;
-    let mut bytes = Vec::with_capacity(byte_len);
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
+    let mut bytes = Bytes::with_capacity(byte_len)?;
+    let codec = handle.codec.as_mut().ok_or_else(closed)?;
+    let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
+    let mut encoded = [0_u8; PCM_CHUNK_SAMPLES * 2];
+    let mut remaining = samples_len;
+    while remaining > 0 {
+        let count = remaining.min(PCM_CHUNK_SAMPLES);
+        codec
+            .read(&mut samples[..count])
+            .await
+            .map_err(codec_error)?;
+        for (pair, sample) in encoded.chunks_exact_mut(2).zip(&samples[..count]) {
+            pair.copy_from_slice(&sample.to_le_bytes());
+        }
+        bytes.extend_from_slice(&encoded[..count * 2])?;
+        remaining -= count;
     }
     Ok(bytes)
 }
@@ -442,17 +448,13 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32> {
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
 
-fn decode_pcm_le(bytes: &[u8]) -> Result<Vec<i16>> {
+fn validate_pcm(bytes: &[u8], channels: u8) -> Result<()> {
     if !bytes.len().is_multiple_of(2) {
         return Err(Error::runtime(
             "audio PCM must contain complete 16-bit samples",
         ));
     }
-    let (pairs, remainder) = bytes.as_chunks::<2>();
-    if !remainder.is_empty() {
-        return Err(Error::runtime("audio PCM contains an incomplete sample"));
-    }
-    Ok(pairs.iter().copied().map(i16::from_le_bytes).collect())
+    validate_sample_count(bytes.len() / 2, channels)
 }
 
 fn validate_wav_format(wav: PcmWav, descriptor: AudioDescriptor) -> Result<()> {
@@ -468,18 +470,25 @@ fn validate_wav_format(wav: PcmWav, descriptor: AudioDescriptor) -> Result<()> {
     Ok(())
 }
 
-async fn write_samples<Device>(handle: &mut AudioHandle<Device>, samples: &[i16]) -> Result<()>
+/// Streams validated little-endian PCM to the codec in stack-sized chunks.
+async fn write_pcm_le<Device>(handle: &mut AudioHandle<Device>, bytes: &[u8]) -> Result<()>
 where
     Device: AudioCodec,
     Device::Error: core::fmt::Debug,
 {
-    handle
-        .codec
-        .as_mut()
-        .ok_or_else(closed)?
-        .write(samples)
-        .await
-        .map_err(codec_error)
+    let codec = handle.codec.as_mut().ok_or_else(closed)?;
+    let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
+    for chunk in bytes.chunks(PCM_CHUNK_SAMPLES * 2) {
+        let (pairs, _remainder) = chunk.as_chunks::<2>();
+        for (sample, pair) in samples.iter_mut().zip(pairs) {
+            *sample = i16::from_le_bytes(*pair);
+        }
+        codec
+            .write(&samples[..pairs.len()])
+            .await
+            .map_err(codec_error)?;
+    }
+    Ok(())
 }
 
 fn validate_sample_count(samples: usize, channels: u8) -> Result<()> {
@@ -513,6 +522,8 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     extern crate std;
+
+    use alloc::vec::Vec;
 
     use super::*;
     use core::convert::Infallible;

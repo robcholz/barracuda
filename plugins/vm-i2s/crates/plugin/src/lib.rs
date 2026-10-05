@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, string::ToString, vec, vec::Vec};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{
     ExposedIo, I2sProvider, I2sRequest,
     audio::{PcmFormat, PcmStream},
@@ -12,13 +12,15 @@ use barracuda_board_hal::{
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
+/// Samples converted per stream call, staged on the stack instead of the heap.
+const PCM_CHUNK_SAMPLES: usize = 512;
 
 /// Shares the unified exposed-I/O owner with the `i2s` Lua package.
 #[barracuda_plugin::macros::plugin]
@@ -169,7 +171,7 @@ where
                 ))
             })())
         });
-        methods.add_async_method("write", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("write", |handle, bytes: Bytes| async move {
             Some(i2s_write(handle, bytes).await)
         });
         methods.add_async_method("read", |handle, frames: i64| async move {
@@ -198,7 +200,7 @@ impl<Stream: PcmStream> I2sHandle<Stream> {
     }
 }
 
-async fn i2s_write<Stream>(handle: UserDataHandle<I2sHandle<Stream>>, bytes: Vec<u8>) -> Result<()>
+async fn i2s_write<Stream>(handle: UserDataHandle<I2sHandle<Stream>>, bytes: Bytes) -> Result<()>
 where
     Stream: PcmStream + Send + 'static,
     Stream::Error: core::fmt::Debug,
@@ -211,22 +213,25 @@ where
             "I2S PCM bytes must contain complete 16-bit samples",
         ));
     }
-    let (pairs, _) = bytes.as_chunks::<2>();
-    let samples: Vec<i16> = pairs.iter().copied().map(i16::from_le_bytes).collect();
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
-    let format = handle.stream.as_ref().ok_or_else(closed)?.format();
-    validate_sample_count(samples.len(), format.channels)?;
-    handle
-        .stream
-        .as_mut()
-        .ok_or_else(closed)?
-        .write(&samples)
-        .await
-        .map_err(stream_error)
+    let stream = handle.stream.as_mut().ok_or_else(closed)?;
+    validate_sample_count(bytes.len() / 2, stream.format().channels)?;
+    let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
+    for chunk in bytes.chunks(PCM_CHUNK_SAMPLES * 2) {
+        let (pairs, _remainder) = chunk.as_chunks::<2>();
+        for (sample, pair) in samples.iter_mut().zip(pairs) {
+            *sample = i16::from_le_bytes(*pair);
+        }
+        stream
+            .write(&samples[..pairs.len()])
+            .await
+            .map_err(stream_error)?;
+    }
+    Ok(())
 }
 
-async fn i2s_read<Stream>(handle: UserDataHandle<I2sHandle<Stream>>, frames: i64) -> Result<Vec<u8>>
+async fn i2s_read<Stream>(handle: UserDataHandle<I2sHandle<Stream>>, frames: i64) -> Result<Bytes>
 where
     Stream: PcmStream + Send + 'static,
     Stream::Error: core::fmt::Debug,
@@ -245,17 +250,22 @@ where
     if byte_len > MAX_TRANSFER_BYTES {
         return Err(Error::runtime("I2S read exceeds 262144 bytes"));
     }
-    let mut samples = vec![0_i16; samples_len];
-    handle
-        .stream
-        .as_mut()
-        .ok_or_else(closed)?
-        .read(&mut samples)
-        .await
-        .map_err(stream_error)?;
-    let mut bytes = Vec::with_capacity(byte_len);
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
+    let mut bytes = Bytes::with_capacity(byte_len)?;
+    let stream = handle.stream.as_mut().ok_or_else(closed)?;
+    let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
+    let mut encoded = [0_u8; PCM_CHUNK_SAMPLES * 2];
+    let mut remaining = samples_len;
+    while remaining > 0 {
+        let count = remaining.min(PCM_CHUNK_SAMPLES);
+        stream
+            .read(&mut samples[..count])
+            .await
+            .map_err(stream_error)?;
+        for (pair, sample) in encoded.chunks_exact_mut(2).zip(&samples[..count]) {
+            pair.copy_from_slice(&sample.to_le_bytes());
+        }
+        bytes.extend_from_slice(&encoded[..count * 2])?;
+        remaining -= count;
     }
     Ok(bytes)
 }
