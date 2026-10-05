@@ -1,3 +1,4 @@
+use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -195,12 +196,12 @@ impl ScopedVfs {
 
 #[derive(Clone)]
 pub(crate) struct ScopedMount {
-    pub(crate) point: String,
-    source_root: String,
+    pub(crate) point: Cow<'static, str>,
+    source_root: Cow<'static, str>,
 }
 
 impl ScopedMount {
-    pub(crate) const fn new(point: String, source_root: String) -> Self {
+    pub(crate) const fn new(point: Cow<'static, str>, source_root: Cow<'static, str>) -> Self {
         Self { point, source_root }
     }
 }
