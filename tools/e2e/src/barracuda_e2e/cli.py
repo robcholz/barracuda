@@ -178,6 +178,8 @@ def run_scenario(
             tape_server.replay(scenario.tape, artifacts / 'requests')
 
         system.start()
+        for pattern in scenario.ready_logs:
+            system.wait_for_log(pattern, scenario.await_seconds)
         http_failures = _run_http(scenario, 'before')
         records: list[dict[str, object]] = []
         if scenario.steps:

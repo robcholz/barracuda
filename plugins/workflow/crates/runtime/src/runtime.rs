@@ -17,9 +17,8 @@ use crate::action::ErasedWorkflowAction;
 use crate::definition::{WorkflowCondition, WorkflowOperation};
 use crate::link::{FieldRef, LinkKind, SourceSelector};
 use crate::{
-    EmitError, Event, EventId, Topic, WorkflowActionDescriptor, WorkflowActionRegistry,
-    WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
-    WorkflowUnloadError, WorkflowValue,
+    EmitError, Event, EventId, Topic, WorkflowActionRegistry, WorkflowControlRejection,
+    WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowUnloadError, WorkflowValue,
 };
 
 type WorkflowDriver = Pin<Box<dyn Future<Output = Result<(), WorkflowExecutionError>> + 'static>>;
@@ -405,11 +404,7 @@ impl WorkflowExecution {
             Err(error) => return Err((id, error)),
         };
         if !plan.definition.has_branch() {
-            let descriptors = actions
-                .iter()
-                .map(|action| action.descriptor().clone())
-                .collect::<Vec<_>>();
-            if let Err(error) = validate_links(&plan.definition, &descriptors) {
+            if let Err(error) = validate_links(&plan.definition, &actions) {
                 return Err((id, error));
             }
         }
@@ -625,10 +620,31 @@ fn schema_properties(schema: &Value) -> Option<&Map<String, Value>> {
     schema.get("properties")?.as_object()
 }
 
+/// Request and response schemas of one step, parsed only for link validation.
+struct StepShapes {
+    request: Value,
+    response: Value,
+}
+
 fn validate_links(
     definition: &WorkflowDefinition,
-    descriptors: &[WorkflowActionDescriptor],
+    actions: &[Rc<dyn ErasedWorkflowAction>],
 ) -> Result<(), WorkflowExecutionError> {
+    let descriptors = actions
+        .iter()
+        .enumerate()
+        .map(|(step, action)| {
+            let descriptor = action.descriptor();
+            let invalid = |_error| WorkflowExecutionError::InvalidLink {
+                from_step: step.saturating_sub(1),
+                to_step: step,
+            };
+            Ok(StepShapes {
+                request: descriptor.request_shape().map_err(invalid)?,
+                response: descriptor.response_shape().map_err(invalid)?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     for to_step in 0..definition.steps().len() {
         let from_step = to_step.saturating_sub(1);
         let this = descriptors
@@ -644,19 +660,19 @@ fn validate_links(
                     .checked_sub(1)
                     .and_then(|index| descriptors.get(index))
                 {
-                    if previous.response_shape() != this.request_shape() {
+                    if previous.response != this.request {
                         return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                     }
                 }
             }
             LinkKind::Literal { arguments } => {
-                validate_request_shape(this.request_shape(), arguments, &[], from_step, to_step)?;
+                validate_request_shape(&this.request, arguments, &[], from_step, to_step)?;
             }
             LinkKind::Mapping {
                 arguments,
                 references,
             } => {
-                let properties = schema_properties(this.request_shape())
+                let properties = schema_properties(&this.request)
                     .ok_or(WorkflowExecutionError::InvalidLink { from_step, to_step })?;
                 for reference in references {
                     let Some(destination) = properties.get(&reference.dest_field) else {
@@ -673,10 +689,10 @@ fn validate_links(
                         };
                         match &reference.source_field {
                             Some(field)
-                                if schema_properties(previous.response_shape())
+                                if schema_properties(&previous.response)
                                     .and_then(|properties| properties.get(field))
                                     == Some(destination) => {}
-                            None if previous.response_shape() == destination => {}
+                            None if &previous.response == destination => {}
                             _ => {
                                 return Err(WorkflowExecutionError::InvalidLink {
                                     from_step,
@@ -686,13 +702,7 @@ fn validate_links(
                         }
                     }
                 }
-                validate_request_shape(
-                    this.request_shape(),
-                    arguments,
-                    references,
-                    from_step,
-                    to_step,
-                )?;
+                validate_request_shape(&this.request, arguments, references, from_step, to_step)?;
             }
         }
     }
@@ -747,11 +757,7 @@ pub fn validate_definition(
     if definition.has_branch() {
         return Ok(());
     }
-    let descriptors = actions
-        .iter()
-        .map(|action| action.descriptor().clone())
-        .collect::<Vec<_>>();
-    validate_links(definition, &descriptors).map_err(|_error| WorkflowControlRejection::InvalidLink)
+    validate_links(definition, &actions).map_err(|_error| WorkflowControlRejection::InvalidLink)
 }
 
 #[cfg(test)]
@@ -769,9 +775,11 @@ mod tests {
     use futures_lite::future::{block_on, poll_fn, poll_once};
     use serde_json::{json, Value};
 
+    use super::validate_definition;
     use crate::{
         parse_definition, workflow_action_schema_inline, Event, WorkflowActionFuture,
-        WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema, WorkflowRuntime,
+        WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
+        WorkflowControlRejection, WorkflowRuntime,
     };
 
     struct Trigger;
@@ -1005,5 +1013,50 @@ mod tests {
             assert_eq!(runtime.view().info().completed_count, 1);
             drop(registrations);
         });
+    }
+
+    #[test]
+    fn link_validation_checks_schemas_of_adjacent_steps() {
+        let actions = WorkflowActionRegistry::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let _registrations = [
+            actions
+                .add_action(FixedAction::<0> {
+                    output: json!({ "token": 7 }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register producer"),
+            actions
+                .add_action(FixedAction::<1> {
+                    output: json!({ "ok": true }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register sink"),
+        ];
+        let validate = |sink: &str| {
+            let source = alloc::format!(
+                r#"{{"id":"linked","match":{{"event":"test.trigger"}},"steps":[{{"call":"test.produce"}},{sink}]}}"#
+            );
+            validate_definition(&actions, &parse_definition(&source).expect("parse"))
+        };
+
+        assert_eq!(
+            validate(
+                r#"{"call":"test.sink","arguments":{"token":"$previous.output.token","extra":5}}"#
+            ),
+            Ok(())
+        );
+        for invalid in [
+            r#"{"call":"test.sink"}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.token"}}"#,
+            r#"{"call":"test.sink","arguments":{"token":1,"extra":2,"bogus":3}}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.missing","extra":5}}"#,
+        ] {
+            assert_eq!(
+                validate(invalid),
+                Err(WorkflowControlRejection::InvalidLink),
+                "{invalid}"
+            );
+        }
     }
 }

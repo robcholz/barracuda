@@ -51,6 +51,8 @@ fn terminate_pem(path: &Path, mut bytes: Vec<u8>) -> Result<Vec<u8>, MacosTlsErr
             path: path.to_owned(),
         });
     }
+    // `fs::read` sizes the buffer exactly; avoid doubling it for the NUL.
+    bytes.reserve_exact(1);
     bytes.push(0);
     Ok(bytes)
 }

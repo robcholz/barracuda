@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{rc::Rc, string::String, vec::Vec};
 
 use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
 
@@ -73,10 +73,12 @@ pub enum MediaPhase {
 
 /// A normal event or an explicit notification that replay history was lost.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps replayed semantic events allocation-free.
 pub enum WebDelivery {
-    Event(WebEvent),
-    Lagged { missed: u64 },
+    /// Shared with the replay history and every other subscriber.
+    Event(Rc<WebEvent>),
+    Lagged {
+        missed: u64,
+    },
 }
 
 impl WebEventData {

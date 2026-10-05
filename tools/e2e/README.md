@@ -81,6 +81,7 @@ body_contains = ['"station"']
 expect = ["Agent created session"]   # regexes that must appear
 forbid = ['\bERROR\b']               # default: ERROR and panics
 allow = []                           # exceptions to forbid
+ready = ["UTC clock synchronized"]   # wait for these before the first step
 await = ["VM run 1 finished"]        # wait for these after the chat
 await_seconds = 30
 

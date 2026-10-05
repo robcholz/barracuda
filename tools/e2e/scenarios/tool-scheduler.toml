@@ -20,3 +20,6 @@ text = "Scheduled and cancelled."
 send = "Schedule then cancel."
 reply_contains = ["Scheduled and cancelled."]
 tool_contains = ["e2e-once"]
+
+[logs]
+ready = ["UTC clock synchronized from network time"]

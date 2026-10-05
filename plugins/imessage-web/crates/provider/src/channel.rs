@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::VecDeque, format, string::String};
+use alloc::{boxed::Box, collections::VecDeque, format, rc::Rc, string::String};
 use core::{
     cell::Cell,
     future::Future,
@@ -20,14 +20,17 @@ use futures_lite::StreamExt;
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
 
-type Bus<const CAP: usize, const SUBS: usize> = PubSubChannel<NoopRawMutex, WebEvent, CAP, SUBS, 0>;
+// Events are shared between the live bus and replay history, so each slot is
+// one pointer instead of an inline event.
+type Bus<const CAP: usize, const SUBS: usize> =
+    PubSubChannel<NoopRawMutex, Rc<WebEvent>, CAP, SUBS, 0>;
 type LiveSubscriber<'a, const CAP: usize, const SUBS: usize> =
-    Subscriber<'a, NoopRawMutex, WebEvent, CAP, SUBS, 0>;
+    Subscriber<'a, NoopRawMutex, Rc<WebEvent>, CAP, SUBS, 0>;
 
 /// Web channel with bounded replay history and subscriber slots.
 pub struct Web<const CAP: usize = 32, const SUBS: usize = 4> {
     bus: Bus<CAP, SUBS>,
-    history: core::cell::RefCell<VecDeque<WebEvent>>,
+    history: core::cell::RefCell<VecDeque<Rc<WebEvent>>>,
     next_id: Cell<u64>,
 }
 
@@ -91,30 +94,30 @@ impl<const CAP: usize, const SUBS: usize> Web<CAP, SUBS> {
         &self,
         target: &MessageTarget,
         data: WebEventData,
-    ) -> Result<WebEvent, ChannelError> {
+    ) -> Result<Rc<WebEvent>, ChannelError> {
         let id = self.next_id.get();
         let next_id = id.checked_add(1).ok_or_else(|| ChannelError::Transport {
             message: String::from("web event sequence exhausted"),
         })?;
         self.next_id.set(next_id);
-        let event = WebEvent {
+        let event = Rc::new(WebEvent {
             id,
             conversation_id: target.conversation_id.clone(),
             thread_id: target.thread_id.clone(),
             data,
-        };
+        });
         {
             let mut history = self.history.borrow_mut();
             if CAP > 0 && history.len() == CAP {
                 history.pop_front();
             }
             if CAP > 0 {
-                history.push_back(event.clone());
+                history.push_back(Rc::clone(&event));
             }
         }
         self.bus
             .immediate_publisher()
-            .publish_immediate(event.clone());
+            .publish_immediate(Rc::clone(&event));
         Ok(event)
     }
 

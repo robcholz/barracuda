@@ -12,7 +12,7 @@ use core::pin::Pin;
 
 use getset::{CopyGetters, Getters};
 use json_validator::JsonSchema;
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::Serialize;
 
 use crate::WorkflowValue;
@@ -150,35 +150,34 @@ pub struct WorkflowActionDescriptor {
     /// Static response JSON Schema and validator.
     #[getset(get_copy = "pub")]
     response_schema: JsonSchema,
-    request_shape: WorkflowValue,
-    response_shape: WorkflowValue,
 }
 
 impl WorkflowActionDescriptor {
     fn try_from_schema(schema: WorkflowActionSchema) -> Result<Self, WorkflowActionRegistryError> {
         let address = WorkflowActionAddress::try_from(schema.address())
             .map_err(WorkflowActionRegistryError::InvalidAddress)?;
-        let request_shape = serde_json::from_str(schema.request().as_str())
+        // Check the static schemas once without keeping a parsed copy; link
+        // validation parses them again only while it runs.
+        serde_json::from_str::<IgnoredAny>(schema.request().as_str())
             .map_err(|_error| WorkflowActionRegistryError::InvalidRequestSchema(address.clone()))?;
-        let response_shape =
-            serde_json::from_str(schema.response().as_str()).map_err(|_error| {
-                WorkflowActionRegistryError::InvalidResponseSchema(address.clone())
-            })?;
+        serde_json::from_str::<IgnoredAny>(schema.response().as_str()).map_err(|_error| {
+            WorkflowActionRegistryError::InvalidResponseSchema(address.clone())
+        })?;
         Ok(Self {
             address,
             request_schema: schema.request(),
             response_schema: schema.response(),
-            request_shape,
-            response_shape,
         })
     }
 
-    pub(crate) fn request_shape(&self) -> &WorkflowValue {
-        &self.request_shape
+    /// Parses the request schema for link validation.
+    pub(crate) fn request_shape(&self) -> Result<WorkflowValue, serde_json::Error> {
+        serde_json::from_str(self.request_schema.as_str())
     }
 
-    pub(crate) fn response_shape(&self) -> &WorkflowValue {
-        &self.response_shape
+    /// Parses the response schema for link validation.
+    pub(crate) fn response_shape(&self) -> Result<WorkflowValue, serde_json::Error> {
+        serde_json::from_str(self.response_schema.as_str())
     }
 }
 

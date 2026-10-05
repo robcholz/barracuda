@@ -26,7 +26,7 @@ static BULK_BACKEND: Backend = Backend::new(&BULK_ALLOCATOR);
 const HEAP_LIMIT_VARIABLE: &str = "BARRACUDA_HEAP_LIMIT_BYTES";
 /// High-water growth between two reports.
 const REPORT_STEP_BYTES: usize = 4 * 1024;
-const REPORT_INTERVAL: Duration = Duration::from_millis(500);
+const REPORT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Selects the uncounted bulk domain and applies the optional heap budget.
 pub(crate) fn install() {

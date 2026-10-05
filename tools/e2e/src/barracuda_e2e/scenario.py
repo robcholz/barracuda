@@ -73,6 +73,8 @@ class Scenario:
     forbid_logs: tuple[str, ...]
     allow_logs: tuple[str, ...] = field(default=())
     await_logs: tuple[str, ...] = field(default=())
+    # Patterns that must appear after startup before any request or chat.
+    ready_logs: tuple[str, ...] = field(default=())
     await_seconds: float = 30.0
     http: tuple[HttpCheck, ...] = field(default=())
     # Maximum ordinary-heap high-water mark the System may report.
@@ -140,6 +142,7 @@ def load_scenario(path: Path) -> Scenario:
         forbid_logs=_strings(logs, 'forbid', path) or DEFAULT_FORBIDDEN_LOGS,
         allow_logs=_strings(logs, 'allow', path),
         await_logs=_strings(logs, 'await', path),
+        ready_logs=_strings(logs, 'ready', path),
         await_seconds=float(logs.get('await_seconds', 30)),
         http=http,
         heap_high_water_max=heap_max,

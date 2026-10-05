@@ -20,5 +20,5 @@ kinds = ["tool"]
 tool_contains = ['"utc":"20']
 
 [logs]
-expect = ["UTC clock synchronized from network time"]
+ready = ["UTC clock synchronized from network time"]
 allow = []

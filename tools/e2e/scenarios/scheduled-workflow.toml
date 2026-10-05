@@ -25,4 +25,5 @@ reply_contains = ["The reminder is scheduled."]
 tool_contains = ['{"id":"e2e-tick"}']
 
 [logs]
+ready = ["UTC clock synchronized from network time"]
 await = ["schedule `e2e-tick` triggered run 1", "VM run 1 finished: Success, 1 output line"]
