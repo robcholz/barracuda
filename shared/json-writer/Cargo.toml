@@ -13,7 +13,12 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-bulk-memory.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 
 [lints.rust]
 unreachable_pub = "deny"

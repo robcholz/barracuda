@@ -10,6 +10,10 @@
 
 extern crate alloc;
 
+mod text;
+
+pub use text::{JsonText, JsonTextError};
+
 use alloc::string::String;
 use core::fmt::{self, Write as _};
 
