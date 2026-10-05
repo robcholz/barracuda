@@ -356,6 +356,3 @@ impl Resolved {
         }
     }
 }
-
-#[allow(dead_code)]
-fn _keep_dir_entry_documented(_: DirEntry) {}

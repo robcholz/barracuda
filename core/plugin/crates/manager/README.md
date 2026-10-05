@@ -27,7 +27,7 @@ typed capability graph without yielding. `start` is only an optional
 post-registration hook: `PluginStartContext` cannot publish capabilities, and
 task spawning itself is synchronous. Long-running services run as
 owner-managed Embassy tasks under the repository's
-[`execution-ownership.md`](../../.agents/docs/execution-ownership.md) boundary.
+[`execution-ownership.md`](../../../../.agents/docs/execution-ownership.md) boundary.
 System installs the Embassy spawner directly on Plugin Manager; only
 `PluginStartContext::task_spawner` exposes it, so registration cannot start a
 service before the complete graph exists.

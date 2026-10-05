@@ -7,7 +7,6 @@ description = "Barracuda Plugin workspace synchronization tool"
 [dependencies]
 barracuda-plugin-build = { path = "../../core/plugin/crates/build" }
 anstream = "1"
-anstyle = "1"
 barracuda-cli-style.workspace = true
 barracuda-plugin = { workspace = true, features = ["manifest"] }
 clap = { version = "4", features = ["derive"] }

@@ -153,34 +153,6 @@ impl Renderer {
                 }
             }
             "message.event" => self.semantic_event(&data, &mut actions),
-            "message.extra"
-                if data.get("field").and_then(serde_json::Value::as_str) == Some("notice") =>
-            {
-                if let Some(notice) = data
-                    .get("content")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|notice| !notice.is_empty())
-                {
-                    actions.push(RenderAction::Print(MessageKind::Notice.render(notice)));
-                }
-            }
-            "message.extra" => {
-                let kind = match data.get("field").and_then(serde_json::Value::as_str) {
-                    Some("reasoning") => Some(MessageKind::Reasoning),
-                    Some("effect_result") => Some(MessageKind::Reply),
-                    Some("tool_output") => Some(MessageKind::Tool),
-                    _ => None,
-                };
-                if let Some(kind) = kind {
-                    let content = data
-                        .get("content")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default();
-                    let complete = data.get("boundary").and_then(serde_json::Value::as_str)
-                        == Some("complete");
-                    self.stream_extra(kind, content, complete, &mut actions);
-                }
-            }
             "message.end" => {
                 if self.extra.take().is_some() {
                     actions.push(RenderAction::End);
@@ -209,14 +181,14 @@ impl Renderer {
                 self.stream_reply(event_text(payload), actions);
             }
             "reasoning_delta" => {
-                self.stream_extra(MessageKind::Reasoning, event_text(payload), false, actions);
+                self.stream_extra(MessageKind::Reasoning, event_text(payload), actions);
             }
             "reasoning_ended" => self.finish_extra(MessageKind::Reasoning, actions),
             "tool_result_started" => {
-                self.stream_extra(MessageKind::Tool, "", false, actions);
+                self.stream_extra(MessageKind::Tool, "", actions);
             }
             "tool_name_delta" | "tool_arguments_delta" | "tool_output_delta" => {
-                self.stream_extra(MessageKind::Tool, event_text(payload), false, actions);
+                self.stream_extra(MessageKind::Tool, event_text(payload), actions);
             }
             "tool_result_ended" => self.finish_extra(MessageKind::Tool, actions),
             "turn_error" | "session_error" => {
@@ -255,13 +227,7 @@ impl Renderer {
         }
     }
 
-    fn stream_extra(
-        &mut self,
-        kind: MessageKind,
-        content: &str,
-        complete: bool,
-        actions: &mut Vec<RenderAction>,
-    ) {
+    fn stream_extra(&mut self, kind: MessageKind, content: &str, actions: &mut Vec<RenderAction>) {
         if self.extra != Some(kind) {
             if self.extra.replace(kind).is_some() {
                 actions.push(RenderAction::End);
@@ -270,10 +236,6 @@ impl Renderer {
         }
         if !content.is_empty() {
             actions.push(RenderAction::Delta(content.to_string()));
-        }
-        if complete {
-            self.extra = None;
-            actions.push(RenderAction::End);
         }
     }
 }
@@ -399,22 +361,6 @@ mod tests {
     }
 
     #[test]
-    fn notice_extra_is_rendered() {
-        let actions = render_actions(&[
-            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"notice\",\"boundary\":\"complete\",\"content\":\"failed to initialize LLM chat: request timed out\"}\n\n",
-            "event: message.end\ndata: {\"error\":null}\n\n",
-        ]);
-
-        assert_eq!(actions.len(), 3);
-        assert_eq!(actions[0], RenderAction::Start(MessageKind::Reply));
-        assert!(
-            matches!(&actions[1], RenderAction::Print(text) if text.contains("note") && text.contains("request timed out"))
-        );
-        assert_eq!(actions[2], RenderAction::End);
-    }
-
-    #[test]
     fn message_end_error_is_rendered() {
         let actions = render_actions(&[
             "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
@@ -444,28 +390,6 @@ mod tests {
                 RenderAction::Start(MessageKind::Reply),
                 RenderAction::Delta("hel".to_string()),
                 RenderAction::Delta("lo".to_string()),
-                RenderAction::End,
-            ]
-        );
-    }
-
-    #[test]
-    fn web_reasoning_extras_follow_stream_boundaries() {
-        let actions = render_actions(&[
-            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"reasoning\",\"boundary\":\"more\",\"content\":\"think\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"reasoning\",\"boundary\":\"complete\",\"content\":\"ing\"}\n\n",
-            "event: message.end\ndata: {\"error\":null}\n\n",
-        ]);
-
-        assert_eq!(
-            actions,
-            vec![
-                RenderAction::Start(MessageKind::Reply),
-                RenderAction::Start(MessageKind::Reasoning),
-                RenderAction::Delta("think".to_string()),
-                RenderAction::Delta("ing".to_string()),
-                RenderAction::End,
                 RenderAction::End,
             ]
         );

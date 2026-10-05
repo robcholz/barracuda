@@ -904,12 +904,9 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustyline",
- "serde",
  "serde_json",
- "strum 0.28.0",
  "tempfile",
  "terminal_size",
- "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "unicode-width",
@@ -1331,7 +1328,6 @@ dependencies = [
  "barracuda-platform-test",
  "ekv",
  "embassy-sync 0.6.2",
- "embassy-sync 0.7.2",
  "embedded-storage-async",
  "futures-lite",
  "thiserror 2.0.18",
@@ -1901,7 +1897,6 @@ name = "barracuda-plugin-tool"
 version = "0.1.0"
 dependencies = [
  "anstream",
- "anstyle",
  "barracuda-cli-style",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1935,7 +1930,6 @@ dependencies = [
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
- "futures-channel",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -2078,7 +2072,6 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-hal 1.0.0",
- "embedded-hal-async",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-storage",

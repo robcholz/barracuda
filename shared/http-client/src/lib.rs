@@ -22,7 +22,6 @@ const TCP_RX_BYTES: usize = 4 * 1024;
 
 pub type Tcp = TcpClient<'static, TCP_CONNECTIONS, TCP_TX_BYTES, TCP_RX_BYTES>;
 pub type Resolver = DnsSocket<'static>;
-pub type RawClient = reqwless::client::HttpClient<'static, Tcp, Resolver>;
 
 enum TlsMode {
     Plaintext,
