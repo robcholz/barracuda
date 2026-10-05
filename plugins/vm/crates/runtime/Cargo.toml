@@ -23,6 +23,7 @@ barracuda-vm-package-api = { path = "../package-api" }
 embassy-executor.workspace = true
 embassy-time.workspace = true
 getset = "0.1"
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
 embedded-alloc = { version = "0.7", default-features = false, features = ["tlsf"] }

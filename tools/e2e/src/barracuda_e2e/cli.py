@@ -1,0 +1,238 @@
+"""Command-line entry for the end-to-end harness."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+import shutil
+import sys
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from .assertions import check_logs, check_replay, check_requests, check_transcript
+from .ntp import LocalNtp
+from .scenario import Scenario, ScenarioError, discover, load_scenario
+from .system import (
+    WORKSPACE,
+    Binaries,
+    HarnessError,
+    SystemProcess,
+    TapeServer,
+    build,
+    chat,
+    configure_model,
+    http_request,
+    require_network,
+)
+from .tapes import CHAT_PATH, SCRIPTED_API_PATH, write_scripted_tape
+
+SCENARIOS = Path(__file__).resolve().parents[2] / 'scenarios'
+ARTIFACTS = WORKSPACE / 'target' / 'e2e'
+TAPE_PORT = 18_787
+TURN_TIMEOUT_SECONDS = 600
+
+
+@dataclass(frozen=True)
+class LiveModel:
+    """Real provider used while recording."""
+
+    base_url: str
+    api_key: str
+    model: str
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the public CLI parser."""
+
+    parser = argparse.ArgumentParser(
+        prog='barracuda-e2e',
+        description='Run host Barracuda scenarios against recorded or scripted LLM tapes.',
+    )
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('list', help='list scenarios')
+    run = commands.add_parser('run', help='run scenarios')
+    run.add_argument('names', nargs='*', help='scenario file stems (default: all)')
+    run.add_argument(
+        '--record',
+        action='store_true',
+        help='record "recorded" scenarios against the live provider',
+    )
+    run.add_argument(
+        '--env-file',
+        type=Path,
+        help='KEY=VALUE file providing BARRACUDA_LLM_BASE_URL/API_KEY/MODEL',
+    )
+    run.add_argument('--skip-build', action='store_true', help='reuse existing builds')
+    run.add_argument(
+        '--no-local-ntp',
+        action='store_true',
+        help='do not answer the System NTP requests from the host clock',
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the harness and exit non-zero when any scenario fails."""
+
+    arguments = build_parser().parse_args(argv)
+    try:
+        scenarios = [load_scenario(path) for path in discover(SCENARIOS)]
+    except ScenarioError as exc:
+        sys.exit(f'error: {exc}')
+    if arguments.command == 'list':
+        for scenario in scenarios:
+            print(f'{scenario.slug:<28} {scenario.mode:<9} {scenario.name}')
+        return
+
+    selected = [
+        s for s in scenarios if not arguments.names or s.slug in arguments.names
+    ]
+    missing = set(arguments.names) - {s.slug for s in selected}
+    if missing:
+        sys.exit(f'error: unknown scenario(s): {", ".join(sorted(missing))}')
+    live = _live_model(arguments.env_file) if arguments.record else None
+    try:
+        require_network()
+        binaries = build(skip=arguments.skip_build)
+    except HarnessError as exc:
+        sys.exit(f'error: {exc}')
+
+    failed = 0
+    with _local_ntp(enabled=not arguments.no_local_ntp):
+        for scenario in selected:
+            failures = run_scenario(scenario, binaries, live)
+            status = 'PASS' if not failures else 'FAIL'
+            print(f'{status} {scenario.slug}: {scenario.name}', flush=True)
+            for failure in failures:
+                print(f'    - {failure}')
+            failed += bool(failures)
+    print(f'\n{len(selected) - failed} passed, {failed} failed')
+    print(f'artifacts: {ARTIFACTS}')
+    sys.exit(1 if failed else 0)
+
+
+def run_scenario(
+    scenario: Scenario, binaries: Binaries, live: LiveModel | None
+) -> list[str]:
+    """Run one scenario in an isolated state directory and return failures."""
+
+    artifacts = ARTIFACTS / scenario.slug
+    shutil.rmtree(artifacts, ignore_errors=True)
+    artifacts.mkdir(parents=True)
+    tape_server = TapeServer(TAPE_PORT, artifacts / 'llm-tape.log')
+    system = SystemProcess(binaries, artifacts / 'state', artifacts / 'system.log')
+    recording = scenario.mode == 'recorded' and live is not None
+    try:
+        if scenario.mode == 'scripted':
+            tape = artifacts / 'scripted.jsonl'
+            interactions = write_scripted_tape(scenario.responses, tape)
+            api_path, model, api_key = SCRIPTED_API_PATH, 'scripted', 'scripted'
+            tape_server.replay(tape, artifacts / 'requests')
+        elif recording:
+            assert live is not None
+            parts = urlsplit(live.base_url)
+            api_path, model, api_key = parts.path.rstrip('/'), live.model, live.api_key
+            interactions = 0
+            tape_server.record(f'{parts.scheme}://{parts.netloc}', scenario.tape)
+        elif scenario.mode == 'none':
+            interactions, api_path, model, api_key = 0, '', '', ''
+        else:
+            if scenario.tape is None or not scenario.tape.exists():
+                return [f'no recorded tape at {scenario.tape}; run with --record']
+            interactions, api_path = _recorded_shape(scenario.tape)
+            model, api_key = 'recorded', 'recorded'
+            tape_server.replay(scenario.tape, artifacts / 'requests')
+
+        system.start()
+        http_failures = []
+        for check in scenario.http:
+            status, body = http_request(check.method, check.path, check.body)
+            if status != check.status:
+                http_failures.append(
+                    f'{check.method} {check.path}: status {status} != {check.status}: '
+                    f'{body[:200]}'
+                )
+            http_failures += [
+                f'{check.method} {check.path}: body lacks {needle!r}: {body[:300]}'
+                for needle in check.body_contains
+                if needle not in body
+            ]
+        records: list[dict[str, object]] = []
+        if scenario.steps:
+            configure_model(tape_server.base_url(api_path), model, api_key)
+            records = chat(
+                binaries.cli,
+                [step.send for step in scenario.steps],
+                TURN_TIMEOUT_SECONDS,
+            )
+        for pattern in scenario.await_logs:
+            system.wait_for_log(pattern, scenario.await_seconds)
+        (artifacts / 'transcript.jsonl').write_text(
+            ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in records),
+            encoding='utf-8',
+        )
+    except HarnessError as exc:
+        return [str(exc)]
+    finally:
+        system.stop()
+        tape_server.stop()
+
+    failures = http_failures + check_transcript(scenario, records)
+    failures += check_logs(scenario, system.log())
+    if not recording and scenario.mode != 'none':
+        failures += check_replay(tape_server.counts(), interactions)
+        failures += check_requests(scenario, artifacts / 'requests')
+    return failures
+
+
+@contextlib.contextmanager
+def _local_ntp(enabled: bool) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+    try:
+        ntp = LocalNtp().__enter__()
+    except HarnessError as exc:
+        print(f'warning: local NTP unavailable ({exc}); time scenarios may fail')
+        yield
+        return
+    try:
+        yield
+    finally:
+        ntp.__exit__(None, None, None)
+
+
+def _recorded_shape(tape: Path) -> tuple[int, str]:
+    paths = [
+        event['path']
+        for event in map(json.loads, tape.read_text(encoding='utf-8').splitlines())
+        if event.get('kind') == 'request'
+    ]
+    if not paths or not paths[0].endswith(CHAT_PATH):
+        raise HarnessError(f'{tape} contains no chat-completions requests')
+    return len(paths), paths[0][: -len(CHAT_PATH)]
+
+
+def _live_model(env_file: Path | None) -> LiveModel:
+    values = dict(os.environ)
+    if env_file is not None:
+        for line in env_file.read_text(encoding='utf-8').splitlines():
+            key, separator, value = line.strip().partition('=')
+            if separator and not key.startswith('#'):
+                values[key.strip()] = value.strip()
+    try:
+        return LiveModel(
+            base_url=values['BARRACUDA_LLM_BASE_URL'],
+            api_key=values['BARRACUDA_LLM_API_KEY'],
+            model=values['BARRACUDA_LLM_MODEL'],
+        )
+    except KeyError as exc:
+        sys.exit(f'error: recording needs {exc.args[0]}')
+
+
+if __name__ == '__main__':
+    main()

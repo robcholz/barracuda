@@ -112,6 +112,17 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
             },
         }
     };
+    match result.outcome {
+        VmRunOutcome::Error => log::warn!(
+            "VM run {run_id} failed: {:?} {}",
+            result.error,
+            result.diagnostic.as_deref().unwrap_or_default()
+        ),
+        outcome => log::info!(
+            "VM run {run_id} finished: {outcome:?}, {} output line(s)",
+            result.output.len()
+        ),
+    }
     let _ignored = completion.send(result);
 }
 

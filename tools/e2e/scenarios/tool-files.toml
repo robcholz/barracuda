@@ -1,0 +1,33 @@
+name = "File tools"
+description = "file_write, file_read, file_list, file_edit, file_move, and file_delete round-trip through the scoped filesystem."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/notes/todo.txt", content = "buy milk\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_edit", arguments = { path = "/data/notes/todo.txt", old_text = "milk", new_text = "tea" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_read", arguments = { path = "/data/notes/todo.txt" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_move", arguments = { from = "/data/notes/todo.txt", to = "/data/notes/done.txt" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_list", arguments = { path = "/data/notes" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_delete", arguments = { path = "/data/notes/done.txt" } }]
+
+[[model.responses]]
+text = "Notes updated."
+
+[[steps]]
+send = "Manage my notes."
+reply_contains = ["Notes updated."]

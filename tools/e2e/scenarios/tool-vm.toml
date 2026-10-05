@@ -1,0 +1,38 @@
+name = "Lua VM tool"
+description = "vm_run executes a sandboxed Lua script that uses the filesystem and message queue packages."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = """
+print('sum', 1 + 2)
+local queue = require('message_queue')
+queue.push('e2e', 'queued')
+print('queue', queue.receive('e2e'))
+local file = assert(io.open('/data/e2e.txt', 'w'))
+file:write('persisted')
+file:close()
+local reader = assert(io.open('/data/e2e.txt', 'r'))
+print('file', reader:read('a'))
+reader:close()
+""" } }]
+
+[[model.responses]]
+text = "The script is running."
+
+[[model.responses]]
+request_contains = ['success', 'queued', 'persisted']
+text = "The script printed its results."
+
+[[steps]]
+send = "Run a script."
+reply_contains = ["The script is running."]
+tool_contains = ['{"run_id":1}']
+
+[[steps]]
+send = "What did it print?"
+reply_contains = ["The script printed its results."]

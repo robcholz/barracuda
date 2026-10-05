@@ -1,0 +1,23 @@
+name = "Multi-turn session reuse"
+description = "A second Web message continues the same Agent session."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+text = "First answer."
+
+[[model.responses]]
+text = "Second answer."
+
+[[steps]]
+send = "first"
+reply_contains = ["First answer."]
+
+[[steps]]
+send = "second"
+reply_contains = ["Second answer."]
+
+[logs]
+expect = ["Agent created session `session-1`"]
+forbid = ['\bERROR\b', 'panicked at', "created session `session-2`"]

@@ -301,6 +301,11 @@ impl Scheduler {
                     break;
                 };
                 let topic = Topic::try_from(occurrence.id.as_str())?;
+                log::info!(
+                    "schedule `{}` triggered run {}",
+                    occurrence.id.as_str(),
+                    occurrence.run_number
+                );
                 workflow.emit_to::<SchedulerTriggered>(
                     topic,
                     serde_json::json!({

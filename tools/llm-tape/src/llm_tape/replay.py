@@ -14,6 +14,7 @@ from .tape import Interaction, Tape, load_tape
 
 CONTROL_PATH = '/_llm_tape/health'
 CURSOR_KEY = web.AppKey('cursor', 'ReplayCursor')
+CAPTURE_KEY = web.AppKey('capture', Path)
 
 
 class ReplayCursor:
@@ -50,8 +51,16 @@ class ReplayCursor:
             return interaction, ''
 
 
-def create_replay_app(tape: Path | str | Tape) -> web.Application:
-    """Create an offline replay application for a validated tape."""
+def create_replay_app(
+    tape: Path | str | Tape, capture_requests: Path | None = None
+) -> web.Application:
+    """Create an offline replay application for a validated tape.
+
+    When `capture_requests` is set, every matched request body is written to
+    `<capture_requests>/<interaction_id>.body` so tests can inspect what the
+    client sent. Replay never needs credentials, so this stays opt-in for
+    test harnesses rather than recording.
+    """
 
     loaded = tape if isinstance(tape, Tape) else load_tape(tape)
     logger.info(
@@ -62,6 +71,9 @@ def create_replay_app(tape: Path | str | Tape) -> web.Application:
     )
     app = web.Application(client_max_size=64 * 1024**2)
     app[CURSOR_KEY] = ReplayCursor(loaded)
+    if capture_requests is not None:
+        capture_requests.mkdir(parents=True, exist_ok=True)
+        app[CAPTURE_KEY] = capture_requests
     app.router.add_get(CONTROL_PATH, _health)
     app.router.add_route('*', '/{tail:.*}', _replay_request)
     return app
@@ -93,7 +105,7 @@ async def _replay_request(request: web.Request) -> web.StreamResponse:
     # content-agnostic. This keeps HTTP/1.1 connection reuse correct and makes
     # the recorded response offsets include the same request-upload phase as
     # record mode.
-    await request.read()
+    body = await request.read()
     interaction, error = await cursor.match(
         method=request.method,
         path=request.path,
@@ -112,6 +124,9 @@ async def _replay_request(request: web.Request) -> web.StreamResponse:
         )
 
     recorded_request = interaction.request
+    capture = request.app.get(CAPTURE_KEY)
+    if capture is not None:
+        (capture / f'{recorded_request.interaction_id}.body').write_bytes(body)
     logger.info(
         'replay request_matched interaction={} call_index={} status={} chunks={} '
         'recorded_end_us={}',

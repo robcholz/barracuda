@@ -1,0 +1,42 @@
+name = "WebServer, portal, and configuration endpoints"
+description = "Direct HTTP checks against the System WebServer: the portal shell and manifest, Plugin assets, Wi-Fi status on a host-managed network, and model API request validation."
+
+[model]
+mode = "none"
+
+[[http]]
+path = "/portal/"
+body_contains = ["<html"]
+
+[[http]]
+path = "/portal/entries.json"
+body_contains = ['"id":"imessage-web"', '"id":"agent"', '"id":"wifi"']
+
+[[http]]
+path = "/portal/assets/imessage-web/entry.js"
+body_contains = ["/ws/message"]
+
+[[http]]
+path = "/portal/assets/missing/entry.js"
+status = 404
+
+[[http]]
+path = "/api/wifi"
+body_contains = ['"station_configuration":false', '"station":{"state":"connected"}']
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = "[]"
+status = 400
+
+[[http]]
+method = "PUT"
+path = "/api/model-api"
+status = 405
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024}]'
+status = 204

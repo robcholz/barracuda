@@ -116,12 +116,12 @@ async fn run_connected(
 
 /// Maps the Web protocol's message lifecycle onto terminal rendering actions.
 #[derive(Default)]
-struct Renderer {
+pub(crate) struct Renderer {
     extra: Option<MessageKind>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum RenderAction {
+pub(crate) enum RenderAction {
     Start(MessageKind),
     Delta(String),
     Print(String),
@@ -129,7 +129,7 @@ enum RenderAction {
 }
 
 impl Renderer {
-    fn absorb(&mut self, frame: &str) -> Vec<RenderAction> {
+    pub(crate) fn absorb(&mut self, frame: &str) -> Vec<RenderAction> {
         let mut actions = Vec::new();
         let Some(frame) = parse_sse(frame) else {
             return actions;
@@ -249,7 +249,7 @@ fn event_text(payload: &serde_json::Value) -> &str {
 
 /// Presentation role mirrored from the gateway `kind`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum MessageKind {
+pub(crate) enum MessageKind {
     #[default]
     Reply,
     Reasoning,
@@ -258,6 +258,16 @@ enum MessageKind {
 }
 
 impl MessageKind {
+    /// Stable machine-readable role used by the scripted channel.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Reply => "reply",
+            Self::Reasoning => "reasoning",
+            Self::Tool => "tool",
+            Self::Notice => "notice",
+        }
+    }
+
     fn from_data(data: &serde_json::Value) -> Self {
         match data.get("kind").and_then(serde_json::Value::as_str) {
             Some("reasoning") => Self::Reasoning,

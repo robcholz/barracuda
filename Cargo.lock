@@ -2414,6 +2414,7 @@ dependencies = [
  "embassy-time",
  "embedded-alloc",
  "getset",
+ "log",
  "serde",
  "thiserror 2.0.18",
 ]

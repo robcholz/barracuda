@@ -192,6 +192,7 @@ impl VmRuntime {
         })
         .map_err(|_error| DispatchError::Busy)?;
         spawner.spawn(task);
+        log::info!("VM run {run_id} started");
         Ok(VmRun::new(run_id, updates, result, cancellation))
     }
 

@@ -113,3 +113,19 @@ async def test_health_does_not_consume_interaction(tmp_path):
                 assert replayed.status == 201
     finally:
         await runner.cleanup()
+
+
+async def test_capture_requests_writes_matched_bodies(tmp_path):
+    path = tmp_path / 'run.llmtape'
+    capture = tmp_path / 'requests'
+    await _make_tape(path, response_at_us=0, chunk_at_us=0)
+    runner, base_url = await _serve(create_replay_app(path, capture))
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f'{base_url}/v1/messages', data=b'{"prompt":"hi"}'
+            ) as response:
+                await response.read()
+        assert (capture / 'call-000000.body').read_bytes() == b'{"prompt":"hi"}'
+    finally:
+        await runner.cleanup()
