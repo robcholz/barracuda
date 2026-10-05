@@ -3,8 +3,8 @@ use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
 use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 
@@ -71,7 +71,7 @@ type AgentChannel = (
 
 impl AgentHandle {
     pub(super) fn channel() -> AgentChannel {
-        let (commands, receiver) = async_channel::unbounded();
+        let (commands, receiver) = local_channel::channel();
         let activity = Rc::new(Cell::new(AgentActivity::Running));
         let awaiting_approval = Rc::new(RefCell::new(None));
         (
@@ -92,11 +92,7 @@ impl AgentHandle {
             AgentActivity::Closed => return Err(AgentDispatchError::Closed),
             AgentActivity::Idle => self.activity.set(AgentActivity::Running),
         }
-        if self
-            .commands
-            .try_send(AgentCommand::Dispatch(message))
-            .is_err()
-        {
+        if self.commands.send(AgentCommand::Dispatch(message)).is_err() {
             self.activity.set(AgentActivity::Closed);
             return Err(AgentDispatchError::Closed);
         }
@@ -105,7 +101,7 @@ impl AgentHandle {
 
     pub fn interrupt(&self) {
         if self.activity.get() == AgentActivity::Running {
-            let _ = self.commands.try_send(AgentCommand::Interrupt);
+            let _ = self.commands.send(AgentCommand::Interrupt);
         }
     }
 
@@ -113,7 +109,7 @@ impl AgentHandle {
         if self.activity.replace(AgentActivity::Closed) == AgentActivity::Closed {
             return;
         }
-        let _ = self.commands.try_send(AgentCommand::Cancel);
+        let _ = self.commands.send(AgentCommand::Cancel);
     }
 
     pub fn resolve_approval(
@@ -134,7 +130,7 @@ impl AgentHandle {
         awaiting.take();
         drop(awaiting);
         self.commands
-            .try_send(AgentCommand::ResolveApproval {
+            .send(AgentCommand::ResolveApproval {
                 tool_call_id,
                 decision,
             })

@@ -2,17 +2,15 @@ use alloc::{
     borrow::ToOwned, boxed::Box, collections::BTreeSet, collections::VecDeque, format,
     string::String, string::ToString, vec::Vec,
 };
-use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
 use barracuda_runtime_utils::oneshot;
 use barracuda_runtime_utils::stream::StreamPart;
-use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use portable_atomic_util::Arc;
 
@@ -213,7 +211,7 @@ where
     managed_agents: BTreeSet<barracuda_agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
-    commands: Pin<Box<Receiver<SessionCommand>>>,
+    commands: Receiver<SessionCommand>,
     next_source: PollSource,
 
     client: Option<OpenSession>,
@@ -234,7 +232,7 @@ where
         state: DurableState<SessionPersistentState>,
         approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
-        let (command_sender, commands) = async_channel::unbounded();
+        let (command_sender, commands) = local_channel::channel();
         (
             Self {
                 session,
@@ -250,7 +248,7 @@ where
                 orchestration: SessionOrchestration::new(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
-                commands: Box::pin(commands),
+                commands,
                 next_source: PollSource::Command,
                 client: None,
                 next_lease: 1,
@@ -270,7 +268,7 @@ where
             self.next_source = source.next();
             match source {
                 PollSource::Command => {
-                    if let Poll::Ready(command) = self.commands.as_mut().poll_next(context) {
+                    if let Poll::Ready(command) = self.commands.poll_recv(context) {
                         match command {
                             Some(command) => self.handle_command(command),
                             None => self.request_shutdown(),
@@ -1033,13 +1031,13 @@ where
 
     fn emit_closed(&mut self, reason: SessionCloseReason) {
         if let Some(client) = self.client.take() {
-            let _ = client.events.try_send(SessionEvent::Closed(reason));
+            let _ = client.events.send(SessionEvent::Closed(reason));
         }
     }
 
     fn emit(&self, event: SessionEvent) {
         if let Some(client) = &self.client {
-            let _ = client.events.try_send(event);
+            let _ = client.events.send(event);
         }
     }
 }

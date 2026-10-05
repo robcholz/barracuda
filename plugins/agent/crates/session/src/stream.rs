@@ -10,9 +10,9 @@ use core::error::Error;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_tool::ToolOutput;
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{Receiver, Sender};
 use barracuda_runtime_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -224,7 +224,7 @@ pub enum SessionError {
 pub struct SessionStream {
     lease: u64,
     commands: Sender<SessionCommand>,
-    events: Pin<Box<Receiver<SessionEvent>>>,
+    events: Receiver<SessionEvent>,
     terminated: bool,
 }
 
@@ -237,7 +237,7 @@ impl SessionStream {
         Self {
             lease,
             commands,
-            events: Box::pin(events),
+            events,
             terminated: false,
         }
     }
@@ -250,7 +250,7 @@ impl Stream for SessionStream {
         if self.terminated {
             return Poll::Ready(None);
         }
-        match self.events.as_mut().poll_next(context) {
+        match self.events.poll_recv(context) {
             Poll::Ready(Some(event)) => {
                 if matches!(&event, SessionEvent::Closed(_)) {
                     self.terminated = true;
@@ -272,7 +272,7 @@ impl Drop for SessionStream {
             return;
         }
         let (ack, _result) = barracuda_runtime_utils::oneshot::channel();
-        let _ = self.commands.try_send(SessionCommand::Close {
+        let _ = self.commands.send(SessionCommand::Close {
             lease: self.lease,
             ack,
         });

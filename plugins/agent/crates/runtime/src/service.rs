@@ -7,12 +7,12 @@ use core::{
     task::{Context, Poll},
 };
 
-use async_channel::Sender;
 use barracuda_agent_memory::LongTermInitError;
 use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersistence};
 use barracuda_agent_skill::SkillError;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
+use barracuda_runtime_utils::local_channel::{self, Sender};
 use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -102,7 +102,7 @@ impl RuntimeControl {
         Tcp: TcpConnect + 'static,
         Resolver: Dns + 'static,
     {
-        let (commands, command_rx) = async_channel::unbounded();
+        let (commands, command_rx) = local_channel::channel();
         let api_manager = SharedApiManager::default();
         let worker_api_manager = Arc::clone(&api_manager);
         let future = Box::pin(async move {
@@ -169,7 +169,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::OpenSession { session, ack })
-            .await
             .map_err(|_| OpenSessionError::WorkerStopped)?;
         result.await.unwrap_or(Err(OpenSessionError::WorkerStopped))
     }
@@ -182,7 +181,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::CreateSession { persistence, ack })
-            .await
             .map_err(|_| SessionCreateError::WorkerStopped)?;
         result
             .await
@@ -195,7 +193,6 @@ impl RuntimeControl {
         if self
             .commands
             .send(RuntimeCommand::ListSessions { ack })
-            .await
             .is_err()
         {
             return Vec::new();
@@ -211,7 +208,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::DeleteSession { session, ack })
-            .await
             .map_err(|_| SessionDeleteError::WorkerStopped)?;
         result
             .await
@@ -220,7 +216,7 @@ impl RuntimeControl {
 
     /// Ask the service to stop after its live actors finish closing.
     pub(crate) async fn shutdown(&self) {
-        let _ = self.commands.send(RuntimeCommand::Stop).await;
+        let _ = self.commands.send(RuntimeCommand::Stop);
     }
 }
 

@@ -801,7 +801,6 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestKind, IterationEvent, ProviderUsage,
     SessionCloseReason, SessionControl, SessionEvent, SessionId, SessionStream, TurnEvent,
@@ -811,6 +810,8 @@ use barracuda_workflow_plugin::{
     EmitError, Event, WorkflowActionRegistration, WorkflowActionRegistry,
     WorkflowActionRegistryError, WorkflowService,
 };
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use futures_lite::{future, future::poll_fn, Stream};
 use serde_json::{json, Map, Value};
 
@@ -835,8 +836,8 @@ struct RegistryState {
 
 struct RegistryInner {
     state: RefCell<RegistryState>,
-    changed: Sender<()>,
-    changes: Receiver<()>,
+    /// Wakes the event loop when a session is added.
+    changed: Signal<NoopRawMutex, ()>,
 }
 
 #[derive(Clone)]
@@ -844,14 +845,12 @@ pub(crate) struct SessionRegistry(Rc<RegistryInner>);
 
 impl Default for SessionRegistry {
     fn default() -> Self {
-        let (changed, changes) = async_channel::bounded(1);
         Self(Rc::new(RegistryInner {
             state: RefCell::new(RegistryState {
                 next_run: 1,
                 sessions: BTreeMap::new(),
             }),
-            changed,
-            changes,
+            changed: Signal::new(),
         }))
     }
 }
@@ -879,7 +878,7 @@ impl SessionRegistry {
             .sessions
             .insert(session, OpenedSession { control, events });
         drop(state);
-        let _ignored = self.0.changed.try_send(());
+        self.0.changed.signal(());
         run
     }
 
@@ -887,7 +886,7 @@ impl SessionRegistry {
         loop {
             let event = poll_fn(|context| self.poll_event(context));
             let changed = async {
-                let _ignored = self.0.changes.recv().await;
+                self.0.changed.wait().await;
                 None
             };
             if let Some(event) = future::or(event, changed).await {

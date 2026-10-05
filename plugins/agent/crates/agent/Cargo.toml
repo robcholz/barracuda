@@ -38,7 +38,6 @@ embassy-sync.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
-async-channel.workspace = true
 # The `Stream` trait `async_channel::Receiver` implements, so
 # `SessionEventStream` can poll it. `default-features = false` keeps this
 # `no_std`-friendly for the device.

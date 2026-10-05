@@ -329,7 +329,6 @@ name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "async-stream",
  "barracuda-agent-context",
  "barracuda-agent-memory",
@@ -451,7 +450,6 @@ dependencies = [
 name = "barracuda-agent-multiagent"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-permission",
  "barracuda-agent-tool",
@@ -494,7 +492,6 @@ dependencies = [
 name = "barracuda-agent-plugin"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent-runtime",
  "barracuda-captive-portal-plugin",
  "barracuda-model-api",
@@ -537,7 +534,6 @@ name = "barracuda-agent-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-memory",
  "barracuda-agent-persistence",
@@ -579,7 +575,6 @@ dependencies = [
 name = "barracuda-agent-session"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-multiagent",
  "barracuda-agent-permission",

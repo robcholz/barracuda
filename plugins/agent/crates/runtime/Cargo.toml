@@ -43,7 +43,6 @@ barracuda-agent-tool = { path = "../tool" }
 # shared client facade; time is provided globally by `embassy-time`.
 barracuda-vfs.workspace = true
 barracuda-runtime-utils.workspace = true
-async-channel.workspace = true
 futures-core.workspace = true
 log = { version = "0.4", default-features = false }
 thiserror = { version = "2", default-features = false }

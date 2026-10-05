@@ -13,7 +13,6 @@ json-validator.workspace = true
 barracuda-agent = { path = "../agent", features = ["multiagent"] }
 barracuda-agent-permission = { path = "../permission" }
 barracuda-agent-tool = { path = "../tool" }
-async-channel.workspace = true
 futures-core.workspace = true
 getset = "0.1.7"
 log = { version = "0.4", default-features = false }

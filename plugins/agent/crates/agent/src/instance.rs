@@ -6,10 +6,10 @@ use core::{
     fmt::Write as _,
 };
 
-use async_channel::{Receiver, TryRecvError};
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::{ToolDetachHandle, ToolDetachUpdate, ToolInvocation, ToolOutput};
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{Receiver, TryRecvError};
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
 use futures_util::stream::SelectAll;
@@ -137,7 +137,7 @@ impl AgentEphemeralState {
                 Command(Option<AgentCommand>),
                 Detached(DetachedNotification),
             }
-            match future::or(async { Wake::Command(commands.recv().await.ok()) }, async {
+            match future::or(async { Wake::Command(commands.recv().await) }, async {
                 Wake::Detached(future::poll_fn(|context| self.poll_update(context)).await)
             })
             .await
@@ -287,7 +287,7 @@ where
                             Engine(Option<Result<AgentEngineEvent, AgentError>>),
                         }
                         let wake = future::or(
-                            async { ActiveWake::Command(commands.recv().await.ok()) },
+                            async { ActiveWake::Command(commands.recv().await) },
                             future::or(
                                 async {
                                     ActiveWake::Detached(

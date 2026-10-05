@@ -7,12 +7,12 @@ use alloc::{
 use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};
 
-use async_channel::Sender;
 use barracuda_agent_persistence::{
     DurableState, InvalidInstanceId, PersistenceError, SharedPersistence,
 };
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
+use barracuda_runtime_utils::local_channel::{self, Sender};
 use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -246,7 +246,7 @@ where
         if !self.ensure_actor(session) {
             return Err(OpenSessionError::SessionNotFound(session));
         }
-        let (events, receiver) = async_channel::unbounded::<SessionEvent>();
+        let (events, receiver) = local_channel::channel::<SessionEvent>();
         let Some(task) = self
             .sessions
             .get_mut(&session)
