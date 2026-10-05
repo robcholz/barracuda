@@ -126,22 +126,13 @@ impl VmRuntime {
     ///
     /// Returns an error when backing storage for the memory pool cannot be reserved.
     pub fn new() -> Result<Self, VmMemoryPoolError> {
-        Self::with_memory_bytes(VM_MEMORY_BYTES_PER_SLOT)
-    }
-
-    /// Creates an unstarted VM runtime with an explicit fixed Lua heap size per slot.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the size is invalid or backing storage cannot be reserved.
-    pub fn with_memory_bytes(bytes: usize) -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
             state: Rc::new(RuntimeState {
                 spawner: Cell::new(None),
                 slots: core::array::from_fn(|_index| RunSlot::new()),
                 next_run_id: Cell::new(1),
             }),
-            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, bytes)?,
+            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, VM_MEMORY_BYTES_PER_SLOT)?,
         })
     }
 

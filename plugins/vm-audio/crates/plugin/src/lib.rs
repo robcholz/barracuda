@@ -155,9 +155,6 @@ where
         methods.add_method("descriptor", |handle, (): ()| {
             Some(handle.descriptor().map(descriptor_values))
         });
-        methods.add_method("format", |handle, (): ()| {
-            Some(handle.descriptor().map(descriptor_values))
-        });
         methods.add_method_mut("set_volume", |handle, percent: i64| {
             Some(handle.set_volume(percent))
         });
@@ -554,7 +551,7 @@ mod tests {
         package.install(&mut lua).expect("install audio package");
 
         let result: bool = futures_lite::future::block_on(
-            lua.load("local audio = require('audio')\nlocal player <close> = audio.open()\nlocal rate, channels, bits = player:descriptor()\nlocal format_rate = player:format()\nlocal wav = 'RIFF\\040\\000\\000\\000WAVEfmt \\016\\000\\000\\000\\001\\000\\002\\000\\128\\187\\000\\000\\000\\238\\002\\000\\004\\000\\016\\000data\\004\\000\\000\\000\\001\\000\\002\\000'\nplayer:set_volume(50)\nplayer:play('\\001\\000\\002\\000')\nplayer:play_wav(wav)\nlocal pcm = player:record(2)\nreturn rate == 48000 and format_rate == rate and channels == 2 and bits == 16 and #pcm == 8")
+            lua.load("local audio = require('audio')\nlocal player <close> = audio.open()\nlocal rate, channels, bits = player:descriptor()\nlocal wav = 'RIFF\\040\\000\\000\\000WAVEfmt \\016\\000\\000\\000\\001\\000\\002\\000\\128\\187\\000\\000\\000\\238\\002\\000\\004\\000\\016\\000data\\004\\000\\000\\000\\001\\000\\002\\000'\nplayer:set_volume(50)\nplayer:play('\\001\\000\\002\\000')\nplayer:play_wav(wav)\nlocal pcm = player:record(2)\nreturn rate == 48000 and channels == 2 and bits == 16 and #pcm == 8")
                 .eval_async(),
         )
         .expect("run audio application");

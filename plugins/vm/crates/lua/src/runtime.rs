@@ -319,12 +319,6 @@ impl Lua {
         Ok(())
     }
 
-    /// Removes the configured instruction hook from future executions.
-    pub fn clear_instruction_hook(&mut self) {
-        self.state.instruction_hook.replace(None);
-        self.state.instruction_hook_interval.set(0);
-    }
-
     pub fn register<A, R, F>(&mut self, name: &str, function: F) -> Result<()>
     where
         A: FromLuaMulti + 'static,

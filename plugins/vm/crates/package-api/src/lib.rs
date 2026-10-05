@@ -83,12 +83,6 @@ impl LuaPackageRegistry {
         Ok(())
     }
 
-    /// Returns the number of registered packages.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.state.lock().entries.len()
-    }
-
     /// Returns whether no packages are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {

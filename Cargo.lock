@@ -1118,7 +1118,6 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embedded-hal 1.0.0",
- "futures-lite",
 ]
 
 [[package]]
@@ -2356,7 +2355,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-lua",
  "barracuda-plugin",
- "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
  "barracuda-workflow-plugin",

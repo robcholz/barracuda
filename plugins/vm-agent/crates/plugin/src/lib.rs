@@ -46,7 +46,6 @@ const REQUEST_QUEUE_DEPTH: usize = MAX_CONCURRENT_ASKS;
 const OUTPUT_QUEUE_DEPTH: usize = 8;
 
 /// Installs the require-only `agent` package into every VM Lua state.
-#[derive(Default)]
 #[barracuda_plugin::macros::plugin]
 pub struct VmAgentPlugin {
     runtime: Option<VmAgentRuntime>,

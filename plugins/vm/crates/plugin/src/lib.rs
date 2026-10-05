@@ -22,8 +22,8 @@ pub use barracuda_lua::{
 };
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
-    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,
-    VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
+    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse, VmRun,
+    VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
     VmRunState, VmRunUpdate,
 };
 

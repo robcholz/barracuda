@@ -13,7 +13,6 @@ embedded-hal.workspace = true
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
-futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

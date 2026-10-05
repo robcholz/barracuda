@@ -19,36 +19,13 @@ use crate::{VmExecutionError, VmLimits, VmRunCompletion, VmRunOutcome, VmRunProg
 const MAX_OUTPUT_BYTES_PER_RUN: usize = 64 * 1024;
 const MAX_OUTPUT_LINES_PER_RUN: usize = 1024;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ExecutionErrorKind {
-    VmCreate,
-    VmConfigure,
-    LuaLoad,
-    LuaRuntime,
-    UnexpectedYield,
-    LuaMemory,
-}
-
-impl ExecutionErrorKind {
-    const fn public(self) -> VmExecutionError {
-        match self {
-            Self::VmCreate => VmExecutionError::VmCreate,
-            Self::VmConfigure => VmExecutionError::VmConfigure,
-            Self::LuaLoad => VmExecutionError::LuaLoad,
-            Self::LuaRuntime => VmExecutionError::LuaRuntime,
-            Self::UnexpectedYield => VmExecutionError::UnexpectedYield,
-            Self::LuaMemory => VmExecutionError::LuaMemory,
-        }
-    }
-}
-
 struct ExecutionError {
-    kind: ExecutionErrorKind,
+    kind: VmExecutionError,
     diagnostic: String,
 }
 
 impl ExecutionError {
-    fn new(kind: ExecutionErrorKind, diagnostic: &str) -> Self {
+    fn new(kind: VmExecutionError, diagnostic: &str) -> Self {
         Self {
             kind,
             diagnostic: diagnostic.to_string(),
@@ -102,7 +79,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
     if !pending_output.is_empty() {
         if output.len() >= MAX_OUTPUT_LINES_PER_RUN {
             result = Err(ExecutionError::new(
-                ExecutionErrorKind::LuaRuntime,
+                VmExecutionError::LuaRuntime,
                 "Lua output limit exceeded",
             ));
         } else {
@@ -130,7 +107,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
                 run_id,
                 outcome: VmRunOutcome::Error,
                 output,
-                error: Some(error.kind.public()),
+                error: Some(error.kind),
                 diagnostic: Some(error.diagnostic),
             },
         }
@@ -159,17 +136,17 @@ async fn drive_execution(
     let installed = setup
         .builtin_packages
         .install(&mut lua)
-        .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+        .map_err(|error| ExecutionError::new(VmExecutionError::VmConfigure, error.message()))?;
     let (lua_input, mut output) = installed.into_io();
     setup
         .package_registry
         .install(&mut lua)
-        .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+        .map_err(|error| ExecutionError::new(VmExecutionError::VmConfigure, error.message()))?;
     lua.set_instruction_hook(setup.limits.instruction_hook_interval(), {
         let yield_signal = setup.yield_signal.clone();
         move || yield_signal.mark()
     })
-    .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+    .map_err(|error| ExecutionError::new(VmExecutionError::VmConfigure, error.message()))?;
 
     let mut execution = lua.run(&setup.source);
     loop {
@@ -192,7 +169,7 @@ async fn drive_execution(
                 });
                 match setup.control.next_input().await {
                     Some(input) => lua_input.send(input.as_str()).await.map_err(|error| {
-                        ExecutionError::new(ExecutionErrorKind::LuaRuntime, error.message())
+                        ExecutionError::new(VmExecutionError::LuaRuntime, error.message())
                     })?,
                     None if setup.control.is_cancelled() => return Ok(()),
                     None => lua_input.close(),
@@ -221,11 +198,11 @@ fn append_output(
     chunk: &str,
 ) -> Result<(), ExecutionError> {
     *output_bytes = output_bytes.checked_add(chunk.len()).ok_or_else(|| {
-        ExecutionError::new(ExecutionErrorKind::LuaRuntime, "Lua output limit exceeded")
+        ExecutionError::new(VmExecutionError::LuaRuntime, "Lua output limit exceeded")
     })?;
     if *output_bytes > MAX_OUTPUT_BYTES_PER_RUN {
         return Err(ExecutionError::new(
-            ExecutionErrorKind::LuaRuntime,
+            VmExecutionError::LuaRuntime,
             "Lua output limit exceeded",
         ));
     }
@@ -235,7 +212,7 @@ fn append_output(
         if output_messages.len() >= MAX_OUTPUT_LINES_PER_RUN {
             pending_output.clear();
             return Err(ExecutionError::new(
-                ExecutionErrorKind::LuaRuntime,
+                VmExecutionError::LuaRuntime,
                 "Lua output limit exceeded",
             ));
         }
@@ -284,23 +261,23 @@ async fn next_execution_event(
 
 fn factory_error(error: &LuaError) -> ExecutionError {
     let kind = match error.kind() {
-        LuaErrorKind::Create => ExecutionErrorKind::VmCreate,
-        LuaErrorKind::Memory => ExecutionErrorKind::LuaMemory,
+        LuaErrorKind::Create => VmExecutionError::VmCreate,
+        LuaErrorKind::Memory => VmExecutionError::LuaMemory,
         LuaErrorKind::Load
         | LuaErrorKind::Runtime
         | LuaErrorKind::Conversion
-        | LuaErrorKind::UnexpectedYield => ExecutionErrorKind::VmConfigure,
+        | LuaErrorKind::UnexpectedYield => VmExecutionError::VmConfigure,
     };
     ExecutionError::new(kind, error.message())
 }
 
 fn execution_error(error: &LuaError) -> ExecutionError {
     let kind = match error.kind() {
-        LuaErrorKind::Load => ExecutionErrorKind::LuaLoad,
-        LuaErrorKind::Memory => ExecutionErrorKind::LuaMemory,
-        LuaErrorKind::UnexpectedYield => ExecutionErrorKind::UnexpectedYield,
+        LuaErrorKind::Load => VmExecutionError::LuaLoad,
+        LuaErrorKind::Memory => VmExecutionError::LuaMemory,
+        LuaErrorKind::UnexpectedYield => VmExecutionError::UnexpectedYield,
         LuaErrorKind::Create | LuaErrorKind::Runtime | LuaErrorKind::Conversion => {
-            ExecutionErrorKind::LuaRuntime
+            VmExecutionError::LuaRuntime
         }
     };
     ExecutionError::new(kind, error.message())

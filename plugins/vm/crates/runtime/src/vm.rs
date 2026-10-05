@@ -337,13 +337,6 @@ impl Vm {
         })
     }
 
-    /// Replaces Lua execution limits.
-    #[must_use]
-    pub fn with_limits(mut self, limits: VmLimits) -> Self {
-        self.limits = limits;
-        self
-    }
-
     /// Installs the task spawner after Plugin registration completes.
     pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
         self.runtime.start(spawner)

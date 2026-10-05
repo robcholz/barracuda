@@ -82,12 +82,6 @@ impl VmWebServerPlugin {
     }
 }
 
-impl Default for VmWebServerPlugin {
-    fn default() -> Self {
-        Self
-    }
-}
-
 impl Plugin for VmWebServerPlugin {
     fn register<Storage>(
         &mut self,

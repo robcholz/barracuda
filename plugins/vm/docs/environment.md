@@ -212,8 +212,7 @@ pool.
 
 Exceeding the fixed per-execution Lua heap completes the execution with
 `outcome: "error"` and `error: "lua_memory"`.
-`VmRuntime::with_memory_bytes` can replace the default per-slot capacity when
-constructing the runtime. The Lua heap limit does not include owned source and
+The Lua heap limit does not include owned source and
 input strings, native callback objects, or Embassy task storage.
 
 Run output is capped at 64 KiB and 1,024 lines. File reads and individual file

@@ -392,12 +392,6 @@ impl VmFilesystemPlugin {
     }
 }
 
-impl Default for VmFilesystemPlugin {
-    fn default() -> Self {
-        Self
-    }
-}
-
 impl Plugin for VmFilesystemPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
@@ -513,7 +507,7 @@ fn prepare_file(
     path: String,
     mode: Option<String>,
 ) -> Result<PreparedFile> {
-    let path = resolve_path(path)?;
+    validate_path(&path)?;
     let (options, readable, writable) = open_mode(mode.as_deref().unwrap_or("r"))?;
     prepare(lua, state, path, options, readable, writable, false)
 }
@@ -902,14 +896,9 @@ fn validate_path(path: &str) -> Result<()> {
     }
 }
 
-fn resolve_path(path: String) -> Result<String> {
-    validate_path(&path)?;
-    Ok(path)
-}
-
 async fn remove_path(state: Arc<FilePackageState>, path: String) -> Result<bool> {
     ensure_active(&state)?;
-    let path = resolve_path(path)?;
+    validate_path(&path)?;
     let metadata = state.filesystem.metadata(&path).await.map_err(file_error)?;
     if metadata.is_dir() {
         state
@@ -929,8 +918,8 @@ async fn remove_path(state: Arc<FilePackageState>, path: String) -> Result<bool>
 
 async fn rename_path(state: Arc<FilePackageState>, from: String, to: String) -> Result<bool> {
     ensure_active(&state)?;
-    let from = resolve_path(from)?;
-    let to = resolve_path(to)?;
+    validate_path(&from)?;
+    validate_path(&to)?;
     state
         .filesystem
         .rename(&from, &to)

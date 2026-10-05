@@ -11,7 +11,6 @@ mod run;
 mod runtime;
 mod vm;
 
-pub use barracuda_vm_builtin_packages::BuiltinPackages;
 pub use memory::VmMemoryPoolError;
 #[cfg(feature = "test-fixture")]
 pub use memory::{FixedMemoryLua, FixedMemoryLuaError};

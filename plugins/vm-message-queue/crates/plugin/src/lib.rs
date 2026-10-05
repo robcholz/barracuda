@@ -34,12 +34,6 @@ impl MessageQueuePlugin {
     }
 }
 
-impl Default for MessageQueuePlugin {
-    fn default() -> Self {
-        Self
-    }
-}
-
 impl Plugin for MessageQueuePlugin {
     fn register<Storage>(
         &mut self,
