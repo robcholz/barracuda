@@ -12,7 +12,7 @@ mod network;
 mod platform;
 mod tls;
 
-pub use flash::{FileNorFlash, FileNorFlashError, VolatileNorFlash, VolatileNorFlashError};
+pub use flash::{FileNorFlash, FileNorFlashError};
 pub use layout::{FileLayout, FileLayoutError, FileRegion, FileRegionAccess};
 pub use network::{MacosNetworkError, DNS_ADDRESS, GATEWAY_ADDRESS, STACK_ADDRESS};
 pub use platform::{

@@ -1313,7 +1313,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-ina226",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -1803,7 +1802,6 @@ dependencies = [
 name = "barracuda-platform-test"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "embassy-embedded-hal 0.5.0",
@@ -1951,7 +1949,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-rx8130ce",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -1985,7 +1982,6 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "critical-section",
- "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -2159,7 +2155,6 @@ dependencies = [
  "barracuda-driver-pi4ioe5v6408",
  "barracuda-driver-st712x",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 

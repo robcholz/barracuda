@@ -1098,14 +1098,6 @@ pub struct DynamicPin {
     pin: Flex<'static>,
 }
 
-/// Converts a selected raw token into a runtime-configurable GPIO.
-#[must_use]
-pub fn dynamic_pin(pin: embassy_stm32::Peri<'static, impl embassy_stm32::gpio::Pin>) -> DynamicPin {
-    DynamicPin {
-        pin: Flex::new(pin),
-    }
-}
-
 impl ErrorType for DynamicPin {
     type Error = Infallible;
 }

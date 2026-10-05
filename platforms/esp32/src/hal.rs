@@ -941,14 +941,6 @@ pub struct DynamicPin {
     pin: Flex<'static>,
 }
 
-/// Converts a selected raw token into a runtime-configurable GPIO.
-#[must_use]
-pub fn dynamic_pin(pin: impl InputPin + OutputPin + 'static) -> DynamicPin {
-    DynamicPin {
-        pin: Flex::new(pin),
-    }
-}
-
 impl ErrorType for DynamicPin {
     type Error = core::convert::Infallible;
 }
@@ -1182,48 +1174,6 @@ pub fn exposed_i2c(
     frequency_hz: u32,
 ) -> Result<ExposedI2cBus, I2cConfigError> {
     Ok(ExposedI2cBus(i2c_device(i2c, scl, sda, frequency_hz)?))
-}
-
-/// Constructs a transmit-only async SPI bus explicitly exposed by the Board.
-pub fn exposed_spi_bus(
-    spi: impl SpiInstance + 'static,
-    sck: impl PeripheralOutput<'static> + 'static,
-    mosi: impl PeripheralOutput<'static> + 'static,
-    frequency_hz: u32,
-) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(ExposedSpiBus(spi_bus(spi, sck, mosi, frequency_hz)?))
-}
-
-/// Constructs a receive-only async SPI bus explicitly exposed by the Board.
-pub fn exposed_spi_bus_rx_only(
-    spi: impl SpiInstance + 'static,
-    sck: impl PeripheralOutput<'static> + 'static,
-    miso: impl PeripheralInput<'static> + 'static,
-    frequency_hz: u32,
-) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(ExposedSpiBus(spi_bus_rx_only(
-        spi,
-        sck,
-        miso,
-        frequency_hz,
-    )?))
-}
-
-/// Constructs a full-duplex async SPI bus explicitly exposed by the Board.
-pub fn exposed_spi_bus_full_duplex(
-    spi: impl SpiInstance + 'static,
-    sck: impl PeripheralOutput<'static> + 'static,
-    mosi: impl PeripheralOutput<'static> + 'static,
-    miso: impl PeripheralInput<'static> + 'static,
-    frequency_hz: u32,
-) -> Result<ExposedSpiBus, SpiConfigError> {
-    Ok(ExposedSpiBus(spi_bus_full_duplex(
-        spi,
-        sck,
-        mosi,
-        miso,
-        frequency_hz,
-    )?))
 }
 
 /// Constructs the delay provider used by synchronous peripheral implementations.

@@ -13,7 +13,7 @@ mod platform;
 mod tls;
 mod tun;
 
-pub use flash::{FileNorFlash, FileNorFlashError, VolatileNorFlash, VolatileNorFlashError};
+pub use flash::{FileNorFlash, FileNorFlashError};
 pub use layout::{FileLayout, FileLayoutError, FileRegion, FileRegionAccess};
 pub use network::LinuxNetworkError;
 pub use platform::{
