@@ -11,6 +11,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 critical-section = "1"
+# Selects the intrusive, allocation-free wait list for every async-channel and
+# async lock in the System instead of a heap-allocated queue per event.
+event-listener.workspace = true
 portable-atomic-util.workspace = true
 portable-atomic.workspace = true
 futures-core.workspace = true
