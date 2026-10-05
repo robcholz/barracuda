@@ -18,7 +18,7 @@ pub use inbound::{
     InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, InboundReceipt,
     MessageBody, WebService,
 };
-pub use model::{MediaPhase, WebDelivery, WebEvent, WebEventData};
+pub use model::{MediaPhase, WebDelivery, WebEvent, WebEventData, WebStreamEvent};
 #[cfg(feature = "server")]
 pub use server::WebBridge;
 pub use sse::SseError;

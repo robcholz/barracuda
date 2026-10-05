@@ -11,9 +11,35 @@ pub struct WebEvent {
     pub data: WebEventData,
 }
 
+/// Semantic Agent event retained in Web replay history.
+///
+/// Gateway events carry their payload in a fixed inline buffer sized for the
+/// largest chunk; history keeps only the bytes each payload actually uses.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebStreamEvent {
+    /// Agent session that owns the event stream.
+    pub session: String,
+    /// Agent-assigned event order.
+    pub sequence: u64,
+    /// Forward-compatible semantic event type.
+    pub event_type: String,
+    /// Complete JSON object payload.
+    pub payload: String,
+}
+
+impl From<SendStreamEvent> for WebStreamEvent {
+    fn from(event: SendStreamEvent) -> Self {
+        Self {
+            session: event.session,
+            sequence: event.sequence,
+            event_type: event.event_type,
+            payload: event.payload.into_string(),
+        }
+    }
+}
+
 /// Message operation represented by a Web event.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps each lane-bounded semantic payload inline.
 pub enum WebEventData {
     MessageStart {
         message_id: String,
@@ -27,7 +53,7 @@ pub enum WebEventData {
     /// One complete semantic Agent event carried by the message stream.
     MessageEvent {
         message_id: String,
-        event: SendStreamEvent,
+        event: WebStreamEvent,
     },
     MessageEnd {
         message_id: String,

@@ -239,7 +239,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                             &request.target,
                             WebEventData::MessageEvent {
                                 message_id: message_id.clone(),
-                                event,
+                                event: event.into(),
                             },
                         )?;
                     }
