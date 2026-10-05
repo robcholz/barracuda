@@ -4,7 +4,7 @@
 
 use core::marker::PhantomData;
 
-use barracuda_driver_es7210::Es7210;
+use barracuda_driver_es7210::{Es7210, Es7210Error};
 use barracuda_driver_es8388::Es8388;
 use barracuda_driver_pi4ioe5v6408::{Error as ExpanderError, Pi4ioe5v6408};
 use barracuda_peripheral::{
@@ -60,8 +60,10 @@ pub enum Es8388Es7210InitError<ControlError> {
     UnsupportedFormat,
     /// One codec address is not a seven-bit I2C address.
     InvalidAddress,
-    /// Codec register programming failed.
+    /// ES8388 register programming failed.
     Control(ControlError),
+    /// ES7210 register programming failed.
+    InputControl(Es7210Error<ControlError>),
     /// The private Tab5 speaker-enable expander could not be configured.
     Expander(ExpanderError<ControlError>),
 }
@@ -129,7 +131,7 @@ where
         bindings.delay.delay_ms(10);
         input
             .initialize(&mut bindings.control)
-            .map_err(Es8388Es7210InitError::Control)?;
+            .map_err(Es8388Es7210InitError::InputControl)?;
         bindings.delay.delay_ms(10);
 
         Ok(Es8388Es7210AudioCodec {
