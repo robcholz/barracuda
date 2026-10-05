@@ -1227,6 +1227,8 @@ name = "barracuda-imessage-gateway-runtime"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "barracuda-bulk-memory",
+ "barracuda-json-writer",
  "barracuda-workflow-plugin",
  "futures-lite",
  "gateway",

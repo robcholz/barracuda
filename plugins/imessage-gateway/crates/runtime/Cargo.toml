@@ -7,6 +7,8 @@ description = "Typed operation runtime for the IMessage Gateway"
 
 [dependencies]
 async-channel.workspace = true
+barracuda-bulk-memory.workspace = true
+barracuda-json-writer.workspace = true
 barracuda-workflow-plugin.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway = { path = "../gateway" }

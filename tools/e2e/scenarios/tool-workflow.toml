@@ -28,5 +28,5 @@ reply_contains = ["The Workflow round-trip finished."]
 tool_contains = ["vm.run", "e2e-flow"]
 
 [memory]
-# Host ordinary-heap peak was 252 KiB when this budget was set.
-heap_high_water_max = 274432
+# Host ordinary-heap peak was 240 KiB when this budget was set.
+heap_high_water_max = 258048

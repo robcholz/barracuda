@@ -5,6 +5,8 @@ use alloc::string::String;
 use core::cell::{Cell, RefCell};
 
 use async_channel::{Receiver, Sender, TrySendError};
+use barracuda_bulk_memory::BulkText;
+use barracuda_json_writer::write_value;
 use barracuda_workflow_plugin::{Event, WorkflowService};
 use futures_lite::stream;
 use gateway::{
@@ -123,8 +125,9 @@ pub(crate) fn accept_stream(
         return Err(GatewayOperationError::InvalidRequest);
     }
     let target = target(&request.route);
-    let payload = serde_json::to_string(&request.payload)
-        .map_err(|_error| GatewayOperationError::InvalidRequest)?;
+    // Encoded once, exactly sized, in bulk memory; every provider shares it.
+    let payload = BulkText::try_encode(|sink| write_value(sink, &request.payload))
+        .map_err(|_error| GatewayOperationError::Busy)?;
     let event = SendStreamEvent::new(
         request.session.clone(),
         request.sequence,

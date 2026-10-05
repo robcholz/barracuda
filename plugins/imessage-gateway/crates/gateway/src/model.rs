@@ -223,6 +223,13 @@ impl JsonContent {
     }
 }
 
+/// Takes already encoded JSON text without copying it.
+impl From<BulkText> for JsonContent {
+    fn from(json: BulkText) -> Self {
+        Self(TextChunk(json))
+    }
+}
+
 impl From<String> for JsonContent {
     fn from(json: String) -> Self {
         Self(TextChunk::from(json))
