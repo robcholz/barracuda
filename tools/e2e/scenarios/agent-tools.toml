@@ -35,5 +35,5 @@ reply_contains = ["Noted your preference."]
 tool_contains = ["green tea", '{"id":"file"', "Stored memory"]
 
 [memory]
-# Host ordinary-heap peak was 221 KiB when this budget was set.
-heap_high_water_max = 241664
+# Host ordinary-heap peak was 211 KiB when this budget was set.
+heap_high_water_max = 229376
