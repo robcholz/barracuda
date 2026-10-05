@@ -983,6 +983,9 @@ async fn emit_session_events(
 ) -> Result<(), AgentWorkflowError> {
     let mut sequence = 0_u64;
     loop {
+        // Every text delta becomes an Event, so pause while earlier ones are
+        // still being handled instead of queuing the whole stream.
+        workflow.ready_for::<SessionOutputEvent>().await;
         let pending = sessions.next_event().await;
         sequence = emit_session_event(&workflow, pending.session, sequence, pending.event)?;
     }
@@ -996,6 +999,7 @@ fn emit_session_event(
 ) -> Result<u64, AgentWorkflowError> {
     let mut emitter = SessionEmitter {
         workflow,
+        listening: workflow.has_listener::<SessionOutputEvent>(),
         session,
         sequence,
     };
@@ -1017,6 +1021,9 @@ fn emit_session_event(
 
 struct SessionEmitter<'a> {
     workflow: &'a WorkflowService,
+    /// Whether any Workflow runs for session output; Events nobody would
+    /// handle are not built, though they still consume a sequence number.
+    listening: bool,
     session: SessionId,
     sequence: u64,
 }
@@ -1117,22 +1124,35 @@ impl SessionEmitter<'_> {
     }
 
     fn emit_text(&mut self, event_type: &str, text: String) -> Result<(), AgentWorkflowError> {
-        self.emit(event_type, json!({ "text": text }))
+        // Moves the text into the Event; `json!` would copy it.
+        self.emit(event_type, object([("text", Value::String(text))]))
     }
 
     fn emit(&mut self, event_type: &str, payload: Value) -> Result<(), AgentWorkflowError> {
-        self.workflow.emit::<SessionOutputEvent>(json!({
-            "session": format!("{}", self.session),
-            "sequence": self.sequence,
-            "type": event_type,
-            "payload": payload,
-        }))?;
+        if self.listening {
+            self.workflow.emit::<SessionOutputEvent>(object([
+                ("payload", payload),
+                ("sequence", Value::from(self.sequence)),
+                ("session", Value::String(format!("{}", self.session))),
+                ("type", Value::from(event_type)),
+            ]))?;
+        }
         self.sequence = self
             .sequence
             .checked_add(1)
             .ok_or(AgentWorkflowError::SequenceOverflow)?;
         Ok(())
     }
+}
+
+/// Builds an object that takes ownership of its field values.
+fn object<const N: usize>(fields: [(&str, Value); N]) -> Value {
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(name, value)| (String::from(name), value))
+            .collect(),
+    )
 }
 
 fn usage_payload(usage: ProviderUsage) -> Value {

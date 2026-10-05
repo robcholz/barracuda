@@ -131,6 +131,24 @@ impl WorkflowService {
         self.view.info()
     }
 
+    /// Returns whether a loaded Workflow would run for an untopiced `E`.
+    #[must_use]
+    pub fn has_listener<E>(&self) -> bool
+    where
+        E: Event,
+    {
+        self.control.has_listener::<E>()
+    }
+
+    /// Waits until `E`'s queued and running executions fall below the
+    /// Runtime's backlog limit.
+    pub async fn ready_for<E>(&self)
+    where
+        E: Event,
+    {
+        self.control.ready_for::<E>().await;
+    }
+
     /// Emits one typed Event directly into Workflow matching.
     pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
     where

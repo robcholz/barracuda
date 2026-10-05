@@ -28,7 +28,7 @@ pub use link::LinkError;
 pub use rule::{Rule, RuleError};
 pub use runtime::{
     validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo, WorkflowRuntime,
-    WorkflowRuntimeControl, WorkflowRuntimeView,
+    WorkflowRuntimeControl, WorkflowRuntimeView, EVENT_BACKLOG_LIMIT,
 };
 pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 

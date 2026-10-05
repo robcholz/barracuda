@@ -21,6 +21,10 @@ use crate::{
     WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowUnloadError, WorkflowValue,
 };
 
+/// Executions one Event may have queued or running before emitters that
+/// wait with [`WorkflowRuntimeControl::ready_for`] pause.
+pub const EVENT_BACKLOG_LIMIT: usize = 4;
+
 type WorkflowDriver = Pin<Box<dyn Future<Output = Result<(), WorkflowExecutionError>> + 'static>>;
 
 /// Failure produced while driving one Workflow execution.
@@ -101,6 +105,10 @@ struct SharedState {
     definitions: Vec<Rc<WorkflowDefinition>>,
     pending: VecDeque<WorkflowExecution>,
     runtime_waker: Option<Waker>,
+    /// Queued or running executions per triggering Event.
+    backlog: Vec<(EventId, usize)>,
+    /// Emitters waiting for an Event's backlog to drain.
+    backlog_waiters: Vec<Waker>,
 }
 
 struct RuntimeShared {
@@ -155,6 +163,59 @@ impl RuntimeShared {
         Ok(Rc::try_unwrap(definition).unwrap_or_else(|definition| definition.as_ref().clone()))
     }
 
+    fn has_listener(&self, event_id: &str) -> bool {
+        self.state.borrow().definitions.iter().any(|definition| {
+            definition.event().matches_str(event_id) && definition.topic().is_none()
+        })
+    }
+
+    fn backlog(&self, event_id: &str) -> usize {
+        self.state
+            .borrow()
+            .backlog
+            .iter()
+            .find(|(id, _count)| id.as_str() == event_id)
+            .map_or(0, |(_id, count)| *count)
+    }
+
+    fn poll_ready_for(&self, event_id: &str, context: &mut Context<'_>) -> Poll<()> {
+        if self.backlog(event_id) < EVENT_BACKLOG_LIMIT {
+            return Poll::Ready(());
+        }
+        let mut state = self.state.borrow_mut();
+        if !state
+            .backlog_waiters
+            .iter()
+            .any(|waiter| waiter.will_wake(context.waker()))
+        {
+            state.backlog_waiters.push(context.waker().clone());
+        }
+        Poll::Pending
+    }
+
+    fn finish(&self, event_id: &EventId) {
+        let waiters = {
+            let mut state = self.state.borrow_mut();
+            let Some(index) = state.backlog.iter().position(|(id, _count)| id == event_id) else {
+                return;
+            };
+            let remaining = state.backlog.get_mut(index).map_or(0, |(_id, count)| {
+                *count = count.saturating_sub(1);
+                *count
+            });
+            if remaining == 0 {
+                state.backlog.swap_remove(index);
+            }
+            if remaining >= EVENT_BACKLOG_LIMIT {
+                return;
+            }
+            core::mem::take(&mut state.backlog_waiters)
+        };
+        for waiter in waiters {
+            waiter.wake();
+        }
+    }
+
     fn matching_plans(&self, event_id: &EventId, topic: Option<&Topic>) -> Vec<WorkflowPlan> {
         self.state
             .borrow()
@@ -182,7 +243,7 @@ impl RuntimeShared {
         let input = Rc::new(input);
         let mut executions = VecDeque::new();
         for plan in plans {
-            match WorkflowExecution::new(plan, Rc::clone(&input), &self.actions) {
+            match WorkflowExecution::new(plan, event_id, Rc::clone(&input), &self.actions) {
                 Ok(execution) => executions.push_back(execution),
                 Err((workflow_id, error)) => self.record_failure(workflow_id, error),
             }
@@ -192,6 +253,10 @@ impl RuntimeShared {
         }
         let waker = {
             let mut state = self.state.borrow_mut();
+            match state.backlog.iter_mut().find(|(id, _count)| id == event_id) {
+                Some((_id, count)) => *count = count.saturating_add(executions.len()),
+                None => state.backlog.push((event_id.clone(), executions.len())),
+            }
             state.pending.extend(executions);
             state.runtime_waker.take()
         };
@@ -263,6 +328,30 @@ impl WorkflowRuntimeControl {
         self.shared.unload(workflow_id)
     }
 
+    /// Returns whether a loaded Workflow would run for an untopiced `E`.
+    ///
+    /// Emitters check this before building an Event they would otherwise
+    /// discard.
+    #[must_use]
+    pub fn has_listener<E>(&self) -> bool
+    where
+        E: Event,
+    {
+        self.shared.has_listener(E::ID)
+    }
+
+    /// Waits until fewer than [`EVENT_BACKLOG_LIMIT`] executions started by
+    /// `E` are queued or running.
+    ///
+    /// A high-rate emitter awaits this between Events so its backlog stays
+    /// bounded instead of queuing every Event while the Runtime catches up.
+    pub async fn ready_for<E>(&self)
+    where
+        E: Event,
+    {
+        core::future::poll_fn(|context| self.shared.poll_ready_for(E::ID, context)).await;
+    }
+
     /// Emits one typed Event directly into the Workflow Runtime.
     pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
     where
@@ -328,6 +417,8 @@ impl WorkflowRuntime {
                     definitions: Vec::new(),
                     pending: VecDeque::new(),
                     runtime_waker: None,
+                    backlog: Vec::new(),
+                    backlog_waiters: Vec::new(),
                 }),
                 actions,
                 completed_count: Cell::new(0),
@@ -369,9 +460,11 @@ impl WorkflowRuntime {
                     self.shared
                         .completed_count
                         .set(self.shared.completed_count.get().saturating_add(1));
+                    self.shared.finish(&execution.event);
                 }
                 Poll::Ready(Err(error)) => {
                     log::error!("Workflow `{}` failed: {error}", execution.id.as_str());
+                    self.shared.finish(&execution.event);
                     self.shared.record_failure(execution.id, error);
                 }
             }
@@ -389,12 +482,15 @@ impl Future for WorkflowRuntime {
 
 struct WorkflowExecution {
     id: WorkflowId,
+    /// The Event that started this execution, for its backlog count.
+    event: EventId,
     driver: WorkflowDriver,
 }
 
 impl WorkflowExecution {
     fn new(
         plan: WorkflowPlan,
+        event_id: &EventId,
         event: Rc<WorkflowValue>,
         registry: &WorkflowActionRegistry,
     ) -> Result<Self, (WorkflowId, WorkflowExecutionError)> {
@@ -410,7 +506,11 @@ impl WorkflowExecution {
         }
         let definition = Rc::clone(&plan.definition);
         let driver = Box::pin(async move { execute_steps(&definition, &event, &actions).await });
-        Ok(Self { id, driver })
+        Ok(Self {
+            id,
+            event: event_id.clone(),
+            driver,
+        })
     }
 }
 
@@ -923,6 +1023,49 @@ mod tests {
                 &["a.first", "b.first", "a.second", "b.second"]
             );
             assert_eq!(runtime.view().info().completed_count, 2);
+        });
+    }
+
+    #[test]
+    fn emitters_see_listeners_and_wait_for_their_backlog() {
+        block_on(async {
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let actions = WorkflowActionRegistry::new();
+            let _registration = actions
+                .add_action(YieldOnceAction::<0> {
+                    name: "a.first",
+                    trace: Rc::clone(&trace),
+                })
+                .expect("register a.first");
+            let mut runtime = WorkflowRuntime::new(actions);
+            let control = runtime.control();
+            assert!(!control.has_listener::<Trigger>());
+            control
+                .load(
+                    parse_definition(
+                        r#"{"id":"a","match":{"event":"test.*"},"steps":[{"call":"a.first"}]}"#,
+                    )
+                    .expect("parse a"),
+                )
+                .expect("load a");
+            assert!(control.has_listener::<Trigger>());
+
+            let mut ready = Box::pin(control.ready_for::<Trigger>());
+            for _event in 0..super::EVENT_BACKLOG_LIMIT {
+                assert!(poll_once(&mut ready).await.is_some());
+                ready = Box::pin(control.ready_for::<Trigger>());
+                control.emit::<Trigger>(json!({})).expect("emit");
+            }
+            assert!(poll_once(&mut ready).await.is_none(), "backlog is full");
+
+            // Each execution yields once, then completes on the next poll.
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert_eq!(
+                runtime.view().info().completed_count,
+                super::EVENT_BACKLOG_LIMIT
+            );
+            assert!(poll_once(&mut ready).await.is_some(), "backlog drained");
         });
     }
 
