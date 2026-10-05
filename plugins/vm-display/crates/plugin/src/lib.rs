@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::display::{
     Display, DisplayDescriptor, DisplayOrientation, DisplayPeripheral, DisplayPower,
     DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
@@ -15,15 +15,14 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
 use embedded_graphics_core::{
     geometry::{Point, Size},
     pixelcolor::Rgb888,
     primitives::Rectangle,
 };
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_DRAW_BYTES: usize = 4 * 1024 * 1024;
 

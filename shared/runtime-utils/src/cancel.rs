@@ -1,9 +1,9 @@
 use core::fmt;
 use core::future::{poll_fn, Future};
-use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::Poll;
 
 use futures_util::task::AtomicWaker;
+use portable_atomic::{AtomicBool, Ordering};
 
 /// Caller-owned, wakeable cooperative cancellation state.
 pub struct CancellationFlag {
@@ -89,10 +89,10 @@ impl Cancel<'static> {
 mod tests {
     use alloc::sync::Arc;
     use core::pin::pin;
-    use core::sync::atomic::{AtomicUsize, Ordering};
     use core::task::{Context, Poll};
 
     use futures_util::task::{waker_ref, ArcWake};
+    use portable_atomic::{AtomicUsize, Ordering};
 
     use super::*;
 

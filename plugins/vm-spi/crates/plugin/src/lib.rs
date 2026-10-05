@@ -4,13 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-    vec::Vec,
-};
+use alloc::{format, string::String, string::ToString, vec, vec::Vec};
 use barracuda_board_hal::{ExposedIo, SpiProvider, SpiRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -18,9 +12,10 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_hal::spi::{MODE_0, MODE_1, MODE_2, MODE_3, Mode};
 use embedded_hal_async::spi::SpiBus;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
@@ -348,8 +343,9 @@ mod tests {
 
     extern crate std;
 
-    use core::{convert::Infallible, sync::atomic::AtomicBool};
+    use core::convert::Infallible;
     use embedded_hal::spi::ErrorType;
+    use portable_atomic::AtomicBool;
 
     use super::*;
 

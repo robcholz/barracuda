@@ -1,10 +1,11 @@
-use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
+use alloc::{borrow::ToOwned, collections::BTreeMap, string::String};
 use core::cell::RefCell;
 
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory};
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use crate::config::SharedApiManager;
 use crate::context_providers::LongTermMemoryContextProvider;

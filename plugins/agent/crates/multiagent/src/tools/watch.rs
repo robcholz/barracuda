@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use portable_atomic_util::Arc;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{

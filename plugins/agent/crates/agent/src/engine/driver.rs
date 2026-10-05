@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::BTreeSet, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeSet, string::String, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind, Context};
 use barracuda_agent_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
@@ -11,6 +11,7 @@ use barracuda_runtime_utils::yield_stream::yield_stream;
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 use tracing::Instrument as _;
 
 use crate::config::{ApiPurpose, SharedApiManager};

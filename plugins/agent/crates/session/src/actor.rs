@@ -1,23 +1,20 @@
 use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    collections::{BTreeSet, VecDeque},
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, collections::VecDeque, format,
+    string::String, string::ToString, vec::Vec,
 };
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
+use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::oneshot;
 use barracuda_runtime_utils::stream::StreamPart;
-use futures_channel::oneshot;
 use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use super::agent_slot::{AgentDispatch, AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
@@ -676,7 +673,10 @@ where
             return Ok(());
         }
         let reasoning_effort = self.state.get().reasoning_effort;
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let root_agent = self.state.get().root_agent;
         let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
             let kind = barracuda_agent::baked::root_kind().clone();
@@ -684,7 +684,7 @@ where
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 extension_tools,
             )?;
@@ -701,7 +701,7 @@ where
                 id,
                 &kind,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 persistence,
                 extension_tools,
@@ -1059,7 +1059,10 @@ where
         kind: &barracuda_agent::AgentKind,
         extension_tools: Vec<ToolGroup>,
     ) -> Result<(), OrchestrationPhysicalError> {
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let reasoning_effort = self.state.get().reasoning_effort;
         let (created_agent, reasoning) = self
             .agent_manager
@@ -1067,7 +1070,7 @@ where
                 agent,
                 kind,
                 false,
-                permission as Arc<_>,
+                permission,
                 reasoning_effort,
                 PersistenceConfig::InMemory,
                 extension_tools,

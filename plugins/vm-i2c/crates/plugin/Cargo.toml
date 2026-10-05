@@ -6,6 +6,8 @@ description = "Barracuda Plugin exposing Board I2C resources to Lua"
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 barracuda-board-hal.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true

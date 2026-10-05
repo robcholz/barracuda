@@ -8,10 +8,10 @@
     clippy::arc_with_non_send_sync
 )]
 
+use portable_atomic_util::Arc;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use barracuda_agent_skill::{FsSkillRegistry, SkillName};
+use barracuda_agent_skill::{FsSkillRegistry, SkillName, SkillSetSource};
 use barracuda_platform_test::memory_vfs;
 use futures_lite::future::block_on;
 use serde_json::Value;

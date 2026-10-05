@@ -15,12 +15,12 @@ vendored = [
 ]
 
 [dependencies]
+barracuda-runtime-utils.workspace = true
 barracuda-lua = { path = "../lua" }
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-package-api = { path = "../package-api" }
 embassy-executor.workspace = true
 embassy-time.workspace = true
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 getset = "0.1"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }

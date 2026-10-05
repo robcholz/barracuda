@@ -4,12 +4,12 @@ use core::future::Future as _;
 use core::task::Poll;
 
 use barracuda_lua::{Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
 use barracuda_vm_package_api::LuaPackageRegistry;
-use futures_channel::oneshot;
 
 use crate::memory::VmMemoryLease;
 use crate::runtime::{RunControl, VM_YIELD_DELAY_MILLIS, VmYieldSignal};

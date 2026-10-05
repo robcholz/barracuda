@@ -3,13 +3,13 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicU32, Ordering};
 
 use barracuda_vfs::{FsError, ScopedVfs};
 use getset::CopyGetters;
+use portable_atomic::{AtomicU32, Ordering};
+use portable_atomic_util::Arc;
 
 use super::document::{
     frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName, SkillResourcePage,
@@ -62,12 +62,6 @@ impl CatalogSnapshot {
 /// Implementations own discovery and document loading. [`SkillSet`] adds the
 /// per-agent render buffers over this shared registry.
 pub trait SkillRegistry: 'static {
-    /// Create a per-agent [`SkillSet`] projection backed by this registry.
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        let registry: Arc<dyn SkillRegistry> = Arc::new(ErasedSkillRegistry(self));
-        SkillSet::from_registry(registry)
-    }
-
     /// Return the current immutable catalog snapshot.
     fn catalog(&self) -> Arc<CatalogSnapshot>;
 
@@ -90,13 +84,29 @@ pub trait SkillRegistry: 'static {
     ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>>;
 }
 
+/// Shared registry handle that creates per-agent [`SkillSet`] projections.
+pub trait SkillSetSource {
+    /// Create a per-agent [`SkillSet`] projection backed by this registry.
+    fn skill_set(&self) -> SkillSet;
+}
+
+impl SkillSetSource for Arc<dyn SkillRegistry> {
+    fn skill_set(&self) -> SkillSet {
+        SkillSet::from_registry(Arc::clone(self))
+    }
+}
+
+impl<R: SkillRegistry> SkillSetSource for Arc<R> {
+    fn skill_set(&self) -> SkillSet {
+        SkillSet::from_registry(Arc::from(
+            Box::new(ErasedSkillRegistry(Arc::clone(self))) as Box<dyn SkillRegistry>
+        ))
+    }
+}
+
 struct ErasedSkillRegistry<R: SkillRegistry + ?Sized>(Arc<R>);
 
 impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         self.0.catalog()
     }
@@ -128,10 +138,6 @@ impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
 pub struct EmptySkillRegistry;
 
 impl SkillRegistry for EmptySkillRegistry {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         Arc::new(CatalogSnapshot::empty())
     }
@@ -187,12 +193,6 @@ impl FsSkillRegistry {
         let snapshot = self.scan_catalog_next_version().await?;
         *self.snapshot.borrow_mut() = Arc::new(snapshot);
         Ok(self)
-    }
-
-    /// Create a per-agent [`SkillSet`] projection backed by this registry.
-    pub fn skill_set(self: &Arc<Self>) -> SkillSet {
-        let registry: Arc<dyn SkillRegistry> = self.clone();
-        SkillSet::from_registry(registry)
     }
 
     pub(crate) fn catalog(&self) -> Arc<CatalogSnapshot> {
@@ -318,10 +318,6 @@ impl FsSkillRegistry {
 }
 
 impl SkillRegistry for FsSkillRegistry {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         FsSkillRegistry::catalog(self)
     }

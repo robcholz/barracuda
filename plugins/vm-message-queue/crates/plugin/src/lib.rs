@@ -4,13 +4,14 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures_util::future::{AbortHandle, Abortable};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// Maximum number of distinct queue keys.
@@ -117,7 +118,7 @@ impl SharedState {
         Ok(queue)
     }
 
-    async fn push(self: Arc<Self>, key: String, message: Vec<u8>) -> Result<()> {
+    async fn push(&self, key: String, message: Vec<u8>) -> Result<()> {
         if message.len() > MESSAGE_MAX_LEN {
             return Err(Error::runtime(format!(
                 "message exceeds {MESSAGE_MAX_LEN} bytes"
@@ -127,15 +128,12 @@ impl SharedState {
         self.run(async move { queue.send(message).await }).await
     }
 
-    async fn receive(self: Arc<Self>, key: String) -> Result<Vec<u8>> {
+    async fn receive(&self, key: String) -> Result<Vec<u8>> {
         let queue = self.queue(key)?;
         self.run(async move { queue.receive().await }).await
     }
 
-    async fn run<T>(
-        self: Arc<Self>,
-        operation: impl core::future::Future<Output = T>,
-    ) -> Result<T> {
+    async fn run<T>(&self, operation: impl core::future::Future<Output = T>) -> Result<T> {
         let id = self.next_operation.fetch_add(1, Ordering::Relaxed);
         let (handle, registration) = AbortHandle::new_pair();
         {
@@ -145,10 +143,7 @@ impl SharedState {
             }
             lifecycle.operations.push((id, handle));
         }
-        let _guard = OperationGuard {
-            state: Arc::clone(&self),
-            id,
-        };
+        let _guard = OperationGuard { state: self, id };
         Abortable::new(operation, registration)
             .await
             .map_err(|_| revoked_error())
@@ -163,12 +158,12 @@ impl SharedState {
     }
 }
 
-struct OperationGuard {
-    state: Arc<SharedState>,
+struct OperationGuard<'a> {
+    state: &'a SharedState,
     id: usize,
 }
 
-impl Drop for OperationGuard {
+impl Drop for OperationGuard<'_> {
     fn drop(&mut self) {
         self.state
             .lifecycle
@@ -266,7 +261,7 @@ mod tests {
     fn empty_receive_waits_until_push() {
         let state = Arc::new(SharedState::new());
         block_on(async {
-            let receive = Arc::clone(&state).receive("key".into());
+            let receive = state.receive("key".into());
             let push = async {
                 state
                     .push("key".into(), b"ready".to_vec())
@@ -283,20 +278,14 @@ mod tests {
         let state = Arc::new(SharedState::new());
         block_on(async {
             for value in 0..QUEUE_DEPTH {
-                Arc::clone(&state)
+                state
                     .push("key".into(), vec![value as u8])
                     .await
                     .expect("fill");
             }
-            let mut blocked = pin!(Arc::clone(&state).push("key".into(), b"last".to_vec()));
+            let mut blocked = pin!(state.push("key".into(), b"last".to_vec()));
             assert!(poll_once(blocked.as_mut()).await.is_none());
-            assert_eq!(
-                Arc::clone(&state)
-                    .receive("key".into())
-                    .await
-                    .expect("receive"),
-                vec![0]
-            );
+            assert_eq!(state.receive("key".into()).await.expect("receive"), vec![0]);
             blocked.await.expect("unblocked push");
         });
     }
@@ -305,36 +294,26 @@ mod tests {
     fn limits_return_clear_errors() {
         let state = Arc::new(SharedState::new());
         block_on(async {
+            assert!(state.push(String::new(), vec![]).await.is_err());
             assert!(
-                Arc::clone(&state)
-                    .push(String::new(), vec![])
-                    .await
-                    .is_err()
-            );
-            assert!(
-                Arc::clone(&state)
+                state
                     .push("k".repeat(KEY_MAX_LEN + 1), vec![])
                     .await
                     .is_err()
             );
             assert!(
-                Arc::clone(&state)
+                state
                     .push("large".into(), vec![0; MESSAGE_MAX_LEN + 1])
                     .await
                     .is_err()
             );
             for index in 0..MAX_KEYS {
-                Arc::clone(&state)
+                state
                     .push(format!("key-{index}"), vec![])
                     .await
                     .expect("create key");
             }
-            assert!(
-                Arc::clone(&state)
-                    .push("overflow".into(), vec![])
-                    .await
-                    .is_err()
-            );
+            assert!(state.push("overflow".into(), vec![]).await.is_err());
         });
     }
 
@@ -351,13 +330,10 @@ mod tests {
         let state = Arc::new(SharedState::new());
         block_on(async {
             for _ in 0..QUEUE_DEPTH {
-                Arc::clone(&state)
-                    .push("full".into(), vec![])
-                    .await
-                    .expect("fill");
+                state.push("full".into(), vec![]).await.expect("fill");
             }
-            let mut push = pin!(Arc::clone(&state).push("full".into(), vec![]));
-            let mut receive = pin!(Arc::clone(&state).receive("empty".into()));
+            let mut push = pin!(state.push("full".into(), vec![]));
+            let mut receive = pin!(state.receive("empty".into()));
             assert!(poll_once(push.as_mut()).await.is_none());
             assert!(poll_once(receive.as_mut()).await.is_none());
             state.revoke();
@@ -374,7 +350,7 @@ mod tests {
                 let state = Arc::clone(&state);
                 async move {
                     for value in range {
-                        Arc::clone(&state)
+                        state
                             .push("shared".into(), vec![value])
                             .await
                             .expect("push");
@@ -386,12 +362,7 @@ mod tests {
                 async move {
                     let mut values = Vec::new();
                     for _ in 0..16 {
-                        values.push(
-                            Arc::clone(&state)
-                                .receive("shared".into())
-                                .await
-                                .expect("receive")[0],
-                        );
+                        values.push(state.receive("shared".into()).await.expect("receive")[0]);
                     }
                     values
                 }

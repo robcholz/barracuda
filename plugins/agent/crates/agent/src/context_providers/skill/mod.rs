@@ -4,8 +4,8 @@
 //! the skill catalog into `BlockKind::SkillList` and exposes skill tools that
 //! read from the same buffered source.
 
-use alloc::sync::Arc;
 use core::cell::{RefCell, RefMut};
+use portable_atomic_util::Arc;
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};

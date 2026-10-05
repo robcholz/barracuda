@@ -1,8 +1,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use embedded_io_async::{Read, Seek, Write};
+use portable_atomic::{AtomicUsize, Ordering};
 
 use crate::path::{backend_path, matches_mount, normalize};
 use crate::{File, FsError, Metadata, OpenOptions, ReadDir, SeekFrom, Vfs};

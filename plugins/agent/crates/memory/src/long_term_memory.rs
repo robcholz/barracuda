@@ -33,18 +33,14 @@
 //! handle. A store is driven by one executor task; higher layers must not access
 //! it re-entrantly while a mutation is in progress.
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{format, string::String, string::ToString, vec::Vec};
 use core::{
     cell::{RefCell, RefMut},
     cmp::Reverse,
     fmt,
 };
 
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 
 use barracuda_vfs::{FsError, ScopedVfs};

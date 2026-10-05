@@ -1,11 +1,11 @@
 use alloc::borrow::ToOwned;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_agent_permission::Action;
+use portable_atomic_util::Arc;
 use serde::Serialize;
 
 use super::definition::{Tool, ToolError, ToolInvocation, ToolResult};

@@ -4,7 +4,6 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::{type_name, Any, TypeId};
 use core::error::Error;
@@ -17,6 +16,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
+use portable_atomic_util::Arc;
 
 use crate::storage::ScopedStorage;
 use crate::{PluginStorage, StorageError};

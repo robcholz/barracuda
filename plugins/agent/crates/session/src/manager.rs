@@ -1,12 +1,8 @@
 //! Ownership and lifecycle for every Session in one runtime.
 
 use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    rc::Rc,
-    string::String,
-    sync::Arc,
-    vec::Vec,
+    boxed::Box, collections::BTreeMap, collections::BTreeSet, collections::VecDeque, rc::Rc,
+    string::String, vec::Vec,
 };
 use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};
@@ -17,9 +13,10 @@ use barracuda_agent_persistence::{
 };
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::SharedApiManager;
 use barracuda_agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};

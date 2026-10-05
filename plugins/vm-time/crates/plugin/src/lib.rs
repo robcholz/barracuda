@@ -4,23 +4,22 @@
 
 extern crate alloc;
 
-use alloc::{format, rc::Rc, string::String, sync::Arc};
-use core::{
-    fmt::Write as _,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use alloc::{format, rc::Rc, string::String};
+use core::fmt::Write as _;
 
 use async_channel::{Receiver, Sender};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_runtime_utils::oneshot;
 use barracuda_time_plugin::{ClockError, UtcClock};
 use barracuda_vm_plugin::{
     Context, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, Table,
 };
 use embassy_futures::select::{Either, select};
-use futures_channel::oneshot;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 const REQUEST_QUEUE_DEPTH: usize = 4;

@@ -3,10 +3,10 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::task::{Poll, Waker};
 
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use embassy_executor::Spawner;
-use futures_channel::oneshot;
 
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
 use crate::run::{ExecutionJob, execute_run};

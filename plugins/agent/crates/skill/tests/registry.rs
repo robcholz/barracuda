@@ -1,10 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::arc_with_non_send_sync)]
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use portable_atomic_util::Arc;
+use std::{future::Future, pin::Pin};
 
 use barracuda_agent_skill::{
     CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry,
-    SkillResourcePage,
+    SkillResourcePage, SkillSetSource,
 };
 use barracuda_platform_test::memory_vfs;
 use barracuda_vfs::ScopedVfs;
@@ -69,9 +70,9 @@ fn public_registry_trait_drives_skill_set() {
             "External backend. Use for external operations.".to_owned(),
         )
         .unwrap();
-        let registry: Arc<dyn SkillRegistry> = Arc::new(ExternalRegistry {
+        let registry: Arc<dyn SkillRegistry> = Arc::from(Box::new(ExternalRegistry {
             catalog: Arc::new(CatalogSnapshot::from_skills(1, vec![skill])),
-        });
+        }) as Box<dyn SkillRegistry>);
         let mut skills = registry.skill_set();
 
         assert!(skills.catalog_context().contains("External backend"));

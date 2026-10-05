@@ -8,16 +8,19 @@ description = "LittleFS backend for the Barracuda VFS"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-vfs.workspace = true
 embedded-io-async = "0.7"
 embedded-storage = "0.3"
 generic-array = "0.14"
 littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
-spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+# Enables littlefs2's logger atomics on targets without native atomic CAS.
+delog = { version = "0.1", features = ["portable-atomic"] }
+spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
-embassy-futures = { workspace = true }
+embassy-futures.workspace = true
 typenum = "1"
 
 [lints.rust]

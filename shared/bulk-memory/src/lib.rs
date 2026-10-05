@@ -7,13 +7,7 @@
 
 #![no_std]
 
-use core::{
-    alloc::Layout,
-    fmt,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::{alloc::Layout, fmt, ops::Deref, ops::DerefMut, ptr::NonNull};
 
 use allocator_api2::{
     alloc::{AllocError, Allocator, Global},
@@ -22,6 +16,7 @@ use allocator_api2::{
     vec::Vec as AllocVec,
 };
 use bytemuck::Pod;
+use portable_atomic::{AtomicPtr, Ordering};
 
 static GLOBAL_ALLOCATOR: Global = Global;
 static GLOBAL_BACKEND: platform::Backend = platform::Backend::new(&GLOBAL_ALLOCATOR);
@@ -297,7 +292,7 @@ pub mod platform {
     pub fn install(backend: &'static Backend) {
         super::ACTIVE_BACKEND.store(
             core::ptr::from_ref(backend).cast_mut(),
-            core::sync::atomic::Ordering::Release,
+            portable_atomic::Ordering::Release,
         );
     }
 

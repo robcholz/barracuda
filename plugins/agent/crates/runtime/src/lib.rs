@@ -13,9 +13,10 @@ extern crate alloc;
 mod service;
 mod worker;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::cell::{Cell, RefCell};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
@@ -373,15 +374,17 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tool_registry_capability_tests {
-    use alloc::{boxed::Box, sync::Arc, vec};
+    use alloc::{boxed::Box, vec};
 
     use barracuda_agent_persistence::Persistence;
+    use barracuda_agent_tool::ToolSetSource;
     use barracuda_agent_tool::{
         DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolDetachUpdate,
         ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
     };
     use barracuda_platform_test::memory_vfs;
     use futures_lite::{future::block_on, StreamExt as _};
+    use portable_atomic_util::Arc;
 
     use super::{AgentToolRegistry, ToolGroup, ToolLifecycle};
 

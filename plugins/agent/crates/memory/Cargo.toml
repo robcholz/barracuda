@@ -10,6 +10,7 @@ description = "Agent memory subsystem: conversation tape and compaction"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 # Filesystem paths are always scoped by System/Plugin Manager before reaching
 # Agent memory; backend selection remains outside this crate.
 barracuda-vfs.workspace = true

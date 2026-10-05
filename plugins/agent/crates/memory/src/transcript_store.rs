@@ -61,11 +61,11 @@
 //! Persistence behavior therefore comes entirely from the injected namespace.
 
 use alloc::{
-    borrow::ToOwned, boxed::Box, collections::BTreeSet, format, rc::Rc, string::String, sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, format, rc::Rc, string::String, vec::Vec,
 };
 use core::cell::{RefCell, RefMut};
 
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 

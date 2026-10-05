@@ -6,10 +6,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use embassy_executor::Spawner;
-use futures_channel::oneshot;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 

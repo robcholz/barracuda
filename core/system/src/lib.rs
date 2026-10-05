@@ -14,7 +14,6 @@ mod resources;
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::sync::Arc;
 use core::future::Future;
 use core::pin::Pin;
 
@@ -49,6 +48,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
+use portable_atomic_util::Arc;
 use read_only_flash::mount_resources_partition;
 
 macro_rules! register_plugins {

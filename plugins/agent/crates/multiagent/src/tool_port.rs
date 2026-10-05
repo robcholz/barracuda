@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{
     cell::{RefCell, RefMut},
     pin::Pin,
@@ -6,8 +6,9 @@ use core::{
 };
 
 use async_channel::{Receiver, Sender};
-use futures_channel::oneshot;
+use barracuda_runtime_utils::oneshot;
 use futures_core::Stream;
+use portable_atomic_util::Arc;
 
 use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};

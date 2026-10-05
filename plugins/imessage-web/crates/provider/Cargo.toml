@@ -15,7 +15,7 @@ server = ["dep:barracuda-webserver-plugin"]
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 barracuda-webserver-plugin = { workspace = true, optional = true }
 embassy-sync.workspace = true
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
 log.workspace = true

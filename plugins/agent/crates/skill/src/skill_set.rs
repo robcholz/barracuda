@@ -1,8 +1,9 @@
 //! Per-agent skill projection and reusable render buffers.
 
+use alloc::boxed::Box;
 use alloc::string::String;
-use alloc::sync::Arc;
 use core::fmt::Write as _;
+use portable_atomic_util::Arc;
 
 use super::document::{SkillDocument, SkillError, SkillName, SkillResourcePage};
 use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
@@ -27,7 +28,9 @@ pub struct SkillSet {
 impl SkillSet {
     /// A skill set over an empty registry.
     pub fn empty() -> Self {
-        Self::from_registry(Arc::new(EmptySkillRegistry))
+        Self::from_registry(Arc::from(
+            Box::new(EmptySkillRegistry) as Box<dyn SkillRegistry>
+        ))
     }
 
     pub(crate) fn from_registry(registry: Arc<dyn SkillRegistry>) -> Self {

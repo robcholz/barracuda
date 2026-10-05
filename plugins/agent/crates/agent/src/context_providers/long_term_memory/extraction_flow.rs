@@ -206,7 +206,9 @@ fn flatten_transcript<'a>(messages: impl Iterator<Item = &'a Value>) -> String {
 #[allow(clippy::expect_used)]
 mod tests {
     use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::sync::{Mutex, MutexGuard};
+
+    use portable_atomic_util::Arc;
 
     use barracuda_agent_memory::{LongTermMemory, TranscriptStore};
     use barracuda_agent_persistence::DurableState;
@@ -247,6 +249,15 @@ mod tests {
                 .pop_front()
                 .expect("each expected extraction has a scripted result");
             Box::pin(async move { result })
+        }
+    }
+
+    /// Shares one recorder between the provider and test assertions.
+    struct SharedRecorder(Arc<RecordingExtractor>);
+
+    impl Extractor for SharedRecorder {
+        fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
+            self.0.extract(input)
         }
     }
 
@@ -366,7 +377,8 @@ mod tests {
             let global = LongTermMemory::new(filesystem, "/memory/global", "g-")
                 .await
                 .expect("the global memory store opens");
-            let extractor: Arc<dyn Extractor> = extractor;
+            let extractor: Arc<dyn Extractor> =
+                Arc::from(Box::new(SharedRecorder(extractor)) as Box<dyn Extractor>);
             LongTermMemoryContextProvider::new(agent, global, extractor)
         })
     }

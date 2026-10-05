@@ -4,18 +4,8 @@
 
 extern crate alloc;
 
-use alloc::{
-    boxed::Box,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, vec::Vec};
+use core::{future::Future, pin::Pin};
 
 use async_channel::{Receiver, Sender};
 use barracuda_agent_plugin::{
@@ -26,13 +16,15 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use embassy_futures::select::{Either, Either3, select, select3};
-use futures_channel::oneshot;
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// Maximum UTF-8 byte length accepted by `agent.ask`.
@@ -360,9 +352,8 @@ fn prepare_ask(
     if text.len() > ASK_TEXT_MAX_BYTES {
         return Err(Error::runtime(VmAgentError::InputTooLarge.to_string()));
     }
-    let (operation, cancel) = state
-        .begin()
-        .map_err(|error| Error::runtime(error.to_string()))?;
+    let (operation, cancel) =
+        PackageState::begin(&state).map_err(|error| Error::runtime(error.to_string()))?;
     let cancel_sender = operation.cancel.clone();
     let (output_sender, output_receiver) = async_channel::bounded(OUTPUT_QUEUE_DEPTH);
     let (accepted_sender, accepted_receiver) = oneshot::channel();
@@ -453,30 +444,30 @@ impl PackageState {
     }
 
     fn begin(
-        self: &Arc<Self>,
+        this: &Arc<Self>,
     ) -> core::result::Result<(OperationGuard, Receiver<()>), VmAgentError> {
-        if !self.active.load(Ordering::Acquire) {
+        if !this.active.load(Ordering::Acquire) {
             return Err(VmAgentError::RuntimeStopped);
         }
-        self.active_asks
+        this.active_asks
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < MAX_CONCURRENT_ASKS).then_some(active + 1)
             })
             .map_err(|_| VmAgentError::Busy)?;
 
-        let id = self.next_operation.fetch_add(1, Ordering::Relaxed);
+        let id = this.next_operation.fetch_add(1, Ordering::Relaxed);
         let (cancel, receiver) = async_channel::bounded(1);
         {
-            let mut lifecycle = self.lifecycle.lock();
-            if !self.active.load(Ordering::Acquire) {
-                self.active_asks.fetch_sub(1, Ordering::AcqRel);
+            let mut lifecycle = this.lifecycle.lock();
+            if !this.active.load(Ordering::Acquire) {
+                this.active_asks.fetch_sub(1, Ordering::AcqRel);
                 return Err(VmAgentError::RuntimeStopped);
             }
             lifecycle.push((id, cancel.clone()));
         }
         Ok((
             OperationGuard {
-                state: Arc::clone(self),
+                state: Arc::clone(this),
                 id,
                 cancel,
             },
@@ -594,11 +585,14 @@ mod tests {
     #[test]
     fn concurrent_ask_limit_releases_capacity_on_drop() {
         let (package, _requests) = AgentLuaPackage::new();
-        let (first, _) = package.state.begin().expect("first ask");
-        let (_second, _) = package.state.begin().expect("second ask");
-        assert!(matches!(package.state.begin(), Err(VmAgentError::Busy)));
+        let (first, _) = PackageState::begin(&package.state).expect("first ask");
+        let (_second, _) = PackageState::begin(&package.state).expect("second ask");
+        assert!(matches!(
+            PackageState::begin(&package.state),
+            Err(VmAgentError::Busy)
+        ));
         drop(first);
-        assert!(package.state.begin().is_ok());
+        assert!(PackageState::begin(&package.state).is_ok());
     }
 
     #[test]

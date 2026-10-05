@@ -1,6 +1,6 @@
 //! Single-thread process runtime loop.
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -9,10 +9,11 @@ use async_channel::Receiver;
 use barracuda_agent_persistence::{PersistenceError, SharedPersistence};
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
 use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::AgentCreateError;
 use barracuda_agent::SharedApiManager;

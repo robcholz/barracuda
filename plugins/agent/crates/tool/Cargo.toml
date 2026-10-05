@@ -14,12 +14,14 @@ crate-type = ["rlib"]
 build-support = ["dep:anyhow"]
 
 [dependencies]
+barracuda-runtime-utils.workspace = true
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 anyhow = { version = "1", optional = true }
 barracuda-agent-permission = { path = "../permission" }
 barracuda-agent-persistence = { path = "../persistence" }
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-core = { version = "0.3", default-features = false }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-core.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
 getset = "0.1.7"
 json-validator.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

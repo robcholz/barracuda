@@ -271,7 +271,7 @@ impl Drop for SessionStream {
         if self.terminated {
             return;
         }
-        let (ack, _result) = futures_channel::oneshot::channel();
+        let (ack, _result) = barracuda_runtime_utils::oneshot::channel();
         let _ = self.commands.try_send(SessionCommand::Close {
             lease: self.lease,
             ack,

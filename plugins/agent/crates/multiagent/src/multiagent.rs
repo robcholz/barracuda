@@ -1,14 +1,12 @@
 use alloc::{
-    borrow::ToOwned,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, collections::BTreeMap, collections::BTreeSet, collections::VecDeque,
+    string::String, string::ToString, vec::Vec,
 };
 use core::task::{Context, Poll};
 
 use barracuda_agent_tool::ToolGroup;
-use futures_channel::oneshot;
+use barracuda_runtime_utils::oneshot;
+use portable_atomic_util::Arc;
 
 use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};

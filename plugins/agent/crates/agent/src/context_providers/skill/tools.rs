@@ -1,11 +1,6 @@
 //! Skill tools owned by the skill context provider.
 
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{borrow::ToOwned, format, string::String, string::ToString};
 use core::cell::RefCell;
 
 use barracuda_agent_skill::{
@@ -14,6 +9,7 @@ use barracuda_agent_skill::{
 use barracuda_agent_tool::{
     tool_metadata, EmptyArgs, ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::lock_skill_set;
@@ -200,13 +196,15 @@ fn reload_failure_content(error: &SkillError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::boxed::Box;
+    use barracuda_agent_skill::SkillSetSource;
     use core::cell::RefCell;
 
     use barracuda_agent_skill::FsSkillRegistry;
     use barracuda_agent_tool::{EmptyArgs, ToolHandler};
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
+    use portable_atomic_util::Arc;
 
     use super::{
         ReadArgs, ReadResourceArgs, ReadSkillResourceTool, ReadSkillTool, ReloadSkillsTool,

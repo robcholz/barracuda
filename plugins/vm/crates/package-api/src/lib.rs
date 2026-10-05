@@ -4,9 +4,10 @@
 
 extern crate alloc;
 
-use alloc::sync::{Arc, Weak};
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use barracuda_lua::{Lua, Package, Result as LuaResult};
+use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
 
 /// A named Lua package registered by a Plugin during System composition.
@@ -47,7 +48,7 @@ impl LuaPackageRegistry {
         &self,
         package: impl LuaPackage + 'static,
     ) -> Result<LuaPackageRegistration, LuaPackageRegistryError> {
-        let package: Arc<dyn LuaPackage> = Arc::new(package);
+        let package: Arc<dyn LuaPackage> = Arc::from(Box::new(package) as Box<dyn LuaPackage>);
         let name = package.name();
         if name.is_empty() {
             return Err(LuaPackageRegistryError::EmptyName);

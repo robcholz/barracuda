@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{format, sync::Arc, vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -12,10 +12,9 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
 const MAX_WAV_HEADER_BYTES: usize = 64 * 1024;

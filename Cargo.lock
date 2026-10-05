@@ -189,6 +189,8 @@ dependencies = [
  "event-listener-strategy",
  "futures-core",
  "pin-project-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -348,6 +350,7 @@ dependencies = [
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "proc-macro2",
  "quote",
  "serde",
@@ -424,6 +427,7 @@ dependencies = [
  "barracuda-vfs",
  "futures-lite",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -438,12 +442,13 @@ dependencies = [
  "barracuda-agent",
  "barracuda-agent-permission",
  "barracuda-agent-tool",
- "futures-channel",
+ "barracuda-runtime-utils",
  "futures-core",
  "futures-lite",
  "getset",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -466,6 +471,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-vfs",
  "futures-lite",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -531,12 +537,12 @@ dependencies = [
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde_json",
  "static_cell",
  "thiserror 2.0.18",
@@ -570,12 +576,12 @@ dependencies = [
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -593,6 +599,8 @@ dependencies = [
  "barracuda-vfs",
  "futures-lite",
  "getset",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -617,12 +625,14 @@ dependencies = [
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-platform-test",
- "futures-channel",
+ "barracuda-runtime-utils",
  "futures-core",
  "futures-lite",
  "futures-util",
  "getset",
  "json-validator",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -696,6 +706,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
  "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -706,6 +718,7 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -717,6 +730,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -835,6 +850,7 @@ version = "0.1.0"
 dependencies = [
  "allocator-api2",
  "bytemuck",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -846,6 +862,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -930,6 +948,8 @@ dependencies = [
  "critical-section",
  "embedded-graphics-core",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1053,6 +1073,7 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -1106,6 +1127,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embedded-hal 1.0.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1133,6 +1156,8 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1144,6 +1169,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1293,6 +1320,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1333,6 +1362,8 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
  "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1356,6 +1387,8 @@ dependencies = [
  "embassy-sync 0.7.2",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -1833,6 +1866,7 @@ dependencies = [
  "embassy-net",
  "embassy-time",
  "http-client",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1868,6 +1902,7 @@ dependencies = [
  "futures-lite",
  "getset",
  "log",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -1913,15 +1948,20 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embedded-hal 1.0.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "futures-core",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1968,6 +2008,8 @@ dependencies = [
  "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1981,6 +2023,8 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2065,6 +2109,7 @@ dependencies = [
  "futures-lite",
  "http-client",
  "log",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -2194,6 +2239,8 @@ dependencies = [
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2204,6 +2251,8 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2218,6 +2267,8 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "hadris-fat",
  "hadris-io",
+ "portable-atomic-util",
+ "spin 0.12.3",
 ]
 
 [[package]]
@@ -2226,11 +2277,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-vfs",
  "critical-section",
+ "delog",
  "embassy-futures",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "generic-array",
  "littlefs2",
+ "portable-atomic-util",
  "spin 0.10.1",
  "typenum",
 ]
@@ -2244,6 +2297,7 @@ dependencies = [
  "critical-section",
  "embassy-futures",
  "embedded-io-async 0.7.0",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -2254,12 +2308,14 @@ dependencies = [
  "async-channel",
  "barracuda-agent-plugin",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
  "thiserror 2.0.18",
 ]
@@ -2287,6 +2343,8 @@ dependencies = [
  "critical-section",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2296,6 +2354,7 @@ dependencies = [
  "async-channel",
  "barracuda-http-plugin",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-vm-builtin-packages",
@@ -2306,9 +2365,10 @@ dependencies = [
  "critical-section",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -2317,6 +2377,7 @@ name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+ "portable-atomic-util",
  "spin 0.10.1",
  "thiserror 2.0.18",
 ]
@@ -2343,13 +2404,13 @@ name = "barracuda-vm-runtime"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+ "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
- "futures-channel",
  "getset",
  "serde",
  "thiserror 2.0.18",
@@ -2369,6 +2430,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-time-plugin",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
@@ -2376,8 +2438,9 @@ dependencies = [
  "critical-section",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
  "thiserror 2.0.18",
  "time",
 ]
@@ -2388,6 +2451,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-vm-builtin-packages",
@@ -2398,8 +2462,9 @@ dependencies = [
  "critical-section",
  "embassy-time",
  "embedded-io-async 0.7.0",
- "futures-channel",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -2940,6 +3005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -3389,6 +3455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed991f9823b19e8a0380e198dcbb6aa6ac82727b40bfecd2c6cc634f46b7e01c"
 dependencies = [
  "log",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -4780,6 +4847,8 @@ dependencies = [
  "concurrent-queue",
  "parking",
  "pin-project-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -4932,6 +5001,9 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "futures-executor"
@@ -7144,6 +7216,9 @@ name = "spin"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "spin"
@@ -7152,6 +7227,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
 dependencies = [
  "lock_api",
+ "portable-atomic",
 ]
 
 [[package]]

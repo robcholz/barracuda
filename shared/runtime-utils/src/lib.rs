@@ -1,6 +1,7 @@
 #![no_std]
 
-//! Shared helpers for the barracuda Rust crates: cooperative cancellation,
+//! Shared helpers for the barracuda Rust crates: cooperative cancellation, a
+//! portable [`oneshot`] channel,
 //! logical [`stream`] parts, single-task [`yield_stream`] generators, the
 //! prefixed-id newtype macro ([`define_prefixed_id`]), and the id-allocator macro.
 //!
@@ -10,6 +11,7 @@
 extern crate alloc;
 
 mod cancel;
+pub mod oneshot;
 pub mod stream;
 pub mod yield_stream;
 

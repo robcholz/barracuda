@@ -28,6 +28,11 @@ default-members = [
 ]
 
 [workspace.dependencies]
+portable-atomic = { version = "1.15", default-features = false }
+async-channel = { version = "2", default-features = false, features = ["portable-atomic"] }
+futures-core = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+futures-util = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+portable-atomic-util = { version = "0.2.7", default-features = false, features = ["alloc"] }
 # Workspace crates
 # BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
 barracuda-platform-esp32 = { path = "platforms/esp32" }

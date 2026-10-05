@@ -6,6 +6,8 @@ description = "FAT removable-filesystem peripheral over a Board-selected SDMMC d
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 barracuda-peripheral.workspace = true
 barracuda-vfs-fat.workspace = true
 embassy-sync.workspace = true

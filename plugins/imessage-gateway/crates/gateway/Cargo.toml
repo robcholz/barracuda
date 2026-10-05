@@ -7,7 +7,7 @@ description = "Minimal channel registry and outbound messaging facade"
 license = "Apache-2.0"
 
 [dependencies]
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

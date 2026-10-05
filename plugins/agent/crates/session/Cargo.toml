@@ -11,6 +11,7 @@ cache_profile = ["barracuda-agent/cache_profile", "barracuda-model-api/cache_pro
 multiagent = ["dep:barracuda-agent-multiagent", "barracuda-agent/multiagent"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 http-client.workspace = true
 json-validator.workspace = true
 barracuda-agent = { path = "../agent" }
@@ -21,10 +22,9 @@ barracuda-agent-tool = { path = "../tool" }
 barracuda-vfs.workspace = true
 barracuda-model-api = { path = "../model-api" }
 barracuda-runtime-utils.workspace = true
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 embassy-time.workspace = true
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 log = { version = "0.4", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

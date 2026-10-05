@@ -9,7 +9,7 @@ barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
 
 [dependencies]
 barracuda-captive-portal-plugin.workspace = true
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin.workspace = true

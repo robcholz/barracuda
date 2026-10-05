@@ -6,7 +6,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -23,6 +22,7 @@ use generic_array::{
 use littlefs2::driver::Storage;
 use littlefs2::fs::Filesystem;
 use littlefs2::path::PathBuf;
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// Adapts an owned synchronous NOR-flash partition to `littlefs2::Storage`.

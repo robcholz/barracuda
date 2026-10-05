@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc};
+use alloc::string::String;
 use barracuda_board_hal::imu::{Imu, ImuDescriptor, ImuPeripheral, ImuSample};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -12,10 +12,9 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Owns the Board's primary IMU capability and publishes it to Lua.
 #[barracuda_plugin::macros::plugin]

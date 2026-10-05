@@ -5,7 +5,7 @@ edition = "2021"
 description = "Barracuda Plugin that provides the portable WebServer capability"
 
 [dependencies]
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 barracuda-bulk-memory.workspace = true
 barracuda-plugin.workspace = true
 embassy-executor.workspace = true

@@ -1,14 +1,6 @@
 //! LLM-backed implementation of the Session approval resolver.
 
-use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    format,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-};
+use alloc::{borrow::ToOwned, boxed::Box, format, rc::Rc, string::String, string::ToString, vec};
 use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
@@ -23,6 +15,7 @@ use barracuda_model_api::{ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 use serde::Deserialize;
 use serde_json::json;
 

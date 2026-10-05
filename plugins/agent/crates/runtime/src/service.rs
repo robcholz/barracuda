@@ -1,6 +1,6 @@
 //! Executor-neutral process runtime ownership and configuration entry point.
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     future::Future,
     pin::Pin,
@@ -13,9 +13,10 @@ use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersisten
 use barracuda_agent_skill::SkillError;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::{
     AgentCreateError, AgentManagerError, ApiPurpose, ModelApiManager, SharedApiManager,

@@ -4,18 +4,8 @@
 
 extern crate alloc;
 
-use alloc::{
-    boxed::Box,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, vec::Vec};
+use core::{future::Future, pin::Pin};
 
 use async_channel::{Receiver, Sender};
 use barracuda_http_plugin::{Http, HttpError, HttpHeader, HttpMethod, HttpRequest, HttpResponse};
@@ -23,10 +13,12 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, Table};
 use embassy_futures::select::{Either, Either3, select, select3};
-use futures_channel::oneshot;
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const REQUEST_QUEUE_DEPTH: usize = 2;
 

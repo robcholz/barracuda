@@ -28,6 +28,7 @@ intrusive-observability = [
 ]
 
 [dependencies]
+portable-atomic-util.workspace = true
 json-validator.workspace = true
 barracuda-vfs.workspace = true
 barracuda-runtime-utils.workspace = true
@@ -37,15 +38,15 @@ embassy-sync.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 # The `Stream` trait `async_channel::Receiver` implements, so
 # `SessionEventStream` can poll it. `default-features = false` keeps this
 # `no_std`-friendly for the device.
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 # `SelectAll` fairly merges the per-batch detached-tool completion streams the
 # Agent wrapper tracks, replacing a hand-written round-robin poll queue.
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { workspace = true, features = ["alloc"] }
 getset = "0.1.7"
 # The runtime is exposed as an ordinary Future. The application chooses Embassy,
 # Tokio, or another executor and spawns that future at its own boundary.

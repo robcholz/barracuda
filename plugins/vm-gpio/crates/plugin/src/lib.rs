@@ -4,11 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, DigitalProvider, ExposedIo, InputConfig, OutputConfig,
     OutputDrive, Pull,
@@ -19,7 +15,8 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Shares the unified exposed-I/O owner with the `gpio` Lua package.
 #[barracuda_plugin::macros::plugin]
@@ -290,8 +287,9 @@ mod tests {
 
     extern crate std;
 
-    use core::{convert::Infallible, sync::atomic::AtomicBool};
+    use core::convert::Infallible;
     use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
+    use portable_atomic::AtomicBool;
 
     use super::*;
 

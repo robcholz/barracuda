@@ -10,13 +10,15 @@ default = []
 test-fixture = []
 
 [dependencies]
-async-channel = { version = "2", default-features = false }
+barracuda-runtime-utils.workspace = true
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
+async-channel.workspace = true
 barracuda-plugin.workspace = true
 barracuda-time-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 time = { version = "0.3.55", default-features = false }
 thiserror = { version = "2", default-features = false }
 

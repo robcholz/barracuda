@@ -161,11 +161,7 @@ where
 mod tests {
     extern crate std;
 
-    use core::{
-        convert::Infallible,
-        future::ready,
-        sync::atomic::{AtomicBool, Ordering},
-    };
+    use core::{convert::Infallible, future::ready};
 
     use barracuda_peripheral::{
         PeripheralImplementation,
@@ -177,6 +173,7 @@ mod tests {
         digital::{ErrorType as DigitalErrorType, OutputPin},
         i2c::{ErrorType, I2c, Operation},
     };
+    use portable_atomic::{AtomicBool, Ordering};
 
     use super::{Es8311AudioCodecImplementation, Es8311Bindings, Es8311Config};
 

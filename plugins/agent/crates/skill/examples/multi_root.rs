@@ -7,9 +7,9 @@
 
 #![allow(clippy::arc_with_non_send_sync)]
 
-use std::sync::Arc;
+use portable_atomic_util::Arc;
 
-use barracuda_agent_skill::FsSkillRegistry;
+use barracuda_agent_skill::{FsSkillRegistry, SkillSetSource};
 use barracuda_platform_test::memory_vfs;
 use futures_lite::future::block_on;
 

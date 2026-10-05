@@ -5,10 +5,11 @@
 //! against an [`ApiPurpose`] and resolves the right one per purpose, falling
 //! back to a registered default.
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use alloc::{collections::BTreeMap, string::String};
 use core::cell::RefCell;
 
 use barracuda_model_api::{InitError, ModelApiConfig};
+use portable_atomic_util::Arc;
 
 /// What an LLM API config is used for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

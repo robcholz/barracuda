@@ -1,13 +1,13 @@
 use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use embedded_io::{ErrorType, SeekFrom};
 use embedded_io_async::{Read, Seek, Write};
+use portable_atomic::{AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
 use crate::{DirEntry, FsError, Metadata, OpenOptions};
 
@@ -58,7 +58,7 @@ impl Backend {
     /// Erases a concrete backend for mounting and sharing between namespaces.
     pub fn new(backend: impl VfsBackend) -> Self {
         Self {
-            inner: Arc::new(backend),
+            inner: Arc::from(Box::new(backend) as Box<dyn VfsBackend>),
         }
     }
 }

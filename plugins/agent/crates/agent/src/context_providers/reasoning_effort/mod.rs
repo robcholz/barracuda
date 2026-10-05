@@ -1,6 +1,6 @@
 //! Per-agent reasoning-effort context.
 
-use alloc::sync::Arc;
+use portable_atomic_util::Arc;
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};

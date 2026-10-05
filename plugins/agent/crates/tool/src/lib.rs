@@ -20,7 +20,9 @@ pub use definition::{
     ToolConfig, ToolDetachUpdate, ToolError, ToolFuture, ToolHandler, ToolInvocation,
     ToolInvokeError, ToolOutput, ToolProgressSender, ToolResult, ToolSpec,
 };
-pub use registry::{ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryVersion};
+pub use registry::{
+    ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryVersion, ToolSetSource,
+};
 pub use runner::{ToolDetachHandle, ToolJoinHandle, ToolRunner};
 pub use set::{
     ToolCatalogEntry, ToolDiscoveryHandle, ToolGroupCatalog, ToolName, ToolSet, ToolSetError,

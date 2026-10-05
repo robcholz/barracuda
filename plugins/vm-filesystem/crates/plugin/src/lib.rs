@@ -5,16 +5,9 @@
 extern crate alloc;
 
 use alloc::{
-    boxed::Box,
-    collections::VecDeque,
-    format,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    boxed::Box, collections::VecDeque, format, rc::Rc, string::String, string::ToString, vec::Vec,
 };
 use core::pin::Pin;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -26,6 +19,8 @@ use barracuda_vm_plugin::{
     UserDataMethods,
 };
 use embedded_io_async::{ErrorType, Read, Seek, Write};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_OPEN_FILES: usize = 16;
 const MAX_IO_BYTES: usize = 32 * 1024;
@@ -996,8 +991,7 @@ fn file_error(error: FsError) -> Error {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use alloc::{boxed::Box, sync::Arc, vec};
-    use core::sync::atomic::Ordering;
+    use alloc::{boxed::Box, vec};
 
     use barracuda_plugin::manager::{Plugin, PluginDeclaration, PluginFilesystem};
     use barracuda_vfs::{FsError, MountOptions, Vfs};
@@ -1005,6 +999,8 @@ mod tests {
     use barracuda_vm_plugin::{Lua, LuaPackage, Package, Result, UserDataHandle};
     use embedded_io_async::Read as _;
     use futures_lite::future::block_on;
+    use portable_atomic::Ordering;
+    use portable_atomic_util::Arc;
 
     use super::{FilePackage, VmFile, VmFileTransfer, VmFilesystemPlugin};
 

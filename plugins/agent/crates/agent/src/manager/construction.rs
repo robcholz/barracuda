@@ -1,5 +1,6 @@
-use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
+use portable_atomic_util::Arc;
 
 use crate::config::SharedApiManager;
 use barracuda_agent_memory::ProfileStore;
@@ -127,7 +128,7 @@ where
 async fn build_fs_skill_registry(
     filesystem: ScopedVfs,
     skill_roots: Vec<String>,
-) -> Result<Arc<FsSkillRegistry>, SkillError> {
+) -> Result<Arc<dyn SkillRegistry>, SkillError> {
     let span = tracing::info_span!("skill.catalog");
     let _enter = span.enter();
     let mut registry = FsSkillRegistry::new(filesystem.clone());
@@ -150,5 +151,5 @@ async fn build_fs_skill_registry(
             }
         }
     }
-    Ok(Arc::new(registry))
+    Ok(Arc::from(Box::new(registry) as Box<dyn SkillRegistry>))
 }

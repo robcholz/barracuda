@@ -1,6 +1,6 @@
 use async_channel::Sender;
 use barracuda_agent_permission::PermissionLevel;
-use futures_channel::oneshot;
+use barracuda_runtime_utils::oneshot;
 use strum::IntoStaticStr;
 
 use barracuda_agent::ReasoningEffort;

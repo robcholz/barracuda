@@ -1,11 +1,11 @@
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use embedded_io_async::{Read, Write};
+use portable_atomic::{AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
 use crate::path::{backend_path, matches_mount, normalize};
 use crate::{

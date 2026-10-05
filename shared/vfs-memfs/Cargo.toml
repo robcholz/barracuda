@@ -8,14 +8,15 @@ description = "In-memory backend for the Barracuda VFS"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 bare-vfs = { version = "0.3", default-features = false }
 barracuda-vfs.workspace = true
 embedded-io-async = "0.7"
-spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
-embassy-futures = { workspace = true }
+embassy-futures.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

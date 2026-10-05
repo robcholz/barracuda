@@ -6,8 +6,9 @@
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory provider.
 
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 
+use portable_atomic_util::Arc;
 use serde_json::json;
 
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
@@ -65,7 +66,7 @@ where
         api_manager: SharedApiManager,
         llm_factory: &ModelApiFactory<Tcp, Resolver>,
     ) -> Arc<dyn Extractor> {
-        Arc::new(Self::new(api_manager, llm_factory))
+        Arc::from(Box::new(Self::new(api_manager, llm_factory)) as Box<dyn Extractor>)
     }
 }
 

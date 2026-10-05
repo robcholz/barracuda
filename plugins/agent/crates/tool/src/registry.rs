@@ -1,7 +1,6 @@
 use alloc::borrow::{Cow, ToOwned};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::{Ref, RefCell, RefMut};
 use core::fmt;
@@ -10,6 +9,7 @@ use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, PersistenceError, SchemaVersion,
     SharedPersistence, StateBlob, StateSlice,
 };
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::definition::Tool;
@@ -204,6 +204,26 @@ pub enum ToolRegistryError {
     InvalidGroup(ToolGroupId),
 }
 
+/// Shared registry handle that creates per-agent [`ToolSet`] projections.
+pub trait ToolSetSource {
+    /// Create one per-agent tool projection over the shared registry.
+    fn tool_set(&self) -> ToolSet;
+
+    /// Create one per-agent tool projection governed by a firmware-baked
+    /// blacklist. Entries match exact tool-group ids or exact tool names.
+    fn tool_set_with_blacklist(&self, blacklist: &'static [&'static str]) -> ToolSet;
+}
+
+impl ToolSetSource for Arc<ToolRegistry> {
+    fn tool_set(&self) -> ToolSet {
+        ToolSet::from_registry(Arc::clone(self), &[])
+    }
+
+    fn tool_set_with_blacklist(&self, blacklist: &'static [&'static str]) -> ToolSet {
+        ToolSet::from_registry(Arc::clone(self), blacklist)
+    }
+}
+
 impl ToolRegistry {
     /// Load and register the durable state owned by this registry.
     ///
@@ -289,19 +309,6 @@ impl ToolRegistry {
         let mut inner = self.write_state();
         inner.set_started(false);
         Ok(())
-    }
-
-    pub fn tool_set(self: &Arc<Self>) -> ToolSet {
-        ToolSet::from_registry(self.clone(), &[])
-    }
-
-    /// Create one per-agent tool projection governed by a firmware-baked
-    /// blacklist. Entries match exact tool-group ids or exact tool names.
-    pub fn tool_set_with_blacklist(
-        self: &Arc<Self>,
-        blacklist: &'static [&'static str],
-    ) -> ToolSet {
-        ToolSet::from_registry(self.clone(), blacklist)
     }
 
     pub fn tool_version(&self) -> ToolRegistryVersion {

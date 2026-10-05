@@ -6,14 +6,16 @@ description = "Bounded outbound HTTP adapter for Barracuda Lua VMs"
 license = "Apache-2.0"
 
 [dependencies]
-async-channel = { version = "2", default-features = false }
+barracuda-runtime-utils.workspace = true
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
+async-channel.workspace = true
 barracuda-http-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+futures-util = { workspace = true, features = ["alloc", "async-await"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

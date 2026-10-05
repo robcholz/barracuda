@@ -1,9 +1,10 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc};
+use alloc::{boxed::Box, string::ToString};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 
 use super::super::model::TranscriptText;
 use super::super::policy::SpawnPolicy;

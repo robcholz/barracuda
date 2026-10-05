@@ -1,9 +1,10 @@
-use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
+use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 use serde::Deserialize;
 
 use barracuda_agent::Message;

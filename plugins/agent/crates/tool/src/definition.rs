@@ -2,7 +2,6 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
-use alloc::sync::{Arc, Weak};
 use core::cell::RefCell;
 use core::fmt;
 use core::future::Future;
@@ -12,6 +11,7 @@ use core::task::{Context, Poll, Waker};
 use barracuda_agent_permission::{Action, RiskClass};
 use futures_core::Stream;
 use getset::CopyGetters;
+use portable_atomic_util::{Arc, Weak};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 

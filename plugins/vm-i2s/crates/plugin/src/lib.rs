@@ -4,13 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-    vec::Vec,
-};
+use alloc::{format, string::String, string::ToString, vec, vec::Vec};
 use barracuda_board_hal::{
     ExposedIo, I2sProvider, I2sRequest,
     audio::{PcmFormat, PcmStream},
@@ -21,7 +15,8 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
 

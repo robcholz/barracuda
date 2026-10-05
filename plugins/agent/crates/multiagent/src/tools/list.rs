@@ -1,8 +1,9 @@
-use alloc::{string::ToString, sync::Arc};
+use alloc::string::ToString;
 
 use barracuda_agent_tool::{
     tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 
 use super::super::tool_port::SubagentControl;
 
