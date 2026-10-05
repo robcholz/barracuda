@@ -4,7 +4,7 @@
 
 use core::marker::PhantomData;
 
-use barracuda_driver_es8311::Es8311;
+use barracuda_driver_es8311::{Es8311, Es8311Error as Es8311RegisterError};
 use barracuda_peripheral::{
     PeripheralImplementation,
     audio::{AudioCodec, AudioDescriptor, PcmStream},
@@ -54,7 +54,7 @@ pub enum Es8311InitError<ControlError, AmplifierError> {
     /// The configured address is not a seven-bit I2C address.
     InvalidAddress,
     /// Codec register programming failed.
-    Control(ControlError),
+    Control(Es8311RegisterError<ControlError>),
     /// The external speaker amplifier could not be enabled.
     Amplifier(AmplifierError),
 }
@@ -63,7 +63,7 @@ pub enum Es8311InitError<ControlError, AmplifierError> {
 #[derive(Debug)]
 pub enum Es8311Error<ControlError, StreamError> {
     /// Codec register access failed.
-    Control(ControlError),
+    Control(Es8311RegisterError<ControlError>),
     /// I2S transfer failed.
     Stream(StreamError),
 }
