@@ -145,7 +145,7 @@ where
     async fn post_json_inner(
         &mut self,
         url: &str,
-        body: &str,
+        body: &[u8],
         headers: &[(&str, &str)],
     ) -> Result<Response, Error> {
         self.ensure_buffers();
@@ -173,7 +173,7 @@ where
                         .post(&path)
                         .headers(headers)
                         .content_type(ContentType::ApplicationJson)
-                        .body(body.as_bytes())
+                        .body(body)
                         .send(header_buffer.as_mut_slice())
                         .await?;
                     let status = response.status.0;
@@ -205,7 +205,7 @@ where
     pub(crate) async fn post_json(
         &mut self,
         url: &str,
-        body: &str,
+        body: &[u8],
         headers: &[(&str, &str)],
     ) -> Result<Response, Error> {
         let result = self.post_json_inner(url, body, headers).await;
@@ -218,7 +218,7 @@ where
     pub(crate) fn post_json_stream<'a>(
         &'a mut self,
         url: String,
-        body: String,
+        body: BulkVec<u8>,
         headers: Vec<(String, String)>,
     ) -> ResponseStream<'a> {
         try_yield_stream(|yielder| async move {
@@ -252,7 +252,7 @@ where
                                 .post(&path)
                                 .headers(&header_refs)
                                 .content_type(ContentType::ApplicationJson)
-                                .body(body.as_bytes())
+                                .body(body.as_slice())
                                 .send(header_buffer.as_mut_slice())
                                 .await?;
                             yielder

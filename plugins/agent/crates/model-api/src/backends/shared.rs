@@ -1,9 +1,10 @@
 //! Helpers shared by the LLM backends.
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
+use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -50,7 +51,7 @@ fn status_is_transient(status: u16) -> bool {
 pub(super) async fn post_json(
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     backend: &Backend,
-    body: &str,
+    body: &[u8],
 ) -> Result<Response, Error> {
     let header_refs = backend
         .headers
@@ -70,7 +71,7 @@ pub(super) async fn post_json(
 pub(super) async fn post_stream<'h>(
     http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
     backend: &Backend,
-    body: String,
+    body: BulkVec<u8>,
     sse: ProviderSse,
 ) -> Result<ProviderStream<'h>, Error> {
     let mut stream = http.post_json_stream(backend.endpoint.clone(), body, backend.headers.clone());
@@ -273,22 +274,4 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Erro
         #[cfg(feature = "cache_profile")]
         usage: response.usage.and_then(OpenAiUsage::profile),
     })
-}
-
-/// Insert OpenAI-style `tools` into a chat request body map.
-pub(super) fn insert_tools_into_body(
-    body: &mut Map<String, Value>,
-    tools_json: &str,
-) -> Result<(), Error> {
-    let tools: Value = serde_json::from_str(tools_json).map_err(|_| Error::InvalidToolsJson)?;
-    if !tools.is_array() {
-        return Err(Error::InvalidToolsJson);
-    }
-    body.insert("tools".to_string(), tools);
-    Ok(())
-}
-
-pub(super) fn serialize_chat_body(body: Map<String, Value>) -> Result<String, Error> {
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| Error::Api("out of memory serializing request"))
 }

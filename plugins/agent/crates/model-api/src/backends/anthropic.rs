@@ -9,6 +9,7 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -18,9 +19,10 @@ use super::super::errors::Error;
 use super::super::media::{prepare_asset, Prepared};
 use super::super::transport::Transport;
 use super::super::types::{ChatRequest, LlmResponse, MediaRequest, ToolCall};
+use super::body::{encode, encode_object, write_base64_str, Object};
 #[cfg(feature = "cache_profile")]
 use super::shared::AnthropicUsage;
-use super::shared::{media_text, post_json, post_stream, serialize_chat_body};
+use super::shared::{media_text, post_json, post_stream};
 use super::sse::{AnthropicSse, ProviderSse};
 use super::Backend;
 
@@ -320,8 +322,8 @@ fn chat_body_object(
     Ok(body)
 }
 
-fn build_chat_body(backend: &Backend, request: &ChatRequest) -> Result<String, Error> {
-    serialize_chat_body(chat_body_object(
+fn build_chat_body(backend: &Backend, request: &ChatRequest) -> Result<BulkVec<u8>, Error> {
+    encode_object(&chat_body_object(
         backend,
         request.system_prompt,
         request.messages,
@@ -331,8 +333,8 @@ fn build_chat_body(backend: &Backend, request: &ChatRequest) -> Result<String, E
     )?)
 }
 
-/// Like [`build_chat_body`](Self::build_chat_body) but sets `stream: true`.
-fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<String, Error> {
+/// Like [`build_chat_body`] but sets `stream: true`.
+fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<BulkVec<u8>, Error> {
     let mut body = chat_body_object(
         backend,
         request.system_prompt,
@@ -342,14 +344,14 @@ fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<String,
         false,
     )?;
     body.insert("stream".to_string(), json!(true));
-    serialize_chat_body(body)
+    encode_object(&body)
 }
 
 fn build_chat_json_body(
     backend: &Backend,
     request: &ChatRequest<'_>,
     schema: &Value,
-) -> Result<String, Error> {
+) -> Result<BulkVec<u8>, Error> {
     let mut body = chat_body_object(
         backend,
         request.system_prompt,
@@ -368,7 +370,7 @@ fn build_chat_json_body(
         }),
     );
 
-    serialize_chat_body(body)
+    encode_object(&body)
 }
 
 fn insert_tools_into_body(
@@ -385,33 +387,49 @@ fn insert_tools_into_body(
     Ok(())
 }
 
-/// Serialize the media inference request body (no transport).
-fn build_media_body(backend: &Backend, request: &MediaRequest<'_>) -> Result<String, Error> {
+/// Encodes the media inference request body (no transport).
+fn build_media_body(backend: &Backend, request: &MediaRequest<'_>) -> Result<BulkVec<u8>, Error> {
     let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
         return Err(Error::IncompleteMediaRequest);
     };
-    let Prepared::Inline { mime_type, base64 } =
+    let Prepared::Inline { mime_type, bytes } =
         prepare_asset(request.media, backend.image_max_bytes)?
     else {
         return Err(Error::RequiresLocalImage);
     };
-
-    let mut body = backend.request_body();
-    if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
-        body.insert("system".to_string(), json!(system));
-    }
-    body.insert(
-            "messages".to_string(),
-            json!([{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": base64}}
-                ]
-            }]),
-        );
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| Error::Api("out of memory serializing media request"))
+    let system_prompt = request.system_prompt.filter(|prompt| !prompt.is_empty());
+    encode(|sink| {
+        let mut body = Object::begin(sink);
+        body.value("max_tokens", &Value::from(backend.max_tokens));
+        let messages = body.field("messages");
+        messages.put(b"[");
+        let mut message = Object::begin(messages);
+        let content = message.field("content");
+        content.put(b"[");
+        let mut text = Object::begin(content);
+        text.str("text", user_prompt);
+        text.str("type", "text");
+        text.end();
+        content.put(b",");
+        let mut image = Object::begin(content);
+        let source = image.field("source");
+        let mut source = Object::begin(source);
+        write_base64_str(source.field("data"), "", bytes);
+        source.str("media_type", mime_type);
+        source.str("type", "base64");
+        source.end();
+        image.str("type", "image");
+        image.end();
+        content.put(b"]");
+        message.str("role", "user");
+        message.end();
+        messages.put(b"]");
+        body.str("model", &backend.model);
+        if let Some(system) = system_prompt {
+            body.str("system", system);
+        }
+        body.end();
+    })
 }
 
 pub(super) async fn chat(
