@@ -288,7 +288,7 @@ use core::{
 };
 use std::alloc::System;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use portable_atomic::{AtomicUsize, Ordering};
 
 struct CountingAllocator {
     allocations: AtomicUsize,

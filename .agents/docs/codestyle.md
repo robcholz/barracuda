@@ -61,3 +61,20 @@ type or keep a named fallible constructor.
 
 Once a `From` or `TryFrom` impl exists, use it at call sites (`.into()`,
 `.try_into()`, `?`) instead of a parallel helper.
+
+## Atomics and `Arc`
+
+Firmware code uses `portable_atomic` atomics and `portable_atomic_util::Arc` /
+`Weak`, never `core::sync::atomic`, `alloc::sync::Arc`, or their `std`
+re-exports: some targets lack native atomics, and the portable types keep one
+implementation on every Platform. The root `clippy.toml` disallows the
+standard types and CI denies `clippy::disallowed_types`.
+
+Host-only crates (the Linux and macOS Platforms, the CLI, workspace tools,
+build-time and proc-macro crates, benchmarks) carry their own `clippy.toml`,
+which replaces the root file and allows the standard types. A host-only module
+inside a firmware crate, such as one behind a host feature, allows the lint
+locally with a reason.
+
+`portable_atomic_util::Arc` cannot coerce to `Arc<dyn Trait>` on stable Rust;
+build trait objects with `Arc::from(Box::new(value) as Box<dyn Trait>)`.

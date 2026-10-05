@@ -349,6 +349,7 @@ dependencies = [
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic",
  "portable-atomic-util",
  "proc-macro2",
  "quote",
@@ -1398,6 +1399,7 @@ dependencies = [
  "getset",
  "lunka",
  "lunka-src",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -2406,6 +2408,7 @@ name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+ "portable-atomic",
  "portable-atomic-util",
  "spin 0.10.1",
  "thiserror 2.0.18",

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "intrusive-observability is a host-only std feature"
+)]
+
 use std::string::String;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;

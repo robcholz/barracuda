@@ -183,7 +183,7 @@ jobs:
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
       - name: Clippy portable workspace
-        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
 
   # The same shared production path is tested on the second supported host.
   # It runs in parallel with Linux: Linux normally reports first, while macOS
@@ -239,7 +239,7 @@ jobs:
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
       - name: Clippy portable workspace
-        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
 
   # The two host Platforms are covered by complete end-user paths above. Check,
   # lint, test, and build every device Platform independently. Native target
@@ -334,11 +334,11 @@ jobs:
 
       - name: Clippy Platform
         if: matrix.toolchain == 'stable'
-        run: cargo clippy --package ${{ matrix.package }}
+        run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Clippy Platform (Xtensa)
         if: matrix.toolchain == 'esp'
-        run: cargo clippy --package ${{ matrix.package }}
+        run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Test Platform on host
         run: cargo test --target host-tuple --package ${{ matrix.package }}

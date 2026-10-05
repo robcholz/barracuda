@@ -12,6 +12,7 @@ spin = { version = "0.10", default-features = false, features = ["portable_atomi
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+portable-atomic.workspace = true
 barracuda-lua = { path = "../lua", features = ["vendored"] }
 
 [lints.rust]

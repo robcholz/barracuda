@@ -82,6 +82,7 @@ proc-macro2 = "1"
 barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
 
 [dev-dependencies]
+portable-atomic.workspace = true
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
 # Host-only mounted VFS helpers for tests.
