@@ -54,6 +54,8 @@ class HttpCheck:
     body: str | None
     status: int
     body_contains: tuple[str, ...] = ()
+    # "before" runs after startup; "after" runs once the chat has settled.
+    when: str = 'before'
 
 
 @dataclass(frozen=True)
@@ -187,7 +189,15 @@ def _http(entry: Any, path: Path) -> HttpCheck:
         body=body,
         status=int(entry.get('status', 200)),
         body_contains=_strings(entry, 'body_contains', path),
+        when=_when(entry, path),
     )
+
+
+def _when(entry: dict[str, Any], path: Path) -> str:
+    when = entry.get('when', 'before')
+    if when not in ('before', 'after'):
+        raise ScenarioError(f'{path}: http when must be "before" or "after"')
+    return when
 
 
 def _list(document: dict[str, Any], key: str, path: Path) -> list[Any]:

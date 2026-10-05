@@ -148,19 +148,7 @@ def run_scenario(
             tape_server.replay(scenario.tape, artifacts / 'requests')
 
         system.start()
-        http_failures = []
-        for check in scenario.http:
-            status, body = http_request(check.method, check.path, check.body)
-            if status != check.status:
-                http_failures.append(
-                    f'{check.method} {check.path}: status {status} != {check.status}: '
-                    f'{body[:200]}'
-                )
-            http_failures += [
-                f'{check.method} {check.path}: body lacks {needle!r}: {body[:300]}'
-                for needle in check.body_contains
-                if needle not in body
-            ]
+        http_failures = _run_http(scenario, 'before')
         records: list[dict[str, object]] = []
         if scenario.steps:
             configure_model(tape_server.base_url(api_path), model, api_key)
@@ -171,6 +159,7 @@ def run_scenario(
             )
         for pattern in scenario.await_logs:
             system.wait_for_log(pattern, scenario.await_seconds)
+        http_failures += _run_http(scenario, 'after')
         (artifacts / 'transcript.jsonl').write_text(
             ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in records),
             encoding='utf-8',
@@ -186,6 +175,25 @@ def run_scenario(
     if not recording and scenario.mode != 'none':
         failures += check_replay(tape_server.counts(), interactions)
         failures += check_requests(scenario, artifacts / 'requests')
+    return failures
+
+
+def _run_http(scenario: Scenario, when: str) -> list[str]:
+    failures: list[str] = []
+    for check in scenario.http:
+        if check.when != when:
+            continue
+        status, body = http_request(check.method, check.path, check.body)
+        if status != check.status:
+            failures.append(
+                f'{check.method} {check.path}: status {status} != {check.status}: '
+                f'{body[:200]}'
+            )
+        failures += [
+            f'{check.method} {check.path}: body lacks {needle!r}: {body[:300]}'
+            for needle in check.body_contains
+            if needle not in body
+        ]
     return failures
 
 

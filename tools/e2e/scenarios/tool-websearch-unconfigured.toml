@@ -1,0 +1,20 @@
+name = "Web search without a provider key"
+description = "web_search reports a structured configuration error instead of failing the turn when no Tavily key is configured."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "websearch" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 3 } }]
+
+[[model.responses]]
+text = "Search is not configured."
+
+[[steps]]
+send = "Search the web."
+reply_contains = ["Search is not configured."]
+tool_contains = ['{"error":']
+tool_errors_allowed = true

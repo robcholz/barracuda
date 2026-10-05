@@ -1,0 +1,35 @@
+name = "Built-in Agent tools"
+description = "Memory, profile, todo, skill, and tool-discovery Tools owned by the Agent runtime."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_search", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_store", arguments = { content = "The user prefers green tea.", tags = ["preferences"] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_list", arguments = { limit = 5 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "profile_replace", arguments = { document = "user_profile", content = "# User\n\nLikes green tea.\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "profile_read", arguments = { document = "user_profile" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "todo_update", arguments = { todos = [{ content = "Brew tea", status = "in_progress" }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+[[model.responses]]
+request_contains = ["Likes green tea."]
+text = "Noted your preference."
+
+[[steps]]
+send = "Remember that I like green tea."
+reply_contains = ["Noted your preference."]
+tool_contains = ["green tea", '{"id":"file"', "Stored memory"]
