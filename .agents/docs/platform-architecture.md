@@ -16,8 +16,8 @@ Board HAL = Board matrix + peripheral implementations + exposed I/O
 Target    = Platform + Board HAL
 ~~~
 
-- **Platform** is an execution platform family: ESP, STM32, nRF, CH, Linux,
-  macOS, or an equivalent environment. It provides platform mechanisms such as
+- **Platform** is one execution platform: a chip line such as ESP32-S3,
+  ESP32-C6, or STM32, or a hosted environment such as Linux or macOS. It provides platform mechanisms such as
   an IP stack, TLS, and partitions and adapts its vendor HAL into upstream
   hardware contracts. It does not describe a Board's concrete peripherals,
   wiring, or product hardware matrix.
@@ -122,7 +122,7 @@ The returned shape preserves ownership:
 
 ~~~rust,ignore
 TargetResources {
-    platform: PlatformResources { ip_stack, tls, partitions },
+    platform: PlatformResources { ip_stack, wifi, tls, partitions },
     board_hal: BoardResources { peripherals, exposed_io },
 }
 ~~~
@@ -132,22 +132,32 @@ never become fields of a Board resource bundle.
 
 ## Platform
 
-A Platform represents a family such as ESP, STM32, nRF, CH, Linux, or macOS.
-It owns integration with that family's execution environment and supplies
+A Platform represents one execution platform: an ESP chip such as ESP32-S3
+or ESP32-C6, an STM32 line, Linux, macOS, or an equivalent environment. Each
+ESP chip is its own Platform crate and selection (`platforms/esp32`,
+`platforms/esp32c3`, `platforms/esp32s3`, ...); chips that share a vendor
+ecosystem declare the same `family` in `platform.yml` and may share vendor
+adaptation source, but they are never merged into one family Platform. A
+Platform owns integration with its execution environment and supplies
 platform-level services. Concrete Board peripherals do not become Platform
 fields or Platform associated types.
 
 Platform resources have stable, exact shapes. The current common contract
-exposes one Embassy IP stack, one TLS client capability, and one partitions
-collection:
+exposes one Embassy IP stack, one Wi-Fi control mechanism, one TLS client
+capability, and one partitions collection:
 
 ~~~rust,ignore
-pub struct PlatformResources<Tls, Partitions> {
+pub struct PlatformResources<Tls, Partitions, Wifi> {
     pub ip_stack: embassy_net::Stack<'static>,
+    pub wifi: Wifi,
     pub tls: Tls,
     pub partitions: Partitions,
 }
 ~~~
+
+`wifi` is a separate communication mechanism, not part of `ip_stack`.
+Platforms without a radio supply an explicitly unsupported implementation, and
+System hands the mechanism to the Wi-Fi Plugin, which owns the policy.
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
@@ -922,7 +932,12 @@ does not depend on accidental ordering between Cargo build scripts.
 platforms/
 +-- api/
 +-- selected/          # selects only Platform
-+-- esp/               # Platform services + vendor HAL adaptation
++-- esp32/             # one Platform per ESP chip: services + vendor HAL adaptation
++-- esp32c3/
++-- esp32c6/
++-- esp32p4/
++-- esp32s2/
++-- esp32s3/
 +-- stm32/             # Platform services + vendor HAL adaptation
 +-- nrf/
 +-- ch/
