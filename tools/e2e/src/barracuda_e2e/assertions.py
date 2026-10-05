@@ -12,6 +12,7 @@ from .scenario import Scenario
 # Records render as `<name><arguments JSON><result JSON>`, so a failed call has
 # a result object that starts with an `error` key.
 TOOL_FAILURE_PATTERNS = (r'tool not found', r'\binvalid arguments\b', r'\}\{"error":')
+HEAP_HIGH_WATER = re.compile(r'ordinary heap high-water: (\d+) bytes')
 
 
 def check_transcript(
@@ -74,6 +75,29 @@ def check_logs(scenario: Scenario, log: str) -> list[str]:
             ):
                 failures.append(f'forbidden log /{pattern}/: {line.strip()}')
     return failures
+
+
+def heap_high_water(log: str) -> int | None:
+    """Largest ordinary-heap high-water mark the System reported, if any."""
+
+    peaks = [int(match.group(1)) for match in HEAP_HIGH_WATER.finditer(log)]
+    return max(peaks, default=None)
+
+
+def check_heap(scenario: Scenario, log: str) -> list[str]:
+    """The reported ordinary-heap high-water mark stays within the budget."""
+
+    if scenario.heap_high_water_max is None:
+        return []
+    peak = heap_high_water(log)
+    if peak is None:
+        return ['System reported no ordinary-heap high-water mark']
+    if peak > scenario.heap_high_water_max:
+        return [
+            f'ordinary heap high-water {peak} bytes exceeds '
+            f'{scenario.heap_high_water_max}'
+        ]
+    return []
 
 
 def check_replay(counts: dict[str, int], interactions: int) -> list[str]:

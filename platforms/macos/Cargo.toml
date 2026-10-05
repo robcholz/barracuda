@@ -32,6 +32,8 @@ log.workspace = true
 rand = "0.9"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 thiserror = "2"
+cap = { version = "0.1", features = ["stats"] }
+allocator-api2 = { version = "0.3.1", features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal"] }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -25,6 +25,8 @@ getrandom = { version = "0.4", features = ["sys_rng"] }
 thiserror = "2"
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "rt-multi-thread"] }
 tun = { version = "0.7.13", features = ["async"] }
+cap = { version = "0.1", features = ["stats"] }
+allocator-api2 = { version = "0.3.1", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"

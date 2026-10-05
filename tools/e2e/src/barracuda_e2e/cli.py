@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .assertions import check_logs, check_replay, check_requests, check_transcript
+from .assertions import (
+    check_heap,
+    check_logs,
+    check_replay,
+    check_requests,
+    check_transcript,
+    heap_high_water,
+)
 from .ntp import LocalNtp
 from .scenario import Scenario, ScenarioError, discover, load_scenario
 from .system import (
@@ -68,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument('--skip-build', action='store_true', help='reuse existing builds')
     run.add_argument(
+        '--heap-limit',
+        type=int,
+        metavar='BYTES',
+        help='cap the System ordinary heap, aborting on overflow like a device OOM',
+    )
+    run.add_argument(
         '--no-local-ntp',
         action='store_true',
         help='do not answer the System NTP requests from the host clock',
@@ -102,21 +115,36 @@ def main(argv: Sequence[str] | None = None) -> None:
         sys.exit(f'error: {exc}')
 
     failed = 0
+    summary: dict[str, dict[str, object]] = {}
     with _local_ntp(enabled=not arguments.no_local_ntp):
         for scenario in selected:
-            failures = run_scenario(scenario, binaries, live)
+            failures = run_scenario(scenario, binaries, live, arguments.heap_limit)
+            peak = _heap_peak(scenario)
             status = 'PASS' if not failures else 'FAIL'
-            print(f'{status} {scenario.slug}: {scenario.name}', flush=True)
+            heap = f' [heap {peak / 1024:.0f} KiB]' if peak is not None else ''
+            print(f'{status} {scenario.slug}: {scenario.name}{heap}', flush=True)
             for failure in failures:
                 print(f'    - {failure}')
             failed += bool(failures)
+            summary[scenario.slug] = {
+                'passed': not failures,
+                'failures': failures,
+                'heap_high_water_bytes': peak,
+            }
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    (ARTIFACTS / 'summary.json').write_text(
+        json.dumps(summary, indent=2) + '\n', encoding='utf-8'
+    )
     print(f'\n{len(selected) - failed} passed, {failed} failed')
     print(f'artifacts: {ARTIFACTS}')
     sys.exit(1 if failed else 0)
 
 
 def run_scenario(
-    scenario: Scenario, binaries: Binaries, live: LiveModel | None
+    scenario: Scenario,
+    binaries: Binaries,
+    live: LiveModel | None,
+    heap_limit: int | None = None,
 ) -> list[str]:
     """Run one scenario in an isolated state directory and return failures."""
 
@@ -124,7 +152,9 @@ def run_scenario(
     shutil.rmtree(artifacts, ignore_errors=True)
     artifacts.mkdir(parents=True)
     tape_server = TapeServer(TAPE_PORT, artifacts / 'llm-tape.log')
-    system = SystemProcess(binaries, artifacts / 'state', artifacts / 'system.log')
+    system = SystemProcess(
+        binaries, artifacts / 'state', artifacts / 'system.log', heap_limit
+    )
     recording = scenario.mode == 'recorded' and live is not None
     try:
         if scenario.mode == 'scripted':
@@ -171,11 +201,21 @@ def run_scenario(
         tape_server.stop()
 
     failures = http_failures + check_transcript(scenario, records)
+    if system.early_exit is not None:
+        failures.append(f'System exited with {system.early_exit} during the scenario')
     failures += check_logs(scenario, system.log())
+    failures += check_heap(scenario, system.log())
     if not recording and scenario.mode != 'none':
         failures += check_replay(tape_server.counts(), interactions)
         failures += check_requests(scenario, artifacts / 'requests')
     return failures
+
+
+def _heap_peak(scenario: Scenario) -> int | None:
+    log = ARTIFACTS / scenario.slug / 'system.log'
+    if not log.exists():
+        return None
+    return heap_high_water(log.read_text(encoding='utf-8', errors='replace'))
 
 
 def _run_http(scenario: Scenario, when: str) -> list[str]:

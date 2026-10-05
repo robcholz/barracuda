@@ -34,7 +34,8 @@ uv run --package barracuda-e2e barracuda-e2e run tool-vm --skip-build
 `--skip-build` is given. Scenarios run sequentially because they share the
 TUN address. Artifacts for each scenario are written to `target/e2e/<name>/`:
 `system.log`, `llm-tape.log`, `transcript.jsonl`, `requests/` (every model
-request body), and the isolated `state/` directory.
+request body), and the isolated `state/` directory. `target/e2e/summary.json`
+records each scenario's result and ordinary-heap high-water mark.
 
 The harness answers the System's SNTP requests from the host clock through an
 iptables DNAT rule, so time, Scheduler, and Workflow scenarios do not depend on
@@ -82,6 +83,9 @@ forbid = ['\bERROR\b']               # default: ERROR and panics
 allow = []                           # exceptions to forbid
 await = ["VM run 1 finished"]        # wait for these after the chat
 await_seconds = 30
+
+[memory]
+heap_high_water_max = 131072          # ordinary-heap budget in bytes
 ```
 
 Plugin Tools are hidden groups: a scripted model must `tool_load` the group
@@ -93,6 +97,17 @@ is generated.
 Every scenario also fails when a Tool result is `tool not found` or an
 `{"error": ...}` object, when llm-tape rejects or misses a model call, or when
 the System logs an `ERROR` or a panic.
+
+### Memory
+
+The host Platform counts the ordinary (internal-RAM) heap separately from bulk
+memory, which on devices lives in PSRAM. It logs `ordinary heap high-water: N
+bytes` as the peak grows, and every result line shows the scenario's peak.
+`[memory] heap_high_water_max` fails a scenario whose peak exceeds the budget.
+`run --heap-limit BYTES` instead caps the heap itself, so an allocation beyond
+it aborts the System the way a device runs out of memory. Host-only
+allocations (the I/O reactor, logger, and TUN driver) are counted too, so the
+host figure is an upper bound on the device's.
 
 ### Scripted, recorded, and none
 

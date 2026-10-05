@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 from llm_tape.tape import load_tape
 
-from barracuda_e2e.assertions import check_logs, check_replay, check_transcript
+from barracuda_e2e.assertions import (
+    check_heap,
+    check_logs,
+    check_replay,
+    check_transcript,
+    heap_high_water,
+)
 from barracuda_e2e.ntp import NTP_UNIX_OFFSET, sntp_reply
 from barracuda_e2e.scenario import (
     ModelResponse,
@@ -143,3 +149,26 @@ def test_tool_call_arguments_are_json_encoded(tmp_path):
     payload = json.loads(frames.split('data: ')[1])
     arguments = payload['choices'][0]['delta']['tool_calls'][0]['function']['arguments']
     assert json.loads(arguments) == {'source': "print('é')"}
+
+
+def test_heap_high_water_is_the_largest_report_and_respects_the_budget(tmp_path):
+    path = tmp_path / 'heap.toml'
+    path.write_text(
+        'name = "heap"\n[[http]]\npath = "/"\n[memory]\nheap_high_water_max = 9000\n',
+        encoding='utf-8',
+    )
+    scenario = load_scenario(path)
+    log = (
+        'ordinary heap high-water: 8192 bytes (current 4000)\n'
+        'ordinary heap high-water: 4096 bytes (current 100)\n'
+    )
+    assert heap_high_water(log) == 8192
+    assert heap_high_water('no reports') is None
+    assert check_heap(scenario, log) == []
+    over = log + 'ordinary heap high-water: 12288 bytes (current 1)\n'
+    assert check_heap(scenario, over) == [
+        'ordinary heap high-water 12288 bytes exceeds 9000'
+    ]
+    assert check_heap(scenario, '') == [
+        'System reported no ordinary-heap high-water mark'
+    ]

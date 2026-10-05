@@ -6,6 +6,7 @@ extern crate alloc;
 
 mod application;
 mod flash;
+mod heap;
 mod layout;
 mod logging;
 mod network;

@@ -1675,11 +1675,13 @@ dependencies = [
 name = "barracuda-platform-linux"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
+ "cap",
  "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
@@ -1705,6 +1707,7 @@ dependencies = [
 name = "barracuda-platform-macos"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "barracuda-board",
  "barracuda-board-config",
@@ -1714,6 +1717,7 @@ dependencies = [
  "barracuda-platform-macos-network-gateway-protocol",
  "barracuda-system-image",
  "barracuda-tls",
+ "cap",
  "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
@@ -2850,6 +2854,12 @@ checksum = "bb1307f12aa967b5a58416e87b3653360e0fd614a016b6e970db08fecbb1b80d"
 dependencies = [
  "serde_core",
 ]
+
+[[package]]
+name = "cap"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f125eb85b84a24c36b02ed1d22c9dd8632f53b3cde6e4d23512f94021030003"
 
 [[package]]
 name = "cargo-platform"

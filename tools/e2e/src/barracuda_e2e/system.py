@@ -88,11 +88,20 @@ def require_network() -> None:
 class SystemProcess:
     """One System run against a freshly erased flash image."""
 
-    def __init__(self, binaries: Binaries, state_dir: Path, log_path: Path):
+    def __init__(
+        self,
+        binaries: Binaries,
+        state_dir: Path,
+        log_path: Path,
+        heap_limit: int | None = None,
+    ):
         self._binaries = binaries
         self._state_dir = state_dir
         self._log_path = log_path
+        self._heap_limit = heap_limit
         self._process: subprocess.Popen[bytes] | None = None
+        # Exit status when the System stopped on its own before `stop`.
+        self.early_exit: int | None = None
 
     def start(self, timeout: float = 60.0) -> None:
         """Write a fresh flash image, launch the System, and wait for HTTP."""
@@ -105,9 +114,13 @@ class SystemProcess:
         contents[offset : offset + len(image)] = image
         flash.write_bytes(contents)
         log = self._log_path.open('wb')
+        environment = dict(os.environ)
+        if self._heap_limit is not None:
+            environment['BARRACUDA_HEAP_LIMIT_BYTES'] = str(self._heap_limit)
         self._process = subprocess.Popen(
             [str(self._binaries.system)],
             cwd=self._state_dir,
+            env=environment,
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -135,7 +148,10 @@ class SystemProcess:
     def stop(self) -> None:
         """Interrupt the System and wait for it to exit."""
 
-        if self._process is None or self._process.poll() is not None:
+        if self._process is None:
+            return
+        if self._process.poll() is not None:
+            self.early_exit = self._process.returncode
             return
         os.killpg(self._process.pid, signal.SIGINT)
         try:

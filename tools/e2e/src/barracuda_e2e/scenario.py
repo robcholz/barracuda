@@ -75,6 +75,8 @@ class Scenario:
     await_logs: tuple[str, ...] = field(default=())
     await_seconds: float = 30.0
     http: tuple[HttpCheck, ...] = field(default=())
+    # Maximum ordinary-heap high-water mark the System may report.
+    heap_high_water_max: int | None = None
 
     @property
     def slug(self) -> str:
@@ -120,6 +122,12 @@ def load_scenario(path: Path) -> Scenario:
     logs = document.get('logs', {})
     if not isinstance(logs, dict):
         raise ScenarioError(f'{path}: logs must be a table')
+    memory = document.get('memory', {})
+    if not isinstance(memory, dict):
+        raise ScenarioError(f'{path}: memory must be a table')
+    heap_max = memory.get('heap_high_water_max')
+    if heap_max is not None and (not isinstance(heap_max, int) or heap_max <= 0):
+        raise ScenarioError(f'{path}: memory.heap_high_water_max must be a byte count')
     return Scenario(
         path=path,
         name=name,
@@ -134,6 +142,7 @@ def load_scenario(path: Path) -> Scenario:
         await_logs=_strings(logs, 'await', path),
         await_seconds=float(logs.get('await_seconds', 30)),
         http=http,
+        heap_high_water_max=heap_max,
     )
 
 

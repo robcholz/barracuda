@@ -155,13 +155,17 @@ impl Platform for LinuxPlatform {
     type Error = LinuxPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
-        barracuda_bulk_memory::platform::install_global();
         crate::logging::install();
         log::info!("preparing Linux Platform");
+        crate::heap::install();
         Self::install_reactor()
     }
 
     async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
+        match crate::heap::report_high_water() {
+            Ok(task) => spawner.spawn(task),
+            Err(_error) => log::warn!("ordinary heap reporting task is unavailable"),
+        }
         log::info!("initializing Linux Platform partitions");
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
