@@ -16,7 +16,8 @@ use super::definition::Tool;
 use super::set::{ToolName, ToolSet};
 
 pub type ToolRegistryVersion = u64;
-type ToolGroupId = String;
+/// A tool group id, shared by every tool of the group.
+pub(crate) type ToolGroupId = Arc<str>;
 
 const TOOL_REGISTRY_STATE_NAME: &str = "tool_registry";
 
@@ -25,17 +26,19 @@ pub struct ToolRegistry {
 }
 
 struct ToolRegistryInner {
-    tools: BTreeMap<ToolName, Tool>,
-    groups: BTreeMap<ToolGroupId, ToolGroupEntry>,
+    /// Every registered tool with its group, sorted by tool name.
+    tools: Vec<RegisteredTool>,
+    /// Registered group ids, sorted.
+    groups: Vec<ToolGroupId>,
     state: DurableState<ToolRegistryState>,
     started: bool,
     runtime_version: ToolRegistryVersion,
 }
 
-#[derive(Clone)]
-struct ToolGroupEntry {
+struct RegisteredTool {
+    tool: Tool,
+    group_id: ToolGroupId,
     default_visibility: bool,
-    tools: Vec<ToolName>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -67,22 +70,38 @@ impl DurableStateCodec for ToolRegistryState {
 }
 
 impl ToolRegistryInner {
+    fn tool_index(&self, name: &str) -> Result<usize, usize> {
+        self.tools
+            .binary_search_by(|registered| registered.tool.name().cmp(name))
+    }
+
+    fn contains_tool(&self, name: &str) -> bool {
+        self.tool_index(name).is_ok()
+    }
+
+    fn contains_group(&self, id: &str) -> bool {
+        self.groups
+            .binary_search_by(|group| (**group).cmp(id))
+            .is_ok()
+    }
+
+    /// Registers a validated group whose id and tool names are all unused.
     fn register_group(&mut self, group: ToolGroup) {
         let (id, default_visibility, group_tools) = group.into_parts();
-        let mut names = Vec::with_capacity(group_tools.len());
-
+        self.tools.reserve_exact(group_tools.len());
         for tool in group_tools {
-            let name = tool.name().to_owned();
-            self.tools.insert(name.clone(), tool);
-            names.push(name);
+            let (Err(index) | Ok(index)) = self.tool_index(tool.name());
+            self.tools.insert(
+                index,
+                RegisteredTool {
+                    tool,
+                    group_id: Arc::clone(&id),
+                    default_visibility,
+                },
+            );
         }
-        self.groups.insert(
-            id,
-            ToolGroupEntry {
-                default_visibility,
-                tools: names,
-            },
-        );
+        let (Err(index) | Ok(index)) = self.groups.binary_search(&id);
+        self.groups.insert(index, id);
         self.bump_runtime_version();
     }
 
@@ -116,31 +135,19 @@ impl ToolRegistryInner {
                 tools: Vec::new(),
             };
         }
-        // Reverse index each tool to its owning group once, rather than
-        // rescanning every group per tool.
-        let mut group_of: BTreeMap<&ToolName, (&ToolGroupId, bool)> = BTreeMap::new();
-        for (group_id, group) in &self.groups {
-            for tool_name in &group.tools {
-                group_of.insert(tool_name, (group_id, group.default_visibility));
-            }
-        }
         let state = self.state.get();
-        let mut tools = Vec::with_capacity(self.tools.len());
-        for (name, tool) in &self.tools {
-            if state.overrides.get(name).copied() == Some(false) {
-                continue;
-            }
-            let (group_id, default_visibility) = group_of
-                .get(name)
-                .map(|(group_id, visibility)| ((*group_id).clone(), *visibility))
-                .unwrap_or_default();
-            tools.push(ToolProjectionEntry {
-                name: name.clone(),
-                group_id,
-                default_visibility,
-                tool: tool.clone(),
-            });
-        }
+        let tools = self
+            .tools
+            .iter()
+            .filter(|registered| {
+                state.overrides.get(registered.tool.name()).copied() != Some(false)
+            })
+            .map(|registered| ToolProjectionEntry {
+                group_id: Arc::clone(&registered.group_id),
+                default_visibility: registered.default_visibility,
+                tool: registered.tool.clone(),
+            })
+            .collect();
         ToolProjection {
             registry_version: self.runtime_version,
             tools,
@@ -153,8 +160,8 @@ pub(super) struct ToolProjection {
     pub tools: Vec<ToolProjectionEntry>,
 }
 
+/// One projected tool, in tool-name order; its name is the tool's own.
 pub(super) struct ToolProjectionEntry {
-    pub name: ToolName,
     pub group_id: ToolGroupId,
     pub default_visibility: bool,
     pub tool: Tool,
@@ -193,7 +200,7 @@ pub enum ToolRegistryError {
     #[error("tool already exists: {0}")]
     AlreadyExists(ToolName),
     #[error("tool group already exists: {0}")]
-    GroupAlreadyExists(ToolGroupId),
+    GroupAlreadyExists(String),
     #[error("tool not found: {0}")]
     NotFound(ToolName),
     #[error("invalid tool: {0}")]
@@ -201,7 +208,7 @@ pub enum ToolRegistryError {
     #[error("tool group and tool names must be distinct: {0}")]
     AmbiguousName(String),
     #[error("invalid tool group: {0}")]
-    InvalidGroup(ToolGroupId),
+    InvalidGroup(String),
 }
 
 /// Shared registry handle that creates per-agent [`ToolSet`] projections.
@@ -241,8 +248,8 @@ impl ToolRegistry {
     fn from_state(state: DurableState<ToolRegistryState>) -> Self {
         Self {
             inner: RefCell::new(ToolRegistryInner {
-                tools: BTreeMap::new(),
-                groups: BTreeMap::new(),
+                tools: Vec::new(),
+                groups: Vec::new(),
                 state,
                 started: false,
                 runtime_version: 0,
@@ -253,13 +260,19 @@ impl ToolRegistry {
     pub fn register_group(&self, group: ToolGroup) -> Result<(), ToolRegistryError> {
         let mut inner = self.write_state();
         if group.id.is_empty() || group.tools.is_empty() {
-            return Err(ToolRegistryError::InvalidGroup(group.id));
+            return Err(ToolRegistryError::InvalidGroup(
+                group.id.as_ref().to_owned(),
+            ));
         }
-        if inner.groups.contains_key(&group.id) {
-            return Err(ToolRegistryError::GroupAlreadyExists(group.id));
+        if inner.contains_group(&group.id) {
+            return Err(ToolRegistryError::GroupAlreadyExists(
+                group.id.as_ref().to_owned(),
+            ));
         }
-        if inner.tools.contains_key(&group.id) {
-            return Err(ToolRegistryError::AmbiguousName(group.id));
+        if inner.contains_tool(&group.id) {
+            return Err(ToolRegistryError::AmbiguousName(
+                group.id.as_ref().to_owned(),
+            ));
         }
         let mut names = BTreeSet::new();
         for tool in &group.tools {
@@ -267,10 +280,10 @@ impl ToolRegistry {
             if name.is_empty() {
                 return Err(ToolRegistryError::InvalidTool(name.to_owned()));
             }
-            if inner.groups.contains_key(name) || name == group.id.as_str() {
+            if inner.contains_group(name) || name == &*group.id {
                 return Err(ToolRegistryError::AmbiguousName(name.to_owned()));
             }
-            if inner.tools.contains_key(name) || !names.insert(name) {
+            if inner.contains_tool(name) || !names.insert(name) {
                 return Err(ToolRegistryError::AlreadyExists(name.to_owned()));
             }
         }
@@ -281,7 +294,7 @@ impl ToolRegistry {
 
     pub fn enable(&self, name: &str) -> Result<(), ToolRegistryError> {
         let mut inner = self.write_state();
-        if !inner.tools.contains_key(name) {
+        if !inner.contains_tool(name) {
             return Err(ToolRegistryError::NotFound(name.to_owned()));
         }
 
@@ -291,7 +304,7 @@ impl ToolRegistry {
 
     pub fn disable(&self, name: &str) -> Result<(), ToolRegistryError> {
         let mut inner = self.write_state();
-        if !inner.tools.contains_key(name) {
+        if !inner.contains_tool(name) {
             return Err(ToolRegistryError::NotFound(name.to_owned()));
         }
 
@@ -316,11 +329,11 @@ impl ToolRegistry {
     }
 
     pub(super) fn contains_group(&self, id: &str) -> bool {
-        self.read_state().groups.contains_key(id)
+        self.read_state().contains_group(id)
     }
 
     pub(super) fn contains_tool(&self, name: &str) -> bool {
-        self.read_state().tools.contains_key(name)
+        self.read_state().contains_tool(name)
     }
 
     pub(super) fn tool_projection(&self) -> ToolProjection {

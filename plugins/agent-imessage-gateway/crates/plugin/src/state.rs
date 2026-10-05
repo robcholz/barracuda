@@ -1,7 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, VecDeque},
-    string::String,
-};
+use alloc::{collections::VecDeque, string::String, vec::Vec};
 use core::mem::size_of;
 
 use barracuda_plugin::manager::PluginStorage;
@@ -98,17 +95,34 @@ impl BridgeError {
     }
 }
 
+/// Bindings between conversation routes and agent sessions.
+///
+/// Each session has at most one route and each route at most one session, so
+/// one list of mappings serves lookups from either side; a device holds few.
 pub(crate) struct BridgeBook {
-    by_route: BTreeMap<Route, String>,
-    by_session: BTreeMap<String, Mapping>,
+    mappings: Vec<Mapping>,
 }
 
 impl BridgeBook {
     pub(crate) const fn new() -> Self {
         Self {
-            by_route: BTreeMap::new(),
-            by_session: BTreeMap::new(),
+            mappings: Vec::new(),
         }
+    }
+
+    fn by_session(&self, session: &str) -> Option<&Mapping> {
+        self.mappings
+            .iter()
+            .find(|mapping| mapping.session == session)
+    }
+
+    fn by_route(&self, route: &Route) -> Option<&Mapping> {
+        self.mappings.iter().find(|mapping| mapping.route == *route)
+    }
+
+    fn insert(&mut self, mapping: Mapping) {
+        self.mappings.reserve_exact(1);
+        self.mappings.push(mapping);
     }
 
     pub(crate) fn restore(
@@ -116,25 +130,20 @@ impl BridgeBook {
         session: &str,
         persisted: PersistedRoute,
     ) -> Result<(), BridgeError> {
-        if !valid_session(session) || self.by_session.contains_key(session) {
+        if !valid_session(session) || self.by_session(session).is_some() {
             return Err(BridgeError::InvalidRequest);
         }
         let mut mapping = persisted.into_mapping(session)?;
         mapping.opened = false;
-        if self.by_route.contains_key(&mapping.route) {
+        if self.by_route(&mapping.route).is_some() {
             return Err(BridgeError::Conflict);
         }
-        self.by_route
-            .insert(mapping.route.clone(), mapping.session.clone());
-        self.by_session.insert(mapping.session.clone(), mapping);
+        self.insert(mapping);
         Ok(())
     }
 
     pub(crate) fn resolve(&self, route: &Route) -> ResolveResult {
-        let Some(session) = self.by_route.get(route) else {
-            return ResolveResult::Missing;
-        };
-        let Some(mapping) = self.by_session.get(session) else {
+        let Some(mapping) = self.by_route(route) else {
             return ResolveResult::Missing;
         };
         ResolveResult::Found {
@@ -143,10 +152,17 @@ impl BridgeBook {
         }
     }
 
+    /// Stores a mapping from [`prepare_binding`](Self::prepare_binding),
+    /// replacing the session's previous state.
     pub(crate) fn commit_mapping(&mut self, mapping: Mapping) {
-        self.by_route
-            .insert(mapping.route.clone(), mapping.session.clone());
-        self.by_session.insert(mapping.session.clone(), mapping);
+        match self
+            .mappings
+            .iter_mut()
+            .find(|existing| existing.session == mapping.session)
+        {
+            Some(existing) => *existing = mapping,
+            None => self.insert(mapping),
+        }
     }
 
     pub(crate) fn prepare_binding(
@@ -159,17 +175,15 @@ impl BridgeBook {
             return Err(BridgeError::InvalidRequest);
         }
         if self
-            .by_route
-            .get(&route)
-            .is_some_and(|existing| existing != session)
+            .by_route(&route)
+            .is_some_and(|existing| existing.session != session)
             || self
-                .by_session
-                .get(session)
+                .by_session(session)
                 .is_some_and(|existing| existing.route != route)
         {
             return Err(BridgeError::Conflict);
         }
-        let mut mapping = self.by_session.get(session).cloned().unwrap_or(Mapping {
+        let mut mapping = self.by_session(session).cloned().unwrap_or(Mapping {
             session: String::from(session),
             route,
             opened: true,
@@ -189,7 +203,11 @@ impl BridgeBook {
         if !valid_session(session) {
             return Err(BridgeError::InvalidRequest);
         }
-        let Some(mapping) = self.by_session.get_mut(session) else {
+        let Some(mapping) = self
+            .mappings
+            .iter_mut()
+            .find(|mapping| mapping.session == session)
+        else {
             return Ok(None);
         };
         match event {
