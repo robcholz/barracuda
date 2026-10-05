@@ -1,23 +1,19 @@
 [package]
-name = "barracuda-agent-message"
+name = "barracuda-json-writer"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Chat messages and text shared as compact JSON in bulk memory"
+description = "JSON written directly into exactly sized bulk buffers"
 
 [lib]
-name = "barracuda_agent_message"
+name = "barracuda_json_writer"
 crate-type = ["rlib"]
 
 [dependencies]
 barracuda-bulk-memory.workspace = true
-barracuda-json-writer.workspace = true
-serde = { version = "1", default-features = false, features = ["alloc"] }
-serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
-
-[dev-dependencies]
-serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [lints.rust]
 unreachable_pub = "deny"

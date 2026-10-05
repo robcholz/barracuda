@@ -79,6 +79,17 @@ impl BulkText {
         Self(Rc::new(BulkVec::encode(write).into_boxed_slice()))
     }
 
+    /// Like [`encode`](Self::encode), but reports bulk-memory exhaustion.
+    ///
+    /// # Errors
+    ///
+    /// [`BulkAllocError`] when the measured length cannot be allocated.
+    pub fn try_encode(write: impl Fn(&mut dyn ByteSink)) -> Result<Self, BulkAllocError> {
+        Ok(Self(Rc::new(
+            BulkVec::try_encode(write)?.into_boxed_slice(),
+        )))
+    }
+
     /// The text as bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
@@ -102,6 +113,14 @@ impl BulkText {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl core::ops::Deref for BulkText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
     }
 }
 

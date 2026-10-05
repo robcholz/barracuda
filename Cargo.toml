@@ -123,6 +123,7 @@ barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-bulk-memory = { path = "shared/bulk-memory" }
 barracuda-cli-style = { path = "shared/cli-style" }
+barracuda-json-writer = { path = "shared/json-writer" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
