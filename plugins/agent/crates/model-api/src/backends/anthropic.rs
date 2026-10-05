@@ -25,6 +25,7 @@ use super::shared::AnthropicUsage;
 use super::shared::{media_text, post_json, post_stream};
 use super::sse::{AnthropicSse, ProviderSse};
 use super::Backend;
+use barracuda_agent_message::ChatMessage;
 
 pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub(super) const CHAT_PATH: &str = "/messages";
@@ -58,12 +59,21 @@ fn make_tool_use_block(tool_call: &Value) -> Result<Value, Error> {
 }
 
 /// Converts the persisted `messages` history followed by the ephemeral
-/// `reminders` (a two-segment tail) into the Anthropic message shape. The two
-/// segments are viewed as one sequence of references (no `Value` is cloned to
-/// fuse them) so consecutive-tool-message merging still works across the seam.
-fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Result<Value, Error> {
+/// `reminders` (a two-segment tail) into the Anthropic message shape, viewed
+/// as one sequence so consecutive-tool-message merging works across the seam.
+fn convert_messages_to_anthropic(
+    messages: &[ChatMessage],
+    reminders: &[ChatMessage],
+) -> Result<Value, Error> {
+    // The Anthropic shape regroups content blocks, so decode each message for
+    // the duration of this request only.
+    let decoded: Vec<Value> = messages
+        .iter()
+        .chain(reminders)
+        .map(ChatMessage::to_value)
+        .collect();
     let mut out: Vec<Value> = Vec::new();
-    let mut iter = messages.iter().chain(reminders.iter()).peekable();
+    let mut iter = decoded.iter().peekable();
 
     while let Some(msg) = iter.next() {
         let role = match str_field(msg, "role") {
@@ -305,8 +315,8 @@ fn parse_chat_response(body: &str) -> Result<LlmResponse, Error> {
 fn chat_body_object(
     backend: &Backend,
     system_prompt: &str,
-    messages: &[Value],
-    reminders: &[Value],
+    messages: &[ChatMessage],
+    reminders: &[ChatMessage],
     tools_json: Option<&str>,
     strict_tools: bool,
 ) -> Result<Map<String, Value>, Error> {

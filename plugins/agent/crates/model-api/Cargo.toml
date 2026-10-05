@@ -14,6 +14,7 @@ crate-type = ["rlib"]
 cache_profile = []
 
 [dependencies]
+barracuda-agent-message = { path = "../message" }
 barracuda-bulk-memory.workspace = true
 barracuda-runtime-utils.workspace = true
 http-client.workspace = true

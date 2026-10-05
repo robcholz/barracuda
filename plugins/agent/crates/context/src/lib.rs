@@ -21,7 +21,7 @@
 //! # Example
 //!
 //! ```
-//! use barracuda_agent_context::{Block, BlockKind, Context};
+//! use barracuda_agent_context::{Block, BlockKind, Context, ChatMessage};
 //! use serde_json::json;
 //!
 //! let mut context = Context::new();
@@ -30,7 +30,7 @@
 //!     .with(Block::new(BlockKind::AgentInstruction, "You are a helpful agent."))
 //!     .with(Block::new(BlockKind::OutputContract, "Answer in one concise paragraph."));
 //!
-//! let history = [json!({ "role": "user", "content": "What's the weather?" })];
+//! let history = [ChatMessage::new(&json!({ "role": "user", "content": "What's the weather?" }))];
 //! let request = context.request(&history);
 //! assert_eq!(
 //!     request.system(),
@@ -47,4 +47,5 @@ mod block;
 mod reminder;
 
 pub use assembly::{Context, ContextItem, ContextSink, RequestContext};
+pub use barracuda_agent_message::ChatMessage;
 pub use block::{Band, Block, BlockKind, Scope};

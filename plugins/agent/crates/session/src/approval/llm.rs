@@ -11,7 +11,7 @@ use barracuda_agent_tool::{
     tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
     ToolRunner, ToolSet, ToolSpec,
 };
-use barracuda_model_api::{ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
+use barracuda_model_api::{ChatMessage, ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -184,7 +184,7 @@ async fn resolve_permission_reply(
         )))],
     ))?;
     let tools = tools.begin()?;
-    let messages = [json!({
+    let messages = [ChatMessage::new(&json!({
         "role": "user",
         "content": format!(
             "Pending tool call:\nID: {}\nName: {}\nArguments JSON: {}\n\nPermission reason:\n{reason}\n\nUser reply:\n{user_reply}",
@@ -192,7 +192,7 @@ async fn resolve_permission_reply(
             tool_call.name,
             tool_call.arguments_json,
         )
-    })];
+    }))];
     let request = ChatRequest {
         system_prompt: APPROVAL_RESOLVER_PROMPT,
         messages: &messages,

@@ -1,7 +1,9 @@
 use alloc::{boxed::Box, collections::BTreeSet, string::String, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind, Context};
-use barracuda_agent_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
+use barracuda_agent_memory::{
+    AssistantFragment, AssistantHandle, ChatMessage, Transcript, TurnHandle,
+};
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolSet;
@@ -323,7 +325,7 @@ where
         Ok(())
     }
 
-    fn render_provider_context(&mut self) -> Result<Vec<serde_json::Value>, AgentError> {
+    fn render_provider_context(&mut self) -> Result<Vec<ChatMessage>, AgentError> {
         let mut sink = self.context.sink();
         for entry in &mut self.context_providers {
             entry
@@ -1028,7 +1030,7 @@ mod tests {
 
     fn assistant_content(transcript: &TranscriptStore) -> Option<String> {
         let turns = transcript.turns();
-        let assistant = turns.last()?.messages.get(1)?;
+        let assistant = turns.last()?.messages.get(1)?.to_value();
         assistant.get("content")?.as_str().map(str::to_owned)
     }
 }

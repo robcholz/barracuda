@@ -25,6 +25,7 @@ intrusive-observability = [
 ]
 
 [dependencies]
+barracuda-agent-message = { path = "../message" }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"], optional = true }
 futures-util = { workspace = true, optional = true }

@@ -71,6 +71,7 @@ mod transport;
 mod types;
 
 pub use backends::{BackendKind, ParseBackendKindError};
+pub use barracuda_agent_message::ChatMessage;
 pub use barracuda_runtime_utils::stream;
 pub use chat_stream::ChatStream;
 pub use client::{ModelApi, ModelApiFactory};

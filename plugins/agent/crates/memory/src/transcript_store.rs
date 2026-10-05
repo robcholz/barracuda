@@ -65,9 +65,12 @@ use alloc::{
 };
 use core::cell::{RefCell, RefMut};
 
+use barracuda_agent_message::json as message_json;
+use barracuda_agent_message::ChatMessage;
+use barracuda_bulk_memory::BulkVec;
 use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use barracuda_vfs::{FsError, ScopedVfs};
 
@@ -160,8 +163,8 @@ impl ByteLen {
 pub struct Turn {
     /// The turn's stable chronological id, or `None` for the open turn.
     pub id: Option<TurnId>,
-    /// The turn's messages, oldest-to-newest.
-    pub messages: Vec<Value>,
+    /// The turn's messages, oldest-to-newest, shared with the store.
+    pub messages: Vec<ChatMessage>,
 }
 
 /// On-disk record discriminator. Keeping this explicit preserves the existing
@@ -174,12 +177,27 @@ enum RecordKind {
 }
 
 /// One committed turn as stored on a line of the data `.jsonl`.
-#[derive(Serialize, Deserialize)]
+///
+/// Lines are written by [`encode_line`], which produces the same bytes
+/// `serde_json` would for this struct.
+#[derive(Deserialize)]
 struct LogRecord {
     #[serde(rename = "t")]
     kind: RecordKind,
     id: TurnId,
-    msgs: Vec<Value>,
+    msgs: Vec<ChatMessage>,
+}
+
+/// Encodes one data-log line, including its trailing newline, in bulk memory.
+fn encode_line(id: TurnId, msgs: &[ChatMessage]) -> BulkVec<u8> {
+    let id = serde_json::to_string(&id).unwrap_or_default();
+    message_json::encode(|sink| {
+        sink.put(br#"{"t":"group","id":"#);
+        sink.put(id.as_bytes());
+        sink.put(br#","msgs":"#);
+        message_json::write_messages(sink, msgs);
+        sink.put(b"}\n");
+    })
 }
 
 /// One record's location inside the data `.jsonl`, as stored in the manifest.
@@ -205,109 +223,90 @@ struct Manifest {
 /// A committed turn plus its byte location in the data log (once flushed).
 struct StoredGroup {
     id: TurnId,
-    msgs: Vec<Value>,
+    msgs: Vec<ChatMessage>,
     loc: Option<(ByteOffset, ByteLen)>,
 }
 
 /// One message currently being assembled from streaming fragments.
+///
+/// Streamed text accumulates in bulk memory; finishing the message encodes it
+/// once into its shared [`ChatMessage`].
 enum MessageDraft {
-    User(String),
+    User(BulkVec<u8>),
     Assistant {
-        content: String,
-        reasoning_content: String,
+        content: BulkVec<u8>,
+        reasoning_content: BulkVec<u8>,
         tool_calls: Vec<Value>,
     },
     Tool {
         tool_call_id: String,
-        content: String,
+        content: BulkVec<u8>,
         is_error: bool,
     },
 }
 
 impl MessageDraft {
-    fn into_message(self) -> Value {
+    /// Encodes the draft with its fields in key order, matching the
+    /// `serde_json` object encoding used by earlier transcripts.
+    fn message(&self) -> ChatMessage {
         match self {
-            Self::User(content) => json!({ "role": "user", "content": content }),
-            Self::Assistant {
-                content,
-                reasoning_content,
-                tool_calls,
-            } => assistant_message(content, reasoning_content, tool_calls),
-            Self::Tool {
-                tool_call_id,
-                content,
-                is_error,
-            } => json!({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": content,
-                "is_error": is_error,
+            Self::User(content) => ChatMessage::encode_object(|object| {
+                object.str("content", text(content));
+                object.str("role", "user");
             }),
-        }
-    }
-
-    fn message(&self) -> Value {
-        match self {
-            Self::User(content) => json!({ "role": "user", "content": content }),
             Self::Assistant {
                 content,
                 reasoning_content,
                 tool_calls,
-            } => assistant_message(
-                content.clone(),
-                reasoning_content.clone(),
-                tool_calls.clone(),
-            ),
+            } => ChatMessage::encode_object(|object| {
+                if !content.is_empty() {
+                    object.str("content", text(content));
+                }
+                if !reasoning_content.is_empty() {
+                    object.str("reasoning_content", text(reasoning_content));
+                }
+                object.str("role", "assistant");
+                if !tool_calls.is_empty() {
+                    message_json::write_array(object.field("tool_calls"), tool_calls);
+                }
+            }),
             Self::Tool {
                 tool_call_id,
                 content,
                 is_error,
-            } => json!({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": content,
-                "is_error": is_error,
+            } => ChatMessage::encode_object(|object| {
+                object.str("content", text(content));
+                object.value("is_error", &Value::Bool(*is_error));
+                object.str("role", "tool");
+                object.str("tool_call_id", tool_call_id);
             }),
         }
     }
 }
 
-fn assistant_message(content: String, reasoning_content: String, tool_calls: Vec<Value>) -> Value {
-    let mut message = serde_json::Map::new();
-    message.insert("role".to_owned(), json!("assistant"));
-    if !content.is_empty() {
-        message.insert("content".to_owned(), Value::String(content));
-    }
-    if !reasoning_content.is_empty() {
-        message.insert(
-            "reasoning_content".to_owned(),
-            Value::String(reasoning_content),
-        );
-    }
-    if !tool_calls.is_empty() {
-        message.insert("tool_calls".to_owned(), Value::Array(tool_calls));
-    }
-    Value::Object(message)
+/// Draft text appended only from `&str` fragments, so always UTF-8.
+fn text(bytes: &BulkVec<u8>) -> &str {
+    core::str::from_utf8(bytes).unwrap_or_default()
 }
 
 /// Volatile contents owned by the one live [`TurnHandle`].
 #[derive(Default)]
 struct OpenTurn {
-    messages: Vec<Value>,
+    messages: Vec<ChatMessage>,
     draft: Option<MessageDraft>,
 }
 
 impl OpenTurn {
     fn finish_message(&mut self) -> bool {
         if let Some(draft) = self.draft.take() {
-            self.messages.push(draft.into_message());
+            self.messages.push(draft.message());
             true
         } else {
             false
         }
     }
 
-    fn snapshot(&self) -> Vec<Value> {
+    fn snapshot(&self) -> Vec<ChatMessage> {
         let mut messages = self.messages.clone();
         if let Some(draft) = &self.draft {
             messages.push(draft.message());
@@ -325,7 +324,7 @@ impl OpenTurn {
 /// A serialized data line awaiting its append, tagged with the turn it belongs
 /// to so its `loc` can be written back once appended.
 struct Pending {
-    line: Vec<u8>,
+    line: BulkVec<u8>,
     id: TurnId,
 }
 
@@ -852,7 +851,7 @@ pub struct TurnHandle {
 impl TurnHandle {
     /// Open a user-message scope.
     pub fn user(&self) -> Result<UserHandle<'_>, TurnError> {
-        start_message(self.state.as_ref(), MessageDraft::User(String::new()))?;
+        start_message(self.state.as_ref(), MessageDraft::User(BulkVec::new()))?;
         Ok(UserHandle {
             state: self.state.as_ref(),
         })
@@ -863,8 +862,8 @@ impl TurnHandle {
         start_message(
             self.state.as_ref(),
             MessageDraft::Assistant {
-                content: String::new(),
-                reasoning_content: String::new(),
+                content: BulkVec::new(),
+                reasoning_content: BulkVec::new(),
                 tool_calls: Vec::new(),
             },
         )?;
@@ -879,7 +878,7 @@ impl TurnHandle {
             self.state.as_ref(),
             MessageDraft::Tool {
                 tool_call_id: tool_call_id.to_owned(),
-                content: String::new(),
+                content: BulkVec::new(),
                 is_error,
             },
         )?;
@@ -900,7 +899,7 @@ impl Drop for TurnHandle {
             if !turn.messages.is_empty() {
                 let messages = turn.messages;
                 let id = state.id_allocator.next();
-                enqueue(&mut state, id, messages.clone());
+                enqueue(&mut state, id, &messages);
                 state.groups.push(StoredGroup {
                     id,
                     msgs: messages,
@@ -931,7 +930,7 @@ impl UserHandle<'_> {
             debug_assert!(false, "user handle lost its draft");
             return;
         };
-        content.push_str(fragment);
+        content.extend_from_slice(fragment.as_bytes());
         state.invalidate_turns_cache();
     }
 }
@@ -968,8 +967,10 @@ impl AssistantHandle<'_> {
             return;
         };
         match fragment {
-            AssistantFragment::Content(fragment) => content.push_str(fragment),
-            AssistantFragment::Reasoning(fragment) => reasoning_content.push_str(fragment),
+            AssistantFragment::Content(fragment) => content.extend_from_slice(fragment.as_bytes()),
+            AssistantFragment::Reasoning(fragment) => {
+                reasoning_content.extend_from_slice(fragment.as_bytes());
+            }
             AssistantFragment::ToolCall(tool_call) => tool_calls.push(tool_call),
         }
         state.invalidate_turns_cache();
@@ -1001,7 +1002,7 @@ impl ToolHandle<'_> {
             debug_assert!(false, "tool handle lost its draft");
             return;
         };
-        content.push_str(fragment);
+        content.extend_from_slice(fragment.as_bytes());
         state.invalidate_turns_cache();
     }
 }
@@ -1036,20 +1037,12 @@ fn finish_message(state: &RefCell<StoreState>) {
     }
 }
 
-/// Serialize a group record to a data line and queue it for the next append.
-fn enqueue(state: &mut StoreState, id: TurnId, msgs: Vec<Value>) {
-    let record = LogRecord {
-        kind: RecordKind::Group,
+/// Encode a group record to a data line and queue it for the next append.
+fn enqueue(state: &mut StoreState, id: TurnId, msgs: &[ChatMessage]) {
+    state.pending.push(Pending {
+        line: encode_line(id, msgs),
         id,
-        msgs,
-    };
-    match serde_json::to_vec(&record) {
-        Ok(mut line) => {
-            line.push(b'\n');
-            state.pending.push(Pending { line, id });
-        }
-        Err(err) => log::warn!("transcript record serialization failed: {err}"),
-    }
+    });
 }
 
 /// Flush pending records (one `append`) and, when needed, rewrite the manifest.
@@ -1068,12 +1061,15 @@ async fn persist(
         let has_pending = !state_ref.pending.is_empty();
         let want_manifest = force_manifest || has_pending;
         let staged = if !state_ref.pending.is_empty() {
-            let mut data_buf = Vec::new();
+            let data_buf = message_json::encode(|sink| {
+                for pending in &state_ref.pending {
+                    sink.put(&pending.line);
+                }
+            });
             let mut locs = Vec::with_capacity(state_ref.pending.len());
             let mut off = state_ref.data_len.as_offset();
             for pending in &state_ref.pending {
                 let len = ByteLen::of(&pending.line);
-                data_buf.extend_from_slice(&pending.line);
                 locs.push((pending.id, off, len));
                 off = off.advance(len);
             }
@@ -1124,27 +1120,29 @@ async fn write_live_set_to_files(
     state: &mut StoreState,
     transcript_id: u32,
 ) {
-    let mut data_buf = Vec::new();
+    let lines: Vec<(TurnId, BulkVec<u8>)> = state
+        .groups
+        .iter()
+        .map(|group| (group.id, encode_line(group.id, &group.msgs)))
+        .collect();
+    let data_buf = message_json::encode(|sink| {
+        for (_, line) in &lines {
+            sink.put(line);
+        }
+    });
     let mut live = Vec::new();
     let mut locs: Vec<(TurnId, ByteOffset, ByteLen)> = Vec::new();
     let mut off = ByteOffset::default();
 
-    for group in &state.groups {
-        let record = LogRecord {
-            kind: RecordKind::Group,
-            id: group.id,
-            msgs: group.msgs.clone(),
-        };
-        let Some(len) = append_line(&mut data_buf, &record, transcript_id) else {
-            return;
-        };
+    for (id, line) in &lines {
+        let len = ByteLen::of(line);
         live.push(IndexEntry {
             kind: RecordKind::Group,
             off,
             len,
-            id: group.id,
+            id: *id,
         });
-        locs.push((group.id, off, len));
+        locs.push((*id, off, len));
         off = off.advance(len);
     }
 
@@ -1179,22 +1177,6 @@ async fn write_live_set_to_files(
     }
     for (id, off, len) in locs {
         set_loc(state, id, off, len);
-    }
-}
-
-/// Serialize `record` into `buf` with a trailing newline; returns the line length.
-fn append_line(buf: &mut Vec<u8>, record: &LogRecord, transcript_id: u32) -> Option<ByteLen> {
-    match serde_json::to_vec(record) {
-        Ok(mut line) => {
-            line.push(b'\n');
-            let len = ByteLen::of(&line);
-            buf.extend_from_slice(&line);
-            Some(len)
-        }
-        Err(err) => {
-            log::warn!("transcript {transcript_id}: serialize record failed: {err}");
-            None
-        }
     }
 }
 
@@ -1479,7 +1461,7 @@ mod tests {
                 .turns()
                 .iter()
                 .flat_map(|turn| turn.messages.iter())
-                .map(Value::to_string)
+                .map(ChatMessage::to_string)
                 .collect();
             assert!(messages.contains("persisted user"));
             assert!(messages.contains("persisted reply"));
@@ -1583,6 +1565,109 @@ mod tests {
                 Err(TranscriptListError::InvalidFilename(
                     "not-an-id.jsonl".to_owned()
                 ))
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod persisted_format {
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
+
+    use super::*;
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::future::block_on;
+    use serde_json::json;
+
+    /// Exact files written before messages moved to bulk memory.
+    const DATA: &str = concat!(
+        r#"{"t":"group","id":"turn-1","msgs":[{"content":"say \"hi\"\nünï 🚀","role":"user"},{"content":"ok","reasoning_content":"think","role":"assistant","tool_calls":[{"function":{"arguments":"{\"a\":1}","name":"t"},"id":"c1","type":"function"}]},{"content":"{\"v\":2}","is_error":false,"role":"tool","tool_call_id":"c1"},{"role":"assistant"}]}"#,
+        "\n",
+        r#"{"t":"group","id":"turn-2","msgs":[{"content":"say \"hi\"\nünï 🚀","role":"user"},{"content":"ok","reasoning_content":"think","role":"assistant","tool_calls":[{"function":{"arguments":"{\"a\":1}","name":"t"},"id":"c1","type":"function"}]},{"content":"{\"v\":2}","is_error":true,"role":"tool","tool_call_id":"c1"},{"role":"assistant"}]}"#,
+        "\n",
+    );
+    const INDEX: &str = r#"{"version":1,"covered_len":681,"next_id":"turn-3","live":[{"t":"group","off":0,"len":341,"id":"turn-1"},{"t":"group","off":341,"len":340,"id":"turn-2"}]}"#;
+
+    fn record_two_turns(store: &TranscriptStore) {
+        for round in 0..2 {
+            let turn = store.open_turn().unwrap();
+            {
+                let mut user = turn.user().unwrap();
+                user.append("say \"hi\"\n");
+                user.append("ünï 🚀");
+            }
+            {
+                let mut assistant = turn.assistant().unwrap();
+                assistant.append(AssistantFragment::Reasoning("think"));
+                assistant.append(AssistantFragment::Content("ok"));
+                assistant.append(AssistantFragment::ToolCall(json!({
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "t", "arguments": "{\"a\":1}"},
+                })));
+            }
+            {
+                let mut tool = turn.tool("c1", round == 1).unwrap();
+                tool.append("{\"v\":2}");
+            }
+            {
+                let mut assistant = turn.assistant().unwrap();
+                assistant.append(AssistantFragment::Reasoning(""));
+            }
+        }
+    }
+
+    #[test]
+    fn data_log_and_manifest_keep_their_byte_format() {
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let store = TranscriptStore::new(filesystem.clone(), 5, "/g")
+                .await
+                .unwrap();
+            record_two_turns(&store);
+            store.flush().await.unwrap();
+            assert_eq!(
+                filesystem.read("/g/5.jsonl").await.unwrap(),
+                DATA.as_bytes()
+            );
+            assert_eq!(
+                filesystem.read("/g/5.json").await.unwrap(),
+                INDEX.as_bytes()
+            );
+        });
+    }
+
+    #[test]
+    fn existing_logs_load_into_the_same_messages() {
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            filesystem
+                .write_atomic("/old/9.jsonl", DATA.as_bytes())
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic("/old/9.json", INDEX.as_bytes())
+                .await
+                .unwrap();
+            let loaded = TranscriptStore::new(filesystem.clone(), 9, "/old")
+                .await
+                .unwrap();
+
+            let fresh = TranscriptStore::new(filesystem, 10, "/new").await.unwrap();
+            record_two_turns(&fresh);
+            let as_text = |store: &TranscriptStore| {
+                store
+                    .turns()
+                    .iter()
+                    .flat_map(|turn| turn.messages.iter().map(ChatMessage::to_string))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(as_text(&loaded), as_text(&fresh));
+            assert_eq!(loaded.turns().len(), 2);
+            assert_eq!(
+                loaded.turns()[1].messages[2].to_value()["is_error"],
+                Value::Bool(true)
             );
         });
     }

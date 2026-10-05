@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use barracuda_agent_memory::{MemoryDraft, Transcript, Turn, TurnId};
+use barracuda_agent_memory::{ChatMessage, MemoryDraft, Transcript, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -180,9 +180,10 @@ fn select_extraction_batch(turns: &[Turn], through: Option<TurnId>) -> Option<Ex
 /// Flatten a sequence of chat messages into the role-prefixed plain text an
 /// extractor reads. Messages without string content (e.g. an assistant turn
 /// carrying only `tool_calls`) are skipped.
-fn flatten_transcript<'a>(messages: impl Iterator<Item = &'a Value>) -> String {
+fn flatten_transcript<'a>(messages: impl Iterator<Item = &'a ChatMessage>) -> String {
     let mut out = String::new();
     for message in messages {
+        let message = message.to_value();
         let Some(role) = message.get("role").and_then(Value::as_str) else {
             continue;
         };

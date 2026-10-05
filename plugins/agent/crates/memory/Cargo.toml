@@ -11,6 +11,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 portable-atomic-util.workspace = true
+# Messages are stored once, as their persisted JSON, in bulk memory.
+barracuda-agent-message = { path = "../message" }
+barracuda-bulk-memory.workspace = true
 # Filesystem paths are always scoped by System/Plugin Manager before reaching
 # Agent memory; backend selection remains outside this crate.
 barracuda-vfs.workspace = true

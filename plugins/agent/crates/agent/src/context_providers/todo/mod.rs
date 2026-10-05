@@ -178,9 +178,13 @@ mod tests {
             .request(&history)
             .reminders()
             .first()
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+            .and_then(|message| {
+                message
+                    .to_value()
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
     }
 
     #[test]

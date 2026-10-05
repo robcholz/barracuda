@@ -64,7 +64,8 @@ async fn run() -> anyhow::Result<()> {
     // `turns()` is the read surface — committed turns plus any open one. The
     // full verbatim transcript you feed to the model is its messages flattened.
     let turns = store.turns();
-    let messages: Vec<&serde_json::Value> = turns.iter().flat_map(|t| &t.messages).collect();
+    let messages: Vec<&barracuda_agent_memory::ChatMessage> =
+        turns.iter().flat_map(|t| &t.messages).collect();
     println!(
         "conversation has {} message(s) to send to the model:\n",
         messages.len()

@@ -75,7 +75,12 @@ impl ContextSnapshot {
             },
             history: ObservedHistory { value: history },
             reminders: ObservedReminders {
-                rendered: context.reminders.as_slice().to_vec(),
+                rendered: context
+                    .reminders
+                    .as_slice()
+                    .iter()
+                    .map(barracuda_agent_message::ChatMessage::to_value)
+                    .collect(),
             },
         }
     }

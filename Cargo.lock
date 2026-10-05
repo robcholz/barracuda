@@ -365,6 +365,7 @@ name = "barracuda-agent-context"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "barracuda-agent-message",
  "futures-util",
  "getset",
  "serde",
@@ -422,6 +423,8 @@ name = "barracuda-agent-memory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-agent-message",
+ "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vfs",
@@ -432,6 +435,16 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-message"
+version = "0.1.0"
+dependencies = [
+ "barracuda-bulk-memory",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1413,6 +1426,7 @@ name = "barracuda-model-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-agent-message",
  "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",

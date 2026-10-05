@@ -49,7 +49,9 @@ mod tests {
         let mut snapshots = hub::subscribe();
         let mut context = Context::new();
         context.with(Block::new(BlockKind::AgentInstruction, UNIQUE_SYSTEM));
-        let history = [json!({ "role": "user", "content": "hello" })];
+        let history = [barracuda_agent_message::ChatMessage::new(
+            &json!({ "role": "user", "content": "hello" }),
+        )];
 
         let request = context.request(&history);
         assert_eq!(request.history(), &history);

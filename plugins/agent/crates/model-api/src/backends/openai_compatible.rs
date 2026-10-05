@@ -12,9 +12,7 @@ use super::super::errors::Error;
 use super::super::media::{prepare_asset, Prepared};
 use super::super::transport::Transport;
 use super::super::types::{ChatRequest, LlmResponse, MediaRequest};
-use super::body::{
-    encode, validate_tools, write_base64_str, write_compact, write_str, write_value, Object,
-};
+use super::body::{encode, validate_tools, write_base64_str, write_compact, write_str, Object};
 use super::shared::{media_text, parse_openai_chat_response, post_json, post_stream};
 use super::sse::{OpenAiSse, ProviderSse};
 use super::Backend;
@@ -59,7 +57,7 @@ fn encode_chat_body(
                 messages.put(b",");
             }
             first = false;
-            write_value(messages, message);
+            messages.put(message.as_bytes());
         }
         messages.put(b"]");
         body.str("model", &backend.model);
@@ -249,6 +247,7 @@ mod wire_tests {
 
     use super::*;
     use crate::types::MediaAsset;
+    use crate::ChatMessage;
     use crate::{BackendKind, ModelApiConfig};
 
     fn backend() -> Backend {
@@ -266,8 +265,8 @@ mod wire_tests {
         if !request.system_prompt.is_empty() {
             messages.push(json!({"role": "system", "content": request.system_prompt}));
         }
-        messages.extend(request.messages.iter().cloned());
-        messages.extend(request.reminders.iter().cloned());
+        messages.extend(request.messages.iter().map(ChatMessage::to_value));
+        messages.extend(request.reminders.iter().map(ChatMessage::to_value));
         let mut body = Map::new();
         body.insert("model".to_string(), Value::String(backend.model.clone()));
         body.insert("max_tokens".to_string(), Value::from(backend.max_tokens));
@@ -288,22 +287,26 @@ mod wire_tests {
         core::str::from_utf8(body.as_slice()).unwrap()
     }
 
-    fn history() -> Vec<Value> {
-        vec![
+    fn history() -> Vec<ChatMessage> {
+        [
             json!({"role": "user", "content": "line\nbreak \"quoted\" ünï 🚀"}),
             json!({"role": "assistant", "content": null, "reasoning_content": "hm",
                    "tool_calls": [{"id": "c1", "type": "function",
                                    "function": {"name": "time_now", "arguments": "{\"tz\":\"utc\"}"}}]}),
             json!({"role": "tool", "tool_call_id": "c1", "content": "{\"utc\":1.5e3}"}),
         ]
+        .iter()
+        .map(ChatMessage::new)
+        .collect()
     }
 
     #[test]
     fn chat_bodies_match_the_previous_encoding_byte_for_byte() {
         let backend = backend();
         let messages = history();
-        let reminders =
-            [json!({"role": "user", "content": "<system-reminder>\nx\n</system-reminder>"})];
+        let reminders = [ChatMessage::new(
+            &json!({"role": "user", "content": "<system-reminder>\nx\n</system-reminder>"}),
+        )];
         let tools = r#"[{"function":{"description":"d","name":"time_now","parameters":{"properties":{},"type":"object"}},"type":"function"}]"#;
         let mut request = ChatRequest::new("system \t prompt", &messages);
         request.reminders = &reminders;

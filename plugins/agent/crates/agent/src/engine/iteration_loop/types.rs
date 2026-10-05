@@ -1,9 +1,9 @@
+use barracuda_agent_memory::ChatMessage;
 use barracuda_agent_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::{Error as ModelError, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
-use serde_json::Value;
 use strum::IntoStaticStr;
 
 use super::{IterationId, ToolCallId};
@@ -35,10 +35,10 @@ pub enum IterationLoopError {
 pub(crate) struct LlmStep<'a> {
     pub(crate) iteration_id: IterationId,
     pub(crate) system_prompt: &'a str,
-    pub(crate) messages: &'a [Value],
+    pub(crate) messages: &'a [ChatMessage],
     /// Ephemeral trailing messages for this request only (never persisted),
     /// appended after `messages`. Empty when there is nothing to nudge.
-    pub(crate) reminders: &'a [Value],
+    pub(crate) reminders: &'a [ChatMessage],
     /// The tool view for this step. It stays stable for the whole iteration.
     pub(crate) tools: &'a ToolSetHandle<'a>,
 }
