@@ -72,8 +72,10 @@ pub struct ToolSet {
     blacklist: &'static [&'static str],
     local_group_ids: BTreeSet<String>,
     local_tool_names: BTreeSet<ToolName>,
-    tools: BTreeMap<ToolName, Tool>,
-    state: ToolSetState,
+    /// Every tool in the set with its visibility state, keyed once by name.
+    entries: BTreeMap<ToolName, ToolEntry>,
+    /// Registry version `entries` reflects.
+    registry_version: ToolRegistryVersion,
     cache: ToolSetCache,
     discovery: Arc<RefCell<ToolDiscovery>>,
     registry_projection_ready: bool,
@@ -81,21 +83,17 @@ pub struct ToolSet {
     should_rebuild_tool: bool,
 }
 
-#[derive(Default)]
-struct ToolSetState {
-    registry_version: ToolRegistryVersion,
-    tools: BTreeMap<ToolName, ToolSetEntryState>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ToolSetEntryState {
+/// One tool in a [`ToolSet`] together with its visibility state.
+#[derive(Clone)]
+struct ToolEntry {
+    tool: Tool,
     source: ToolSource,
     state: ToolState,
     group_id: Option<String>,
     default_visibility: bool,
 }
 
-impl ToolSetEntryState {
+impl ToolEntry {
     /// A registered-but-hidden tool the model can reveal with `tool_load`:
     /// outside the default surface and currently disabled.
     fn is_loadable(&self) -> bool {
@@ -112,8 +110,9 @@ impl ToolSetEntryState {
 /// the next [`ToolSet::begin`].
 #[derive(Default)]
 struct ToolDiscovery {
-    /// Loadable groups, grouped for `tool_search` output.
-    catalog: Vec<ToolGroupCatalog>,
+    /// Loadable groups and their tools; `tool_search` derives names and
+    /// descriptions from the tools when it runs.
+    catalog: Vec<LoadableGroup>,
     /// Group ids `tool_load` asked to reveal, not yet applied.
     pending_loads: Vec<ToolName>,
 }
@@ -128,7 +127,22 @@ impl ToolDiscoveryHandle {
     /// Snapshot of the loadable (registered-but-hidden) tool groups, for
     /// `tool_search` to surface. Never includes tool schemas.
     pub fn catalog(&self) -> Vec<ToolGroupCatalog> {
-        self.inner.borrow().catalog.clone()
+        self.inner
+            .borrow()
+            .catalog
+            .iter()
+            .map(|group| ToolGroupCatalog {
+                id: group.id.clone(),
+                tools: group
+                    .tools
+                    .iter()
+                    .map(|tool| ToolCatalogEntry {
+                        name: tool.name().to_owned(),
+                        description: tool_description(tool),
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 
     /// Request that `group_id`'s tools be enabled on the next tick. Returns
@@ -143,6 +157,12 @@ impl ToolDiscoveryHandle {
         }
         loadable
     }
+}
+
+/// One loadable tool group held by the discovery bridge.
+struct LoadableGroup {
+    id: String,
+    tools: Vec<Tool>,
 }
 
 /// One loadable tool group as surfaced by `tool_search`.
@@ -180,8 +200,8 @@ impl ToolSet {
             blacklist,
             local_group_ids: BTreeSet::new(),
             local_tool_names: BTreeSet::new(),
-            tools: BTreeMap::new(),
-            state: ToolSetState::default(),
+            entries: BTreeMap::new(),
+            registry_version: ToolRegistryVersion::default(),
             cache: ToolSetCache::default(),
             discovery: Arc::new(RefCell::new(ToolDiscovery::default())),
             registry_projection_ready,
@@ -238,10 +258,10 @@ impl ToolSet {
             if group_blacklisted || self.blacklist.contains(&name.as_str()) {
                 continue;
             }
-            self.tools.insert(name.clone(), tool);
-            self.state.tools.insert(
+            self.entries.insert(
                 name,
-                ToolSetEntryState {
+                ToolEntry {
+                    tool,
                     source: ToolSource::Local,
                     state: if default_visibility {
                         ToolState::Enabled
@@ -261,11 +281,11 @@ impl ToolSet {
     }
 
     pub fn enable_tool(&mut self, name: ToolName) -> Result<(), ToolSetError> {
-        let Some(entry) = self.state.tools.get(&name).cloned() else {
+        let Some(current) = self.entries.get(&name).map(|entry| entry.state) else {
             return Err(ToolSetError::NotFound(name));
         };
-        let changed = entry.state != ToolState::Enabled;
-        match entry.state {
+        let changed = current != ToolState::Enabled;
+        match current {
             ToolState::Enabled => {}
             ToolState::Disabled => self.should_rebuild_tool = true,
             ToolState::TemporarilyEnabled | ToolState::TemporarilyDisabled => {
@@ -274,7 +294,7 @@ impl ToolSet {
             }
         }
         if changed {
-            if let Some(entry) = self.state.tools.get_mut(&name) {
+            if let Some(entry) = self.entries.get_mut(&name) {
                 entry.state = ToolState::Enabled;
             }
         }
@@ -282,11 +302,11 @@ impl ToolSet {
     }
 
     pub fn disable_tool(&mut self, name: ToolName) -> Result<(), ToolSetError> {
-        let Some(entry) = self.state.tools.get(&name).cloned() else {
+        let Some(current) = self.entries.get(&name).map(|entry| entry.state) else {
             return Err(ToolSetError::NotFound(name));
         };
-        let changed = entry.state != ToolState::Disabled;
-        match entry.state {
+        let changed = current != ToolState::Disabled;
+        match current {
             ToolState::Disabled => {}
             ToolState::Enabled => self.should_rebuild_tool = true,
             ToolState::TemporarilyEnabled | ToolState::TemporarilyDisabled => {
@@ -295,7 +315,7 @@ impl ToolSet {
             }
         }
         if changed {
-            if let Some(entry) = self.state.tools.get_mut(&name) {
+            if let Some(entry) = self.entries.get_mut(&name) {
                 entry.state = ToolState::Disabled;
             }
         }
@@ -303,10 +323,10 @@ impl ToolSet {
     }
 
     pub fn temporarily_enable_tool(&mut self, name: ToolName) -> Result<(), ToolSetError> {
-        let Some(entry) = self.state.tools.get(&name).cloned() else {
+        let Some(current) = self.entries.get(&name).map(|entry| entry.state) else {
             return Err(ToolSetError::NotFound(name));
         };
-        let next = match entry.state {
+        let next = match current {
             ToolState::Disabled => {
                 self.should_rebuild_temporary_tool = true;
                 Some(ToolState::TemporarilyEnabled)
@@ -318,7 +338,7 @@ impl ToolSet {
             ToolState::Enabled | ToolState::TemporarilyEnabled => None,
         };
         if let Some(next) = next {
-            if let Some(entry) = self.state.tools.get_mut(&name) {
+            if let Some(entry) = self.entries.get_mut(&name) {
                 entry.state = next;
             }
         }
@@ -326,10 +346,10 @@ impl ToolSet {
     }
 
     pub fn temporarily_disable_tool(&mut self, name: ToolName) -> Result<(), ToolSetError> {
-        let Some(entry) = self.state.tools.get(&name).cloned() else {
+        let Some(current) = self.entries.get(&name).map(|entry| entry.state) else {
             return Err(ToolSetError::NotFound(name));
         };
-        let next = match entry.state {
+        let next = match current {
             ToolState::Enabled => {
                 self.should_rebuild_temporary_tool = true;
                 Some(ToolState::TemporarilyDisabled)
@@ -341,7 +361,7 @@ impl ToolSet {
             ToolState::Disabled | ToolState::TemporarilyDisabled => None,
         };
         if let Some(next) = next {
-            if let Some(entry) = self.state.tools.get_mut(&name) {
+            if let Some(entry) = self.entries.get_mut(&name) {
                 entry.state = next;
             }
         }
@@ -364,8 +384,7 @@ impl ToolSet {
             return;
         }
         let to_enable: Vec<ToolName> = self
-            .state
-            .tools
+            .entries
             .iter()
             .filter(|(_, entry)| {
                 entry.is_loadable()
@@ -384,8 +403,7 @@ impl ToolSet {
 
     pub fn clear_temporary_tools(&mut self) {
         let changes: Vec<_> = self
-            .state
-            .tools
+            .entries
             .iter()
             .filter_map(|(name, entry)| match entry.state {
                 ToolState::TemporarilyEnabled => Some((name.clone(), ToolState::Disabled)),
@@ -396,9 +414,8 @@ impl ToolSet {
         if changes.is_empty() {
             return;
         }
-        let state = &mut self.state;
         for (name, next) in changes {
-            if let Some(entry) = state.tools.get_mut(&name) {
+            if let Some(entry) = self.entries.get_mut(&name) {
                 entry.state = next;
             }
         }
@@ -408,8 +425,7 @@ impl ToolSet {
     pub fn begin(&mut self) -> Result<ToolSetHandle<'_>, ToolSetError> {
         self.apply_pending_tool_loads();
         let should_rebuild_registry = self.registry.as_ref().is_some_and(|registry| {
-            !self.registry_projection_ready
-                || self.state.registry_version != registry.tool_version()
+            !self.registry_projection_ready || self.registry_version != registry.tool_version()
         });
         if should_rebuild_registry {
             self.rebuild_registry()?;
@@ -419,8 +435,7 @@ impl ToolSet {
             self.rebuild_extra_tool_context();
         }
         Ok(ToolSetHandle {
-            tools: &self.tools,
-            states: &self.state.tools,
+            entries: &self.entries,
             cache: &self.cache,
         })
     }
@@ -438,16 +453,8 @@ impl ToolSet {
             .map(|entry| entry.name.clone())
             .collect::<BTreeSet<_>>();
 
-        self.tools.retain(|name, _| {
-            self.state
-                .tools
-                .get(name)
-                .is_some_and(|entry| entry.source == ToolSource::Local)
-                || registry_names.contains(name)
-        });
-
-        let mut tool_states = self.state.tools.clone();
-        tool_states.retain(|name, entry| {
+        let mut entries = core::mem::take(&mut self.entries);
+        entries.retain(|name, entry| {
             entry.source == ToolSource::Local || registry_names.contains(name)
         });
 
@@ -456,10 +463,10 @@ impl ToolSet {
                 continue;
             }
             let carried_state =
-                tool_states
+                entries
                     .get(&entry.name)
-                    .and_then(|tool_state| match tool_state.source {
-                        ToolSource::Registry => Some(tool_state.state),
+                    .and_then(|existing| match existing.source {
+                        ToolSource::Registry => Some(existing.state),
                         ToolSource::Local => {
                             tracing::trace!(
                                 tool = entry.name.as_str(),
@@ -473,10 +480,10 @@ impl ToolSet {
             } else {
                 ToolState::Disabled
             });
-            self.tools.insert(entry.name.clone(), entry.tool);
-            tool_states.insert(
+            entries.insert(
                 entry.name,
-                ToolSetEntryState {
+                ToolEntry {
+                    tool: entry.tool,
                     source: ToolSource::Registry,
                     state,
                     group_id: Some(entry.group_id),
@@ -485,14 +492,8 @@ impl ToolSet {
             );
         }
 
-        if self.state.registry_version != projection.registry_version
-            || self.state.tools != tool_states
-        {
-            self.state = ToolSetState {
-                registry_version: projection.registry_version,
-                tools: tool_states,
-            };
-        }
+        self.entries = entries;
+        self.registry_version = projection.registry_version;
         self.rebuild_cache();
         self.registry_projection_ready = true;
         Ok(())
@@ -546,46 +547,37 @@ impl ToolSet {
     }
 
     fn refresh_discovery_catalog(&self) {
-        let mut groups = BTreeMap::<String, Vec<ToolCatalogEntry>>::new();
-        for (name, entry) in &self.state.tools {
+        let mut groups = BTreeMap::<&str, Vec<Tool>>::new();
+        for entry in self.entries.values() {
             if !entry.is_loadable() {
                 continue;
             }
-            let Some(group_id) = entry.group_id.as_ref() else {
-                continue;
-            };
-            let Some(tool) = self.tools.get(name) else {
-                continue;
-            };
-            groups
-                .entry(group_id.clone())
-                .or_default()
-                .push(ToolCatalogEntry {
-                    name: name.clone(),
-                    description: tool_description(tool),
-                });
+            if let Some(group_id) = entry.group_id.as_deref() {
+                groups.entry(group_id).or_default().push(entry.tool.clone());
+            }
         }
-        let catalog = groups
+        self.discovery.borrow_mut().catalog = groups
             .into_iter()
-            .map(|(id, tools)| ToolGroupCatalog { id, tools })
+            .map(|(id, tools)| LoadableGroup {
+                id: id.to_owned(),
+                tools,
+            })
             .collect();
-        self.discovery.borrow_mut().catalog = catalog;
     }
 
     /// Tools on the default (`true`) or deferred (`false`) surface that the
     /// model can currently see.
     fn surface(&self, default_visibility: bool) -> Vec<&Tool> {
-        self.state
-            .tools
-            .iter()
-            .filter(|(_, entry)| {
+        self.entries
+            .values()
+            .filter(|entry| {
                 entry.default_visibility == default_visibility
                     && matches!(
                         entry.state,
                         ToolState::Enabled | ToolState::TemporarilyDisabled
                     )
             })
-            .filter_map(|(name, _)| self.tools.get(name))
+            .map(|entry| &entry.tool)
             .collect()
     }
 
@@ -622,12 +614,9 @@ impl ToolSet {
     fn render_extra_tool_context(&mut self) {
         let context = Text::encode(|sink| {
             let mut first = true;
-            for (name, entry) in &self.state.tools {
+            for (name, entry) in &self.entries {
                 let tool = match entry.state {
-                    ToolState::TemporarilyEnabled => match self.tools.get(name) {
-                        Some(tool) => Some(tool),
-                        None => continue,
-                    },
+                    ToolState::TemporarilyEnabled => Some(&entry.tool),
                     ToolState::TemporarilyDisabled => None,
                     ToolState::Enabled | ToolState::Disabled => continue,
                 };
@@ -651,8 +640,7 @@ impl ToolSet {
 }
 
 pub struct ToolSetHandle<'a> {
-    tools: &'a BTreeMap<ToolName, Tool>,
-    states: &'a BTreeMap<ToolName, ToolSetEntryState>,
+    entries: &'a BTreeMap<ToolName, ToolEntry>,
     cache: &'a ToolSetCache,
 }
 
@@ -679,16 +667,16 @@ impl<'a> ToolSetHandle<'a> {
 
     /// Classify one call for a caller-owned permission evaluation phase.
     pub fn classify(&self, call: &ToolInvocation) -> ToolResult<Action> {
-        match (self.tools.get(call.name()), self.states.get(call.name())) {
-            (Some(tool), Some(entry))
+        match self.entries.get(call.name()) {
+            Some(entry)
                 if matches!(
                     entry.state,
                     ToolState::Enabled | ToolState::TemporarilyEnabled
                 ) =>
             {
-                tool.classify(call)
+                entry.tool.classify(call)
             }
-            (_, Some(entry)) if entry.state == ToolState::TemporarilyDisabled => {
+            Some(entry) if entry.state == ToolState::TemporarilyDisabled => {
                 Err(ToolError::InvokeRejected(unavailable_message(call.name())).into())
             }
             _ => Err(ToolError::NotFound(call.name().to_owned()).into()),
@@ -696,16 +684,16 @@ impl<'a> ToolSetHandle<'a> {
     }
 
     pub(crate) fn runnable_tool(&self, call: &ToolInvocation) -> ToolResult<Tool> {
-        match (self.tools.get(call.name()), self.states.get(call.name())) {
-            (Some(tool), Some(entry))
+        match self.entries.get(call.name()) {
+            Some(entry)
                 if matches!(
                     entry.state,
                     ToolState::Enabled | ToolState::TemporarilyEnabled
                 ) =>
             {
-                Ok(tool.clone())
+                Ok(entry.tool.clone())
             }
-            (_, Some(entry)) if entry.state == ToolState::TemporarilyDisabled => {
+            Some(entry) if entry.state == ToolState::TemporarilyDisabled => {
                 Err(ToolError::InvokeRejected(unavailable_message(call.name())).into())
             }
             _ => Err(ToolError::NotFound(call.name().to_owned()).into()),
