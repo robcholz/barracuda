@@ -40,3 +40,7 @@ method = "POST"
 path = "/api/model-api"
 body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024}]'
 status = 204
+
+[memory]
+# Host ordinary-heap peak was 181 KiB when this budget was set.
+heap_high_water_max = 200704

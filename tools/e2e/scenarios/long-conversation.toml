@@ -64,3 +64,7 @@ reply_contains = ["reply-8-marker"]
 [logs]
 expect = ["Agent created session `session-1`"]
 forbid = ['\bERROR\b', 'panicked at', 'conversation compaction', "created session `session-2`"]
+
+[memory]
+# Host ordinary-heap peak was 244 KiB when this budget was set.
+heap_high_water_max = 262144

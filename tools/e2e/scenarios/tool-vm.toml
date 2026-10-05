@@ -36,3 +36,7 @@ tool_contains = ['{"run_id":1}']
 [[steps]]
 send = "What did it print?"
 reply_contains = ["The script printed its results."]
+
+[memory]
+# Host ordinary-heap peak was 265 KiB when this budget was set.
+heap_high_water_max = 286720
