@@ -13,7 +13,7 @@ use core::pin::Pin;
 use core::task::Poll;
 
 use async_channel::{Receiver, Sender};
-use barracuda_bulk_memory::BulkBox;
+use barracuda_bulk_memory::{BulkBox, BulkText};
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use futures_lite::future;
@@ -329,11 +329,11 @@ pub struct WebSocketClosed;
 /// concrete socket types.
 pub struct WebSocketConnection {
     incoming: Receiver<WebSocketMessage>,
-    outgoing: Sender<String>,
+    outgoing: Sender<BulkText>,
 }
 
 impl WebSocketConnection {
-    fn new(incoming: Receiver<WebSocketMessage>, outgoing: Sender<String>) -> Self {
+    fn new(incoming: Receiver<WebSocketMessage>, outgoing: Sender<BulkText>) -> Self {
         Self { incoming, outgoing }
     }
 
@@ -351,10 +351,12 @@ impl WebSocketConnection {
 
     /// Sends one UTF-8 text message to the client.
     ///
+    /// Queued messages wait in bulk memory until the socket writes them.
+    ///
     /// # Errors
     ///
     /// Returns [`WebSocketClosed`] after the underlying socket closes.
-    pub async fn send_text(&self, message: impl Into<String>) -> Result<(), WebSocketClosed> {
+    pub async fn send_text(&self, message: impl Into<BulkText>) -> Result<(), WebSocketClosed> {
         self.outgoing
             .send(message.into())
             .await
@@ -560,7 +562,7 @@ async fn drive_socket<R, W>(
     mut rx: SocketRx<R>,
     mut tx: SocketTx<W>,
     incoming: Sender<WebSocketMessage>,
-    outgoing: Receiver<String>,
+    outgoing: Receiver<BulkText>,
 ) -> Result<(), W::Error>
 where
     R: picoserve::io::Read,
@@ -592,7 +594,7 @@ where
             Either::First(Ok(Message::Pong(_))) => {}
             Either::First(Err(_frame)) => break,
             Either::Second(Err(_closed)) => break,
-            Either::Second(Ok(message)) => tx.send_text(&message).await?,
+            Either::Second(Ok(message)) => tx.send_text(message.as_str()).await?,
         }
     }
     tx.close(None).await
