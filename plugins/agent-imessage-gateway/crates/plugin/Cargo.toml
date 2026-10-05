@@ -15,7 +15,7 @@ embassy-sync.workspace = true
 json-validator.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 

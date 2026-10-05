@@ -806,8 +806,9 @@ use barracuda_agent_runtime::{
     SessionCloseReason, SessionControl, SessionEvent, SessionId, SessionStream, TurnEvent,
     TurnOrigin,
 };
+use barracuda_json_writer::{write_value, Object, Sink};
 use barracuda_workflow_plugin::{
-    EmitError, Event, WorkflowActionRegistration, WorkflowActionRegistry,
+    EmitError, Event, JsonText, WorkflowActionRegistration, WorkflowActionRegistry,
     WorkflowActionRegistryError, WorkflowService,
 };
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -1124,18 +1125,40 @@ impl SessionEmitter<'_> {
     }
 
     fn emit_text(&mut self, event_type: &str, text: String) -> Result<(), AgentWorkflowError> {
-        // Moves the text into the Event; `json!` would copy it.
-        self.emit(event_type, object([("text", Value::String(text))]))
+        self.emit_with(event_type, |sink| {
+            let mut payload = Object::begin(sink);
+            payload.str("text", &text);
+            payload.end();
+        })
     }
 
     fn emit(&mut self, event_type: &str, payload: Value) -> Result<(), AgentWorkflowError> {
+        self.emit_with(event_type, |sink| write_value(sink, &payload))
+    }
+
+    /// Emits one Event written straight into shared bulk JSON.
+    fn emit_with(
+        &mut self,
+        event_type: &str,
+        payload: impl Fn(&mut dyn Sink),
+    ) -> Result<(), AgentWorkflowError> {
         if self.listening {
-            self.workflow.emit::<SessionOutputEvent>(object([
-                ("payload", payload),
-                ("sequence", Value::from(self.sequence)),
-                ("session", Value::String(format!("{}", self.session))),
-                ("type", Value::from(event_type)),
-            ]))?;
+            let session = format!("{}", self.session);
+            let sequence = Value::from(self.sequence);
+            let event = JsonText::try_encode_object(|object| {
+                payload(object.field("payload"));
+                object.value("sequence", &sequence);
+                object.str("session", &session);
+                object.str("type", event_type);
+            });
+            match event {
+                Ok(event) => self.workflow.emit::<SessionOutputEvent>(event)?,
+                Err(_error) => log::warn!(
+                    "Agent session {} Event {} does not fit in bulk memory",
+                    self.session,
+                    self.sequence
+                ),
+            }
         }
         self.sequence = self
             .sequence
@@ -1143,16 +1166,6 @@ impl SessionEmitter<'_> {
             .ok_or(AgentWorkflowError::SequenceOverflow)?;
         Ok(())
     }
-}
-
-/// Builds an object that takes ownership of its field values.
-fn object<const N: usize>(fields: [(&str, Value); N]) -> Value {
-    Value::Object(
-        fields
-            .into_iter()
-            .map(|(name, value)| (String::from(name), value))
-            .collect(),
-    )
 }
 
 fn usage_payload(usage: ProviderUsage) -> Value {

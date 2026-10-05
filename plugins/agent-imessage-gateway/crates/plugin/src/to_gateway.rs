@@ -5,7 +5,7 @@ use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionSchema, workflow_action_schema,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::{
     bridge::{BridgeControl, BridgeShared},
@@ -19,13 +19,27 @@ pub(crate) struct ToGatewayRequest {
     sequence: u64,
     #[serde(rename = "type")]
     event_type: String,
-    payload: Value,
+    payload: TurnStart,
 }
 
 #[derive(Deserialize)]
 struct TurnStartedPayload {
     turn: String,
     origin: String,
+}
+
+/// The only payload this Action reads: a `turn_started` payload, or `None`
+/// for any other shape.
+///
+/// The payload is inspected where it lies in the request text, so a large
+/// text or tool-output payload is skipped without being copied.
+struct TurnStart(Option<TurnStartedPayload>);
+
+impl<'de> Deserialize<'de> for TurnStart {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <&'de RawValue>::deserialize(deserializer)?;
+        Ok(Self(serde_json::from_str(raw.get()).ok()))
+    }
 }
 
 #[derive(Serialize)]
@@ -52,8 +66,11 @@ pub(crate) enum ToGatewayResponse {
 fn gateway_event(request: &ToGatewayRequest) -> Result<GatewayEvent, BridgeError> {
     match request.event_type.as_str() {
         "turn_started" => {
-            let payload = serde_json::from_value::<TurnStartedPayload>(request.payload.clone())
-                .map_err(|_error| BridgeError::InvalidRequest)?;
+            let payload = request
+                .payload
+                .0
+                .as_ref()
+                .ok_or(BridgeError::InvalidRequest)?;
             if payload.turn.is_empty() {
                 return Err(BridgeError::InvalidRequest);
             }

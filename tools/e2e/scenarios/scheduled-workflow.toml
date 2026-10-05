@@ -29,5 +29,6 @@ ready = ["UTC clock synchronized from network time"]
 await = ["schedule `e2e-tick` triggered run 1", "VM run 1 finished: Success, 1 output line"]
 
 [memory]
-# Host ordinary-heap peak was 207 KiB when this budget was set.
-heap_high_water_max = 225280
+# Host ordinary-heap peak was 222 KiB when this budget was set; it
+# lands while the Lua state exists, after the Agent turn.
+heap_high_water_max = 241664

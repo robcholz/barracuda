@@ -9,6 +9,7 @@ description = "Direct-action Workflow runtime for Barracuda"
 crate-type = ["rlib"]
 
 [dependencies]
+barracuda-json-writer.workspace = true
 getset = "0.1.7"
 json-validator.workspace = true
 log.workspace = true

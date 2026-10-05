@@ -20,5 +20,5 @@ expect = [
 ]
 
 [memory]
-# Host ordinary-heap peak was 185 KiB when this budget was set.
-heap_high_water_max = 204800
+# Host ordinary-heap peak was 183 KiB when this budget was set.
+heap_high_water_max = 200704

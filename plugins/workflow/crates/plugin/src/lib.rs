@@ -150,7 +150,7 @@ impl WorkflowService {
     }
 
     /// Emits one typed Event directly into Workflow matching.
-    pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit<E>(&self, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -158,7 +158,7 @@ impl WorkflowService {
     }
 
     /// Emits one typed Event with a topic filter.
-    pub fn emit_to<E>(&self, topic: Topic, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit_to<E>(&self, topic: Topic, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -166,7 +166,12 @@ impl WorkflowService {
     }
 
     /// Emits an Event whose identity is selected at runtime.
-    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: WorkflowValue) {
+    pub fn emit_event(
+        &self,
+        event_id: EventId,
+        topic: Option<Topic>,
+        input: impl Into<JsonText>,
+    ) {
         self.control.emit_event(event_id, topic, input);
     }
 

@@ -17,7 +17,7 @@ use crate::action::ErasedWorkflowAction;
 use crate::definition::{WorkflowCondition, WorkflowOperation};
 use crate::link::{FieldRef, LinkKind, SourceSelector};
 use crate::{
-    EmitError, Event, EventId, Topic, WorkflowActionRegistry, WorkflowControlRejection,
+    EmitError, Event, EventId, JsonText, Topic, WorkflowActionRegistry, WorkflowControlRejection,
     WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowUnloadError, WorkflowValue,
 };
 
@@ -81,6 +81,12 @@ pub enum WorkflowExecutionError {
     #[error("Workflow Action step {step} has no previous output")]
     PreviousOutputUnavailable {
         /// Step whose arguments contain the invalid selector.
+        step: usize,
+    },
+    /// Bulk memory could not hold a step's request.
+    #[error("Workflow Action step {step} request does not fit in memory")]
+    OutOfMemory {
+        /// Step whose request could not be built.
         step: usize,
     },
 }
@@ -233,17 +239,21 @@ impl RuntimeShared {
             .collect()
     }
 
-    fn dispatch(&self, event_id: &EventId, topic: Option<&Topic>, input: WorkflowValue) {
+    fn dispatch(&self, event_id: &EventId, topic: Option<&Topic>, input: impl Into<JsonText>) {
         let plans = self.matching_plans(event_id, topic);
         log::debug!(
             "Workflow Event `{}` matched {} definition(s)",
             event_id.as_str(),
             plans.len()
         );
-        let input = Rc::new(input);
+        if plans.is_empty() {
+            return;
+        }
+        // Encoded once; every matching execution shares it.
+        let input = input.into();
         let mut executions = VecDeque::new();
         for plan in plans {
-            match WorkflowExecution::new(plan, event_id, Rc::clone(&input), &self.actions) {
+            match WorkflowExecution::new(plan, event_id, input.clone(), &self.actions) {
                 Ok(execution) => executions.push_back(execution),
                 Err((workflow_id, error)) => self.record_failure(workflow_id, error),
             }
@@ -353,7 +363,7 @@ impl WorkflowRuntimeControl {
     }
 
     /// Emits one typed Event directly into the Workflow Runtime.
-    pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit<E>(&self, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -361,14 +371,18 @@ impl WorkflowRuntimeControl {
     }
 
     /// Emits one typed Event with a topic filter.
-    pub fn emit_to<E>(&self, topic: Topic, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit_to<E>(&self, topic: Topic, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
         self.emit_inner::<E>(Some(topic), input)
     }
 
-    fn emit_inner<E>(&self, topic: Option<Topic>, input: WorkflowValue) -> Result<(), EmitError>
+    fn emit_inner<E>(
+        &self,
+        topic: Option<Topic>,
+        input: impl Into<JsonText>,
+    ) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -378,7 +392,7 @@ impl WorkflowRuntimeControl {
     }
 
     /// Emits a dynamically identified Event.
-    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: WorkflowValue) {
+    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: impl Into<JsonText>) {
         self.shared.dispatch(&event_id, topic.as_ref(), input);
     }
 }
@@ -491,7 +505,7 @@ impl WorkflowExecution {
     fn new(
         plan: WorkflowPlan,
         event_id: &EventId,
-        event: Rc<WorkflowValue>,
+        event: JsonText,
         registry: &WorkflowActionRegistry,
     ) -> Result<Self, (WorkflowId, WorkflowExecutionError)> {
         let id = plan.definition.id().clone();
@@ -516,7 +530,7 @@ impl WorkflowExecution {
 
 async fn execute_steps(
     definition: &WorkflowDefinition,
-    event_input: &WorkflowValue,
+    event_input: &JsonText,
     actions: &[Rc<dyn ErasedWorkflowAction>],
 ) -> Result<(), WorkflowExecutionError> {
     let mut frames = Vec::new();
@@ -577,11 +591,11 @@ struct OperationFrame<'a> {
 async fn execute_call(
     definition: &WorkflowDefinition,
     to_step: usize,
-    event_input: &WorkflowValue,
+    event_input: &JsonText,
     actions: &[Rc<dyn ErasedWorkflowAction>],
-    previous: Option<WorkflowValue>,
+    previous: Option<JsonText>,
     _previous_step: Option<usize>,
-) -> Result<WorkflowValue, WorkflowExecutionError> {
+) -> Result<JsonText, WorkflowExecutionError> {
     let _step = definition
         .steps()
         .get(to_step)
@@ -592,7 +606,8 @@ async fn execute_call(
         .ok_or(WorkflowExecutionError::UnknownAction { step: to_step })?;
     let request = match link {
         LinkKind::Direct => previous.unwrap_or_else(|| event_input.clone()),
-        LinkKind::Literal { arguments } => arguments.clone(),
+        LinkKind::Literal { arguments } => JsonText::try_from_value(arguments)
+            .map_err(|_error| WorkflowExecutionError::OutOfMemory { step: to_step })?,
         LinkKind::Mapping {
             arguments,
             references,
@@ -618,8 +633,8 @@ async fn execute_call(
 
 fn evaluate_condition(
     condition: &WorkflowCondition,
-    event_input: &WorkflowValue,
-    previous: Option<&WorkflowValue>,
+    event_input: &JsonText,
+    previous: Option<&JsonText>,
     previous_step: Option<usize>,
 ) -> Result<bool, WorkflowExecutionError> {
     let source = match condition.selector {
@@ -630,38 +645,45 @@ fn evaluate_condition(
             })?
         }
     };
-    let missing = Value::Null;
+    // Only the compared value is decoded.
     let actual = match &condition.field {
-        None => source,
-        Some(field) => source
-            .as_object()
-            .ok_or(match condition.selector {
-                SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-                SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-                    step: previous_step.unwrap_or(0),
-                },
-            })?
-            .get(field)
-            .unwrap_or(&missing),
+        None => source.to_value(),
+        Some(field) => {
+            if !source.is_object() {
+                return Err(match condition.selector {
+                    SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                    SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
+                        step: previous_step.unwrap_or(0),
+                    },
+                });
+            }
+            source
+                .field(field)
+                .map_or(Value::Null, |actual| actual.to_value())
+        }
     };
-    Ok(condition.comparison.matches(actual))
+    Ok(condition.comparison.matches(&actual))
 }
 
+/// Builds a step request from literal arguments and referenced values.
+///
+/// Referenced values are spliced in as their stored text, so a large field
+/// selected from the Event input is copied once into the new request rather
+/// than decoded and re-encoded.
 fn mapped_request(
-    event_input: &WorkflowValue,
-    previous: Option<&WorkflowValue>,
+    event_input: &JsonText,
+    previous: Option<&JsonText>,
     to_step: usize,
     arguments: &WorkflowValue,
     references: &[FieldRef],
-) -> Result<WorkflowValue, WorkflowExecutionError> {
-    let mut request =
-        arguments
-            .as_object()
-            .cloned()
-            .ok_or(WorkflowExecutionError::InvalidLink {
-                from_step: to_step.saturating_sub(1),
-                to_step,
-            })?;
+) -> Result<JsonText, WorkflowExecutionError> {
+    let literal = arguments
+        .as_object()
+        .ok_or(WorkflowExecutionError::InvalidLink {
+            from_step: to_step.saturating_sub(1),
+            to_step,
+        })?;
+    let mut values = Vec::with_capacity(references.len());
     for reference in references {
         let source = match reference.selector {
             SourceSelector::EventInput => event_input,
@@ -671,15 +693,18 @@ fn mapped_request(
         let value = match &reference.source_field {
             None => source.clone(),
             Some(field) => {
-                let object = source.as_object().ok_or(match reference.selector {
-                    SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-                    SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-                        step: to_step.saturating_sub(1),
-                    },
-                })?;
-                object
-                    .get(field)
-                    .cloned()
+                if !source.is_object() {
+                    return Err(match reference.selector {
+                        SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                        SourceSelector::PreviousOutput => {
+                            WorkflowExecutionError::ResponseNotObject {
+                                step: to_step.saturating_sub(1),
+                            }
+                        }
+                    });
+                }
+                source
+                    .field(field)
                     .ok_or_else(|| match reference.selector {
                         SourceSelector::EventInput => {
                             WorkflowExecutionError::MissingEventInputField {
@@ -695,9 +720,19 @@ fn mapped_request(
                     })?
             }
         };
-        request.insert(reference.dest_field.clone(), value);
+        values.push(value);
     }
-    Ok(Value::Object(request))
+    JsonText::try_encode_object(|object| {
+        for (name, value) in literal {
+            object.value(name, value);
+        }
+        for (reference, value) in references.iter().zip(&values) {
+            object
+                .field(&reference.dest_field)
+                .put(value.as_str().as_bytes());
+        }
+    })
+    .map_err(|_error| WorkflowExecutionError::OutOfMemory { step: to_step })
 }
 
 fn resolve_actions(
@@ -1103,6 +1138,67 @@ mod tests {
         assert_eq!(registry.descriptors().len(), 1);
         drop(registration);
         assert!(registry.descriptors().is_empty());
+    }
+
+    struct CaptureText {
+        requests: Rc<RefCell<Vec<crate::JsonText>>>,
+    }
+
+    impl WorkflowActionHandler for CaptureText {
+        type Request = crate::JsonText;
+        type Response = Value;
+
+        const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
+            "test.capture",
+            r#"{"type":"object","properties":{"payload":{"type":"object"},"kind":{"type":"string"},"x":{"type":"string"}}}"#,
+            "{}"
+        );
+
+        fn invoke(&self, request: crate::JsonText) -> WorkflowActionFuture<'_, Value> {
+            self.requests.borrow_mut().push(request);
+            Box::pin(async { Ok(json!({})) })
+        }
+    }
+
+    #[test]
+    fn mapping_splices_referenced_fields_as_stored_text() {
+        block_on(async {
+            let actions = WorkflowActionRegistry::new();
+            let requests = Rc::new(RefCell::new(Vec::new()));
+            let _registration = actions
+                .add_action(CaptureText {
+                    requests: Rc::clone(&requests),
+                })
+                .expect("register capture");
+            let mut runtime = WorkflowRuntime::new(actions);
+            let control = runtime.control();
+            control.load(parse_definition(
+                r#"{"id":"splice","match":{"event":"test.trigger"},"steps":[{"call":"test.capture","arguments":{"payload":"$event.input.payload","kind":"x"}}]}"#,
+            ).expect("parse splice")).expect("load splice");
+            control.load(parse_definition(
+                r#"{"id":"missing","match":{"event":"test.trigger"},"steps":[{"call":"test.capture","arguments":{"x":"$event.input.missing"}}]}"#,
+            ).expect("parse missing")).expect("load missing");
+
+            control
+                .emit::<Trigger>(json!({ "payload": { "text": "a\"b", "n": [1, 2] }, "other": 1 }))
+                .expect("emit");
+            assert!(poll_once(&mut runtime).await.is_none());
+
+            let requests = requests.borrow();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(
+                requests.first().expect("request").as_str(),
+                r#"{"kind":"x","payload":{"n":[1,2],"text":"a\"b"}}"#
+            );
+            let info = runtime.view().info();
+            assert_eq!((info.completed_count, info.failed_count), (1, 1));
+            assert_eq!(
+                info.last_failure.expect("failure").error(),
+                &super::WorkflowExecutionError::MissingEventInputField {
+                    field: "missing".into()
+                }
+            );
+        });
     }
 
     #[test]

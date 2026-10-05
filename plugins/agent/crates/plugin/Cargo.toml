@@ -20,6 +20,7 @@ embassy-futures.workspace = true
 embassy-sync.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 http-client = { workspace = true, features = ["mbedtls"] }
+barracuda-json-writer.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

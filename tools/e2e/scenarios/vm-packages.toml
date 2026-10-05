@@ -43,5 +43,5 @@ path = "/vm/unknown/"
 status = 404
 
 [memory]
-# Host ordinary-heap peak was 237 KiB when this budget was set.
-heap_high_water_max = 258048
+# Host ordinary-heap peak was 233 KiB when this budget was set.
+heap_high_water_max = 253952

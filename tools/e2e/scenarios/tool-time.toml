@@ -24,5 +24,5 @@ ready = ["UTC clock synchronized from network time"]
 allow = []
 
 [memory]
-# Host ordinary-heap peak was 191 KiB when this budget was set.
-heap_high_water_max = 208896
+# Host ordinary-heap peak was 188 KiB when this budget was set.
+heap_high_water_max = 204800

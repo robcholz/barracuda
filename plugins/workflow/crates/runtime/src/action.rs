@@ -15,7 +15,7 @@ use json_validator::JsonSchema;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::Serialize;
 
-use crate::WorkflowValue;
+use crate::{JsonText, WorkflowValue};
 
 /// Stable address of one Workflow Action.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -201,7 +201,7 @@ pub trait WorkflowActionHandler: 'static {
 
 pub(crate) trait ErasedWorkflowAction {
     fn descriptor(&self) -> &WorkflowActionDescriptor;
-    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue>;
+    fn invoke_erased(&self, input: JsonText) -> WorkflowActionFuture<'_, JsonText>;
 }
 
 struct TypedWorkflowAction<Handler> {
@@ -217,28 +217,31 @@ where
         &self.descriptor
     }
 
-    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue> {
+    fn invoke_erased(&self, input: JsonText) -> WorkflowActionFuture<'_, JsonText> {
         Box::pin(async move {
+            // Validation and decoding read the shared text; no value tree is
+            // built for the request.
             Handler::SCHEMA
                 .request()
-                .validate(&input)
+                .validate_str(input.as_str())
                 .map_err(|error| {
                     WorkflowActionError::new(format!("invalid Workflow Action request: {error}"))
                 })?;
-            let request = serde_json::from_value::<Handler::Request>(input).map_err(|error| {
+            let request = input.parse_as::<Handler::Request>().map_err(|error| {
                 WorkflowActionError::new(format!(
                     "failed to decode Workflow Action request: {error}"
                 ))
             })?;
+            drop(input);
             let response = self.handler.invoke(request).await?;
-            let response = serde_json::to_value(response).map_err(|error| {
+            let response = JsonText::from_serialize(&response).map_err(|error| {
                 WorkflowActionError::new(format!(
                     "failed to encode Workflow Action response: {error}"
                 ))
             })?;
             Handler::SCHEMA
                 .response()
-                .validate(&response)
+                .validate_str(response.as_str())
                 .map_err(|error| {
                     WorkflowActionError::new(format!("invalid Workflow Action response: {error}"))
                 })?;
@@ -453,13 +456,13 @@ mod tests {
             let action = registry.resolve(&address).expect("resolve typed Action");
 
             let response = action
-                .invoke_erased(json!({ "message": "hello" }))
+                .invoke_erased(json!({ "message": "hello" }).into())
                 .await
                 .expect("invoke typed Action");
             assert_eq!(response, json!({ "message": "hello" }));
 
             let error = action
-                .invoke_erased(json!({ "message": 7 }))
+                .invoke_erased(json!({ "message": 7 }).into())
                 .await
                 .expect_err("reject request before Serde conversion");
             assert!(error.message().contains("invalid Workflow Action request"));

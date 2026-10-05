@@ -32,8 +32,12 @@ pub use runtime::{
 };
 pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 
-/// Owned JSON value passed directly between Workflow Actions.
+/// JSON value used in Workflow definitions and other configuration.
 pub type WorkflowValue = serde_json::Value;
+
+/// Event inputs, Action requests and Action responses travel as shared
+/// compact JSON in bulk memory.
+pub use barracuda_json_writer::{JsonText, JsonTextError};
 
 /// Dependencies used by exported schema macros.
 #[doc(hidden)]

@@ -5,15 +5,12 @@ use alloc::string::String;
 use core::cell::{Cell, RefCell};
 
 use async_channel::{Receiver, Sender, TrySendError};
-use barracuda_bulk_memory::BulkText;
-use barracuda_json_writer::write_value;
-use barracuda_workflow_plugin::{Event, WorkflowService};
+use barracuda_workflow_plugin::{Event, JsonText, WorkflowService};
 use futures_lite::stream;
 use gateway::{
     MessageGateway, MessageTarget, SendStream, SendStreamEvent, SendStreamRequest, StreamError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::json::{map_gateway_error, valid_required, GatewayAccepted, GatewayOperationError};
 use crate::route::GatewayRoute;
@@ -36,8 +33,8 @@ pub struct GatewaySendStreamRequest {
     /// Forward-compatible semantic event type.
     #[serde(rename = "type")]
     pub event_type: String,
-    /// Complete semantic payload.
-    pub payload: Value,
+    /// Complete semantic payload, kept as the compact JSON it arrived as.
+    pub payload: JsonText,
 }
 
 /// Terminal Workflow Event for one accepted outbound semantic stream.
@@ -125,9 +122,8 @@ pub(crate) fn accept_stream(
         return Err(GatewayOperationError::InvalidRequest);
     }
     let target = target(&request.route);
-    // Encoded once, exactly sized, in bulk memory; every provider shares it.
-    let payload = BulkText::try_encode(|sink| write_value(sink, &request.payload))
-        .map_err(|_error| GatewayOperationError::Busy)?;
+    // Already compact JSON in bulk memory; every provider shares it.
+    let payload = request.payload.clone().into_bulk_text();
     let event = SendStreamEvent::new(
         request.session.clone(),
         request.sequence,
@@ -169,10 +165,10 @@ fn target(route: &GatewayRoute) -> MessageTarget {
     target
 }
 
-fn stream_error(payload: &Value) -> Result<StreamError, GatewayOperationError> {
+fn stream_error(payload: &JsonText) -> Result<StreamError, GatewayOperationError> {
     payload
-        .get("error")
-        .and_then(Value::as_str)
+        .field("error")
+        .and_then(|error| error.parse_as::<String>().ok())
         .filter(|message| valid_required(message))
         .map(StreamError::failed)
         .ok_or(GatewayOperationError::InvalidRequest)
@@ -303,7 +299,7 @@ where
     EventType: Event,
     Payload: Serialize,
 {
-    match serde_json::to_value(payload) {
+    match JsonText::from_serialize(payload) {
         Ok(value) => {
             if let Err(error) = workflow.emit::<EventType>(value) {
                 log::error!("IMessage Gateway failed to emit terminal Event: {error}");

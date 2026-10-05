@@ -494,6 +494,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-agent-runtime",
  "barracuda-captive-portal-plugin",
+ "barracuda-json-writer",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
@@ -1227,8 +1228,6 @@ name = "barracuda-imessage-gateway-runtime"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "barracuda-bulk-memory",
- "barracuda-json-writer",
  "barracuda-workflow-plugin",
  "futures-lite",
  "gateway",
@@ -1359,7 +1358,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-bulk-memory",
  "base64 0.22.1",
+ "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2574,6 +2575,7 @@ dependencies = [
 name = "barracuda-workflow-runtime"
 version = "0.1.0"
 dependencies = [
+ "barracuda-json-writer",
  "futures-lite",
  "getset",
  "json-validator",
