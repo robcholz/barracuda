@@ -2,6 +2,7 @@ use alloc::{
     borrow::ToOwned, collections::BTreeMap, collections::BTreeSet, collections::VecDeque,
     string::String, string::ToString, vec::Vec,
 };
+use core::cell::OnceCell;
 use core::task::{Context, Poll};
 
 use barracuda_agent_tool::ToolGroup;
@@ -80,7 +81,9 @@ struct RemovalPlan {
 /// Session identity, timers, or persistence.
 pub struct Multiagent {
     state: MultiagentState,
-    bridge: Arc<MultiagentBridge>,
+    /// Created when tools first need it, so an orchestration that never runs
+    /// Agents allocates nothing.
+    bridge: OnceCell<Arc<MultiagentBridge>>,
     effects: VecDeque<MultiagentEffect>,
     pending_effects: BTreeMap<EffectId, PendingEffect>,
     next_effect_id: u64,
@@ -93,7 +96,7 @@ impl Multiagent {
     pub fn new() -> Self {
         Self {
             state: MultiagentState::default(),
-            bridge: Arc::new(MultiagentBridge::new()),
+            bridge: OnceCell::new(),
             effects: VecDeque::new(),
             pending_effects: BTreeMap::new(),
             next_effect_id: 1,
@@ -104,7 +107,7 @@ impl Multiagent {
     }
 
     pub fn tool_group(&self, caller: AgentId, kind: &AgentKind) -> Option<ToolGroup> {
-        super::tools::tool_group(caller, kind, Arc::clone(&self.bridge))
+        super::tools::tool_group(caller, kind, Arc::clone(self.bridge()))
     }
 
     pub fn register_root(&mut self, id: AgentId, kind: AgentKind) -> bool {
@@ -133,7 +136,10 @@ impl Multiagent {
             return Poll::Ready(Some(effect));
         }
 
-        let Poll::Ready(command) = self.bridge.poll_command(context) else {
+        let Some(bridge) = self.bridge.get() else {
+            return Poll::Pending;
+        };
+        let Poll::Ready(command) = bridge.poll_command(context) else {
             return Poll::Pending;
         };
         let (requester, action) = command.into_parts();
@@ -357,7 +363,9 @@ impl Multiagent {
         self.routes.clear();
         self.pending_interrupts.clear();
         self.removals.clear();
-        self.bridge.clear();
+        if let Some(bridge) = self.bridge.get() {
+            bridge.clear();
+        }
     }
 
     fn prepare_spawn(&mut self, requester: AgentId, command: SpawnCommand) {
@@ -899,8 +907,13 @@ impl Multiagent {
         }
     }
 
-    fn publish_snapshot(&self) {
+    fn bridge(&self) -> &Arc<MultiagentBridge> {
         self.bridge
+            .get_or_init(|| Arc::new(MultiagentBridge::new()))
+    }
+
+    fn publish_snapshot(&self) {
+        self.bridge()
             .publish_snapshot(MultiagentSnapshot::new(self.state.snapshots()));
     }
 }
@@ -921,6 +934,21 @@ mod tests {
 
     fn timeout() -> SubagentTimeout {
         SubagentTimeout::new(core::num::NonZeroU32::new(60_000).expect("test timeout is non-zero"))
+    }
+
+    #[test]
+    fn an_unused_orchestration_creates_no_bridge() {
+        let mut multiagent = Multiagent::new();
+        let waker = core::task::Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(multiagent.poll_effect(&mut context).is_pending());
+        multiagent.clear();
+        assert!(multiagent.bridge.get().is_none());
+
+        assert!(
+            multiagent.register_root(AgentId::new(1), barracuda_agent::baked::root_kind().clone())
+        );
+        assert!(multiagent.bridge.get().is_some());
     }
 
     fn take_spawn_effect(multiagent: &mut Multiagent) -> (EffectId, SubagentSpec) {
@@ -970,7 +998,7 @@ mod tests {
         multiagent.publish_snapshot();
 
         let control =
-            super::super::tool_port::SubagentControl::new(first, Arc::clone(&multiagent.bridge));
+            super::super::tool_port::SubagentControl::new(first, Arc::clone(multiagent.bridge()));
         assert!(control.get(second).is_none());
     }
 
@@ -980,7 +1008,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let bridge = Arc::clone(&multiagent.bridge);
+        let bridge = Arc::clone(multiagent.bridge());
         let (mut accepted, _completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
@@ -1011,7 +1039,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let bridge = Arc::clone(&multiagent.bridge);
+        let bridge = Arc::clone(multiagent.bridge());
         let (mut accepted, mut completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
@@ -1292,7 +1320,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (mut accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge().spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1628,7 +1656,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (mut accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge().spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
