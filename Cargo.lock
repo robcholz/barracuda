@@ -704,6 +704,7 @@ dependencies = [
 name = "barracuda-agent-workflow-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-agent-message",
  "barracuda-agent-plugin",
  "barracuda-plugin",
  "barracuda-workflow-plugin",
@@ -5118,6 +5119,7 @@ dependencies = [
 name = "gateway"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "futures-core",
  "futures-lite",
  "serde",

@@ -9,7 +9,7 @@ use serde_json::value::RawValue;
 use serde_json::Value;
 
 use crate::json::{write_compact, write_value, Object};
-use crate::Text;
+use barracuda_bulk_memory::BulkText;
 
 /// One chat message object, stored as compact JSON in bulk memory.
 ///
@@ -28,7 +28,7 @@ use crate::Text;
 /// assert_eq!(message.to_value()["content"], "hi");
 /// ```
 #[derive(Clone, PartialEq, Eq)]
-pub struct ChatMessage(Text);
+pub struct ChatMessage(BulkText);
 
 /// Text that is not one JSON object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl ChatMessage {
     /// Encodes a message object.
     #[must_use]
     pub fn new(value: &Value) -> Self {
-        Self(Text::encode(|sink| write_value(sink, value)))
+        Self(BulkText::encode(|sink| write_value(sink, value)))
     }
 
     /// Encodes a message object field by field.
@@ -56,7 +56,7 @@ impl ChatMessage {
     /// `serde_json` encoding of the equivalent `Value`.
     #[must_use]
     pub fn encode_object(fields: impl Fn(&mut Object<'_>)) -> Self {
-        Self(Text::encode(|sink| {
+        Self(BulkText::encode(|sink| {
             let mut object = Object::begin(sink);
             fields(&mut object);
             object.end();
@@ -73,7 +73,7 @@ impl ChatMessage {
             return Err(ChatMessageError);
         }
         serde_json::from_str::<IgnoredAny>(json).map_err(|_error| ChatMessageError)?;
-        Ok(Self(Text::encode(|sink| write_compact(sink, json))))
+        Ok(Self(BulkText::encode(|sink| write_compact(sink, json))))
     }
 
     /// The encoded message.

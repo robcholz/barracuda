@@ -22,25 +22,7 @@ const BASE64_INPUT_CHUNK: usize = 768;
 const BASE64_OUTPUT_CHUNK: usize = BASE64_INPUT_CHUNK / 3 * 4;
 
 /// Destination of encoded bytes.
-pub trait Sink {
-    /// Appends `bytes` to the output.
-    fn put(&mut self, bytes: &[u8]);
-}
-
-/// Counts the bytes an encoding will occupy.
-struct Measure(usize);
-
-impl Sink for Measure {
-    fn put(&mut self, bytes: &[u8]) {
-        self.0 = self.0.saturating_add(bytes.len());
-    }
-}
-
-impl Sink for BulkVec<u8> {
-    fn put(&mut self, bytes: &[u8]) {
-        self.extend_from_slice(bytes);
-    }
-}
+pub use barracuda_bulk_memory::ByteSink as Sink;
 
 struct Formatted<'a>(&'a mut dyn Sink);
 
@@ -58,9 +40,32 @@ impl fmt::Write for Formatted<'_> {
 /// whose failure the caller can report.
 #[must_use]
 pub fn encode(write: impl Fn(&mut dyn Sink)) -> BulkVec<u8> {
-    let mut output = BulkVec::with_capacity(measure(&write));
-    write(&mut output);
-    output
+    BulkVec::encode(write)
+}
+
+/// Like [`encode`], but into an exactly sized ordinary `String`, for small
+/// results whose consumers need one.
+#[must_use]
+pub fn encode_string(write: impl Fn(&mut dyn Sink)) -> String {
+    struct Count(usize);
+    impl Sink for Count {
+        fn put(&mut self, bytes: &[u8]) {
+            self.0 = self.0.saturating_add(bytes.len());
+        }
+    }
+    struct Fill(String);
+    impl Sink for Fill {
+        fn put(&mut self, bytes: &[u8]) {
+            // Encoders split output only at ASCII boundaries.
+            self.0
+                .push_str(core::str::from_utf8(bytes).unwrap_or_default());
+        }
+    }
+    let mut count = Count(0);
+    write(&mut count);
+    let mut fill = Fill(String::with_capacity(count.0));
+    write(&mut fill);
+    fill.0
 }
 
 /// Like [`encode`], but reports bulk-memory exhaustion instead of aborting.
@@ -69,15 +74,7 @@ pub fn encode(write: impl Fn(&mut dyn Sink)) -> BulkVec<u8> {
 ///
 /// [`BulkAllocError`] when the measured length cannot be allocated.
 pub fn try_encode(write: impl Fn(&mut dyn Sink)) -> Result<BulkVec<u8>, BulkAllocError> {
-    let mut output = BulkVec::try_with_capacity(measure(&write))?;
-    write(&mut output);
-    Ok(output)
-}
-
-fn measure(write: &impl Fn(&mut dyn Sink)) -> usize {
-    let mut measure = Measure(0);
-    write(&mut measure);
-    measure.0
+    BulkVec::try_encode(write)
 }
 
 /// Writes one JSON object field by field.
@@ -303,6 +300,14 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn encode_string_matches_the_bulk_encoding_exactly() {
+        let value = json!({"a": "ünï \"q\"", "b": [1, 2.5]});
+        let text = encode_string(|sink| write_value(sink, &value));
+        assert_eq!(text, serde_json::to_string(&value).unwrap());
+        assert_eq!(text.capacity(), text.len());
     }
 
     #[test]

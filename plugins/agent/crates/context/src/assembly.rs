@@ -24,7 +24,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-use barracuda_agent_message::{ChatMessage, Text};
+use barracuda_agent_message::{BulkText, ChatMessage};
 use getset::CopyGetters;
 
 use crate::block::{Block, BlockKind, Scope};
@@ -70,10 +70,10 @@ pub struct Context {
     /// One owned content string per declared kind. Only ever holds non-absent
     /// content — empty content drops the key (see [`with`](Self::with)).
     /// Block text lives in bulk memory, sized exactly.
-    blocks: BTreeMap<BlockKind, Text>,
+    blocks: BTreeMap<BlockKind, BulkText>,
     /// Cached rendered system prefix in bulk memory. Rebuilt by
     /// [`request`](Self::request) only when `content_version != rendered_version`.
-    rendered: Text,
+    rendered: BulkText,
     /// Bumped on every real block change. The `version()` surface, and the gate
     /// for re-rendering.
     content_version: u64,
@@ -98,7 +98,7 @@ impl Context {
 
         Self {
             blocks: BTreeMap::new(),
-            rendered: Text::default(),
+            rendered: BulkText::default(),
             content_version: 0,
             rendered_version: 0,
             reminders: Reminders::new(),
@@ -126,7 +126,7 @@ impl Context {
             if is_empty {
                 self.blocks.remove(&kind);
             } else {
-                self.blocks.insert(kind, Text::new(&content));
+                self.blocks.insert(kind, BulkText::new(&content));
             }
             self.content_version = self.content_version.saturating_add(1);
         }
@@ -201,12 +201,12 @@ impl Context {
     /// Re-render the cached prefix from the current blocks, in wire order
     /// (`band`, then `scope`, then in-band order), reusing the buffer.
     fn rebuild(&mut self) {
-        let mut entries: Vec<(&BlockKind, &Text)> = self.blocks.iter().collect();
+        let mut entries: Vec<(&BlockKind, &BulkText)> = self.blocks.iter().collect();
         // Sort by the wire-order key; the full `BlockKind` Ord breaks ties between
         // custom blocks sharing a key, keeping the render deterministic.
         entries.sort_by(|left, right| block_order(left.0, right.0));
 
-        self.rendered = Text::encode(|sink| {
+        self.rendered = BulkText::encode(|sink| {
             for (index, (_, content)) in entries.iter().enumerate() {
                 if index > 0 {
                     sink.put(BLOCK_SEPARATOR.as_bytes());

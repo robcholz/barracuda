@@ -9,7 +9,7 @@ use core::{
 use barracuda_imessage_gateway_plugin::{
     BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody,
+    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody, TextChunk,
 };
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
@@ -160,7 +160,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                         &request.target,
                         WebEventData::MessageDelta {
                             message_id: message_id.clone(),
-                            delta: text,
+                            delta: TextChunk::from(text),
                         },
                     )?;
                 }
@@ -173,7 +173,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                     &request.target,
                                     WebEventData::MessageDelta {
                                         message_id: message_id.clone(),
-                                        delta: delta.into_string(),
+                                        delta,
                                     },
                                 )?;
                             }
@@ -239,7 +239,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                             &request.target,
                             WebEventData::MessageEvent {
                                 message_id: message_id.clone(),
-                                event: event.into(),
+                                event,
                             },
                         )?;
                     }

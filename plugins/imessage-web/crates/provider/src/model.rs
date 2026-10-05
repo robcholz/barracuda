@@ -1,6 +1,6 @@
 use alloc::{rc::Rc, string::String, vec::Vec};
 
-use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
+use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent, TextChunk};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,33 +9,6 @@ pub struct WebEvent {
     pub conversation_id: String,
     pub thread_id: Option<String>,
     pub data: WebEventData,
-}
-
-/// Semantic Agent event retained in Web replay history.
-///
-/// Gateway events carry their payload in a fixed inline buffer sized for the
-/// largest chunk; history keeps only the bytes each payload actually uses.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WebStreamEvent {
-    /// Agent session that owns the event stream.
-    pub session: String,
-    /// Agent-assigned event order.
-    pub sequence: u64,
-    /// Forward-compatible semantic event type.
-    pub event_type: String,
-    /// Complete JSON object payload.
-    pub payload: String,
-}
-
-impl From<SendStreamEvent> for WebStreamEvent {
-    fn from(event: SendStreamEvent) -> Self {
-        Self {
-            session: event.session,
-            sequence: event.sequence,
-            event_type: event.event_type,
-            payload: event.payload.into_string(),
-        }
-    }
 }
 
 /// Message operation represented by a Web event.
@@ -48,12 +21,14 @@ pub enum WebEventData {
     },
     MessageDelta {
         message_id: String,
-        delta: String,
+        /// Shares the Gateway chunk's bulk allocation.
+        delta: TextChunk,
     },
     /// One complete semantic Agent event carried by the message stream.
     MessageEvent {
         message_id: String,
-        event: WebStreamEvent,
+        /// Shares the Gateway event's bulk payload.
+        event: SendStreamEvent,
     },
     MessageEnd {
         message_id: String,

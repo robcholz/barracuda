@@ -41,7 +41,7 @@ fn event_payload(data: &WebEventData) -> Result<Value, serde_json::Error> {
             kind,
         } => json!({ "message_id": message_id, "reply_to": reply_to, "kind": kind }),
         WebEventData::MessageDelta { message_id, delta } => {
-            json!({ "message_id": message_id, "delta": delta })
+            json!({ "message_id": message_id, "delta": delta.as_str() })
         }
         WebEventData::MessageEvent { message_id, event } => json!({
             "message_id": message_id,

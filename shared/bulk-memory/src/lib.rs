@@ -1,11 +1,17 @@
 //! POD-only containers backed by a Platform-selected bulk-memory allocator.
 //!
 //! Platforms install the allocator that represents their high-capacity memory
-//! domain. Callers use [`BulkVec`] and [`BulkBox`] without receiving or naming
-//! that allocator, so non-POD control state cannot be placed in the domain by
-//! safe code.
+//! domain. Callers use [`BulkVec`], [`BulkBox`], and [`BulkText`] without
+//! receiving or naming that allocator, so non-POD control state cannot be
+//! placed in the domain by safe code.
 
 #![no_std]
+
+extern crate alloc;
+
+mod text;
+
+pub use text::{BulkText, ByteSink};
 
 use core::{alloc::Layout, fmt, ops::Deref, ops::DerefMut, ptr::NonNull};
 

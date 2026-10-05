@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_agent_message::json::Sink;
-use barracuda_agent_message::Text;
+use barracuda_agent_message::BulkText;
 use barracuda_agent_permission::Action;
 use portable_atomic_util::Arc;
 use serde::Serialize;
@@ -23,16 +23,16 @@ const NO_EXTRA_TOOL_CONTEXT: &str = "no extra tool context";
 /// sized bulk text.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ToolSetCache {
-    static_schemas: Option<Text>,
-    static_context: Option<Text>,
-    deferred_context: Option<Text>,
-    extra_tool_context: Option<Text>,
+    static_schemas: Option<BulkText>,
+    static_context: Option<BulkText>,
+    deferred_context: Option<BulkText>,
+    extra_tool_context: Option<BulkText>,
 }
 
 impl ToolSetCache {
-    fn text(text: &Option<Text>) -> Option<&str> {
+    fn text(text: &Option<BulkText>) -> Option<&str> {
         text.as_ref()
-            .map(Text::as_str)
+            .map(BulkText::as_str)
             .filter(|text| !text.is_empty())
     }
 }
@@ -585,8 +585,8 @@ impl ToolSet {
         let (schemas, context) = {
             let tools = self.surface(true);
             (
-                Text::encode(|sink| write_schemas(sink, &tools)),
-                Text::encode(|sink| {
+                BulkText::encode(|sink| write_schemas(sink, &tools)),
+                BulkText::encode(|sink| {
                     write_usages(sink, &tools);
                 }),
             )
@@ -598,7 +598,7 @@ impl ToolSet {
     fn render_deferred_tools(&mut self) {
         let context = {
             let tools = self.surface(false);
-            Text::encode(|sink| {
+            BulkText::encode(|sink| {
                 let wrote_usage = write_usages(sink, &tools);
                 if !tools.is_empty() {
                     if wrote_usage {
@@ -612,7 +612,7 @@ impl ToolSet {
     }
 
     fn render_extra_tool_context(&mut self) {
-        let context = Text::encode(|sink| {
+        let context = BulkText::encode(|sink| {
             let mut first = true;
             for (name, entry) in &self.entries {
                 let tool = match entry.state {
