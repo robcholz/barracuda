@@ -331,13 +331,11 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, GatewayOperationError> {
         return Err(GatewayOperationError::InvalidRequest);
     }
     let mut output = Vec::with_capacity(encoded.len());
-    let group_count = encoded.len() / 4;
-    for (index, chunk) in encoded.as_bytes().chunks_exact(4).enumerate() {
-        let a = decode_base64_byte(*chunk.first().ok_or(GatewayOperationError::InvalidRequest)?)?;
-        let b = decode_base64_byte(*chunk.get(1).ok_or(GatewayOperationError::InvalidRequest)?)?;
-        let c = *chunk.get(2).ok_or(GatewayOperationError::InvalidRequest)?;
-        let d = *chunk.get(3).ok_or(GatewayOperationError::InvalidRequest)?;
-        let is_last = index.saturating_add(1) == group_count;
+    let (groups, _) = encoded.as_bytes().as_chunks::<4>();
+    for (index, &[a, b, c, d]) in groups.iter().enumerate() {
+        let a = decode_base64_byte(a)?;
+        let b = decode_base64_byte(b)?;
+        let is_last = index.saturating_add(1) == groups.len();
         if c == b'=' && (!is_last || d != b'=') || d == b'=' && !is_last {
             return Err(GatewayOperationError::InvalidRequest);
         }

@@ -311,8 +311,13 @@ where
 
         let mut row = [0u8; WIDTH as usize * 2];
         for (line, source) in pixels.chunks_exact(width).enumerate() {
-            for (target, color) in row[..width * 2].chunks_exact_mut(2).zip(source) {
-                target.copy_from_slice(&rgb565(*color).to_be_bytes());
+            for (target, color) in row[..width * 2]
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(source)
+            {
+                *target = rgb565(*color).to_be_bytes();
             }
             self.write_pixels(
                 area.top_left.x as u16,

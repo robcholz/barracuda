@@ -295,8 +295,13 @@ where
             .read(&mut samples[..count])
             .await
             .map_err(codec_error)?;
-        for (pair, sample) in encoded.chunks_exact_mut(2).zip(&samples[..count]) {
-            pair.copy_from_slice(&sample.to_le_bytes());
+        for (pair, sample) in encoded
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(&samples[..count])
+        {
+            *pair = sample.to_le_bytes();
         }
         bytes.extend_from_slice(&encoded[..count * 2])?;
         remaining -= count;
