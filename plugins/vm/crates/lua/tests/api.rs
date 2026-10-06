@@ -25,6 +25,25 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
 }
 
 #[test]
+fn numbers_convert_without_the_c_library() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let text: String = lua
+        .load(
+            "return table.concat({ tostring(0.1), tostring(1e100), tostring(2^63), \
+             tostring(-0.0), string.format('%5.2f|%-4d|%#x|%g|%e|%c', 3.14159, 7, 255, \
+             1e20, 12.5, 65), tostring(tonumber('0x1.8p1')), tostring(tonumber(' 12e-1 ')), \
+             tostring(3 // 2), tostring(3 / 2) }, ' ')",
+        )
+        .eval()?;
+    assert_eq!(
+        text,
+        "0.1 1e+100 9.2233720368548e+18 -0.0  3.14|7   |0xff|1e+20|1.250000e+01|A 3.0 1.2 1 1.5"
+    );
+    assert!(lua.load("return string.format('%a', 1)").exec().is_err());
+    Ok(())
+}
+
+#[test]
 fn lua_new_exposes_table_metaprogramming_without_runtime_control() -> Result<()> {
     let mut lua = Lua::new()?;
     let compatible: bool = lua

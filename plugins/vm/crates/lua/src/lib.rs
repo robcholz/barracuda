@@ -31,6 +31,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "vendored")]
+#[allow(unsafe_code)]
+mod c_numbers;
 mod convert;
 mod environment;
 mod error;
