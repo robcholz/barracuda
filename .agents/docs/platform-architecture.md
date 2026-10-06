@@ -122,7 +122,7 @@ The returned shape preserves ownership:
 
 ~~~rust,ignore
 TargetResources {
-    platform: PlatformResources { ip_stack, wifi, tls, partitions },
+    platform: PlatformResources { ip_stack, wifi, entropy, tls, partitions },
     board_hal: BoardResources { peripherals, exposed_io },
 }
 ~~~
@@ -143,13 +143,14 @@ platform-level services. Concrete Board peripherals do not become Platform
 fields or Platform associated types.
 
 Platform resources have stable, exact shapes. The current common contract
-exposes one Embassy IP stack, one Wi-Fi control mechanism, one TLS client
-capability, and one partitions collection:
+exposes one Embassy IP stack, one Wi-Fi control mechanism, one entropy source,
+one TLS client capability, and one partitions collection:
 
 ~~~rust,ignore
-pub struct PlatformResources<Tls, Partitions, Wifi> {
+pub struct PlatformResources<Tls, Partitions, Wifi, Entropy> {
     pub ip_stack: embassy_net::Stack<'static>,
     pub wifi: Wifi,
+    pub entropy: Entropy,
     pub tls: Tls,
     pub partitions: Partitions,
 }
@@ -158,6 +159,13 @@ pub struct PlatformResources<Tls, Partitions, Wifi> {
 `wifi` is a separate communication mechanism, not part of `ip_stack`.
 Platforms without a radio supply an explicitly unsupported implementation, and
 System hands the mechanism to the Wi-Fi Plugin, which owns the policy.
+
+`entropy` is the Platform's source of unpredictable bytes, fit for
+cryptographic use: the operating system's generator on Host Platforms, a true
+random number generator fed by physical noise on devices. A Platform without
+one supplies `UnavailableEntropy`, never a weaker generator. System hands it to
+the VM Plugin, which seeds `math.random` from it; like Wi-Fi, the Plugin's
+constructor is generic over the Platform's type and erases it inside.
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become

@@ -1,186 +1,140 @@
 #[cfg(feature = "vendored")]
 mod vendored {
     use std::env;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use lunka_src::platforms::{Platform, Standards};
+    /// The Lua core and the libraries the sandbox opens. Lua's io, os, math,
+    /// debug, coroutine and package libraries and `luaL_openlibs` are not
+    /// built; `c/require.c` replaces `require`.
+    const SOURCES: [&str; 25] = [
+        "lapi", "lcode", "lctype", "ldebug", "ldo", "ldump", "lfunc", "lgc", "llex", "lmem",
+        "lobject", "lopcodes", "lparser", "lstate", "lstring", "ltable", "ltm", "lundump", "lvm",
+        "lzio", "lauxlib", "lbaselib", "lstrlib", "ltablib", "lutf8lib",
+    ];
 
-    /// Header that `lua.h` includes last, through `LUA_USER_H`.
-    const USER_HEADER: &str = "LUA_USER_H=\"barracuda_lua_user.h\"";
-
-    struct BareMetal;
-
-    impl Platform for BareMetal {
-        fn defines(&self) -> &[&str] {
-            &[USER_HEADER]
-        }
-
-        fn standards(&self) -> &Standards<'_> {
-            static STANDARDS: Standards<'static> = Standards {
-                gnu: Some("gnu99"),
-                clang: Some("gnu99"),
-                msvc: None,
-                clang_cl: None,
-            };
-            &STANDARDS
-        }
-    }
-
-    /// The host's own Lua platform, plus the user header.
-    struct Host<P> {
-        platform: P,
-        defines: Vec<&'static str>,
-    }
-
-    impl<P: Platform> Platform for Host<P> {
-        fn defines(&self) -> &[&str] {
-            &self.defines
-        }
-
-        fn standards(&self) -> &Standards<'_> {
-            self.platform.standards()
-        }
-    }
+    /// The C library functions Lua calls, copied from musl into `c/musl`.
+    const MUSL_SOURCES: [&str; 30] = [
+        "__math_invalid",
+        "__math_oflow",
+        "__math_uflow",
+        "__math_xflow",
+        "copysign",
+        "ctype",
+        "exp_data",
+        "floatscan",
+        "floor",
+        "fmod",
+        "frexp",
+        "ldexp",
+        "memchr",
+        "pow",
+        "pow_data",
+        "scalbn",
+        "stpcpy",
+        "strchr",
+        "strchrnul",
+        "strcmp",
+        "strcpy",
+        "strcspn",
+        "strlen",
+        "strncmp",
+        "strnlen",
+        "strpbrk",
+        "strspn",
+        "strstr",
+        "strtod",
+        "vfprintf",
+    ];
 
     pub(crate) fn build() {
         let manifest = PathBuf::from(
             env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"),
         );
+        let upstream = manifest.join("lua");
+        let patches = manifest.join("patches");
         let c = manifest.join("c");
-        println!("cargo:rerun-if-changed={}", c.display());
-        let target = env::var("TARGET").expect("Cargo sets TARGET");
-        if target.contains("-none-") {
-            lunka_src::Build::new(BareMetal)
-                .include(&c)
-                .add_lunka_src()
-                .compile("lua");
-            remove_unused_libraries();
-            isolate_c_library(&c);
-        } else {
-            let platform = lunka_src::platforms::from_current_triple()
-                .expect("lunka-src supports the host platform");
-            let defines = platform
-                .defines()
-                .iter()
-                .map(|define| &*String::leak((*define).to_owned()))
-                .chain([USER_HEADER])
-                .collect();
-            lunka_src::Build::new(Host { platform, defines })
-                .include(&c)
-                .add_lunka_src()
-                .compile("lua");
-            remove_unused_libraries();
+        for path in [&upstream, &patches, &c] {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+        assert!(
+            upstream.join("lua.h").is_file(),
+            "the Lua sources are missing; run `git submodule update --init {}`",
+            upstream.display()
+        );
+
+        let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
+        let source = out.join("lua");
+        if source.exists() {
+            fs::remove_dir_all(&source).expect("the previous Lua sources can be removed");
+        }
+        fs::create_dir_all(&source).expect("the Lua source directory can be created");
+        copy_sources(&upstream, &source);
+        apply_patches(&patches, &source);
+
+        cc::Build::new()
+            .std("c11")
+            // Lua-only C library headers come before the system's.
+            .include(c.join("libc"))
+            .include(&c)
+            .include(&source)
+            .define("LUA_USER_H", "\"barracuda_lua_user.h\"")
+            .files(SOURCES.map(|name| source.join(format!("{name}.c"))))
+            .file(c.join("require.c"))
+            .compile("lua");
+
+        let musl = c.join("musl");
+        cc::Build::new()
+            .std("c11")
+            // musl is written for its own warning flags, not -Wall -Wextra.
+            .warnings(false)
+            .extra_warnings(false)
+            .include(c.join("libc"))
+            .include(&musl)
+            .flag("-include")
+            .flag(musl.join("barracuda_musl.h").to_string_lossy().as_ref())
+            .files(MUSL_SOURCES.map(|name| musl.join(format!("{name}.c"))))
+            .compile("lua_musl");
+    }
+
+    /// Copies the built sources and every header out of the submodule.
+    fn copy_sources(upstream: &Path, source: &Path) {
+        for entry in fs::read_dir(upstream).expect("the Lua submodule can be read") {
+            let path = entry.expect("the Lua submodule can be listed").path();
+            let is = |extension: &str| path.extension().is_some_and(|found| found == extension);
+            let built = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| SOURCES.contains(&stem));
+            if is("h") || (is("c") && built) {
+                let name = path.file_name().expect("a Lua source has a file name");
+                fs::copy(&path, source.join(name)).expect("a Lua source can be copied");
+            }
         }
     }
 
-    /// Lua's own io, os and debug libraries, and `luaL_openlibs` that opens
-    /// them. The sandbox never opens them: Barracuda's builtin packages
-    /// provide files, time and the like instead.
-    const UNUSED_LIBRARIES: [&str; 4] = ["liolib", "loslib", "ldblib", "linit"];
-
-    /// Drops [`UNUSED_LIBRARIES`] from `liblua.a`; `lunka-src` compiles every
-    /// Lua source file.
-    fn remove_unused_libraries() {
-        let archive =
-            PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR")).join("liblua.a");
-        let archiver = || cc::Build::new().get_archiver();
-        let listing = archiver()
-            .arg("t")
-            .arg(&archive)
-            .output()
-            .expect("the archiver runs");
-        let members: Vec<String> = String::from_utf8_lossy(&listing.stdout)
-            .lines()
-            .filter(|member| {
-                UNUSED_LIBRARIES
-                    .iter()
-                    .any(|library| member.ends_with(&format!("-{library}.o")))
+    /// Applies `patches/*.patch` in name order.
+    fn apply_patches(patches: &Path, source: &Path) {
+        let mut files: Vec<PathBuf> = fs::read_dir(patches)
+            .expect("the Lua patches can be read")
+            .map(|entry| entry.expect("the Lua patches can be listed").path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "patch")
             })
-            .map(str::to_owned)
             .collect();
-        assert_eq!(
-            members.len(),
-            UNUSED_LIBRARIES.len(),
-            "liblua.a holds every Lua library"
-        );
-        run(archiver().arg("d").arg(&archive).args(&members));
-    }
-
-    /// Replaces `liblua.a` with one object holding Lua and the parts of the
-    /// toolchain's C library Lua uses, exporting only the Lua API.
-    ///
-    /// The firmware then links no C library: nothing else can resolve a C
-    /// function, such as a Wi-Fi driver's `usleep`, to this one, and the C
-    /// library's symbols cannot clash with the firmware's own.
-    fn isolate_c_library(c: &Path) {
-        let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
-        let compiler = cc::Build::new().get_compiler();
-        let tool = |name: &str| toolchain_tool(compiler.path(), name);
-        let library = |name: &str| {
-            let output = Command::new(compiler.path())
-                .args(compiler.args())
-                .arg(format!("-print-file-name={name}"))
-                .output()
-                .expect("the C compiler runs");
-            PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
-        };
-
-        let bare_metal = out.join("barracuda_lua_bare_metal.o");
-        run(Command::new(compiler.path())
-            .args(compiler.args())
-            .arg("-c")
-            .arg(c.join("bare_metal.c"))
-            .arg("-o")
-            .arg(&bare_metal));
-
-        let archive = out.join("liblua.a");
-        let combined = out.join("lua-isolated.o");
-        // Lua's own replacements come before the C library so the archive
-        // supplies only what is still undefined.
-        run(Command::new(tool("ld"))
-            .arg("-r")
-            .arg("-o")
-            .arg(&combined)
-            .arg(&bare_metal)
-            .arg("--whole-archive")
-            .arg(&archive)
-            .arg("--no-whole-archive")
-            .arg("--start-group")
-            .arg(library("libc.a"))
-            .arg(library("libm.a"))
-            .arg(library("libgcc.a"))
-            .arg("--end-group"));
-        run(Command::new(tool("objcopy"))
-            .arg("--wildcard")
-            .args([
-                "--keep-global-symbol=lua_*",
-                "--keep-global-symbol=luaL_*",
-                "--keep-global-symbol=luaopen_*",
-            ])
-            .arg(&combined));
-        std::fs::remove_file(&archive).expect("liblua.a can be replaced");
-        run(Command::new(tool("ar"))
-            .arg("crs")
-            .arg(&archive)
-            .arg(&combined));
-    }
-
-    /// The `ld`, `objcopy` or `ar` beside a `<prefix>-gcc` cross compiler.
-    fn toolchain_tool(compiler: &Path, name: &str) -> PathBuf {
-        let file = compiler
-            .file_name()
-            .and_then(|file| file.to_str())
-            .unwrap_or_default();
-        let prefix = file.strip_suffix("gcc").unwrap_or_default();
-        compiler.with_file_name(format!("{prefix}{name}"))
-    }
-
-    fn run(command: &mut Command) {
-        let status = command
-            .status()
-            .unwrap_or_else(|error| panic!("failed to run {command:?}: {error}"));
-        assert!(status.success(), "{command:?} failed with {status}");
+        files.sort();
+        for patch in files {
+            let status = Command::new("patch")
+                .args(["-p1", "-s", "-t", "-d"])
+                .arg(source)
+                .arg("-i")
+                .arg(&patch)
+                .status()
+                .unwrap_or_else(|error| panic!("failed to run patch: {error}"));
+            assert!(status.success(), "{} does not apply", patch.display());
+        }
     }
 }
 

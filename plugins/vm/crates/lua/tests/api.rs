@@ -25,7 +25,7 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
 }
 
 #[test]
-fn numbers_convert_without_the_c_library() -> Result<()> {
+fn numbers_convert_like_the_c_library() -> Result<()> {
     let mut lua = Lua::new()?;
     let text: String = lua
         .load(
@@ -39,7 +39,8 @@ fn numbers_convert_without_the_c_library() -> Result<()> {
         text,
         "0.1 1e+100 9.2233720368548e+18 -0.0  3.14|7   |0xff|1e+20|1.250000e+01|A 3.0 1.2 1 1.5"
     );
-    assert!(lua.load("return string.format('%a', 1)").exec().is_err());
+    let hexadecimal: String = lua.load("return string.format('%a %q', 1, 1.5)").eval()?;
+    assert_eq!(hexadecimal, "0x1p+0 0x1.8p+0");
     Ok(())
 }
 
@@ -71,35 +72,16 @@ fn lua_new_includes_safe_computation_standard_libraries() -> Result<()> {
         .load(
             "return string == require('string') \
              and table == require('table') \
-             and math == require('math') \
              and utf8 == require('utf8') \
+             and math == nil \
              and string.upper('barracuda') == 'BARRACUDA' \
              and table.concat({'bar', 'rac', 'uda'}) == 'barracuda' \
-             and math.floor(4.2) == 4 \
-             and utf8.len('汉字') == 2",
+             and utf8.len('汉字') == 2 \
+             and 7 // 2 == 3 and 7 % -3 == -2 and 2 ^ 10 == 1024.0",
         )
         .eval()?;
 
     assert!(libraries_work);
-    Ok(())
-}
-
-#[test]
-fn math_random_does_not_reveal_a_clock_or_native_address_seed() -> Result<()> {
-    let mut lua = Lua::new()?;
-    let isolated: bool = lua
-        .load(
-            "local first_seed, second_seed = math.randomseed() \
-             local first = math.random() \
-             local repeated_first_seed, repeated_second_seed = math.randomseed() \
-             local repeated = math.random() \
-             return first_seed == 0 and second_seed == 0 \
-                and repeated_first_seed == 0 and repeated_second_seed == 0 \
-                and first == repeated",
-        )
-        .eval()?;
-
-    assert!(isolated);
     Ok(())
 }
 

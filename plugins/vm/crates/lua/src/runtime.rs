@@ -9,18 +9,15 @@ use core::{
     task::{Context, Poll, Waker},
 };
 
-use lunka::Thread;
-use lunka::cdef::auxlib::{LOADED_TABLE, PRELOAD_TABLE, luaL_loadbufferx, luaL_ref};
-use lunka::cdef::stdlibs::{
-    luaopen_base, luaopen_math, luaopen_package, luaopen_string, luaopen_table, luaopen_utf8,
-};
-use lunka::cdef::{
-    DEFAULT_EXTRA_SPACE, EventMask, MAX_ALIGN, REGISTRY_GLOBALS, REGISTRY_INDEX, Status,
-    lua_CFunction, lua_Debug, lua_KContext, lua_State, lua_createtable, lua_getextraspace,
-    lua_getfield, lua_getglobal, lua_gettop, lua_newthread, lua_pop, lua_pushcclosure,
-    lua_pushlightuserdata, lua_pushlstring, lua_pushnil, lua_pushvalue, lua_rawgeti, lua_rawseti,
-    lua_remove, lua_resetthread, lua_resume, lua_setfield, lua_sethook, lua_settop, lua_setupvalue,
-    lua_tolstring, lua_touserdata, lua_xmove,
+use crate::ffi::{
+    DEFAULT_EXTRA_SPACE, LOADED_TABLE, MASK_COUNT, MAX_ALIGN, MainThread, PRELOAD_TABLE,
+    REGISTRY_GLOBALS, REGISTRY_INDEX, STATUS_MEMORY_ERROR, Thread, Type,
+    barracuda_lua_open_require, lua_CFunction, lua_Debug, lua_KContext, lua_State, lua_createtable,
+    lua_getextraspace, lua_getfield, lua_getglobal, lua_gettop, lua_newthread, lua_pop,
+    lua_pushcclosure, lua_pushlightuserdata, lua_pushlstring, lua_pushnil, lua_pushvalue,
+    lua_rawgeti, lua_rawseti, lua_remove, lua_resetthread, lua_resume, lua_setfield, lua_sethook,
+    lua_settop, lua_setupvalue, lua_tolstring, lua_touserdata, lua_xmove, luaL_loadbufferx,
+    luaL_ref, luaL_requiref, luaopen_base, luaopen_string, luaopen_table, luaopen_utf8,
 };
 
 use crate::{
@@ -47,7 +44,7 @@ pub(crate) struct Task {
 static ASYNC_MARKER: u8 = 0xA5;
 static ERROR_MARKER: u8 = 0xE1;
 
-const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 23] = [
+const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 22] = [
     c"assert",
     c"error",
     c"getmetatable",
@@ -68,38 +65,14 @@ const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 23] = [
     c"xpcall",
     c"string",
     c"table",
-    c"math",
     c"utf8",
     c"_VERSION",
 ];
 
-const SANITIZE_STANDARD_LIBRARIES: &str = r#"
-local native_randomseed = math.randomseed
-native_randomseed(0, 0)
-function math.randomseed(first, second)
-    if first == nil then
-        return native_randomseed(0, 0)
-    end
-    return native_randomseed(first, second)
-end
-"#;
-
 pub struct Lua {
-    raw: lunka::Lua,
+    raw: MainThread,
     state: Rc<State>,
     environment: c_int,
-}
-
-unsafe fn retain_preload_searcher(state: *mut lua_State) {
-    unsafe {
-        lua_getglobal(state, c"package".as_ptr());
-        lua_getfield(state, -1, c"searchers".as_ptr());
-        lua_createtable(state, 1, 0);
-        lua_rawgeti(state, -2, 1);
-        lua_rawseti(state, -2, 1);
-        lua_setfield(state, -3, c"searchers".as_ptr());
-        lua_pop(state, 2);
-    }
 }
 
 unsafe fn create_environment(state: *mut lua_State) -> c_int {
@@ -120,8 +93,6 @@ unsafe fn discard_bootstrap_environment(state: *mut lua_State, environment: c_in
         lua_getfield(state, REGISTRY_INDEX, LOADED_TABLE.as_ptr());
         lua_pushnil(state);
         lua_setfield(state, -2, c"_G".as_ptr());
-        lua_pushnil(state);
-        lua_setfield(state, -2, c"package".as_ptr());
         lua_pop(state, 1);
 
         lua_rawgeti(state, REGISTRY_INDEX, environment.into());
@@ -183,7 +154,7 @@ impl State {
         let interval = self.instruction_hook_interval.get();
         let enabled = self.instruction_hook.borrow().is_some() && interval > 0;
         let hook = enabled.then_some(instruction_hook_dispatch as _);
-        let mask = if enabled { EventMask::COUNT.0 } else { 0 };
+        let mask = if enabled { MASK_COUNT } else { 0 };
         unsafe { lua_sethook(coroutine, hook, mask, interval) };
     }
 }
@@ -221,9 +192,38 @@ where
     }
 }
 
+/// The program's global allocator, for states created by [`Lua::new`].
+struct GlobalAllocator;
+
+unsafe impl GlobalAlloc for GlobalAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe { alloc::alloc::alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, allocation: *mut u8, layout: Layout) {
+        unsafe { alloc::alloc::dealloc(allocation, layout) }
+    }
+
+    unsafe fn realloc(&self, allocation: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        unsafe { alloc::alloc::realloc(allocation, layout, new_size) }
+    }
+}
+
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+
+/// A bare state on the global allocator.
+fn new_main_thread() -> Option<MainThread> {
+    unsafe {
+        MainThread::new(
+            rust_allocator::<GlobalAllocator>,
+            (&raw const GLOBAL_ALLOCATOR).cast_mut().cast::<c_void>(),
+        )
+    }
+}
+
 impl Lua {
     pub fn new() -> Result<Self> {
-        let raw = lunka::Lua::try_new()
+        let raw = new_main_thread()
             .ok_or_else(|| Error::new(ErrorKind::Create, "failed to create Lua state"))?;
         Self::initialize(raw)
     }
@@ -242,36 +242,28 @@ impl Lua {
         if allocator.is_null() {
             return Err(Error::new(ErrorKind::Create, "Lua allocator is null"));
         }
-        let raw = unsafe {
-            lunka::Lua::try_new_with_alloc_fn(
-                rust_allocator::<A>,
-                allocator.cast_mut().cast::<c_void>(),
-            )
-        }
-        .ok_or_else(|| Error::new(ErrorKind::Memory, "external Lua allocator is exhausted"))?;
+        let raw =
+            unsafe { MainThread::new(rust_allocator::<A>, allocator.cast_mut().cast::<c_void>()) }
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Memory, "external Lua allocator is exhausted")
+                })?;
         Self::initialize(raw)
     }
 
-    fn initialize(mut raw: lunka::Lua) -> Result<Self> {
+    fn initialize(raw: MainThread) -> Result<Self> {
         let state = raw.as_ptr();
         unsafe {
-            lunka::cdef::auxlib::luaL_requiref(state, c"_G".as_ptr(), luaopen_base, 1);
+            luaL_requiref(state, c"_G".as_ptr(), luaopen_base, 1);
             lua_pop(state, 1);
-            lunka::cdef::auxlib::luaL_requiref(state, c"package".as_ptr(), luaopen_package, 1);
+            luaL_requiref(state, c"string".as_ptr(), luaopen_string, 1);
             lua_pop(state, 1);
-            lunka::cdef::auxlib::luaL_requiref(state, c"string".as_ptr(), luaopen_string, 1);
+            luaL_requiref(state, c"table".as_ptr(), luaopen_table, 1);
             lua_pop(state, 1);
-            lunka::cdef::auxlib::luaL_requiref(state, c"table".as_ptr(), luaopen_table, 1);
+            luaL_requiref(state, c"utf8".as_ptr(), luaopen_utf8, 1);
             lua_pop(state, 1);
-            lunka::cdef::auxlib::luaL_requiref(state, c"math".as_ptr(), luaopen_math, 1);
-            lua_pop(state, 1);
-            lunka::cdef::auxlib::luaL_requiref(state, c"utf8".as_ptr(), luaopen_utf8, 1);
-            lua_pop(state, 1);
+            barracuda_lua_open_require(state);
         }
-        let environment = unsafe {
-            retain_preload_searcher(state);
-            create_environment(state)
-        };
+        let environment = unsafe { create_environment(state) };
         unsafe { discard_bootstrap_environment(state, environment) };
         let shared = Rc::new(State {
             main: Cell::new(state),
@@ -284,13 +276,11 @@ impl Lua {
             let slot = lua_getextraspace(state, DEFAULT_EXTRA_SPACE).cast::<*const State>();
             slot.write(Rc::as_ptr(&shared));
         }
-        let mut lua = Self {
+        Ok(Self {
             raw,
             state: shared,
             environment,
-        };
-        lua.load(SANITIZE_STANDARD_LIBRARIES).exec()?;
-        Ok(lua)
+        })
     }
 
     /// Installs a count hook called after every `instruction_interval` Lua instructions.
@@ -384,7 +374,7 @@ impl Lua {
         let name = lua_name(name)?;
         let main_top = self.raw.top();
         let callback_count = self.state.callbacks.borrow().len();
-        self.raw.managed().new_table();
+        self.raw.new_table();
         let table_index = self.raw.top();
         let result = configure(&mut Library {
             lua: self,
@@ -422,7 +412,7 @@ impl Lua {
             lua_getfield(self.raw.as_ptr(), REGISTRY_INDEX, LOADED_TABLE.as_ptr());
             lua_getfield(self.raw.as_ptr(), -1, name.as_ptr());
         }
-        if self.raw.type_of(-1) != lunka::cdef::Type::Table {
+        if self.raw.type_of(-1) != Type::Table {
             unsafe { lua_settop(self.raw.as_ptr(), main_top) };
             return Err(Error::runtime(alloc::format!(
                 "Lua library `{}` is not loaded as a table",
@@ -597,7 +587,7 @@ impl Library<'_> {
         let name = lua_name(name)?;
         let initial_top = self.lua.raw.top();
         let callback_count = self.lua.state.callbacks.borrow().len();
-        self.lua.raw.managed().new_table();
+        self.lua.raw.new_table();
         let table_index = self.lua.raw.top();
         let result = configure(&mut Library {
             lua: self.lua,
@@ -743,7 +733,7 @@ impl<R> ExecutionState<R> {
             )
         };
         if load_status != 0 {
-            let kind = if load_status == Status::MemoryError as c_int {
+            let kind = if load_status == STATUS_MEMORY_ERROR {
                 ErrorKind::Memory
             } else {
                 ErrorKind::Load
@@ -879,7 +869,7 @@ impl<R> ExecutionState<R> {
                     }
                 }
                 _ => {
-                    let kind = if status == Status::MemoryError as c_int {
+                    let kind = if status == STATUS_MEMORY_ERROR {
                         ErrorKind::Memory
                     } else {
                         ErrorKind::Runtime
@@ -917,14 +907,14 @@ pub(crate) fn push_lua_return<R: IntoLuaMulti>(
         Some(Ok(value)) => value.push_to_lua_multi(lua),
         Some(Err(error)) => {
             lua.push_nil();
-            lua.managed().push_string(error.message().as_bytes());
+            lua.push_string(error.message().as_bytes());
             Ok(2)
         }
     }
 }
 
 unsafe extern "C-unwind" fn preload_loader(state: *mut lua_State) -> c_int {
-    unsafe { lua_pushvalue(state, lunka::cdef::lua_upvalueindex(1)) };
+    unsafe { lua_pushvalue(state, crate::ffi::lua_upvalueindex(1)) };
     1
 }
 
@@ -989,7 +979,7 @@ unsafe extern "C-unwind" fn async_continuation(
 
 unsafe fn callback(state: *mut lua_State) -> Option<&'static Callback> {
     let pointer =
-        unsafe { lua_touserdata(state, lunka::cdef::lua_upvalueindex(1)) as *const Callback };
+        unsafe { lua_touserdata(state, crate::ffi::lua_upvalueindex(1)) as *const Callback };
     unsafe { pointer.as_ref() }
 }
 
@@ -1123,12 +1113,9 @@ mod tests {
         task::{Context, Poll, Waker},
     };
 
-    use lunka::{
-        Thread,
-        cdef::{
-            DEFAULT_EXTRA_SPACE, lua_CFunction, lua_State, lua_getextraspace, lua_pop,
-            lua_pushcclosure, lua_setfield, lua_settop,
-        },
+    use crate::ffi::{
+        DEFAULT_EXTRA_SPACE, MainThread, Thread, lua_CFunction, lua_State, lua_getextraspace,
+        lua_pop, lua_pushcclosure, lua_setfield, lua_settop,
     };
 
     use super::{
@@ -1136,8 +1123,8 @@ mod tests {
         state_from_thread, take_async_yield, take_lua_error,
     };
 
-    fn raw_lua() -> lunka::Lua {
-        lunka::Lua::try_new().expect("create raw Lua state")
+    fn raw_lua() -> MainThread {
+        super::new_main_thread().expect("create raw Lua state")
     }
 
     unsafe extern "C-unwind" fn raw_yield(state: *mut lua_State) -> c_int {
@@ -1182,7 +1169,7 @@ mod tests {
 
     #[test]
     fn rejects_yields_without_native_task_marker() {
-        let mut lua = raw_lua();
+        let lua = raw_lua();
         let state = lua.as_ptr();
         let wrong_count = unsafe { take_async_yield(state, 0) }.unwrap_err();
         assert_eq!(wrong_count.kind(), ErrorKind::UnexpectedYield);
@@ -1195,7 +1182,7 @@ mod tests {
 
     #[test]
     fn native_error_marker_is_consumed_by_async_continuation() {
-        let mut lua = raw_lua();
+        let lua = raw_lua();
         let state = lua.as_ptr();
         unsafe { push_native_error(state, &Error::runtime("native failed")) };
         assert_eq!(unsafe { finish_async(state) }, -1);
@@ -1208,7 +1195,7 @@ mod tests {
 
     #[test]
     fn async_preparation_rejects_missing_context_and_callback() {
-        let mut lua = raw_lua();
+        let lua = raw_lua();
         let state = lua.as_ptr();
         assert_eq!(unsafe { prepare_async(state, core::ptr::null_mut()) }, -1);
         unsafe { lua_settop(state, 0) };
@@ -1224,7 +1211,7 @@ mod tests {
         let empty = unsafe { take_lua_error(state, ErrorKind::Runtime) };
         assert_eq!(empty.message(), "unknown Lua error");
 
-        lua.managed().new_table();
+        lua.new_table();
         let non_string = unsafe { take_lua_error(state, ErrorKind::Runtime) };
         assert_eq!(non_string.message(), "unknown Lua error");
     }

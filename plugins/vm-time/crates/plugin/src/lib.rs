@@ -554,8 +554,10 @@ mod tests {
             let (package, requests) = TimePackage::new();
             let mut fixed = FixedMemoryLua::new(64 * 1024)
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package.install(fixed.lua_mut())?;
 
             let execution = fixed
@@ -595,8 +597,10 @@ mod tests {
             let (package, _requests) = TimePackage::new();
             let mut fixed = FixedMemoryLua::new(64 * 1024)
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package.install(fixed.lua_mut())?;
             package.revoke();
             fixed

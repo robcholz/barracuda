@@ -1090,7 +1090,10 @@ mod tests {
             let package = FilePackage::new(filesystem);
             let state = Arc::clone(&package.state);
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             let file: UserDataHandle<VmFile> = lua
                 .load(
@@ -1127,7 +1130,10 @@ mod tests {
             let filesystem = filesystem().await?;
             let package = FilePackage::new(filesystem.clone());
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             let file: UserDataHandle<VmFile> = lua
                 .load(
@@ -1367,7 +1373,10 @@ mod tests {
             let filesystem = filesystem().await?;
             let package = FilePackage::new(filesystem);
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             package.revoke();
 
@@ -1394,8 +1403,10 @@ mod tests {
         pub(super) fn install(package: impl Package) -> Result<Installed> {
             let mut lua = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(lua.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(lua.lua_mut())?;
             package.install(lua.lua_mut())?;
             Ok(Installed { lua: Some(lua) })
         }

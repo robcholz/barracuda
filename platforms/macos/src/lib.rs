@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod application;
+mod entropy;
 mod flash;
 mod heap;
 mod layout;
@@ -13,6 +14,7 @@ mod network;
 mod platform;
 mod tls;
 
+pub use entropy::MacosEntropy;
 pub use flash::{FileNorFlash, FileNorFlashError};
 pub use layout::{FileLayout, FileLayoutError, FileRegion, FileRegionAccess};
 pub use network::{MacosNetworkError, DNS_ADDRESS, GATEWAY_ADDRESS, STACK_ADDRESS};

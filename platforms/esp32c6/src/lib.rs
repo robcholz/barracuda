@@ -6,6 +6,12 @@
 #[cfg(target_arch = "riscv32")]
 pub mod hal;
 
+#[cfg(target_arch = "riscv32")]
+mod entropy;
+
+#[cfg(target_arch = "riscv32")]
+pub use entropy::Esp32c6Entropy;
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32c6RegionAccess {
@@ -224,6 +230,7 @@ mod internal_flash {
         type Bindings = Esp32c6PlatformBindings;
         type Tls = barracuda_tls::MbedTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
+        type Entropy = crate::Esp32c6Entropy;
         type Partitions = Esp32c6Partitions;
         type Error = Esp32c6PlatformError;
 
@@ -247,6 +254,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
+                entropy: crate::Esp32c6Entropy,
                 tls,
                 partitions,
             })

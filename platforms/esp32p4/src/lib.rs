@@ -224,6 +224,8 @@ mod internal_flash {
         type Bindings = Esp32P4PlatformBindings;
         type Tls = barracuda_tls::MbedTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
+        /// esp-hal has no true random number generator for the ESP32-P4.
+        type Entropy = barracuda_platform::UnavailableEntropy;
         type Partitions = Esp32P4Partitions;
         type Error = Esp32P4PlatformError;
 
@@ -247,6 +249,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
+                entropy: barracuda_platform::UnavailableEntropy,
                 tls,
                 partitions,
             })

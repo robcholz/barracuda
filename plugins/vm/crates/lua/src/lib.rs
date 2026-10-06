@@ -1,4 +1,4 @@
-//! A small `no_std` Lua 5.4 wrapper built on the project's `lunka` fork.
+//! A small `no_std` Lua 5.4 wrapper over the vendored Lua sources.
 //!
 //! `Lua::new()` always creates an allowlist sandbox; there is no full-library or
 //! unsandboxed construction mode. The public surface is deliberately narrow:
@@ -31,12 +31,11 @@
 
 extern crate alloc;
 
-#[cfg(feature = "vendored")]
-#[allow(unsafe_code)]
-mod c_numbers;
 mod convert;
 mod environment;
 mod error;
+#[allow(unsafe_code)]
+mod ffi;
 #[allow(unsafe_code)]
 mod object;
 mod run;
@@ -45,7 +44,7 @@ mod runtime;
 #[allow(unsafe_code)]
 mod userdata;
 
-pub use convert::{Bytes, FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Variadic};
+pub use convert::{Bytes, FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Number, Variadic};
 pub use environment::{Environment, Package};
 pub use error::{Error, ErrorKind, Result};
 pub use object::{Context, Function, FunctionCall, RegistryKey, Table};

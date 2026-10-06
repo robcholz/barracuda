@@ -4,8 +4,8 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+use crate::ffi::{Thread, Type};
 use barracuda_bulk_memory::BulkVec;
-use lunka::{Thread, cdef::Type};
 
 use crate::{Error, ErrorKind, Result};
 
@@ -106,13 +106,44 @@ impl IntoLua for f64 {
     }
 }
 
+/// A Lua number, keeping Lua's integer and float subtypes apart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Number {
+    /// A Lua integer.
+    Integer(i64),
+    /// A Lua float.
+    Float(f64),
+}
+
+impl FromLua for Number {
+    fn from_lua(lua: &mut Thread, index: c_int) -> Result<Self> {
+        if lua.type_of(index) != Type::Number {
+            return Err(wrong_type("number"));
+        }
+        if lua.is_integer(index) {
+            Ok(Self::Integer(lua.to_integer(index)))
+        } else {
+            Ok(Self::Float(lua.to_number(index)))
+        }
+    }
+}
+
+impl IntoLua for Number {
+    fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
+        match self {
+            Self::Integer(value) => lua.push_integer(value),
+            Self::Float(value) => lua.push_number(value),
+        }
+        Ok(())
+    }
+}
+
 impl FromLua for String {
     fn from_lua(lua: &mut Thread, index: c_int) -> Result<Self> {
         if lua.type_of(index) != Type::String {
             return Err(wrong_type("string"));
         }
         let bytes = lua
-            .managed()
             .to_string(index)
             .ok_or_else(|| wrong_type("string"))?
             .to_vec();
@@ -123,14 +154,14 @@ impl FromLua for String {
 
 impl IntoLua for String {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
-        lua.managed().push_string(self.as_bytes());
+        lua.push_string(self.as_bytes());
         Ok(())
     }
 }
 
 impl IntoLua for &str {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
-        lua.managed().push_string(self.as_bytes());
+        lua.push_string(self.as_bytes());
         Ok(())
     }
 }
@@ -141,7 +172,6 @@ impl FromLua for Vec<u8> {
             return Err(wrong_type("string"));
         }
         Ok(lua
-            .managed()
             .to_string(index)
             .ok_or_else(|| wrong_type("string"))?
             .to_vec())
@@ -150,7 +180,7 @@ impl FromLua for Vec<u8> {
 
 impl IntoLua for Vec<u8> {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
-        lua.managed().push_string(&self);
+        lua.push_string(&self);
         Ok(())
     }
 }
@@ -236,24 +266,21 @@ impl FromLua for Bytes {
         if lua.type_of(index) != Type::String {
             return Err(wrong_type("string"));
         }
-        let mut managed = lua.managed();
-        let bytes = managed
-            .to_string(index)
-            .ok_or_else(|| wrong_type("string"))?;
+        let bytes = lua.to_string(index).ok_or_else(|| wrong_type("string"))?;
         Self::copy_from(bytes)
     }
 }
 
 impl IntoLua for Bytes {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
-        lua.managed().push_string(&*self);
+        lua.push_string(&*self);
         Ok(())
     }
 }
 
 impl IntoLua for &[u8] {
     fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
-        lua.managed().push_string(self);
+        lua.push_string(self);
         Ok(())
     }
 }

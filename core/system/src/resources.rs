@@ -20,9 +20,10 @@ pub(super) struct PreparedFilesystemPartition<Region> {
     pub(super) filesystem: PartitionFilesystem,
 }
 
-pub(super) struct PreparedTarget<Region, Tls, Wifi, BoardHal, const P: usize> {
+pub(super) struct PreparedTarget<Region, Tls, Wifi, Entropy, BoardHal, const P: usize> {
     pub(super) ip_stack: Stack<'static>,
     pub(super) wifi: Wifi,
+    pub(super) entropy: Entropy,
     pub(super) tls: Tls,
     pub(super) partitions: PreparedPartitions<Region, P>,
     pub(super) board_hal: BoardHal,
@@ -49,14 +50,18 @@ pub enum SystemResourceError {
     },
 }
 
-pub(super) fn prepare<Region, Tls, Wifi, BoardHal, const P: usize>(
-    resources: TargetResources<PlatformResources<Tls, Partitions<Region, P>, Wifi>, BoardHal>,
-) -> Result<PreparedTarget<Region, Tls, Wifi, BoardHal, P>, SystemResourceError> {
+pub(super) fn prepare<Region, Tls, Wifi, Entropy, BoardHal, const P: usize>(
+    resources: TargetResources<
+        PlatformResources<Tls, Partitions<Region, P>, Wifi, Entropy>,
+        BoardHal,
+    >,
+) -> Result<PreparedTarget<Region, Tls, Wifi, Entropy, BoardHal, P>, SystemResourceError> {
     let TargetResources {
         platform:
             PlatformResources {
                 ip_stack,
                 wifi,
+                entropy,
                 tls,
                 mut partitions,
             },
@@ -81,6 +86,7 @@ pub(super) fn prepare<Region, Tls, Wifi, BoardHal, const P: usize>(
     Ok(PreparedTarget {
         ip_stack,
         wifi,
+        entropy,
         tls,
         partitions: PreparedPartitions {
             system: system.into_region(),
@@ -140,11 +146,12 @@ mod tests {
 
     fn target(
         partitions: Partitions<u8, 4>,
-    ) -> TargetResources<PlatformResources<(), Partitions<u8, 4>, ()>, BoardHal> {
+    ) -> TargetResources<PlatformResources<(), Partitions<u8, 4>, (), ()>, BoardHal> {
         TargetResources {
             platform: PlatformResources {
                 ip_stack: never_embassy_stack(),
                 wifi: (),
+                entropy: (),
                 tls: (),
                 partitions,
             },

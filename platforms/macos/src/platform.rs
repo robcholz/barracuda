@@ -161,6 +161,7 @@ impl Platform for MacosPlatform {
     type Bindings = &'static Board;
     type Tls = barracuda_tls::MbedTls;
     type Wifi = barracuda_platform::HostWifiDevice;
+    type Entropy = crate::MacosEntropy;
     type Partitions = MacosPartitions;
     type Error = MacosPlatformError;
 
@@ -188,6 +189,7 @@ impl Platform for MacosPlatform {
         Ok(PlatformResources {
             ip_stack,
             wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
+            entropy: crate::MacosEntropy,
             tls,
             partitions,
         })

@@ -200,7 +200,7 @@ mod tests {
     };
 
     use barracuda_agent_tool::{ToolDetachUpdate, ToolInvocation, ToolRunner, ToolSet};
-    use barracuda_vm_plugin::{LuaPackageRegistry, Vm, VmInputRequest, VmRunRequest};
+    use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmInputRequest, VmRunRequest};
     use embassy_executor::{Executor, Spawner};
     use embassy_time::Timer;
     use futures_lite::StreamExt as _;
@@ -210,8 +210,10 @@ mod tests {
     #[embassy_executor::task]
     async fn exercise_detached_tool(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
         let result = async {
-            let vm =
-                Rc::new(Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?);
+            let vm = Rc::new(
+                Vm::new(LuaPackageRegistry::new(), SeedSource::unavailable())
+                    .map_err(|error| error.to_string())?,
+            );
             vm.start(spawner).map_err(|error| error.to_string())?;
 
             let mut tools = ToolSet::empty();

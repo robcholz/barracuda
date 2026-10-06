@@ -36,18 +36,21 @@ remain local to that one Lua state.
 | `require` | Load a native package installed into this Lua state. |
 | `string` | Lua's standard string manipulation library. |
 | `table` | Lua's standard table manipulation library. |
-| `math` | Lua's standard mathematical library. |
+| `math` | Lua's standard mathematical library, installed by the VM (see below). |
 | `utf8` | Lua's standard UTF-8 library. |
 
 Lua syntax and language primitives remain available: values, tables, functions,
 closures, conditionals, loops, operators, and multiple return values do not
 come from a standard-library table.
 
-`math.random` and `math.randomseed` retain their standard call shapes, but the
-sandbox replaces the no-argument seed with `(0, 0)`. This prevents Lua's native
-default seeding path from returning the host clock and a state address. Callers
-that need a varied sequence must provide explicit seed values from an approved
-capability.
+`math` is a VM built-in written in Rust after Lua 5.4.8's `lmathlib.c`; the
+Lua sources are built without their own `math`, `io`, `os`, `debug`,
+`coroutine` and `package` libraries. `math.random` uses Lua's xoshiro256**
+generator, so a seed gives the same sequence as standard Lua. Its seed comes
+from the Platform's entropy source, never from the clock or an address: until a
+script calls `math.randomseed(n)`, the first `math.random` draws one, as does
+`math.randomseed()` without arguments, and both raise an error on a Platform
+without an entropy source. Each execution has its own generator.
 
 ## Execution data flow
 
@@ -56,7 +59,7 @@ operations:
 
 ```rust,ignore
 let mut lua = Lua::new()?;
-let packages = barracuda_vm_builtin_packages::BuiltinPackages::all();
+let packages = barracuda_vm_builtin_packages::BuiltinPackages::new(seeds);
 let (input, output) = packages.install(&mut lua)?.into_io();
 lua_package_registry.install(&mut lua)?;
 let completion = lua.run(source);
@@ -114,13 +117,14 @@ completed, failed, and cancelled executions are omitted.
 
 `require` resolves the already-loaded `string`, `table`, `math`, and `utf8`
 standard libraries, then only searches the internal preload table populated
-through Rust `register_lib`. Filesystem Lua modules, native shared libraries,
-and arbitrary searchers are not supported. The `package` table is not exposed,
-and the bootstrap entries for `_G` and `package` are removed from the
-loaded-module cache, so `require("_G")` and `require("package")` fail.
+through Rust `register_lib`. It is Barracuda's own (`crates/lua/c/require.c`):
+Lua's `package` library, with its filesystem searchers and native shared
+libraries, is not built, and no `package` table exists. The bootstrap entry for
+`_G` is removed from the loaded-module cache, so `require("_G")` and
+`require("package")` fail.
 
-The VM composes two built-in native packages: `io` and an initially empty
-`os` table. `io` implements virtual standard streams over VM messages and
+The VM composes three built-in native packages: `io`, `math`, and an initially
+empty `os` table. `io` implements virtual standard streams over VM messages and
 installs the standard global `io` and `print` names. The empty `os` table gives
 capability Plugins a single standard table to extend. Neither built-in owns a
 filesystem, clock, or process authority.

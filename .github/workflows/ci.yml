@@ -32,6 +32,8 @@ jobs:
       board_matrix: ${{ steps.boards.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -154,6 +156,8 @@ jobs:
         --exclude barracuda-platform-stm32
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -210,6 +214,8 @@ jobs:
         --exclude barracuda-platform-stm32
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -303,6 +309,8 @@ jobs:
             toolchain: stable
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -387,6 +395,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -429,6 +439,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -480,6 +492,8 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

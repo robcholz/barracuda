@@ -175,6 +175,13 @@ where
 
 pub use resources::SystemResourceError;
 
+/// The selected Target's Platform and Board resources, as System consumes them.
+type SelectedResources<Tls, Region, Wifi, Entropy, Peripherals, Io, const P: usize> =
+    TargetResources<
+        PlatformResources<Tls, Partitions<Region, P>, Wifi, Entropy>,
+        BoardResources<Peripherals, Io>,
+    >;
+
 /// Fully assembled portable Barracuda system.
 ///
 /// Platform owns the executor-facing runners and concrete implementations;
@@ -277,11 +284,8 @@ where
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Tls: ClientTls, Wifi: WifiDevice>(
-        resources: TargetResources<
-            PlatformResources<Tls, Partitions<Region, P>, Wifi>,
-            BoardResources<Peripherals, Io>,
-        >,
+    pub async fn new<Tls: ClientTls, Wifi: WifiDevice, Entropy: barracuda_platform::Entropy>(
+        resources: SelectedResources<Tls, Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
@@ -352,7 +356,7 @@ where
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
-            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
+            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context, prepared.entropy),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
             barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),

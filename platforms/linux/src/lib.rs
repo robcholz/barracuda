@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod application;
+mod entropy;
 mod flash;
 mod heap;
 mod layout;
@@ -14,6 +15,7 @@ mod platform;
 mod tls;
 mod tun;
 
+pub use entropy::LinuxEntropy;
 pub use flash::{FileNorFlash, FileNorFlashError};
 pub use layout::{FileLayout, FileLayoutError, FileRegion, FileRegionAccess};
 pub use network::LinuxNetworkError;

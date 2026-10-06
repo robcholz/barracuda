@@ -22,8 +22,8 @@ pub use barracuda_lua::{
 };
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
-    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse, VmRun,
-    VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
+    SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse,
+    VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
     VmRunState, VmRunUpdate,
 };
 
@@ -32,6 +32,7 @@ pub use barracuda_vm_runtime::{
 pub struct VmPlugin {
     runtime: Option<VmPluginRuntime>,
     package_registry: LuaPackageRegistry,
+    seeds: SeedSource,
 }
 
 struct VmPluginRuntime {
@@ -39,12 +40,17 @@ struct VmPluginRuntime {
 }
 
 impl VmPlugin {
-    /// Creates the VM Plugin from the shared construction context.
+    /// Creates the VM Plugin, seeding `math.random` from the Platform's
+    /// entropy source.
     #[must_use]
-    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+    pub fn new<Builtins, Io, Entropy: barracuda_platform::Entropy>(
+        _context: &mut PluginContext<Builtins, Io>,
+        entropy: Entropy,
+    ) -> Self {
         Self {
             runtime: None,
             package_registry: LuaPackageRegistry::new(),
+            seeds: SeedSource::new(move |bytes| entropy.fill(bytes).is_ok()),
         }
     }
 }
@@ -58,8 +64,10 @@ impl Plugin for VmPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
-        let vm =
-            Rc::new(Vm::new(self.package_registry.clone()).map_err(PluginError::registration)?);
+        let vm = Rc::new(
+            Vm::new(self.package_registry.clone(), self.seeds.clone())
+                .map_err(PluginError::registration)?,
+        );
         for registration in workflow::register_actions(&actions, Rc::clone(&vm))
             .map_err(PluginError::registration)?
         {

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use barracuda_vm_package_api::LuaPackageRegistry;
 use barracuda_vm_runtime::{
-    Vm, VmExecutionError, VmInputRequest, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunRequest,
-    VmRunState, VmRunUpdate,
+    SeedSource, Vm, VmExecutionError, VmInputRequest, VmRunInfo, VmRunOutcome, VmRunProgress,
+    VmRunRequest, VmRunState, VmRunUpdate,
 };
 use embassy_executor::{Executor, Spawner};
 use embassy_time::Timer;
@@ -28,7 +28,7 @@ async fn wait_for_no_active_runs(vm: &Vm) -> Result<(), String> {
 #[embassy_executor::task]
 async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
     let result = async {
-        let vm = Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?;
+        let vm = Vm::new(LuaPackageRegistry::new(), SeedSource::unavailable()).map_err(|error| error.to_string())?;
         vm.start(spawner).map_err(|error| error.to_string())?;
         if !vm.list().runs.is_empty() {
             return Err("new VM runtime listed active runs".into());
@@ -181,7 +181,8 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
 #[embassy_executor::task]
 async fn exercise_vm_handle_drop(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
     let result = async {
-        let vm = Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?;
+        let vm = Vm::new(LuaPackageRegistry::new(), SeedSource::unavailable())
+            .map_err(|error| error.to_string())?;
         vm.start(spawner).map_err(|error| error.to_string())?;
         let mut run = vm
             .run(VmRunRequest {

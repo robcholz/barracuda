@@ -6,17 +6,20 @@ use barracuda_platform::{
 };
 
 #[test]
-fn platform_resources_expose_exact_ip_tls_and_partition_capabilities() {
-    fn assert_shape<Tls, Partitions, Wifi>(resources: PlatformResources<Tls, Partitions, Wifi>) {
+fn platform_resources_expose_exact_ip_tls_entropy_and_partition_capabilities() {
+    fn assert_shape<Tls, Partitions, Wifi, Entropy>(
+        resources: PlatformResources<Tls, Partitions, Wifi, Entropy>,
+    ) {
         let PlatformResources {
             ip_stack: _,
             wifi: _,
+            entropy: _,
             tls: _,
             partitions: _,
         } = resources;
     }
 
-    let _assert_shape = assert_shape::<(), (), ()>;
+    let _assert_shape = assert_shape::<(), (), (), ()>;
 }
 
 #[test]

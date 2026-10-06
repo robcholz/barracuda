@@ -1398,8 +1398,7 @@ dependencies = [
  "cc",
  "futures-lite",
  "getset",
- "lunka",
- "lunka-src",
+ "libm",
  "portable-atomic",
 ]
 
@@ -2367,6 +2366,7 @@ dependencies = [
  "async-channel",
  "barracuda-lua",
  "futures-lite",
+ "libm",
 ]
 
 [[package]]
@@ -2428,6 +2428,7 @@ name = "barracuda-vm-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+ "barracuda-platform",
  "barracuda-plugin",
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
@@ -3297,12 +3298,6 @@ dependencies = [
  "nix 0.31.3",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "current_platform"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a74858bcfe44b22016cb49337d7b6f04618c58e5dbfdef61b06b8c434324a0bc"
 
 [[package]]
 name = "cvt"
@@ -5806,6 +5801,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "linked_list_allocator"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5888,21 +5889,6 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "lunka"
-version = "0.14.0"
-source = "git+https://github.com/robcholz/lunka.git?rev=820b3d89a6ccfcdae3286f9b4548831dc568cf54#820b3d89a6ccfcdae3286f9b4548831dc568cf54"
-
-[[package]]
-name = "lunka-src"
-version = "54.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59eb06a054a60c04c7ca44aee6b2b197feaff6364907ed7f43d68580adfc02b2"
-dependencies = [
- "cc",
- "current_platform",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ description = "Barracuda Plugin that publishes the Lua VM capability"
 
 [dependencies]
 barracuda-lua = { path = "../lua", features = ["vendored"] }
+barracuda-platform.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vm-runtime = { path = "../runtime", features = ["vendored"] }
 barracuda-vm-package-api = { path = "../package-api" }

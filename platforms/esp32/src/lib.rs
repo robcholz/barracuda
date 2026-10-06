@@ -6,6 +6,12 @@
 #[cfg(target_arch = "xtensa")]
 pub mod hal;
 
+#[cfg(target_arch = "xtensa")]
+mod entropy;
+
+#[cfg(target_arch = "xtensa")]
+pub use entropy::Esp32Entropy;
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32RegionAccess {
@@ -224,6 +230,7 @@ mod internal_flash {
         type Bindings = Esp32PlatformBindings;
         type Tls = barracuda_tls::MbedTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
+        type Entropy = crate::Esp32Entropy;
         type Partitions = Esp32Partitions;
         type Error = Esp32PlatformError;
 
@@ -247,6 +254,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
+                entropy: crate::Esp32Entropy,
                 tls,
                 partitions,
             })

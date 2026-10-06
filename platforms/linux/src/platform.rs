@@ -151,6 +151,7 @@ impl Platform for LinuxPlatform {
     type Bindings = &'static Board;
     type Tls = barracuda_tls::MbedTls;
     type Wifi = barracuda_platform::HostWifiDevice;
+    type Entropy = crate::LinuxEntropy;
     type Partitions = LinuxPartitions;
     type Error = LinuxPlatformError;
 
@@ -179,6 +180,7 @@ impl Platform for LinuxPlatform {
         Ok(PlatformResources {
             ip_stack,
             wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
+            entropy: crate::LinuxEntropy,
             tls,
             partitions,
         })

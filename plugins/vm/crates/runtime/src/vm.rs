@@ -8,6 +8,7 @@ use core::task::{Context, Poll, Waker};
 
 use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
+pub use barracuda_vm_builtin_packages::math::SeedSource;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use embassy_executor::Spawner;
 use getset::CopyGetters;
@@ -327,12 +328,16 @@ pub struct Vm {
 }
 
 impl Vm {
-    /// Creates the VM capability with its fixed execution pool.
-    pub fn new(package_registry: LuaPackageRegistry) -> Result<Self, VmMemoryPoolError> {
+    /// Creates the VM capability with its fixed execution pool, seeding each
+    /// execution's `math.random` from `seeds`.
+    pub fn new(
+        package_registry: LuaPackageRegistry,
+        seeds: SeedSource,
+    ) -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
             runtime: VmRuntime::new()?,
             limits: VmLimits::default(),
-            builtin_packages: BuiltinPackages::all(),
+            builtin_packages: BuiltinPackages::new(seeds),
             package_registry,
         })
     }
@@ -353,7 +358,7 @@ impl Vm {
             .dispatch(
                 request.source,
                 self.limits,
-                self.builtin_packages,
+                self.builtin_packages.clone(),
                 self.package_registry.clone(),
             )
             .map_err(VmError::from)

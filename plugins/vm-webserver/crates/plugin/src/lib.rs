@@ -641,8 +641,10 @@ mod tests {
             };
             let mut fixed = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package_for_test(filesystem).install(fixed.lua_mut())?;
             webserver.install(fixed.lua_mut())?;
             let execution = fixed
