@@ -20,7 +20,7 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["attributes"] }
 
 [dev-dependencies]
 futures-lite = "2"

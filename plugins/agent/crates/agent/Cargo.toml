@@ -62,7 +62,7 @@ log = { version = "0.4", default-features = false }
 # is intentionally NOT enabled: with a real subscriber it would double-emit every
 # event (once via the log bridge, once via the subscriber). The facade stays
 # `no_std`; `attributes` is enabled for the spans used by the runtime.
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["attributes"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 strum = { version = "0.28", default-features = false, features = ["derive"] }

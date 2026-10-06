@@ -7,9 +7,9 @@ extern crate alloc;
 use alloc::{format, string::String, vec::Vec};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use barracuda_vm_plugin::{Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use futures_util::future::{AbortHandle, Abortable};
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use portable_atomic_util::Arc;
 use spin::Mutex;
@@ -77,7 +77,7 @@ struct SharedState {
 }
 
 struct Lifecycle {
-    operations: Vec<(usize, AbortHandle)>,
+    operations: Vec<(usize, Arc<CancellationFlag>)>,
 }
 
 impl SharedState {
@@ -136,25 +136,29 @@ impl SharedState {
 
     async fn run<T>(&self, operation: impl core::future::Future<Output = T>) -> Result<T> {
         let id = self.next_operation.fetch_add(1, Ordering::Relaxed);
-        let (handle, registration) = AbortHandle::new_pair();
+        let cancellation = Arc::new(CancellationFlag::new());
         {
             let mut lifecycle = self.lifecycle.lock();
             if !self.active.load(Ordering::Acquire) {
                 return Err(revoked_error());
             }
-            lifecycle.operations.push((id, handle));
+            lifecycle.operations.push((id, Arc::clone(&cancellation)));
         }
         let _guard = OperationGuard { state: self, id };
-        Abortable::new(operation, registration)
-            .await
-            .map_err(|_| revoked_error())
+        // Revocation wins over an operation that is ready in the same poll.
+        let revoked = core::pin::pin!(Cancel::new(&cancellation).cancelled());
+        let operation = core::pin::pin!(operation);
+        match futures_util::future::select(revoked, operation).await {
+            futures_util::future::Either::Left(_) => Err(revoked_error()),
+            futures_util::future::Either::Right((output, _)) => Ok(output),
+        }
     }
 
     fn revoke(&self) {
         let mut lifecycle = self.lifecycle.lock();
         self.active.store(false, Ordering::Release);
-        for (_, handle) in lifecycle.operations.drain(..) {
-            handle.abort();
+        for (_, cancellation) in lifecycle.operations.drain(..) {
+            cancellation.cancel();
         }
     }
 }

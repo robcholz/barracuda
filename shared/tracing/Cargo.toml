@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-tracing"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "tracing where the target has atomic compare-and-swap, inert stand-ins elsewhere"
+
+[lib]
+name = "barracuda_tracing"
+crate-type = ["rlib"]
+
+[features]
+std = ["tracing/std"]
+attributes = ["tracing/attributes"]
+
+# tracing-core needs atomic read-modify-write and alloc::sync, which targets
+# such as ESP32-C3 and ESP32-S2 do not have.
+[target.'cfg(target_has_atomic = "ptr")'.dependencies]
+tracing = { version = "0.1", default-features = false }
+
+[lints.rust]
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

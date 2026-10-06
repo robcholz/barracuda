@@ -46,7 +46,7 @@ barracuda-runtime-utils.workspace = true
 futures-core.workspace = true
 log = { version = "0.4", default-features = false }
 thiserror = { version = "2", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["attributes"] }
 
 [dev-dependencies]
 json-validator.workspace = true
@@ -58,7 +58,7 @@ tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "
 # (no network, no API key) entirely through the public API.
 barracuda-platform-test = { workspace = true, features = ["std"] }
 serde_json = "1"
-tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["std"] }
 # `block_on` for tests (smol family; replaces the removed local spin executor).
 futures-lite = "2"
 static_cell = "2"

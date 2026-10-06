@@ -35,7 +35,7 @@ reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705c
 eventsource-stream = { version = "0.2.3", default-features = false }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 # Shape-only attempt/retry spans consumed by the firmware's barracuda-agent-trace subscriber.
-tracing = { version = "0.1", default-features = false }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing" }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true

@@ -29,7 +29,7 @@ json-validator.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
-tracing = { version = "0.1", default-features = false }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing" }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true

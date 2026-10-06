@@ -9,6 +9,7 @@ license = "Apache-2.0"
 portable-atomic-util.workspace = true
 portable-atomic.workspace = true
 barracuda-plugin.workspace = true
+barracuda-runtime-utils.workspace = true
 barracuda-vm-plugin.workspace = true
 embassy-sync.workspace = true
 futures-util = { workspace = true, features = ["alloc", "async-await"] }

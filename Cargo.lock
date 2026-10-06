@@ -339,6 +339,7 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -357,7 +358,6 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -455,6 +455,7 @@ dependencies = [
  "barracuda-agent-permission",
  "barracuda-agent-tool",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "futures-core",
  "futures-lite",
  "getset",
@@ -465,7 +466,6 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -546,6 +546,7 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
  "embassy-time",
  "futures-core",
@@ -558,7 +559,6 @@ dependencies = [
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -584,6 +584,7 @@ dependencies = [
  "barracuda-agent-tool",
  "barracuda-model-api",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
  "embassy-time",
  "futures-core",
@@ -596,7 +597,6 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -637,6 +637,7 @@ dependencies = [
  "barracuda-agent-persistence",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -647,7 +648,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -1407,6 +1407,7 @@ name = "barracuda-message-queue-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-sync 0.7.2",
@@ -1441,6 +1442,7 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "base64 0.22.1",
  "embassy-futures",
  "embassy-time",
@@ -1458,7 +1460,6 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -2257,6 +2258,13 @@ dependencies = [
  "mbedtls-rs",
  "rand_core 0.10.1",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-tracing"
+version = "0.1.0"
+dependencies = [
+ "tracing",
 ]
 
 [[package]]

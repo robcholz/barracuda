@@ -5,6 +5,9 @@
 //! adapter crates above this layer.
 
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3, ESP32-S2) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 // Public subsystem handles share ownership inside one RuntimeService task.
 #![allow(clippy::arc_with_non_send_sync)]
 

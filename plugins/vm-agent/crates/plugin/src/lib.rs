@@ -17,12 +17,13 @@ use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
 use barracuda_runtime_utils::oneshot;
+use barracuda_runtime_utils::unordered::Unordered;
 use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
 use embassy_futures::select::{Either, Either3, select, select3};
-use futures_util::stream::{FuturesUnordered, StreamExt as _};
+use futures_util::stream::StreamExt as _;
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use portable_atomic_util::Arc;
 use spin::Mutex;
@@ -109,7 +110,7 @@ async fn serve(runtime: VmAgentRuntime, cancellation: PluginTaskToken) {
         requests,
         state,
     } = runtime;
-    let mut asks = FuturesUnordered::<AskFuture>::new();
+    let mut asks = Unordered::<AskFuture>::new();
 
     loop {
         if asks.is_empty() {
