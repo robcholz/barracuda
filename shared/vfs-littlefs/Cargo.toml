@@ -18,6 +18,11 @@ littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c
 delog = { version = "0.1", features = ["portable-atomic"] }
 spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 
+# Bare-metal targets link no C library; littlefs2-sys supplies the string
+# functions `lfs.c` calls.
+[target.'cfg(target_os = "none")'.dependencies]
+littlefs2-sys = { version = "0.4", features = ["tinyrlibc"] }
+
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
 embassy-futures.workspace = true

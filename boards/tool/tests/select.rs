@@ -169,16 +169,12 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
     assert!(cargo.contains("CXX_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-g++\""));
     assert!(cargo.contains("AR_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-ar\""));
     assert!(
-        cargo.contains(
-            "CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\""
-        )
+        cargo.contains("CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f\"")
     );
     assert!(!cargo.contains("boards/tool/assets"));
-    assert!(cargo.contains("linker = \"riscv32-esp-elf-gcc\""));
-    assert!(cargo.contains("\"link-arg=-Tlinkall.x\""));
-    assert!(cargo.contains("\"link-arg=-march=rv32imafc_zicsr_zifencei_zaamo_zalrsc\""));
-    assert!(cargo.contains("\"link-arg=-mabi=ilp32f\""));
-    assert!(cargo.contains("\"link-arg=-lc\""));
+    // Rust's own linker links the image, without a C library.
+    assert!(!cargo.contains("linker ="));
+    assert!(cargo.contains("rustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]"));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
     assert!(cargo.contains("\"--launcher-argument=16mb\""));
     assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));
@@ -219,10 +215,10 @@ fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
     assert!(cargo.contains("BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf ="));
     assert!(cargo.contains("--target=xtensa-esp-elf -I"));
     assert!(cargo.contains("boards/tool/assets/xtensa-include"));
-    assert!(cargo.contains("link-arg=-Tlinkall.x"));
-    assert!(cargo.contains("link-arg=-Wl,--allow-multiple-definition"));
-    assert!(cargo.contains("link-arg=-lgcc"));
-    assert!(!cargo.contains("link-arg=-lnosys"));
+    // The esp-generate flags for espup's Xtensa linker.
+    assert!(cargo.contains(
+        "rustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\"]"
+    ));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
     assert!(cargo.contains("\"--launcher-argument=16mb\""));
     assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));

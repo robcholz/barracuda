@@ -83,6 +83,12 @@ mod vendored {
             .files(SOURCES.map(|name| source.join(format!("{name}.c"))))
             .file(c.join("require.c"))
             .compile("lua");
+        // On Xtensa, GCC lowers Lua's error jumps (`__builtin_longjmp`) to
+        // libgcc's `__xtensa_nonlocal_goto`. Rust links no C runtime by
+        // default, so Lua names the one its compiler needs.
+        if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("xtensa") {
+            println!("cargo:rustc-link-lib=gcc");
+        }
 
         let musl = c.join("musl");
         cc::Build::new()
