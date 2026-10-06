@@ -15,6 +15,7 @@ permissions:
 
 env:
   BUN_VERSION: "1.4.0"
+  ESPUP_VERSION: v0.17.1
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
@@ -95,6 +96,8 @@ jobs:
               toolchain=esp
               chip="${target#xtensa-}"
               chip="${chip%-none-elf}"
+            elif [[ "$target" == riscv32imafc-* ]]; then
+              c_toolchain=esp-riscv
             elif [[ "$target" == riscv32* ]]; then
               c_toolchain=riscv
             elif [[ "$target" == thumb* ]]; then
@@ -280,6 +283,7 @@ jobs:
             os: ubuntu-latest
             package: barracuda-platform-esp32p4
             toolchain: stable
+            c_toolchain: esp-riscv
           - name: esp32s2
             board: esp32s2-saola-1
             os: ubuntu-latest
@@ -313,6 +317,18 @@ jobs:
           default: false
           ldproxy: false
           override: false
+
+      # ESP32-P4 C libraries need Espressif's hard-float GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for this Platform.
+      - name: Install Espressif RISC-V GCC
+        if: matrix.c_toolchain == 'esp-riscv'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espup" \
+            "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
+          chmod +x "$RUNNER_TEMP/espup"
+          "$RUNNER_TEMP/espup" install --targets esp32p4 --esp-riscv-gcc
 
       - name: Select representative Board
         run: |
@@ -474,8 +490,20 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: rustup target add ${{ matrix.key }}
 
+      # ESP32-P4 C libraries need Espressif's hard-float GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for this Platform.
+      - name: Install Espressif RISC-V GCC
+        if: matrix.c_toolchain == 'esp-riscv'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espup" \
+            "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
+          chmod +x "$RUNNER_TEMP/espup"
+          "$RUNNER_TEMP/espup" install --targets esp32p4 --esp-riscv-gcc
+
       - name: Install C cross-toolchain
-        if: matrix.c_toolchain != 'none'
+        if: matrix.c_toolchain == 'riscv' || matrix.c_toolchain == 'arm'
         run: |
           sudo apt-get update
           if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then

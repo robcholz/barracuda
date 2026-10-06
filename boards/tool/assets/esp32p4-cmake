@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs CMake with this directory first on PATH, so C libraries that name
+# riscv32-esp-elf-gcc directly, such as mbedtls-rs-sys, use these wrappers.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+PATH="$here:$PATH" exec cmake "$@"

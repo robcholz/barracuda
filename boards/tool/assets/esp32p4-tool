@@ -1,0 +1,36 @@
+#!/bin/sh
+# Runs one tool of Espressif's riscv32-esp-elf GCC toolchain for ESP32-P4.
+#
+# espup installs the toolchain (`espup install --targets esp32p4
+# --esp-riscv-gcc`) and its export file puts it on PATH; these wrappers are
+# skipped on PATH, and espup's install directory is the fallback.
+set -eu
+
+tool=$1
+shift
+here=$(cd "$(dirname "$0")" && pwd)
+
+toolchain_bin() {
+    old_ifs=$IFS
+    IFS=:
+    for directory in $PATH; do
+        IFS=$old_ifs
+        if [ -n "$directory" ] && [ -x "$directory/riscv32-esp-elf-gcc" ] &&
+            [ "$(cd "$directory" && pwd)" != "$here" ]; then
+            printf '%s\n' "$directory"
+            return
+        fi
+    done
+    IFS=$old_ifs
+    for directory in "$HOME"/.rustup/toolchains/esp/riscv32-esp-elf/*/riscv32-esp-elf/bin; do
+        if [ -x "$directory/riscv32-esp-elf-gcc" ]; then
+            printf '%s\n' "$directory"
+            return
+        fi
+    done
+    echo 'riscv32-esp-elf toolchain not found; install it with: espup install --targets esp32p4 --esp-riscv-gcc' >&2
+    exit 127
+}
+
+bin=$(toolchain_bin)
+exec "$bin/riscv32-esp-elf-$tool" "$@"

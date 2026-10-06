@@ -7,9 +7,13 @@ crate: barracuda_platform_esp32p4
 type: Esp32P4Platform
 build:
   rustup-toolchain: stable
+  environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |
-    The stable Rust toolchain is required. Install it with:
+    The stable Rust toolchain and Espressif's riscv32-esp-elf GCC are required.
+    Install them with:
       rustup toolchain install stable
+      cargo install espup
+      espup install --targets esp32p4 --esp-riscv-gcc
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1]
