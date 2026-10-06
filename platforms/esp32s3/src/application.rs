@@ -10,6 +10,11 @@ use crate::{
 #[doc(hidden)]
 pub const CHIP: &str = "ESP32-S3";
 
+/// Global heap bytes in the main DRAM segment, beside the static data.
+const HEAP_BYTES: usize = 64 * 1024;
+/// Global heap bytes in the DRAM the bootloader frees.
+const RECLAIMED_HEAP_BYTES: usize = 64 * 1024;
+
 include!("../../esp32/src/application/radio.rs");
 
 static EXTERNAL_MEMORY_ALLOCATOR: esp_alloc::ExternalMemory = esp_alloc::ExternalMemory;

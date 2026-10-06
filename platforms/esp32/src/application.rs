@@ -10,6 +10,11 @@ use crate::{
 #[doc(hidden)]
 pub const CHIP: &str = "ESP32";
 
+/// Global heap bytes in the main DRAM segment, beside the static data.
+const HEAP_BYTES: usize = 16 * 1024;
+/// Global heap bytes in the DRAM the bootloader frees, about 96 KiB here.
+const RECLAIMED_HEAP_BYTES: usize = 96 * 1024;
+
 include!("application/radio.rs");
 
 /// Serves bulk memory from the global heap.

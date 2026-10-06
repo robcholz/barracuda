@@ -1,8 +1,10 @@
 // Shared ESP process entry for Platforms with a radio, instantiated inside
 // each Platform's `application` module. The including module names its chip
-// as `CHIP` and imports `PlatformBindings`, `PlatformError`, `Flash`,
-// `WifiDevice` and `WifiError` from its Platform, and defines how the entry
-// initializes bulk memory through the `__initialize_bulk_memory!` macro.
+// as `CHIP`, sizes its two internal heaps with `HEAP_BYTES` and
+// `RECLAIMED_HEAP_BYTES`, imports `PlatformBindings`, `PlatformError`,
+// `Flash`, `WifiDevice` and `WifiError` from its Platform, and defines how
+// the entry initializes bulk memory through the `__initialize_bulk_memory!`
+// macro.
 
 use core::cell::RefCell;
 use core::net::Ipv4Addr;
@@ -44,8 +46,8 @@ async fn run_wifi_network(mut runner: Runner<'static, Interface>) -> ! {
 /// instead of becoming part of the global heap.
 #[doc(hidden)]
 pub fn initialize_allocator() {
-    esp_alloc::heap_allocator!(size: 64 * 1024);
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
+    esp_alloc::heap_allocator!(size: HEAP_BYTES);
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_HEAP_BYTES);
 }
 
 /// Creates the process-lifetime mechanisms needed by the selected Platform.
