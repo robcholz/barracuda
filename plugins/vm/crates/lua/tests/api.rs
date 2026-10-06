@@ -286,9 +286,9 @@ use core::{
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+use portable_atomic::{AtomicUsize, Ordering};
 use std::alloc::System;
 use std::rc::Rc;
-use portable_atomic::{AtomicUsize, Ordering};
 
 struct CountingAllocator {
     allocations: AtomicUsize,

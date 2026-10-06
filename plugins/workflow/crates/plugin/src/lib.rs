@@ -166,12 +166,7 @@ impl WorkflowService {
     }
 
     /// Emits an Event whose identity is selected at runtime.
-    pub fn emit_event(
-        &self,
-        event_id: EventId,
-        topic: Option<Topic>,
-        input: impl Into<JsonText>,
-    ) {
+    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: impl Into<JsonText>) {
         self.control.emit_event(event_id, topic, input);
     }
 

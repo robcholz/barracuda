@@ -552,9 +552,9 @@ fn trace_immediate_tool_result(
 #[cfg(test)]
 #[allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 mod tests {
-    use std::cell::{Cell, RefCell};
     use portable_atomic::{AtomicUsize, Ordering};
     use portable_atomic_util::Arc;
+    use std::cell::{Cell, RefCell};
 
     use barracuda_agent_permission::{AllowAll, RiskClass};
     use barracuda_agent_tool::{
