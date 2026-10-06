@@ -42,6 +42,11 @@ jobs:
         with:
           shared-key: workspace-tools
 
+      # The workspace includes the selected composition, so Cargo cannot load
+      # it until some Board is selected.
+      - name: Select Board
+        run: cargo board select local-linux
+
       - name: Check committed lockfile
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
 
@@ -341,7 +346,16 @@ jobs:
         run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Test Platform on host
+        if: matrix.toolchain == 'stable'
         run: cargo test --target host-tuple --package ${{ matrix.package }}
+
+      # Xtensa selections build only core and alloc; host tests also need std
+      # from the same build, as the host-tool aliases in .cargo/config.toml do.
+      - name: Test Platform on host (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: >-
+          cargo test --config 'unstable.build-std=["std"]'
+          --target host-tuple --package ${{ matrix.package }}
 
       - name: Build Platform
         if: matrix.toolchain == 'stable'
@@ -375,6 +389,9 @@ jobs:
 
       - name: Type check
         run: bun run check
+
+      - name: Select Board
+        run: cargo board select local-linux
 
       - name: Build independent Plugin resources
         run: cargo plugin run build
