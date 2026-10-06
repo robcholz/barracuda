@@ -171,6 +171,8 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
     assert!(
         cargo.contains("CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f\"")
     );
+    assert!(cargo
+        .contains("BINDGEN_EXTRA_CLANG_ARGS_riscv32imafc_unknown_none_elf = \"-ffreestanding\""));
     assert!(!cargo.contains("boards/tool/assets"));
     // Rust's own linker links the image, without a C library.
     assert!(!cargo.contains("linker ="));

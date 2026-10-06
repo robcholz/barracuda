@@ -837,6 +837,13 @@ fn write_selected_build(
                 format!("AR_{environment_suffix}"),
                 String::from("riscv32-esp-elf-ar"),
             ),
+            // Bindgen parses C headers as a bare-metal translation unit, so
+            // Clang's own scalar headers apply whichever libclang espup
+            // exported.
+            (
+                format!("BINDGEN_EXTRA_CLANG_ARGS_{environment_suffix}"),
+                String::from("-ffreestanding"),
+            ),
         ];
         if target == "riscv32imafc-unknown-none-elf" {
             // cc-rs passes the soft-float ABI for every bare-metal RISC-V

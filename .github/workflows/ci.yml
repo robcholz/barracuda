@@ -98,6 +98,11 @@ jobs:
               toolchain=esp
               chip="${target#xtensa-}"
               chip="${chip%-none-elf}"
+            elif [[ "$target" == riscv32imafc-* ]]; then
+              # The prebuilt stable riscv32imafc libraries mix float ABIs, so
+              # ESP32-P4 builds core and alloc with espup's esp toolchain.
+              toolchain=esp
+              c_toolchain=esp-riscv
             elif [[ "$target" == riscv32* ]]; then
               c_toolchain=esp-riscv
             elif [[ "$target" == thumb* ]]; then
@@ -286,7 +291,7 @@ jobs:
             board: esp32p4-function-ev-board
             os: ubuntu-latest
             package: barracuda-platform-esp32p4
-            toolchain: stable
+            toolchain: esp
             c_toolchain: esp-riscv
           - name: esp32s3
             board: esp32s3-devkitc-1
@@ -310,7 +315,7 @@ jobs:
           components: clippy
 
       - name: Install Rust for Xtensa
-        if: matrix.toolchain == 'esp'
+        if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: ${{ matrix.chip }}
@@ -328,7 +333,12 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/espup" \
             "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
           chmod +x "$RUNNER_TEMP/espup"
-          "$RUNNER_TEMP/espup" install --targets esp32c3,esp32c6,esp32p4 --esp-riscv-gcc
+          # espup installs its esp Rust toolchain only beside an Xtensa target.
+          targets=esp32c3,esp32c6,esp32p4
+          if [[ "${{ matrix.toolchain }}" == esp ]]; then
+            targets="esp32s3,$targets"
+          fi
+          "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc
 
       - name: Select representative Board
         run: |
@@ -349,7 +359,7 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: cargo check --package ${{ matrix.package }}
 
-      - name: Check Platform (Xtensa)
+      - name: Check Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: cargo check --package ${{ matrix.package }}
 
@@ -357,7 +367,7 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
-      - name: Clippy Platform (Xtensa)
+      - name: Clippy Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
@@ -365,9 +375,9 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: cargo test --target host-tuple --package ${{ matrix.package }}
 
-      # Xtensa selections build only core and alloc; host tests also need std
+      # esp-toolchain selections build only core and alloc; host tests also need std
       # from the same build, as the host-tool aliases in .cargo/config.toml do.
-      - name: Test Platform on host (Xtensa)
+      - name: Test Platform on host (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: >-
           cargo test --config 'unstable.build-std=["std"]'
@@ -377,7 +387,7 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: cargo build --package ${{ matrix.package }}
 
-      - name: Build Platform (Xtensa)
+      - name: Build Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: cargo build --package ${{ matrix.package }}
 
@@ -506,7 +516,12 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/espup" \
             "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
           chmod +x "$RUNNER_TEMP/espup"
-          "$RUNNER_TEMP/espup" install --targets esp32c3,esp32c6,esp32p4 --esp-riscv-gcc
+          # espup installs its esp Rust toolchain only beside an Xtensa target.
+          targets=esp32c3,esp32c6,esp32p4
+          if [[ "${{ matrix.toolchain }}" == esp ]]; then
+            targets="esp32s3,$targets"
+          fi
+          "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc
 
       - name: Install C cross-toolchain
         if: matrix.c_toolchain == 'arm'
@@ -522,7 +537,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust for Xtensa
-        if: matrix.toolchain == 'esp'
+        if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: ${{ matrix.chip }}
@@ -555,7 +570,7 @@ jobs:
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
           exit "$failed"
 
-      - name: Check, lint & build every Board (Xtensa)
+      - name: Check, lint & build every Board (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: |
           failed=0
