@@ -12,7 +12,7 @@ build:
   missing-toolchain-prompt: |
     The Espressif Rust toolchain is required. Install it with:
       cargo install espup
-      espup install
+      espup install --toolchain-version 1.98.1.0
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, i2s-stream, capacitive-touch]
   runtime-i2c-controllers: [I2C0, I2C1]
