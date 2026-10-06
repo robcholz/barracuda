@@ -549,11 +549,11 @@ jobs:
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, cargo clippy, cargo build"
+            echo "::group::$board: cargo check, cargo clippy, cargo build --release"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build; then
+              cargo build --release; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"
@@ -568,11 +568,11 @@ jobs:
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, clippy, build"
+            echo "::group::$board: cargo check, clippy, build --release"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build; then
+              cargo build --release; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"

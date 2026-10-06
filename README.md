@@ -85,7 +85,8 @@ installation prompt used when that toolchain is unavailable. Selection
 activates the toolchain as a workspace override and imports its environment,
 so ordinary `cargo build` and `cargo run` operate directly on the standalone
 System application through native Cargo; there is no Board-aware build wrapper
-or shell setup step. System, Platform, Core, and Plugin logs remain in that
+or shell setup step. Device Boards build firmware with `--release`, whose
+profile the selection sets to size optimization with whole-program LTO. System, Platform, Core, and Plugin logs remain in that
 terminal.
 
 Run the external terminal Channel separately. This command is always compiled
