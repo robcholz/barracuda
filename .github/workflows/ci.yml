@@ -39,7 +39,7 @@ jobs:
           submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt
 
@@ -86,7 +86,7 @@ jobs:
 
             target="$(cargo board target "$board")"
             os=ubuntu-latest
-            toolchain=stable
+            toolchain=rust
             chip=''
             c_toolchain=none
             key="$target"
@@ -102,7 +102,7 @@ jobs:
               chip="${target#xtensa-}"
               chip="${chip%-none-elf}"
             elif [[ "$target" == riscv32imafc-* ]]; then
-              # The prebuilt stable riscv32imafc libraries mix float ABIs, so
+              # The prebuilt riscv32imafc standard libraries mix float ABIs, so
               # ESP32-P4 builds core and alloc with espup's esp toolchain.
               toolchain=esp
               c_toolchain=esp-riscv
@@ -167,7 +167,7 @@ jobs:
           submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
@@ -224,7 +224,7 @@ jobs:
           submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
@@ -282,13 +282,13 @@ jobs:
             board: esp32c3-devkitc-02
             os: ubuntu-latest
             package: barracuda-platform-esp32c3
-            toolchain: stable
+            toolchain: rust
             c_toolchain: esp-riscv
           - name: esp32c6
             board: esp32c6-devkitc-1
             os: ubuntu-latest
             package: barracuda-platform-esp32c6
-            toolchain: stable
+            toolchain: rust
             c_toolchain: esp-riscv
           - name: esp32p4
             board: esp32p4-function-ev-board
@@ -306,14 +306,14 @@ jobs:
             board: stm32f429zi-nucleo
             os: ubuntu-latest
             package: barracuda-platform-stm32
-            toolchain: stable
+            toolchain: rust
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
@@ -343,7 +343,7 @@ jobs:
             targets="esp32s3,$targets"
           fi
           "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
-            --toolchain-version "$ESP_RUST_VERSION"
+            --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
 
       - name: Select representative Board
         run: |
@@ -351,8 +351,8 @@ jobs:
           target="$(cargo board target)"
           echo "target=$target" >> "$GITHUB_ENV"
 
-      - name: Install stable Rust target
-        if: matrix.toolchain == 'stable'
+      - name: Install Rust target
+        if: matrix.toolchain == 'rust'
         run: rustup target add "$target"
 
       - name: Cache Platform build
@@ -361,7 +361,7 @@ jobs:
           shared-key: platform-${{ matrix.name }}
 
       - name: Check Platform
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo check --package ${{ matrix.package }}
 
       - name: Check Platform (esp toolchain)
@@ -369,7 +369,7 @@ jobs:
         run: cargo check --package ${{ matrix.package }}
 
       - name: Clippy Platform
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Clippy Platform (esp toolchain)
@@ -377,7 +377,7 @@ jobs:
         run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Test Platform on host
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo test --target host-tuple --package ${{ matrix.package }}
 
       # esp-toolchain selections build only core and alloc; host tests also need std
@@ -389,7 +389,7 @@ jobs:
           --target host-tuple --package ${{ matrix.package }}
 
       - name: Build Platform
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo build --package ${{ matrix.package }}
 
       - name: Build Platform (esp toolchain)
@@ -405,7 +405,7 @@ jobs:
         with:
           submodules: true
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -502,13 +502,13 @@ jobs:
         with:
           submodules: true
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
-      - name: Install stable Rust target
-        if: matrix.toolchain == 'stable'
+      - name: Install Rust target
+        if: matrix.toolchain == 'rust'
         run: rustup target add ${{ matrix.key }}
 
       # ESP RISC-V C dependencies build with Espressif's GCC. espup writes
@@ -527,7 +527,7 @@ jobs:
             targets="esp32s3,$targets"
           fi
           "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
-            --toolchain-version "$ESP_RUST_VERSION"
+            --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
 
       - name: Install C cross-toolchain
         if: matrix.c_toolchain == 'arm'

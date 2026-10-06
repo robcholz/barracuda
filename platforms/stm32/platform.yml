@@ -6,10 +6,10 @@ package: barracuda-platform-stm32
 crate: barracuda_platform_stm32
 type: Stm32Platform
 build:
-  rustup-toolchain: stable
+  rustup-toolchain: "1.98.1"
   missing-toolchain-prompt: |
-    The stable Rust toolchain is required. Install it with:
-      rustup toolchain install stable
+    Rust 1.98.1 is required. Install it with:
+      rustup toolchain install 1.98.1 --target thumbv7em-none-eabihf
 hal:
   bindings: [digital-input, digital-output, gpio, i2c-device, spi-bus]
   runtime-i2c-controllers: [I2C1]

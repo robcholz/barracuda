@@ -1,4 +1,4 @@
 # Board selection applies each Platform's rustup override, so ordinary Cargo
-# commands use its declared toolchain. Stable remains the unselected default.
+# commands use its declared toolchain. Rust 1.98.1 remains the unselected default.
 [toolchain]
-channel = "stable"
+channel = "1.98.1"

@@ -6,14 +6,14 @@ package: barracuda-platform-esp32c3
 crate: barracuda_platform_esp32c3
 type: Esp32C3Platform
 build:
-  rustup-toolchain: stable
+  rustup-toolchain: "1.98.1"
   environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |
-    The stable Rust toolchain and Espressif's riscv32-esp-elf GCC are required.
+    Rust 1.98.1 and Espressif's riscv32-esp-elf GCC are required.
     Install them with:
-      rustup toolchain install stable
+      rustup toolchain install 1.98.1
       cargo install espup
-      espup install --targets esp32c3 --esp-riscv-gcc
+      espup install --stable-version 1.98.1 --targets esp32c3 --esp-riscv-gcc
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0]
