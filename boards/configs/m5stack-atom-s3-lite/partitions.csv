@@ -2,8 +2,8 @@
 nvs,          data, nvs,     0x9000,   0x6000,
 otadata,      data, ota,     0xf000,   0x2000,
 phy_init,     data, phy,     0x11000,  0x1000,
-ota_0,        app,  ota_0,   0x20000,  0x160000,
-ota_1,        app,  ota_1,   0x180000, 0x160000,
-kv_database,  data, 0x80,    0x2e0000,0x40000,
-system,       data, littlefs,0x320000,0x80000,
-resources,    data, fat,     0x3a0000,0x60000, readonly
+ota_0,        app,  ota_0,   0x20000,  0x400000,
+ota_1,        app,  ota_1,   0x420000, 0x400000,
+kv_database,  data, 0x80,    0x820000, 0x40000,
+system,       data, littlefs,0x860000, 0x80000,
+resources,    data, fat,     0x8e0000, 0x60000, readonly
