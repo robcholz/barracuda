@@ -819,29 +819,42 @@ fn write_selected_build(
             );
         }
     }
-    if target == "riscv32imafc-unknown-none-elf" {
+    if let Some((march, mabi)) = esp_riscv_abi(target) {
         // espup's riscv32-esp-elf toolchain, on PATH through the Platform's
-        // environment file, compiles C dependencies with the hard-float ABI
-        // and links newlib from the matching multilib.
-        for (name, value) in [
+        // environment file, compiles C dependencies and links newlib from the
+        // multilib that matches the Rust target.
+        let environment_suffix = target.replace('-', "_");
+        let mut environment = vec![
             (
-                "CC_riscv32imafc_unknown_none_elf",
-                "\"riscv32-esp-elf-gcc\"",
+                format!("CC_{environment_suffix}"),
+                String::from("riscv32-esp-elf-gcc"),
             ),
             (
-                "CXX_riscv32imafc_unknown_none_elf",
-                "\"riscv32-esp-elf-g++\"",
+                format!("CXX_{environment_suffix}"),
+                String::from("riscv32-esp-elf-g++"),
             ),
-            ("AR_riscv32imafc_unknown_none_elf", "\"riscv32-esp-elf-ar\""),
             (
-                "CFLAGS_riscv32imafc_unknown_none_elf",
-                "\"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"",
+                format!("AR_{environment_suffix}"),
+                String::from("riscv32-esp-elf-ar"),
             ),
-        ] {
-            append_cargo_environment(&mut cargo, &mut has_environment, name, value);
+        ];
+        if mabi == "ilp32f" {
+            // cc-rs passes the soft-float ABI for every bare-metal RISC-V target.
+            environment.push((
+                format!("CFLAGS_{environment_suffix}"),
+                String::from("-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4"),
+            ));
+        }
+        for (name, value) in environment {
+            append_cargo_environment(
+                &mut cargo,
+                &mut has_environment,
+                &name,
+                &format!("{value:?}"),
+            );
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nlinker = \"riscv32-esp-elf-gcc\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\", \"-C\", \"link-arg=-march=rv32imafc\", \"-C\", \"link-arg=-mabi=ilp32f\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
+            "\n[target.{target}]\nlinker = \"riscv32-esp-elf-gcc\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\", \"-C\", \"link-arg=-march={march}\", \"-C\", \"link-arg=-mabi={mabi}\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
         ));
     }
     if let Some(tool_prefix) = target
@@ -884,7 +897,8 @@ fn write_selected_build(
     }
     if platform.application().launcher().is_some() {
         let runner = install_runner(workspace_root, &host)?;
-        if target != "riscv32imafc-unknown-none-elf" && !target.starts_with("xtensa-esp32") {
+        let esp_target = esp_riscv_abi(target).is_some() || target.starts_with("xtensa-esp32");
+        if !esp_target {
             cargo.push_str(&format!("\n[target.{target}]\n"));
         }
         let mut runner_arguments = format!(
@@ -892,7 +906,7 @@ fn write_selected_build(
             runner.to_string_lossy(),
             platform.name()
         );
-        if target == "riscv32imafc-unknown-none-elf" || target.starts_with("xtensa-esp32") {
+        if esp_target {
             if let Some(flash_size) = board.hardware().flash_size() {
                 append_launcher_argument(&mut runner_arguments, "--flash-size");
                 append_launcher_argument(&mut runner_arguments, flash_size);
@@ -912,6 +926,19 @@ fn write_selected_build(
         &workspace_root.join(".barracuda/selected-platform"),
         &format!("{}\n", platform.name()),
     )
+}
+
+/// The newlib multilib `-march` and `-mabi` for an ESP RISC-V target, as
+/// named by espup's riscv32-esp-elf toolchain.
+fn esp_riscv_abi(target: &str) -> Option<(&'static str, &'static str)> {
+    match target {
+        "riscv32imc-unknown-none-elf" => Some(("rv32imc_zicsr_zifencei", "ilp32")),
+        "riscv32imac-unknown-none-elf" => Some(("rv32imac_zicsr_zifencei_zaamo_zalrsc", "ilp32")),
+        "riscv32imafc-unknown-none-elf" => {
+            Some(("rv32imafc_zicsr_zifencei_zaamo_zalrsc", "ilp32f"))
+        }
+        _ => None,
+    }
 }
 
 fn append_cargo_environment(

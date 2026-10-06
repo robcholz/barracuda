@@ -176,6 +176,7 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
     assert!(!cargo.contains("boards/tool/assets"));
     assert!(cargo.contains("linker = \"riscv32-esp-elf-gcc\""));
     assert!(cargo.contains("\"link-arg=-Tlinkall.x\""));
+    assert!(cargo.contains("\"link-arg=-march=rv32imafc_zicsr_zifencei_zaamo_zalrsc\""));
     assert!(cargo.contains("\"link-arg=-mabi=ilp32f\""));
     assert!(cargo.contains("\"link-arg=-lc\""));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));

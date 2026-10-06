@@ -96,10 +96,8 @@ jobs:
               toolchain=esp
               chip="${target#xtensa-}"
               chip="${chip%-none-elf}"
-            elif [[ "$target" == riscv32imafc-* ]]; then
-              c_toolchain=esp-riscv
             elif [[ "$target" == riscv32* ]]; then
-              c_toolchain=riscv
+              c_toolchain=esp-riscv
             elif [[ "$target" == thumb* ]]; then
               c_toolchain=arm
             fi
@@ -273,11 +271,13 @@ jobs:
             os: ubuntu-latest
             package: barracuda-platform-esp32c3
             toolchain: stable
+            c_toolchain: esp-riscv
           - name: esp32c6
             board: esp32c6-devkitc-1
             os: ubuntu-latest
             package: barracuda-platform-esp32c6
             toolchain: stable
+            c_toolchain: esp-riscv
           - name: esp32p4
             board: esp32p4-function-ev-board
             os: ubuntu-latest
@@ -318,8 +318,8 @@ jobs:
           ldproxy: false
           override: false
 
-      # ESP32-P4 C libraries need Espressif's hard-float GCC. espup writes
-      # ~/export-esp.sh, which `cargo board select` loads for this Platform.
+      # ESP RISC-V C dependencies build with Espressif's GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for these Platforms.
       - name: Install Espressif RISC-V GCC
         if: matrix.c_toolchain == 'esp-riscv'
         env:
@@ -328,7 +328,7 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/espup" \
             "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
           chmod +x "$RUNNER_TEMP/espup"
-          "$RUNNER_TEMP/espup" install --targets esp32p4 --esp-riscv-gcc
+          "$RUNNER_TEMP/espup" install --targets esp32c3,esp32c6,esp32p4 --esp-riscv-gcc
 
       - name: Select representative Board
         run: |
@@ -490,8 +490,8 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: rustup target add ${{ matrix.key }}
 
-      # ESP32-P4 C libraries need Espressif's hard-float GCC. espup writes
-      # ~/export-esp.sh, which `cargo board select` loads for this Platform.
+      # ESP RISC-V C dependencies build with Espressif's GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for these Platforms.
       - name: Install Espressif RISC-V GCC
         if: matrix.c_toolchain == 'esp-riscv'
         env:
@@ -500,27 +500,15 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/espup" \
             "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
           chmod +x "$RUNNER_TEMP/espup"
-          "$RUNNER_TEMP/espup" install --targets esp32p4 --esp-riscv-gcc
+          "$RUNNER_TEMP/espup" install --targets esp32c3,esp32c6,esp32p4 --esp-riscv-gcc
 
       - name: Install C cross-toolchain
-        if: matrix.c_toolchain == 'riscv' || matrix.c_toolchain == 'arm'
+        if: matrix.c_toolchain == 'arm'
         run: |
           sudo apt-get update
-          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
-            sudo apt-get install --no-install-recommends \
-              gcc-riscv64-unknown-elf \
-              picolibc-riscv64-unknown-elf
-            target_env="${{ matrix.key }}"
-            target_env="${target_env//[-.]/_}"
-            sysroot="$(dirname "$(find /usr -path '*/riscv64-unknown-elf/include/math.h' -print -quit)")"
-            sysroot="${sysroot%/include}"
-            echo "CC_${target_env}=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
-            echo "CFLAGS_${target_env}=--sysroot=$sysroot" >> "$GITHUB_ENV"
-          else
-            sudo apt-get install --no-install-recommends \
-              gcc-arm-none-eabi \
-              libnewlib-arm-none-eabi
-          fi
+          sudo apt-get install --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
 
       - name: Install Bun for Plugin build hooks
         uses: oven-sh/setup-bun@v2
