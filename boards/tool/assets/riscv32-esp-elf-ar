@@ -1,3 +1,0 @@
-#!/bin/sh
-# Runs riscv32-esp-elf-ar from the Espressif toolchain; see esp32p4-tool.
-exec "$(dirname "$0")/esp32p4-tool" ar "$@"

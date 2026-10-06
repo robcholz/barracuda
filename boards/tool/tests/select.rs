@@ -165,34 +165,19 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
     assert!(cargo.contains("[env]"));
-    assert!(cargo.contains(
-        "CC_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "CXX_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "AR_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "AR = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }"
-    ));
-    assert!(cargo.contains(
-        "RANLIB = { value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }"
-    ));
-    assert!(cargo.contains(
-        "CMAKE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-cmake\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }"
-    ));
+    assert!(cargo.contains("CC_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-gcc\""));
+    assert!(cargo.contains("CXX_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-g++\""));
+    assert!(cargo.contains("AR_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-ar\""));
     assert!(
         cargo.contains(
             "CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\""
         )
     );
-    assert!(cargo.contains("rustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]"));
-    assert!(cargo.contains("linker = \"boards/tool/assets/esp32p4-linker\""));
+    assert!(!cargo.contains("boards/tool/assets"));
+    assert!(cargo.contains("linker = \"riscv32-esp-elf-gcc\""));
+    assert!(cargo.contains("\"link-arg=-Tlinkall.x\""));
+    assert!(cargo.contains("\"link-arg=-mabi=ilp32f\""));
+    assert!(cargo.contains("\"link-arg=-lc\""));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
     assert!(cargo.contains("\"--launcher-argument=16mb\""));
     assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));

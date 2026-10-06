@@ -820,35 +820,19 @@ fn write_selected_build(
         }
     }
     if target == "riscv32imafc-unknown-none-elf" {
+        // espup's riscv32-esp-elf toolchain, on PATH through the Platform's
+        // environment file, compiles C dependencies with the hard-float ABI
+        // and links newlib from the matching multilib.
         for (name, value) in [
             (
                 "CC_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }",
+                "\"riscv32-esp-elf-gcc\"",
             ),
             (
                 "CXX_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }",
+                "\"riscv32-esp-elf-g++\"",
             ),
-            (
-                "AR_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }",
-            ),
-            (
-                "AR",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }",
-            ),
-            (
-                "RANLIB",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }",
-            ),
-            (
-                "CMAKE_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/esp32p4-cmake\", relative = true }",
-            ),
-            (
-                "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }",
-            ),
+            ("AR_riscv32imafc_unknown_none_elf", "\"riscv32-esp-elf-ar\""),
             (
                 "CFLAGS_riscv32imafc_unknown_none_elf",
                 "\"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"",
@@ -857,7 +841,7 @@ fn write_selected_build(
             append_cargo_environment(&mut cargo, &mut has_environment, name, value);
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nlinker = \"boards/tool/assets/esp32p4-linker\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
+            "\n[target.{target}]\nlinker = \"riscv32-esp-elf-gcc\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\", \"-C\", \"link-arg=-march=rv32imafc\", \"-C\", \"link-arg=-mabi=ilp32f\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
         ));
     }
     if let Some(tool_prefix) = target
