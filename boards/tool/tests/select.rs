@@ -226,6 +226,39 @@ fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
 }
 
 #[test]
+fn select_links_a_cortex_m_target_with_the_runtime_script() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board manifest");
+    fs::write(
+        &board_path,
+        board.replace(
+            "native-layout:",
+            "toolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:",
+        ),
+    )
+    .expect("STM32 target");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace("- os: macos", "- triple: thumbv7em-none-eabihf"),
+    )
+    .expect("STM32 platform target");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    // embassy-stm32's example flags: cortex-m-rt's script over the Platform's memory.x.
+    assert!(cargo.contains(
+        "[target.thumbv7em-none-eabihf]\nrustflags = [\"-C\", \"link-arg=--nmagic\", \"-C\", \"link-arg=-Tlink.x\"]"
+    ));
+    assert!(!cargo.contains("linker ="));
+}
+
+#[test]
 fn select_uses_the_platform_hal_without_a_chip_adapter() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");

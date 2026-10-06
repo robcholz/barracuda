@@ -901,6 +901,13 @@ fn write_selected_build(
         let esp_target = is_esp_riscv(target) || target.starts_with("xtensa-esp32");
         if !esp_target {
             cargo.push_str(&format!("\n[target.{target}]\n"));
+            if target.starts_with("thumb") {
+                // cortex-m-rt's link script, as in embassy-stm32's examples;
+                // it includes the Platform's `memory.x`.
+                cargo.push_str(
+                    "rustflags = [\"-C\", \"link-arg=--nmagic\", \"-C\", \"link-arg=-Tlink.x\"]\n",
+                );
+            }
         }
         let mut runner_arguments = format!(
             "{:?}, \"__run\", {:?}",

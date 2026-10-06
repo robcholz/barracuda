@@ -12,6 +12,18 @@ mod entropy;
 #[cfg(target_arch = "xtensa")]
 pub use entropy::Esp32S2Entropy;
 
+#[cfg(target_arch = "xtensa")]
+#[doc(hidden)]
+pub mod application;
+
+#[cfg(target_arch = "xtensa")]
+mod wifi {
+    include!("../../esp32/src/wifi.rs");
+}
+
+#[cfg(target_arch = "xtensa")]
+pub use wifi::{EspWifiDevice as Esp32S2WifiDevice, EspWifiError as Esp32S2WifiError};
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32S2RegionAccess {
@@ -164,7 +176,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32S2Platform`].
     pub struct Esp32S2PlatformBindings {
         ip_stack: Stack<'static>,
-        tls: barracuda_tls::MbedTlsInput,
+        wifi: crate::Esp32S2WifiDevice,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S2Flash<'static>>>,
     }
 
@@ -181,7 +193,7 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            tls: barracuda_tls::MbedTlsInput,
+            wifi: crate::Esp32S2WifiDevice,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32S2Flash<'static>>>,
         ) -> Result<Self, Esp32S2PlatformError> {
             if board.hardware().chip() != "esp32s2" {
@@ -189,7 +201,7 @@ mod internal_flash {
             }
             Ok(Self {
                 ip_stack,
-                tls,
+                wifi,
                 flash,
             })
         }
@@ -228,14 +240,13 @@ mod internal_flash {
 
     impl Platform for Esp32S2Platform {
         type Bindings = Esp32S2PlatformBindings;
-        type Tls = barracuda_tls::MbedTls;
-        type Wifi = barracuda_platform::UnavailableWifiDevice;
+        type Tls = barracuda_tls::PlaintextTls;
+        type Wifi = crate::Esp32S2WifiDevice;
         type Entropy = crate::Esp32S2Entropy;
         type Partitions = Esp32S2Partitions;
         type Error = Esp32S2PlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
-            barracuda_bulk_memory::platform::install_global();
             esp_println::logger::init_logger(crate::PLATFORM_LOG_LEVEL);
             log::info!("preparing ESP32-S2 Platform");
             Ok(())
@@ -247,15 +258,13 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing ESP32-S2 Platform partitions");
             let partitions = partitions(bindings.flash)?;
-            log::info!("initializing ESP32-S2 Platform TLS");
-            let tls = bindings.tls.initialize()?;
             log::info!("initialized ESP32-S2 Platform");
             let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
                 ip_stack,
-                wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
+                wifi: bindings.wifi,
                 entropy: crate::Esp32S2Entropy,
-                tls,
+                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }
@@ -268,8 +277,10 @@ mod internal_flash {
         IncompatibleChip,
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
-        /// Platform TLS initialization failed.
-        Tls(barracuda_tls::TlsError),
+        /// ESP radio initialization failed.
+        Wifi(crate::Esp32S2WifiError),
+        /// An Embassy network runner could not be allocated.
+        NetworkTask,
     }
 
     impl From<PartitionsInsertError> for Esp32S2PlatformError {
@@ -278,23 +289,24 @@ mod internal_flash {
         }
     }
 
-    impl From<barracuda_tls::TlsError> for Esp32S2PlatformError {
-        fn from(error: barracuda_tls::TlsError) -> Self {
-            Self::Tls(error)
-        }
-    }
-
     impl core::fmt::Display for Esp32S2PlatformError {
         fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
-                Self::Tls(error) => write!(formatter, "failed to initialize ESP32 TLS: {error}"),
+                Self::Wifi(error) => write!(formatter, "failed to initialize ESP32 Wi-Fi: {error}"),
+                Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
             }
         }
     }
 
     impl core::error::Error for Esp32S2PlatformError {}
+
+    impl From<crate::Esp32S2WifiError> for Esp32S2PlatformError {
+        fn from(error: crate::Esp32S2WifiError) -> Self {
+            Self::Wifi(error)
+        }
+    }
 }
 
 #[cfg(target_arch = "xtensa")]

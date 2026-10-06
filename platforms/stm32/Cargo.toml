@@ -8,12 +8,14 @@ description = "STM32-native Board storage integration for Barracuda"
 default = []
 stm32f429zi = [
     "dep:barracuda-board-hal",
+    "dep:cortex-m",
     "dep:cortex-m-rt",
     "dep:embassy-embedded-hal",
     "dep:embassy-executor",
     "dep:embassy-net",
     "dep:embassy-stm32",
     "dep:embassy-sync",
+    "dep:embedded-alloc",
     "dep:embedded-hal",
     "dep:embedded-hal-bus",
     "dep:embedded-hal-async",
@@ -34,12 +36,15 @@ log.workspace = true
 [target.'cfg(target_arch = "arm")'.dependencies]
 barracuda-board-hal = { workspace = true, optional = true }
 barracuda-tls.workspace = true
+# The single-core critical section, as in embassy-stm32's examples.
+cortex-m = { version = "0.7.6", features = ["critical-section-single-core"], optional = true }
 cortex-m-rt = { version = "0.7.6", optional = true }
 embassy-embedded-hal = { version = "0.6.0", optional = true }
-embassy-executor = { workspace = true, optional = true }
+embassy-executor = { workspace = true, features = ["executor-thread", "platform-cortex-m"], optional = true }
 embassy-net = { workspace = true, optional = true }
-embassy-stm32 = { version = "0.6.0", default-features = false, optional = true }
+embassy-stm32 = { version = "0.6.0", default-features = false, features = ["rt", "time-driver-any"], optional = true }
 embassy-sync = { version = "0.8.0", default-features = false, optional = true }
+embedded-alloc = { version = "0.7", default-features = false, features = ["tlsf"], optional = true }
 embedded-hal = { workspace = true, optional = true }
 embedded-hal-bus = { workspace = true, optional = true }
 embedded-hal-async = { workspace = true, optional = true }

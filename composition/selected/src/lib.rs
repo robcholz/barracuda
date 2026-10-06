@@ -80,10 +80,10 @@ macro_rules! application_entry {
             $application(spawner, $crate::__application_bindings()).await
         });
 
-        #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+        #[cfg(any(target_arch = "arm", target_arch = "riscv32", target_arch = "xtensa"))]
         use $crate::__board_bindings;
 
-        #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
+        #[cfg(any(target_arch = "arm", target_arch = "riscv32", target_arch = "xtensa"))]
         $crate::__platform::platform_entry!(
             &$crate::BOARD,
             __board_bindings,

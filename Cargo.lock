@@ -1509,6 +1509,7 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
 ]
 
 [[package]]
@@ -1533,15 +1534,22 @@ dependencies = [
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1561,15 +1569,22 @@ dependencies = [
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1589,15 +1604,22 @@ dependencies = [
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1618,14 +1640,19 @@ dependencies = [
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1645,15 +1672,22 @@ dependencies = [
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1830,12 +1864,14 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-platform",
  "barracuda-tls",
+ "cortex-m",
  "cortex-m-rt",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-stm32",
  "embassy-sync 0.8.0",
+ "embedded-alloc",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
@@ -3786,6 +3822,7 @@ dependencies = [
  "embassy-futures",
  "embassy-hal-internal 0.4.0",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -3801,6 +3838,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0d3b15c9d7dc4fec1d8cb77112472fb008b3b28c51ad23838d83587a6d2f1e"
 dependencies = [
  "cordyceps",
+ "cortex-m",
  "critical-section",
  "document-features",
  "embassy-executor-macros",
@@ -3914,6 +3952,9 @@ dependencies = [
  "embassy-hal-internal 0.5.0",
  "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embassy-usb-driver",
  "embassy-usb-synopsys-otg 0.3.3",
  "embedded-can",
@@ -4432,15 +4473,15 @@ dependencies = [
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
- "esp32",
+ "esp32 0.41.0",
  "esp32c2",
- "esp32c3",
+ "esp32c3 0.33.0",
  "esp32c5",
- "esp32c6",
+ "esp32c6 0.24.0",
  "esp32c61",
  "esp32h2",
  "esp32p4",
- "esp32s2",
+ "esp32s2 0.32.0",
  "esp32s3 0.36.0",
  "esp32s31",
  "fugit",
@@ -4535,7 +4576,15 @@ dependencies = [
  "esp-hal",
  "esp-metadata-generated",
  "esp-sync",
+ "esp-wifi-sys-esp32",
+ "esp-wifi-sys-esp32c3",
+ "esp-wifi-sys-esp32c6",
+ "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
+ "esp32 0.42.0",
+ "esp32c3 0.34.0",
+ "esp32c6 0.25.0",
+ "esp32s2 0.33.0",
  "esp32s3 0.37.0",
  "log",
 ]
@@ -4582,6 +4631,10 @@ dependencies = [
  "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
  "esp-wifi-sys-esp32s31",
+ "esp32 0.42.0",
+ "esp32c3 0.34.0",
+ "esp32c6 0.25.0",
+ "esp32s2 0.33.0",
  "esp32s3 0.37.0",
  "heapless 0.9.3",
  "instability",
@@ -4623,11 +4676,11 @@ checksum = "e933ff78374b763b65998b64ad671b4890ed4ba13a80deff9f53afe95ede289d"
 dependencies = [
  "document-features",
  "esp-metadata-generated",
- "esp32",
- "esp32c3",
- "esp32c6",
+ "esp32 0.41.0",
+ "esp32c3 0.33.0",
+ "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2",
+ "esp32s2 0.32.0",
  "esp32s3 0.36.0",
 ]
 
@@ -4670,11 +4723,11 @@ dependencies = [
  "esp-metadata-generated",
  "esp-rom-sys",
  "esp-sync",
- "esp32",
- "esp32c3",
- "esp32c6",
+ "esp32 0.41.0",
+ "esp32c3 0.33.0",
+ "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2",
+ "esp32s2 0.32.0",
  "esp32s3 0.36.0",
 ]
 
@@ -4775,6 +4828,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e31e10b4c4f5fc2445896b46a7dabd689572d1e52dada21703659d97a373aa4"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c2"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4793,6 +4855,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c3"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "569e03d871eac998bc62ef95a9a6d31a91fc0aaef0e0017a6b5a6a9c4759768a"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c5"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4806,6 +4877,15 @@ name = "esp32c6"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a207a5d6886ca89b4f220606dcf3779ca869803df192508314939186ae8de1ee"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c6"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f90472d3e6a752e5d20533796f649760103ea449319f14d2a26b2fdff95633bb"
 dependencies = [
  "vcell",
 ]
@@ -4843,6 +4923,15 @@ name = "esp32s2"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbeb62af2f2ca94a85be9ab22f8ad97c23ba79b9b3d3e4e20f3e0957bc5f2b2d"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32s2"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a4d3aacde708234b93372de368fd7866f63c150c5e863ab9b9950b85a5103a5"
 dependencies = [
  "vcell",
 ]
@@ -7317,6 +7406,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e74b78632cea498cfb28386a29f8bfae7476d6570a78733eb5fecbee66c2f4ce"
 dependencies = [
  "cortex-m",
+ "cortex-m-rt",
 ]
 
 [[package]]

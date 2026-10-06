@@ -6,6 +6,10 @@
 #[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
 pub mod hal;
 
+#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[doc(hidden)]
+pub mod application;
+
 /// Runtime access discipline declared by the native linker memory region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stm32RegionAccess {
@@ -184,7 +188,6 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Stm32Platform`].
     pub struct Stm32PlatformBindings {
         ip_stack: Stack<'static>,
-        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
     }
 
@@ -201,17 +204,12 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
         ) -> Result<Self, Stm32PlatformError> {
             if board.hardware().chip() != "stm32f429zi" {
                 return Err(Stm32PlatformError::IncompatibleChip);
             }
-            Ok(Self {
-                ip_stack,
-                tls,
-                flash,
-            })
+            Ok(Self { ip_stack, flash })
         }
     }
 
@@ -265,7 +263,7 @@ mod internal_flash {
 
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
-        type Tls = barracuda_tls::MbedTls;
+        type Tls = barracuda_tls::PlaintextTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
         /// The RNG peripheral is not bound by Target composition yet.
         type Entropy = barracuda_platform::UnavailableEntropy;
@@ -285,15 +283,13 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing STM32 Platform partitions");
             let partitions = partitions(bindings.flash)?;
-            log::info!("initializing STM32 Platform TLS");
-            let tls = bindings.tls.initialize()?;
             log::info!("initialized STM32 Platform");
             let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
                 entropy: barracuda_platform::UnavailableEntropy,
-                tls,
+                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }
@@ -306,19 +302,13 @@ mod internal_flash {
         IncompatibleChip,
         /// Native linker regions could not become generic partitions.
         Partitions(Stm32PartitionsError),
-        /// Platform TLS initialization failed.
-        Tls(barracuda_tls::TlsError),
+        /// An Embassy network runner could not be allocated.
+        NetworkTask,
     }
 
     impl From<Stm32PartitionsError> for Stm32PlatformError {
         fn from(error: Stm32PartitionsError) -> Self {
             Self::Partitions(error)
-        }
-    }
-
-    impl From<barracuda_tls::TlsError> for Stm32PlatformError {
-        fn from(error: barracuda_tls::TlsError) -> Self {
-            Self::Tls(error)
         }
     }
 
@@ -329,7 +319,7 @@ mod internal_flash {
                 Self::Partitions(error) => {
                     write!(formatter, "invalid STM32 partitions: {error:?}")
                 }
-                Self::Tls(error) => write!(formatter, "failed to initialize STM32 TLS: {error}"),
+                Self::NetworkTask => formatter.write_str("failed to allocate STM32 network task"),
             }
         }
     }

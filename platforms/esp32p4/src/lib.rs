@@ -6,6 +6,10 @@
 #[cfg(target_arch = "riscv32")]
 pub mod hal;
 
+#[cfg(target_arch = "riscv32")]
+#[doc(hidden)]
+pub mod application;
+
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Esp32P4RegionAccess {
@@ -158,7 +162,6 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32P4Platform`].
     pub struct Esp32P4PlatformBindings {
         ip_stack: Stack<'static>,
-        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
     }
 
@@ -175,17 +178,12 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
         ) -> Result<Self, Esp32P4PlatformError> {
             if board.hardware().chip() != "esp32p4" {
                 return Err(Esp32P4PlatformError::IncompatibleChip);
             }
-            Ok(Self {
-                ip_stack,
-                tls,
-                flash,
-            })
+            Ok(Self { ip_stack, flash })
         }
     }
 
@@ -222,7 +220,7 @@ mod internal_flash {
 
     impl Platform for Esp32P4Platform {
         type Bindings = Esp32P4PlatformBindings;
-        type Tls = barracuda_tls::MbedTls;
+        type Tls = barracuda_tls::PlaintextTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
         /// esp-hal has no true random number generator for the ESP32-P4.
         type Entropy = barracuda_platform::UnavailableEntropy;
@@ -230,7 +228,6 @@ mod internal_flash {
         type Error = Esp32P4PlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
-            barracuda_bulk_memory::platform::install_global();
             esp_println::logger::init_logger(crate::PLATFORM_LOG_LEVEL);
             log::info!("preparing ESP32-P4 Platform");
             Ok(())
@@ -242,15 +239,13 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing ESP32-P4 Platform partitions");
             let partitions = partitions(bindings.flash)?;
-            log::info!("initializing ESP32-P4 Platform TLS");
-            let tls = bindings.tls.initialize()?;
             log::info!("initialized ESP32-P4 Platform");
             let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
                 entropy: barracuda_platform::UnavailableEntropy,
-                tls,
+                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }
@@ -263,8 +258,8 @@ mod internal_flash {
         IncompatibleChip,
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
-        /// Platform TLS initialization failed.
-        Tls(barracuda_tls::TlsError),
+        /// An Embassy network runner could not be allocated.
+        NetworkTask,
     }
 
     impl From<PartitionsInsertError> for Esp32P4PlatformError {
@@ -273,18 +268,12 @@ mod internal_flash {
         }
     }
 
-    impl From<barracuda_tls::TlsError> for Esp32P4PlatformError {
-        fn from(error: barracuda_tls::TlsError) -> Self {
-            Self::Tls(error)
-        }
-    }
-
     impl core::fmt::Display for Esp32P4PlatformError {
         fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
-                Self::Tls(error) => write!(formatter, "failed to initialize ESP32 TLS: {error}"),
+                Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
             }
         }
     }

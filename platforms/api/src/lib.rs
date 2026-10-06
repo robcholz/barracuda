@@ -9,6 +9,7 @@
 extern crate alloc;
 
 mod entropy;
+mod network;
 mod wifi;
 
 use core::future::Future;
@@ -17,6 +18,7 @@ use embassy_executor::Spawner;
 use embassy_net::Stack;
 
 pub use entropy::{Entropy, EntropyUnavailable, UnavailableEntropy};
+pub use network::{UnavailableNetworkDriver, UnavailableToken};
 pub use wifi::{
     AccessPointConfiguration, AccessPointState, HostWifiDevice, StationConfiguration, StationState,
     UnavailableWifiDevice, VisibleNetwork, WifiCapabilities, WifiDevice,

@@ -1,3 +1,5 @@
+// Shared ESP radio mechanism instantiated inside each Platform with a radio.
+
 extern crate alloc;
 
 use alloc::string::ToString;
@@ -16,8 +18,8 @@ use esp_radio::wifi::{
 
 const DHCP_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// ESP32-S3 radio mechanism controlled by the portable Wi-Fi Plugin.
-pub struct Esp32S3WifiDevice {
+/// ESP radio mechanism controlled by the portable Wi-Fi Plugin.
+pub struct EspWifiDevice {
     controller: WifiController<'static>,
     station_stack: Stack<'static>,
     access_point_stack: Stack<'static>,
@@ -27,7 +29,7 @@ pub struct Esp32S3WifiDevice {
     access_point_state: AccessPointState,
 }
 
-impl Esp32S3WifiDevice {
+impl EspWifiDevice {
     pub(crate) const fn new(
         controller: WifiController<'static>,
         station_stack: Stack<'static>,
@@ -46,7 +48,7 @@ impl Esp32S3WifiDevice {
 
     fn station_config(
         configuration: &StationConfiguration,
-    ) -> Result<StationConfig, Esp32S3WifiError> {
+    ) -> Result<StationConfig, EspWifiError> {
         let authentication = authentication(configuration.password())?;
         Ok(StationConfig::default()
             .with_ssid(configuration.ssid().try_into()?)
@@ -55,14 +57,14 @@ impl Esp32S3WifiDevice {
 
     fn access_point_config(
         configuration: &AccessPointConfiguration,
-    ) -> Result<AccessPointConfig, Esp32S3WifiError> {
+    ) -> Result<AccessPointConfig, EspWifiError> {
         let authentication = authentication(configuration.password())?;
         Ok(AccessPointConfig::default()
             .with_ssid(configuration.ssid().try_into()?)
             .with_authentication(authentication))
     }
 
-    fn apply_config(&mut self, config: &Config) -> Result<(), Esp32S3WifiError> {
+    fn apply_config(&mut self, config: &Config) -> Result<(), EspWifiError> {
         if let Err(error) = self.controller.set_config(config) {
             // esp-radio stops the controller and resets its mode after a
             // configuration failure, so cached state must reflect that reset.
@@ -76,7 +78,7 @@ impl Esp32S3WifiDevice {
     }
 }
 
-fn authentication(password: &str) -> Result<AuthenticationMethodConfig, Esp32S3WifiError> {
+fn authentication(password: &str) -> Result<AuthenticationMethodConfig, EspWifiError> {
     if password.is_empty() {
         Ok(AuthenticationMethodConfig::Open)
     } else {
@@ -86,8 +88,8 @@ fn authentication(password: &str) -> Result<AuthenticationMethodConfig, Esp32S3W
     }
 }
 
-impl WifiDevice for Esp32S3WifiDevice {
-    type Error = Esp32S3WifiError;
+impl WifiDevice for EspWifiDevice {
+    type Error = EspWifiError;
 
     fn capabilities(&self) -> WifiCapabilities {
         WifiCapabilities::managed()
@@ -193,7 +195,7 @@ impl WifiDevice for Esp32S3WifiDevice {
             .is_err()
         {
             self.station_state = StationState::Disconnected;
-            return Err(Esp32S3WifiError::DhcpTimeout);
+            return Err(EspWifiError::DhcpTimeout);
         }
         self.station_configuration = Some(station);
         self.station_state = StationState::Connected {
@@ -220,9 +222,9 @@ impl WifiDevice for Esp32S3WifiDevice {
     }
 }
 
-/// ESP32-S3 radio operation failure.
+/// ESP radio operation failure.
 #[derive(Debug)]
-pub enum Esp32S3WifiError {
+pub enum EspWifiError {
     /// The ESP radio rejected a mode or configuration operation.
     Radio(WifiError),
     /// Station association failed.
@@ -231,19 +233,19 @@ pub enum Esp32S3WifiError {
     DhcpTimeout,
 }
 
-impl From<WifiError> for Esp32S3WifiError {
+impl From<WifiError> for EspWifiError {
     fn from(error: WifiError) -> Self {
         Self::Radio(error)
     }
 }
 
-impl From<ConnectionError> for Esp32S3WifiError {
+impl From<ConnectionError> for EspWifiError {
     fn from(error: ConnectionError) -> Self {
         Self::Connection(error)
     }
 }
 
-impl core::fmt::Display for Esp32S3WifiError {
+impl core::fmt::Display for EspWifiError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Radio(error) => write!(formatter, "ESP radio error: {error}"),
@@ -253,4 +255,4 @@ impl core::fmt::Display for Esp32S3WifiError {
     }
 }
 
-impl core::error::Error for Esp32S3WifiError {}
+impl core::error::Error for EspWifiError {}
