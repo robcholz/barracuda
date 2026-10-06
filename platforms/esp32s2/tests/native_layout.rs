@@ -21,14 +21,14 @@ fn native_csv_supplies_the_complete_partition_table() {
             .get("kv_database")
             .expect("KV database region")
             .offset(),
-        0x2e_0000
+        0x82_0000
     );
     assert_eq!(
         BOARD_ESP32S2_PARTITION_TABLE
             .get("system")
             .expect("System region")
             .offset(),
-        0x32_0000
+        0x86_0000
     );
 
     let resources = BOARD_ESP32S2_PARTITION_TABLE
