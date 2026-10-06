@@ -26,6 +26,7 @@ pub type Resources = PlatformResources<
     <SelectedPlatform as Platform>::Tls,
     <SelectedPlatform as Platform>::Partitions,
     <SelectedPlatform as Platform>::Wifi,
+    <SelectedPlatform as Platform>::Entropy,
 >;
 
 /// Initialization error produced only by the selected Platform.
