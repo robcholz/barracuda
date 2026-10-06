@@ -218,6 +218,12 @@ mod tests {
             tools
                 .add_group(vm_tool_group(Rc::clone(&vm)))
                 .map_err(|error| error.to_string())?;
+            // The VM group is hidden until loaded; enable the Tools this test calls.
+            for name in ["vm_run", "vm_list"] {
+                tools
+                    .enable_tool(name.to_string())
+                    .map_err(|error| error.to_string())?;
+            }
             let handle = tools.begin().map_err(|error| error.to_string())?;
             let invocation = ToolInvocation::try_new(
                 Some("vm-call"),
