@@ -317,6 +317,14 @@ jobs:
         with:
           components: clippy
 
+      # Restore before espup runs: espup's RISC-V GCC lands in a rustc-less
+      # `esp` rustup toolchain, and rust-cache queries every listed toolchain.
+      - name: Cache Platform build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: platform-${{ matrix.name }}
+          key: esp-${{ env.ESP_RUST_VERSION }}
+
       - name: Install Rust for Xtensa
         if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
@@ -354,11 +362,6 @@ jobs:
       - name: Install Rust target
         if: matrix.toolchain == 'rust'
         run: rustup target add "$target"
-
-      - name: Cache Platform build
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: platform-${{ matrix.name }}
 
       - name: Check Platform
         if: matrix.toolchain == 'rust'
@@ -507,6 +510,15 @@ jobs:
         with:
           components: clippy
 
+      # Restore before espup runs: espup's RISC-V GCC lands in a rustc-less
+      # `esp` rustup toolchain, and rust-cache queries every listed toolchain.
+      - name: Cache Board builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: boards-${{ matrix.key }}
+          add-job-id-key: false
+          key: esp-${{ env.ESP_RUST_VERSION }}
+
       - name: Install Rust target
         if: matrix.toolchain == 'rust'
         run: rustup target add ${{ matrix.key }}
@@ -551,12 +563,6 @@ jobs:
           default: false
           ldproxy: false
           override: false
-
-      - name: Cache Board builds
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: boards-${{ matrix.key }}
-          add-job-id-key: false
 
       - name: Check, lint & build every Board
         if: matrix.toolchain != 'esp'
