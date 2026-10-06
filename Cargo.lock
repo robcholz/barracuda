@@ -1660,41 +1660,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-platform-esp32s2"
-version = "0.1.0"
-dependencies = [
- "barracuda-board",
- "barracuda-board-config",
- "barracuda-board-hal",
- "barracuda-bulk-memory",
- "barracuda-platform",
- "barracuda-tls",
- "embassy-embedded-hal 0.6.0",
- "embassy-executor",
- "embassy-net",
- "embassy-net-driver",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "embedded-hal-bus",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "esp-alloc",
- "esp-backtrace",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-idf-part",
- "esp-println",
- "esp-radio",
- "esp-rtos",
- "esp-storage",
- "log",
- "nb 1.1.0",
- "static_cell",
-]
-
-[[package]]
 name = "barracuda-platform-esp32s3"
 version = "0.1.0"
 dependencies = [
@@ -1847,7 +1812,6 @@ dependencies = [
  "barracuda-platform-esp32c3",
  "barracuda-platform-esp32c6",
  "barracuda-platform-esp32p4",
- "barracuda-platform-esp32s2",
  "barracuda-platform-esp32s3",
  "barracuda-platform-linux",
  "barracuda-platform-macos",
@@ -4481,7 +4445,7 @@ dependencies = [
  "esp32c61",
  "esp32h2",
  "esp32p4",
- "esp32s2 0.32.0",
+ "esp32s2",
  "esp32s3 0.36.0",
  "esp32s31",
  "fugit",
@@ -4579,12 +4543,10 @@ dependencies = [
  "esp-wifi-sys-esp32",
  "esp-wifi-sys-esp32c3",
  "esp-wifi-sys-esp32c6",
- "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
  "esp32 0.42.0",
  "esp32c3 0.34.0",
  "esp32c6 0.25.0",
- "esp32s2 0.33.0",
  "esp32s3 0.37.0",
  "log",
 ]
@@ -4634,7 +4596,6 @@ dependencies = [
  "esp32 0.42.0",
  "esp32c3 0.34.0",
  "esp32c6 0.25.0",
- "esp32s2 0.33.0",
  "esp32s3 0.37.0",
  "heapless 0.9.3",
  "instability",
@@ -4680,7 +4641,6 @@ dependencies = [
  "esp32c3 0.33.0",
  "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2 0.32.0",
  "esp32s3 0.36.0",
 ]
 
@@ -4727,7 +4687,6 @@ dependencies = [
  "esp32c3 0.33.0",
  "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2 0.32.0",
  "esp32s3 0.36.0",
 ]
 
@@ -4923,15 +4882,6 @@ name = "esp32s2"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbeb62af2f2ca94a85be9ab22f8ad97c23ba79b9b3d3e4e20f3e0957bc5f2b2d"
-dependencies = [
- "vcell",
-]
-
-[[package]]
-name = "esp32s2"
-version = "0.33.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a4d3aacde708234b93372de368fd7866f63c150c5e863ab9b9950b85a5103a5"
 dependencies = [
  "vcell",
 ]

@@ -15,7 +15,7 @@ std = ["tracing/std"]
 attributes = ["tracing/attributes"]
 
 # tracing-core needs atomic read-modify-write and alloc::sync, which targets
-# such as ESP32-C3 and ESP32-S2 do not have.
+# such as ESP32-C3 do not have.
 [target.'cfg(target_has_atomic = "ptr")'.dependencies]
 tracing = { version = "0.1", default-features = false }
 

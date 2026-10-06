@@ -944,7 +944,6 @@ platforms/
 +-- esp32c3/
 +-- esp32c6/
 +-- esp32p4/
-+-- esp32s2/
 +-- esp32s3/
 +-- stm32/             # Platform services + vendor HAL adaptation
 +-- nrf/

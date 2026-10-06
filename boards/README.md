@@ -148,10 +148,9 @@ and commit its deterministic workspace dependency block. Use
 that commit only run `cargo board select` followed by ordinary Cargo commands.
 
 The repository currently provides reference Board bundles for the ESP32,
-ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog
-also includes Espressif DevKitM boards (`esp32c3-devkitm-1`,
-`esp32c6-devkitm-1`, `esp32s3-devkitm-1`), the ESP32-S2-Kaluga and
-ESP32-S3-BOX-3 evaluation kits, and the M5Stamp C3 Mate
+ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog also
+includes Espressif DevKitM boards (`esp32c3-devkitm-1`, `esp32c6-devkitm-1`,
+`esp32s3-devkitm-1`), the ESP32-S3-BOX-3 evaluation kit, and the M5Stamp C3 Mate
 (`m5stack-stamp-c3-mate`). Each ESP bundle keeps its ESP-IDF partition CSV
 as the native layout and records the chip-specific Rust target in
 `board.yml`.

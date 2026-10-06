@@ -3,7 +3,7 @@
 //! [`Unordered`] yields each future's output as it completes, and [`Merged`]
 //! interleaves the items of several streams. Unlike their `futures-util`
 //! counterparts they need no `Arc` or atomic read-modify-write, so they also
-//! build on targets such as ESP32-C3 and ESP32-S2. Each wake polls every
+//! build on targets such as ESP32-C3. Each wake polls every
 //! member, which suits the handful of members these sets hold; polling
 //! starts after the member that last made progress so none is starved.
 

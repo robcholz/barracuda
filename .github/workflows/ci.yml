@@ -62,7 +62,7 @@ jobs:
       - name: Check CI covers every Platform
         run: |
           diff -u \
-            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s3 linux macos stm32 | sort) \
             <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
               -exec dirname {} \; | xargs -n1 basename | sort)
 
@@ -150,7 +150,6 @@ jobs:
         --exclude barracuda-platform-esp32c3
         --exclude barracuda-platform-esp32c6
         --exclude barracuda-platform-esp32p4
-        --exclude barracuda-platform-esp32s2
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-macos
         --exclude barracuda-platform-stm32
@@ -208,7 +207,6 @@ jobs:
         --exclude barracuda-platform-esp32c3
         --exclude barracuda-platform-esp32c6
         --exclude barracuda-platform-esp32p4
-        --exclude barracuda-platform-esp32s2
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-linux
         --exclude barracuda-platform-stm32
@@ -290,12 +288,6 @@ jobs:
             package: barracuda-platform-esp32p4
             toolchain: stable
             c_toolchain: esp-riscv
-          - name: esp32s2
-            board: esp32s2-saola-1
-            os: ubuntu-latest
-            package: barracuda-platform-esp32s2
-            toolchain: esp
-            chip: esp32s2
           - name: esp32s3
             board: esp32s3-devkitc-1
             os: ubuntu-latest
