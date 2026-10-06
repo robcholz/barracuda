@@ -55,6 +55,7 @@ mod vendored {
                 .include(&c)
                 .add_lunka_src()
                 .compile("lua");
+            remove_unused_libraries();
             isolate_c_library(&c);
         } else {
             let platform = lunka_src::platforms::from_current_triple()
@@ -69,7 +70,41 @@ mod vendored {
                 .include(&c)
                 .add_lunka_src()
                 .compile("lua");
+            remove_unused_libraries();
         }
+    }
+
+    /// Lua's own io, os and debug libraries, and `luaL_openlibs` that opens
+    /// them. The sandbox never opens them: Barracuda's builtin packages
+    /// provide files, time and the like instead.
+    const UNUSED_LIBRARIES: [&str; 4] = ["liolib", "loslib", "ldblib", "linit"];
+
+    /// Drops [`UNUSED_LIBRARIES`] from `liblua.a`; `lunka-src` compiles every
+    /// Lua source file.
+    fn remove_unused_libraries() {
+        let archive =
+            PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR")).join("liblua.a");
+        let archiver = || cc::Build::new().get_archiver();
+        let listing = archiver()
+            .arg("t")
+            .arg(&archive)
+            .output()
+            .expect("the archiver runs");
+        let members: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter(|member| {
+                UNUSED_LIBRARIES
+                    .iter()
+                    .any(|library| member.ends_with(&format!("-{library}.o")))
+            })
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            members.len(),
+            UNUSED_LIBRARIES.len(),
+            "liblua.a holds every Lua library"
+        );
+        run(archiver().arg("d").arg(&archive).args(&members));
     }
 
     /// Replaces `liblua.a` with one object holding Lua and the parts of the
