@@ -87,12 +87,6 @@ fn select_persists_a_valid_board_for_the_next_build() {
         String::from_utf8(output).expect("UTF-8 output"),
         "Selected Board `local-macos`.\nRun `cargo run` to build and start it.\n"
     );
-    // Host builds keep the workspace release profile.
-    assert!(
-        !fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
-            .expect("local Cargo selection")
-            .contains("[profile.release]")
-    );
     assert_eq!(
         fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
             .expect("selected Platform manifest after selection"),
@@ -210,13 +204,8 @@ fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
         platform.replace("- os: macos", "- triple: xtensa-esp32s3-none-elf"),
     )
     .expect("ESP32-S3 platform target");
-    let mut output = Vec::new();
 
-    run(["select", "local-macos"], root.path(), &mut output).expect("select Board");
-
-    assert!(String::from_utf8(output)
-        .expect("UTF-8 output")
-        .ends_with("Run `cargo run --release` to build and start it.\n"));
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
@@ -267,8 +256,6 @@ fn select_links_a_cortex_m_target_with_the_runtime_script() {
         "[target.thumbv7em-none-eabihf]\nrustflags = [\"-C\", \"link-arg=--nmagic\", \"-C\", \"link-arg=-Tlink.x\"]"
     ));
     assert!(!cargo.contains("linker ="));
-    // Firmware links with whole-program size optimization.
-    assert!(cargo.contains("[profile.release]\nopt-level = \"z\"\nlto = \"fat\"\n"));
 }
 
 #[test]

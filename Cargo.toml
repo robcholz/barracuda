@@ -40,7 +40,6 @@ barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
 barracuda-platform-esp32p4 = { path = "platforms/esp32p4" }
-barracuda-platform-esp32s2 = { path = "platforms/esp32s2" }
 barracuda-platform-esp32s3 = { path = "platforms/esp32s3" }
 barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
@@ -191,13 +190,13 @@ static_cell = "2"
 picoserve = { git = "https://github.com/sammhicks/picoserve.git", rev = "dbe0513e21e6e28a04446e4027e1d337d83d8b24" }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
-# the std crates can be unit-tested on the host. LTO remains disabled so final
-# applications can select the link strategy appropriate to their target.
+# the std crates can be unit-tested on the host. Release builds optimize for
+# size with whole-program LTO so the firmware fits its 4 MiB application slot.
 [profile.release]
 panic = "abort"
-opt-level = "s"
+opt-level = "z"
 codegen-units = 1
-lto = false
+lto = "fat"
 
 # Host profiling keeps the same size-oriented optimization as firmware while
 # retaining source locations for allocation backtraces.
