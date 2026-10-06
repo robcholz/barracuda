@@ -1145,8 +1145,8 @@ mod tests {
             "export PATH=\"/riscv/bin:$PATH\"\nexport LIBCLANG_PATH=\"/clang\"\nexport PATH=\"/xtensa/bin:$PATH\"\n",
         )
         .expect("environment file");
-        let environment = read_environment_file(root.path(), Path::new("export-esp.sh"))
-            .expect("environment");
+        let environment =
+            read_environment_file(root.path(), Path::new("export-esp.sh")).expect("environment");
         let paths = environment
             .iter()
             .filter(|(name, _)| name == "PATH")
@@ -1154,7 +1154,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(paths.len(), 1);
         assert!(paths[0].starts_with("/xtensa/bin:/riscv/bin:"));
-        assert!(environment.iter().any(|(name, value)| name == "LIBCLANG_PATH" && value == "/clang"));
+        assert!(environment
+            .iter()
+            .any(|(name, value)| name == "LIBCLANG_PATH" && value == "/clang"));
     }
 
     #[test]
