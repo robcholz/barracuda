@@ -91,23 +91,61 @@ impl HttpRequest {
         {
             return Err(HttpError::RequestTooLarge);
         }
-        if !self.url.starts_with("http://") && !self.url.starts_with("https://") {
+        let https = has_scheme(&self.url, "https://");
+        if !https && !has_scheme(&self.url, "http://") {
             return Err(HttpError::InvalidUrl);
         }
-        if self.url.starts_with("https://") && !tls {
+        if https && !tls {
             return Err(HttpError::TlsNotConfigured);
         }
-        for header in &self.headers {
-            if header.name.is_empty()
-                || header.name.bytes().any(|byte| byte <= b' ' || byte == b':')
-                || header.value.contains('\r')
-                || header.value.contains('\n')
-            {
-                return Err(HttpError::InvalidHeader);
-            }
+        if self
+            .headers
+            .iter()
+            .any(|header| !valid_header_name(&header.name) || !valid_header_value(&header.value))
+        {
+            return Err(HttpError::InvalidHeader);
         }
         Ok(())
     }
+}
+
+/// Whether `url` starts with `scheme`; schemes are case-insensitive.
+fn has_scheme(url: &str, scheme: &str) -> bool {
+    url.get(..scheme.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+}
+
+/// Headers the client writes itself or that control the connection. A second
+/// copy from the caller would frame or route the request differently than the
+/// client does, so the caller may not set them.
+const RESERVED_HEADERS: [&str; 9] = [
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "upgrade",
+];
+
+/// An RFC 9110 field name: a token that the client does not reserve.
+fn valid_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+        && !RESERVED_HEADERS
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
+}
+
+/// An RFC 9110 field value: no control characters other than tab.
+fn valid_header_value(value: &str) -> bool {
+    !value
+        .bytes()
+        .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
 }
 
 /// Successful buffered HTTP response.
@@ -391,6 +429,11 @@ mod tests {
         invalid.url = String::from("file:///data/value");
         assert_eq!(invalid.validate(true), Err(HttpError::InvalidUrl));
 
+        let mut upper = request();
+        upper.url = String::from("HTTPS://example.com");
+        assert_eq!(upper.validate(true), Ok(()));
+        assert_eq!(upper.validate(false), Err(HttpError::TlsNotConfigured));
+
         let missing_tls = request();
         assert_eq!(
             missing_tls.validate(false),
@@ -403,5 +446,37 @@ mod tests {
             value: String::new(),
         });
         assert_eq!(invalid_header.validate(true), Err(HttpError::InvalidHeader));
+    }
+
+    #[test]
+    fn headers_must_be_tokens_and_cannot_reframe_the_request() {
+        let with_header = |name: &str, value: &str| {
+            let mut request = request();
+            request.headers.push(HttpHeader {
+                name: String::from(name),
+                value: String::from(value),
+            });
+            request.validate(true)
+        };
+        for (name, value) in [
+            ("Host", "evil.example"),
+            ("content-length", "99"),
+            ("Transfer-Encoding", "chunked"),
+            ("Connection", "close"),
+            ("X(Y", "1"),
+            ("X-Ünicode", "1"),
+            ("X-Test", "a\u{0}b"),
+            ("X-Test", "a\rb"),
+            ("X-Test", "a\u{7f}"),
+        ] {
+            assert_eq!(
+                with_header(name, value),
+                Err(HttpError::InvalidHeader),
+                "{name}: {value:?}"
+            );
+        }
+        for (name, value) in [("X-Test", "a\tb"), ("Content-Type", "application/json")] {
+            assert_eq!(with_header(name, value), Ok(()), "{name}");
+        }
     }
 }
