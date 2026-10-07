@@ -317,6 +317,71 @@ impl<T: BulkData + fmt::Debug + ?Sized> fmt::Debug for BulkBox<T> {
     }
 }
 
+/// Untyped byte buffers for C libraries that allocate through `calloc`-style
+/// hooks.
+///
+/// A C library such as mbedTLS asks for raw memory and decides itself what it
+/// stores there, so the [`BulkData`] boundary cannot be checked. Its owner
+/// sends only large plain-data buffers here (record and certificate buffers)
+/// and keeps the library's control structures on the global heap.
+pub mod foreign {
+    use core::{alloc::Layout, ptr::NonNull};
+
+    use super::{active_backend, platform::Backend};
+
+    /// Bytes before each buffer: its total size and its backend, padded to the
+    /// 16-byte alignment C expects from `calloc`.
+    const HEADER: usize = 16;
+
+    /// Allocates `size` zeroed bytes aligned to 16 from the active bulk-memory
+    /// domain, or returns null when the domain is exhausted.
+    #[must_use]
+    pub fn calloc(size: usize) -> *mut u8 {
+        let backend = active_backend();
+        let Some(layout) = size
+            .checked_add(HEADER)
+            .and_then(|total| Layout::from_size_align(total, HEADER).ok())
+        else {
+            return core::ptr::null_mut();
+        };
+        let Ok(block) = backend.allocator.allocate_zeroed(layout) else {
+            return core::ptr::null_mut();
+        };
+        let base = block.cast::<u8>().as_ptr();
+        // SAFETY: the block is at least `HEADER` bytes and 16-byte aligned,
+        // which fits a `usize` and a pointer at its start.
+        unsafe {
+            base.cast::<usize>().write(layout.size());
+            base.add(size_of::<usize>())
+                .cast::<*const Backend>()
+                .write(core::ptr::from_ref(backend));
+            base.add(HEADER)
+        }
+    }
+
+    /// Returns a buffer from [`calloc`] to the domain that allocated it.
+    ///
+    /// # Safety
+    ///
+    /// `pointer` is null, or came from [`calloc`] and has not been freed.
+    pub unsafe fn free(pointer: *mut u8) {
+        if pointer.is_null() {
+            return;
+        }
+        // SAFETY: `calloc` wrote the header just before `pointer`; the backend
+        // is static and the layout is the one it allocated with.
+        unsafe {
+            let base = pointer.sub(HEADER);
+            let size = base.cast::<usize>().read();
+            let backend = &*base.add(size_of::<usize>()).cast::<*const Backend>().read();
+            let layout = Layout::from_size_align_unchecked(size, HEADER);
+            backend
+                .allocator
+                .deallocate(NonNull::new_unchecked(base), layout);
+        }
+    }
+}
+
 /// Platform-only backend installation surface.
 ///
 /// Business code should use [`BulkVec`] and [`BulkBox`] rather than importing
@@ -372,6 +437,22 @@ mod tests {
 
         let zeroed = BulkBox::<[u16]>::try_new_zeroed_slice(4).expect("allocate zeroed slice");
         assert_eq!(&*zeroed, &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn foreign_buffers_are_zeroed_aligned_and_returned() {
+        let buffer = super::foreign::calloc(20_000);
+        assert!(!buffer.is_null());
+        assert_eq!(buffer as usize % 16, 0);
+        // SAFETY: `calloc` returned 20 000 writable bytes.
+        let bytes = unsafe { core::slice::from_raw_parts_mut(buffer, 20_000) };
+        assert!(bytes.iter().all(|byte| *byte == 0));
+        bytes.fill(0xa5);
+        // SAFETY: the buffer came from `foreign::calloc`.
+        unsafe { super::foreign::free(buffer) };
+        // SAFETY: null is accepted and ignored.
+        unsafe { super::foreign::free(core::ptr::null_mut()) };
+        assert!(super::foreign::calloc(usize::MAX).is_null());
     }
 
     #[test]

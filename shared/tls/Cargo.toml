@@ -9,6 +9,7 @@ description = "TLS client engine and compact trust-root bundle shared by every B
 force-esp-riscv-gcc = ["mbedtls-rs/force-esp-riscv-gcc"]
 
 [dependencies]
+barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
 log.workspace = true
 # `tls` is the feature set of the prebuilt device libraries (RSA, ECDSA, TLS 1.2 and 1.3).

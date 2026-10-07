@@ -11,6 +11,7 @@ extern crate alloc;
 
 #[cfg(target_os = "none")]
 mod c_runtime;
+mod memory;
 mod roots;
 
 use alloc::{boxed::Box, format, string::String};
@@ -42,6 +43,7 @@ impl Tls {
         entropy
             .fill(&mut [0; 1])
             .map_err(|EntropyUnavailable| TlsError::EntropyUnavailable)?;
+        memory::install();
         let certificates = Certificate::verified_by(roots::verify)
             .map_err(|error| TlsError::Initialize(format!("{error:?}")))?;
         let rng = Box::leak(Box::new(EntropyRng(entropy)));

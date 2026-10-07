@@ -750,6 +750,14 @@ cannot be accessed safely. Bulk containers remain explicit: the Platform does
 not add external memory to the ordinary global allocator used by arbitrary
 System and Plugin state.
 
+A C library that allocates through `calloc`-style hooks asks for untyped
+memory, so the `Pod` boundary cannot be checked for it. `bulk_memory::foreign`
+gives such a library raw zeroed byte buffers from the same domain; its owner
+sends only large plain-data buffers there and keeps the library's control
+structures on the global heap. `shared/tls` is the one user: mbedTLS
+allocations of 4 KiB or more (record buffers and certificate copies) go to bulk
+memory, everything smaller to the global heap.
+
 ## TLS and HTTP clients
 
 TLS is a shared software service above the Platform boundary. Its only
@@ -770,7 +778,8 @@ the top certificate of a server chain arrives untrusted, and the callback
 trusts it only when a bundled root of its issuer's name verifies its
 signature. mbedTLS verifies the rest of the chain. The roots stay in flash and
 only the matching root's key is parsed, so no Platform keeps parsed roots in
-RAM. mbedTLS checks no certificate dates, so expired roots are left out of the
+RAM. Each connection's two 16 KiB record buffers come from bulk memory (see
+"Bulk memory"), which is external RAM on Boards that have it. mbedTLS checks no certificate dates, so expired roots are left out of the
 bundle when it is generated. `mbedtls-rs` is vendored in
 `shared/tls/mbedtls-rs` with the verify callback and a fallible random source
 added.
