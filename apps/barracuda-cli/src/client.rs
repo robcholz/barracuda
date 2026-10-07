@@ -87,7 +87,7 @@ async fn run_connected(
                             RenderAction::Delta(delta) => {
                                 editor.print_stream_fragment(&delta)?;
                             }
-                            RenderAction::Print(message) => {
+                            RenderAction::Print(message) | RenderAction::Prompt(message) => {
                                 editor.finish_stream_line()?;
                                 editor.print(message)?;
                             }
@@ -118,6 +118,15 @@ async fn run_connected(
 #[derive(Default)]
 pub(crate) struct Renderer {
     extra: Option<MessageKind>,
+    approval: Option<ApprovalRequest>,
+}
+
+/// A permission request being assembled from its streamed fields.
+#[derive(Default)]
+struct ApprovalRequest {
+    tool: String,
+    arguments: String,
+    reason: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -125,6 +134,8 @@ pub(crate) enum RenderAction {
     Start(MessageKind),
     Delta(String),
     Print(String),
+    /// A notice the Agent waits on: the user's next message answers it.
+    Prompt(String),
     End,
 }
 
@@ -195,6 +206,39 @@ impl Renderer {
                 self.print_notice(payload.get("message"), actions);
             }
             "stream_error" => self.print_notice(payload.get("error"), actions),
+            "input_request_started" => self.approval = Some(ApprovalRequest::default()),
+            "input_request_tool_name_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.tool.push_str(event_text(payload));
+                }
+            }
+            "input_request_arguments_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.arguments.push_str(event_text(payload));
+                }
+            }
+            "input_request_reason_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.reason.push_str(event_text(payload));
+                }
+            }
+            // The Agent waits for the reply, so the user must see the request.
+            "input_requested" => {
+                if let Some(request) = self.approval.take() {
+                    let mut text = format!(
+                        "permission needed for {} {}",
+                        request.tool, request.arguments
+                    );
+                    if !request.reason.is_empty() {
+                        text.push_str(&format!(": {}", request.reason.trim_end_matches('.')));
+                    }
+                    text.push_str(". Reply to approve or refuse.");
+                    if self.extra.take().is_some() {
+                        actions.push(RenderAction::End);
+                    }
+                    actions.push(RenderAction::Prompt(MessageKind::Notice.render(&text)));
+                }
+            }
             _ => {}
         }
     }
@@ -403,6 +447,33 @@ mod tests {
                 RenderAction::End,
             ]
         );
+    }
+
+    #[test]
+    fn permission_requests_render_as_a_notice_asking_for_a_reply() {
+        let event = |kind: &str, text: &str| {
+            format!(
+                "event: message.event\ndata: {}\n\n",
+                serde_json::json!({ "type": kind, "payload": { "text": text } })
+            )
+        };
+        let frames = [
+            event("input_request_started", ""),
+            event("input_request_tool_name_delta", "file_write"),
+            event("input_request_arguments_delta", r#"{"path":"/data/a.txt"}"#),
+            event("input_request_reason_delta", "writes a file"),
+            event("input_requested", ""),
+        ];
+        let actions = render_actions(&frames.iter().map(String::as_str).collect::<Vec<_>>());
+
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0],
+            RenderAction::Prompt(text) if text.contains("permission needed for file_write")
+                && text.contains("/data/a.txt")
+                && text.contains("writes a file")
+                && text.contains("Reply to approve or refuse")
+        ));
     }
 
     #[test]

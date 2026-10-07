@@ -45,6 +45,7 @@ pub async fn run(url: &str, timing: ScriptTiming) -> Result<()> {
         .collect::<std::io::Result<Vec<_>>>()
         .context("read stdin")?;
     let mut stdout = std::io::stdout().lock();
+    let mut carried: Option<TurnCollector> = None;
     for (turn, line) in lines
         .iter()
         .map(|line| line.trim())
@@ -56,7 +57,10 @@ pub async fn run(url: &str, timing: ScriptTiming) -> Result<()> {
             reply_to: None,
         })?;
         sink.send(Message::text(frame)).await?;
-        let mut collector = TurnCollector::default();
+        // A turn that stopped to ask for input continues in this one.
+        let mut collector = carried
+            .take()
+            .map_or_else(TurnCollector::default, TurnCollector::resume);
         let deadline = Instant::now() + timing.turn;
         loop {
             let wait_until = match collector.settled_at() {
@@ -74,8 +78,7 @@ pub async fn run(url: &str, timing: ScriptTiming) -> Result<()> {
                 Ok(Some(Err(error))) => return Err(error.into()),
             }
         }
-        for (kind, text) in collector
-            .completed
+        for (kind, text) in core::mem::take(&mut collector.completed)
             .into_iter()
             .filter(|(_, text)| !text.is_empty())
         {
@@ -83,6 +86,7 @@ pub async fn run(url: &str, timing: ScriptTiming) -> Result<()> {
             writeln!(stdout, "{record}")?;
         }
         stdout.flush()?;
+        carried = collector.prompted.then_some(collector);
     }
     Ok(())
 }
@@ -94,9 +98,21 @@ struct TurnCollector {
     open: Vec<(MessageKind, String)>,
     completed: Vec<(MessageKind, String)>,
     settled: Option<Instant>,
+    /// The Agent asked for input and waits for the next line.
+    prompted: bool,
 }
 
 impl TurnCollector {
+    /// Continues a turn that stopped to ask for input: its open messages and
+    /// stream state carry over, and only new completions are reported.
+    fn resume(previous: Self) -> Self {
+        Self {
+            renderer: previous.renderer,
+            open: previous.open,
+            ..Self::default()
+        }
+    }
+
     fn absorb(&mut self, frame: &str) {
         for action in self.renderer.absorb(frame) {
             match action {
@@ -110,6 +126,11 @@ impl TurnCollector {
                     self.completed
                         .push((MessageKind::Notice, strip_label(&text)));
                 }
+                RenderAction::Prompt(text) => {
+                    self.completed
+                        .push((MessageKind::Notice, strip_label(&text)));
+                    self.prompted = true;
+                }
                 RenderAction::End => {
                     if let Some(message) = self.open.pop() {
                         self.completed.push(message);
@@ -117,7 +138,8 @@ impl TurnCollector {
                 }
             }
         }
-        self.settled = (self.open.is_empty() && !self.completed.is_empty()).then(Instant::now);
+        self.settled = ((self.open.is_empty() || self.prompted) && !self.completed.is_empty())
+            .then(Instant::now);
     }
 
     fn settled_at(&self) -> Option<Instant> {
@@ -157,5 +179,34 @@ mod tests {
             .map(|(kind, text)| (kind.as_str(), text.as_str()))
             .collect();
         assert_eq!(completed, [("reasoning", "plan"), ("reply", "hi")]);
+    }
+
+    #[test]
+    fn a_prompt_settles_the_turn_and_the_open_reply_continues_in_the_next() {
+        let event = |kind: &str| {
+            format!(
+                "event: message.event\ndata: {}\n\n",
+                serde_json::json!({ "type": kind, "payload": { "text": "x" } })
+            )
+        };
+        let mut collector = TurnCollector::default();
+        collector.absorb("event: message.start\ndata: {\"kind\":\"reply\"}\n\n");
+        collector.absorb(&event("input_request_started"));
+        assert!(collector.settled_at().is_none());
+        collector.absorb(&event("input_requested"));
+        assert!(collector.settled_at().is_some());
+        assert_eq!(collector.completed.len(), 1);
+
+        let mut next = TurnCollector::resume(collector);
+        next.absorb("event: message.delta\ndata: {\"delta\":\"done\"}\n\n");
+        assert!(next.settled_at().is_none());
+        next.absorb("event: message.end\ndata: {\"error\":null}\n\n");
+        assert!(next.settled_at().is_some());
+        let completed: Vec<_> = next
+            .completed
+            .iter()
+            .map(|(kind, text)| (kind.as_str(), text.as_str()))
+            .collect();
+        assert_eq!(completed, [("reply", "done")]);
     }
 }
