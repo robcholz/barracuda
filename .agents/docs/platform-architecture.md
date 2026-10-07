@@ -114,9 +114,14 @@ async fn application(spawner: Spawner, bindings: barracuda_target::Bindings) -> 
 barracuda_target::application_entry!(application);
 ~~~
 
-Host Targets have no chip peripheral singleton. Their selected-target entry
-macro supplies a binding pair whose Platform side is the host's unit binding;
-the application still uses the same `resources_with_bindings` boundary.
+Host Targets have no chip peripheral singleton. The Linux and macOS Platforms
+share a host-only virtual one instead (`platforms/virtual-io`): virtual pins
+and I2C controllers backed by a virtual peripherals manager that tests and
+developers drive over a loopback control interface. The host entry macro takes
+that singleton once, exactly as a device entry takes its chip singleton, and
+the generated Board bindings move the declared virtual tokens out of it. The
+application still uses the same `resources_with_bindings` boundary, and the
+virtual hardware never enters firmware.
 
 The returned shape preserves ownership:
 
@@ -984,6 +989,7 @@ platforms/
 +-- ch/
 +-- linux/
 +-- macos/
++-- virtual-io/        # host-only virtual GPIO/I2C shared by linux and macos
 
 peripherals/
 +-- api/
@@ -1052,7 +1058,7 @@ existing chip driver and adds no central renderer branch.
 - Peripheral implementation calls remain statically dispatched.
 - A device entry acquires the hardware singleton once, constructs the selected
   Target bindings, and invokes selected Target composition. Host Targets
-  construct their binding pair without a hardware singleton.
+  take their Platform's virtual peripheral singleton the same way.
 - Board HAL initialization consumes owned bindings; it does not reacquire
   peripherals or resolve pin numbers at runtime.
 - The Board HAL constructs only the optional peripherals and exposed I/O

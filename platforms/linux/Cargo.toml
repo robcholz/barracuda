@@ -8,6 +8,7 @@ description = "Linux Platform implementation for Barracuda"
 barracuda-board.workspace = true
 barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
+barracuda-platform-virtual-io.workspace = true
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }

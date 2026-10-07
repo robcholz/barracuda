@@ -109,6 +109,10 @@ cargo board select
 cargo run
 ```
 
+A host Board runs as `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run`; the
+variable names the loopback address of the virtual peripherals manager behind
+its virtual GPIO and I2C (see `platforms/virtual-io`).
+
 `cargo run` owns only the selected System application. Start the external
 terminal Channel in another terminal with `cargo cli [ws://DEVICE_ADDRESS:8787]`.
 The CLI is forced to the development host target, so it can connect while an

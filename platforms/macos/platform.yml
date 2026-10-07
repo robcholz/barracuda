@@ -10,6 +10,11 @@ build:
   missing-toolchain-prompt: |
     Rust 1.98.1 is required. Install it with:
       rustup toolchain install 1.98.1
+hal:
+  # Virtual hardware from platforms/virtual-io: pins GPIO0..GPIO15 and the
+  # I2C controllers below, controlled through BARRACUDA_VIRTUAL_IO_ADDR.
+  bindings: [gpio, i2c-device]
+  runtime-i2c-controllers: [I2C0, I2C1]
 selection:
   board-chips:
     - macos

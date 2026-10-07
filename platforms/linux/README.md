@@ -13,8 +13,14 @@ The application then opens `barracuda0` without root privileges.
 
 ```sh
 cargo board select local-linux
-cargo run
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
 ```
+
+`BARRACUDA_VIRTUAL_IO_ADDR` is required: it is the loopback address where the
+virtual peripherals manager listens. `local-linux` exposes the virtual pins
+`vio-0` to `vio-7` and two virtual I2C controllers; the manager drives input
+levels, attaches I2C devices, and injects faults. See
+[`platforms/virtual-io`](../virtual-io/README.md).
 
 This terminal owns the System and its logs. Start `cargo cli` in another
 terminal to connect the external terminal Channel.

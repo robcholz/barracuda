@@ -3,3 +3,14 @@ hardware:
   chip: macos
 native-layout:
   artifact: file-layout.yml
+# Virtual pins served by the host Platform's peripherals manager.
+exposed-io:
+  pins:
+    vio-0: { pin: GPIO0 }
+    vio-1: { pin: GPIO1 }
+    vio-2: { pin: GPIO2 }
+    vio-3: { pin: GPIO3 }
+    vio-4: { pin: GPIO4 }
+    vio-5: { pin: GPIO5 }
+    vio-6: { pin: GPIO6 }
+    vio-7: { pin: GPIO7 }
