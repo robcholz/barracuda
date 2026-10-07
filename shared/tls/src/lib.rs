@@ -7,6 +7,9 @@
 
 extern crate alloc;
 
+#[cfg(target_os = "none")]
+mod c_runtime;
+
 use alloc::{boxed::Box, string::String, string::ToString};
 
 use http_client::TlsConfig;

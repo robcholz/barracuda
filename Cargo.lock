@@ -2254,7 +2254,9 @@ dependencies = [
 name = "barracuda-tls"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "http-client",
+ "log",
  "mbedtls-rs",
  "rand_core 0.10.1",
  "thiserror 2.0.18",

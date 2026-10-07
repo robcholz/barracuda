@@ -16,12 +16,16 @@ std = ["mbedtls", "mbedtls-rs/std"]
 
 [dependencies]
 http-client.workspace = true
+log.workspace = true
 mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
 rand_core = "0.10.0-rc-2"
 thiserror = { version = "2", default-features = false }
 
+[build-dependencies]
+cc = "1"
+
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]
