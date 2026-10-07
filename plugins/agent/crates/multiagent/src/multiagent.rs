@@ -33,6 +33,11 @@ enum DispatchPurpose {
     },
 }
 
+/// Subagents one Session may keep at once, across every depth. Each one is a
+/// full Agent with its own transcript, so the bound keeps a model from
+/// exhausting device memory by fanning out or nesting.
+const MAX_LIVE_SUBAGENTS: usize = 3;
+
 enum PendingEffect {
     Spawn {
         requester: AgentId,
@@ -399,6 +404,14 @@ impl Multiagent {
             let _ = command.accepted.send(Err(error));
             return;
         }
+        if self.live_subagents() >= MAX_LIVE_SUBAGENTS {
+            let _ = command
+                .accepted
+                .send(Err(MultiagentCommandError::LimitReached(
+                    MAX_LIVE_SUBAGENTS,
+                )));
+            return;
+        }
         let SpawnCommand {
             spec,
             accepted,
@@ -629,6 +642,17 @@ impl Multiagent {
         let id = EffectId(self.next_effect_id);
         self.next_effect_id = self.next_effect_id.wrapping_add(1);
         id
+    }
+
+    /// Committed subagents plus spawns still waiting for their Agent, so
+    /// concurrent spawn calls cannot pass the limit together.
+    fn live_subagents(&self) -> usize {
+        let pending = self
+            .pending_effects
+            .values()
+            .filter(|effect| matches!(effect, PendingEffect::Spawn { .. }))
+            .count();
+        self.state.subagent_count().saturating_add(pending)
     }
 
     fn reserve_effect(&mut self, pending: PendingEffect) -> EffectId {
@@ -1311,6 +1335,62 @@ mod tests {
                 if agents == vec![cancelled_foreground]
         ));
         assert_eq!(nested_receiver.try_recv(), Ok(None));
+    }
+
+    #[test]
+    fn spawns_beyond_the_live_limit_are_rejected_until_one_finishes() {
+        let root = AgentId(1);
+        let mut multiagent = Multiagent::new();
+        assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+        multiagent.on_agent_started(root);
+        let spawn = |multiagent: &Multiagent| {
+            multiagent.bridge().spawn(
+                root,
+                super::super::model::SubagentSpec::new(
+                    AgentKind::from_static("worker"),
+                    None,
+                    Message::text("goal"),
+                    timeout(),
+                ),
+            )
+        };
+
+        // Spawns still waiting for their Agent count toward the limit.
+        let mut accepted = Vec::new();
+        let mut pending = Vec::new();
+        for _ in 0..MAX_LIVE_SUBAGENTS {
+            let (receiver, completion) = spawn(&multiagent);
+            accepted.push((receiver, completion));
+            pending.push(take_spawn_effect(&mut multiagent));
+        }
+        let (mut rejected, _completion) = spawn(&multiagent);
+        let waker = core::task::Waker::noop();
+        assert!(matches!(
+            multiagent.poll_effect(&mut Context::from_waker(waker)),
+            Poll::Ready(None)
+        ));
+        assert_eq!(
+            rejected.try_recv(),
+            Ok(Some(Err(MultiagentCommandError::LimitReached(
+                MAX_LIVE_SUBAGENTS
+            ))))
+        );
+
+        for (index, (effect, spec)) in pending.into_iter().enumerate() {
+            let child = AgentId(10 + index as u32);
+            assert_eq!(apply_spawned(&mut multiagent, effect, spec, child), None);
+        }
+        while multiagent.take_effect().is_some() {}
+
+        // A delivered result frees its slot.
+        multiagent.on_agent_completed(AgentId(10), "done".to_owned(), true);
+        while multiagent.take_effect().is_some() {}
+        multiagent.physical_agent_removed(AgentId(10), Ok(()));
+        multiagent.acknowledge_delivery(root, AgentId(10));
+        assert!(!multiagent.contains(AgentId(10)));
+        let (mut admitted, _completion) = spawn(&multiagent);
+        take_spawn_effect(&mut multiagent);
+        assert_eq!(admitted.try_recv(), Ok(None));
     }
 
     #[test]

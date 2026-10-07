@@ -25,6 +25,10 @@ pub(crate) enum MultiagentCommandError {
     TargetBusy,
     #[error("subagent kind '{0}' is not permitted for the requesting agent")]
     ForbiddenKind(String),
+    #[error(
+        "at most {0} subagents may be live at once; wait for one to finish or delete one before spawning another"
+    )]
+    LimitReached(usize),
     #[error("failed to create subagent: {0}")]
     CreateFailed(String),
     #[error("failed to remove subagent storage: {0}")]
