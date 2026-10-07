@@ -328,9 +328,12 @@ jobs:
           # Board links can fail after every dependency has compiled.
           cache-on-failure: true
 
+      # espup queries the GitHub API; without a token it is rate-limited (403).
       - name: Install Rust for Xtensa
         if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           buildtargets: ${{ matrix.chip }}
           version: ${{ env.ESP_RUST_VERSION }}
