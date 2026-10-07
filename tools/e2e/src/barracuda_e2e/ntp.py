@@ -2,11 +2,14 @@
 
 The System resolves its fixed public NTP pool and sends UDP/123 through the
 host TUN. A DNAT rule redirects that traffic to this responder on the TUN
-peer address, which answers with the host clock.
+peer address, which answers with the host clock. The responder listens on an
+unprivileged port, so only installing the rule needs root; without it the
+rule is installed through `sudo -n`.
 """
 
 from __future__ import annotations
 
+import os
 import socket
 import struct
 import subprocess
@@ -16,6 +19,7 @@ import time
 from .system import HOST_ADDRESS, INTERFACE, HarnessError
 
 NTP_PORT = 123
+RESPONDER_PORT = 11123
 NTP_UNIX_OFFSET = 2_208_988_800
 DNAT_RULE = [
     'PREROUTING',
@@ -28,7 +32,7 @@ DNAT_RULE = [
     '-j',
     'DNAT',
     '--to-destination',
-    f'{HOST_ADDRESS}:{NTP_PORT}',
+    f'{HOST_ADDRESS}:{RESPONDER_PORT}',
 ]
 
 
@@ -72,7 +76,7 @@ class LocalNtp:
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._socket.settimeout(0.2)
         try:
-            self._socket.bind((HOST_ADDRESS, NTP_PORT))
+            self._socket.bind((HOST_ADDRESS, RESPONDER_PORT))
         except OSError as exc:
             raise HarnessError(f'cannot bind local NTP responder: {exc}') from exc
         _iptables('-A')
@@ -102,8 +106,9 @@ class LocalNtp:
 
 
 def _iptables(action: str) -> None:
+    sudo = [] if os.geteuid() == 0 else ['sudo', '-n']
     result = subprocess.run(
-        ['iptables', '-t', 'nat', action, *DNAT_RULE],
+        [*sudo, 'iptables', '-t', 'nat', action, *DNAT_RULE],
         capture_output=True,
         text=True,
         check=False,

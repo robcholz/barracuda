@@ -202,6 +202,75 @@ jobs:
       - name: Clippy portable workspace
         run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
 
+  # Boot the real local-linux System on a TUN, drive it through the CLI
+  # Channel, and serve every model call from an llm-tape tape (scripted or
+  # recorded). Offline apart from DNS and needs no secrets. Scenarios share
+  # the TUN address, so each shard runs its part sequentially.
+  e2e:
+    name: E2E (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache E2E build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: local-linux-e2e
+          save-if: ${{ matrix.shard == 1 }}
+
+      - name: Select Board
+        run: cargo board select local-linux
+
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
+
+      - name: Build System, CLI and resources image
+        run: |
+          cargo build
+          cargo build --package barracuda-cli
+          cargo image build
+
+      - name: Provision TUN
+        run: sudo sh platforms/linux/provision.sh barracuda0
+
+      - name: Run scenarios
+        run: >-
+          uv run --package barracuda-e2e barracuda-e2e run
+          --skip-build --shard ${{ matrix.shard }}/4
+
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.shard }}
+          path: target/e2e
+          retention-days: 7
+
   # The same shared production path is tested on the second supported host.
   # It runs in parallel with Linux: Linux normally reports first, while macOS
   # adds host/compiler integration coverage without repeating device tests.
@@ -499,6 +568,9 @@ jobs:
         run: >-
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
+
+      - name: Test barracuda-e2e
+        run: uv run --package barracuda-e2e pytest tools/e2e/tests
 
   # Once all fast gates pass, check, lint, and build every Board. Target groups
   # run in parallel; Boards sharing a target run serially so the expensive

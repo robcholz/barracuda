@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument('--skip-build', action='store_true', help='reuse existing builds')
     run.add_argument(
+        '--shard',
+        type=_shard_spec,
+        metavar='K/N',
+        help='run only every N-th selected scenario, starting with the K-th',
+    )
+    run.add_argument(
         '--heap-limit',
         type=int,
         metavar='BYTES',
@@ -120,6 +126,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     missing = set(arguments.names) - {s.slug for s in selected}
     if missing:
         sys.exit(f'error: unknown scenario(s): {", ".join(sorted(missing))}')
+    if arguments.shard is not None:
+        selected = shard(selected, *arguments.shard)
     if arguments.record and arguments.direct:
         sys.exit('error: --record and --direct are exclusive')
     live = (
@@ -161,6 +169,25 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f'\n{len(selected) - failed} passed, {failed} failed')
     print(f'artifacts: {ARTIFACTS}')
     sys.exit(1 if failed else 0)
+
+
+def shard(scenarios: list[Scenario], index: int, count: int) -> list[Scenario]:
+    """Every `count`-th scenario from the 1-based `index`; shards partition the list."""
+
+    return scenarios[index - 1 :: count]
+
+
+def _shard_spec(value: str) -> tuple[int, int]:
+    index, sep, count = value.partition('/')
+    try:
+        parsed = int(index), int(count)
+    except ValueError:
+        parsed = (0, 0)
+    if not sep or not 1 <= parsed[0] <= parsed[1]:
+        raise argparse.ArgumentTypeError(
+            f'expected K/N with 1 <= K <= N, got {value!r}'
+        )
+    return parsed
 
 
 def run_scenario(

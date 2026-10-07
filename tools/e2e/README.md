@@ -39,9 +39,13 @@ records each scenario's result and ordinary-heap high-water mark.
 
 The harness answers the System's SNTP requests from the host clock through an
 iptables DNAT rule, so time, Scheduler, and Workflow scenarios do not depend on
-public NTP. It needs root; without it the run prints a warning and time-based
-scenarios may fail. The rule is removed when the run ends. Pass
-`--no-local-ntp` to use real NTP instead.
+public NTP. Installing the rule needs root, through `sudo -n` when the harness
+is not root; without it the run prints a warning and time-based scenarios may
+fail. The rule is removed when the run ends. Pass `--no-local-ntp` to use real
+NTP instead.
+
+`--shard K/N` runs every N-th selected scenario starting with the K-th, so N
+parallel runs cover the set once. CI runs the whole set in four shards.
 
 ## Scenarios
 

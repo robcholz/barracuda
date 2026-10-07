@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from llm_tape.tape import load_tape
 
+from barracuda_e2e.cli import build_parser, shard
 from barracuda_e2e.assertions import (
     check_heap,
     check_logs,
@@ -172,3 +173,18 @@ def test_heap_high_water_is_the_largest_report_and_respects_the_budget(tmp_path)
     assert check_heap(scenario, '') == [
         'System reported no ordinary-heap high-water mark'
     ]
+
+
+def test_shards_partition_the_scenarios():
+    scenarios = [load_scenario(path) for path in discover(SCENARIOS)]
+    shards = [shard(scenarios, index, 4) for index in range(1, 5)]
+    assert sorted(s.slug for part in shards for s in part) == sorted(
+        s.slug for s in scenarios
+    )
+    assert max(map(len, shards)) - min(map(len, shards)) <= 1
+
+
+@pytest.mark.parametrize('spec', ['0/4', '5/4', '2', 'a/b'])
+def test_invalid_shards_are_rejected(spec):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(['run', '--shard', spec])
