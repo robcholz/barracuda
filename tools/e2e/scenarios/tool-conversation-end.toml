@@ -1,0 +1,12 @@
+name = "Conversation end"
+description = "conversation_end ends the turn with the model's final message. A real model reserves this circuit breaker for abusive or unsafe requests, so the call is scripted."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "conversation_end", arguments = { final_message = "I am ending this conversation." } }]
+
+[[steps]]
+send = "Something out of bounds."
+reply_contains = ["I am ending this conversation."]

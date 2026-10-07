@@ -42,6 +42,7 @@ class Step:
     reply_matches: tuple[str, ...] = ()
     kinds: tuple[str, ...] = ()
     tool_contains: tuple[str, ...] = ()
+    notice_contains: tuple[str, ...] = ()
     tool_errors_allowed: bool = False
 
 
@@ -185,6 +186,7 @@ def _step(entry: Any, path: Path) -> Step:
         reply_matches=_strings(entry, 'reply_matches', path),
         kinds=_strings(entry, 'kinds', path),
         tool_contains=_strings(entry, 'tool_contains', path),
+        notice_contains=_strings(entry, 'notice_contains', path),
         tool_errors_allowed=bool(entry.get('tool_errors_allowed', False)),
     )
 

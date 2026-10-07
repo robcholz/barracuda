@@ -1,0 +1,18 @@
+name = "Live subagents"
+description = "A real model lists spawnable kinds, runs and spawns subagents, inspects them, interrupts one, and deletes it."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Call subagent_list_spawnable, then use subagent_run with one of those kinds and the goal: Reply with exactly the word ready. Tell me what it replied."
+tool_contains = ['ready']
+
+[[steps]]
+send = "Use subagent_spawn with the same kind, name it counter, and the goal: Reply with exactly the text 1 2 3. Then call subagent_list and subagent_watch on it, and tell me its status."
+tool_contains = ['counter']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Use subagent_interrupt on counter with the message: Reply with exactly the word stop. Then use subagent_delete on counter."
+tool_errors_allowed = true

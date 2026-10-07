@@ -34,6 +34,11 @@ def check_transcript(
             for record in messages
             if record.get('kind') == 'tool'
         )
+        notices = '\n'.join(
+            str(record.get('text', ''))
+            for record in messages
+            if record.get('kind') == 'notice'
+        )
         if not messages:
             failures.append(f'step {turn}: no reply was received')
             continue
@@ -46,6 +51,9 @@ def check_transcript(
         for needle in step.tool_contains:
             if needle not in tools:
                 failures.append(f'step {turn}: tool output lacks {needle!r}: {tools!r}')
+        for needle in step.notice_contains:
+            if needle not in notices:
+                failures.append(f'step {turn}: notices lack {needle!r}: {notices!r}')
         if not step.tool_errors_allowed:
             for pattern in TOOL_FAILURE_PATTERNS:
                 for line in tools.splitlines():

@@ -68,6 +68,7 @@ send = "What time is it?"
 reply_contains = ["I checked the clock."]
 reply_matches = ['clock\.$']
 tool_contains = ['"utc":"20']
+notice_contains = []       # CLI notices, such as a permission prompt
 kinds = ["tool"]           # message roles that must appear in the turn
 # tool_errors_allowed = true
 
