@@ -1,0 +1,87 @@
+name = "Edge: subagent tool errors"
+description = "Spawn policy, argument validation, and subtree authorization errors of the subagent Tools; no subagent is ever created, so every model call belongs to the root."
+
+[model]
+mode = "scripted"
+
+# list_spawnable.rs / conversation agent.json: the root may spawn only "worker".
+# list.rs: an empty subtree lists as an empty array.
+[[model.responses]]
+request_contains = ["You are the user-facing assistant"]
+tool_calls = [
+  { name = "subagent_list_spawnable", arguments = {} },
+  { name = "subagent_list", arguments = {} },
+]
+
+# spawn.rs:122-129 policy rejection. With the baked manifests every unknown
+# kind is also outside the root's allow list, so it takes this branch too.
+[[model.responses]]
+tool_calls = [
+  { name = "subagent_run", arguments = { kind = "nope", name = "n", goal = "g", timeout_ms = 1000 } },
+  { name = "subagent_spawn", arguments = { kind = "conversation", name = "n", goal = "g", timeout_ms = 1000 } },
+]
+
+# spawn.rs:105-107 zero timeout (schema has no minimum); a negative timeout
+# passes the schema "integer" check and fails u32 deserialization
+# (definition.rs:176-182); missing and blank fields fail the schema.
+[[model.responses]]
+tool_calls = [
+  { name = "subagent_run", arguments = { kind = "worker", name = "n", goal = "g", timeout_ms = 0 } },
+  { name = "subagent_spawn", arguments = { kind = "worker", name = "n", goal = "g", timeout_ms = -5 } },
+  { name = "subagent_spawn", arguments = { kind = "worker", name = "n", timeout_ms = 1000 } },
+  { name = "subagent_run", arguments = { kind = "worker", name = "   ", goal = "g", timeout_ms = 1000 } },
+]
+
+# watch.rs:46-51 unknown id and the caller itself (an agent
+# is not its own strict descendant, model.rs:191-197); helper.rs:71-76 malformed ids.
+[[model.responses]]
+tool_calls = [
+  { name = "subagent_watch", arguments = { agent = "agent-99" } },
+  { name = "subagent_watch", arguments = { agent = "agent-1" } },
+  { name = "subagent_watch", arguments = { agent = "bogus" } },
+]
+
+# followup.rs:44-51 and delete.rs:34-41 reject ids outside the subtree before
+# sending a command; "agent-" has no number.
+[[model.responses]]
+tool_calls = [
+  { name = "subagent_interrupt", arguments = { agent = "agent-99", message = "stop" } },
+  { name = "subagent_delete", arguments = { agent = "agent-99" } },
+  { name = "subagent_delete", arguments = { agent = "agent-" } },
+  { name = "subagent_delete", arguments = { agent = "  " } },
+]
+
+[[model.responses]]
+request_contains = [
+  "kind 'nope' is not permitted for this agent. Allowed: worker",
+  "Cannot delete agent-99: it is not a subagent in your subtree.",
+]
+text = "All subagent errors observed."
+
+[[steps]]
+send = "Exercise the subagent error paths."
+tool_errors_allowed = true
+reply_contains = ["All subagent errors observed."]
+tool_contains = [
+  '"kind":"worker"',
+  'subagent_list{}{"subagents":[]}',
+  "tool invocation rejected: subagent_run: kind 'nope' is not permitted for this agent. Allowed: worker",
+  "tool invocation rejected: subagent_spawn: kind 'conversation' is not permitted for this agent. Allowed: worker",
+  "invalid arguments: 'timeout_ms' must be greater than zero",
+  "invalid arguments: invalid value: integer `-5`, expected u32",
+  "invalid arguments: JSON schema validation failed at $.goal: Required",
+  "invalid arguments: JSON schema validation failed at $.name: TrimmedEmpty",
+  "No subagent agent-99 in your subtree (unknown id, or not one of yours).",
+  "No subagent agent-1 in your subtree (unknown id, or not one of yours).",
+  "tool invocation rejected: invalid agent id 'bogus': invalid agent id: bogus",
+  "Cannot interrupt agent-99: it is not a subagent in your subtree.",
+  "Cannot delete agent-99: it is not a subagent in your subtree.",
+  "tool invocation rejected: invalid agent id 'agent-': invalid agent id: agent-",
+  "invalid arguments: JSON schema validation failed at $.agent: TrimmedEmpty",
+]
+
+[logs]
+expect = [
+  "subagent spawn kind rejected by policy: nope",
+  "subagent spawn kind rejected by policy: conversation",
+]

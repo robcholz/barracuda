@@ -1,0 +1,103 @@
+name = "VM input lifecycle"
+description = "A run that reads twice reports input_required progress for each read, lists as input_required, consumes one value and EOF, completes, and then rejects further control as run_not_found."
+
+# The script spends about 500 ms in an empty loop (instruction-hook yields of
+# 100 ms each) before every progress or completion update, so each update
+# arrives after the reply that ends the turn and costs exactly one
+# detached-turn model call.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: start the reader; the first io.read() reports input_required.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end local first = io.read('l') for _ = 1, 50000 do end local second = io.read('l') for _ = 1, 50000 do end print('first=' .. tostring(first)) print('second=' .. tostring(second))" } }]
+
+[[model.responses]]
+text = "The reader started."
+
+[[model.responses]]
+request_contains = ['[detached:progress]', '{\"kind\":\"input_required\",\"run_id\":1}']
+text = "It is waiting for input."
+
+# Step 1: the waiting run lists as input_required.
+[[model.responses]]
+tool_calls = [{ name = "vm_list", arguments = {} }]
+
+[[model.responses]]
+text = "It needs input."
+
+# Step 2: one value is consumed and the second read reports progress again.
+[[model.responses]]
+tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "hello" } }]
+
+[[model.responses]]
+text = "Sent hello."
+
+[[model.responses]]
+request_contains = ['[detached:progress]']
+text = "It wants another line."
+
+# Step 3: EOF makes the second read return nil and the run completes.
+[[model.responses]]
+tool_calls = [{ name = "vm_input", arguments = { run_id = 1, eof = true } }]
+
+[[model.responses]]
+text = "Closed the input."
+
+[[model.responses]]
+request_contains = ['[detached:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"first=hello\",\"second=nil\"]}']
+text = "It printed both values."
+
+# Step 4: a finished or unknown run no longer accepts control.
+[[model.responses]]
+tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "late" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_cancel", arguments = { run_id = 1 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_input", arguments = { run_id = 99, eof = true } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_list", arguments = {} }]
+
+[[model.responses]]
+text = "The finished run is gone."
+
+[[steps]]
+send = "Start a script that reads two lines."
+reply_contains = ["It is waiting for input."]
+tool_contains = ['{"run_id":1}']
+
+[[steps]]
+send = "What state is it in?"
+reply_contains = ["It needs input."]
+tool_contains = ['vm_list{}{"runs":[{"run_id":1,"state":"input_required"}]}']
+
+[[steps]]
+send = "Send it hello."
+reply_contains = ["It wants another line."]
+tool_contains = ['vm_input{"run_id": 1, "input": "hello"}{}']
+
+[[steps]]
+send = "Close its input."
+reply_contains = ["It printed both values."]
+tool_contains = ['vm_input{"run_id": 1, "eof": true}{}']
+
+[[steps]]
+send = "Try to control it again."
+reply_contains = ["The finished run is gone."]
+tool_contains = [
+    'vm_input{"run_id": 1, "input": "late"}{"error":"run_not_found"}',
+    'vm_cancel{"run_id": 1}{"error":"run_not_found"}',
+    'vm_input{"run_id": 99, "eof": true}{"error":"run_not_found"}',
+    'vm_list{}{"runs":[]}',
+]
+tool_errors_allowed = true
+
+[logs]
+expect = ["VM run 1 finished: Success, 2 output line"]

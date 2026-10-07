@@ -1,0 +1,176 @@
+name = "Edge: skill read and resource errors"
+description = "Unknown skills, schema bounds, resource path containment, UTF-8 paging, missing and non-file resources, and range bounds for skill_read and skill_resource_read."
+
+[model]
+mode = "scripted"
+
+# ---- Step 0: no skills installed -------------------------------------------
+
+# tools.rs:82-84 / 117-119: SkillError::NotFound becomes ToolError::InvokeRejected,
+# rendered by runner.rs:383-389 as "tool invocation rejected: ...".
+[[model.responses]]
+tool_calls = [{ name = "skill_read", arguments = { name = "ghost" } }]
+
+# registry.rs:234-245: the limit and the path are validated BEFORE the skill is
+# looked up, so a traversal path on an unknown skill reports the path, while a
+# valid path reports the unknown skill.
+[[model.responses]]
+tool_calls = [
+  { name = "skill_resource_read", arguments = { name = "ghost", path = "notes.txt" } },
+  { name = "skill_resource_read", arguments = { name = "ghost", path = "../escape.txt" } },
+]
+
+# skill_resource_read/schema.json: limit 4..=16384, additionalProperties false;
+# skill_read/schema.json: trimmedNonEmpty name. The framework validates the
+# schema before the handler (definition.rs:548-554), json-validator lib.rs:820.
+[[model.responses]]
+tool_calls = [
+  { name = "skill_resource_read", arguments = { name = "ghost", path = "notes.txt", limit = 3 } },
+  { name = "skill_resource_read", arguments = { name = "ghost", path = "notes.txt", limit = 16385 } },
+  { name = "skill_resource_read", arguments = { name = "ghost", path = "notes.txt", mode = "raw" } },
+  { name = "skill_read", arguments = { name = "   " } },
+]
+
+[[model.responses]]
+text = "Nothing is installed yet."
+
+[[steps]]
+send = "Probe the empty skill catalog."
+tool_errors_allowed = true
+reply_contains = ["Nothing is installed yet."]
+tool_contains = [
+  'tool invocation rejected: unknown skill "ghost"; call skill_list to see what is available.',
+  "Could not read resource for skill \"ghost\": invalid resource path '../escape.txt' for skill 'ghost'",
+  'invalid arguments: JSON schema validation failed at $.limit: Minimum',
+  'invalid arguments: JSON schema validation failed at $.limit: Maximum',
+  'invalid arguments: JSON schema validation failed at $.mode: AdditionalProperty',
+  'invalid arguments: JSON schema validation failed at $.name: TrimmedEmpty',
+]
+
+# ---- Step 1: install alpha and read its resources --------------------------
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/alpha/SKILL.md", content = "---\nname: alpha\ndescription: Use alpha for edge tests.\n---\n\n# Alpha\n\nRead notes.txt.\n" } }]
+
+# "abcé" is 5 bytes: a b c 0xC3 0xA9.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/alpha/notes.txt", content = "abcé" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/alpha/refs/guide.md", content = "guide" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+# tools.rs:75 trims the name before lookup.
+[[model.responses]]
+request_contains = ["- alpha: Use alpha for edge tests."]
+tool_calls = [{ name = "skill_read", arguments = { name = " alpha " } }]
+
+[[model.responses]]
+text = "Alpha is installed."
+
+[[steps]]
+send = "Install the alpha skill."
+reply_contains = ["Alpha is installed."]
+tool_contains = [
+  "Skills refreshed. Use skill_list to inspect the catalog.",
+  '[{"name":"alpha","description":"Use alpha for edge tests."}]',
+  "# Alpha",
+  "Read notes.txt.",
+]
+
+# ---- Step 2: resource paging and containment -------------------------------
+
+# Full read (default limit 4096).
+[[model.responses]]
+request_contains = ["- alpha: Use alpha for edge tests."]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt" } }]
+
+# registry.rs:412-434: a page that ends inside a multi-byte character is cut
+# back to the last whole character when more bytes follow.
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt", offset = 0, limit = 4 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt", offset = 3, limit = 4 } }]
+
+# Offset 4 starts on a continuation byte and nothing follows: InvalidResourceUtf8
+# (registry.rs:436-439, document.rs:254).
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt", offset = 4, limit = 4 } }]
+
+# offset == length is an empty page; offset > length is out of bounds
+# (registry.rs:267-274, document.rs:214).
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt", offset = 5 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt", offset = 6 } }]
+
+[[model.responses]]
+text = "Paged the notes."
+
+[[steps]]
+send = "Page through the alpha notes."
+reply_contains = ["Paged the notes."]
+tool_contains = [
+  '{"name":"alpha","path":"notes.txt","content":"abcé","offset":0,"bytes":5,"next_offset":null}',
+  '"content":"abc","offset":0,"bytes":3,"next_offset":3}',
+  '"content":"é","offset":3,"bytes":2,"next_offset":null}',
+  "Could not read resource for skill \"alpha\": skill 'alpha' resource 'notes.txt' is not valid UTF-8 in the requested range",
+  '"content":"","offset":5,"bytes":0,"next_offset":null}',
+  "Could not read resource for skill \"alpha\": resource offset 6 exceeds length 5 for skill 'alpha' path 'notes.txt'",
+]
+
+# ---- Step 3: path validation, nested, missing, directory, SKILL.md ---------
+
+# registry.rs:395-410: empty, absolute, NUL, "", "." and ".." components are
+# rejected before touching the filesystem.
+[[model.responses]]
+tool_calls = [
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "../alpha/notes.txt" } },
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "/workspace/media/skills/alpha/notes.txt" } },
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "refs/../notes.txt" } },
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "./notes.txt" } },
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "refs//guide.md" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "refs/guide.md" } }]
+
+# registry.rs:251-265: a missing path fails metadata(); a directory is not a file.
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "missing.txt" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "refs" } }]
+
+# SKILL.md itself is an ordinary resource: it is returned raw, frontmatter included.
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "SKILL.md", limit = 16 } }]
+
+[[model.responses]]
+text = "Checked resource paths."
+
+[[steps]]
+send = "Try odd resource paths."
+reply_contains = ["Checked resource paths."]
+tool_contains = [
+  "invalid resource path '../alpha/notes.txt' for skill 'alpha'",
+  "invalid resource path '/workspace/media/skills/alpha/notes.txt' for skill 'alpha'",
+  "invalid resource path 'refs/../notes.txt' for skill 'alpha'",
+  "invalid resource path './notes.txt' for skill 'alpha'",
+  "invalid resource path 'refs//guide.md' for skill 'alpha'",
+  '{"name":"alpha","path":"refs/guide.md","content":"guide","offset":0,"bytes":5,"next_offset":null}',
+  "Could not read resource for skill \"alpha\": failed to read skill 'alpha' resource 'missing.txt': ",
+  "path not found",
+  "Could not read resource for skill \"alpha\": skill 'alpha' resource 'refs' is not a regular file",
+  '"path":"SKILL.md","content":"---\nname: alpha\n","offset":0,"bytes":16,"next_offset":16}',
+]

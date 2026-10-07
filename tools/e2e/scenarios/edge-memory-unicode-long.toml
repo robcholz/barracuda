@@ -1,0 +1,43 @@
+name = "Edge: memory unicode and long content"
+description = "Unicode content dedups and searches case-insensitively, keywords are searchable, and a long memory is stored and recalled without truncation."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "memory_store", arguments = { content = "Der Benutzer trinkt gern Grüntee 🍵 und liest Ελληνικά.", tags = ["getränke"], keywords = ["Kräutertee"] } }]
+
+# Unicode lowercasing makes the uppercase variant a duplicate
+# (plugins/agent/crates/memory/src/long_term_memory.rs:604-610).
+[[model.responses]]
+tool_calls = [{ name = "memory_store", arguments = { content = "DER BENUTZER TRINKT GERN GRÜNTEE 🍵 UND LIEST ΕΛΛΗΝΙΚΆ." } }]
+
+# The query matches only the keyword, never the content.
+[[model.responses]]
+tool_calls = [{ name = "memory_recall", arguments = { query = "KRÄUTER" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_recall", arguments = { labels = ["getränke"], query = "ελληνικά" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_store", arguments = { content = "Long memory start. Filler line 000 mit Ümläuten ✓. Filler line 001 mit Ümläuten ✓. Filler line 002 mit Ümläuten ✓. Filler line 003 mit Ümläuten ✓. Filler line 004 mit Ümläuten ✓. Filler line 005 mit Ümläuten ✓. Filler line 006 mit Ümläuten ✓. Filler line 007 mit Ümläuten ✓. Filler line 008 mit Ümläuten ✓. Filler line 009 mit Ümläuten ✓. Filler line 010 mit Ümläuten ✓. Filler line 011 mit Ümläuten ✓. Filler line 012 mit Ümläuten ✓. Filler line 013 mit Ümläuten ✓. Filler line 014 mit Ümläuten ✓. Filler line 015 mit Ümläuten ✓. Filler line 016 mit Ümläuten ✓. Filler line 017 mit Ümläuten ✓. Filler line 018 mit Ümläuten ✓. Filler line 019 mit Ümläuten ✓. Filler line 020 mit Ümläuten ✓. Filler line 021 mit Ümläuten ✓. Filler line 022 mit Ümläuten ✓. Filler line 023 mit Ümläuten ✓. Filler line 024 mit Ümläuten ✓. Filler line 025 mit Ümläuten ✓. Filler line 026 mit Ümläuten ✓. Filler line 027 mit Ümläuten ✓. Filler line 028 mit Ümläuten ✓. Filler line 029 mit Ümläuten ✓. Filler line 030 mit Ümläuten ✓. Filler line 031 mit Ümläuten ✓. Filler line 032 mit Ümläuten ✓. Filler line 033 mit Ümläuten ✓. Filler line 034 mit Ümläuten ✓. Filler line 035 mit Ümläuten ✓. Filler line 036 mit Ümläuten ✓. Filler line 037 mit Ümläuten ✓. Filler line 038 mit Ümläuten ✓. Filler line 039 mit Ümläuten ✓. Filler line 040 mit Ümläuten ✓. Filler line 041 mit Ümläuten ✓. Filler line 042 mit Ümläuten ✓. Filler line 043 mit Ümläuten ✓. Filler line 044 mit Ümläuten ✓. Filler line 045 mit Ümläuten ✓. Filler line 046 mit Ümläuten ✓. Filler line 047 mit Ümläuten ✓. Filler line 048 mit Ümläuten ✓. Filler line 049 mit Ümläuten ✓. Filler line 050 mit Ümläuten ✓. Filler line 051 mit Ümläuten ✓. Filler line 052 mit Ümläuten ✓. Filler line 053 mit Ümläuten ✓. Filler line 054 mit Ümläuten ✓. Filler line 055 mit Ümläuten ✓. Filler line 056 mit Ümläuten ✓. Filler line 057 mit Ümläuten ✓. Filler line 058 mit Ümläuten ✓. Filler line 059 mit Ümläuten ✓. Filler line 060 mit Ümläuten ✓. Filler line 061 mit Ümläuten ✓. Filler line 062 mit Ümläuten ✓. Filler line 063 mit Ümläuten ✓. Filler line 064 mit Ümläuten ✓. Filler line 065 mit Ümläuten ✓. Filler line 066 mit Ümläuten ✓. Filler line 067 mit Ümläuten ✓. Filler line 068 mit Ümläuten ✓. Filler line 069 mit Ümläuten ✓. Filler line 070 mit Ümläuten ✓. Filler line 071 mit Ümläuten ✓. Filler line 072 mit Ümläuten ✓. Filler line 073 mit Ümläuten ✓. Filler line 074 mit Ümläuten ✓. Filler line 075 mit Ümläuten ✓. Filler line 076 mit Ümläuten ✓. Filler line 077 mit Ümläuten ✓. Filler line 078 mit Ümläuten ✓. Filler line 079 mit Ümläuten ✓. Filler line 080 mit Ümläuten ✓. Filler line 081 mit Ümläuten ✓. Filler line 082 mit Ümläuten ✓. Filler line 083 mit Ümläuten ✓. Filler line 084 mit Ümläuten ✓. Filler line 085 mit Ümläuten ✓. Filler line 086 mit Ümläuten ✓. Filler line 087 mit Ümläuten ✓. Filler line 088 mit Ümläuten ✓. Filler line 089 mit Ümläuten ✓. Filler line 090 mit Ümläuten ✓. Filler line 091 mit Ümläuten ✓. Filler line 092 mit Ümläuten ✓. Filler line 093 mit Ümläuten ✓. Filler line 094 mit Ümläuten ✓. Filler line 095 mit Ümläuten ✓. Filler line 096 mit Ümläuten ✓. Filler line 097 mit Ümläuten ✓. Filler line 098 mit Ümläuten ✓. Filler line 099 mit Ümläuten ✓. Filler line 100 mit Ümläuten ✓. Filler line 101 mit Ümläuten ✓. Filler line 102 mit Ümläuten ✓. Filler line 103 mit Ümläuten ✓. Filler line 104 mit Ümläuten ✓. Filler line 105 mit Ümläuten ✓. Filler line 106 mit Ümläuten ✓. Filler line 107 mit Ümläuten ✓. Filler line 108 mit Ümläuten ✓. Filler line 109 mit Ümläuten ✓. Filler line 110 mit Ümläuten ✓. Filler line 111 mit Ümläuten ✓. Filler line 112 mit Ümläuten ✓. Filler line 113 mit Ümläuten ✓. Filler line 114 mit Ümläuten ✓. Filler line 115 mit Ümläuten ✓. Filler line 116 mit Ümläuten ✓. Filler line 117 mit Ümläuten ✓. Filler line 118 mit Ümläuten ✓. Filler line 119 mit Ümläuten ✓. Filler line 120 mit Ümläuten ✓. Filler line 121 mit Ümläuten ✓. Filler line 122 mit Ümläuten ✓. Filler line 123 mit Ümläuten ✓. Filler line 124 mit Ümläuten ✓. Filler line 125 mit Ümläuten ✓. Filler line 126 mit Ümläuten ✓. Filler line 127 mit Ümläuten ✓. Filler line 128 mit Ümläuten ✓. Filler line 129 mit Ümläuten ✓. Filler line 130 mit Ümläuten ✓. Filler line 131 mit Ümläuten ✓. Filler line 132 mit Ümläuten ✓. Filler line 133 mit Ümläuten ✓. Filler line 134 mit Ümläuten ✓. Filler line 135 mit Ümläuten ✓. Filler line 136 mit Ümläuten ✓. Filler line 137 mit Ümläuten ✓. Filler line 138 mit Ümläuten ✓. Filler line 139 mit Ümläuten ✓. Filler line 140 mit Ümläuten ✓. Filler line 141 mit Ümläuten ✓. Filler line 142 mit Ümläuten ✓. Filler line 143 mit Ümläuten ✓. Filler line 144 mit Ümläuten ✓. Filler line 145 mit Ümläuten ✓. Filler line 146 mit Ümläuten ✓. Filler line 147 mit Ümläuten ✓. Filler line 148 mit Ümläuten ✓. Filler line 149 mit Ümläuten ✓. Filler line 150 mit Ümläuten ✓. Filler line 151 mit Ümläuten ✓. Filler line 152 mit Ümläuten ✓. Filler line 153 mit Ümläuten ✓. Filler line 154 mit Ümläuten ✓. Filler line 155 mit Ümläuten ✓. Filler line 156 mit Ümläuten ✓. Filler line 157 mit Ümläuten ✓. Filler line 158 mit Ümläuten ✓. Filler line 159 mit Ümläuten ✓. Filler line 160 mit Ümläuten ✓. Filler line 161 mit Ümläuten ✓. Filler line 162 mit Ümläuten ✓. Filler line 163 mit Ümläuten ✓. Filler line 164 mit Ümläuten ✓. Filler line 165 mit Ümläuten ✓. Filler line 166 mit Ümläuten ✓. Filler line 167 mit Ümläuten ✓. Filler line 168 mit Ümläuten ✓. Filler line 169 mit Ümläuten ✓. ENDMARK-7Q." } }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_recall", arguments = { query = "endmark-7q" } }]
+
+[[model.responses]]
+request_contains = ['Your long-term memory topics: getränke']
+text = "Unicode and long memories checked."
+
+[[steps]]
+send = "Remember some unicode and a long note."
+reply_contains = ["Unicode and long memories checked."]
+tool_contains = [
+  "Stored memory a-0.",
+  "Already remembered (as a-0); nothing changed.",
+  "memory_recall{\"query\": \"KRÄUTER\"}Recalled memories:\n- [a-0] (getränke) Der Benutzer trinkt gern Grüntee 🍵 und liest Ελληνικά.\n",
+  "memory_recall{\"labels\": [\"getränke\"], \"query\": \"ελληνικά\"}Recalled memories:\n- [a-0] (getränke) Der Benutzer trinkt gern Grüntee 🍵 und liest Ελληνικά.\n",
+  "Stored memory a-1.",
+  "memory_recall{\"query\": \"endmark-7q\"}Recalled memories:\n- [a-1] Long memory start. Filler line 000",
+  "Filler line 169 mit Ümläuten ✓. ENDMARK-7Q.\n",
+]

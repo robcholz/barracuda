@@ -100,6 +100,14 @@ Every scenario also fails when a Tool result is `tool not found` or an
 `{"error": ...}` object, when llm-tape rejects or misses a model call, or when
 the System logs an `ERROR` or a panic.
 
+Keep a scripted scenario below eight committed turns and well below the
+compaction threshold (about 24 KB of transcript). After eight turns the Agent
+extracts long-term memory, and a long transcript is summarized; both make a
+non-streaming model call that a scripted tape cannot answer, so the call takes
+the next scripted response and every later step shifts. A detached completion
+(a VM run that ends after its turn, for example) starts a turn of its own and
+counts too. Split longer cases into numbered files such as `edge-vm-output-2`.
+
 ### Memory
 
 The host Platform counts the ordinary (internal-RAM) heap separately from bulk

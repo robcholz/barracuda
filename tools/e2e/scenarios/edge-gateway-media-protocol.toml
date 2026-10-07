@@ -1,0 +1,76 @@
+name = "Gateway media stream protocol errors"
+description = "gateway_send_media rejects a duplicate start, an out-of-order chunk, non-canonical base64, an unknown stream, and commands after finish, without consuming the stream sequence; schema-invalid commands fail the oneOf check."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "s1", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file", filename = "a.txt", mime_type = "text/plain" } }]
+
+# The first worker holds s1 open waiting for chunks, so its id is still taken.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "s1", sequence = 0, channel = "web", conversation_id = "conversation", kind = "image" } }]
+
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"duplicate_stream\"}","is_error":true']
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "s1", sequence = 2, content_base64 = "aGVsbG8=" } }]
+
+# "aGVsbG9=" passes the schema's contentEncoding check (alphabet and padding
+# only) but has non-zero trailing bits, which the runtime decoder rejects.
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"out_of_order\"}","is_error":true']
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "s1", sequence = 1, content_base64 = "aGVsbG9=" } }]
+
+# Neither rejection advanced the stream: sequence 1 is still the next one.
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"invalid_request\"}","is_error":true']
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "s1", sequence = 1, content_base64 = "aGVsbG8=" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "nope", sequence = 1, content_base64 = "aGVsbG8=" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "finish", stream_id = "s1", sequence = 2 } }]
+
+# Finish removes the session immediately.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "s1", sequence = 3, content_base64 = "aGVsbG8=" } }]
+
+# Schema violations: start must use sequence 0, stream ids match
+# ^[A-Za-z0-9_.-]+$, kind is an enum, and padding longer than two is invalid.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "s2", sequence = 1, channel = "web", conversation_id = "conversation", kind = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "bad id", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "s3", sequence = 0, channel = "web", conversation_id = "conversation", kind = "document" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "s1", sequence = 1, content_base64 = "a===" } }]
+
+[[model.responses]]
+text = "Media protocol checked."
+
+[[steps]]
+send = "Exercise the media stream."
+reply_contains = ["Media protocol checked."]
+tool_contains = [
+  'gateway_send_media{"action": "start", "stream_id": "s1", "sequence": 0, "channel": "web", "conversation_id": "conversation", "kind": "file", "filename": "a.txt", "mime_type": "text/plain"}{"accepted_sequence":0}',
+  '"kind": "image"}{"error":"duplicate_stream"}',
+  '{"action": "chunk", "stream_id": "s1", "sequence": 2, "content_base64": "aGVsbG8="}{"error":"out_of_order"}',
+  '{"action": "chunk", "stream_id": "s1", "sequence": 1, "content_base64": "aGVsbG9="}{"error":"invalid_request"}',
+  '{"action": "chunk", "stream_id": "s1", "sequence": 1, "content_base64": "aGVsbG8="}{"accepted_sequence":1}',
+  '{"action": "chunk", "stream_id": "nope", "sequence": 1, "content_base64": "aGVsbG8="}{"error":"unknown_stream"}',
+  '{"action": "finish", "stream_id": "s1", "sequence": 2}{"accepted_sequence":2}',
+  '{"action": "chunk", "stream_id": "s1", "sequence": 3, "content_base64": "aGVsbG8="}{"error":"unknown_stream"}',
+  '"stream_id": "s2", "sequence": 1, "channel": "web", "conversation_id": "conversation", "kind": "file"}invalid arguments: JSON schema validation failed at $: OneOf',
+  '"stream_id": "bad id", "sequence": 0, "channel": "web", "conversation_id": "conversation", "kind": "file"}invalid arguments: JSON schema validation failed at $: OneOf',
+  '"kind": "document"}invalid arguments: JSON schema validation failed at $: OneOf',
+  '"content_base64": "a==="}invalid arguments: JSON schema validation failed at $: OneOf',
+]
+tool_errors_allowed = true

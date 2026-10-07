@@ -1,0 +1,33 @@
+name = "VM output limits (4)"
+description = "A run may emit exactly 1024 lines; a 1025th line, an unterminated line after 1024, or more than 64 KiB of output fails the run with lua_runtime and keeps only the output accepted so far."
+
+# Each script first spends about 500 ms in an empty loop (instruction-hook
+# yields of 100 ms each) so its completion always arrives after the reply that
+# ends the turn, costing exactly one detached-turn model call.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: exactly MAX_OUTPUT_LINES_PER_RUN lines succeed.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end print('start') io.write(string.rep('x', 65536))" } }]
+
+[[model.responses]]
+text = "The large-output script is running."
+
+[[model.responses]]
+request_contains = ['{\"run_id\":1,\"outcome\":\"error\",\"output\":[\"start\"],\"error\":\"lua_runtime\",\"diagnostic\":\"Lua output limit exceeded\"}']
+text = "The byte limit was enforced."
+
+[[steps]]
+send = "Print more than 64 KiB."
+reply_contains = ["The byte limit was enforced."]
+tool_contains = ['{"run_id":1}']
+
+[logs]
+expect = [
+    "VM run 1 failed: Some\\(LuaRuntime\\) Lua output limit exceeded",
+]

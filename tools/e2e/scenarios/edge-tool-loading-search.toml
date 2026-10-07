@@ -1,0 +1,34 @@
+name = "Tool search catalog"
+description = "tool_search ignores filter-like arguments and always returns the full sorted loadable catalog; a group disappears from the catalog once its load is applied, and loading it again reports already_loaded."
+
+[model]
+mode = "scripted"
+
+# The schema declares no properties but allows extras, and EmptyArgs ignores
+# unknown fields, so this is not a filter.
+[[model.responses]]
+tool_calls = [{ name = "tool_search", arguments = { query = "time", limit = 1 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_search", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+text = "Catalog checked."
+
+[[steps]]
+send = "What tools can you load?"
+reply_contains = ["Catalog checked."]
+tool_contains = [
+  'tool_search{"query": "time", "limit": 1}{"tool_groups":[{"id":"file","tools":[{"description":',
+  '{"id":"gateway","tools":[{"description":"Use `gateway_send` for one complete text message.',
+  '{"id":"workflow","tools":[',
+  'tool_load{"group_id": "file"}{"available_next_turn":true,"group_id":"file","loaded":true}',
+  'tool_search{}{"tool_groups":[{"id":"gateway","tools":[',
+  'tool_load{"group_id": "file"}{"already_loaded":true,"group_id":"file","loaded":true}',
+]

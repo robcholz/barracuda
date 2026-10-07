@@ -1,0 +1,101 @@
+name = "Edge: profile documents"
+description = "Profile reads on a fresh System, clear of an absent document, whitespace-only content, strict document ids, unicode content, and cross-turn projection."
+
+[model]
+mode = "scripted"
+
+# --- Step 0: absent, empty, whitespace, invalid ids --------------------------
+
+# A fresh System has no profile documents and projects none.
+[[model.responses]]
+request_contains = ['</mode_policy>\n\nAvailable skills:']
+tool_calls = [{ name = "profile_read", arguments = { document = "soul" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "profile_read", arguments = { document = "assistant_identity" } }]
+
+# Clearing an absent document creates it empty (profile.rs:209-211).
+[[model.responses]]
+tool_calls = [{ name = "profile_clear", arguments = { document = "user_profile" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "profile_read", arguments = { document = "user_profile" } }]
+
+# profile_replace content has no trimmedNonEmpty rule, so whitespace is stored.
+[[model.responses]]
+tool_calls = [{ name = "profile_replace", arguments = { document = "soul", content = "  \n\t " } }]
+
+# Whitespace-only reads as empty and is not projected into the system prompt.
+[[model.responses]]
+tool_calls = [{ name = "profile_read", arguments = { document = "soul" } }]
+
+# The schema enum is exact, so the store's case-insensitive parser and its
+# `user`/`identity` aliases are unreachable from the model.
+[[model.responses]]
+request_contains = ['</mode_policy>\n\nAvailable skills:']
+tool_calls = [
+  { name = "profile_replace", arguments = { document = "USER_PROFILE", content = "x" } },
+  { name = "profile_read", arguments = { document = "user" } },
+  { name = "profile_clear", arguments = { document = "identity" } },
+  { name = "profile_replace", arguments = { document = "user_profile" } },
+  { name = "profile_read", arguments = { document = 5 } },
+  { name = "profile_read", arguments = {} },
+]
+
+[[model.responses]]
+request_contains = ['"content":"invalid arguments: JSON schema validation failed at $.document: Enum","is_error":true']
+text = "Profile edge cases done."
+
+# --- Step 1: unicode content -------------------------------------------------
+
+[[model.responses]]
+tool_calls = [{ name = "profile_replace", arguments = { document = "user_profile", content = "Name: Zoë 🦀\nTimezone: UTC+1" } }]
+
+[[model.responses]]
+request_contains = ['</mode_policy>\n\nName: Zoë 🦀\nTimezone: UTC+1']
+tool_calls = [{ name = "profile_read", arguments = { document = "user_profile" } }]
+
+[[model.responses]]
+text = "Profile saved."
+
+# --- Step 2: projection persists across turns; clear removes it --------------
+
+[[model.responses]]
+request_contains = ['</mode_policy>\n\nName: Zoë 🦀\nTimezone: UTC+1']
+tool_calls = [{ name = "profile_clear", arguments = { document = "user_profile" } }]
+
+[[model.responses]]
+request_contains = ['</mode_policy>\n\nAvailable skills:']
+text = "Profile cleared."
+
+[[steps]]
+send = "Inspect the profile documents."
+reply_contains = ["Profile edge cases done."]
+tool_errors_allowed = true
+tool_contains = [
+  'profile_read{"document": "soul"}Profile document soul does not exist.',
+  'profile_read{"document": "assistant_identity"}Profile document assistant_identity does not exist.',
+  'profile_clear{"document": "user_profile"}Cleared profile document user_profile.',
+  'profile_read{"document": "user_profile"}Profile document user_profile is empty.',
+  'Replaced profile document soul.',
+  'profile_read{"document": "soul"}Profile document soul is empty.',
+  'profile_replace{"document": "USER_PROFILE", "content": "x"}invalid arguments: JSON schema validation failed at $.document: Enum',
+  'profile_read{"document": "user"}invalid arguments: JSON schema validation failed at $.document: Enum',
+  'profile_clear{"document": "identity"}invalid arguments: JSON schema validation failed at $.document: Enum',
+  'profile_replace{"document": "user_profile"}invalid arguments: JSON schema validation failed at $.content: Required',
+  'profile_read{"document": 5}invalid arguments: JSON schema validation failed at $.document: Type { expected: String }',
+  'profile_read{}invalid arguments: JSON schema validation failed at $.document: Required',
+]
+
+[[steps]]
+send = "My name is Zoë."
+reply_contains = ["Profile saved."]
+tool_contains = [
+  'Replaced profile document user_profile.',
+  "profile_read{\"document\": \"user_profile\"}Profile document user_profile:\nName: Zoë 🦀\nTimezone: UTC+1",
+]
+
+[[steps]]
+send = "Forget my profile."
+reply_contains = ["Profile cleared."]
+tool_contains = ['profile_clear{"document": "user_profile"}Cleared profile document user_profile.']

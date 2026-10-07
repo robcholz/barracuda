@@ -1,0 +1,161 @@
+name = "Workflow load validation (1)"
+description = "workflow_actions renders the static Action catalog; workflow_load rejects unknown Actions, malformed addresses, rules, topics, references, links, and control flow with stable codes; duplicate IDs, unknown or repeated unloads, and bundled Workflows are rejected; workflow_list tracks load order."
+
+# Every rejected definition uses the never-emitted Event `e2e.never`, and the
+# accepted ones never fire, so no Workflow runs during this scenario.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+# Step 0: the Action catalog.
+[[model.responses]]
+tool_calls = [{ name = "workflow_actions", arguments = {} }]
+
+[[model.responses]]
+text = "I read the Action catalog."
+
+# Step 1: definitions rejected by the Workflow service or the tool schema.
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-unknown", match = { event = "e2e.never" }, steps = [{ call = "nope.missing" }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-address", match = { event = "e2e.never" }, steps = [{ call = "vm run", arguments = { source = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-rule", match = { event = "scheduler triggered" }, steps = [{ call = "vm.run", arguments = { source = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-topic", match = { event = "e2e.never", topic = "topic-is-17-bytes" }, steps = [{ call = "vm.run", arguments = { source = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-ref-short", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "$previous" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-ref-nested", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "$event.input.a.b" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-extra-arg", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { script = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-no-source", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = {} }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-first-prev", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "$previous.output.output" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-prev-field", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "print(1)" } }, { call = "vm.cancel", arguments = { run_id = "$previous.output.run_id" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-direct", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "print(1)" } }, { call = "vm.cancel" }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-early-return", match = { event = "e2e.never" }, steps = [{ return = {} }, { call = "vm.run", arguments = { source = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-bad-if", match = { event = "e2e.never" }, steps = [{ if = { source = "event.input.id", equals = "x" }, then = [], else = [] }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-empty", match = { event = "e2e.never" }, steps = [] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-return-value", match = { event = "e2e.never" }, steps = [{ return = { value = 1 } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_list", arguments = {} }]
+
+[[model.responses]]
+text = "None of those definitions loaded."
+
+# Step 2: duplicate IDs, list order, and unload errors.
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-dup", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = "print(1)" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-dup", match = { event = "e2e.other" }, steps = [{ return = {} }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "imessage-to-agent", match = { event = "e2e.never" }, steps = [{ return = {} }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-return-only", match = { event = "e2e.never", topic = "t" }, steps = [{ return = {} }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_list", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_unload", arguments = { id = "e2e-dup" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_unload", arguments = { id = "e2e-dup" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_unload", arguments = { id = "never-loaded" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_unload", arguments = { id = "imessage-to-agent" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_unload", arguments = { id = "bad id!" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_list", arguments = {} }]
+
+[[model.responses]]
+text = "Duplicates and unloads behaved as expected."
+
+# Step 3: link validation is skipped for branching Workflows and checks only
+# argument names, not value types.
+[[steps]]
+send = "Show me the Workflow Actions."
+reply_contains = ["I read the Action catalog."]
+tool_contains = [
+    'workflow_actions{}{"actions":[{"address":"session.new","request_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",',
+    '{"address":"vm.run","request_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"source":{"type":"string"}},"required":["source"],"additionalProperties":false},"response_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[',
+    '{"address":"vm.cancel","request_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"run_id":{"type":"integer","minimum":1,"maximum":4294967295}},"required":["run_id"],"additionalProperties":false},"response_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"type":"object","properties":{},"additionalProperties":false},{"type":"object","properties":{"error":{"const":"run_not_found"}},"required":["error"],"additionalProperties":false}]}}]}',
+]
+
+[[steps]]
+send = "Try loading these broken Workflows."
+reply_contains = ["None of those definitions loaded."]
+tool_contains = [
+    '[{"call": "nope.missing"}]}{"error":"unknown_action"}',
+    '"id": "e2e-address", "match": {"event": "e2e.never"}, "steps": [{"call": "vm run", "arguments": {"source": "print(1)"}}]}{"error":"invalid_action_address"}',
+    '"match": {"event": "scheduler triggered"}, "steps": [{"call": "vm.run", "arguments": {"source": "print(1)"}}]}{"error":"invalid_rule"}',
+    '"topic": "topic-is-17-bytes"}, "steps": [{"call": "vm.run", "arguments": {"source": "print(1)"}}]}{"error":"invalid_topic"}',
+    '"arguments": {"source": "$previous"}}]}{"error":"invalid_arguments"}',
+    '"arguments": {"source": "$event.input.a.b"}}]}{"error":"invalid_arguments"}',
+    '"arguments": {"script": "print(1)"}}]}{"error":"invalid_link"}',
+    '"arguments": {}}]}{"error":"invalid_link"}',
+    '"arguments": {"source": "$previous.output.output"}}]}{"error":"invalid_link"}',
+    # vm.run's success shape supplies run_id, so the link is valid.
+    '"arguments": {"run_id": "$previous.output.run_id"}}]}{}',
+    '{"call": "vm.cancel"}]}{"error":"invalid_link"}',
+    '"steps": [{"return": {}}, {"call": "vm.run", "arguments": {"source": "print(1)"}}]}{"error":"invalid_control_flow"}',
+    '"then": [], "else": []}]}{"error":"invalid_control_flow"}',
+    '"steps": []}invalid arguments: JSON schema validation failed at $.steps: MinItems',
+    '"steps": [{"return": {"value": 1}}]}invalid arguments: JSON schema validation failed at $.steps[0]: OneOf',
+    'workflow_list{}{"workflows":["imessage-to-agent","agent-to-imessage","e2e-prev-field"]}',
+]
+tool_errors_allowed = true
+
+[[steps]]
+send = "Load, duplicate, list, and unload Workflows."
+reply_contains = ["Duplicates and unloads behaved as expected."]
+tool_contains = [
+    '"id": "e2e-dup", "match": {"event": "e2e.never"}, "steps": [{"call": "vm.run", "arguments": {"source": "print(1)"}}]}{}',
+    '"id": "e2e-dup", "match": {"event": "e2e.other"}, "steps": [{"return": {}}]}{"error":"duplicate_id"}',
+    '"id": "imessage-to-agent", "match": {"event": "e2e.never"}, "steps": [{"return": {}}]}{"error":"duplicate_id"}',
+    '"id": "e2e-return-only", "match": {"event": "e2e.never", "topic": "t"}, "steps": [{"return": {}}]}{}',
+    'workflow_list{}{"workflows":["imessage-to-agent","agent-to-imessage","e2e-prev-field","e2e-dup","e2e-return-only"]}',
+    'workflow_unload{"id": "e2e-dup"}{}',
+    'workflow_unload{"id": "e2e-dup"}{"error":"not_found"}',
+    'workflow_unload{"id": "never-loaded"}{"error":"not_found"}',
+    'workflow_unload{"id": "imessage-to-agent"}{"error":"not_unloadable"}',
+    'workflow_unload{"id": "bad id!"}invalid arguments: JSON schema validation failed at $.id: Pattern',
+    'workflow_list{}{"workflows":["imessage-to-agent","agent-to-imessage","e2e-prev-field","e2e-return-only"]}',
+]
+tool_errors_allowed = true
+

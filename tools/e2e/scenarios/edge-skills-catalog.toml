@@ -1,0 +1,192 @@
+name = "Edge: skill catalog reload"
+description = "Malformed SKILL.md packages are left out of the catalog and reported by skill_reload without hiding the other skills; directories without SKILL.md are skipped; a deleted skill stays stale until reload and then disappears."
+
+[model]
+mode = "scripted"
+
+# ---- Step 0: install alpha, plus a directory without SKILL.md ---------------
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/alpha/SKILL.md", content = "---\nname: alpha\ndescription: Use alpha for edge tests.\n---\n\n# Alpha\n\nAlpha body.\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/alpha/notes.txt", content = "alpha notes" } }]
+
+# registry.rs:368-374: a directory without SKILL.md is skipped, not an error.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/no-manifest/readme.txt", content = "not a skill" } }]
+
+# registry.rs:363-365: plain files directly under a root are ignored.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/loose.md", content = "---\nname: loose\ndescription: Loose file.\n---\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+[[model.responses]]
+text = "Catalog ready."
+
+[[steps]]
+send = "Install alpha."
+reply_contains = ["Catalog ready."]
+tool_contains = [
+  "Skills refreshed. Use skill_list to inspect the catalog.",
+  'skill_list{}[{"name":"alpha","description":"Use alpha for edge tests."}]',
+]
+
+# ---- Step 1: malformed manifests in beta/ ----------------------------------
+# Every reload succeeds and reports beta as left out with its reason, also
+# logged at WARN; skill_list keeps showing only alpha.
+
+# document.rs:416-419 MissingOpeningFence.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "name: beta\ndescription: Beta.\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# document.rs:430-437 MissingClosingFence.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "---\nname: beta\ndescription: Beta.\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# document.rs:311-317 name/directory mismatch.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "---\nname: gamma\ndescription: Beta.\n---\nbody\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# document.rs:318 + 460-466 missing description.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "---\nname: beta\n---\nbody\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# document.rs:386-394 + 408-410 duplicate scalar field.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "---\nname: beta\nname: beta\ndescription: Beta.\n---\nbody\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# document.rs:303-308 JSON frontmatter.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/beta/SKILL.md", overwrite = true, content = "---\n{\"name\": \"beta\", \"description\": \"Beta.\"}\n---\nbody\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+# The catalog is unchanged after six failed reloads.
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+# Remove the bad manifest; the empty beta/ directory is then skipped.
+[[model.responses]]
+tool_calls = [{ name = "file_delete", arguments = { path = "/workspace/media/skills/beta/SKILL.md" } }]
+
+[[model.responses]]
+request_contains = ["- alpha: Use alpha for edge tests."]
+text = "Rejected the broken beta skill."
+
+[[steps]]
+send = "Try installing a broken beta skill."
+reply_contains = ["Rejected the broken beta skill."]
+tool_contains = [
+  "skill_reload{}Skills refreshed. Use skill_list to inspect the catalog.\nThese skill packages were left out:",
+  'skill_list{}[{"name":"alpha","description":"Use alpha for edge tests."}]',
+]
+
+# ---- Step 2: invalid directory name, then recovery -------------------------
+
+# document.rs:301 + 440-458: the directory name is validated first; "--" is not
+# allowed. (Lowercase on purpose so a case-folding media filesystem cannot
+# change the outcome.)
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/media/skills/bad--name/SKILL.md", content = "---\nname: bad--name\ndescription: Bad name.\n---\nbody\n" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_delete", arguments = { path = "/workspace/media/skills/bad--name/SKILL.md" } }]
+
+# With every bad manifest gone, reload succeeds again.
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+[[model.responses]]
+text = "Catalog recovered."
+
+[[steps]]
+send = "Try a badly named skill, then clean up."
+reply_contains = ["Catalog recovered."]
+tool_contains = [
+  "skill_reload{}Skills refreshed. Use skill_list to inspect the catalog.\nThese skill packages were left out:",
+  "skill_reload{}Skills refreshed. Use skill_list to inspect the catalog.",
+  'skill_list{}[{"name":"alpha","description":"Use alpha for edge tests."}]',
+]
+
+# ---- Step 3: delete alpha; stale until reload ------------------------------
+
+[[model.responses]]
+tool_calls = [{ name = "file_delete", arguments = { path = "/workspace/media/skills/alpha/SKILL.md" } }]
+
+# The snapshot still lists alpha, so the lookup succeeds and the read of the
+# missing SKILL.md fails (registry.rs:208-221 ReadFailed, tools.rs:86-89).
+[[model.responses]]
+tool_calls = [{ name = "skill_read", arguments = { name = "alpha" } }]
+
+# Resources of a stale-but-listed skill are still served.
+[[model.responses]]
+tool_calls = [{ name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_reload", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "skill_list", arguments = {} }]
+
+# After the reload alpha is NotFound -> InvokeRejected.
+[[model.responses]]
+tool_calls = [
+  { name = "skill_read", arguments = { name = "alpha" } },
+  { name = "skill_resource_read", arguments = { name = "alpha", path = "notes.txt" } },
+]
+
+[[model.responses]]
+text = "Alpha is gone."
+
+[[steps]]
+send = "Delete alpha."
+reply_contains = ["Alpha is gone."]
+tool_contains = [
+  "Could not read skill \"alpha\": failed to read skill 'alpha': path not found",
+  '{"name":"alpha","path":"notes.txt","content":"alpha notes","offset":0,"bytes":11,"next_offset":null}',
+  "skill_reload{}Skills refreshed. Use skill_list to inspect the catalog.",
+  "skill_list{}[]",
+  'tool invocation rejected: unknown skill "alpha"; call skill_list to see what is available.',
+]
+
+[logs]
+expect = [
+  "skill package left out of the catalog: skill 'beta' is missing the opening '---' frontmatter fence",
+  "skill package left out of the catalog: skill 'beta' is missing the closing '---' frontmatter fence",
+  "skill package left out of the catalog: skill 'beta' has invalid frontmatter: frontmatter name 'gamma' must match the skill directory name",
+  "skill package left out of the catalog: skill 'beta' has invalid frontmatter: missing description",
+  "skill package left out of the catalog: skill 'beta' has invalid YAML frontmatter: duplicate field 'name'",
+  "skill package left out of the catalog: skill 'beta' has invalid YAML frontmatter: JSON object frontmatter is not accepted",
+  "skill package left out of the catalog: skill 'bad--name' has invalid frontmatter: name must be 1-64 lowercase ASCII letters",
+]

@@ -1,0 +1,67 @@
+# Failures are encoded as {"error":"<code>"} by plugins/agent-http/crates/plugin/src/lib.rs:67
+# with HttpError serialized snake_case (plugins/http/crates/plugin/src/http.rs:121-150).
+# No case reaches the network: validation fails first or reqwless rejects the URL before DNS/TCP.
+name = "HTTP tool request validation (2)"
+description = "The HTTP capability rejects scheme, header, size, and URL-syntax failures with stable error codes."
+
+[model]
+mode = "scripted"
+
+# Case 1: ftp scheme is rejected (http.rs:94-95)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"request_too_large\"}']
+text = "Case 8 checked."
+
+# Case 9: size check precedes the scheme check (http.rs:87-95)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "ftp://10.42.0.1/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"request_too_large\"}']
+text = "Case 9 checked."
+
+# Case 10: port out of range fails URL parsing in reqwless -> transport (http.rs:283-285)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:65536/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"transport\"}']
+text = "Case 10 checked."
+
+# Case 11: empty port after colon fails URL parsing -> transport (http.rs:283-285)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"transport\"}']
+text = "Case 11 checked."
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 8 checked."]
+tool_contains = ['{"error":"request_too_large"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 9 checked."]
+tool_contains = ['{"error":"request_too_large"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 10 checked."]
+tool_contains = ['{"error":"transport"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 11 checked."]
+tool_contains = ['{"error":"transport"}']
+tool_errors_allowed = true

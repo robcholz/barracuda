@@ -1,0 +1,75 @@
+name = "VM error outcomes"
+description = "vm_run accepts scripts that fail to load, raise string and non-string errors, hit the sandboxed require, or exhaust the Lua heap; each failure arrives as a failed detached completion."
+
+# Detached completions cost exactly one model call each. The syntax error
+# completes in the VM task's first poll, so a vm_list call absorbs it before
+# the text reply. Every other script spends about 500 ms in an empty loop
+# (instruction-hook yields of 100 ms each) so its completion always lands
+# after the reply that ends the turn and starts its own detached turn.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: Lua load (syntax) error.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "local x = = 1" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_list", arguments = {} }]
+
+[[model.responses]]
+request_contains = [
+    '[detached:failed]',
+    '{\"run_id\":1,\"outcome\":\"error\",\"output\":[],\"error\":\"lua_load\",\"diagnostic\":\"chunk:1: unexpected symbol near',
+]
+text = "The syntax error was reported."
+
+# Step 1: runtime error keeps the output printed before it.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "print('before') for _ = 1, 50000 do end error('boom')" } }]
+
+[[model.responses]]
+text = "The second script is running."
+
+[[model.responses]]
+request_contains = [
+    '{\"run_id\":2,\"outcome\":\"error\",\"output\":[\"before\"],\"error\":\"lua_runtime\",\"diagnostic\":\"chunk:1: boom\"}',
+]
+text = "The runtime error was reported."
+
+# Step 2: a non-string error object has no message.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end error({ code = 7 })" } }]
+
+[[model.responses]]
+text = "The third script is running."
+
+[[model.responses]]
+request_contains = [
+    '{\"run_id\":3,\"outcome\":\"error\",\"output\":[],\"error\":\"lua_runtime\",\"diagnostic\":\"unknown Lua error\"}',
+]
+text = "The table error was reported."
+
+[[steps]]
+send = "Run a script with a syntax error."
+reply_contains = ["The syntax error was reported."]
+tool_contains = ['{"run_id":1}']
+
+[[steps]]
+send = "Run a script that prints and then fails."
+reply_contains = ["The runtime error was reported."]
+tool_contains = ['{"run_id":2}']
+
+[[steps]]
+send = "Run a script that raises a table."
+reply_contains = ["The table error was reported."]
+tool_contains = ['{"run_id":3}']
+
+[logs]
+expect = [
+    "VM run 1 failed: Some\\(LuaLoad\\)",
+    "VM run 2 failed: Some\\(LuaRuntime\\) chunk:1: boom",
+]

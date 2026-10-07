@@ -1,0 +1,108 @@
+# Schemas: plugins/agent-scheduler/crates/plugin/resources/tools/*/schema.json. A failing oneOf
+# reports only "OneOf" at the trigger (shared/json-validator/src/lib.rs:268-276).
+name = "Scheduler tool argument schema (2)"
+description = "scheduler_schedule and scheduler_cancel reject malformed IDs and triggers at the schema."
+
+[model]
+mode = "scripted"
+
+# Case 1: empty id
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "interval", at = "2099-01-01T00:00:00.000Z", every_seconds = 0, count = 2 } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 8 checked."
+
+# Case 9: interval with count 0
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "interval", at = "2099-01-01T00:00:00.000Z", every_seconds = 60, count = 0 } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 9 checked."
+
+# Case 10: interval missing count
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "interval", at = "2099-01-01T00:00:00.000Z", every_seconds = 60 } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 10 checked."
+
+# Case 11: once with interval fields
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z", every_seconds = 60 } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 11 checked."
+
+# Case 12: cancel with an unknown field
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "e2e", force = true } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.force: AdditionalProperty']
+text = "Case 12 checked."
+
+# Case 13: cancel id with a slash
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "a/b" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.id: Pattern']
+text = "Case 13 checked."
+
+# Case 14: cancel without id
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = {} }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.id: Required']
+text = "Case 14 checked."
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 8 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 9 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 10 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 11 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 12 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.force: AdditionalProperty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 13 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.id: Pattern']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 14 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.id: Required']
+tool_errors_allowed = true
