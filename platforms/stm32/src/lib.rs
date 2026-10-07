@@ -262,7 +262,6 @@ mod internal_flash {
 
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
-        type Tls = barracuda_tls::PlaintextTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
         /// The RNG peripheral is not bound by Target composition yet.
         type Entropy = barracuda_platform::UnavailableEntropy;
@@ -288,7 +287,6 @@ mod internal_flash {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
                 entropy: barracuda_platform::UnavailableEntropy,
-                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }

@@ -16,7 +16,6 @@ barracuda-platform-macos-network-gateway = { path = "network-gateway" }
 barracuda-platform-macos-network-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
 barracuda-system-image = { path = "../../tools/system-image" }
-barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
@@ -30,7 +29,7 @@ futures-util = { version = "0.3", features = ["sink"] }
 heapless = "0.9"
 log.workspace = true
 rand = "0.9"
-getrandom = { version = "0.4", features = ["sys_rng"] }
+getrandom = "0.4"
 thiserror = "2"
 cap = { version = "0.1", features = ["stats"] }
 allocator-api2 = { version = "0.3.1", features = ["std"] }

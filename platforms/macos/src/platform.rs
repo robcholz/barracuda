@@ -98,14 +98,6 @@ impl MacosPlatform {
         Ok(())
     }
 
-    /// Loads macOS trust roots and initializes the Platform TLS capability.
-    ///
-    /// # Errors
-    /// Returns an error when the macOS trust store or TLS engine is invalid.
-    pub fn initialize_tls() -> Result<barracuda_tls::MbedTls, MacosPlatformError> {
-        crate::tls::initialize().map_err(MacosPlatformError::Tls)
-    }
-
     /// Initializes partitions using generated macOS settings.
     ///
     /// # Errors
@@ -159,7 +151,6 @@ impl MacosPlatform {
 
 impl Platform for MacosPlatform {
     type Bindings = &'static Board;
-    type Tls = barracuda_tls::MbedTls;
     type Wifi = barracuda_platform::HostWifiDevice;
     type Entropy = crate::MacosEntropy;
     type Partitions = MacosPartitions;
@@ -183,14 +174,11 @@ impl Platform for MacosPlatform {
         log::info!("initializing macOS Platform network");
         let ip_stack =
             crate::network::initialize(spawner, crate::PLATFORM_SETTINGS.network_gateway()).await?;
-        log::info!("initializing macOS Platform TLS");
-        let tls = Self::initialize_tls()?;
         log::info!("initialized macOS Platform");
         Ok(PlatformResources {
             ip_stack,
             wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
             entropy: crate::MacosEntropy,
-            tls,
             partitions,
         })
     }
@@ -211,9 +199,6 @@ pub enum MacosPlatformError {
     /// The gateway-backed Embassy network failed to initialize.
     #[error(transparent)]
     Network(#[from] MacosNetworkError),
-    /// Host TLS initialization failed.
-    #[error(transparent)]
-    Tls(#[from] crate::MacosTlsError),
     /// File-backed NOR initialization failed.
     #[error(transparent)]
     Flash(#[from] FileNorFlashError),

@@ -88,14 +88,6 @@ impl LinuxPlatform {
         Ok(())
     }
 
-    /// Loads Linux trust roots and initializes the Platform TLS capability.
-    ///
-    /// # Errors
-    /// Returns an error when the Linux trust store or TLS engine is invalid.
-    pub fn initialize_tls() -> Result<barracuda_tls::MbedTls, LinuxPlatformError> {
-        crate::tls::initialize().map_err(LinuxPlatformError::Tls)
-    }
-
     /// Initializes partitions using generated Linux settings.
     ///
     /// # Errors
@@ -149,7 +141,6 @@ impl LinuxPlatform {
 
 impl Platform for LinuxPlatform {
     type Bindings = &'static Board;
-    type Tls = barracuda_tls::MbedTls;
     type Wifi = barracuda_platform::HostWifiDevice;
     type Entropy = crate::LinuxEntropy;
     type Partitions = LinuxPartitions;
@@ -174,14 +165,11 @@ impl Platform for LinuxPlatform {
         let ip_stack =
             crate::network::initialize(spawner, crate::PLATFORM_SETTINGS.network_interface())
                 .await?;
-        log::info!("initializing Linux Platform TLS");
-        let tls = Self::initialize_tls()?;
         log::info!("initialized Linux Platform");
         Ok(PlatformResources {
             ip_stack,
             wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
             entropy: crate::LinuxEntropy,
-            tls,
             partitions,
         })
     }
@@ -202,9 +190,6 @@ pub enum LinuxPlatformError {
     /// The real TUN-backed Embassy network failed to initialize.
     #[error(transparent)]
     Network(#[from] LinuxNetworkError),
-    /// Host TLS initialization failed.
-    #[error(transparent)]
-    Tls(#[from] crate::LinuxTlsError),
     /// File-backed NOR initialization failed.
     #[error(transparent)]
     Flash(#[from] FileNorFlashError),

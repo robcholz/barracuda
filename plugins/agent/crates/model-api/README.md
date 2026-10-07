@@ -22,7 +22,7 @@ tool-result roles, structured-output config) into each provider's wire format.
 
 ## HTTP is injected
 
-Platform supplies `http_client::ClientFactory`, which contains only TCP, DNS,
+System supplies `http_client::ClientFactory`, which contains only TCP, DNS,
 and TLS construction resources. This crate builds reqwless on top and owns the
 persistent connection, request/response representation, reusable buffers, and
 streaming behavior. Sequential calls on one `ModelApi` reuse its connection

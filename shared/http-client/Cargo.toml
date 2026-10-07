@@ -10,10 +10,10 @@ name = "http_client"
 
 [features]
 default = []
-embedded-tls = ["reqwless/embedded-tls"]
-mbedtls = ["reqwless/mbedtls-rs"]
+mbedtls = ["dep:barracuda-tls", "reqwless/mbedtls-rs"]
 
 [dependencies]
+barracuda-tls = { workspace = true, optional = true }
 embassy-net.workspace = true
 embedded-nal-async = "0.9"
 static_cell.workspace = true

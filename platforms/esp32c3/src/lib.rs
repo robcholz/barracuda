@@ -240,7 +240,6 @@ mod internal_flash {
 
     impl Platform for Esp32C3Platform {
         type Bindings = Esp32C3PlatformBindings;
-        type Tls = barracuda_tls::PlaintextTls;
         type Wifi = crate::Esp32C3WifiDevice;
         type Entropy = crate::Esp32C3Entropy;
         type Partitions = Esp32C3Partitions;
@@ -264,7 +263,6 @@ mod internal_flash {
                 ip_stack,
                 wifi: bindings.wifi,
                 entropy: crate::Esp32C3Entropy,
-                tls: barracuda_tls::PlaintextTls,
                 partitions,
             })
         }

@@ -17,6 +17,7 @@ log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 barracuda-board-hal.workspace = true
+# System links TLS; this only makes mbedTLS compile with Espressif's GCC.
 barracuda-tls = { workspace = true, features = ["force-esp-riscv-gcc"] }
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"

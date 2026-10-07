@@ -23,7 +23,6 @@ pub type Bindings = <SelectedPlatform as Platform>::Bindings;
 
 /// Resource bundle produced only by the selected Platform.
 pub type Resources = PlatformResources<
-    <SelectedPlatform as Platform>::Tls,
     <SelectedPlatform as Platform>::Partitions,
     <SelectedPlatform as Platform>::Wifi,
     <SelectedPlatform as Platform>::Entropy,

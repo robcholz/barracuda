@@ -239,11 +239,10 @@ request never reconstructs its client. The shared crate owns reqwless client
 construction; Model API owns the LLM-specific request, response, connection,
 and stream behavior.
 
-TLS is initialized by the selected Platform and returned beside `ip_stack` in
-`PlatformResources`. Linux and macOS load the Host certificate bundle; device
-Platforms initialize the same capability from their RNG and DER trust roots.
-System passes that capability into Agent construction. No Plugin loads system
-certificates or selects a Host-only TLS feature.
+System initializes TLS from the selected Platform's `entropy` and the Mozilla
+trust roots compiled in by `shared/tls`, the same roots on every Platform, and
+passes it to the shared HTTP client factory. No Platform or Plugin loads system
+certificates or selects a TLS feature.
 
 Host tests and `barracuda-cli` remain normal `std` consumers. The former C ABI and
 prebuilt static archives are no longer part of this workspace.

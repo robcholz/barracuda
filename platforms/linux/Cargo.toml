@@ -8,7 +8,6 @@ description = "Linux Platform implementation for Barracuda"
 barracuda-board.workspace = true
 barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
-barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
@@ -21,7 +20,7 @@ env_logger = { version = "0.11", default-features = false, features = ["auto-col
 heapless = "0.9"
 log.workspace = true
 rand = "0.9"
-getrandom = { version = "0.4", features = ["sys_rng"] }
+getrandom = "0.4"
 thiserror = "2"
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "rt-multi-thread"] }
 tun = { version = "0.7.13", features = ["async"] }

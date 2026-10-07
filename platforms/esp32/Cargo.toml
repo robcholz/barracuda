@@ -17,7 +17,6 @@ log.workspace = true
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 barracuda-board-hal.workspace = true
-barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net = { workspace = true, features = ["dhcpv4"] }

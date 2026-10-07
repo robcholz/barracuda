@@ -36,7 +36,6 @@ use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
 use barracuda_target_api::{TargetIdentity, TargetResources};
-use barracuda_tls::ClientTls;
 use barracuda_vfs::{
     create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
 };
@@ -176,11 +175,10 @@ where
 pub use resources::SystemResourceError;
 
 /// The selected Target's Platform and Board resources, as System consumes them.
-type SelectedResources<Tls, Region, Wifi, Entropy, Peripherals, Io, const P: usize> =
-    TargetResources<
-        PlatformResources<Tls, Partitions<Region, P>, Wifi, Entropy>,
-        BoardResources<Peripherals, Io>,
-    >;
+type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
+    PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
+    BoardResources<Peripherals, Io>,
+>;
 
 /// Fully assembled portable Barracuda system.
 ///
@@ -284,8 +282,8 @@ where
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Tls: ClientTls, Wifi: WifiDevice, Entropy: barracuda_platform::Entropy>(
-        resources: SelectedResources<Tls, Region, Wifi, Entropy, Peripherals, Io, P>,
+    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send>(
+        resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
@@ -325,8 +323,17 @@ where
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
-        let http_clients =
-            http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
+        let tls = match barracuda_tls::Tls::new(prepared.entropy.clone()) {
+            Ok(tls) => {
+                log::info!("initialized TLS");
+                Some(tls)
+            }
+            Err(error) => {
+                log::warn!("HTTPS is unavailable: {error}");
+                None
+            }
+        };
+        let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
         let mut plugin_context = PluginContext::from_hal(
             target_identity,
             prepared.ip_stack,

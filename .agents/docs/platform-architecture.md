@@ -18,7 +18,7 @@ Target    = Platform + Board HAL
 
 - **Platform** is one execution platform: a chip line such as ESP32-S3,
   ESP32-C6, or STM32, or a hosted environment such as Linux or macOS. It provides platform mechanisms such as
-  an IP stack, TLS, and partitions and adapts its vendor HAL into upstream
+  an IP stack, entropy, and partitions and adapts its vendor HAL into upstream
   hardware contracts. It does not describe a Board's concrete peripherals,
   wiring, or product hardware matrix.
 - **Board** is one concrete hardware combination. Its matrix describes the
@@ -122,7 +122,7 @@ The returned shape preserves ownership:
 
 ~~~rust,ignore
 TargetResources {
-    platform: PlatformResources { ip_stack, wifi, entropy, tls, partitions },
+    platform: PlatformResources { ip_stack, wifi, entropy, partitions },
     board_hal: BoardResources { peripherals, exposed_io },
 }
 ~~~
@@ -144,14 +144,13 @@ fields or Platform associated types.
 
 Platform resources have stable, exact shapes. The current common contract
 exposes one Embassy IP stack, one Wi-Fi control mechanism, one entropy source,
-one TLS client capability, and one partitions collection:
+and one partitions collection:
 
 ~~~rust,ignore
-pub struct PlatformResources<Tls, Partitions, Wifi, Entropy> {
+pub struct PlatformResources<Partitions, Wifi, Entropy> {
     pub ip_stack: embassy_net::Stack<'static>,
     pub wifi: Wifi,
     pub entropy: Entropy,
-    pub tls: Tls,
     pub partitions: Partitions,
 }
 ~~~
@@ -163,16 +162,17 @@ System hands the mechanism to the Wi-Fi Plugin, which owns the policy.
 `entropy` is the Platform's source of unpredictable bytes, fit for
 cryptographic use: the operating system's generator on Host Platforms, a true
 random number generator fed by physical noise on devices. A Platform without
-one supplies `UnavailableEntropy`, never a weaker generator. System hands it to
-the VM Plugin, which seeds `math.random` from it; like Wi-Fi, the Plugin's
-constructor is generic over the Platform's type and erases it inside.
+one supplies `UnavailableEntropy`, never a weaker generator. System builds the
+TLS engine from it and hands it to the VM Plugin, which seeds `math.random`
+from it; like Wi-Fi, the Plugin's constructor is generic over the Platform's
+type and erases it inside.
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
 fields such as filesystem_partition, resources_partition, or
 database_partition. The IP capability likewise remains `ip_stack` rather than
-web_network or database_network. TLS remains an independent `tls` capability;
-it is not hidden inside `ip_stack` or reconstructed by an HTTP consumer.
+web_network or database_network. TLS is not a Platform resource; System builds
+it above the Platform boundary (see "TLS and HTTP clients").
 
 Adding a Plugin, peripheral, filesystem, database, or application subsystem
 does not modify the Platform API or PlatformResources shape.
@@ -752,25 +752,31 @@ System and Plugin state.
 
 ## TLS and HTTP clients
 
-TLS is a Platform capability because each Platform owns its randomness,
-trust-root source, TLS engine initialization, and process or firmware lifetime.
-Host Platforms load the system certificate bundle. Device Platforms construct
-the same semantic capability from Platform RNG state and provisioned DER trust
-roots. A Plugin must not load Host certificates, initialize a TLS backend, or
-select a TLS implementation through a Host-only feature.
+TLS is a shared software service above the Platform boundary. Its only
+Platform-specific input is randomness, which the Platform already supplies as
+`entropy`; the engine, its process lifetime, and the trust roots are the same
+on every Platform.
 
-`shared/tls` owns only TLS mechanisms: the `ClientTls` contract and constructors
-that accept caller-supplied RNG and DER/PEM roots. It must not inspect
-environment variables, read certificate files, or contain operating-system CA
-paths. Those policies live in each concrete Host Platform.
+`shared/tls` owns the TLS engine and the trust roots. `Tls::new(entropy)`
+initializes the process-wide mbedTLS engine from the Platform's entropy source
+and refuses `UnavailableEntropy` rather than fall back to a weaker generator.
+The trust roots are Mozilla's CA store, pinned in `shared/tls/roots` and
+compiled into the firmware or host binary, so every Platform trusts exactly the
+same roots. Device Platforms do not have them yet: the PEM bundle is too large
+to parse into device RAM, so until the compact bundle verified on demand lands,
+`Tls::new` reports that a device has no trust roots. No Platform reads its operating system's certificate store, and
+`shared/tls` inspects no environment variables or certificate files. It also
+owns the few C library functions mbedTLS calls on bare-metal targets. A Plugin
+must not load certificates, initialize a TLS backend, or select a TLS
+implementation.
 
 HTTP is a shared software service above the Platform boundary:
 
 ~~~text
-PlatformResources { ip_stack, tls }
+PlatformResources { ip_stack, entropy }
                  |
                  v
-System composition
+System composition: barracuda_tls::Tls::new(entropy)
                  |
                  v
 shared/http-client
@@ -789,8 +795,9 @@ streaming, buffering, and transport error classification. Protocol crates may
 adapt its domain-neutral request and response values, but they do not create a
 second reqwless transport implementation.
 
-System combines the Platform's `ip_stack` and `tls` capabilities into one
-`http_client::ClientFactory`. Construction code may clone that factory;
+System combines the Platform's `ip_stack` with the `Tls` it built into one
+`http_client::ClientFactory`. When TLS cannot start, the factory has no TLS and
+`https://` requests fail instead of falling back to plaintext. Construction code may clone that factory;
 business consumers receive only `http_client::Client` and use its fluent
 `get`/`post`/`request` facade. TCP, DNS, TLS configuration, reqwless types, and
 buffer sizes must not parameterize Plugin or domain APIs.
@@ -989,7 +996,7 @@ Dependencies flow toward semantic consumers:
 ~~~text
 Platform adaptation + peripheral implementations + Board matrix -> Board HAL ----+
                                                                          |
-Platform services -> { IP, TLS, partitions } ----------------------------+-> System -> Plugins
+Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
 ~~~
 
 Platform crates do not own peripheral implementations or Board
@@ -1063,8 +1070,9 @@ Before changing target-sensitive code, verify:
     System or a Plugin?
 12. Does the application obtain the complete selected Target from the target
     composition crate without performing the wiring itself?
-13. Does Platform initialize TLS from Platform-owned randomness and trust
-    roots, while all HTTP consumers use `shared/http-client`?
+13. Does System build TLS from the Platform's entropy and the shared trust
+    roots, with no Platform touching TLS, while all HTTP consumers use
+    `shared/http-client`?
 14. Does the device entry acquire the hardware singleton exactly once and pass
     the resulting binding pair through selected-target composition before
     returning Target resources?

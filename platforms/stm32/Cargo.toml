@@ -35,7 +35,6 @@ log.workspace = true
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 barracuda-board-hal = { workspace = true, optional = true }
-barracuda-tls.workspace = true
 # The single-core critical section, as in embassy-stm32's examples.
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"], optional = true }
 cortex-m-rt = { version = "0.7.6", optional = true }
