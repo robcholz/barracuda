@@ -22,6 +22,7 @@ pub mod hal;
 mod hardware;
 mod i2c;
 pub mod models;
+mod spi;
 
 pub use clock::{Clock, VirtualDelay};
 pub use device::{DataNack, DeviceContext, I2cDevice, RegisterDevice, RuleViolation};
@@ -32,3 +33,4 @@ pub use hardware::{
     VirtualHardware, EVENT_CAPACITY,
 };
 pub use i2c::{VirtualI2cBus, VirtualI2cError};
+pub use spi::{SpiDevice, VirtualSpiBus, VirtualSpiError};

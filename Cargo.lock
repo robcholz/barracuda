@@ -955,6 +955,7 @@ dependencies = [
 name = "barracuda-driver-es7210"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -962,6 +963,7 @@ dependencies = [
 name = "barracuda-driver-es8311"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -976,6 +978,7 @@ dependencies = [
 name = "barracuda-driver-es8389"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -1043,6 +1046,7 @@ version = "0.1.0"
 name = "barracuda-driver-ws2812-spi"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 

@@ -19,3 +19,6 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
+
+[dev-dependencies]
+barracuda-platform-virtual-io.workspace = true

@@ -82,7 +82,16 @@ const fn default_once() -> bool {
 }
 
 /// Device models that the control interface can attach by name.
-pub const DEVICE_MODELS: &[&str] = &["registers", "bq27220", "ina226", "pi4ioe5v6408", "rx8130ce"];
+pub const DEVICE_MODELS: &[&str] = &[
+    "registers",
+    "bq27220",
+    "es7210",
+    "es8311",
+    "es8389",
+    "ina226",
+    "pi4ioe5v6408",
+    "rx8130ce",
+];
 
 /// Creates a device model by its control-interface name.
 #[must_use]
@@ -90,6 +99,9 @@ pub fn device_model(name: &str) -> Option<Box<dyn I2cDevice>> {
     match name {
         "registers" => Some(Box::new(RegisterDevice::new())),
         "bq27220" => Some(Box::new(crate::models::Bq27220Model::new())),
+        "es7210" => Some(Box::new(crate::models::everest::es7210())),
+        "es8311" => Some(Box::new(crate::models::everest::es8311())),
+        "es8389" => Some(Box::new(crate::models::everest::es8389())),
         "ina226" => Some(Box::new(crate::models::Ina226Model::new())),
         "pi4ioe5v6408" => Some(Box::new(crate::models::Pi4ioe5v6408Model::new())),
         "rx8130ce" => Some(Box::new(crate::models::Rx8130ceModel::new())),

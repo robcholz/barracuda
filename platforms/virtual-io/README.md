@@ -120,9 +120,26 @@ violation names that citation. Attach one through the manager with
 | `rx8130ce` | Epson RX8130CE RTC | Epson ETM50E-10 | 30 ms power-on access wait, t_str before initial setting, user registers only, TEST bit, valid date, initialize all registers after VLF |
 | `pi4ioe5v6408` | Diodes PI4IOE5V6408 I/O expander | Diodes DS40583 Rev 3-5 | register map, pin drive from direction/output/high-Z (noted as `P<n> high/low/released` events), no burst reads |
 | `bq27220` | TI BQ27220 fuel gauge | TI SLUSCB7A, SLUUBD4A | 66 µs t(BUF) between packets, two commands per second, 250 ms tPUCD, read-only commands NACK |
+| `es8311`, `es7210`, `es8389` | Everest audio converters | Everest ES8311 rev 10.0, ES7210 rev 21.0, ES8389 rev 5.0 | documented register map and defaults, one-byte write format, address write before every read |
 
 Device models may also note device-side changes (such as an expander pin
 changing level) as `device` events in the log.
+
+## Virtual SPI
+
+`VirtualHardware::with_spi` adds SPI controllers for driver tests;
+`spi_bus(name, frequency_hz)` opens one at a fixed clock as an
+`embedded-hal` `SpiBus` (blocking and async). Each bus operation is one
+full-duplex transfer recorded as an `spi` event with its MOSI and MISO
+bytes; MISO reads FFh without a device. `inject_fault` accepts an SPI
+controller name (per bus, no address) and fails the next transfer. An
+`SpiDevice` model receives each transfer with its start time and the bus
+clock. The host Boards expose no SPI, so the control interface does not
+attach SPI devices.
+
+| SPI model | Chip | Datasheet | Checks |
+| --- | --- | --- | --- |
+| `Ws2812bModel` | Worldsemi WS2812B LED chain on MOSI | Worldsemi WS2812B (undated) | T0H/T0L/T1H/T1L ±150 ns from the MOSI bit stream and bus clock, RES latch above 50 µs, 24-bit GRB frames |
 
 ## Driver tests
 

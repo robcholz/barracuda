@@ -13,6 +13,7 @@ use crate::{
     clock::Clock,
     device::{DeviceContext, I2cDevice, RegisterRangeError, RuleViolation},
     i2c::{VirtualI2cBus, VirtualI2cError},
+    spi::{SpiDevice, VirtualSpiBus, VirtualSpiError},
 };
 
 /// Number of recorded events kept; older events are dropped first.
@@ -182,6 +183,19 @@ pub enum EventDetail {
         /// Whether the failure came from an injected fault.
         injected: bool,
     },
+    /// One SPI bus operation (full duplex: both directions in one record).
+    Spi {
+        /// Controller name.
+        bus: &'static str,
+        /// Bytes clocked out on MOSI.
+        write: String,
+        /// Bytes clocked in on MISO.
+        read: String,
+        /// `ok` or the injected fault.
+        result: &'static str,
+        /// Whether the failure came from an injected fault.
+        injected: bool,
+    },
     /// A device-side change noted by a device model, such as an output pin
     /// of an I/O expander changing level.
     Device {
@@ -231,7 +245,7 @@ pub enum HardwareError {
     #[error("unknown pin `{0}`")]
     UnknownPin(String),
     /// No controller has this name.
-    #[error("unknown I2C bus `{0}`")]
+    #[error("unknown bus `{0}`")]
     UnknownBus(String),
     /// The address is not a seven-bit address.
     #[error("I2C address {0} is not a seven-bit address")]
@@ -244,6 +258,12 @@ pub enum HardwareError {
         /// Seven-bit address.
         address: u8,
     },
+    /// SPI faults apply to a whole bus, not an address.
+    #[error("SPI bus `{0}` takes no fault address")]
+    SpiAddress(&'static str),
+    /// No device is attached to the SPI bus.
+    #[error("SPI bus `{0}` has no device")]
+    NoSpiDevice(&'static str),
     /// No device answers the address.
     #[error("{bus} has no device at address {address:#04x}")]
     NoDevice {
@@ -321,9 +341,15 @@ struct BusState {
     devices: BTreeMap<u8, Box<dyn I2cDevice>>,
 }
 
+struct SpiBusState {
+    name: &'static str,
+    device: Option<Box<dyn SpiDevice>>,
+}
+
 struct Hardware {
     pins: Vec<PinState>,
     buses: Vec<BusState>,
+    spi: Vec<SpiBusState>,
     faults: Vec<FaultRule>,
     next_fault: u64,
     events: VecDeque<Event>,
@@ -367,6 +393,7 @@ impl VirtualHardware {
                     devices: BTreeMap::new(),
                 })
                 .collect(),
+            spi: Vec::new(),
             faults: Vec::new(),
             next_fault: 1,
             events: VecDeque::new(),
@@ -377,6 +404,133 @@ impl VirtualHardware {
             shared: Arc::new(Mutex::new(hardware)),
             clock,
         }
+    }
+
+    /// Adds SPI controllers with the given names.
+    #[must_use]
+    pub fn with_spi(self, buses: &[&'static str]) -> Self {
+        self.lock()
+            .spi
+            .extend(buses.iter().map(|name| SpiBusState { name, device: None }));
+        self
+    }
+
+    /// Attaches the device driven by one SPI controller, replacing any other.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HardwareError::UnknownBus`] for an unknown controller.
+    pub fn attach_spi(
+        &self,
+        bus: &str,
+        mut device: Box<dyn SpiDevice>,
+    ) -> Result<(), HardwareError> {
+        let now = self.clock.now();
+        let mut hardware = self.lock();
+        let index = spi_index(&hardware, bus)?;
+        let name = hardware.spi[index].name;
+        let mut violations = Vec::new();
+        let mut context = DeviceContext::new(now, &mut violations);
+        device.attached(&mut context);
+        let notes = context.into_notes();
+        let model = device.model();
+        hardware.spi[index].device = Some(device);
+        hardware.record_notes(now, name, 0, model, notes);
+        hardware.record_violations(0, micros(now), name, 0, model, violations);
+        Ok(())
+    }
+
+    /// Reads model-defined bytes of the device on an SPI controller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown bus, no device, or a bad range.
+    pub fn read_spi_registers(
+        &self,
+        bus: &str,
+        offset: usize,
+        length: usize,
+    ) -> Result<Vec<u8>, HardwareError> {
+        let hardware = self.lock();
+        let index = spi_index(&hardware, bus)?;
+        let state = &hardware.spi[index];
+        let device = state
+            .device
+            .as_ref()
+            .ok_or(HardwareError::NoSpiDevice(state.name))?;
+        let mut bytes = vec![0; length];
+        device.peek(offset, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// Opens an SPI controller at `frequency_hz` for a driver test.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HardwareError::UnknownBus`] for an unknown controller.
+    pub fn spi_bus(&self, bus: &str, frequency_hz: u32) -> Result<VirtualSpiBus, HardwareError> {
+        let index = spi_index(&self.lock(), bus)?;
+        Ok(VirtualSpiBus::new(self.clone(), index, frequency_hz))
+    }
+
+    pub(crate) fn spi_transfer(
+        &self,
+        bus: usize,
+        frequency_hz: u32,
+        write: &[u8],
+        read: &mut [u8],
+    ) -> Result<(), VirtualSpiError> {
+        let now = self.clock.now();
+        let mut hardware = self.lock();
+        let Some(name) = hardware.spi.get(bus).map(|bus| bus.name) else {
+            return Err(VirtualSpiError::new(FaultKind::BusError));
+        };
+        if let Some(position) = hardware.faults.iter().position(|rule| rule.bus == name) {
+            let rule = if hardware.faults[position].once {
+                hardware.faults.remove(position)
+            } else {
+                hardware.faults[position].clone()
+            };
+            let error = VirtualSpiError::new(rule.kind);
+            hardware.record(
+                now,
+                EventDetail::Spi {
+                    bus: name,
+                    write: hex(write),
+                    read: String::new(),
+                    result: error.label(),
+                    injected: true,
+                },
+            );
+            return Err(error);
+        }
+        let seq = hardware.next_seq;
+        let mut violations = Vec::new();
+        let mut notes = Vec::new();
+        let mut model = None;
+        // MISO floats high without a device on the bus.
+        read.fill(0xff);
+        if let Some(device) = hardware.spi[bus].device.as_mut() {
+            let mut context = DeviceContext::new(now, &mut violations);
+            device.transfer(&mut context, frequency_hz, write, read);
+            notes = context.into_notes();
+            model = Some(device.model());
+        }
+        hardware.record(
+            now,
+            EventDetail::Spi {
+                bus: name,
+                write: hex(write),
+                read: hex(read),
+                result: "ok",
+                injected: false,
+            },
+        );
+        if let Some(model) = model {
+            hardware.record_notes(now, name, 0, model, notes);
+            hardware.record_violations(seq, micros(now), name, 0, model, violations);
+        }
+        Ok(())
     }
 
     /// Clock that timestamps this model's events.
@@ -572,10 +726,19 @@ impl VirtualHardware {
     ) -> Result<u64, HardwareError> {
         let address = address.map(seven_bit).transpose()?;
         let mut hardware = self.lock();
-        let index = bus_index(&hardware, bus)?;
+        let bus = match bus_index(&hardware, bus) {
+            Ok(index) => hardware.buses[index].name,
+            Err(error) => {
+                let index = spi_index(&hardware, bus).map_err(|_| error)?;
+                let name = hardware.spi[index].name;
+                if address.is_some() {
+                    return Err(HardwareError::SpiAddress(name));
+                }
+                name
+            }
+        };
         let id = hardware.next_fault;
         hardware.next_fault += 1;
-        let bus = hardware.buses[index].name;
         hardware.faults.push(FaultRule {
             id,
             bus,
@@ -600,7 +763,15 @@ impl VirtualHardware {
     pub fn clear_faults(&self, bus: Option<&str>) -> Result<usize, HardwareError> {
         let mut hardware = self.lock();
         let bus = bus
-            .map(|bus| bus_index(&hardware, bus).map(|index| hardware.buses[index].name))
+            .map(|bus| {
+                bus_index(&hardware, bus)
+                    .map(|index| hardware.buses[index].name)
+                    .or_else(|error| {
+                        spi_index(&hardware, bus)
+                            .map(|index| hardware.spi[index].name)
+                            .map_err(|_| error)
+                    })
+            })
             .transpose()?;
         let before = hardware.faults.len();
         hardware
@@ -634,6 +805,9 @@ impl VirtualHardware {
         let mut hardware = self.lock();
         for bus in &mut hardware.buses {
             bus.devices.clear();
+        }
+        for bus in &mut hardware.spi {
+            bus.device = None;
         }
         for pin in &mut hardware.pins {
             pin.driven = None;
@@ -939,6 +1113,14 @@ fn pin_index(hardware: &Hardware, name: &str) -> Result<usize, HardwareError> {
 fn bus_index(hardware: &Hardware, name: &str) -> Result<usize, HardwareError> {
     hardware
         .buses
+        .iter()
+        .position(|bus| bus.name == name)
+        .ok_or_else(|| HardwareError::UnknownBus(String::from(name)))
+}
+
+fn spi_index(hardware: &Hardware, name: &str) -> Result<usize, HardwareError> {
+    hardware
+        .spi
         .iter()
         .position(|bus| bus.name == name)
         .ok_or_else(|| HardwareError::UnknownBus(String::from(name)))
