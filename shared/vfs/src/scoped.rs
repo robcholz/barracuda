@@ -150,7 +150,10 @@ impl ScopedVfs {
     pub async fn write_atomic(&self, path: &str, bytes: &[u8]) -> Result<(), FsError> {
         let target = self.prepare_file_path(path).await?;
         let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let temporary = alloc::format!("{target}.barracuda-tmp-{sequence}");
+        // A sibling with its own short name: appending to the target's name
+        // would push a name near the backend's length limit past it.
+        let parent = target.rsplit_once('/').map_or("", |(parent, _name)| parent);
+        let temporary = alloc::format!("{parent}/.barracuda-tmp-{sequence}");
         if let Err(error) = self.vfs.write(&temporary, bytes).await {
             let _ignored = self.vfs.remove_file(&temporary).await;
             return Err(error);
