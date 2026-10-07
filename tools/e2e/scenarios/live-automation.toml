@@ -1,0 +1,17 @@
+name = "Live automation"
+description = "A real model drives the Scheduler and Workflow tools."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Use the scheduler tools to schedule a one-time job with id e2e-once at 2099-01-01T00:00:00Z, then cancel it, and tell me both results."
+tool_contains = ['e2e-once']
+
+[[steps]]
+send = "Use the workflow tools to list which workflow actions are available, and name one of them."
+tool_contains = ['vm.run']
+reply_matches = ['\w+\.\w+']
+
+[logs]
+ready = ["UTC clock synchronized"]

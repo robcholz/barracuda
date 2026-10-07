@@ -6,7 +6,6 @@ import json
 import os
 import re
 import signal
-import ssl
 import subprocess
 import sys
 import time
@@ -116,11 +115,6 @@ class SystemProcess:
         flash.write_bytes(contents)
         log = self._log_path.open('wb')
         environment = dict(os.environ)
-        # Scenarios never verify TLS peers in the System; one root keeps the
-        # host CA bundle out of the ordinary-heap figure.
-        trust = _single_root_bundle(self._state_dir / 'ca.pem')
-        if trust is not None:
-            environment['SSL_CERT_FILE'] = str(trust)
         if self._heap_limit is not None:
             environment['BARRACUDA_HEAP_LIMIT_BYTES'] = str(self._heap_limit)
         self._process = subprocess.Popen(
@@ -165,28 +159,6 @@ class SystemProcess:
         except subprocess.TimeoutExpired:
             os.killpg(self._process.pid, signal.SIGKILL)
             self._process.wait()
-
-
-PEM_END = '-----END CERTIFICATE-----'
-
-
-def _single_root_bundle(path: Path) -> Path | None:
-    """Write the first certificate of the host CA bundle to `path`."""
-
-    for candidate in (
-        os.environ.get('SSL_CERT_FILE'),
-        ssl.get_default_verify_paths().cafile,
-    ):
-        if not candidate or not Path(candidate).is_file():
-            continue
-        text = Path(candidate).read_text(encoding='utf-8', errors='replace')
-        end = text.find(PEM_END)
-        start = text.rfind('-----BEGIN CERTIFICATE-----', 0, end)
-        if start < 0 or end < 0:
-            continue
-        path.write_text(text[start : end + len(PEM_END)] + '\n', encoding='utf-8')
-        return path
-    return None
 
 
 class TapeServer:
