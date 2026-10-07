@@ -10,6 +10,7 @@ from typing import Any
 from .virtual_io import VirtualIoSpec, VirtualIoSpecError, parse_spec
 
 DEFAULT_FORBIDDEN_LOGS = (r'\bERROR\b', r'panicked at')
+BACKENDS = ('openai_compatible', 'anthropic_compatible')
 
 
 class ScenarioError(ValueError):
@@ -55,6 +56,8 @@ class Step:
     # contain (from the first request carrying this step's message up to the
     # first request carrying the next one).
     request_contains: tuple[str, ...] = ()
+    # Restart the System from its flash before sending this step.
+    restart: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,8 @@ class Scenario:
     http: tuple[HttpCheck, ...] = field(default=())
     # Maximum ordinary-heap high-water mark the System may report.
     heap_high_water_max: int | None = None
+    # Model API wire format the Agent is configured with.
+    backend: str = 'openai_compatible'
     # Virtual GPIO/I2C set up before the chat and checked after it.
     virtual_io: VirtualIoSpec | None = None
 
@@ -119,6 +124,13 @@ def load_scenario(path: Path) -> Scenario:
             f'{path}: model.mode must be "scripted", "recorded", or "none"'
         )
 
+    backend = model.get('backend', 'openai_compatible')
+    if backend not in BACKENDS:
+        raise ScenarioError(
+            f'{path}: model.backend must be one of {", ".join(BACKENDS)}'
+        )
+    if backend != 'openai_compatible' and mode != 'recorded':
+        raise ScenarioError(f'{path}: model.backend {backend} needs a recorded tape')
     responses: tuple[ModelResponse, ...] = ()
     tape: Path | None = None
     if mode == 'scripted':
@@ -172,6 +184,7 @@ def load_scenario(path: Path) -> Scenario:
         http=http,
         heap_high_water_max=heap_max,
         virtual_io=virtual_io,
+        backend=backend,
     )
 
 
@@ -199,7 +212,9 @@ def _response(entry: Any, path: Path) -> ModelResponse:
     if not isinstance(status, int) or not 100 <= status <= 599:
         raise ScenarioError(f'{path}: a model response status must be an HTTP status')
     if raw is not None and (text or calls):
-        raise ScenarioError(f'{path}: a raw model response cannot also have text or tool_calls')
+        raise ScenarioError(
+            f'{path}: a raw model response cannot also have text or tool_calls'
+        )
     if raw is None and not text and not calls:
         raise ScenarioError(f'{path}: a model response needs text, tool_calls, or raw')
     return ModelResponse(
@@ -225,6 +240,7 @@ def _step(entry: Any, path: Path) -> Step:
         notice_contains=_strings(entry, 'notice_contains', path),
         tool_errors_allowed=bool(entry.get('tool_errors_allowed', False)),
         request_contains=_strings(entry, 'request_contains', path),
+        restart=bool(entry.get('restart', False)),
     )
 
 

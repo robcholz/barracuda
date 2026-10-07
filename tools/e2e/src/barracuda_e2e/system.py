@@ -116,20 +116,28 @@ class SystemProcess:
         self._log_path = log_path
         self._heap_limit = heap_limit
         self._process: subprocess.Popen[bytes] | None = None
+        # Character offset in the log where the current boot starts.
+        self._log_start = 0
         # Exit status when the System stopped on its own before `stop`.
         self.early_exit: int | None = None
 
-    def start(self, timeout: float = 60.0) -> None:
-        """Write a fresh flash image, launch the System, and wait for HTTP."""
+    def start(self, timeout: float = 60.0, keep_flash: bool = False) -> None:
+        """Write a fresh flash image, launch the System, and wait for HTTP.
 
-        flash = self._state_dir / '.barracuda' / 'board.flash'
-        flash.parent.mkdir(parents=True, exist_ok=True)
-        image = self._binaries.resources_image.read_bytes()
-        contents = bytearray([ERASED]) * self._binaries.flash_capacity
-        offset = self._binaries.resources_offset
-        contents[offset : offset + len(image)] = image
-        flash.write_bytes(contents)
-        log = self._log_path.open('wb')
+        With `keep_flash`, the System boots again from the flash its previous
+        run left behind, and its log continues the same file.
+        """
+
+        if not keep_flash:
+            flash = self._state_dir / '.barracuda' / 'board.flash'
+            flash.parent.mkdir(parents=True, exist_ok=True)
+            image = self._binaries.resources_image.read_bytes()
+            contents = bytearray([ERASED]) * self._binaries.flash_capacity
+            offset = self._binaries.resources_offset
+            contents[offset : offset + len(image)] = image
+            flash.write_bytes(contents)
+        self._log_start = len(self.log()) if keep_flash else 0
+        log = self._log_path.open('ab' if keep_flash else 'wb')
         environment = dict(os.environ)
         environment[virtual_io.ADDRESS_VARIABLE] = virtual_io.address_value()
         if self._heap_limit is not None:
@@ -144,13 +152,22 @@ class SystemProcess:
         )
         self.wait_for_log(READY_PATTERN, timeout)
 
+    def restart(self, timeout: float = 60.0) -> None:
+        """Interrupt the System and boot it again from the same flash."""
+
+        self.stop()
+        if self.early_exit is not None:
+            raise HarnessError(f'System exited with {self.early_exit} before a restart')
+        self._process = None
+        self.start(timeout, keep_flash=True)
+
     def wait_for_log(self, pattern: str, timeout: float) -> None:
-        """Wait until `pattern` appears in the System log."""
+        """Wait until `pattern` appears in the System log of the current boot."""
 
         deadline = time.monotonic() + timeout
         regex = re.compile(pattern)
         while time.monotonic() < deadline:
-            if regex.search(self.log()):
+            if regex.search(self.log()[self._log_start :]):
                 return
             if self._process is not None and self._process.poll() is not None:
                 raise HarnessError(f'System exited with {self._process.returncode}')
@@ -215,6 +232,20 @@ class TapeServer:
 
         return f'http://{HOST_ADDRESS}:{self.port}{api_path}'
 
+    def wait_consumed(self, total: int, timeout: float) -> None:
+        """Wait until replay has served `total` interactions, or give up.
+
+        A detached turn can start its model call after the last awaited log
+        line; stopping the System then would cut that call short.
+        """
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            counts = self.counts()
+            if counts['request_completed'] >= total or counts['request_rejected']:
+                return
+            time.sleep(0.2)
+
     def counts(self) -> dict[str, int]:
         """Replay outcome counters parsed from the server log."""
 
@@ -256,8 +287,10 @@ class TapeServer:
         raise HarnessError('llm-tape did not become healthy')
 
 
-def configure_model(base_url: str, model: str, api_key: str) -> None:
-    """Install one default OpenAI-compatible model API on the Agent."""
+def configure_model(
+    base_url: str, model: str, api_key: str, backend: str = 'openai_compatible'
+) -> None:
+    """Install one default model API of the given wire format on the Agent."""
 
     body = json.dumps(
         [
@@ -265,7 +298,7 @@ def configure_model(base_url: str, model: str, api_key: str) -> None:
                 'timeout_ms': 60_000,
                 'max_tokens': 2_048,
                 'image_max_bytes': 524_288,
-                'backend': 'openai_compatible',
+                'backend': backend,
                 'purpose': 'root_agent',
                 'default': True,
                 'api_key': api_key,

@@ -70,6 +70,7 @@ name = "Time tool"
 
 [model]
 mode = "scripted"          # scripted | recorded | none
+# backend = "anthropic_compatible"  # recorded only; default openai_compatible
 
 [[model.responses]]        # one per /chat/completions call, in order
 tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
@@ -94,6 +95,7 @@ tool_contains = ['"utc":"20']
 notice_contains = []       # CLI notices, such as a permission prompt
 kinds = ["tool"]           # message roles that must appear in the turn
 # request_contains = []    # recorded only: some model request of this step
+# restart = true           # restart the System from its flash before this step
 # tool_errors_allowed = true
 
 [[http]]                   # direct WebServer request after startup
@@ -210,6 +212,11 @@ aborted streams, malformed SSE or tool-call JSON, and similar. A scripted
 response's `raw` replaces the synthesized stream, so it can carry any of
 these; a body that starts with `data:` is served as `text/event-stream`, any
 other as `application/json`.
+
+A step with `restart = true` interrupts the System and boots it again from the
+flash its previous run left behind, then sends the step's message in a new
+chat. The model API configuration is not applied again, so the restored
+configuration is what answers.
 
 A recorded step's `request_contains` is checked against the model requests
 made while the step was active: from the first request whose body carries the

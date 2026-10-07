@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from llm_tape.tape import load_tape
 
-from barracuda_e2e.cli import build_parser, shard
+from barracuda_e2e.cli import _segments, build_parser, shard
 from barracuda_e2e.assertions import (
     check_step_requests,
     check_heap,
@@ -22,6 +22,7 @@ from barracuda_e2e.ntp import NTP_UNIX_OFFSET, sntp_reply
 from barracuda_e2e.scenario import (
     ModelResponse,
     ScenarioError,
+    Step,
     ToolCall,
     discover,
     load_scenario,
@@ -86,6 +87,41 @@ def test_raw_responses_exclude_text_and_tool_calls(tmp_path):
     )
     with pytest.raises(ScenarioError):
         load_scenario(path)
+
+
+def test_restart_steps_split_the_chat_into_segments():
+    steps = [
+        Step(send='a'),
+        Step(send='b'),
+        Step(send='c', restart=True),
+        Step(send='d', restart=True),
+        Step(send='e'),
+    ]
+    assert _segments(steps) == [(0, ['a', 'b']), (2, ['c']), (3, ['d', 'e'])]
+
+
+def test_backends_are_validated(tmp_path):
+    def scenario(model: str) -> Path:
+        path = tmp_path / 'backend.toml'
+        path.write_text(
+            f'name = "x"\n[model]\n{model}\n[[steps]]\nsend = "hi"\n',
+            encoding='utf-8',
+        )
+        return path
+
+    recorded = load_scenario(
+        scenario('mode = "recorded"\nbackend = "anthropic_compatible"')
+    )
+    assert recorded.backend == 'anthropic_compatible'
+    with pytest.raises(ScenarioError):
+        load_scenario(scenario('mode = "recorded"\nbackend = "gemini"'))
+    with pytest.raises(ScenarioError):
+        load_scenario(
+            scenario(
+                'mode = "scripted"\nbackend = "anthropic_compatible"\n'
+                '[[model.responses]]\ntext = "y"'
+            )
+        )
 
 
 def test_now_placeholders_expand_to_rfc3339_milliseconds():

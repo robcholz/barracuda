@@ -172,6 +172,4 @@ def check_step_requests(scenario: Scenario, requests: Path) -> list[str]:
 
 def _first_request_with(bodies: Sequence[str], message: str) -> int | None:
     encoded = json.dumps(message, ensure_ascii=False)[1:-1]
-    return next(
-        (index for index, body in enumerate(bodies) if encoded in body), None
-    )
+    return next((index for index, body in enumerate(bodies) if encoded in body), None)
