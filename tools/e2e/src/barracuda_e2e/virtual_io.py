@@ -18,7 +18,17 @@ HOST = '127.0.0.1'
 PORT = 18_790
 DEFAULT_BUS = 'I2C0'
 FAULTS = ('nack', 'arbitration-loss', 'timeout', 'bus-error')
-PIN_FIELDS = ('mode', 'level', 'output', 'pull', 'drive', 'function', 'driven')
+# `claimed` is derived: whether any function holds the pin.
+PIN_FIELDS = (
+    'mode',
+    'level',
+    'output',
+    'pull',
+    'drive',
+    'function',
+    'driven',
+    'claimed',
+)
 
 
 class VirtualIoError(RuntimeError):
@@ -269,6 +279,7 @@ def check(client: VirtualIoClient, spec: VirtualIoSpec | None) -> list[str]:
 def pin_failures(actual: dict[str, Any], expectation: PinExpectation) -> list[str]:
     """Differences between a pin snapshot and the expected fields."""
 
+    actual = {**actual, 'claimed': actual.get('function') is not None}
     return [
         f'virtual pin {expectation.pin} {name}: {actual.get(name)!r} != {wanted!r}'
         for name, wanted in expectation.fields.items()

@@ -148,8 +148,8 @@ address = 0x51                       # omit for every address on the bus
 fault = "nack"                       # nack | arbitration-loss | timeout | bus-error
 once = false                         # default true: fires once
 
-[[virtual_io.expect_pins]]           # after the chat; any of mode, level,
-pin = "vio-0"                        # output, pull, drive, function, driven
+[[virtual_io.expect_pins]]           # after the chat; any of mode, level, output,
+pin = "vio-0"                        # pull, drive, function, driven, claimed
 mode = "output"
 level = true
 

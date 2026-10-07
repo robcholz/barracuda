@@ -138,6 +138,18 @@ def test_malformed_virtual_io_tables_are_rejected(tmp_path, table):
         load_scenario(write_scenario(tmp_path, table))
 
 
+def test_pin_expectations_compare_fields_and_derive_claimed():
+    pin = {'name': 'vio-6', 'mode': 'disabled', 'function': None}
+    unclaimed = virtual_io.PinExpectation(
+        'vio-6', {'claimed': False, 'mode': 'disabled'}
+    )
+    assert virtual_io.pin_failures(pin, unclaimed) == []
+    claimed = virtual_io.PinExpectation('vio-6', {'claimed': True})
+    assert virtual_io.pin_failures(pin, claimed) == [
+        'virtual pin vio-6 claimed: False != True'
+    ]
+
+
 def test_event_matching_uses_fields_and_list_prefixes():
     event = {
         'kind': 'i2c',
