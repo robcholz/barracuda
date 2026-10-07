@@ -296,6 +296,9 @@ def http_request(method: str, path: str, body: str | None) -> tuple[int, str]:
             return response.status, response.read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode('utf-8', 'replace')
+    except OSError as error:
+        # A hung or refused request fails this check, not the whole run.
+        return 0, f'request failed: {error}'
 
 
 def chat(cli: Path, messages: Sequence[str], timeout: float) -> list[dict[str, object]]:
