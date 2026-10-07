@@ -12,6 +12,9 @@
 
 #pragma weak memchr
 #pragma weak strcmp
+#pragma weak strstr
+#pragma weak strchr
+#pragma weak __strchrnul
 #pragma weak vsnprintf
 #pragma weak snprintf
 #pragma weak calloc

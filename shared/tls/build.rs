@@ -4,9 +4,12 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 /// The copied musl sources and Barracuda's wrappers, relative to `c/`.
-const SOURCES: [&str; 4] = [
+const SOURCES: [&str; 7] = [
     "musl/memchr.c",
+    "musl/strchr.c",
+    "musl/strchrnul.c",
     "musl/strcmp.c",
+    "musl/strstr.c",
     "musl/vfprintf.c",
     "runtime.c",
 ];

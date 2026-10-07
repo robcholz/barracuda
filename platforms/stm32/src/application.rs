@@ -9,7 +9,11 @@ use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use panic_halt as _;
 use static_cell::StaticCell;
 
-use crate::{Stm32Flash, Stm32PlatformBindings, Stm32PlatformError};
+use crate::{Stm32Flash, Stm32PlatformBindings, Stm32PlatformError, Stm32Rng};
+
+embassy_stm32::bind_interrupts!(struct Irqs {
+    RNG => embassy_stm32::rng::InterruptHandler<embassy_stm32::peripherals::RNG>;
+});
 
 #[doc(hidden)]
 pub use cortex_m_rt as __rt;
@@ -73,10 +77,12 @@ pub fn bindings(
     board: &barracuda_board::Board,
     spawner: embassy_executor::Spawner,
     flash_token: embassy_stm32::Peri<'static, embassy_stm32::peripherals::FLASH>,
+    rng_token: embassy_stm32::Peri<'static, embassy_stm32::peripherals::RNG>,
 ) -> Result<Stm32PlatformBindings, Stm32PlatformError> {
     static NETWORK: StaticCell<StackResources<4>> = StaticCell::new();
     static FLASH: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>> =
         StaticCell::new();
+    static RNG: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<Stm32Rng>>> = StaticCell::new();
 
     // The STM32U5A5 has no Ethernet MAC and no Board network interface is
     // wired yet, so the IP stack never has a link.
@@ -89,7 +95,11 @@ pub fn bindings(
     let network = run_network(runner).map_err(|_error| Stm32PlatformError::NetworkTask)?;
     spawner.spawn(network);
     let flash = FLASH.init(Mutex::new(RefCell::new(Flash::new_blocking(flash_token))));
-    Stm32PlatformBindings::from_initialized_services(board, ip_stack, flash)
+    // The RNG runs from HSI48, which the default clock configuration enables.
+    let rng = RNG.init(Mutex::new(RefCell::new(embassy_stm32::rng::Rng::new(
+        rng_token, Irqs,
+    ))));
+    Stm32PlatformBindings::from_initialized_services(board, ip_stack, flash, rng)
 }
 
 /// Generates the STM32 async entry around one selected application.
@@ -104,19 +114,24 @@ macro_rules! platform_entry {
                 'static,
                 $crate::application::__hal::peripherals::FLASH,
             >,
+            rng: $crate::application::__hal::Peri<
+                'static,
+                $crate::application::__hal::peripherals::RNG,
+            >,
         ) {
-            let $platform_bindings = match $crate::application::bindings($board, $spawner, flash) {
-                Ok(bindings) => bindings,
-                Err(error) => {
-                    $crate::application::__log::error!(
-                        "failed to bootstrap STM32 Platform: {}",
-                        error
-                    );
-                    loop {
-                        core::hint::spin_loop();
+            let $platform_bindings =
+                match $crate::application::bindings($board, $spawner, flash, rng) {
+                    Ok(bindings) => bindings,
+                    Err(error) => {
+                        $crate::application::__log::error!(
+                            "failed to bootstrap STM32 Platform: {}",
+                            error
+                        );
+                        loop {
+                            core::hint::spin_loop();
+                        }
                     }
-                }
-            };
+                };
             if let Err(error) = $application.await {
                 $crate::application::__log::error!("application exited: {}", error);
                 loop {
@@ -132,13 +147,14 @@ macro_rules! platform_entry {
             let peripherals = $crate::application::__hal::init($crate::application::clock_config());
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
+            let rng = peripherals.RNG;
             static EXECUTOR: $crate::application::__StaticCell<embassy_executor::Executor> =
                 $crate::application::__StaticCell::new();
             EXECUTOR
                 .init(embassy_executor::Executor::new())
                 .run(move |spawner| {
                     if let Ok(task) =
-                        __barracuda_application_task(spawner, $board_bindings_value, flash)
+                        __barracuda_application_task(spawner, $board_bindings_value, flash, rng)
                     {
                         spawner.spawn(task);
                     }

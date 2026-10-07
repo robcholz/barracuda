@@ -10,7 +10,7 @@ system C library and compile none of this.
 
 | Files | Source | Changes |
 | --- | --- | --- |
-| `musl/memchr.c`, `musl/strcmp.c` | [musl](https://musl.libc.org/) 1.2.5 `src/string` | none |
+| `musl/memchr.c`, `musl/strchr.c`, `musl/strchrnul.c`, `musl/strcmp.c`, `musl/strstr.c` | [musl](https://musl.libc.org/) 1.2.5 `src/string` | none |
 | `musl/vfprintf.c` | musl 1.2.5 `src/stdio`, as already reduced in `plugins/vm/crates/lua/c/musl` | becomes `vsnprintf` and `snprintf` over a buffer; no floating-point conversions (mbedTLS formats none, so `%e`, `%f`, `%g` and `%a` are rejected); a private `strnlen` |
 | `musl/stdio_impl.h` | musl `src/internal` | rewritten: the part of `FILE` that `vsnprintf` uses |
 | `musl/COPYRIGHT` | musl | musl's license (MIT) |

@@ -10,6 +10,11 @@ pub mod hal;
 #[doc(hidden)]
 pub mod application;
 
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
+mod entropy;
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
+pub use entropy::{Stm32Entropy, Stm32Rng};
+
 /// Runtime access discipline declared by the native linker memory region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stm32RegionAccess {
@@ -171,7 +176,9 @@ mod internal_flash {
     use embassy_stm32::flash::{Blocking, Flash};
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 
-    use crate::{board_partition_table, LinkerRegionError, Stm32RegionAccess};
+    use crate::{
+        board_partition_table, LinkerRegionError, Stm32Entropy, Stm32RegionAccess, Stm32Rng,
+    };
 
     /// STM32 internal flash driver; the STM32U5 HAL exposes blocking access only.
     pub type Stm32Flash = Flash<'static, Blocking>;
@@ -189,13 +196,14 @@ mod internal_flash {
     pub struct Stm32PlatformBindings {
         ip_stack: Stack<'static>,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
+        rng: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Rng>>,
     }
 
     impl Stm32PlatformBindings {
         /// Binds initialized STM32 Platform services to a compatible Board.
         ///
-        /// The selected Board/HAL composition hands the Platform IP service
-        /// and internal flash to this binding.
+        /// The selected Board/HAL composition hands the Platform IP service,
+        /// internal flash and random number generator to this binding.
         ///
         /// # Errors
         ///
@@ -204,11 +212,16 @@ mod internal_flash {
             board: &Board,
             ip_stack: Stack<'static>,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
+            rng: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Rng>>,
         ) -> Result<Self, Stm32PlatformError> {
             if board.hardware().chip() != "stm32u5a5zj" {
                 return Err(Stm32PlatformError::IncompatibleChip);
             }
-            Ok(Self { ip_stack, flash })
+            Ok(Self {
+                ip_stack,
+                flash,
+                rng,
+            })
         }
     }
 
@@ -263,8 +276,7 @@ mod internal_flash {
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
-        /// The RNG peripheral is not bound by Target composition yet.
-        type Entropy = barracuda_platform::UnavailableEntropy;
+        type Entropy = Stm32Entropy;
         type Partitions = Stm32Partitions;
         type Error = Stm32PlatformError;
 
@@ -286,7 +298,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
-                entropy: barracuda_platform::UnavailableEntropy,
+                entropy: Stm32Entropy::new(bindings.rng),
                 partitions,
             })
         }
