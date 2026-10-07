@@ -24,17 +24,32 @@ pub struct RuleViolation {
 pub struct DeviceContext<'a> {
     now: Duration,
     violations: &'a mut Vec<RuleViolation>,
+    notes: Vec<String>,
 }
 
 impl<'a> DeviceContext<'a> {
     pub(crate) fn new(now: Duration, violations: &'a mut Vec<RuleViolation>) -> Self {
-        Self { now, violations }
+        Self {
+            now,
+            violations,
+            notes: Vec::new(),
+        }
+    }
+
+    pub(crate) fn into_notes(self) -> Vec<String> {
+        self.notes
     }
 
     /// Time of this bus phase on the hardware model's monotonic clock.
     #[must_use]
     pub const fn now(&self) -> Duration {
         self.now
+    }
+
+    /// Records an observable device-side change, such as an output pin
+    /// level, in the hardware event log after the current transaction.
+    pub fn note(&mut self, note: impl Into<String>) {
+        self.notes.push(note.into());
     }
 
     /// Reports that the observed traffic breaks a datasheet rule.

@@ -91,6 +91,8 @@ Events carry `seq`, `at_us` (microseconds since the manager started), and
 {"seq":4,"at_us":1710,"kind":"i2c","bus":"I2C0","address":80,"operations":[{"write":"10"},{"read":"aabb"}],"result":"ok","injected":false}
 ```
 
+A device model's notes follow its transaction as
+`{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}`.
 `result` is `ok`, `nack`, `arbitration-loss`, `timeout`, or `bus-error`. The
 log keeps the latest 4096 events. A violation carries the `seq` of the
 transaction that exposed it, `at_us`, `bus`, `address`, `model`, `rule`, and
@@ -102,6 +104,25 @@ $ printf '%s\n' '{"op":"add_device","bus":"I2C0","address":80}' \
 {"ok":true}
 {"ok":true,"pin":{"name":"vio-2","chip":"GPIO2",...,"level":true}}
 ```
+
+## Chip models
+
+`models` holds datasheet models of real chips reached over I2C. Every
+register behaviour, ordering rule, and timing number cites its datasheet
+(document, revision, section or table) in the model source, and each rule
+violation names that citation. Attach one through the manager with
+`add_device` and its `model` name.
+
+| `model` | Chip | Datasheet | Checks |
+| --- | --- | --- | --- |
+| `registers` | generic 256-byte register device | — | none |
+| `ina226` | TI INA226 power monitor | TI SBOS547C (2011, rev. Aug 2026) | register set, two-byte access, read-only registers, conversion timing, Equations 3 and 4 |
+| `rx8130ce` | Epson RX8130CE RTC | Epson ETM50E-10 | 30 ms power-on access wait, t_str before initial setting, user registers only, TEST bit, valid date, initialize all registers after VLF |
+| `pi4ioe5v6408` | Diodes PI4IOE5V6408 I/O expander | Diodes DS40583 Rev 3-5 | register map, pin drive from direction/output/high-Z (noted as `P<n> high/low/released` events), no burst reads |
+| `bq27220` | TI BQ27220 fuel gauge | TI SLUSCB7A, SLUUBD4A | 66 µs t(BUF) between packets, two commands per second, 250 ms tPUCD, read-only commands NACK |
+
+Device models may also note device-side changes (such as an expander pin
+changing level) as `device` events in the log.
 
 ## Driver tests
 

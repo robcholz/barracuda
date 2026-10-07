@@ -21,6 +21,7 @@ mod gpio;
 pub mod hal;
 mod hardware;
 mod i2c;
+pub mod models;
 
 pub use clock::{Clock, VirtualDelay};
 pub use device::{DataNack, DeviceContext, I2cDevice, RegisterDevice, RuleViolation};

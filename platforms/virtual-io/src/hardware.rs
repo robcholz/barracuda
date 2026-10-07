@@ -182,6 +182,18 @@ pub enum EventDetail {
         /// Whether the failure came from an injected fault.
         injected: bool,
     },
+    /// A device-side change noted by a device model, such as an output pin
+    /// of an I/O expander changing level.
+    Device {
+        /// Controller name.
+        bus: &'static str,
+        /// Seven-bit address.
+        address: u8,
+        /// Device model name.
+        model: &'static str,
+        /// Model-defined description.
+        note: String,
+    },
 }
 
 /// One phase of a recorded I2C transaction, as lowercase hex bytes.
@@ -463,9 +475,12 @@ impl VirtualHardware {
             return Err(HardwareError::AddressInUse { bus: name, address });
         }
         let mut violations = Vec::new();
-        device.attached(&mut DeviceContext::new(now, &mut violations));
+        let mut context = DeviceContext::new(now, &mut violations);
+        device.attached(&mut context);
+        let notes = context.into_notes();
         let model = device.model();
         hardware.buses[index].devices.insert(address, device);
+        hardware.record_notes(now, name, address, model, notes);
         hardware.record_violations(0, micros(now), name, address, model, violations);
         Ok(())
     }
@@ -748,12 +763,9 @@ impl VirtualHardware {
         let model = device.model();
         let mut violations = Vec::new();
         let mut records = Vec::new();
-        let result = run_phases(
-            device.as_mut(),
-            &mut DeviceContext::new(now, &mut violations),
-            operations,
-            &mut records,
-        );
+        let mut context = DeviceContext::new(now, &mut violations);
+        let result = run_phases(device.as_mut(), &mut context, operations, &mut records);
+        let notes = context.into_notes();
         let label = result.err().map_or("ok", VirtualI2cError::label);
         hardware.record(
             now,
@@ -765,6 +777,7 @@ impl VirtualHardware {
                 injected: false,
             },
         );
+        hardware.record_notes(now, name, address, model, notes);
         hardware.record_violations(seq, micros(now), name, address, model, violations);
         result
     }
@@ -841,6 +854,27 @@ impl Hardware {
             at_us: micros(now),
             detail,
         });
+    }
+
+    fn record_notes(
+        &mut self,
+        now: Duration,
+        bus: &'static str,
+        address: u8,
+        model: &'static str,
+        notes: Vec<String>,
+    ) {
+        for note in notes {
+            self.record(
+                now,
+                EventDetail::Device {
+                    bus,
+                    address,
+                    model,
+                    note,
+                },
+            );
+        }
     }
 
     fn record_violations(
