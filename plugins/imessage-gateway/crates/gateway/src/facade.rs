@@ -36,6 +36,11 @@ impl MessageGateway {
         })
     }
 
+    /// Whether a provider is registered for `channel` now.
+    pub fn has_channel(&self, channel: &str) -> bool {
+        self.channels.borrow().contains_key(channel)
+    }
+
     pub async fn send_message(
         &self,
         request: SendMessageRequest,

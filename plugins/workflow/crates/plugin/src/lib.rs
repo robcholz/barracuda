@@ -107,7 +107,7 @@ impl WorkflowService {
             .position(|workflow| &workflow.id == workflow_id)
         else {
             return Err(WorkflowServiceError::Rejected(
-                WorkflowControlRejection::Persistence,
+                WorkflowControlRejection::NotUnloadable,
             ));
         };
         next_catalog.remove(position);
@@ -386,6 +386,15 @@ mod tests {
             .expect("valid catalog");
             assert_eq!(persisted.len(), 1);
             assert_eq!(persisted[0]["id"], "saved");
+
+            let bundled = WorkflowId::try_from("bundled").expect("Workflow ID");
+            assert!(matches!(
+                service.unload(&bundled).await,
+                Err(WorkflowServiceError::Rejected(
+                    WorkflowControlRejection::NotUnloadable
+                ))
+            ));
+            assert_eq!(service.definitions().len(), 2);
         });
     }
 

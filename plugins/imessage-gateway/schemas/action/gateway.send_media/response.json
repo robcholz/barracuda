@@ -13,7 +13,7 @@
       "type": "object",
       "properties": {
         "error": {
-          "enum": ["invalid_request", "duplicate_stream", "unknown_stream", "out_of_order", "busy"]
+          "enum": ["invalid_request", "unknown_channel", "duplicate_stream", "unknown_stream", "out_of_order", "busy"]
         }
       },
       "required": ["error"],

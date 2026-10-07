@@ -228,6 +228,7 @@ const fn rejection_code(rejection: WorkflowControlRejection) -> &'static str {
         WorkflowControlRejection::DuplicateId => "duplicate_id",
         WorkflowControlRejection::NotFound => "not_found",
         WorkflowControlRejection::Persistence => "persistence",
+        WorkflowControlRejection::NotUnloadable => "not_unloadable",
         WorkflowControlRejection::InvalidArguments => "invalid_arguments",
         WorkflowControlRejection::UnknownAction => "unknown_action",
         WorkflowControlRejection::InvalidLink => "invalid_link",

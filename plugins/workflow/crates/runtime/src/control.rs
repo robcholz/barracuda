@@ -33,6 +33,9 @@ pub enum WorkflowControlRejection {
     NotFound,
     /// The persistence operation failed.
     Persistence,
+    /// The Workflow was loaded by its owning Plugin for this run, not stored,
+    /// so it cannot be unloaded.
+    NotUnloadable,
     /// A step's link arguments were malformed.
     InvalidArguments,
     /// A step addressed an Action that is not registered.

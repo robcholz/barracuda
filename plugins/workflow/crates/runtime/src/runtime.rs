@@ -755,6 +755,40 @@ fn schema_properties(schema: &Value) -> Option<&Map<String, Value>> {
     schema.get("properties")?.as_object()
 }
 
+/// The shapes an Action response can take: each `oneOf` branch, or the schema.
+///
+/// Responses list success and error shapes as `oneOf` branches. A link that
+/// reads the previous output is valid when some shape supplies the value; an
+/// execution that receives another shape fails at that step.
+fn response_shapes(schema: &Value) -> impl Iterator<Item = &Value> {
+    let branches = schema.get("oneOf").and_then(Value::as_array);
+    branches
+        .into_iter()
+        .flatten()
+        .chain(branches.is_none().then_some(schema))
+}
+
+/// Whether two schemas describe the same value, ignoring the `$schema` tag
+/// that only top-level documents carry.
+fn same_shape(left: &Value, right: &Value) -> bool {
+    match (left.as_object(), right.as_object()) {
+        (Some(left), Some(right)) => {
+            let fields = |object: &'_ Map<String, Value>| {
+                object
+                    .iter()
+                    .filter(|(key, _value)| key.as_str() != "$schema")
+                    .count()
+            };
+            fields(left) == fields(right)
+                && left
+                    .iter()
+                    .filter(|(key, _value)| key.as_str() != "$schema")
+                    .all(|(key, value)| right.get(key) == Some(value))
+        }
+        _ => left == right,
+    }
+}
+
 /// Request and response schemas of one step, parsed only for link validation.
 struct StepShapes {
     request: Value,
@@ -795,7 +829,9 @@ fn validate_links(
                     .checked_sub(1)
                     .and_then(|index| descriptors.get(index))
                 {
-                    if previous.response != this.request {
+                    if !response_shapes(&previous.response)
+                        .any(|shape| same_shape(shape, &this.request))
+                    {
                         return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                     }
                 }
@@ -822,18 +858,18 @@ fn validate_links(
                                 step: to_step,
                             });
                         };
-                        match &reference.source_field {
-                            Some(field)
-                                if schema_properties(&previous.response)
-                                    .and_then(|properties| properties.get(field))
-                                    == Some(destination) => {}
-                            None if &previous.response == destination => {}
-                            _ => {
-                                return Err(WorkflowExecutionError::InvalidLink {
-                                    from_step,
-                                    to_step,
-                                })
+                        let supplied = response_shapes(&previous.response).any(|shape| {
+                            match &reference.source_field {
+                                Some(field) => {
+                                    schema_properties(shape)
+                                        .and_then(|properties| properties.get(field))
+                                        == Some(destination)
+                                }
+                                None => same_shape(shape, destination),
                             }
+                        });
+                        if !supplied {
+                            return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                         }
                     }
                 }
@@ -981,6 +1017,11 @@ mod tests {
             ),
             2 => workflow_action_schema_inline!("test.then", "{}", "{}"),
             3 => workflow_action_schema_inline!("test.else", "{}", "{}"),
+            4 => workflow_action_schema_inline!(
+                "test.maybe",
+                "{}",
+                r#"{"oneOf":[{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"]},{"type":"object","properties":{"error":{"const":"busy"}},"required":["error"]}]}"#
+            ),
             _ => workflow_action_schema_inline!("test.invalid", "{}", "{}"),
         };
 
@@ -1289,6 +1330,49 @@ mod tests {
             r#"{"call":"test.sink"}"#,
             r#"{"call":"test.sink","arguments":{"token":"$previous.output.token"}}"#,
             r#"{"call":"test.sink","arguments":{"token":1,"extra":2,"bogus":3}}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.missing","extra":5}}"#,
+        ] {
+            assert_eq!(
+                validate(invalid),
+                Err(WorkflowControlRejection::InvalidLink),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn links_may_read_a_field_of_one_response_shape() {
+        let actions = WorkflowActionRegistry::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let _registrations = [
+            actions
+                .add_action(FixedAction::<4> {
+                    output: json!({ "token": 7 }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register maybe"),
+            actions
+                .add_action(FixedAction::<1> {
+                    output: json!({ "ok": true }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register sink"),
+        ];
+        let validate = |sink: &str| {
+            let source = alloc::format!(
+                r#"{{"id":"linked","match":{{"event":"test.trigger"}},"steps":[{{"call":"test.maybe"}},{sink}]}}"#
+            );
+            validate_definition(&actions, &parse_definition(&source).expect("parse"))
+        };
+
+        assert_eq!(
+            validate(
+                r#"{"call":"test.sink","arguments":{"token":"$previous.output.token","extra":5}}"#
+            ),
+            Ok(())
+        );
+        for invalid in [
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.error","extra":5}}"#,
             r#"{"call":"test.sink","arguments":{"token":"$previous.output.missing","extra":5}}"#,
         ] {
             assert_eq!(

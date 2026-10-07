@@ -143,6 +143,7 @@ impl MediaSessions {
 }
 
 pub(crate) fn accept_media(
+    gateway: &MessageGateway,
     sessions: &MediaSessions,
     jobs: &Sender<MediaJob>,
     request: GatewaySendMediaRequest,
@@ -166,6 +167,11 @@ pub(crate) fn accept_media(
                 || !valid_required(&conversation_id)
             {
                 return Err(GatewayOperationError::InvalidRequest);
+            }
+            // Refuse now: a worker that fails later only reports through a
+            // Workflow Event, and the next chunk would see `unknown_stream`.
+            if !gateway.has_channel(&channel) {
+                return Err(GatewayOperationError::UnknownChannel);
             }
             if sessions.entries.borrow().contains_key(&stream_id) {
                 return Err(GatewayOperationError::DuplicateStream);

@@ -400,6 +400,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_longest_key_and_query_fit_the_request_buffer() {
+        // The tool schema caps a query at 255 characters; a control character
+        // is the longest to escape.
+        let api_key = "k".repeat(crate::MAX_API_KEY_BYTES);
+        let query = "\u{1}".repeat(255);
+        let body = ApiRequest {
+            api_key: &api_key,
+            query: &query,
+            max_results: 10,
+        };
+        let mut buffer = [0; API_REQUEST_BUFFER_SIZE];
+        assert!(write_encoded_json(&body, &mut buffer).is_ok());
+    }
+
+    #[test]
     fn provider_results_are_borrowed_and_capped_at_ten() {
         let response: ApiResponse<'_> = serde_json::from_str(
             r#"{"results":[{"title":"A","url":"https://a","content":"B","score":0.5}],"request_id":"ignored"}"#,
