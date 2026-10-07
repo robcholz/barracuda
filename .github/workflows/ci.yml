@@ -307,6 +307,7 @@ jobs:
             os: ubuntu-latest
             package: barracuda-platform-stm32
             toolchain: rust
+            c_toolchain: arm
     steps:
       - uses: actions/checkout@v7
         with:
@@ -354,6 +355,16 @@ jobs:
           fi
           "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
             --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
+
+      # barracuda-tls compiles mbedTLS's C library functions with the
+      # target's C compiler.
+      - name: Install C cross-toolchain
+        if: matrix.c_toolchain == 'arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
 
       - name: Select representative Board
         run: |
