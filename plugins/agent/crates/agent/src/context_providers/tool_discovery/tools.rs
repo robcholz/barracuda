@@ -11,7 +11,7 @@ use barracuda_agent_tool::{
 use serde::Deserialize;
 use serde_json::json;
 
-use super::record_loaded_tool_group;
+use super::{loaded_tool_groups, record_loaded_tool_group};
 
 #[derive(Deserialize)]
 pub(super) struct LoadArgs {
@@ -44,18 +44,39 @@ impl ToolHandler for ToolLoadTool {
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let group_id = args.group_id.trim().to_owned();
-            let loaded = self.discovery.request_load(group_id.clone());
-            if loaded {
+            if self.discovery.request_load(group_id.clone()) {
                 record_loaded_tool_group(&self.storage, group_id.clone());
+                return Ok(ToolOutput {
+                    content: json!({
+                        "group_id": group_id,
+                        "loaded": true,
+                        "available_next_turn": true,
+                    })
+                    .to_string(),
+                    ok: true,
+                });
+            }
+            // A loaded group leaves the loadable catalog. Reporting it as not
+            // loaded makes a model retry the load instead of calling its tools.
+            if loaded_tool_groups(&self.storage).contains(&group_id) {
+                return Ok(ToolOutput {
+                    content: json!({
+                        "group_id": group_id,
+                        "loaded": true,
+                        "already_loaded": true,
+                    })
+                    .to_string(),
+                    ok: true,
+                });
             }
             Ok(ToolOutput {
                 content: json!({
                     "group_id": group_id,
-                    "loaded": loaded,
-                    "available_next_turn": loaded,
+                    "loaded": false,
+                    "error": "unknown tool group; tool_search lists the loadable groups",
                 })
                 .to_string(),
-                ok: loaded,
+                ok: false,
             })
         })
     }
@@ -130,6 +151,29 @@ mod tests {
 
         assert!(output.ok);
         assert_eq!(loaded_tool_groups(&storage), vec!["hidden".to_owned()]);
+
+        // Once the next iteration applies the load, the group is no longer
+        // loadable; loading it again reports it as already loaded.
+        let tools = tool_set.begin().expect("tool set begins again");
+        let load_again = |group: &str| {
+            let call = ToolInvocation::try_new(
+                Some("call-again"),
+                "tool_load",
+                &alloc::format!(r#"{{"group_id":"{group}"}}"#),
+            )
+            .expect("valid invocation");
+            let (joined, _) = ToolRunner::new(&tools).run(vec![call]);
+            block_on(joined.collect::<Vec<_>>())
+                .pop()
+                .expect("load result")
+                .1
+        };
+        let again = load_again("hidden");
+        assert!(again.ok);
+        assert!(again.content.contains(r#""already_loaded":true"#));
+        let unknown = load_again("missing");
+        assert!(!unknown.ok);
+        assert!(unknown.content.contains("unknown tool group"));
     }
 
     struct HiddenTool;
