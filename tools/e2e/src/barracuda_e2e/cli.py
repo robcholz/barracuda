@@ -37,6 +37,7 @@ from .system import (
     require_network,
 )
 from .tapes import CHAT_PATH, SCRIPTED_API_PATH, write_scripted_tape
+from . import virtual_io
 
 SCENARIOS = Path(__file__).resolve().parents[2] / 'scenarios'
 ARTIFACTS = WORKSPACE / 'target' / 'e2e'
@@ -264,6 +265,9 @@ def run_scenario(
         system.start()
         for pattern in scenario.ready_logs:
             system.wait_for_log(pattern, scenario.await_seconds)
+        hardware = virtual_io.VirtualIoClient()
+        if scenario.virtual_io is not None:
+            virtual_io.apply_setup(hardware, scenario.virtual_io)
         http_failures = _run_http(scenario, 'before')
         records: list[dict[str, object]] = []
         if scenario.steps:
@@ -276,11 +280,16 @@ def run_scenario(
         for pattern in scenario.await_logs:
             system.wait_for_log(pattern, scenario.await_seconds)
         http_failures += _run_http(scenario, 'after')
+        http_failures += virtual_io.check(hardware, scenario.virtual_io)
+        (artifacts / 'virtual-io.json').write_text(
+            json.dumps(virtual_io.snapshot(hardware), indent=2) + '\n', encoding='utf-8'
+        )
+        hardware.close()
         (artifacts / 'transcript.jsonl').write_text(
             ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in records),
             encoding='utf-8',
         )
-    except HarnessError as exc:
+    except (HarnessError, virtual_io.VirtualIoError) as exc:
         return [str(exc)]
     finally:
         system.stop()

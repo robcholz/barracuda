@@ -15,6 +15,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import virtual_io
+
 WORKSPACE = Path(__file__).resolve().parents[4]
 BOARD = 'local-linux'
 INTERFACE = 'barracuda0'
@@ -129,6 +131,7 @@ class SystemProcess:
         flash.write_bytes(contents)
         log = self._log_path.open('wb')
         environment = dict(os.environ)
+        environment[virtual_io.ADDRESS_VARIABLE] = virtual_io.address_value()
         if self._heap_limit is not None:
             environment['BARRACUDA_HEAP_LIMIT_BYTES'] = str(self._heap_limit)
         self._process = subprocess.Popen(

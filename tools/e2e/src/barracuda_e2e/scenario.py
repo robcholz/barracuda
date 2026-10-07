@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .virtual_io import VirtualIoSpec, VirtualIoSpecError, parse_spec
+
 DEFAULT_FORBIDDEN_LOGS = (r'\bERROR\b', r'panicked at')
 
 
@@ -80,6 +82,8 @@ class Scenario:
     http: tuple[HttpCheck, ...] = field(default=())
     # Maximum ordinary-heap high-water mark the System may report.
     heap_high_water_max: int | None = None
+    # Virtual GPIO/I2C set up before the chat and checked after it.
+    virtual_io: VirtualIoSpec | None = None
 
     @property
     def slug(self) -> str:
@@ -131,6 +135,12 @@ def load_scenario(path: Path) -> Scenario:
     heap_max = memory.get('heap_high_water_max')
     if heap_max is not None and (not isinstance(heap_max, int) or heap_max <= 0):
         raise ScenarioError(f'{path}: memory.heap_high_water_max must be a byte count')
+    virtual_io = None
+    if 'virtual_io' in document:
+        try:
+            virtual_io = parse_spec(document['virtual_io'], path)
+        except VirtualIoSpecError as exc:
+            raise ScenarioError(str(exc)) from exc
     return Scenario(
         path=path,
         name=name,
@@ -147,6 +157,7 @@ def load_scenario(path: Path) -> Scenario:
         await_seconds=float(logs.get('await_seconds', 30)),
         http=http,
         heap_high_water_max=heap_max,
+        virtual_io=virtual_io,
     )
 
 

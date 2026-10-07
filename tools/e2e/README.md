@@ -126,6 +126,48 @@ the next scripted response and every later step shifts. A detached completion
 (a VM run that ends after its turn, for example) starts a turn of its own and
 counts too. Split longer cases into numbered files such as `edge-vm-output-2`.
 
+### Virtual GPIO and I2C
+
+Every run starts the System with `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:18790`
+and connects to its virtual peripherals manager (protocol in
+`platforms/virtual-io/README.md`). The Board exposes `vio-0` to `vio-7` and
+the I2C controllers `I2C0` and `I2C1`; the first `i2c.open` gets `I2C0`. A
+`[virtual_io]` table sets hardware up after startup and checks it after the
+chat:
+
+```toml
+[virtual_io]
+inputs = { vio-2 = true }            # externally driven input levels
+
+[[virtual_io.devices]]               # generic 256-byte register device
+address = 0x50                       # bus defaults to "I2C0"
+data = "0a0b"                        # optional initial bytes from offset 0
+
+[[virtual_io.faults]]
+address = 0x51                       # omit for every address on the bus
+fault = "nack"                       # nack | arbitration-loss | timeout | bus-error
+once = false                         # default true: fires once
+
+[[virtual_io.expect_pins]]           # after the chat; any of mode, level,
+pin = "vio-0"                        # output, pull, drive, function, driven
+mode = "output"
+level = true
+
+[[virtual_io.expect_registers]]
+address = 0x50
+offset = 0x10
+data = "a1b2"
+
+[[virtual_io.expect_events]]         # some recorded event has these fields;
+kind = "i2c"                         # lists match by prefix
+address = 0x51
+result = "nack"
+```
+
+Every scenario fails when a device model reports a datasheet order or timing
+violation, unless `allow_violations = true`. The final pins, buses, events,
+and violations are written to `target/e2e/<name>/virtual-io.json`.
+
 ### Memory
 
 The host Platform counts the ordinary (internal-RAM) heap separately from bulk
