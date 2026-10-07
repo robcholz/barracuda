@@ -24,7 +24,7 @@ peripherals:
         href: GPIO38
         data: [GPIO13, GPIO47, GPIO14, GPIO3, GPIO12, GPIO42, GPIO41, GPIO39]
         xclk-frequency-hz: 20000000
-        dma-buffer-bytes: 98304
+        dma-buffer-bytes: 65536
   devices:
     camera:
       implementation: ov3660-camera

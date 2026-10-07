@@ -24,7 +24,7 @@ peripherals:
         href: GPIO7
         data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
         xclk-frequency-hz: 16000000
-        dma-buffer-bytes: 98304
+        dma-buffer-bytes: 65536
   devices:
     camera:
       implementation: ov2640-camera
