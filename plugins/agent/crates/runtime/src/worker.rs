@@ -1,18 +1,18 @@
 //! Single-thread process runtime loop.
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::Receiver;
 use barracuda_agent_persistence::{PersistenceError, SharedPersistence};
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
+use barracuda_runtime_utils::local_channel::Receiver;
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
-use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::AgentCreateError;
 use barracuda_agent::SharedApiManager;
@@ -66,7 +66,7 @@ where
     persistence_task: Option<PersistenceTask>,
     maintenance_task: Option<MaintenanceTask>,
     session_manager: SessionManager<Tcp, Resolver>,
-    commands: Pin<Box<Receiver<RuntimeCommand>>>,
+    commands: Receiver<RuntimeCommand>,
     stopping: bool,
     next_task: WorkerTask,
 }
@@ -109,7 +109,7 @@ where
             persistence_task: None,
             maintenance_task: None,
             session_manager,
-            commands: Box::pin(commands),
+            commands,
             stopping: false,
             next_task: WorkerTask::Ingress,
         })
@@ -223,7 +223,7 @@ where
             this.next_task = task.next();
             match task {
                 WorkerTask::Ingress if !this.stopping => {
-                    if let Poll::Ready(command) = this.commands.as_mut().poll_next(context) {
+                    if let Poll::Ready(command) = this.commands.poll_recv(context) {
                         this.handle_command(command);
                         progressed = true;
                         break;

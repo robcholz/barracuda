@@ -26,15 +26,25 @@ members = [
 default-members = [
     "apps/barracuda-system",
 ]
+exclude = [
+    # Vendored third-party crate, patched below.
+    "shared/tls/mbedtls-rs",
+    "apps/barracuda-cli/rustyline",
+]
 
 [workspace.dependencies]
+portable-atomic = { version = "1.15", default-features = false }
+async-channel = { version = "2", default-features = false, features = ["portable-atomic"] }
+event-listener = { version = "5", default-features = false, features = ["critical-section", "portable-atomic"] }
+futures-core = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+futures-util = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+portable-atomic-util = { version = "0.2.7", default-features = false, features = ["alloc"] }
 # Workspace crates
 # BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
 barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
 barracuda-platform-esp32p4 = { path = "platforms/esp32p4" }
-barracuda-platform-esp32s2 = { path = "platforms/esp32s2" }
 barracuda-platform-esp32s3 = { path = "platforms/esp32s3" }
 barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
@@ -117,6 +127,7 @@ barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-bulk-memory = { path = "shared/bulk-memory" }
 barracuda-cli-style = { path = "shared/cli-style" }
+barracuda-json-writer = { path = "shared/json-writer" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
@@ -178,19 +189,25 @@ log = { version = "0.4", default-features = false }
 static_cell = "2"
 
 [patch.crates-io]
+# mbedtls-rs 0.1.0 with a verify callback and a fallible RNG; see
+# shared/tls/mbedtls-rs/BARRACUDA.md.
+mbedtls-rs = { path = "shared/tls/mbedtls-rs" }
+# rustyline 18.0.1 that reads buffered input before waiting; see
+# apps/barracuda-cli/rustyline/BARRACUDA.md.
+rustyline = { path = "apps/barracuda-cli/rustyline" }
 # picoserve 0.19.0 gates core Error implementations on its `std` feature,
 # which breaks when another workspace crate enables serde/std. This upstream
 # commit keeps the same release API and derives portable Error implementations.
 picoserve = { git = "https://github.com/sammhicks/picoserve.git", rev = "dbe0513e21e6e28a04446e4027e1d337d83d8b24" }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
-# the std crates can be unit-tested on the host. LTO remains disabled so final
-# applications can select the link strategy appropriate to their target.
+# the std crates can be unit-tested on the host. Release builds optimize for
+# size with whole-program LTO so the firmware fits its 4 MiB application slot.
 [profile.release]
 panic = "abort"
-opt-level = "s"
+opt-level = "z"
 codegen-units = 1
-lto = false
+lto = "fat"
 
 # Host profiling keeps the same size-oriented optimization as firmware while
 # retaining source locations for allocation backtraces.

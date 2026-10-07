@@ -204,26 +204,6 @@ impl ProfileStore {
             .map_err(|source| ProfileError::File { document, source })
     }
 
-    /// Create a document with `content` only when it does not already exist.
-    ///
-    /// Returns `true` when the document was created.
-    pub async fn ensure_default(
-        &self,
-        document: ProfileDocument,
-        content: impl AsRef<str>,
-    ) -> Result<bool, ProfileError> {
-        if self
-            .filesystem
-            .exists(&self.path(document))
-            .await
-            .map_err(|source| ProfileError::File { document, source })?
-        {
-            return Ok(false);
-        }
-        self.replace(document, content).await?;
-        Ok(true)
-    }
-
     /// Atomically clear one document. The file remains present but contributes no
     /// context because empty content is semantically absent.
     pub async fn clear(&self, document: ProfileDocument) -> Result<(), ProfileError> {

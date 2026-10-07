@@ -15,6 +15,10 @@ permissions:
 
 env:
   BUN_VERSION: "1.4.0"
+  ESPUP_VERSION: v0.17.1
+  # esp 1.99.0.0 orders esp-hal's ESP32-S3 `__pre_init` literal pool after
+  # its IRAM code in release builds, which no longer links.
+  ESP_RUST_VERSION: 1.98.1.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
@@ -31,9 +35,11 @@ jobs:
       board_matrix: ${{ steps.boards.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt
 
@@ -41,6 +47,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: workspace-tools
+
+      # The workspace includes the selected composition, so Cargo cannot load
+      # it until some Board is selected.
+      - name: Select Board
+        run: cargo board select local-linux
 
       - name: Check committed lockfile
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
@@ -54,7 +65,7 @@ jobs:
       - name: Check CI covers every Platform
         run: |
           diff -u \
-            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s3 linux macos stm32 | sort) \
             <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
               -exec dirname {} \; | xargs -n1 basename | sort)
 
@@ -75,7 +86,7 @@ jobs:
 
             target="$(cargo board target "$board")"
             os=ubuntu-latest
-            toolchain=stable
+            toolchain=rust
             chip=''
             c_toolchain=none
             key="$target"
@@ -90,8 +101,13 @@ jobs:
               toolchain=esp
               chip="${target#xtensa-}"
               chip="${chip%-none-elf}"
+            elif [[ "$target" == riscv32imafc-* ]]; then
+              # The prebuilt riscv32imafc standard libraries mix float ABIs, so
+              # ESP32-P4 builds core and alloc with espup's esp toolchain.
+              toolchain=esp
+              c_toolchain=esp-riscv
             elif [[ "$target" == riscv32* ]]; then
-              c_toolchain=riscv
+              c_toolchain=esp-riscv
             elif [[ "$target" == thumb* ]]; then
               c_toolchain=arm
             fi
@@ -142,16 +158,16 @@ jobs:
         --exclude barracuda-platform-esp32c3
         --exclude barracuda-platform-esp32c6
         --exclude barracuda-platform-esp32p4
-        --exclude barracuda-platform-esp32s2
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-macos
         --exclude barracuda-platform-stm32
-        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
@@ -184,7 +200,76 @@ jobs:
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
       - name: Clippy portable workspace
-        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
+
+  # Boot the real local-linux System on a TUN, drive it through the CLI
+  # Channel, and serve every model call from an llm-tape tape (scripted or
+  # recorded). Offline apart from DNS and needs no secrets. Scenarios share
+  # the TUN address, so each shard runs its part sequentially.
+  e2e:
+    name: E2E (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache E2E build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: local-linux-e2e
+          save-if: ${{ matrix.shard == 1 }}
+
+      - name: Select Board
+        run: cargo board select local-linux
+
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
+
+      - name: Build System, CLI and resources image
+        run: |
+          cargo build
+          cargo build --package barracuda-cli
+          cargo image build
+
+      - name: Provision TUN
+        run: sudo sh platforms/linux/provision.sh barracuda0
+
+      - name: Run scenarios
+        run: >-
+          uv run --package barracuda-e2e barracuda-e2e run
+          --skip-build --shard ${{ matrix.shard }}/4
+
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.shard }}
+          path: target/e2e
+          retention-days: 7
 
   # The same shared production path is tested on the second supported host.
   # It runs in parallel with Linux: Linux normally reports first, while macOS
@@ -199,16 +284,16 @@ jobs:
         --exclude barracuda-platform-esp32c3
         --exclude barracuda-platform-esp32c6
         --exclude barracuda-platform-esp32p4
-        --exclude barracuda-platform-esp32s2
         --exclude barracuda-platform-esp32s3
         --exclude barracuda-platform-linux
         --exclude barracuda-platform-stm32
-        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
@@ -241,7 +326,7 @@ jobs:
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
       - name: Clippy portable workspace
-        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
 
   # The two host Platforms are covered by complete end-user paths above. Check,
   # lint, test, and build every device Platform independently. Native target
@@ -266,23 +351,20 @@ jobs:
             board: esp32c3-devkitc-02
             os: ubuntu-latest
             package: barracuda-platform-esp32c3
-            toolchain: stable
+            toolchain: rust
+            c_toolchain: esp-riscv
           - name: esp32c6
             board: esp32c6-devkitc-1
             os: ubuntu-latest
             package: barracuda-platform-esp32c6
-            toolchain: stable
+            toolchain: rust
+            c_toolchain: esp-riscv
           - name: esp32p4
             board: esp32p4-function-ev-board
             os: ubuntu-latest
             package: barracuda-platform-esp32p4
-            toolchain: stable
-          - name: esp32s2
-            board: esp32s2-saola-1
-            os: ubuntu-latest
-            package: barracuda-platform-esp32s2
             toolchain: esp
-            chip: esp32s2
+            c_toolchain: esp-riscv
           - name: esp32s3
             board: esp32s3-devkitc-1
             os: ubuntu-latest
@@ -290,26 +372,71 @@ jobs:
             toolchain: esp
             chip: esp32s3
           - name: stm32
-            board: stm32f429zi-nucleo
+            board: nucleo-u5a5zj-q
             os: ubuntu-latest
             package: barracuda-platform-stm32
-            toolchain: stable
+            toolchain: rust
+            c_toolchain: arm
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
+      # Restore before espup runs: espup's RISC-V GCC lands in a rustc-less
+      # `esp` rustup toolchain, and rust-cache queries every listed toolchain.
+      - name: Cache Platform build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: platform-${{ matrix.name }}
+          key: esp-${{ env.ESP_RUST_VERSION }}
+          # Board links can fail after every dependency has compiled.
+          cache-on-failure: true
+
+      # espup queries the GitHub API; without a token it is rate-limited (403).
       - name: Install Rust for Xtensa
-        if: matrix.toolchain == 'esp'
+        if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           buildtargets: ${{ matrix.chip }}
+          version: ${{ env.ESP_RUST_VERSION }}
           default: false
           ldproxy: false
           override: false
+
+      # ESP RISC-V C dependencies build with Espressif's GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for these Platforms.
+      - name: Install Espressif RISC-V GCC
+        if: matrix.c_toolchain == 'esp-riscv'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espup" \
+            "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
+          chmod +x "$RUNNER_TEMP/espup"
+          # espup installs its esp Rust toolchain only beside an Xtensa target.
+          targets=esp32c3,esp32c6,esp32p4
+          if [[ "${{ matrix.toolchain }}" == esp ]]; then
+            targets="esp32s3,$targets"
+          fi
+          "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
+            --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
+
+      # barracuda-tls compiles mbedTLS's C library functions with the
+      # target's C compiler.
+      - name: Install C cross-toolchain
+        if: matrix.c_toolchain == 'arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
 
       - name: Select representative Board
         run: |
@@ -317,39 +444,43 @@ jobs:
           target="$(cargo board target)"
           echo "target=$target" >> "$GITHUB_ENV"
 
-      - name: Install stable Rust target
-        if: matrix.toolchain == 'stable'
+      - name: Install Rust target
+        if: matrix.toolchain == 'rust'
         run: rustup target add "$target"
 
-      - name: Cache Platform build
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: platform-${{ matrix.name }}
-
       - name: Check Platform
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo check --package ${{ matrix.package }}
 
-      - name: Check Platform (Xtensa)
+      - name: Check Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: cargo check --package ${{ matrix.package }}
 
       - name: Clippy Platform
-        if: matrix.toolchain == 'stable'
-        run: cargo clippy --package ${{ matrix.package }}
+        if: matrix.toolchain == 'rust'
+        run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
-      - name: Clippy Platform (Xtensa)
+      - name: Clippy Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
-        run: cargo clippy --package ${{ matrix.package }}
+        run: cargo clippy --package ${{ matrix.package }} -- -D clippy::disallowed_types
 
       - name: Test Platform on host
+        if: matrix.toolchain == 'rust'
         run: cargo test --target host-tuple --package ${{ matrix.package }}
 
+      # esp-toolchain selections build only core and alloc; host tests also need std
+      # from the same build, as the host-tool aliases in .cargo/config.toml do.
+      - name: Test Platform on host (esp toolchain)
+        if: matrix.toolchain == 'esp'
+        run: >-
+          cargo test --config 'unstable.build-std=["std"]'
+          --target host-tuple --package ${{ matrix.package }}
+
       - name: Build Platform
-        if: matrix.toolchain == 'stable'
+        if: matrix.toolchain == 'rust'
         run: cargo build --package ${{ matrix.package }}
 
-      - name: Build Platform (Xtensa)
+      - name: Build Platform (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: cargo build --package ${{ matrix.package }}
 
@@ -359,8 +490,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -377,6 +510,9 @@ jobs:
 
       - name: Type check
         run: bun run check
+
+      - name: Select Board
+        run: cargo board select local-linux
 
       - name: Build independent Plugin resources
         run: cargo plugin run build
@@ -398,6 +534,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -431,6 +569,9 @@ jobs:
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
 
+      - name: Test barracuda-e2e
+        run: uv run --package barracuda-e2e pytest tools/e2e/tests
+
   # Once all fast gates pass, check, lint, and build every Board. Target groups
   # run in parallel; Boards sharing a target run serially so the expensive
   # dependency graph is reused.
@@ -449,35 +590,54 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
 
-      - name: Install stable Rust target
-        if: matrix.toolchain == 'stable'
+      # Restore before espup runs: espup's RISC-V GCC lands in a rustc-less
+      # `esp` rustup toolchain, and rust-cache queries every listed toolchain.
+      - name: Cache Board builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: boards-${{ matrix.key }}
+          add-job-id-key: false
+          key: esp-${{ env.ESP_RUST_VERSION }}
+          # Board links can fail after every dependency has compiled.
+          cache-on-failure: true
+
+      - name: Install Rust target
+        if: matrix.toolchain == 'rust'
         run: rustup target add ${{ matrix.key }}
 
+      # ESP RISC-V C dependencies build with Espressif's GCC. espup writes
+      # ~/export-esp.sh, which `cargo board select` loads for these Platforms.
+      - name: Install Espressif RISC-V GCC
+        if: matrix.c_toolchain == 'esp-riscv'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espup" \
+            "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
+          chmod +x "$RUNNER_TEMP/espup"
+          # espup installs its esp Rust toolchain only beside an Xtensa target.
+          targets=esp32c3,esp32c6,esp32p4
+          if [[ "${{ matrix.toolchain }}" == esp ]]; then
+            targets="esp32s3,$targets"
+          fi
+          "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
+            --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
+
       - name: Install C cross-toolchain
-        if: matrix.c_toolchain != 'none'
+        if: matrix.c_toolchain == 'arm'
         run: |
           sudo apt-get update
-          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
-            sudo apt-get install --no-install-recommends \
-              gcc-riscv64-unknown-elf \
-              picolibc-riscv64-unknown-elf
-            target_env="${{ matrix.key }}"
-            target_env="${target_env//[-.]/_}"
-            sysroot="$(dirname "$(find /usr -path '*/riscv64-unknown-elf/include/math.h' -print -quit)")"
-            sysroot="${sysroot%/include}"
-            echo "CC_${target_env}=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
-            echo "CFLAGS_${target_env}=--sysroot=$sysroot" >> "$GITHUB_ENV"
-          else
-            sudo apt-get install --no-install-recommends \
-              gcc-arm-none-eabi \
-              libnewlib-arm-none-eabi
-          fi
+          sudo apt-get install --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
 
       - name: Install Bun for Plugin build hooks
         uses: oven-sh/setup-bun@v2
@@ -485,30 +645,25 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust for Xtensa
-        if: matrix.toolchain == 'esp'
+        if: matrix.toolchain == 'esp' && matrix.chip != ''
         uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: ${{ matrix.chip }}
+          version: ${{ env.ESP_RUST_VERSION }}
           default: false
           ldproxy: false
           override: false
-
-      - name: Cache Board builds
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: boards-${{ matrix.key }}
-          add-job-id-key: false
 
       - name: Check, lint & build every Board
         if: matrix.toolchain != 'esp'
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, cargo clippy, cargo build"
+            echo "::group::$board: cargo check, cargo clippy, cargo build --release"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build; then
+              cargo build --release; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"
@@ -518,16 +673,16 @@ jobs:
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
           exit "$failed"
 
-      - name: Check, lint & build every Board (Xtensa)
+      - name: Check, lint & build every Board (esp toolchain)
         if: matrix.toolchain == 'esp'
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, clippy, build"
+            echo "::group::$board: cargo check, clippy, build --release"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build; then
+              cargo build --release; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"

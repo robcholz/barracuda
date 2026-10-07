@@ -71,6 +71,9 @@ pub enum WorkflowIdError {
 }
 
 /// One ordered Action step in a Workflow, with optional link arguments.
+///
+/// Building a [`WorkflowDefinition`] moves the arguments into the step's
+/// classified link, so they are stored once.
 #[derive(Clone, Debug, Getters, PartialEq)]
 pub struct WorkflowStep {
     /// Action address invoked by this step.
@@ -84,12 +87,6 @@ impl WorkflowStep {
     #[must_use]
     pub fn new(address: WorkflowActionAddress, arguments: Option<Value>) -> Self {
         Self { address, arguments }
-    }
-
-    /// Returns the step's link arguments, when present.
-    #[must_use]
-    pub fn arguments(&self) -> Option<&Value> {
-        self.arguments.as_ref()
     }
 }
 
@@ -155,16 +152,6 @@ impl WorkflowDefinition {
         Self::from_parts(id, event, None, steps, false)
     }
 
-    /// Creates a Workflow whose Event match also requires a matching topic.
-    pub fn with_topic(
-        id: WorkflowId,
-        event: Rule,
-        topic: Topic,
-        steps: Vec<WorkflowStep>,
-    ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, Some(topic), steps, false)
-    }
-
     fn from_parts(
         id: WorkflowId,
         event: Rule,
@@ -175,7 +162,7 @@ impl WorkflowDefinition {
         if steps.is_empty() && !returns {
             return Err(WorkflowDefinitionError::EmptySteps);
         }
-        let links = classify_steps(&steps)?;
+        let (steps, links) = classify_steps(steps)?;
         let operations = linear_operations(steps.len(), returns);
         Ok(Self {
             id,
@@ -199,7 +186,9 @@ impl WorkflowDefinition {
         if operations.is_empty() {
             return Err(WorkflowDefinitionError::EmptySteps);
         }
-        let links = classify_steps(&steps)?;
+        let (steps, links) = classify_steps(steps)?;
+        let mut operations = operations;
+        operations.shrink_to_fit();
         Ok(Self {
             id,
             event,
@@ -260,11 +249,18 @@ fn operations_have_branch(operations: &[WorkflowOperation]) -> bool {
     })
 }
 
-fn classify_steps(steps: &[WorkflowStep]) -> Result<Vec<LinkKind>, WorkflowDefinitionError> {
-    steps
-        .iter()
-        .map(|step| classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference))
-        .collect()
+/// Moves each step's arguments into its classified link.
+fn classify_steps(
+    mut steps: Vec<WorkflowStep>,
+) -> Result<(Vec<WorkflowStep>, Vec<LinkKind>), WorkflowDefinitionError> {
+    let links = steps
+        .iter_mut()
+        .map(|step| {
+            classify(step.arguments.take()).map_err(WorkflowDefinitionError::InvalidReference)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    steps.shrink_to_fit();
+    Ok((steps, links))
 }
 
 /// Failure while constructing a [`WorkflowDefinition`].

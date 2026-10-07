@@ -4,9 +4,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use barracuda_peripheral::PeripheralImplementation;
 use barracuda_peripheral::removable_storage::{
@@ -17,6 +15,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_io::{ErrorKind, ErrorType, SeekFrom};
 use embedded_io_async::{Read, Seek, Write};
+use portable_atomic::{AtomicBool, AtomicU32, Ordering};
+use portable_atomic_util::Arc;
 
 const RETRY_INTERVAL_MILLIS: u64 = 1_000;
 const PRESENCE_POLL_MILLIS: u64 = 500;
@@ -62,17 +62,17 @@ impl<DEVICE> SharedDevice<DEVICE> {
         }
     }
 
-    fn begin_mount(self: &Arc<Self>) -> SessionDevice<DEVICE> {
-        let generation = self
+    fn begin_mount(this: &Arc<Self>) -> SessionDevice<DEVICE> {
+        let generation = this
             .generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
-        self.connected.store(true, Ordering::Release);
-        SessionDevice::new(Arc::clone(self), generation)
+        this.connected.store(true, Ordering::Release);
+        SessionDevice::new(Arc::clone(this), generation)
     }
 
-    fn probe(self: &Arc<Self>, generation: u32) -> SessionDevice<DEVICE> {
-        SessionDevice::new(Arc::clone(self), generation)
+    fn probe(this: &Arc<Self>, generation: u32) -> SessionDevice<DEVICE> {
+        SessionDevice::new(Arc::clone(this), generation)
     }
 
     fn is_connected(&self, generation: u32) -> bool {
@@ -282,7 +282,7 @@ where
                         embassy_time::Timer::after_millis(RETRY_INTERVAL_MILLIS).await;
                     }
                     immediate = false;
-                    let session = self.shared.begin_mount();
+                    let session = SharedDevice::begin_mount(&self.shared);
                     let generation = session.generation;
                     if let Ok(filesystem) = FatFs::mount(session).await {
                         self.state = SlotState::Mounted { generation };
@@ -295,7 +295,7 @@ where
             }
             SlotState::Mounted { generation } => loop {
                 embassy_time::Timer::after_millis(PRESENCE_POLL_MILLIS).await;
-                let mut probe = self.shared.probe(generation);
+                let mut probe = SharedDevice::probe(&self.shared, generation);
                 let mut byte = [0_u8; 1];
                 let present = probe.seek(SeekFrom::Start(0)).await.is_ok()
                     && matches!(probe.read(&mut byte).await, Ok(1));

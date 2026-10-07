@@ -204,13 +204,28 @@ pub async fn synchronize_clock<Source>(mut source: Source, updater: UtcClockUpda
 where
     Source: TimeSource,
 {
+    // Only the previous outcome is logged so a persistent failure is reported
+    // once instead of on every retry.
+    let mut last_failure = None;
+    let mut ever_synchronized = false;
     loop {
         let synchronized = match source.synchronize().await {
             Ok(sample) => {
                 updater.synchronize(sample);
+                if !ever_synchronized || last_failure.is_some() {
+                    log::info!("UTC clock synchronized from network time");
+                }
+                ever_synchronized = true;
+                last_failure = None;
                 true
             }
-            Err(_error) => false,
+            Err(error) => {
+                if last_failure != Some(error) {
+                    log::warn!("network time synchronization failed: {error}");
+                }
+                last_failure = Some(error);
+                false
+            }
         };
         let config = updater.config();
         let delay = if synchronized {

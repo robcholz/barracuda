@@ -38,7 +38,7 @@ fn selected_board_exports_no_platform_identity() -> Result<(), std::io::Error> {
     assert!(build.contains("render_board_hal"));
     assert!(build.contains("render_board_hal"));
     assert!(!build.contains("board.board_hal()"));
-    assert!(!build.contains("stm32f429zi-nucleo"));
+    assert!(!build.contains("nucleo-u5a5zj-q"));
     assert!(!manifest.contains("[features]"));
     assert!(manifest
         .contains("barracuda-board-selection = { path = \"../../.barracuda/selection/board\" }"));

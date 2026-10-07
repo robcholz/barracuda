@@ -4,7 +4,6 @@
 - Direct dependency: `workflow`
 - Provided typed capabilities: `Vm`, `LuaPackageRegistry`
 - Required typed capabilities: `WorkflowActionRegistry` from `workflow`
-- Owned Components: none
 - Plugin-owned tasks: one lifecycle task and up to four Lua execution tasks
 - Workflow Actions: `vm.run`, `vm.input`, `vm.cancel`
 
@@ -22,8 +21,8 @@ run that is waiting for input.
 The `vm.run` Workflow Action awaits that handle and returns only after the Lua
 execution finishes. VM output and terminal state are not emitted as Workflow
 Events, and input progress does not alter the Workflow Action contract. The
-Plugin owns a fixed pool of four Embassy execution slots and four
-reusable 96 KiB Lua heaps. Requests and responses use ordinary Serde values;
+Plugin owns a fixed pool of four Embassy execution slots; each running
+execution allocates a 1 MiB Lua heap from Platform bulk memory. Requests and responses use ordinary Serde values;
 there is no Event Router lane or transport-derived source/input limit.
 
 Dependent VM package Plugins still register require-only Lua packages through

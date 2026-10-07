@@ -1,0 +1,9 @@
+name = "Live Gateway media"
+description = "A real model streams a small file to the Web channel with gateway_send_media."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Use gateway_send_media to send me a text file named hello.txt on channel web, conversation_id conversation. Use stream_id e2e-media: action start with sequence 0 and kind file and mime_type text/plain, then action chunk with sequence 1 and content_base64 aGVsbG8=, then action finish with sequence 2."
+tool_contains = ['e2e-media']

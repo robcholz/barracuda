@@ -88,14 +88,6 @@ pub struct Validator {
 
 impl Validator {
     #[doc(hidden)]
-    pub const fn from_schema(schema: &'static Schema) -> Self {
-        Self {
-            schema,
-            definitions: &[],
-        }
-    }
-
-    #[doc(hidden)]
     pub const fn from_parts(schema: &'static Schema, definitions: &'static [Schema]) -> Self {
         Self {
             schema,

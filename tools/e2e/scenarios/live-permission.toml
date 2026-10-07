@@ -1,0 +1,17 @@
+name = "Live permission approval"
+description = "A real model loads a Workflow that switches its session to ask for permission when the next chat message arrives; a file write then waits for approval, and the user's reply is classified by permission_resolve_reply."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = """Load the workflow tools and use workflow_load to load a workflow with id perm-ask that matches the event gateway.message.received and has one step calling session.set_permission_level with arguments {"session": "session-1", "level": "ask"}. Do nothing else."""
+tool_contains = ['perm-ask']
+
+[[steps]]
+send = "Use file_write to write the text approved to /data/approved.txt."
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes, go ahead and write it."
+tool_contains = ['approved.txt']

@@ -1,0 +1,58 @@
+name = "Tool load rejections"
+description = "tool_load rejects unknown, tool-named, always-visible, and wrongly cased group ids and blank or missing ids, trims a padded id before loading, and an unloaded or nonexistent Tool call reports tool not found."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "nope" } }]
+
+# A Tool name is not a group id.
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"unknown tool group; tool_search lists the loadable groups\",\"group_id\":\"nope\",\"loaded\":false}","is_error":true']
+tool_calls = [{ name = "tool_load", arguments = { group_id = "time_now" } }]
+
+# Default-visible groups are never in the loadable catalog.
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "internal" } }]
+
+# Group ids are matched exactly.
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "Gateway" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "   " } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "  time  " } }]
+
+[[model.responses]]
+request_contains = ['Use `time_now` when an exact current UTC timestamp is needed.']
+tool_calls = [{ name = "does_not_exist", arguments = {} }]
+
+# Registered but never loaded: indistinguishable from a missing Tool.
+[[model.responses]]
+tool_calls = [{ name = "file_read", arguments = { path = "/data/never.txt" } }]
+
+[[model.responses]]
+request_contains = ['"content":"tool not found: file_read","is_error":true']
+text = "Loading checked."
+
+[[steps]]
+send = "Load some odd groups."
+reply_contains = ["Loading checked."]
+tool_contains = [
+  'tool_load{"group_id": "nope"}{"error":"unknown tool group; tool_search lists the loadable groups","group_id":"nope","loaded":false}',
+  'tool_load{"group_id": "time_now"}{"error":"unknown tool group; tool_search lists the loadable groups","group_id":"time_now","loaded":false}',
+  'tool_load{"group_id": "internal"}{"error":"unknown tool group; tool_search lists the loadable groups","group_id":"internal","loaded":false}',
+  'tool_load{"group_id": "Gateway"}{"error":"unknown tool group; tool_search lists the loadable groups","group_id":"Gateway","loaded":false}',
+  'tool_load{"group_id": "   "}invalid arguments: JSON schema validation failed at $.group_id: TrimmedEmpty',
+  'tool_load{}invalid arguments: JSON schema validation failed at $.group_id: Required',
+  'tool_load{"group_id": "  time  "}{"available_next_turn":true,"group_id":"time","loaded":true}',
+  'does_not_exist{}tool not found: does_not_exist',
+  'file_read{"path": "/data/never.txt"}tool not found: file_read',
+]
+tool_errors_allowed = true

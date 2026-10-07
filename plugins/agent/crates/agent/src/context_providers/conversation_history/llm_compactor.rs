@@ -7,7 +7,7 @@ use alloc::{
     vec,
 };
 
-use barracuda_agent_memory::{CompactError, CompactFuture, Compactor};
+use barracuda_agent_memory::{ChatMessage, CompactError, CompactFuture, Compactor};
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -51,13 +51,13 @@ where
     Tcp: TcpConnect + 'static,
     Resolver: Dns + 'static,
 {
-    fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
+    fn compact<'a>(&'a self, window: &'a [ChatMessage]) -> CompactFuture<'a> {
         Box::pin(async move {
             let transcript = render_transcript(window);
-            let messages = [json!({
+            let messages = [ChatMessage::new(&json!({
                 "role": "user",
                 "content": format!("{SUMMARY_USER_PREFIX}\n\n{transcript}")
-            })];
+            }))];
 
             let request = ChatRequest::new(SUMMARY_SYSTEM_PROMPT, &messages);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
@@ -84,17 +84,18 @@ where
                 return Err(CompactError::EmptySummary);
             }
 
-            Ok(vec![json!({
+            Ok(vec![ChatMessage::new(&json!({
                 "role": "system",
                 "content": format!("Summary of earlier conversation:\n{summary}"),
-            })])
+            }))])
         })
     }
 }
 
-fn render_transcript(window: &[Value]) -> String {
+fn render_transcript(window: &[ChatMessage]) -> String {
     let mut out = String::new();
     for message in window {
+        let message = message.to_value();
         let Some(role) = message.get("role").and_then(Value::as_str) else {
             continue;
         };

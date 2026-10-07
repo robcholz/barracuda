@@ -1,9 +1,9 @@
 use core::fmt;
 use core::future::{poll_fn, Future};
-use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::Poll;
 
 use futures_util::task::AtomicWaker;
+use portable_atomic::{AtomicBool, Ordering};
 
 /// Caller-owned, wakeable cooperative cancellation state.
 pub struct CancellationFlag {
@@ -87,19 +87,19 @@ impl Cancel<'static> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
     use core::pin::pin;
-    use core::sync::atomic::{AtomicUsize, Ordering};
-    use core::task::{Context, Poll};
+    use core::task::{Context, Poll, Waker};
 
-    use futures_util::task::{waker_ref, ArcWake};
+    use portable_atomic::{AtomicUsize, Ordering};
+    use portable_atomic_util::task::Wake;
+    use portable_atomic_util::Arc;
 
     use super::*;
 
     struct WakeCounter(AtomicUsize);
 
-    impl ArcWake for WakeCounter {
-        fn wake_by_ref(counter: &Arc<Self>) {
+    impl Wake for WakeCounter {
+        fn wake(counter: Arc<Self>) {
             counter.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -109,7 +109,7 @@ mod tests {
         let flag = CancellationFlag::new();
         let mut cancelled = pin!(Cancel::new(&flag).cancelled());
         let counter = Arc::new(WakeCounter(AtomicUsize::new(0)));
-        let waker = waker_ref(&counter);
+        let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
 
         assert_eq!(cancelled.as_mut().poll(&mut context), Poll::Pending);

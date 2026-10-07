@@ -11,6 +11,7 @@ readme = "README.md"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-kv.workspace = true
 barracuda-vfs.workspace = true
 embassy-executor.workspace = true

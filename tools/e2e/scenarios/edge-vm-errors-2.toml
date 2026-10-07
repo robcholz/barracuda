@@ -1,0 +1,55 @@
+name = "VM error outcomes (2)"
+description = "vm_run accepts scripts that fail to load, raise string and non-string errors, hit the sandboxed require, or exhaust the Lua heap; each failure arrives as a failed detached completion."
+
+# Detached completions cost exactly one model call each. The syntax error
+# completes in the VM task's first poll, so a vm_list call absorbs it before
+# the text reply. Every other script spends about 500 ms in an empty loop
+# (instruction-hook yields of 100 ms each) so its completion always lands
+# after the reply that ends the turn and starts its own detached turn.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 3: require only resolves preloaded packages; `debug` is not built.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end local debug = require('debug')" } }]
+
+[[model.responses]]
+text = "The fourth script is running."
+
+[[model.responses]]
+request_contains = [
+    '''{\"run_id\":1,\"outcome\":\"error\",\"output\":[],\"error\":\"lua_runtime\",\"diagnostic\":\"chunk:1: module 'debug' not found:''',
+]
+text = "The missing module was reported."
+
+# Step 4: the fixed 1 MiB Lua heap is exhausted.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end local s = 'x' for _ = 1, 40 do s = s .. s end" } }]
+
+[[model.responses]]
+text = "The fifth script is running."
+
+[[model.responses]]
+request_contains = [
+    '{\"run_id\":2,\"outcome\":\"error\",\"output\":[],\"error\":\"lua_memory\",\"diagnostic\":\"not enough memory\"}',
+]
+text = "The memory error was reported."
+
+[[steps]]
+send = "Run a script that requires debug."
+reply_contains = ["The missing module was reported."]
+tool_contains = ['{"run_id":1}']
+
+[[steps]]
+send = "Run a script that exhausts memory."
+reply_contains = ["The memory error was reported."]
+tool_contains = ['{"run_id":2}']
+
+[logs]
+expect = [
+    "VM run 2 failed: Some\\(LuaMemory\\) not enough memory",
+]

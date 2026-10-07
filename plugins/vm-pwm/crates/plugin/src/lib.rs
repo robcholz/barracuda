@@ -4,10 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{string::String, string::ToString};
 use barracuda_board_hal::{ExposedIo, PwmProvider, PwmRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -15,8 +12,9 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_hal::pwm::SetDutyCycle;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Shares the unified exposed-I/O owner with the `pwm` Lua package.
 #[barracuda_plugin::macros::plugin]

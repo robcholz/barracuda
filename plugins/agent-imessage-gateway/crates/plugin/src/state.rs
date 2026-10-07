@@ -1,7 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, VecDeque},
-    string::String,
-};
+use alloc::{collections::VecDeque, string::String, vec::Vec};
 use core::mem::size_of;
 
 use barracuda_plugin::manager::PluginStorage;
@@ -54,6 +51,9 @@ pub(crate) struct Mapping {
 #[derive(Clone, Debug)]
 struct ActiveTurn {
     reply_to: Option<String>,
+    /// The Agent's open input request (`input-N`), answered by the next
+    /// inbound message instead of that message starting a turn.
+    input_request: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,17 +98,34 @@ impl BridgeError {
     }
 }
 
+/// Bindings between conversation routes and agent sessions.
+///
+/// Each session has at most one route and each route at most one session, so
+/// one list of mappings serves lookups from either side; a device holds few.
 pub(crate) struct BridgeBook {
-    by_route: BTreeMap<Route, String>,
-    by_session: BTreeMap<String, Mapping>,
+    mappings: Vec<Mapping>,
 }
 
 impl BridgeBook {
     pub(crate) const fn new() -> Self {
         Self {
-            by_route: BTreeMap::new(),
-            by_session: BTreeMap::new(),
+            mappings: Vec::new(),
         }
+    }
+
+    fn by_session(&self, session: &str) -> Option<&Mapping> {
+        self.mappings
+            .iter()
+            .find(|mapping| mapping.session == session)
+    }
+
+    fn by_route(&self, route: &Route) -> Option<&Mapping> {
+        self.mappings.iter().find(|mapping| mapping.route == *route)
+    }
+
+    fn insert(&mut self, mapping: Mapping) {
+        self.mappings.reserve_exact(1);
+        self.mappings.push(mapping);
     }
 
     pub(crate) fn restore(
@@ -116,25 +133,20 @@ impl BridgeBook {
         session: &str,
         persisted: PersistedRoute,
     ) -> Result<(), BridgeError> {
-        if !valid_session(session) || self.by_session.contains_key(session) {
+        if !valid_session(session) || self.by_session(session).is_some() {
             return Err(BridgeError::InvalidRequest);
         }
         let mut mapping = persisted.into_mapping(session)?;
         mapping.opened = false;
-        if self.by_route.contains_key(&mapping.route) {
+        if self.by_route(&mapping.route).is_some() {
             return Err(BridgeError::Conflict);
         }
-        self.by_route
-            .insert(mapping.route.clone(), mapping.session.clone());
-        self.by_session.insert(mapping.session.clone(), mapping);
+        self.insert(mapping);
         Ok(())
     }
 
     pub(crate) fn resolve(&self, route: &Route) -> ResolveResult {
-        let Some(session) = self.by_route.get(route) else {
-            return ResolveResult::Missing;
-        };
-        let Some(mapping) = self.by_session.get(session) else {
+        let Some(mapping) = self.by_route(route) else {
             return ResolveResult::Missing;
         };
         ResolveResult::Found {
@@ -143,33 +155,41 @@ impl BridgeBook {
         }
     }
 
+    /// Stores a mapping from [`prepare_binding`](Self::prepare_binding),
+    /// replacing the session's previous state.
     pub(crate) fn commit_mapping(&mut self, mapping: Mapping) {
-        self.by_route
-            .insert(mapping.route.clone(), mapping.session.clone());
-        self.by_session.insert(mapping.session.clone(), mapping);
+        match self
+            .mappings
+            .iter_mut()
+            .find(|existing| existing.session == mapping.session)
+        {
+            Some(existing) => *existing = mapping,
+            None => self.insert(mapping),
+        }
     }
 
+    /// Prepares the session's mapping for one inbound message. When the
+    /// session's turn waits on an input request, the message answers it: the
+    /// request id is returned and no reply is queued, since no turn starts.
     pub(crate) fn prepare_binding(
         &self,
         route: Route,
         message_id: &str,
         session: &str,
-    ) -> Result<Mapping, BridgeError> {
+    ) -> Result<(Mapping, Option<String>), BridgeError> {
         if !valid_text(message_id, MESSAGE_ID_MAX) || !valid_session(session) {
             return Err(BridgeError::InvalidRequest);
         }
         if self
-            .by_route
-            .get(&route)
-            .is_some_and(|existing| existing != session)
+            .by_route(&route)
+            .is_some_and(|existing| existing.session != session)
             || self
-                .by_session
-                .get(session)
+                .by_session(session)
                 .is_some_and(|existing| existing.route != route)
         {
             return Err(BridgeError::Conflict);
         }
-        let mut mapping = self.by_session.get(session).cloned().unwrap_or(Mapping {
+        let mut mapping = self.by_session(session).cloned().unwrap_or(Mapping {
             session: String::from(session),
             route,
             opened: true,
@@ -177,8 +197,26 @@ impl BridgeBook {
             active_turn: None,
         });
         mapping.opened = true;
-        mapping.pending_replies.push_back(String::from(message_id));
-        Ok(mapping)
+        let input_request = mapping
+            .active_turn
+            .as_mut()
+            .and_then(|turn| turn.input_request.take());
+        if input_request.is_none() {
+            mapping.pending_replies.push_back(String::from(message_id));
+        }
+        Ok((mapping, input_request))
+    }
+
+    /// Records that the session's active turn waits on input request `request`.
+    pub(crate) fn input_requested(&mut self, session: &str, request: String) {
+        if let Some(turn) = self
+            .mappings
+            .iter_mut()
+            .find(|mapping| mapping.session == session)
+            .and_then(|mapping| mapping.active_turn.as_mut())
+        {
+            turn.input_request = Some(request);
+        }
     }
 
     pub(crate) fn gateway_target(
@@ -189,7 +227,11 @@ impl BridgeBook {
         if !valid_session(session) {
             return Err(BridgeError::InvalidRequest);
         }
-        let Some(mapping) = self.by_session.get_mut(session) else {
+        let Some(mapping) = self
+            .mappings
+            .iter_mut()
+            .find(|mapping| mapping.session == session)
+        else {
             return Ok(None);
         };
         match event {
@@ -209,13 +251,17 @@ impl BridgeBook {
                     .ok_or(BridgeError::InvalidRequest)?;
                 mapping.active_turn = Some(ActiveTurn {
                     reply_to: Some(reply_to),
+                    input_request: None,
                 });
             }
             GatewayEvent::OtherTurnStarted => {
                 if mapping.active_turn.is_some() {
                     return Err(BridgeError::Conflict);
                 }
-                mapping.active_turn = Some(ActiveTurn { reply_to: None });
+                mapping.active_turn = Some(ActiveTurn {
+                    reply_to: None,
+                    input_request: None,
+                });
             }
             GatewayEvent::TurnEnded | GatewayEvent::Continuing => {}
         }
@@ -360,11 +406,13 @@ mod tests {
         let mut book = BridgeBook::new();
         let first = book
             .prepare_binding(route(), "message-9", "session-4")
-            .expect("prepare first binding");
+            .expect("prepare first binding")
+            .0;
         book.commit_mapping(first);
         let second = book
             .prepare_binding(route(), "message-10", "session-4")
-            .expect("prepare second binding");
+            .expect("prepare second binding")
+            .0;
         book.commit_mapping(second);
 
         assert_eq!(
@@ -402,7 +450,8 @@ mod tests {
         let mut book = BridgeBook::new();
         let mapping = book
             .prepare_binding(route(), "message-9", "session-4")
-            .expect("prepare binding");
+            .expect("prepare binding")
+            .0;
         let persisted = PersistedRoute::from_mapping(&mapping).expect("encode persisted route");
         book.commit_mapping(mapping);
         assert_eq!(
@@ -436,7 +485,8 @@ mod tests {
         let mut book = BridgeBook::new();
         let mapping = book
             .prepare_binding(route(), "message-9", "session-4")
-            .expect("prepare binding");
+            .expect("prepare binding")
+            .0;
         book.commit_mapping(mapping);
 
         let tool_target = book
@@ -453,5 +503,36 @@ mod tests {
             .expect("start user turn")
             .expect("user target");
         assert_eq!(user_target.reply_to.as_deref(), Some("message-9"));
+    }
+
+    #[test]
+    fn a_message_during_an_input_request_answers_it_without_queuing_a_reply() {
+        let mut book = BridgeBook::new();
+        let (mapping, request) = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding");
+        assert_eq!(request, None);
+        book.commit_mapping(mapping);
+        let _started = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start turn");
+        book.input_requested("session-4", String::from("input-3"));
+
+        let (answer, request) = book
+            .prepare_binding(route(), "message-10", "session-4")
+            .expect("prepare answer");
+        assert_eq!(request.as_deref(), Some("input-3"));
+        assert!(answer.pending_replies.is_empty());
+        book.commit_mapping(answer);
+
+        let continuing = book
+            .gateway_target("session-4", GatewayEvent::Continuing)
+            .expect("continue turn")
+            .expect("continuing target");
+        assert_eq!(continuing.reply_to.as_deref(), Some("message-9"));
+        let (_next, request) = book
+            .prepare_binding(route(), "message-11", "session-4")
+            .expect("prepare next message");
+        assert_eq!(request, None, "the request is answered once");
     }
 }

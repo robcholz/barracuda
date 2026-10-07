@@ -10,7 +10,7 @@ fn system_image_core_has_no_concrete_platform_registry() -> Result<(), std::io::
     .join("\n");
 
     for concrete in [
-        "macos", "linux", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s2", "esp32s3", "stm32",
+        "macos", "linux", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3", "stm32",
     ] {
         assert!(!sources.contains(&format!("\"{concrete}\"")));
     }

@@ -4,20 +4,21 @@
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc, vec, vec::Vec};
+use alloc::string::String;
 use barracuda_board_hal::camera::{Camera, CameraDescriptor, CameraPeripheral, CameraPixelFormat};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
-const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
+/// Largest frame returned to Lua; it must fit the 1 MiB per-run Lua heap with
+/// room to process it (an SVGA JPEG or a full QVGA RGB565 frame).
+const MAX_CAPTURE_BYTES: usize = 512 * 1024;
 
 /// Owns the Board's primary camera capability and publishes it to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -194,7 +195,7 @@ impl<Device> Drop for CameraHandle<Device> {
 async fn capture<Device>(
     handle: UserDataHandle<CameraHandle<Device>>,
     capacity: i64,
-) -> Result<Vec<u8>>
+) -> Result<Bytes>
 where
     Device: Camera + Send + 'static,
     Device::Error: core::fmt::Debug,
@@ -203,10 +204,10 @@ where
         .map_err(|_| Error::runtime("camera capture capacity must be non-negative"))?;
     if capacity == 0 || capacity > MAX_CAPTURE_BYTES {
         return Err(Error::runtime(
-            "camera capture capacity must be between 1 and 4194304 bytes",
+            "camera capture capacity must be between 1 and 524288 bytes",
         ));
     }
-    let mut frame = vec![0; capacity];
+    let mut frame = Bytes::zeroed(capacity)?;
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
     let camera = handle

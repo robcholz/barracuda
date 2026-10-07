@@ -10,14 +10,13 @@
 
 mod llm_compactor;
 
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
-use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
+use barracuda_agent_memory::{ChatMessage, CompactError, Compactor, Transcript, Turn, TurnId};
 use barracuda_model_api::ModelApiFactory;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
-use serde_json::Value;
 use tracing::Instrument as _;
 
 use crate::config::SharedApiManager;
@@ -70,9 +69,10 @@ pub(crate) struct ConversationHistoryContextProvider {
     /// Highest committed turn represented by `summary_messages`.
     covered_through: Option<TurnId>,
     /// Non-overlapping summaries of committed transcript prefixes.
-    summary_messages: Vec<Value>,
-    /// Verbatim committed turns after `covered_through`, plus the open turn.
-    verbatim_tail: Vec<Value>,
+    summary_messages: Vec<ChatMessage>,
+    /// Verbatim committed turns after `covered_through`, plus the open turn,
+    /// sharing the transcript's message encodings.
+    verbatim_tail: Vec<ChatMessage>,
 }
 
 impl ConversationHistoryContextProvider {
@@ -167,7 +167,10 @@ impl ConversationHistoryContextProvider {
     ///
     /// Summaries only ever cover **committed** turns, so the volatile open turn
     /// (`id == None`) is excluded here — it always stays verbatim.
-    fn select_window(&self, transcript: &dyn Transcript) -> Option<(TurnId, Vec<Value>, usize)> {
+    fn select_window(
+        &self,
+        transcript: &dyn Transcript,
+    ) -> Option<(TurnId, Vec<ChatMessage>, usize)> {
         let turns = transcript.turns();
         let uncovered: Vec<(TurnId, &Turn)> = turns
             .iter()
@@ -272,9 +275,8 @@ fn recent_tail_count(turns: &[(TurnId, &Turn)], keep_recent_tokens: usize) -> us
 
 // todo: replace this byte-length heuristic with a tokenizer estimate matching
 // the active backend. It only needs to remain monotonic for trigger behavior.
-fn estimate_message_tokens(message: &Value) -> usize {
+fn estimate_message_tokens(message: &ChatMessage) -> usize {
     message
-        .to_string()
         .len()
         .checked_div(CHARS_PER_TOKEN)
         .unwrap_or(0)
@@ -285,7 +287,9 @@ fn estimate_message_tokens(message: &Value) -> usize {
 #[allow(clippy::expect_used)]
 mod tests {
     use barracuda_agent_context::Context;
-    use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
+    use barracuda_agent_memory::{
+        ChatMessage, CompactFuture, Compactor, Transcript, TranscriptStore,
+    };
     use barracuda_agent_persistence::DurableState;
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
@@ -298,17 +302,23 @@ mod tests {
     struct WindowEchoCompactor;
 
     impl Compactor for WindowEchoCompactor {
-        fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
+        fn compact<'a>(&'a self, window: &'a [ChatMessage]) -> CompactFuture<'a> {
             Box::pin(async move {
                 let covered = window
                     .iter()
-                    .filter_map(|message| message.get("content").and_then(Value::as_str))
+                    .filter_map(|message| {
+                        message
+                            .to_value()
+                            .get("content")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .collect::<Vec<_>>()
                     .join("|");
-                Ok(vec![json!({
+                Ok(vec![ChatMessage::new(&json!({
                     "role": "system",
                     "content": format!("summary:{covered}"),
-                })])
+                }))])
             })
         }
     }

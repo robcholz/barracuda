@@ -3,13 +3,13 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicU32, Ordering};
 
 use barracuda_vfs::{FsError, ScopedVfs};
 use getset::CopyGetters;
+use portable_atomic::{AtomicU32, Ordering};
+use portable_atomic_util::Arc;
 
 use super::document::{
     frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName, SkillResourcePage,
@@ -28,6 +28,7 @@ pub struct CatalogSnapshot {
     #[getset(get_copy = "pub")]
     version: SkillRegistryVersion,
     skills: Arc<[Skill]>,
+    rejected: Arc<[SkillError]>,
 }
 
 impl CatalogSnapshot {
@@ -35,6 +36,7 @@ impl CatalogSnapshot {
         Self {
             version: 0,
             skills: Arc::from([]),
+            rejected: Arc::from([]),
         }
     }
 
@@ -43,12 +45,21 @@ impl CatalogSnapshot {
         Self {
             version,
             skills: Arc::from(skills),
+            rejected: Arc::from([]),
         }
     }
 
     /// Skills sorted by globally unique name.
     pub fn skills(&self) -> &[Skill] {
         &self.skills
+    }
+
+    /// Skill packages left out of this catalog, each with the reason.
+    ///
+    /// A malformed package or a name found more than once is excluded on its
+    /// own, so one bad package never hides the others.
+    pub fn rejected(&self) -> &[SkillError] {
+        &self.rejected
     }
 
     /// Look up one skill by id.
@@ -62,12 +73,6 @@ impl CatalogSnapshot {
 /// Implementations own discovery and document loading. [`SkillSet`] adds the
 /// per-agent render buffers over this shared registry.
 pub trait SkillRegistry: 'static {
-    /// Create a per-agent [`SkillSet`] projection backed by this registry.
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        let registry: Arc<dyn SkillRegistry> = Arc::new(ErasedSkillRegistry(self));
-        SkillSet::from_registry(registry)
-    }
-
     /// Return the current immutable catalog snapshot.
     fn catalog(&self) -> Arc<CatalogSnapshot>;
 
@@ -90,13 +95,29 @@ pub trait SkillRegistry: 'static {
     ) -> SkillFuture<'a, Result<SkillResourcePage, SkillError>>;
 }
 
+/// Shared registry handle that creates per-agent [`SkillSet`] projections.
+pub trait SkillSetSource {
+    /// Create a per-agent [`SkillSet`] projection backed by this registry.
+    fn skill_set(&self) -> SkillSet;
+}
+
+impl SkillSetSource for Arc<dyn SkillRegistry> {
+    fn skill_set(&self) -> SkillSet {
+        SkillSet::from_registry(Arc::clone(self))
+    }
+}
+
+impl<R: SkillRegistry> SkillSetSource for Arc<R> {
+    fn skill_set(&self) -> SkillSet {
+        SkillSet::from_registry(Arc::from(
+            Box::new(ErasedSkillRegistry(Arc::clone(self))) as Box<dyn SkillRegistry>
+        ))
+    }
+}
+
 struct ErasedSkillRegistry<R: SkillRegistry + ?Sized>(Arc<R>);
 
 impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         self.0.catalog()
     }
@@ -128,10 +149,6 @@ impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
 pub struct EmptySkillRegistry;
 
 impl SkillRegistry for EmptySkillRegistry {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         Arc::new(CatalogSnapshot::empty())
     }
@@ -181,18 +198,13 @@ impl FsSkillRegistry {
 
     /// Append one skills root, rescan all roots, and return the registry builder.
     ///
-    /// Root order does not affect selection. Duplicate skill names are errors.
+    /// Root order does not affect selection: every copy of a duplicated skill
+    /// name is excluded. Only a root that cannot be listed is an error.
     pub async fn add_root(mut self, root: impl Into<String>) -> Result<Self, SkillError> {
         self.roots.push(root.into());
         let snapshot = self.scan_catalog_next_version().await?;
         *self.snapshot.borrow_mut() = Arc::new(snapshot);
         Ok(self)
-    }
-
-    /// Create a per-agent [`SkillSet`] projection backed by this registry.
-    pub fn skill_set(self: &Arc<Self>) -> SkillSet {
-        let registry: Arc<dyn SkillRegistry> = self.clone();
-        SkillSet::from_registry(registry)
     }
 
     pub(crate) fn catalog(&self) -> Arc<CatalogSnapshot> {
@@ -318,10 +330,6 @@ impl FsSkillRegistry {
 }
 
 impl SkillRegistry for FsSkillRegistry {
-    fn skill_set(self: Arc<Self>) -> SkillSet {
-        SkillSet::from_registry(self)
-    }
-
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         FsSkillRegistry::catalog(self)
     }
@@ -355,7 +363,9 @@ async fn scan_catalog(
     roots: &[String],
     version: SkillRegistryVersion,
 ) -> Result<CatalogSnapshot, SkillError> {
-    let mut skills = Vec::new();
+    let mut skills: Vec<Skill> = Vec::new();
+    let mut rejected = Vec::new();
+    let mut duplicates: Vec<SkillName> = Vec::new();
     for root in roots {
         let entries = match filesystem.read_dir(root).await {
             Ok(entries) => entries,
@@ -376,23 +386,31 @@ async fn scan_catalog(
             {
                 continue;
             }
-            if let Some(existing) = skills.iter().find(|skill: &&Skill| skill.name() == &name) {
-                let first_directory = existing.directory().unwrap_or("").into();
-                let second_directory = skill_directory_path(root, name.as_str());
-                return Err(SkillError::DuplicateSkill {
-                    name,
-                    first_directory,
-                    second_directory,
+            if let Some(existing) = skills.iter().find(|skill| skill.name() == &name) {
+                rejected.push(SkillError::DuplicateSkill {
+                    name: name.clone(),
+                    first_directory: existing.directory().unwrap_or("").into(),
+                    second_directory: skill_directory_path(root, name.as_str()),
                 });
+                duplicates.push(name);
+                continue;
             }
-            let document = read_document(filesystem, &name, &path).await?;
-            skills.push(parse_frontmatter(name, root, &document)?);
+            let parsed = match read_document(filesystem, &name, &path).await {
+                Ok(document) => parse_frontmatter(name, root, &document),
+                Err(error) => Err(error),
+            };
+            match parsed {
+                Ok(skill) => skills.push(skill),
+                Err(error) => rejected.push(error),
+            }
         }
     }
+    skills.retain(|skill| !duplicates.contains(skill.name()));
     skills.sort_by(|left, right| left.name().cmp(right.name()));
     Ok(CatalogSnapshot {
         version,
         skills: Arc::from(skills),
+        rejected: Arc::from(rejected),
     })
 }
 

@@ -1,4 +1,4 @@
-//! WebSocket wire glue shared by the terminal client and the host server.
+//! WebSocket wire glue for the terminal client.
 //!
 //! Client → server frames are [`barracuda_imessage_web_plugin::WebClientFrame`].
 //! Server → client frames are the web channel's own Server-Sent-Events serialization

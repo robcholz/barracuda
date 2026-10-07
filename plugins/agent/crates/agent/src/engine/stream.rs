@@ -57,8 +57,6 @@ pub enum AgentError {
     Transcript(#[from] TurnError),
     #[error("transcript persistence failed: {0}")]
     TranscriptStorage(#[from] FsError),
-    #[error("multiple task effects were emitted in one tool round: {count}")]
-    ConflictingEffects { count: usize },
     #[error("LLM assistant message cannot be reconstructed from streamed deltas")]
     MalformedAssistantMessage,
     #[error("agent run-state invariant violated")]

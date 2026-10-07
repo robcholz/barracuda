@@ -1,0 +1,52 @@
+# Schema: plugins/agent-websearch/crates/plugin/resources/tools/web_search/schema.json.
+# Error text: shared/json-validator/src/lib.rs:820 via plugins/agent/crates/tool/src/definition.rs:321.
+name = "Web search argument schema (2)"
+description = "web_search rejects malformed arguments at the schema; a schema-valid call without a provider key reports not_configured."
+
+[model]
+mode = "scripted"
+
+# Case 1: empty query fails minLength before trimmedNonEmpty
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "websearch" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "web_search", arguments = { query = "barracuda" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Required']
+text = "Case 8 checked."
+
+# Case 9: unknown field is rejected
+[[model.responses]]
+tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 3, search_depth = "basic" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.search_depth: AdditionalProperty']
+text = "Case 9 checked."
+
+# Case 10: 255 four-byte characters pass the character-counted schema; the unconfigured check runs first (search.rs:99-100)
+[[model.responses]]
+tool_calls = [{ name = "web_search", arguments = { query = "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀", max_results = 10 } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"not_configured\"}']
+text = "Case 10 checked."
+
+[[steps]]
+send = "Search schema case."
+reply_contains = ["Case 8 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Required']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Search schema case."
+reply_contains = ["Case 9 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.search_depth: AdditionalProperty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Search with a long query."
+reply_contains = ["Case 10 checked."]
+tool_contains = ['{"error":"not_configured"}']
+tool_errors_allowed = true

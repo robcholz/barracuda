@@ -801,16 +801,18 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestKind, IterationEvent, ProviderUsage,
     SessionCloseReason, SessionControl, SessionEvent, SessionId, SessionStream, TurnEvent,
     TurnOrigin,
 };
+use barracuda_json_writer::{write_value, Object, Sink};
 use barracuda_workflow_plugin::{
-    EmitError, Event, WorkflowActionRegistration, WorkflowActionRegistry,
+    EmitError, Event, JsonText, WorkflowActionRegistration, WorkflowActionRegistry,
     WorkflowActionRegistryError, WorkflowService,
 };
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use futures_lite::{future, future::poll_fn, Stream};
 use serde_json::{json, Map, Value};
 
@@ -835,8 +837,8 @@ struct RegistryState {
 
 struct RegistryInner {
     state: RefCell<RegistryState>,
-    changed: Sender<()>,
-    changes: Receiver<()>,
+    /// Wakes the event loop when a session is added.
+    changed: Signal<NoopRawMutex, ()>,
 }
 
 #[derive(Clone)]
@@ -844,14 +846,12 @@ pub(crate) struct SessionRegistry(Rc<RegistryInner>);
 
 impl Default for SessionRegistry {
     fn default() -> Self {
-        let (changed, changes) = async_channel::bounded(1);
         Self(Rc::new(RegistryInner {
             state: RefCell::new(RegistryState {
                 next_run: 1,
                 sessions: BTreeMap::new(),
             }),
-            changed,
-            changes,
+            changed: Signal::new(),
         }))
     }
 }
@@ -879,7 +879,7 @@ impl SessionRegistry {
             .sessions
             .insert(session, OpenedSession { control, events });
         drop(state);
-        let _ignored = self.0.changed.try_send(());
+        self.0.changed.signal(());
         run
     }
 
@@ -887,7 +887,7 @@ impl SessionRegistry {
         loop {
             let event = poll_fn(|context| self.poll_event(context));
             let changed = async {
-                let _ignored = self.0.changes.recv().await;
+                self.0.changed.wait().await;
                 None
             };
             if let Some(event) = future::or(event, changed).await {
@@ -984,6 +984,9 @@ async fn emit_session_events(
 ) -> Result<(), AgentWorkflowError> {
     let mut sequence = 0_u64;
     loop {
+        // Every text delta becomes an Event, so pause while earlier ones are
+        // still being handled instead of queuing the whole stream.
+        workflow.ready_for::<SessionOutputEvent>().await;
         let pending = sessions.next_event().await;
         sequence = emit_session_event(&workflow, pending.session, sequence, pending.event)?;
     }
@@ -997,6 +1000,7 @@ fn emit_session_event(
 ) -> Result<u64, AgentWorkflowError> {
     let mut emitter = SessionEmitter {
         workflow,
+        listening: workflow.has_listener::<SessionOutputEvent>(),
         session,
         sequence,
     };
@@ -1018,6 +1022,9 @@ fn emit_session_event(
 
 struct SessionEmitter<'a> {
     workflow: &'a WorkflowService,
+    /// Whether any Workflow runs for session output; Events nobody would
+    /// handle are not built, though they still consume a sequence number.
+    listening: bool,
     session: SessionId,
     sequence: u64,
 }
@@ -1118,16 +1125,41 @@ impl SessionEmitter<'_> {
     }
 
     fn emit_text(&mut self, event_type: &str, text: String) -> Result<(), AgentWorkflowError> {
-        self.emit(event_type, json!({ "text": text }))
+        self.emit_with(event_type, |sink| {
+            let mut payload = Object::begin(sink);
+            payload.str("text", &text);
+            payload.end();
+        })
     }
 
     fn emit(&mut self, event_type: &str, payload: Value) -> Result<(), AgentWorkflowError> {
-        self.workflow.emit::<SessionOutputEvent>(json!({
-            "session": format!("{}", self.session),
-            "sequence": self.sequence,
-            "type": event_type,
-            "payload": payload,
-        }))?;
+        self.emit_with(event_type, |sink| write_value(sink, &payload))
+    }
+
+    /// Emits one Event written straight into shared bulk JSON.
+    fn emit_with(
+        &mut self,
+        event_type: &str,
+        payload: impl Fn(&mut dyn Sink),
+    ) -> Result<(), AgentWorkflowError> {
+        if self.listening {
+            let session = format!("{}", self.session);
+            let sequence = Value::from(self.sequence);
+            let event = JsonText::try_encode_object(|object| {
+                payload(object.field("payload"));
+                object.value("sequence", &sequence);
+                object.str("session", &session);
+                object.str("type", event_type);
+            });
+            match event {
+                Ok(event) => self.workflow.emit::<SessionOutputEvent>(event)?,
+                Err(_error) => log::warn!(
+                    "Agent session {} Event {} does not fit in bulk memory",
+                    self.session,
+                    self.sequence
+                ),
+            }
+        }
         self.sequence = self
             .sequence
             .checked_add(1)

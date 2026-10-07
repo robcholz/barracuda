@@ -60,7 +60,7 @@ impl ContextSnapshot {
         blocks.sort_by(|left, right| block_order(left.0, right.0));
         let blocks = blocks
             .into_iter()
-            .map(|(kind, content)| observed_text(kind, content.trim()))
+            .map(|(kind, content)| observed_text(kind, content.as_str().trim()))
             .collect();
 
         Self {
@@ -70,12 +70,17 @@ impl ContextSnapshot {
             content_version: context.content_version,
             system: ObservedSystem {
                 blocks,
-                rendered: context.rendered.clone(),
+                rendered: context.rendered.as_str().into(),
                 bytes: context.rendered.len(),
             },
             history: ObservedHistory { value: history },
             reminders: ObservedReminders {
-                rendered: context.reminders.as_slice().to_vec(),
+                rendered: context
+                    .reminders
+                    .as_slice()
+                    .iter()
+                    .map(barracuda_agent_message::ChatMessage::to_value)
+                    .collect(),
             },
         }
     }

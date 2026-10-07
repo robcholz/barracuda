@@ -2,8 +2,10 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 use barracuda_peripheral::PeripheralImplementation;
 use barracuda_peripheral::removable_storage::{

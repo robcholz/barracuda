@@ -1,0 +1,252 @@
+name = "File tools: path policy edge cases"
+description = "Scoped path normalization, mount routing, read-only and removable mounts, mount roots, and backend name limits for the file Tools."
+
+# Path strings go straight to the Plugin ScopedVfs (plugins/agent-file/docs/plugin.md).
+# ScopedVfs::path (shared/vfs/src/scoped.rs:33-49) prefixes relative paths with
+# "/", normalizes them (shared/vfs/src/path.rs:7-35) and picks the longest
+# matching logical mount (core/plugin/crates/manager/src/filesystem.rs:10-27).
+# Filesystem failures come back as {"error":<code>,"message":<FsError Display>}
+# (plugins/agent-file/crates/plugin/src/tools/common.rs:41-71,
+# shared/vfs/src/error.rs:159-180).
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+# --- step 0: probe the scope before anything has been written ---------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/data" } },
+  { name = "file_list", arguments = { path = "/cache" } },
+  { name = "file_list", arguments = { path = "/" } },
+  { name = "file_list", arguments = { path = "/workspace" } },
+  { name = "file_read", arguments = { path = "" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"is_directory\",\"message\":\"path is not a regular file\"}","is_error":true',
+]
+text = "Scope probed."
+
+# --- step 1: mount roots cannot be replaced by a file ------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data", content = "root" } },
+  { name = "file_write", arguments = { path = "/cache", content = "c" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data" } },
+  { name = "file_write", arguments = { path = "/data/after.txt", content = "x" } },
+  { name = "file_list", arguments = { path = "/data" } },
+  { name = "file_write", arguments = { path = "/cache/after.txt", content = "x" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_delete", arguments = { path = "/data" } },
+  { name = "file_delete", arguments = { path = "/cache" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/after.txt", content = "x" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"is_directory\",\"message\":\"path is not a regular file\"}","is_error":true',
+]
+text = "Roots restored."
+
+# --- step 2: normalization that stays inside the scope ----------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "data/relative.txt", content = "rel" } },
+  { name = "file_write", arguments = { path = "./data/dot.txt", content = "dot" } },
+  { name = "file_write", arguments = { path = "/data//a///b/./c.txt", content = "deep" } },
+  { name = "file_write", arguments = { path = "/data/trail/", content = "trail" } },
+  { name = "file_write", arguments = { path = "/data/sub/../../cache/hop.txt", content = "hop" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data/relative.txt" } },
+  { name = "file_read", arguments = { path = "/data/dot.txt" } },
+  { name = "file_read", arguments = { path = "/data/a/b/c.txt" } },
+  { name = "file_read", arguments = { path = "/data/trail" } },
+  { name = "file_read", arguments = { path = "/cache/hop.txt" } },
+  { name = "file_list", arguments = { path = "/data/sub" } },
+]
+
+[[model.responses]]
+text = "Paths normalized."
+
+# --- step 3: escapes, unmounted prefixes, and NUL bytes ----------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/../escape.txt", content = "x" } },
+  { name = "file_write", arguments = { path = "../escape.txt", content = "x" } },
+  { name = "file_read", arguments = { path = "/data/../../etc/passwd" } },
+  { name = "file_read", arguments = { path = "/etc/passwd" } },
+  { name = "file_read", arguments = { path = "/data2/x.txt" } },
+  { name = "file_read", arguments = { path = "/DATA/x.txt" } },
+  { name = "file_read", arguments = { path = "/workspace/cachex/x.txt" } },
+  { name = "file_read", arguments = { path = "/data/nul\u0000.txt" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"invalid_path\",\"message\":\"invalid VFS path\"}","is_error":true',
+]
+text = "Escapes rejected."
+
+# --- step 4: read-only resources and the removable namespace anchor --------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/resources/x.txt", content = "x" } },
+  { name = "file_write", arguments = { path = "/workspace/resources/x.txt", content = "x" } },
+  { name = "file_delete", arguments = { path = "/resources" } },
+  { name = "file_write", arguments = { path = "/workspace/removable/stray.txt", content = "no medium" } },
+  { name = "file_delete", arguments = { path = "/workspace/removable" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/workspace/removable" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"read_only\",\"message\":\"filesystem is read-only\"}","is_error":true',
+  '\"error\":\"permission_denied\",\"message\":\"permission denied\"}","is_error":true',
+]
+text = "Mounts probed."
+
+# --- step 5: backend name limits (LittleFS /data vs MemFs /cache) ----------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/cache/café ☕.txt", content = "latte" } },
+  { name = "file_write", arguments = { path = "/data/café.txt", content = "latte" } },
+  { name = "file_write", arguments = { path = "/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", content = "x" } },
+  { name = "file_write", arguments = { path = "/cache/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", content = "x" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/cache" } },
+  { name = "file_read", arguments = { path = "/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt" } },
+]
+
+[[model.responses]]
+text = "Names probed."
+
+[[steps]]
+send = "Probe the empty file scope."
+reply_contains = ["Scope probed."]
+kinds = ["tool"]
+tool_errors_allowed = true
+tool_contains = [
+  # A mount point is a directory before anything is written below it.
+  'file_list{"path": "/data"}{"path":"/data","entries":[],"next_offset":null}',
+  'file_list{"path": "/cache"}{"path":"/cache","entries":[],"next_offset":null}',
+  # Parents of mount points list the mount points below them.
+  'file_list{"path": "/"}{"path":"/","entries":[{"name":"cache","kind":"directory","bytes":0},{"name":"data","kind":"directory","bytes":0},{"name":"media","kind":"directory","bytes":0},{"name":"resources","kind":"directory","bytes":0},{"name":"workspace","kind":"directory","bytes":0}],"next_offset":null}',
+  'file_list{"path": "/workspace"}{"path":"/workspace","entries":[{"name":"cache","kind":"directory","bytes":0},{"name":"media","kind":"directory","bytes":0},{"name":"removable","kind":"directory","bytes":0},{"name":"resources","kind":"directory","bytes":0}],"next_offset":null}',
+  # "" is relative and becomes "/", a directory.
+  'file_read{"path": ""}{"error":"is_directory","message":"path is not a regular file"}',
+]
+
+[[steps]]
+send = "Write to the mount roots themselves."
+reply_contains = ["Roots restored."]
+tool_errors_allowed = true
+tool_contains = [
+  # A mount point is a directory that cannot be replaced or removed, so the
+  # paths below it keep working.
+  'file_write{"path": "/data", "content": "root"}{"error":"already_exists","message":"destination already exists; set overwrite to true to replace it"}',
+  'file_write{"path": "/cache", "content": "c"}{"error":"already_exists","message":"destination already exists; set overwrite to true to replace it"}',
+  'file_read{"path": "/data"}{"error":"is_directory","message":"path is not a regular file"}',
+  'file_write{"path": "/data/after.txt", "content": "x"}{"path":"/data/after.txt","bytes":1}',
+  'file_write{"path": "/cache/after.txt", "content": "x"}{"path":"/cache/after.txt","bytes":1}',
+  'file_delete{"path": "/data"}{"error":"permission_denied","message":"permission denied"}',
+  'file_delete{"path": "/cache"}{"error":"permission_denied","message":"permission denied"}',
+]
+
+[[steps]]
+send = "Exercise path normalization."
+reply_contains = ["Paths normalized."]
+tool_errors_allowed = true
+tool_contains = [
+  # Responses echo the caller's path string, not the normalized path.
+  '{"path":"data/relative.txt","bytes":3}',
+  '{"path":"./data/dot.txt","bytes":3}',
+  '{"path":"/data//a///b/./c.txt","bytes":4}',
+  '{"path":"/data/trail/","bytes":5}',
+  '{"path":"/data/sub/../../cache/hop.txt","bytes":3}',
+  '{"path":"/data/relative.txt","content":"rel","offset":0,"bytes":3,"next_offset":null}',
+  '{"path":"/data/dot.txt","content":"dot","offset":0,"bytes":3,"next_offset":null}',
+  '{"path":"/data/a/b/c.txt","content":"deep","offset":0,"bytes":4,"next_offset":null}',
+  # A trailing slash names the file itself.
+  '{"path":"/data/trail","content":"trail","offset":0,"bytes":5,"next_offset":null}',
+  # ".." is resolved lexically before mount selection, so it may cross from
+  # /data to /cache but never above the scope root.
+  '{"path":"/cache/hop.txt","content":"hop","offset":0,"bytes":3,"next_offset":null}',
+  'file_list{"path": "/data/sub"}{"error":"not_found","message":"path not found"}',
+]
+
+[[steps]]
+send = "Try to escape the scope."
+reply_contains = ["Escapes rejected."]
+tool_errors_allowed = true
+tool_contains = [
+  # path.rs:16-19: ".." above "/" is InvalidPath.
+  'file_write{"path": "/../escape.txt", "content": "x"}{"error":"invalid_path","message":"invalid VFS path"}',
+  'file_write{"path": "../escape.txt", "content": "x"}{"error":"invalid_path","message":"invalid VFS path"}',
+  'file_read{"path": "/data/../../etc/passwd"}{"error":"invalid_path","message":"invalid VFS path"}',
+  # path.rs:68-74: mount matching is per component and case-sensitive.
+  'file_read{"path": "/etc/passwd"}{"error":"not_mounted","message":"path is not mounted"}',
+  'file_read{"path": "/data2/x.txt"}{"error":"not_mounted","message":"path is not mounted"}',
+  'file_read{"path": "/DATA/x.txt"}{"error":"not_mounted","message":"path is not mounted"}',
+  'file_read{"path": "/workspace/cachex/x.txt"}{"error":"not_mounted","message":"path is not mounted"}',
+  # path.rs:8: an interior NUL is InvalidPath.
+  'file_read{"path": "/data/nul\u0000.txt"}{"error":"invalid_path","message":"invalid VFS path"}',
+]
+
+[[steps]]
+send = "Probe the read-only and removable mounts."
+reply_contains = ["Mounts probed."]
+tool_errors_allowed = true
+tool_contains = [
+  # write_atomic -> create_dir_all on a read-only mount (vfs.rs:265-274,358-365).
+  'file_write{"path": "/resources/x.txt", "content": "x"}{"error":"read_only","message":"filesystem is read-only"}',
+  'file_write{"path": "/workspace/resources/x.txt", "content": "x"}{"error":"read_only","message":"filesystem is read-only"}',
+  # A mount point cannot be removed.
+  'file_delete{"path": "/resources"}{"error":"permission_denied","message":"permission denied"}',
+  # With no medium inserted, the removable namespace is read-only and empty.
+  'file_write{"path": "/workspace/removable/stray.txt", "content": "no medium"}{"error":"read_only","message":"filesystem is read-only"}',
+  '{"path":"/workspace/removable","entries":[],"next_offset":null}',
+  # The anchor root is the MemFS root, which bare-vfs refuses to remove.
+  'file_delete{"path": "/workspace/removable"}{"error":"permission_denied","message":"permission denied"}',
+]
+
+[[steps]]
+send = "Probe file name encoding and length."
+reply_contains = ["Names probed."]
+tool_errors_allowed = true
+tool_contains = [
+  # MemFS accepts any UTF-8 name.
+  '{"path":"/cache/café ☕.txt","bytes":5}',
+  '{"name":"café ☕.txt","kind":"file","bytes":5}',
+  # LittleFS stores non-ASCII names escaped, so they work on /data too.
+  'file_write{"path": "/data/café.txt", "content": "latte"}{"path":"/data/café.txt","bytes":5}',
+  # A 230-byte name fits LittleFS's 255-byte path limit; the atomic write's
+  # temporary sibling has its own short name, so it fits as well.
+  'file_write{"path": "/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", "content": "x"}{"path":"/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt","bytes":1}',
+  'file_read{"path": "/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt"}{"path":"/data/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt","content":"x","offset":0,"bytes":1,"next_offset":null}',
+  '{"path":"/cache/long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt","bytes":1}',
+]

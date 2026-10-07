@@ -10,6 +10,7 @@ package = false
 
 [tool.uv.workspace]
 members = [
+    "tools/e2e",
     "tools/llm-tape",
     "plugins/agent/crates/trace",
     "plugins/agent/crates/trace/scripts/serial_log",

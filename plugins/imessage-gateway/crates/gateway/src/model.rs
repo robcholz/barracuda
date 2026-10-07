@@ -1,4 +1,6 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
+
+use barracuda_bulk_memory::BulkText;
 use core::{fmt, ops::Deref, pin::Pin};
 
 use futures_core::Stream;
@@ -26,83 +28,47 @@ pub enum MessageKind {
     Notice,
 }
 
-const INLINE_TEXT_BYTES: usize = 512;
+/// Largest text chunk one stream frame carries.
+const FRAME_TEXT_BYTES: usize = 512;
 const INLINE_BINARY_BYTES: usize = 384;
 
-/// UTF-8 stream chunk stored inline unless a provider already owns a String.
-#[derive(Clone)]
-pub struct TextChunk {
-    storage: TextChunkStorage,
-}
-
-#[derive(Clone)]
-#[allow(clippy::large_enum_variant)] // Deliberately avoids one heap allocation per stream chunk.
-enum TextChunkStorage {
-    Owned(String),
-    Inline {
-        bytes: [u8; INLINE_TEXT_BYTES],
-        len: u16,
-    },
-}
+/// UTF-8 stream chunk held in bulk memory and shared on clone.
+///
+/// Queued and retained chunks therefore cost a pointer in internal RAM rather
+/// than a fixed inline buffer.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TextChunk(BulkText);
 
 impl TextChunk {
-    /// Copies one lane-bounded UTF-8 chunk into inline storage.
+    /// Copies one frame-bounded UTF-8 chunk, or `None` when `text` exceeds a
+    /// stream frame.
     #[must_use]
     pub fn inline(text: &str) -> Option<Self> {
-        let len = u16::try_from(text.len()).ok()?;
-        let length = usize::from(len);
-        if length > INLINE_TEXT_BYTES {
-            return None;
-        }
-        let mut bytes = [0_u8; INLINE_TEXT_BYTES];
-        bytes.get_mut(..length)?.copy_from_slice(text.as_bytes());
-        Some(Self {
-            storage: TextChunkStorage::Inline { bytes, len },
-        })
+        (text.len() <= FRAME_TEXT_BYTES).then(|| Self(BulkText::new(text)))
     }
 
     /// Borrows the UTF-8 chunk.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match &self.storage {
-            TextChunkStorage::Owned(text) => text,
-            TextChunkStorage::Inline { bytes, len } => {
-                core::str::from_utf8(bytes.get(..usize::from(*len)).unwrap_or_default())
-                    .unwrap_or_default()
-            }
-        }
+        self.0.as_str()
     }
 
-    /// Converts the chunk into provider-owned text when retention is required.
+    /// Copies the chunk into provider-owned text.
     #[must_use]
     pub fn into_string(self) -> String {
-        match self.storage {
-            TextChunkStorage::Owned(text) => text,
-            TextChunkStorage::Inline { bytes, len } => String::from(
-                core::str::from_utf8(bytes.get(..usize::from(len)).unwrap_or_default())
-                    .unwrap_or_default(),
-            ),
-        }
-    }
-
-    /// Returns whether the chunk occupies only its inline storage.
-    #[must_use]
-    pub const fn is_inline(&self) -> bool {
-        matches!(&self.storage, TextChunkStorage::Inline { .. })
+        String::from(self.as_str())
     }
 }
 
 impl From<String> for TextChunk {
     fn from(text: String) -> Self {
-        Self {
-            storage: TextChunkStorage::Owned(text),
-        }
+        Self::from(text.as_str())
     }
 }
 
 impl From<&str> for TextChunk {
     fn from(text: &str) -> Self {
-        Self::from(String::from(text))
+        Self(BulkText::new(text))
     }
 }
 
@@ -114,13 +80,17 @@ impl Deref for TextChunk {
     }
 }
 
-impl PartialEq for TextChunk {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+impl PartialEq<str> for TextChunk {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
     }
 }
 
-impl Eq for TextChunk {}
+impl PartialEq<&str> for TextChunk {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
 
 impl fmt::Debug for TextChunk {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -235,33 +205,28 @@ impl fmt::Debug for BinaryChunk {
 /// Asynchronous append-only chunks for one text message.
 pub type TextStream = Pin<Box<dyn Stream<Item = Result<TextChunk, StreamError>> + 'static>>;
 
-/// One complete lane-bounded JSON value carried by a semantic event.
+/// One complete JSON value carried by a semantic event, held in bulk memory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JsonContent(TextChunk);
 
 impl JsonContent {
-    /// Copies a lane-backed JSON value into inline storage.
-    #[must_use]
-    pub fn inline(json: &str) -> Option<Self> {
-        Some(Self(TextChunk::inline(json)?))
-    }
-
     /// Borrows the encoded JSON value.
     #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 
-    /// Converts the value into provider-owned JSON text.
+    /// Copies the value into provider-owned JSON text.
     #[must_use]
     pub fn into_string(self) -> String {
         self.0.into_string()
     }
+}
 
-    /// Returns whether the JSON value occupies only inline storage.
-    #[must_use]
-    pub const fn is_inline(&self) -> bool {
-        self.0.is_inline()
+/// Takes already encoded JSON text without copying it.
+impl From<BulkText> for JsonContent {
+    fn from(json: BulkText) -> Self {
+        Self(TextChunk(json))
     }
 }
 
@@ -297,26 +262,14 @@ impl SendStreamEvent {
         session: impl Into<String>,
         sequence: u64,
         event_type: impl Into<String>,
-        payload: impl Into<String>,
+        payload: impl Into<JsonContent>,
     ) -> Self {
-        let payload = payload.into();
         Self {
             session: session.into(),
             sequence,
             event_type: event_type.into(),
-            payload: JsonContent::from(payload),
+            payload: payload.into(),
         }
-    }
-
-    /// Copies one lane-bounded semantic event into provider-facing storage.
-    #[must_use]
-    pub fn inline(session: &str, sequence: u64, event_type: &str, payload: &str) -> Option<Self> {
-        Some(Self {
-            session: String::from(session),
-            sequence,
-            event_type: String::from(event_type),
-            payload: JsonContent::inline(payload)?,
-        })
     }
 }
 
@@ -391,13 +344,6 @@ impl SendMessageRequest {
             reply_to: None,
             kind: MessageKind::Reply,
         }
-    }
-
-    /// Sets the presentation role for this message.
-    #[must_use]
-    pub fn with_kind(mut self, kind: MessageKind) -> Self {
-        self.kind = kind;
-        self
     }
 }
 

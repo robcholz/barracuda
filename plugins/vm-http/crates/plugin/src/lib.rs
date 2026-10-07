@@ -4,18 +4,8 @@
 
 extern crate alloc;
 
-use alloc::{
-    boxed::Box,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, vec::Vec};
+use core::{future::Future, pin::Pin};
 
 use async_channel::{Receiver, Sender};
 use barracuda_http_plugin::{Http, HttpError, HttpHeader, HttpMethod, HttpRequest, HttpResponse};
@@ -23,10 +13,13 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_runtime_utils::oneshot;
+use barracuda_runtime_utils::unordered::Unordered;
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, Table};
 use embassy_futures::select::{Either, Either3, select, select3};
-use futures_channel::oneshot;
-use futures_util::stream::{FuturesUnordered, StreamExt as _};
+use futures_util::stream::StreamExt as _;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const REQUEST_QUEUE_DEPTH: usize = 2;
 
@@ -117,7 +110,7 @@ async fn serve(runtime: VmHttpRuntime, cancellation: PluginTaskToken) {
         requests,
         state,
     } = runtime;
-    let mut active = FuturesUnordered::<RequestFuture>::new();
+    let mut active = Unordered::<RequestFuture>::new();
     loop {
         if active.is_empty() {
             match select(cancellation.cancelled(), requests.recv()).await {
@@ -315,8 +308,10 @@ mod tests {
             let (package, requests) = HttpPackage::new();
             let mut fixed = FixedMemoryLua::new(64 * 1024)
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package.install(fixed.lua_mut())?;
 
             let execution = fixed
@@ -400,10 +395,12 @@ mod tests {
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
 
             let (http, _requests) = HttpPackage::new();
-            let mut fixed = FixedMemoryLua::new(96 * 1024)
+            let mut fixed = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             barracuda_vm_filesystem_plugin::package_for_test(filesystem)
                 .install(fixed.lua_mut())?;
             barracuda_vm_time_plugin::package_for_test().install(fixed.lua_mut())?;

@@ -1,0 +1,22 @@
+name = "Agent sends a proactive Gateway message"
+description = "gateway_send delivers an extra message to the Web conversation alongside the turn reply."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation", text = "Proactive hello." } }]
+
+[[model.responses]]
+text = "I sent you a note."
+
+[[steps]]
+send = "Ping me."
+reply_contains = ["Proactive hello.", "I sent you a note."]
+
+[memory]
+# Host ordinary-heap peak was 189 KiB when this budget was set.
+heap_high_water_max = 208896

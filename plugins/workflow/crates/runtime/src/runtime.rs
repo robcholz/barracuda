@@ -17,10 +17,13 @@ use crate::action::ErasedWorkflowAction;
 use crate::definition::{WorkflowCondition, WorkflowOperation};
 use crate::link::{FieldRef, LinkKind, SourceSelector};
 use crate::{
-    EmitError, Event, EventId, Topic, WorkflowActionDescriptor, WorkflowActionRegistry,
-    WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
-    WorkflowUnloadError, WorkflowValue,
+    EmitError, Event, EventId, JsonText, Topic, WorkflowActionRegistry, WorkflowControlRejection,
+    WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowUnloadError, WorkflowValue,
 };
+
+/// Executions one Event may have queued or running before emitters that
+/// wait with [`WorkflowRuntimeControl::ready_for`] pause.
+pub const EVENT_BACKLOG_LIMIT: usize = 4;
 
 type WorkflowDriver = Pin<Box<dyn Future<Output = Result<(), WorkflowExecutionError>> + 'static>>;
 
@@ -80,6 +83,12 @@ pub enum WorkflowExecutionError {
         /// Step whose arguments contain the invalid selector.
         step: usize,
     },
+    /// Bulk memory could not hold a step's request.
+    #[error("Workflow Action step {step} request does not fit in memory")]
+    OutOfMemory {
+        /// Step whose request could not be built.
+        step: usize,
+    },
 }
 
 /// Last recorded failure of one fire-and-forget Workflow execution.
@@ -102,6 +111,10 @@ struct SharedState {
     definitions: Vec<Rc<WorkflowDefinition>>,
     pending: VecDeque<WorkflowExecution>,
     runtime_waker: Option<Waker>,
+    /// Queued or running executions per triggering Event.
+    backlog: Vec<(EventId, usize)>,
+    /// Emitters waiting for an Event's backlog to drain.
+    backlog_waiters: Vec<Waker>,
 }
 
 struct RuntimeShared {
@@ -156,6 +169,59 @@ impl RuntimeShared {
         Ok(Rc::try_unwrap(definition).unwrap_or_else(|definition| definition.as_ref().clone()))
     }
 
+    fn has_listener(&self, event_id: &str) -> bool {
+        self.state.borrow().definitions.iter().any(|definition| {
+            definition.event().matches_str(event_id) && definition.topic().is_none()
+        })
+    }
+
+    fn backlog(&self, event_id: &str) -> usize {
+        self.state
+            .borrow()
+            .backlog
+            .iter()
+            .find(|(id, _count)| id.as_str() == event_id)
+            .map_or(0, |(_id, count)| *count)
+    }
+
+    fn poll_ready_for(&self, event_id: &str, context: &mut Context<'_>) -> Poll<()> {
+        if self.backlog(event_id) < EVENT_BACKLOG_LIMIT {
+            return Poll::Ready(());
+        }
+        let mut state = self.state.borrow_mut();
+        if !state
+            .backlog_waiters
+            .iter()
+            .any(|waiter| waiter.will_wake(context.waker()))
+        {
+            state.backlog_waiters.push(context.waker().clone());
+        }
+        Poll::Pending
+    }
+
+    fn finish(&self, event_id: &EventId) {
+        let waiters = {
+            let mut state = self.state.borrow_mut();
+            let Some(index) = state.backlog.iter().position(|(id, _count)| id == event_id) else {
+                return;
+            };
+            let remaining = state.backlog.get_mut(index).map_or(0, |(_id, count)| {
+                *count = count.saturating_sub(1);
+                *count
+            });
+            if remaining == 0 {
+                state.backlog.swap_remove(index);
+            }
+            if remaining >= EVENT_BACKLOG_LIMIT {
+                return;
+            }
+            core::mem::take(&mut state.backlog_waiters)
+        };
+        for waiter in waiters {
+            waiter.wake();
+        }
+    }
+
     fn matching_plans(&self, event_id: &EventId, topic: Option<&Topic>) -> Vec<WorkflowPlan> {
         self.state
             .borrow()
@@ -173,17 +239,21 @@ impl RuntimeShared {
             .collect()
     }
 
-    fn dispatch(&self, event_id: &EventId, topic: Option<&Topic>, input: WorkflowValue) {
+    fn dispatch(&self, event_id: &EventId, topic: Option<&Topic>, input: impl Into<JsonText>) {
         let plans = self.matching_plans(event_id, topic);
         log::debug!(
             "Workflow Event `{}` matched {} definition(s)",
             event_id.as_str(),
             plans.len()
         );
-        let input = Rc::new(input);
+        if plans.is_empty() {
+            return;
+        }
+        // Encoded once; every matching execution shares it.
+        let input = input.into();
         let mut executions = VecDeque::new();
         for plan in plans {
-            match WorkflowExecution::new(plan, Rc::clone(&input), &self.actions) {
+            match WorkflowExecution::new(plan, event_id, input.clone(), &self.actions) {
                 Ok(execution) => executions.push_back(execution),
                 Err((workflow_id, error)) => self.record_failure(workflow_id, error),
             }
@@ -193,6 +263,10 @@ impl RuntimeShared {
         }
         let waker = {
             let mut state = self.state.borrow_mut();
+            match state.backlog.iter_mut().find(|(id, _count)| id == event_id) {
+                Some((_id, count)) => *count = count.saturating_add(executions.len()),
+                None => state.backlog.push((event_id.clone(), executions.len())),
+            }
             state.pending.extend(executions);
             state.runtime_waker.take()
         };
@@ -264,8 +338,32 @@ impl WorkflowRuntimeControl {
         self.shared.unload(workflow_id)
     }
 
+    /// Returns whether a loaded Workflow would run for an untopiced `E`.
+    ///
+    /// Emitters check this before building an Event they would otherwise
+    /// discard.
+    #[must_use]
+    pub fn has_listener<E>(&self) -> bool
+    where
+        E: Event,
+    {
+        self.shared.has_listener(E::ID)
+    }
+
+    /// Waits until fewer than [`EVENT_BACKLOG_LIMIT`] executions started by
+    /// `E` are queued or running.
+    ///
+    /// A high-rate emitter awaits this between Events so its backlog stays
+    /// bounded instead of queuing every Event while the Runtime catches up.
+    pub async fn ready_for<E>(&self)
+    where
+        E: Event,
+    {
+        core::future::poll_fn(|context| self.shared.poll_ready_for(E::ID, context)).await;
+    }
+
     /// Emits one typed Event directly into the Workflow Runtime.
-    pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit<E>(&self, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -273,14 +371,18 @@ impl WorkflowRuntimeControl {
     }
 
     /// Emits one typed Event with a topic filter.
-    pub fn emit_to<E>(&self, topic: Topic, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit_to<E>(&self, topic: Topic, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
         self.emit_inner::<E>(Some(topic), input)
     }
 
-    fn emit_inner<E>(&self, topic: Option<Topic>, input: WorkflowValue) -> Result<(), EmitError>
+    fn emit_inner<E>(
+        &self,
+        topic: Option<Topic>,
+        input: impl Into<JsonText>,
+    ) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -290,7 +392,7 @@ impl WorkflowRuntimeControl {
     }
 
     /// Emits a dynamically identified Event.
-    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: WorkflowValue) {
+    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: impl Into<JsonText>) {
         self.shared.dispatch(&event_id, topic.as_ref(), input);
     }
 }
@@ -329,6 +431,8 @@ impl WorkflowRuntime {
                     definitions: Vec::new(),
                     pending: VecDeque::new(),
                     runtime_waker: None,
+                    backlog: Vec::new(),
+                    backlog_waiters: Vec::new(),
                 }),
                 actions,
                 completed_count: Cell::new(0),
@@ -370,9 +474,11 @@ impl WorkflowRuntime {
                     self.shared
                         .completed_count
                         .set(self.shared.completed_count.get().saturating_add(1));
+                    self.shared.finish(&execution.event);
                 }
                 Poll::Ready(Err(error)) => {
                     log::error!("Workflow `{}` failed: {error}", execution.id.as_str());
+                    self.shared.finish(&execution.event);
                     self.shared.record_failure(execution.id, error);
                 }
             }
@@ -390,13 +496,16 @@ impl Future for WorkflowRuntime {
 
 struct WorkflowExecution {
     id: WorkflowId,
+    /// The Event that started this execution, for its backlog count.
+    event: EventId,
     driver: WorkflowDriver,
 }
 
 impl WorkflowExecution {
     fn new(
         plan: WorkflowPlan,
-        event: Rc<WorkflowValue>,
+        event_id: &EventId,
+        event: JsonText,
         registry: &WorkflowActionRegistry,
     ) -> Result<Self, (WorkflowId, WorkflowExecutionError)> {
         let id = plan.definition.id().clone();
@@ -405,23 +514,23 @@ impl WorkflowExecution {
             Err(error) => return Err((id, error)),
         };
         if !plan.definition.has_branch() {
-            let descriptors = actions
-                .iter()
-                .map(|action| action.descriptor().clone())
-                .collect::<Vec<_>>();
-            if let Err(error) = validate_links(&plan.definition, &descriptors) {
+            if let Err(error) = validate_links(&plan.definition, &actions) {
                 return Err((id, error));
             }
         }
         let definition = Rc::clone(&plan.definition);
         let driver = Box::pin(async move { execute_steps(&definition, &event, &actions).await });
-        Ok(Self { id, driver })
+        Ok(Self {
+            id,
+            event: event_id.clone(),
+            driver,
+        })
     }
 }
 
 async fn execute_steps(
     definition: &WorkflowDefinition,
-    event_input: &WorkflowValue,
+    event_input: &JsonText,
     actions: &[Rc<dyn ErasedWorkflowAction>],
 ) -> Result<(), WorkflowExecutionError> {
     let mut frames = Vec::new();
@@ -482,11 +591,11 @@ struct OperationFrame<'a> {
 async fn execute_call(
     definition: &WorkflowDefinition,
     to_step: usize,
-    event_input: &WorkflowValue,
+    event_input: &JsonText,
     actions: &[Rc<dyn ErasedWorkflowAction>],
-    previous: Option<WorkflowValue>,
+    previous: Option<JsonText>,
     _previous_step: Option<usize>,
-) -> Result<WorkflowValue, WorkflowExecutionError> {
+) -> Result<JsonText, WorkflowExecutionError> {
     let _step = definition
         .steps()
         .get(to_step)
@@ -497,7 +606,8 @@ async fn execute_call(
         .ok_or(WorkflowExecutionError::UnknownAction { step: to_step })?;
     let request = match link {
         LinkKind::Direct => previous.unwrap_or_else(|| event_input.clone()),
-        LinkKind::Literal { arguments } => arguments.clone(),
+        LinkKind::Literal { arguments } => JsonText::try_from_value(arguments)
+            .map_err(|_error| WorkflowExecutionError::OutOfMemory { step: to_step })?,
         LinkKind::Mapping {
             arguments,
             references,
@@ -523,8 +633,8 @@ async fn execute_call(
 
 fn evaluate_condition(
     condition: &WorkflowCondition,
-    event_input: &WorkflowValue,
-    previous: Option<&WorkflowValue>,
+    event_input: &JsonText,
+    previous: Option<&JsonText>,
     previous_step: Option<usize>,
 ) -> Result<bool, WorkflowExecutionError> {
     let source = match condition.selector {
@@ -535,38 +645,45 @@ fn evaluate_condition(
             })?
         }
     };
-    let missing = Value::Null;
+    // Only the compared value is decoded.
     let actual = match &condition.field {
-        None => source,
-        Some(field) => source
-            .as_object()
-            .ok_or(match condition.selector {
-                SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-                SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-                    step: previous_step.unwrap_or(0),
-                },
-            })?
-            .get(field)
-            .unwrap_or(&missing),
+        None => source.to_value(),
+        Some(field) => {
+            if !source.is_object() {
+                return Err(match condition.selector {
+                    SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                    SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
+                        step: previous_step.unwrap_or(0),
+                    },
+                });
+            }
+            source
+                .field(field)
+                .map_or(Value::Null, |actual| actual.to_value())
+        }
     };
-    Ok(condition.comparison.matches(actual))
+    Ok(condition.comparison.matches(&actual))
 }
 
+/// Builds a step request from literal arguments and referenced values.
+///
+/// Referenced values are spliced in as their stored text, so a large field
+/// selected from the Event input is copied once into the new request rather
+/// than decoded and re-encoded.
 fn mapped_request(
-    event_input: &WorkflowValue,
-    previous: Option<&WorkflowValue>,
+    event_input: &JsonText,
+    previous: Option<&JsonText>,
     to_step: usize,
     arguments: &WorkflowValue,
     references: &[FieldRef],
-) -> Result<WorkflowValue, WorkflowExecutionError> {
-    let mut request =
-        arguments
-            .as_object()
-            .cloned()
-            .ok_or(WorkflowExecutionError::InvalidLink {
-                from_step: to_step.saturating_sub(1),
-                to_step,
-            })?;
+) -> Result<JsonText, WorkflowExecutionError> {
+    let literal = arguments
+        .as_object()
+        .ok_or(WorkflowExecutionError::InvalidLink {
+            from_step: to_step.saturating_sub(1),
+            to_step,
+        })?;
+    let mut values = Vec::with_capacity(references.len());
     for reference in references {
         let source = match reference.selector {
             SourceSelector::EventInput => event_input,
@@ -576,15 +693,18 @@ fn mapped_request(
         let value = match &reference.source_field {
             None => source.clone(),
             Some(field) => {
-                let object = source.as_object().ok_or(match reference.selector {
-                    SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-                    SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-                        step: to_step.saturating_sub(1),
-                    },
-                })?;
-                object
-                    .get(field)
-                    .cloned()
+                if !source.is_object() {
+                    return Err(match reference.selector {
+                        SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                        SourceSelector::PreviousOutput => {
+                            WorkflowExecutionError::ResponseNotObject {
+                                step: to_step.saturating_sub(1),
+                            }
+                        }
+                    });
+                }
+                source
+                    .field(field)
                     .ok_or_else(|| match reference.selector {
                         SourceSelector::EventInput => {
                             WorkflowExecutionError::MissingEventInputField {
@@ -600,9 +720,19 @@ fn mapped_request(
                     })?
             }
         };
-        request.insert(reference.dest_field.clone(), value);
+        values.push(value);
     }
-    Ok(Value::Object(request))
+    JsonText::try_encode_object(|object| {
+        for (name, value) in literal {
+            object.value(name, value);
+        }
+        for (reference, value) in references.iter().zip(&values) {
+            object
+                .field(&reference.dest_field)
+                .put(value.as_str().as_bytes());
+        }
+    })
+    .map_err(|_error| WorkflowExecutionError::OutOfMemory { step: to_step })
 }
 
 fn resolve_actions(
@@ -625,10 +755,65 @@ fn schema_properties(schema: &Value) -> Option<&Map<String, Value>> {
     schema.get("properties")?.as_object()
 }
 
+/// The shapes an Action response can take: each `oneOf` branch, or the schema.
+///
+/// Responses list success and error shapes as `oneOf` branches. A link that
+/// reads the previous output is valid when some shape supplies the value; an
+/// execution that receives another shape fails at that step.
+fn response_shapes(schema: &Value) -> impl Iterator<Item = &Value> {
+    let branches = schema.get("oneOf").and_then(Value::as_array);
+    branches
+        .into_iter()
+        .flatten()
+        .chain(branches.is_none().then_some(schema))
+}
+
+/// Whether two schemas describe the same value, ignoring the `$schema` tag
+/// that only top-level documents carry.
+fn same_shape(left: &Value, right: &Value) -> bool {
+    match (left.as_object(), right.as_object()) {
+        (Some(left), Some(right)) => {
+            let fields = |object: &'_ Map<String, Value>| {
+                object
+                    .iter()
+                    .filter(|(key, _value)| key.as_str() != "$schema")
+                    .count()
+            };
+            fields(left) == fields(right)
+                && left
+                    .iter()
+                    .filter(|(key, _value)| key.as_str() != "$schema")
+                    .all(|(key, value)| right.get(key) == Some(value))
+        }
+        _ => left == right,
+    }
+}
+
+/// Request and response schemas of one step, parsed only for link validation.
+struct StepShapes {
+    request: Value,
+    response: Value,
+}
+
 fn validate_links(
     definition: &WorkflowDefinition,
-    descriptors: &[WorkflowActionDescriptor],
+    actions: &[Rc<dyn ErasedWorkflowAction>],
 ) -> Result<(), WorkflowExecutionError> {
+    let descriptors = actions
+        .iter()
+        .enumerate()
+        .map(|(step, action)| {
+            let descriptor = action.descriptor();
+            let invalid = |_error| WorkflowExecutionError::InvalidLink {
+                from_step: step.saturating_sub(1),
+                to_step: step,
+            };
+            Ok(StepShapes {
+                request: descriptor.request_shape().map_err(invalid)?,
+                response: descriptor.response_shape().map_err(invalid)?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     for to_step in 0..definition.steps().len() {
         let from_step = to_step.saturating_sub(1);
         let this = descriptors
@@ -644,19 +829,21 @@ fn validate_links(
                     .checked_sub(1)
                     .and_then(|index| descriptors.get(index))
                 {
-                    if previous.response_shape() != this.request_shape() {
+                    if !response_shapes(&previous.response)
+                        .any(|shape| same_shape(shape, &this.request))
+                    {
                         return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                     }
                 }
             }
             LinkKind::Literal { arguments } => {
-                validate_request_shape(this.request_shape(), arguments, &[], from_step, to_step)?;
+                validate_request_shape(&this.request, arguments, &[], from_step, to_step)?;
             }
             LinkKind::Mapping {
                 arguments,
                 references,
             } => {
-                let properties = schema_properties(this.request_shape())
+                let properties = schema_properties(&this.request)
                     .ok_or(WorkflowExecutionError::InvalidLink { from_step, to_step })?;
                 for reference in references {
                     let Some(destination) = properties.get(&reference.dest_field) else {
@@ -671,28 +858,22 @@ fn validate_links(
                                 step: to_step,
                             });
                         };
-                        match &reference.source_field {
-                            Some(field)
-                                if schema_properties(previous.response_shape())
-                                    .and_then(|properties| properties.get(field))
-                                    == Some(destination) => {}
-                            None if previous.response_shape() == destination => {}
-                            _ => {
-                                return Err(WorkflowExecutionError::InvalidLink {
-                                    from_step,
-                                    to_step,
-                                })
+                        let supplied = response_shapes(&previous.response).any(|shape| {
+                            match &reference.source_field {
+                                Some(field) => {
+                                    schema_properties(shape)
+                                        .and_then(|properties| properties.get(field))
+                                        == Some(destination)
+                                }
+                                None => same_shape(shape, destination),
                             }
+                        });
+                        if !supplied {
+                            return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                         }
                     }
                 }
-                validate_request_shape(
-                    this.request_shape(),
-                    arguments,
-                    references,
-                    from_step,
-                    to_step,
-                )?;
+                validate_request_shape(&this.request, arguments, references, from_step, to_step)?;
             }
         }
     }
@@ -747,11 +928,7 @@ pub fn validate_definition(
     if definition.has_branch() {
         return Ok(());
     }
-    let descriptors = actions
-        .iter()
-        .map(|action| action.descriptor().clone())
-        .collect::<Vec<_>>();
-    validate_links(definition, &descriptors).map_err(|_error| WorkflowControlRejection::InvalidLink)
+    validate_links(definition, &actions).map_err(|_error| WorkflowControlRejection::InvalidLink)
 }
 
 #[cfg(test)]
@@ -769,10 +946,11 @@ mod tests {
     use futures_lite::future::{block_on, poll_fn, poll_once};
     use serde_json::{json, Value};
 
+    use super::validate_definition;
     use crate::{
-        parse_definition, workflow_action_schema_inline, Event, WorkflowActionError,
-        WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
-        WorkflowRuntime,
+        parse_definition, workflow_action_schema_inline, Event, WorkflowActionFuture,
+        WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
+        WorkflowControlRejection, WorkflowRuntime,
     };
 
     struct Trigger;
@@ -839,6 +1017,11 @@ mod tests {
             ),
             2 => workflow_action_schema_inline!("test.then", "{}", "{}"),
             3 => workflow_action_schema_inline!("test.else", "{}", "{}"),
+            4 => workflow_action_schema_inline!(
+                "test.maybe",
+                "{}",
+                r#"{"oneOf":[{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"]},{"type":"object","properties":{"error":{"const":"busy"}},"required":["error"]}]}"#
+            ),
             _ => workflow_action_schema_inline!("test.invalid", "{}", "{}"),
         };
 
@@ -920,6 +1103,49 @@ mod tests {
     }
 
     #[test]
+    fn emitters_see_listeners_and_wait_for_their_backlog() {
+        block_on(async {
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let actions = WorkflowActionRegistry::new();
+            let _registration = actions
+                .add_action(YieldOnceAction::<0> {
+                    name: "a.first",
+                    trace: Rc::clone(&trace),
+                })
+                .expect("register a.first");
+            let mut runtime = WorkflowRuntime::new(actions);
+            let control = runtime.control();
+            assert!(!control.has_listener::<Trigger>());
+            control
+                .load(
+                    parse_definition(
+                        r#"{"id":"a","match":{"event":"test.*"},"steps":[{"call":"a.first"}]}"#,
+                    )
+                    .expect("parse a"),
+                )
+                .expect("load a");
+            assert!(control.has_listener::<Trigger>());
+
+            let mut ready = Box::pin(control.ready_for::<Trigger>());
+            for _event in 0..super::EVENT_BACKLOG_LIMIT {
+                assert!(poll_once(&mut ready).await.is_some());
+                ready = Box::pin(control.ready_for::<Trigger>());
+                control.emit::<Trigger>(json!({})).expect("emit");
+            }
+            assert!(poll_once(&mut ready).await.is_none(), "backlog is full");
+
+            // Each execution yields once, then completes on the next poll.
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert_eq!(
+                runtime.view().info().completed_count,
+                super::EVENT_BACKLOG_LIMIT
+            );
+            assert!(poll_once(&mut ready).await.is_some(), "backlog drained");
+        });
+    }
+
+    #[test]
     fn definitions_can_load_and_unload_while_runtime_exists() {
         let actions = WorkflowActionRegistry::new();
         let _registration = actions
@@ -953,6 +1179,67 @@ mod tests {
         assert_eq!(registry.descriptors().len(), 1);
         drop(registration);
         assert!(registry.descriptors().is_empty());
+    }
+
+    struct CaptureText {
+        requests: Rc<RefCell<Vec<crate::JsonText>>>,
+    }
+
+    impl WorkflowActionHandler for CaptureText {
+        type Request = crate::JsonText;
+        type Response = Value;
+
+        const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
+            "test.capture",
+            r#"{"type":"object","properties":{"payload":{"type":"object"},"kind":{"type":"string"},"x":{"type":"string"}}}"#,
+            "{}"
+        );
+
+        fn invoke(&self, request: crate::JsonText) -> WorkflowActionFuture<'_, Value> {
+            self.requests.borrow_mut().push(request);
+            Box::pin(async { Ok(json!({})) })
+        }
+    }
+
+    #[test]
+    fn mapping_splices_referenced_fields_as_stored_text() {
+        block_on(async {
+            let actions = WorkflowActionRegistry::new();
+            let requests = Rc::new(RefCell::new(Vec::new()));
+            let _registration = actions
+                .add_action(CaptureText {
+                    requests: Rc::clone(&requests),
+                })
+                .expect("register capture");
+            let mut runtime = WorkflowRuntime::new(actions);
+            let control = runtime.control();
+            control.load(parse_definition(
+                r#"{"id":"splice","match":{"event":"test.trigger"},"steps":[{"call":"test.capture","arguments":{"payload":"$event.input.payload","kind":"x"}}]}"#,
+            ).expect("parse splice")).expect("load splice");
+            control.load(parse_definition(
+                r#"{"id":"missing","match":{"event":"test.trigger"},"steps":[{"call":"test.capture","arguments":{"x":"$event.input.missing"}}]}"#,
+            ).expect("parse missing")).expect("load missing");
+
+            control
+                .emit::<Trigger>(json!({ "payload": { "text": "a\"b", "n": [1, 2] }, "other": 1 }))
+                .expect("emit");
+            assert!(poll_once(&mut runtime).await.is_none());
+
+            let requests = requests.borrow();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(
+                requests.first().expect("request").as_str(),
+                r#"{"kind":"x","payload":{"n":[1,2],"text":"a\"b"}}"#
+            );
+            let info = runtime.view().info();
+            assert_eq!((info.completed_count, info.failed_count), (1, 1));
+            assert_eq!(
+                info.last_failure.expect("failure").error(),
+                &super::WorkflowExecutionError::MissingEventInputField {
+                    field: "missing".into()
+                }
+            );
+        });
     }
 
     #[test]
@@ -1008,8 +1295,91 @@ mod tests {
         });
     }
 
-    #[allow(dead_code)]
-    fn action_error_is_public() -> WorkflowActionError {
-        WorkflowActionError::new("failed")
+    #[test]
+    fn link_validation_checks_schemas_of_adjacent_steps() {
+        let actions = WorkflowActionRegistry::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let _registrations = [
+            actions
+                .add_action(FixedAction::<0> {
+                    output: json!({ "token": 7 }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register producer"),
+            actions
+                .add_action(FixedAction::<1> {
+                    output: json!({ "ok": true }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register sink"),
+        ];
+        let validate = |sink: &str| {
+            let source = alloc::format!(
+                r#"{{"id":"linked","match":{{"event":"test.trigger"}},"steps":[{{"call":"test.produce"}},{sink}]}}"#
+            );
+            validate_definition(&actions, &parse_definition(&source).expect("parse"))
+        };
+
+        assert_eq!(
+            validate(
+                r#"{"call":"test.sink","arguments":{"token":"$previous.output.token","extra":5}}"#
+            ),
+            Ok(())
+        );
+        for invalid in [
+            r#"{"call":"test.sink"}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.token"}}"#,
+            r#"{"call":"test.sink","arguments":{"token":1,"extra":2,"bogus":3}}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.missing","extra":5}}"#,
+        ] {
+            assert_eq!(
+                validate(invalid),
+                Err(WorkflowControlRejection::InvalidLink),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn links_may_read_a_field_of_one_response_shape() {
+        let actions = WorkflowActionRegistry::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let _registrations = [
+            actions
+                .add_action(FixedAction::<4> {
+                    output: json!({ "token": 7 }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register maybe"),
+            actions
+                .add_action(FixedAction::<1> {
+                    output: json!({ "ok": true }),
+                    inputs: Rc::clone(&inputs),
+                })
+                .expect("register sink"),
+        ];
+        let validate = |sink: &str| {
+            let source = alloc::format!(
+                r#"{{"id":"linked","match":{{"event":"test.trigger"}},"steps":[{{"call":"test.maybe"}},{sink}]}}"#
+            );
+            validate_definition(&actions, &parse_definition(&source).expect("parse"))
+        };
+
+        assert_eq!(
+            validate(
+                r#"{"call":"test.sink","arguments":{"token":"$previous.output.token","extra":5}}"#
+            ),
+            Ok(())
+        );
+        for invalid in [
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.error","extra":5}}"#,
+            r#"{"call":"test.sink","arguments":{"token":"$previous.output.missing","extra":5}}"#,
+        ] {
+            assert_eq!(
+                validate(invalid),
+                Err(WorkflowControlRejection::InvalidLink),
+                "{invalid}"
+            );
+        }
     }
 }

@@ -1,0 +1,78 @@
+name = "Workflow branches"
+description = "Scheduled Events drive branching Workflows: `equals` on an Event field selects then/else, `return` inside an arm skips the remaining steps, `not_equals` on the previous output, and a missing Event field compares as null instead of failing."
+
+# VM log lines report only the output line count, so every vm.run step prints
+# a distinct number of lines to identify which branch arm ran:
+#   e2e-branch-a, run 1: then arm (2 lines) and return, skipping the 4-line step
+#   e2e-branch-a, run 2: else arm (3 lines), then the trailing 4-line step
+#   e2e-branch-b: 5-line step, not_equals false -> else -> missing field
+#                 equals "anything" false -> else (8 lines)
+# Expected VM runs: 1 (2 lines), 2 (3), 3 (4), 4 (5), 5 (8), and no run 6.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-branch-a", match = { event = "scheduler.triggered", topic = "e2e-branch-a" }, steps = [
+    { if = { source = "$event.input.run_number", equals = 1 }, then = [
+        { call = "vm.run", arguments = { source = "for i = 1, 2 do print('a' .. i) end" } },
+        { return = {} },
+    ], else = [
+        { call = "vm.run", arguments = { source = "for i = 1, 3 do print('b' .. i) end" } },
+    ] },
+    { call = "vm.run", arguments = { source = "for i = 1, 4 do print('c' .. i) end" } },
+] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-branch-b", match = { event = "scheduler.triggered", topic = "e2e-branch-b" }, steps = [
+    { call = "vm.run", arguments = { source = "for i = 1, 5 do print('d' .. i) end" } },
+    { if = { source = "$previous.output.outcome", not_equals = "success" }, then = [
+        { call = "vm.run", arguments = { source = "for i = 1, 6 do print('f' .. i) end" } },
+    ], else = [
+        { if = { source = "$event.input.missing", equals = "anything" }, then = [
+            { call = "vm.run", arguments = { source = "for i = 1, 7 do print('g' .. i) end" } },
+        ], else = [
+            { call = "vm.run", arguments = { source = "for i = 1, 8 do print('h' .. i) end" } },
+        ] },
+    ] },
+] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-branch-a", trigger = { type = "interval", at = "${now+12s}", every_seconds = 3, count = 2 } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-branch-b", trigger = { type = "once", at = "${now+20s}" } } }]
+
+[[model.responses]]
+text = "Both branching Workflows are scheduled."
+
+[[steps]]
+send = "Load and schedule the branching Workflows."
+reply_contains = ["Both branching Workflows are scheduled."]
+tool_contains = [
+    '''"else": [{"call": "vm.run", "arguments": {"source": "for i = 1, 3 do print('b' .. i) end"}}]}, {"call": "vm.run", "arguments": {"source": "for i = 1, 4 do print('c' .. i) end"}}]}{}''',
+    '''"else": [{"call": "vm.run", "arguments": {"source": "for i = 1, 8 do print('h' .. i) end"}}]}]}]}{}''',
+    '{"id":"e2e-branch-a"}',
+    '{"id":"e2e-branch-b"}',
+]
+
+[logs]
+ready = ["UTC clock synchronized from network time"]
+await = [
+    "schedule `e2e-branch-a` triggered run 1",
+    "VM run 1 finished: Success, 2 output line",
+    "schedule `e2e-branch-a` triggered run 2",
+    "VM run 2 finished: Success, 3 output line",
+    "VM run 3 finished: Success, 4 output line",
+    "schedule `e2e-branch-b` triggered run 1",
+    "VM run 4 finished: Success, 5 output line",
+    "VM run 5 finished: Success, 8 output line",
+]
+await_seconds = 45
+forbid = ['\bERROR\b', 'panicked at', 'VM run 6 started']

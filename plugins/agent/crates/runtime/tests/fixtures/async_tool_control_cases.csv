@@ -1,3 +1,0 @@
-case,control,interrupted_output,post_submit_output
-cancel-while-request-pending,cancel,,after cancel accepted
-interrupt-while-request-pending,interrupt,root reached safe boundary,after interrupt accepted

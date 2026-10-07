@@ -70,17 +70,6 @@ impl<Bus> SharedI2cBus<Bus> {
     pub fn device(&'static self) -> embedded_hal_bus::i2c::CriticalSectionDevice<'static, Bus> {
         embedded_hal_bus::i2c::CriticalSectionDevice::new(&self.bus)
     }
-
-    /// Borrows the underlying bus while holding its critical-section lock.
-    ///
-    /// Platform adapters use this only to obtain stable vendor handles needed
-    /// by non-standard data planes such as MIPI-CSI sensor discovery.
-    pub fn with_bus<R>(&self, use_bus: impl FnOnce(&Bus) -> R) -> R {
-        critical_section::with(|critical_section| {
-            let bus = self.bus.borrow(critical_section).borrow();
-            use_bus(&bus)
-        })
-    }
 }
 
 /// Input bias selected while a VM-exposed GPIO operates as an input.

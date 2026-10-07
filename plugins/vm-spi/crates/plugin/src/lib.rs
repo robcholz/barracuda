@@ -4,23 +4,18 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-    vec::Vec,
-};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{ExposedIo, SpiProvider, SpiRequest};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_hal::spi::{MODE_0, MODE_1, MODE_2, MODE_3, Mode};
 use embedded_hal_async::spi::SpiBus;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
@@ -172,16 +167,16 @@ where
         methods.add_async_method("read", |handle, length: i64| async move {
             Some(spi_read(handle, length).await)
         });
-        methods.add_async_method("write", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("write", |handle, bytes: Bytes| async move {
             Some(spi_write(handle, bytes).await)
         });
         methods.add_async_method(
             "transfer",
-            |handle, (bytes, read_length): (Vec<u8>, i64)| async move {
+            |handle, (bytes, read_length): (Bytes, i64)| async move {
                 Some(spi_transfer(handle, bytes, read_length).await)
             },
         );
-        methods.add_async_method("transfer_in_place", |handle, bytes: Vec<u8>| async move {
+        methods.add_async_method("transfer_in_place", |handle, bytes: Bytes| async move {
             Some(spi_transfer_in_place(handle, bytes).await)
         });
         methods.add_method("is_open", |handle, (): ()| {
@@ -200,12 +195,12 @@ where
     }
 }
 
-async fn spi_read<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, length: i64) -> Result<Vec<u8>>
+async fn spi_read<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, length: i64) -> Result<Bytes>
 where
     Bus: SpiBus + Send + 'static,
     <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let mut bytes = vec![0; parse_length(length)?];
+    let mut bytes = Bytes::zeroed(parse_length(length)?)?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -219,11 +214,12 @@ where
     Ok(bytes)
 }
 
-async fn spi_write<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, bytes: Vec<u8>) -> Result<()>
+async fn spi_write<Bus>(handle: UserDataHandle<SpiHandle<Bus>>, bytes: Bytes) -> Result<()>
 where
     Bus: SpiBus + Send + 'static,
     <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
+    check_length(bytes.len())?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -238,14 +234,15 @@ where
 
 async fn spi_transfer<Bus>(
     handle: UserDataHandle<SpiHandle<Bus>>,
-    write: Vec<u8>,
+    write: Bytes,
     read_length: i64,
-) -> Result<Vec<u8>>
+) -> Result<Bytes>
 where
     Bus: SpiBus + Send + 'static,
     <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    let mut read = vec![0; parse_length(read_length)?];
+    check_length(write.len())?;
+    let mut read = Bytes::zeroed(parse_length(read_length)?)?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -261,12 +258,13 @@ where
 
 async fn spi_transfer_in_place<Bus>(
     handle: UserDataHandle<SpiHandle<Bus>>,
-    mut bytes: Vec<u8>,
-) -> Result<Vec<u8>>
+    mut bytes: Bytes,
+) -> Result<Bytes>
 where
     Bus: SpiBus + Send + 'static,
     <Bus as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
+    check_length(bytes.len())?;
     let mut handle = handle.borrow_mut()?;
     ensure_handle(&handle.active, handle.bus.is_some())?;
     let label = handle.label.clone();
@@ -319,6 +317,10 @@ fn positive_u32(value: i64, field: &str) -> Result<u32> {
 fn parse_length(value: i64) -> Result<usize> {
     let length = usize::try_from(value)
         .map_err(|_| Error::runtime("transfer length must be non-negative"))?;
+    check_length(length)
+}
+
+fn check_length(length: usize) -> Result<usize> {
     if length <= MAX_TRANSFER_BYTES {
         Ok(length)
     } else {
@@ -348,8 +350,9 @@ mod tests {
 
     extern crate std;
 
-    use core::{convert::Infallible, sync::atomic::AtomicBool};
+    use core::convert::Infallible;
     use embedded_hal::spi::ErrorType;
+    use portable_atomic::AtomicBool;
 
     use super::*;
 

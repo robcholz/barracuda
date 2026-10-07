@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-agent-message"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Chat messages and text shared as compact JSON in bulk memory"
+
+[lib]
+name = "barracuda_agent_message"
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-bulk-memory.workspace = true
+barracuda-json-writer.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
+
+[dev-dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+
+[lints.rust]
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

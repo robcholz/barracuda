@@ -1,0 +1,34 @@
+name = "VM output limits (1)"
+description = "A run may emit exactly 1024 lines; a 1025th line, an unterminated line after 1024, or more than 64 KiB of output fails the run with lua_runtime and keeps only the output accepted so far."
+
+# Each script first spends about 500 ms in an empty loop (instruction-hook
+# yields of 100 ms each) so its completion always arrives after the reply that
+# ends the turn, costing exactly one detached-turn model call.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: exactly MAX_OUTPUT_LINES_PER_RUN lines succeed.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end for i = 1, 1024 do print('s' .. i) end" } }]
+
+[[model.responses]]
+text = "The 1024-line script is running."
+
+[[model.responses]]
+request_contains = ['[detached:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"s1\",', '\"s1023\",\"s1024\"]}']
+text = "All 1024 lines arrived."
+
+# Step 1: the 1025th line fails the run; the first 1024 lines are kept.
+[[steps]]
+send = "Print exactly 1024 lines."
+reply_contains = ["All 1024 lines arrived."]
+tool_contains = ['{"run_id":1}']
+
+[logs]
+expect = [
+    "VM run 1 finished: Success, 1024 output line",
+]

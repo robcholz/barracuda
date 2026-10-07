@@ -4,7 +4,6 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::{type_name, Any, TypeId};
 use core::error::Error;
@@ -17,6 +16,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
+use portable_atomic_util::Arc;
 
 use crate::storage::ScopedStorage;
 use crate::{PluginStorage, StorageError};
@@ -638,7 +638,9 @@ where
     capabilities: CapabilityRegistry,
     task_spawner: Option<Spawner>,
     vfs_root: Option<Vfs>,
-    loaded: BTreeMap<PluginId, LoadedPlugin<ScopedStorage<DatabaseRegion>>>,
+    /// Boxed so the map's B-tree leaves hold pointers rather than reserving
+    /// eleven inline Plugin records each.
+    loaded: BTreeMap<PluginId, Box<LoadedPlugin<ScopedStorage<DatabaseRegion>>>>,
     pending: BTreeMap<PluginId, Box<dyn ManagedPlugin<ScopedStorage<DatabaseRegion>>>>,
     registration_order: Vec<PluginId>,
 }
@@ -810,7 +812,7 @@ where
                 self.registration_order.push(id.clone());
                 self.loaded.insert(
                     id,
-                    LoadedPlugin {
+                    Box::new(LoadedPlugin {
                         plugin,
                         started: false,
                         dependencies,
@@ -818,7 +820,7 @@ where
                         retained_resources,
                         task_cancellations: Vec::new(),
                         filesystem,
-                    },
+                    }),
                 );
                 Ok(())
             }
@@ -912,7 +914,7 @@ where
             retained_resources,
             task_cancellations,
             ..
-        } = plugin;
+        } = *plugin;
         for cancellation in task_cancellations {
             cancellation.cancel_and_wait().await;
         }
@@ -968,7 +970,7 @@ fn validate_dependency_ids(
 fn resolve_dependencies<Storage: PluginStorage>(
     plugin: &PluginId,
     declared: &[&'static str],
-    loaded: &BTreeMap<PluginId, LoadedPlugin<Storage>>,
+    loaded: &BTreeMap<PluginId, Box<LoadedPlugin<Storage>>>,
 ) -> Result<Vec<PluginId>, PluginRegisterError> {
     let mut dependencies = BTreeSet::new();
     for dependency in declared {

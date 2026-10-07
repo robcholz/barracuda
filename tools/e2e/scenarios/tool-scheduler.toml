@@ -1,0 +1,29 @@
+name = "Scheduler tools"
+description = "The Agent creates a far-future one-shot schedule and cancels it."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-once", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "e2e-once" } }]
+
+[[model.responses]]
+text = "Scheduled and cancelled."
+
+[[steps]]
+send = "Schedule then cancel."
+reply_contains = ["Scheduled and cancelled."]
+tool_contains = ["e2e-once"]
+
+[logs]
+ready = ["UTC clock synchronized from network time"]
+
+[memory]
+# Host ordinary-heap peak was 196 KiB when this budget was set.
+heap_high_water_max = 212992

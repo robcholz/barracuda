@@ -1,0 +1,22 @@
+name = "HTTP tool"
+description = "http_request reaches a host service through the Platform IP stack."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+text = "The service is healthy."
+
+[[steps]]
+send = "Check the service."
+reply_contains = ["The service is healthy."]
+
+[memory]
+# Host ordinary-heap peak was 188 KiB when this budget was set.
+heap_high_water_max = 204800

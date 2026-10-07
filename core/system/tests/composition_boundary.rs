@@ -25,7 +25,8 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
         application.contains("System::new(resources, barracuda_target::TARGET_IDENTITY, spawner)")
     );
     assert!(system.contains("TargetResources<"));
-    assert!(system.contains("PlatformResources<Tls, Partitions<"));
+    assert!(system.contains("PlatformResources<Partitions<"));
+    assert!(system.contains("barracuda_tls::Tls::new(prepared.entropy.clone())"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("prepared.partitions.resources.filesystem"));
     assert!(system.contains("mod read_only_flash;"));

@@ -1,9 +1,10 @@
-use alloc::{boxed::Box, sync::Arc};
+use alloc::boxed::Box;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 
 use super::super::tool_port::SubagentControl;
 use super::helper::{action_with_agent_resource, required_agent_id, AgentArgs};

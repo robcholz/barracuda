@@ -109,7 +109,12 @@ impl GatewayRuntime {
         &self,
         request: GatewaySendMediaRequest,
     ) -> Result<GatewayAccepted, GatewayOperationError> {
-        accept_media(&self.media_sessions, &self.media_jobs, request)
+        accept_media(
+            &self.gateway,
+            &self.media_sessions,
+            &self.media_jobs,
+            request,
+        )
     }
 
     /// Runs one of the fixed outbound semantic-stream workers.

@@ -6,10 +6,14 @@ package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform
 build:
-  rustup-toolchain: stable
+  rustup-toolchain: esp
+  build-std: [core, alloc]
+  environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |
-    The stable Rust toolchain is required. Install it with:
-      rustup toolchain install stable
+    Espressif's esp Rust toolchain and riscv32-esp-elf GCC are required.
+    espup installs the esp toolchain beside an Xtensa target. Install them with:
+      cargo install espup
+      espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1]

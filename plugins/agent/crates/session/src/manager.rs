@@ -1,25 +1,22 @@
 //! Ownership and lifecycle for every Session in one runtime.
 
 use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    rc::Rc,
-    string::String,
-    sync::Arc,
-    vec::Vec,
+    boxed::Box, collections::BTreeMap, collections::BTreeSet, collections::VecDeque, rc::Rc,
+    string::String, vec::Vec,
 };
 use core::task::{Context, Poll};
 use core::{future::Future, pin::Pin};
 
-use async_channel::Sender;
 use barracuda_agent_persistence::{
     DurableState, InvalidInstanceId, PersistenceError, SharedPersistence,
 };
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
+use barracuda_runtime_utils::local_channel::{self, Sender};
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::SharedApiManager;
 use barracuda_agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
@@ -134,7 +131,9 @@ where
     state: DurableState<SessionManagerState>,
     agent_manager: SharedAgentManager<Tcp, Resolver>,
     approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
-    sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>>,
+    /// Boxed so one live session does not allocate a full B-tree leaf of
+    /// inline entries.
+    sessions: BTreeMap<SessionId, Box<SessionEntry<Tcp, Resolver>>>,
     actor_poll_queue: VecDeque<SessionId>,
 }
 
@@ -173,7 +172,7 @@ where
         let approval_resolver: SharedApprovalResolver<Tcp, Resolver> =
             Rc::new(LlmApprovalResolver::new(api_manager, llm_factory));
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>> = BTreeMap::new();
+        let mut sessions: BTreeMap<SessionId, Box<SessionEntry<Tcp, Resolver>>> = BTreeMap::new();
         for instance in states.list().await? {
             let session = SessionId::from_wire(instance.as_str())?;
             let persisted = states
@@ -184,11 +183,11 @@ where
             states.register(&instance, &state)?;
             sessions.insert(
                 session,
-                SessionEntry {
+                Box::new(SessionEntry {
                     persistence: SessionPersistence::Persistent,
                     state,
                     actor: None,
-                },
+                }),
             );
         }
         let next_session_id = sessions
@@ -223,11 +222,11 @@ where
         }
         let previous = self.sessions.insert(
             session,
-            SessionEntry {
+            Box::new(SessionEntry {
                 persistence,
                 state,
                 actor: None,
-            },
+            }),
         );
         debug_assert!(previous.is_none());
         Ok(session)
@@ -247,7 +246,7 @@ where
         if !self.ensure_actor(session) {
             return Err(OpenSessionError::SessionNotFound(session));
         }
-        let (events, receiver) = async_channel::unbounded::<SessionEvent>();
+        let (events, receiver) = local_channel::channel::<SessionEvent>();
         let Some(task) = self
             .sessions
             .get_mut(&session)

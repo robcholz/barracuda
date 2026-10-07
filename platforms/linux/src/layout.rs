@@ -120,54 +120,6 @@ impl FileLayout {
         Ok(self.regions)
     }
 
-    /// Validates the native layout against the opened flash and resolves a writable region.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for malformed layouts, incompatible flash geometry, missing labels,
-    /// or a logical database binding that names a read-only region.
-    pub fn writable_region<F: NorFlash>(
-        &self,
-        flash: &F,
-        name: &str,
-    ) -> Result<&'static FileRegion, FileLayoutError> {
-        let region = self.region(flash, name)?;
-        if region.access == FileRegionAccess::ReadOnly {
-            return Err(FileLayoutError::RegionReadOnly);
-        }
-        Ok(region)
-    }
-
-    /// Validates the native layout and resolves a provisioned read-only region.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for malformed layouts, missing labels, or a logical
-    /// read-only binding that names a writable region.
-    pub fn read_only_region<F: NorFlash>(
-        &self,
-        flash: &F,
-        name: &str,
-    ) -> Result<&'static FileRegion, FileLayoutError> {
-        let region = self.region(flash, name)?;
-        if region.access != FileRegionAccess::ReadOnly {
-            return Err(FileLayoutError::RegionWritable);
-        }
-        Ok(region)
-    }
-
-    fn region<F: NorFlash>(
-        &self,
-        flash: &F,
-        name: &str,
-    ) -> Result<&'static FileRegion, FileLayoutError> {
-        self.validate::<F>(flash)?;
-        self.regions
-            .iter()
-            .find(|region| region.name == name)
-            .ok_or(FileLayoutError::RegionMissing)
-    }
-
     fn validate<F: NorFlash>(&self, flash: &F) -> Result<(), FileLayoutError> {
         if self.capacity != flash.capacity()
             || F::READ_SIZE == 0
@@ -205,7 +157,7 @@ impl FileLayout {
     }
 }
 
-/// Invalid file-backed image layout or logical binding.
+/// Invalid file-backed image layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum FileLayoutError {
     /// Image capacity or operation geometry does not match the native layout.
@@ -214,13 +166,4 @@ pub enum FileLayoutError {
     /// A region is empty, overlapping, duplicated, unaligned, or out of bounds.
     #[error("file-backed flash layout contains an invalid region")]
     Range,
-    /// A Board storage binding names no file-backed region.
-    #[error("Board storage binding names no file-backed region")]
-    RegionMissing,
-    /// A writable capability was bound to a read-only file-backed region.
-    #[error("Board writable storage binding names a read-only file-backed region")]
-    RegionReadOnly,
-    /// A read-only capability was bound to a writable file-backed region.
-    #[error("Board read-only storage binding names a writable file-backed region")]
-    RegionWritable,
 }

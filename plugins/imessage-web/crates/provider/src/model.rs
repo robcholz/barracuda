@@ -1,6 +1,6 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{rc::Rc, string::String, vec::Vec};
 
-use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
+use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent, TextChunk};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,7 +13,6 @@ pub struct WebEvent {
 
 /// Message operation represented by a Web event.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps each lane-bounded semantic payload inline.
 pub enum WebEventData {
     MessageStart {
         message_id: String,
@@ -22,11 +21,13 @@ pub enum WebEventData {
     },
     MessageDelta {
         message_id: String,
-        delta: String,
+        /// Shares the Gateway chunk's bulk allocation.
+        delta: TextChunk,
     },
     /// One complete semantic Agent event carried by the message stream.
     MessageEvent {
         message_id: String,
+        /// Shares the Gateway event's bulk payload.
         event: SendStreamEvent,
     },
     MessageEnd {
@@ -73,10 +74,12 @@ pub enum MediaPhase {
 
 /// A normal event or an explicit notification that replay history was lost.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps replayed semantic events allocation-free.
 pub enum WebDelivery {
-    Event(WebEvent),
-    Lagged { missed: u64 },
+    /// Shared with the replay history and every other subscriber.
+    Event(Rc<WebEvent>),
+    Lagged {
+        missed: u64,
+    },
 }
 
 impl WebEventData {

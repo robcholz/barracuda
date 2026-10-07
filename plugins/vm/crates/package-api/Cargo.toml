@@ -6,11 +6,13 @@ publish = false
 description = "Registration API for Lua packages exposed by the Barracuda VM Plugin"
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-lua = { path = "../lua" }
-spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+portable-atomic.workspace = true
 barracuda-lua = { path = "../lua", features = ["vendored"] }
 
 [lints.rust]

@@ -1,0 +1,110 @@
+# Scheduler::schedule order (plugins/scheduler/crates/plugin/src/scheduler.rs:237-269):
+# id -> clock -> trigger.parts() (calendar) -> past check -> book.add (duplicate) -> persist.
+# Errors are {"error":"<code>"} from plugins/agent-scheduler/crates/plugin/src/lib.rs:94-109.
+name = "Scheduler tool business rules (2)"
+description = "Calendar validation, past and pre-epoch triggers, check ordering, duplicate and unknown IDs, cancel idempotence, and maximal intervals."
+
+[model]
+mode = "scripted"
+
+# Case 1: trigger in the past (scheduler.rs:249-250)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "leap", trigger = { type = "once", at = "2028-02-29T12:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"leap\"}']
+text = "Case 8 checked."
+
+# Case 9: latest representable timestamp is accepted
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "max-date", trigger = { type = "once", at = "9999-12-31T23:59:59.999Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"max-date\"}']
+text = "Case 9 checked."
+
+# Case 10: duplicate live id (state.rs:121-122)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "leap", trigger = { type = "once", at = "2099-06-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"duplicate_id\"}']
+text = "Case 10 checked."
+
+# Case 11: past check precedes the duplicate check (scheduler.rs:249 before 253)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "leap", trigger = { type = "once", at = "2000-06-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"trigger_in_past\"}']
+text = "Case 11 checked."
+
+# Case 12: unknown id (state.rs:142-146)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "nope" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"not_found\"}']
+text = "Case 12 checked."
+
+# Case 13: cancel a live schedule (scheduler.rs:283-286)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "leap" } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"leap\",\"completed_runs\":0}']
+text = "Case 13 checked."
+
+# Case 14: second cancel of the same id
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "leap" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"not_found\"}']
+text = "Case 14 checked."
+
+# Case 15: a cancelled id can be reused
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 8 checked."]
+tool_contains = ['{"id":"leap"}']
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 9 checked."]
+tool_contains = ['{"id":"max-date"}']
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 10 checked."]
+tool_contains = ['{"error":"duplicate_id"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 11 checked."]
+tool_contains = ['{"error":"trigger_in_past"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Cancel case."
+reply_contains = ["Case 12 checked."]
+tool_contains = ['{"error":"not_found"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Cancel case."
+reply_contains = ["Case 13 checked."]
+tool_contains = ['{"id":"leap","completed_runs":0}']
+
+[[steps]]
+send = "Cancel case."
+reply_contains = ["Case 14 checked."]
+tool_contains = ['{"error":"not_found"}']
+tool_errors_allowed = true
+
+[logs]
+ready = ['UTC clock synchronized from network time']

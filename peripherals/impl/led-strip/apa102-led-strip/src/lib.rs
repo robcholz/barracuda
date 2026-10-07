@@ -134,15 +134,13 @@ mod tests {
     use super::{Apa102Bindings, Apa102Config, Apa102LedStrip, Apa102LedStripImplementation};
     use barracuda_peripheral::PeripheralImplementation;
     use barracuda_peripheral::led_strip::{LedStrip, Rgb8};
-    use core::{
-        convert::Infallible,
-        sync::atomic::{AtomicBool, Ordering},
-    };
+    use core::convert::Infallible;
     use embassy_futures::block_on;
     use embedded_hal::{
         digital::{ErrorType as DigitalErrorType, OutputPin},
         spi::{ErrorType, SpiBus},
     };
+    use portable_atomic::{AtomicBool, Ordering};
 
     #[derive(Default)]
     struct RecordingSpi {

@@ -2,26 +2,28 @@
 name = "barracuda-tls"
 version = "0.1.0"
 edition = "2021"
-description = "Platform-owned TLS client capability for Barracuda"
+description = "TLS client engine and compact trust-root bundle shared by every Barracuda Platform"
 
 [features]
-default = ["mbedtls"]
-mbedtls = [
-    "http-client/mbedtls",
-    "dep:mbedtls-rs",
-]
-force-esp-riscv-gcc = ["mbedtls", "mbedtls-rs/force-esp-riscv-gcc"]
-pem = ["mbedtls", "mbedtls-rs/pem-parse"]
-std = ["mbedtls", "mbedtls-rs/std"]
+# ESP32-P4 compiles mbedTLS's C sources with Espressif's RISC-V GCC.
+force-esp-riscv-gcc = ["mbedtls-rs/force-esp-riscv-gcc"]
 
 [dependencies]
-http-client.workspace = true
-mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
-rand_core = "0.10.0-rc-2"
+barracuda-bulk-memory.workspace = true
+barracuda-platform.workspace = true
+log.workspace = true
+# `tls` is the feature set of the prebuilt device libraries (RSA, ECDSA, TLS 1.2 and 1.3).
+mbedtls-rs = { version = "0.1.0", default-features = false, features = ["tls"] }
 thiserror = { version = "2", default-features = false }
 
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+
+[build-dependencies]
+cc = "1"
+
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]

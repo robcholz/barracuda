@@ -2,10 +2,8 @@
 
 use barracuda_lua::{Lua, Package, Result};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry, LuaPackageRegistryError};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 struct Marker {
     name: &'static str,

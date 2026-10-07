@@ -4,12 +4,12 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use async_channel::{Receiver, Sender};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_filesystem_plugin::{VmFile, VmFileReader, VmFileTransfer};
 use barracuda_vm_plugin::{
     Error, Function, Lua, LuaPackage, LuaPackageRegistry, Package, Result, Table, UserDataHandle,
@@ -19,7 +19,8 @@ use barracuda_webserver_plugin::{
 };
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{ErrorType, Read};
-use futures_channel::oneshot;
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// HTTP prefix owned by the VM WebServer adapter.
@@ -78,12 +79,6 @@ impl VmWebServerPlugin {
     pub const fn new<Peripherals, ExposedIo>(
         _context: &mut PluginContext<Peripherals, ExposedIo>,
     ) -> Self {
-        Self
-    }
-}
-
-impl Default for VmWebServerPlugin {
-    fn default() -> Self {
         Self
     }
 }
@@ -157,10 +152,10 @@ impl SharedState {
         }
     }
 
-    fn register(self: &Arc<Self>, mount: String) -> Result<(Receiver<RequestJob>, RouteLease)> {
+    fn register(this: &Arc<Self>, mount: String) -> Result<(Receiver<RequestJob>, RouteLease)> {
         validate_mount(&mount)?;
-        let mut routes = self.routes.lock();
-        if !self.active.load(Ordering::Acquire) {
+        let mut routes = this.routes.lock();
+        if !this.active.load(Ordering::Acquire) {
             return Err(Error::runtime("VM WebServer package has been revoked"));
         }
         if routes.iter().any(|route| route.mount == mount) {
@@ -169,13 +164,13 @@ impl SharedState {
         if routes.len() >= MAX_ACTIVE_MOUNTS {
             return Err(Error::runtime("VM WebServer mount capacity is busy"));
         }
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let id = this.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = async_channel::bounded(REQUEST_QUEUE_DEPTH);
         routes.push(Route { id, mount, sender });
         Ok((
             receiver,
             RouteLease {
-                state: Arc::clone(self),
+                state: Arc::clone(this),
                 id,
             },
         ))
@@ -339,7 +334,7 @@ async fn serve(
     mount: String,
     handler: Function,
 ) -> Result<()> {
-    let (requests, _lease) = state.register(mount)?;
+    let (requests, _lease) = SharedState::register(&state, mount)?;
     while let Ok(request) = requests.recv().await {
         let RequestJob {
             method,
@@ -545,7 +540,6 @@ mod tests {
     extern crate std;
 
     use alloc::string::{String, ToString};
-    use alloc::sync::Arc;
     use alloc::{vec, vec::Vec};
 
     use barracuda_plugin::manager::{Plugin, PluginDeclaration, PluginRequirements};
@@ -558,6 +552,7 @@ mod tests {
     use embassy_time::Duration;
     use embedded_io_async::Read as _;
     use futures_lite::future::{block_on, zip};
+    use portable_atomic_util::Arc;
 
     use super::{HandlerResponse, SharedState, VmEndpoint, VmWebServerPackage, VmWebServerPlugin};
 
@@ -644,10 +639,12 @@ mod tests {
                 state: Arc::clone(&state),
                 files: VmFileTransfer::new(),
             };
-            let mut fixed = FixedMemoryLua::new(96 * 1024)
+            let mut fixed = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package_for_test(filesystem).install(fixed.lua_mut())?;
             webserver.install(fixed.lua_mut())?;
             let execution = fixed
@@ -724,10 +721,9 @@ mod tests {
                 HandlerResponse::Buffered { status: 404, .. }
             ));
 
-            let (_requests, _lease) = state
-                .register(String::from("busy"))
-                .expect("register mount");
-            let (response_sender, _receive) = futures_channel::oneshot::channel();
+            let (_requests, _lease) =
+                SharedState::register(&state, String::from("busy")).expect("register mount");
+            let (response_sender, _receive) = barracuda_runtime_utils::oneshot::channel();
             let sender = state.resolve("/vm/busy").expect("resolve mount").0;
             sender
                 .try_send(super::RequestJob {
@@ -750,7 +746,7 @@ mod tests {
             ));
 
             state.revoke();
-            assert!(state.register(String::from("late")).is_err());
+            assert!(SharedState::register(&state, String::from("late")).is_err());
         });
     }
 
@@ -758,8 +754,7 @@ mod tests {
     fn handler_timeout_releases_the_connection_worker() {
         block_on(async {
             let state = Arc::new(SharedState::new());
-            let (_requests, _lease) = state
-                .register(String::from("silent"))
+            let (_requests, _lease) = SharedState::register(&state, String::from("silent"))
                 .expect("register silent mount");
             let endpoint = VmEndpoint::with_timeout(Arc::clone(&state), Duration::from_millis(1));
             let response = endpoint

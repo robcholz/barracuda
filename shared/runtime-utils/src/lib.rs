@@ -1,24 +1,25 @@
 #![no_std]
 
-//! Shared helpers for the barracuda Rust crates: the externally-driven [`TaskPool`],
-//! logical [`stream`] parts, log-safe text truncation, the prefixed-id newtype
-//! macro ([`define_prefixed_id`]), and the id-allocator macro.
+//! Shared helpers for the barracuda Rust crates: cooperative cancellation, a
+//! portable [`oneshot`] channel, a single-executor [`local_channel`],
+//! logical [`stream`] parts, single-task [`yield_stream`] generators,
+//! [`unordered`] futures and merged streams for one task, the
+//! prefixed-id newtype macro ([`define_prefixed_id`]), and the id-allocator macro.
 //!
-//! This crate does not own an async executor or runner. [`TaskPool`] advances
-//! only when its owner calls [`TaskPool::drive`]. Use vetted runtime-specific
-//! crates for channels and top-level `block_on` behavior.
+//! This crate does not own an async executor or runner. Use vetted
+//! runtime-specific crates for cross-executor channels and top-level
+//! `block_on` behavior.
 
 extern crate alloc;
 
 mod cancel;
+pub mod local_channel;
+pub mod oneshot;
 pub mod stream;
-mod task_pool;
+pub mod unordered;
 pub mod yield_stream;
 
 pub use cancel::{Cancel, CancellationFlag};
-pub use task_pool::{JobCancelled, JobHandle, TaskPool};
-
-use core::fmt;
 
 use alloc::string::{String, ToString};
 
@@ -29,50 +30,6 @@ pub mod __private {
     pub use alloc::{format, string::String};
     pub use core::{default::Default, fmt, str::FromStr};
     pub use serde;
-}
-
-/// Default byte ceiling for [`TruncatedText::new`]. Keep trace/log lines compact
-/// on every target; callers that need a different ceiling use [`with_limit`].
-///
-/// [`with_limit`]: TruncatedText::with_limit
-const LOG_SNIPPET_LEN: usize = 96;
-
-/// Log-safe view of text: at most `limit` bytes on a char boundary, plus `"..."`
-/// when truncated. [`new`](Self::new) uses the platform default
-/// (`LOG_SNIPPET_LEN`); [`with_limit`](Self::with_limit) overrides it.
-pub struct TruncatedText<T> {
-    text: T,
-    limit: usize,
-}
-
-impl<T: AsRef<str>> TruncatedText<T> {
-    /// Truncate to the default 96-byte ceiling.
-    pub fn new(text: T) -> Self {
-        Self {
-            text,
-            limit: LOG_SNIPPET_LEN,
-        }
-    }
-
-    /// Truncate to an explicit byte ceiling (call-site override / testable).
-    pub fn with_limit(text: T, limit: usize) -> Self {
-        Self { text, limit }
-    }
-}
-
-impl<T: AsRef<str>> fmt::Display for TruncatedText<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = self.text.as_ref();
-        let mut end = text.len().min(self.limit);
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        write!(f, "{}", &text[..end])?;
-        if text.len() > self.limit {
-            write!(f, "...")?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
 use barracuda_model_api::{
-    BackendKind, ChatRequest, Error, ModelApi, ModelApiConfig, RetryPolicy, StaticOutputSchema,
+    BackendKind, ChatMessage, ChatRequest, Error, ModelApi, ModelApiConfig, RetryPolicy,
+    StaticOutputSchema,
 };
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
@@ -35,7 +36,7 @@ fn request_body(stack: &ScriptedStack) -> Value {
 fn chat_requires_configuration() {
     let stack = ScriptedStack::default();
     let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let error =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap_err();
     assert!(matches!(error, Error::NotConfigured));
@@ -48,7 +49,7 @@ fn openai_chat_uses_expected_wire_request() {
         r#"{"choices":[{"message":{"role":"assistant","content":"pong"}}]}"#,
     )]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let messages = [json!({"role":"user","content":"ping"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"ping"}))];
     let response =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap();
     assert_eq!(response.text.as_deref(), Some("pong"));
@@ -73,8 +74,8 @@ fn sequential_chats_reuse_one_connection() {
         ),
     ]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let first_messages = [json!({"role":"user","content":"first"})];
-    let second_messages = [json!({"role":"user","content":"second"})];
+    let first_messages = [ChatMessage::new(&json!({"role":"user","content":"first"}))];
+    let second_messages = [ChatMessage::new(&json!({"role":"user","content":"second"}))];
 
     let first = block_on(api.chat(
         &ChatRequest::new("system", &first_messages),
@@ -100,7 +101,7 @@ fn anthropic_chat_uses_provider_headers_and_shape() {
         r#"{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}"#,
     )]);
     let mut api = configured(&stack, BackendKind::AnthropicCompatible);
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let response =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap();
     assert_eq!(response.text.as_deref(), Some("ok"));
@@ -117,7 +118,7 @@ fn structured_chat_sends_schema_and_parses_output() {
         r#"{"choices":[{"message":{"role":"assistant","content":"{\"answer\":42}"}}]}"#,
     )]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let messages = [json!({"role":"user","content":"answer"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"answer"}))];
     let request = ChatRequest::new("system", &messages);
     let schema = StaticOutputSchema {
         name: "answer",
@@ -134,7 +135,7 @@ fn structured_chat_sends_schema_and_parses_output() {
 
 #[test]
 fn invalid_tools_are_rejected_before_network_io() {
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     for backend in [
         BackendKind::OpenAiCompatible,
         BackendKind::AnthropicCompatible,
@@ -161,7 +162,7 @@ fn transient_connect_failure_is_retried_on_same_client() {
         ),
     ]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::fixed(1, 0));
     let response = block_on(api.chat(&request, Cancel::never())).unwrap();
     assert_eq!(response.text.as_deref(), Some("recovered"));
@@ -186,7 +187,7 @@ fn timed_out_request_reconnects_before_retry() {
     );
     config.timeout_ms = 1;
     api.set_config(config).unwrap();
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::fixed(1, 0));
 
     let response = block_on(api.chat(&request, Cancel::never())).unwrap();
@@ -199,7 +200,7 @@ fn timed_out_request_reconnects_before_retry() {
 fn cancelled_request_does_not_touch_network() {
     let stack = ScriptedStack::new([ScriptStep::json(200, "{}")]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let cancelled = CancellationFlag::new();
     cancelled.cancel();
     let error = block_on(api.chat(
@@ -221,7 +222,7 @@ fn cancelling_a_pending_request_reconnects_before_the_next_call() {
         ),
     ]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
-    let messages = [json!({"role":"user","content":"hello"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let cancelled = CancellationFlag::new();
 
     {

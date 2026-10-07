@@ -8,9 +8,8 @@
 
 This plugin owns web entry aggregation and the portal scaffold resource entry.
 It registers one GET subtree, `/portal/*`, with WebServer. It owns no additional
-task, socket, or DNS service. It does not yet implement
-OS captive-network detection, DNS interception, or automatic redirects.
-The existing IMessage Web WebSocket at `/` is unchanged.
+task, socket, or DNS service. OS captive-network detection paths and captive
+DNS for the setup access point are owned by the `wifi` Plugin.
 
 ## Consumer contract
 

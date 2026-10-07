@@ -1,0 +1,24 @@
+name = "Plain conversation round-trip"
+description = "A Web message reaches a new Agent session and the streamed reply returns to the CLI."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+reasoning = "The user greets me."
+text = "Hello from Barracuda."
+
+[[steps]]
+send = "hello"
+reply_contains = ["Hello from Barracuda."]
+kinds = ["reasoning"]
+
+[logs]
+expect = [
+  "Agent created session `session-1`",
+  "IMessage Web completed outbound message",
+]
+
+[memory]
+# Host ordinary-heap peak was 183 KiB when this budget was set.
+heap_high_water_max = 200704

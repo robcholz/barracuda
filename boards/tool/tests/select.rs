@@ -165,34 +165,18 @@ fn select_configures_the_esp32p4_c_hard_float_abi() {
     let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
         .expect("local Cargo selection");
     assert!(cargo.contains("[env]"));
-    assert!(cargo.contains(
-        "CC_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "CXX_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "AR_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "AR = { value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }"
-    ));
-    assert!(cargo.contains(
-        "RANLIB = { value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }"
-    ));
-    assert!(cargo.contains(
-        "CMAKE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-cmake\", relative = true }"
-    ));
-    assert!(cargo.contains(
-        "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf = { value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }"
-    ));
+    assert!(cargo.contains("CC_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-gcc\""));
+    assert!(cargo.contains("CXX_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-g++\""));
+    assert!(cargo.contains("AR_riscv32imafc_unknown_none_elf = \"riscv32-esp-elf-ar\""));
     assert!(
-        cargo.contains(
-            "CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\""
-        )
+        cargo.contains("CFLAGS_riscv32imafc_unknown_none_elf = \"-march=rv32imafc -mabi=ilp32f\"")
     );
+    assert!(cargo
+        .contains("BINDGEN_EXTRA_CLANG_ARGS_riscv32imafc_unknown_none_elf = \"-ffreestanding\""));
+    assert!(!cargo.contains("boards/tool/assets"));
+    // Rust's own linker links the image, without a C library.
+    assert!(!cargo.contains("linker ="));
     assert!(cargo.contains("rustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]"));
-    assert!(cargo.contains("linker = \"boards/tool/assets/esp32p4-linker\""));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
     assert!(cargo.contains("\"--launcher-argument=16mb\""));
     assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));
@@ -233,14 +217,47 @@ fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
     assert!(cargo.contains("BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf ="));
     assert!(cargo.contains("--target=xtensa-esp-elf -I"));
     assert!(cargo.contains("boards/tool/assets/xtensa-include"));
-    assert!(cargo.contains("link-arg=-Tlinkall.x"));
-    assert!(cargo.contains("link-arg=-Wl,--allow-multiple-definition"));
-    assert!(cargo.contains("link-arg=-lgcc"));
-    assert!(!cargo.contains("link-arg=-lnosys"));
+    // The esp-generate flags for espup's Xtensa linker.
+    assert!(cargo.contains(
+        "rustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\"]"
+    ));
     assert!(cargo.contains("\"--launcher-argument=--flash-size\""));
     assert!(cargo.contains("\"--launcher-argument=16mb\""));
     assert!(cargo.contains("\"--launcher-argument=boards/configs/local-macos/file-layout.yml\""));
     assert!(cargo.contains("\"--launcher-argument=ota_0\""));
+}
+
+#[test]
+fn select_links_a_cortex_m_target_with_the_runtime_script() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board manifest");
+    fs::write(
+        &board_path,
+        board.replace(
+            "native-layout:",
+            "toolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:",
+        ),
+    )
+    .expect("STM32 target");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace("- os: macos", "- triple: thumbv7em-none-eabihf"),
+    )
+    .expect("STM32 platform target");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    // embassy-stm32's example flags: cortex-m-rt's script over the Platform's memory.x.
+    assert!(cargo.contains(
+        "[target.thumbv7em-none-eabihf]\nrustflags = [\"-C\", \"link-arg=--nmagic\", \"-C\", \"link-arg=-Tlink.x\"]"
+    ));
+    assert!(!cargo.contains("linker ="));
 }
 
 #[test]
@@ -445,15 +462,15 @@ fn target_prints_the_boards_declared_toolchain_triple() {
 #[test]
 fn target_reads_the_persisted_selection_when_no_board_is_named() {
     let root = tempdir().expect("temporary workspace");
-    add_cross_board(root.path(), "stm32f429zi-nucleo", "thumbv7em-none-eabihf");
-    write_selected_board(root.path(), "stm32f429zi-nucleo").expect("select Board");
+    add_cross_board(root.path(), "nucleo-u5a5zj-q", "thumbv8m.main-none-eabihf");
+    write_selected_board(root.path(), "nucleo-u5a5zj-q").expect("select Board");
     let mut output = Vec::new();
 
     run(["target"], root.path(), &mut output).expect("read selected Board target");
 
     assert_eq!(
         String::from_utf8(output).expect("UTF-8 output"),
-        "thumbv7em-none-eabihf\n"
+        "thumbv8m.main-none-eabihf\n"
     );
 }
 
@@ -523,7 +540,7 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
     assert!(!manifest.contains("\"tools/barracuda-build\","));
     assert!(!manifest.contains("boards/chips"));
     assert!(!manifest.contains("\"boards/configs/*/hal\","));
-    assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
+    assert!(!manifest.contains("\"boards/nucleo-u5a5zj-q\","));
 }
 
 #[test]

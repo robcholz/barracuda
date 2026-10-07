@@ -5,12 +5,12 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::future::Future;
 use core::pin::Pin;
-use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll};
 
-use futures_channel::oneshot;
+use barracuda_runtime_utils::oneshot;
+use barracuda_runtime_utils::unordered::{Merged, Unordered};
 use futures_core::Stream;
-use futures_util::stream::{FuturesUnordered, SelectAll};
+use portable_atomic::{AtomicU32, Ordering};
 use tracing::Instrument as _;
 
 use super::{
@@ -33,12 +33,12 @@ static NEXT_TOOL_TASK_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Default)]
 struct ToolRuns {
-    runs: FuturesUnordered<ToolRunFuture>,
+    runs: Unordered<ToolRunFuture>,
 }
 
 #[derive(Default)]
 struct ToolDetachRuns {
-    runs: SelectAll<ToolDetachStream>,
+    runs: Merged<ToolDetachStream>,
 }
 
 impl ToolDetachRuns {

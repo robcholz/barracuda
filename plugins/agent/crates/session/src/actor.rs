@@ -1,23 +1,18 @@
 use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    collections::{BTreeSet, VecDeque},
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, collections::VecDeque, format,
+    string::String, string::ToString, vec::Vec,
 };
-use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
+use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
+use barracuda_runtime_utils::oneshot;
 use barracuda_runtime_utils::stream::StreamPart;
-use futures_channel::oneshot;
-use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use super::agent_slot::{AgentDispatch, AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
@@ -216,7 +211,7 @@ where
     managed_agents: BTreeSet<barracuda_agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
-    commands: Pin<Box<Receiver<SessionCommand>>>,
+    commands: Receiver<SessionCommand>,
     next_source: PollSource,
 
     client: Option<OpenSession>,
@@ -237,7 +232,7 @@ where
         state: DurableState<SessionPersistentState>,
         approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
-        let (command_sender, commands) = async_channel::unbounded();
+        let (command_sender, commands) = local_channel::channel();
         (
             Self {
                 session,
@@ -253,7 +248,7 @@ where
                 orchestration: SessionOrchestration::new(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
-                commands: Box::pin(commands),
+                commands,
                 next_source: PollSource::Command,
                 client: None,
                 next_lease: 1,
@@ -273,7 +268,7 @@ where
             self.next_source = source.next();
             match source {
                 PollSource::Command => {
-                    if let Poll::Ready(command) = self.commands.as_mut().poll_next(context) {
+                    if let Poll::Ready(command) = self.commands.poll_recv(context) {
                         match command {
                             Some(command) => self.handle_command(command),
                             None => self.request_shutdown(),
@@ -492,7 +487,7 @@ where
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
         let reason = self.lifecycle.reason()?;
-        if self.agents.values().any(AgentSlot::is_in_flight) {
+        if self.agents.values().any(|slot| slot.is_in_flight()) {
             return None;
         }
         if reason != StopReason::Delete && self.orchestration.has_live_children() {
@@ -676,7 +671,10 @@ where
             return Ok(());
         }
         let reasoning_effort = self.state.get().reasoning_effort;
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let root_agent = self.state.get().root_agent;
         let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
             let kind = barracuda_agent::baked::root_kind().clone();
@@ -684,7 +682,7 @@ where
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 extension_tools,
             )?;
@@ -701,7 +699,7 @@ where
                 id,
                 &kind,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 persistence,
                 extension_tools,
@@ -710,7 +708,7 @@ where
         };
         let previous = self
             .agents
-            .insert(id, AgentSlot::new(agent, reasoning_handle));
+            .insert(id, Box::new(AgentSlot::new(agent, reasoning_handle)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(id);
         if !self.orchestration.register_root(id, kind) {
@@ -987,7 +985,7 @@ where
 
     fn root_mut(&mut self) -> Option<&mut AgentSlot<Tcp, Resolver>> {
         let root = self.root_id()?;
-        self.agents.get_mut(&root)
+        self.agents.get_mut(&root).map(|slot| &mut **slot)
     }
 
     fn accepts(&self, lease: u64) -> bool {
@@ -1033,13 +1031,13 @@ where
 
     fn emit_closed(&mut self, reason: SessionCloseReason) {
         if let Some(client) = self.client.take() {
-            let _ = client.events.try_send(SessionEvent::Closed(reason));
+            let _ = client.events.send(SessionEvent::Closed(reason));
         }
     }
 
     fn emit(&self, event: SessionEvent) {
         if let Some(client) = &self.client {
-            let _ = client.events.try_send(event);
+            let _ = client.events.send(event);
         }
     }
 }
@@ -1059,7 +1057,10 @@ where
         kind: &barracuda_agent::AgentKind,
         extension_tools: Vec<ToolGroup>,
     ) -> Result<(), OrchestrationPhysicalError> {
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let reasoning_effort = self.state.get().reasoning_effort;
         let (created_agent, reasoning) = self
             .agent_manager
@@ -1067,7 +1068,7 @@ where
                 agent,
                 kind,
                 false,
-                permission as Arc<_>,
+                permission,
                 reasoning_effort,
                 PersistenceConfig::InMemory,
                 extension_tools,
@@ -1075,14 +1076,18 @@ where
             .map_err(|error| OrchestrationPhysicalError::new(error.to_string()))?;
         let previous = self
             .agents
-            .insert(agent, AgentSlot::new(created_agent, reasoning));
+            .insert(agent, Box::new(AgentSlot::new(created_agent, reasoning)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(agent);
         Ok(())
     }
 
     fn rollback_agent(&mut self, agent: AgentId) -> ReapStatus {
-        if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+        if self
+            .agents
+            .get(&agent)
+            .is_some_and(|slot| slot.is_in_flight())
+        {
             if let Some(slot) = self.agents.get_mut(&agent) {
                 slot.begin_reaping();
             }
@@ -1140,7 +1145,11 @@ where
         agents
             .into_iter()
             .map(|agent| {
-                if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+                if self
+                    .agents
+                    .get(&agent)
+                    .is_some_and(|slot| slot.is_in_flight())
+                {
                     if let Some(slot) = self.agents.get_mut(&agent) {
                         slot.begin_reaping();
                     }

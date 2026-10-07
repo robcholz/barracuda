@@ -14,7 +14,6 @@ mod resources;
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::sync::Arc;
 use core::future::Future;
 use core::pin::Pin;
 
@@ -37,7 +36,6 @@ use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
 use barracuda_target_api::{TargetIdentity, TargetResources};
-use barracuda_tls::ClientTls;
 use barracuda_vfs::{
     create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
 };
@@ -49,6 +47,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
+use portable_atomic_util::Arc;
 use read_only_flash::mount_resources_partition;
 
 macro_rules! register_plugins {
@@ -175,6 +174,12 @@ where
 
 pub use resources::SystemResourceError;
 
+/// The selected Target's Platform and Board resources, as System consumes them.
+type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
+    PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
+    BoardResources<Peripherals, Io>,
+>;
+
 /// Fully assembled portable Barracuda system.
 ///
 /// Platform owns the executor-facing runners and concrete implementations;
@@ -277,11 +282,8 @@ where
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Tls: ClientTls, Wifi: WifiDevice>(
-        resources: TargetResources<
-            PlatformResources<Tls, Partitions<Region, P>, Wifi>,
-            BoardResources<Peripherals, Io>,
-        >,
+    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send>(
+        resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
@@ -306,13 +308,11 @@ where
         let cache = MemFs::new().into_backend();
         mount("/cache", cache, MountOptions::read_write()).await?;
         log::info!("mounted System cache filesystem");
+        // Only inserted media, mounted below it, are writable: a write to the
+        // empty namespace itself would land in RAM and could later be hidden
+        // by a slot mount of the same name.
         let removable_namespace = MemFs::new().into_backend();
-        mount(
-            "/removable",
-            removable_namespace,
-            MountOptions::read_write(),
-        )
-        .await?;
+        mount("/removable", removable_namespace, MountOptions::read_only()).await?;
         log::info!("mounted removable-filesystem namespace");
         let removable_storage = prepared.board_hal.peripherals.take_removable_storage();
         let mut plugins =
@@ -321,8 +321,17 @@ where
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
-        let http_clients =
-            http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
+        let tls = match barracuda_tls::Tls::new(prepared.entropy.clone()) {
+            Ok(tls) => {
+                log::info!("initialized TLS");
+                Some(tls)
+            }
+            Err(error) => {
+                log::warn!("HTTPS is unavailable: {error}");
+                None
+            }
+        };
+        let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
         let mut plugin_context = PluginContext::from_hal(
             target_identity,
             prepared.ip_stack,
@@ -352,7 +361,7 @@ where
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
-            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
+            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context, prepared.entropy),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
             barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),

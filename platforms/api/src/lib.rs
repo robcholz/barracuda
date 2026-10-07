@@ -1,13 +1,15 @@
 //! Compile-time Platform resource contract.
 //!
 //! Platforms expose exact platform mechanisms. The current common contract is
-//! one Embassy IP stack, one TLS client capability, and one generic collection
-//! of native partitions.
+//! one Embassy IP stack, one Wi-Fi mechanism, one entropy source, and one
+//! generic collection of native partitions.
 
 #![no_std]
 
 extern crate alloc;
 
+mod entropy;
+mod network;
 mod wifi;
 
 use core::future::Future;
@@ -15,6 +17,8 @@ use core::future::Future;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 
+pub use entropy::{Entropy, EntropyUnavailable, UnavailableEntropy};
+pub use network::{UnavailableNetworkDriver, UnavailableToken};
 pub use wifi::{
     AccessPointConfiguration, AccessPointState, HostWifiDevice, StationConfiguration, StationState,
     UnavailableWifiDevice, VisibleNetwork, WifiCapabilities, WifiDevice,
@@ -263,20 +267,20 @@ impl core::fmt::Display for PartitionsInsertError {
 impl core::error::Error for PartitionsInsertError {}
 
 /// Portable mechanisms produced by one concrete Platform.
-pub struct PlatformResources<Tls, Partitions, Wifi> {
+pub struct PlatformResources<Partitions, Wifi, Entropy> {
     /// Embassy IP stack. Its device runner remains Platform-owned.
     pub ip_stack: Stack<'static>,
     /// Platform Wi-Fi mechanism consumed by the Wi-Fi Plugin.
     pub wifi: Wifi,
-    /// Platform-owned TLS client capability.
-    pub tls: Tls,
+    /// Platform entropy source.
+    pub entropy: Entropy,
     /// Arbitrarily named regions projected from the Platform's native layout.
     pub partitions: Partitions,
 }
 
 /// Result of initializing one statically selected [`Platform`].
 pub type PlatformInitResult<P> = Result<
-    PlatformResources<<P as Platform>::Tls, <P as Platform>::Partitions, <P as Platform>::Wifi>,
+    PlatformResources<<P as Platform>::Partitions, <P as Platform>::Wifi, <P as Platform>::Entropy>,
     <P as Platform>::Error,
 >;
 
@@ -292,10 +296,10 @@ pub trait Platform: Sized + 'static {
     /// a concrete binding type containing only the chip resources that Target
     /// composition assigned to Platform mechanisms.
     type Bindings;
-    /// TLS client capability initialized and owned by this Platform.
-    type Tls;
     /// Concrete Wi-Fi mechanism supplied to System composition.
     type Wifi: WifiDevice;
+    /// Concrete entropy source supplied to System composition.
+    type Entropy: Entropy;
     /// Generic named partition collection produced from the native layout.
     type Partitions;
     /// Platform initialization failure.

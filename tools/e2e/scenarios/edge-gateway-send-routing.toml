@@ -1,0 +1,29 @@
+name = "Gateway send routing"
+description = "gateway_send to a Web conversation nobody is subscribed to still succeeds but never reaches the CLI conversation; thread_id and reply_to are accepted and the message is delivered to the bound conversation."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+# No client is bound to `elsewhere`: the Web channel publishes the event and
+# returns a receipt, but the CLI subscription filters by conversation id.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "elsewhere", text = "Misrouted note." } }]
+
+[[model.responses]]
+request_contains = ['"content":"{\"message_id\":\"web-']
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation", thread_id = "thread-7", reply_to = "web-in-1", text = "Threaded note." } }]
+
+[[model.responses]]
+text = "Routing checked."
+
+[[steps]]
+send = "Send the routed notes."
+reply_contains = ["Threaded note.", "Routing checked."]
+reply_matches = ['(?s)^(?!.*Misrouted note)']
+tool_contains = [
+  'gateway_send{"channel": "web", "conversation_id": "elsewhere", "text": "Misrouted note."}{"message_id":"web-',
+  '"thread_id": "thread-7", "reply_to": "web-in-1", "text": "Threaded note."}{"message_id":"web-',
+]

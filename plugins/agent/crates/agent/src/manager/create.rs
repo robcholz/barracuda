@@ -1,12 +1,14 @@
-use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind};
 use barracuda_agent_memory::{Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_skill::SkillSetSource;
+use barracuda_agent_tool::{ToolGroup, ToolSetSource};
 use barracuda_model_api::RetryPolicy;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use crate::baked;
 use crate::config::ApiPurpose;
@@ -167,7 +169,7 @@ where
             AgentCreateError::UnknownKind(kind.as_str().to_owned())
         })?;
         let runtime = manifest.runtime();
-        let skill_set = Arc::clone(&self.skill_registry).skill_set();
+        let skill_set = self.skill_registry.skill_set();
         let state =
             recovery_state.unwrap_or_else(|| DurableState::new(AgentEngineState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
@@ -270,15 +272,16 @@ where
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use alloc::{sync::Arc, vec::Vec};
+    use alloc::{boxed::Box, vec::Vec};
 
-    use barracuda_agent_permission::AllowAll;
+    use barracuda_agent_permission::{AllowAll, PermissionPolicy};
     use barracuda_agent_persistence::{DurableState, InstanceId, Persistence};
     use barracuda_agent_tool::ToolRegistry;
     use barracuda_model_api::{ModelApi, ModelApiFactory};
     use barracuda_platform_test::{memory_vfs, NeverStack};
     use futures_lite::future::block_on;
     use http_client::ClientFactory;
+    use portable_atomic_util::Arc;
 
     use crate::{baked, AgentEngineState, AgentId, ReasoningEffort, SharedApiManager};
 
@@ -339,7 +342,7 @@ mod tests {
                 .resume_from(
                     agent,
                     true,
-                    Arc::new(AllowAll),
+                    Arc::from(Box::new(AllowAll) as Box<dyn PermissionPolicy>),
                     ReasoningEffort::Medium,
                     Vec::new(),
                 )
@@ -382,7 +385,7 @@ mod tests {
                     agent,
                     baked::root_kind(),
                     true,
-                    Arc::new(AllowAll),
+                    Arc::from(Box::new(AllowAll) as Box<dyn PermissionPolicy>),
                     ReasoningEffort::Medium,
                     PersistenceConfig::Persistent,
                     Vec::new(),

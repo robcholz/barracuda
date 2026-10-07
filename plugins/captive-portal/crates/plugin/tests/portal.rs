@@ -208,7 +208,7 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
     resources
         .write_file("/plugins/wifi/entry.js", b"entry.js")
         .expect("consumer module");
-    let mut filesystem = barracuda_vfs::Vfs::new();
+    let filesystem = barracuda_vfs::Vfs::new();
     filesystem
         .mount(
             "/resources",

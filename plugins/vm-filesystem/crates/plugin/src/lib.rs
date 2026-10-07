@@ -5,16 +5,9 @@
 extern crate alloc;
 
 use alloc::{
-    boxed::Box,
-    collections::VecDeque,
-    format,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    boxed::Box, collections::VecDeque, format, rc::Rc, string::String, string::ToString, vec::Vec,
 };
 use core::pin::Pin;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -22,10 +15,12 @@ use barracuda_plugin::manager::{
 };
 use barracuda_vfs::{File, FsError, OpenOptions, ScopedVfs, SeekFrom};
 use barracuda_vm_plugin::{
-    Context, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, UserData, UserDataHandle,
-    UserDataMethods,
+    Bytes, Context, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, UserData,
+    UserDataHandle, UserDataMethods,
 };
 use embedded_io_async::{ErrorType, Read, Seek, Write};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
 const MAX_OPEN_FILES: usize = 16;
 const MAX_IO_BYTES: usize = 32 * 1024;
@@ -392,12 +387,6 @@ impl VmFilesystemPlugin {
     }
 }
 
-impl Default for VmFilesystemPlugin {
-    fn default() -> Self {
-        Self
-    }
-}
-
 impl Plugin for VmFilesystemPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
@@ -513,7 +502,7 @@ fn prepare_file(
     path: String,
     mode: Option<String>,
 ) -> Result<PreparedFile> {
-    let path = resolve_path(path)?;
+    validate_path(&path)?;
     let (options, readable, writable) = open_mode(mode.as_deref().unwrap_or("r"))?;
     prepare(lua, state, path, options, readable, writable, false)
 }
@@ -629,7 +618,7 @@ impl UserData for VmFile {
         methods.add_async_method("read_number", |file, (): ()| async move {
             Some(with_file(&file, |state| Box::pin(read_number(state))).await)
         });
-        methods.add_async_method("write", |file, bytes: Vec<u8>| async move {
+        methods.add_async_method("write", |file, bytes: Bytes| async move {
             Some(with_file(&file, |state| Box::pin(write_bytes(state, bytes))).await)
         });
         methods.add_async_method("seek", |file, (whence, offset): (String, i64)| async move {
@@ -772,51 +761,69 @@ async fn peek_byte(state: &mut FileState) -> Result<Option<u8>> {
     Ok(state.pending.front().copied())
 }
 
-async fn read_line(state: &mut FileState, include_newline: bool) -> Result<Option<Vec<u8>>> {
-    let mut output = Vec::new();
-    loop {
-        let Some(byte) = peek_byte(state).await? else {
-            return Ok((!output.is_empty()).then_some(output));
-        };
-        state.pending.pop_front();
-        if byte == b'\n' {
-            if include_newline {
-                output.push(byte);
-            }
-            return Ok(Some(output));
-        }
-        ensure_read_capacity(output.len())?;
-        output.push(byte);
+/// Moves up to `limit` buffered bytes into `output`.
+fn drain_pending(state: &mut FileState, limit: usize, output: &mut Bytes) -> Result<()> {
+    let take = limit.min(state.pending.len());
+    let (front, back) = state.pending.as_slices();
+    let front_take = take.min(front.len());
+    output.extend_from_slice(&front[..front_take])?;
+    output.extend_from_slice(&back[..take - front_take])?;
+    state.pending.drain(..take);
+    Ok(())
+}
+
+fn ensure_read_capacity(length: usize) -> Result<()> {
+    if length > MAX_IO_BYTES {
+        Err(Error::runtime("read exceeds Lua file IO limit"))
+    } else {
+        Ok(())
     }
 }
 
-async fn read_count(state: &mut FileState, count: i64) -> Result<Option<Vec<u8>>> {
+async fn read_line(state: &mut FileState, include_newline: bool) -> Result<Option<Bytes>> {
+    let mut output = Bytes::default();
+    loop {
+        if state.pending.is_empty() && !fill_buffer(state).await? {
+            return Ok((!output.is_empty()).then_some(output));
+        }
+        if let Some(index) = state.pending.iter().position(|byte| *byte == b'\n') {
+            ensure_read_capacity(output.len() + index)?;
+            drain_pending(state, index, &mut output)?;
+            state.pending.pop_front();
+            if include_newline {
+                output.extend_from_slice(b"\n")?;
+            }
+            return Ok(Some(output));
+        }
+        ensure_read_capacity(output.len() + state.pending.len())?;
+        drain_pending(state, usize::MAX, &mut output)?;
+    }
+}
+
+async fn read_count(state: &mut FileState, count: i64) -> Result<Option<Bytes>> {
     let count = usize::try_from(count)
         .map_err(|_error| Error::runtime("read count must be a non-negative integer"))?;
     if count > MAX_IO_BYTES {
         return Err(Error::runtime("read count exceeds Lua file IO limit"));
     }
     if count == 0 {
-        return Ok(peek_byte(state).await?.map(|_byte| Vec::new()));
+        return Ok(peek_byte(state).await?.map(|_byte| Bytes::default()));
     }
-    let mut output = Vec::with_capacity(count);
+    let mut output = Bytes::with_capacity(count)?;
     while output.len() < count {
-        let Some(byte) = peek_byte(state).await? else {
+        if state.pending.is_empty() && !fill_buffer(state).await? {
             break;
-        };
-        state.pending.pop_front();
-        output.push(byte);
+        }
+        drain_pending(state, count - output.len(), &mut output)?;
     }
     Ok((!output.is_empty()).then_some(output))
 }
 
-async fn read_all(state: &mut FileState) -> Result<Option<Vec<u8>>> {
-    let mut output = Vec::new();
+async fn read_all(state: &mut FileState) -> Result<Option<Bytes>> {
+    let mut output = Bytes::default();
     loop {
-        while let Some(byte) = state.pending.pop_front() {
-            ensure_read_capacity(output.len())?;
-            output.push(byte);
-        }
+        ensure_read_capacity(output.len() + state.pending.len())?;
+        drain_pending(state, usize::MAX, &mut output)?;
         if !fill_buffer(state).await? {
             return Ok(Some(output));
         }
@@ -847,7 +854,7 @@ async fn read_number(state: &mut FileState) -> Result<Option<Vec<u8>>> {
     Ok(Some(token))
 }
 
-async fn write_bytes(state: &mut FileState, bytes: Vec<u8>) -> Result<bool> {
+async fn write_bytes(state: &mut FileState, bytes: Bytes) -> Result<bool> {
     if !state.writable {
         return Err(Error::runtime("file is not open for writing"));
     }
@@ -886,14 +893,6 @@ async fn flush_file(state: &mut FileState) -> Result<bool> {
     Ok(true)
 }
 
-fn ensure_read_capacity(length: usize) -> Result<()> {
-    if length >= MAX_IO_BYTES {
-        Err(Error::runtime("read exceeds Lua file IO limit"))
-    } else {
-        Ok(())
-    }
-}
-
 fn validate_path(path: &str) -> Result<()> {
     if path.is_empty() || path.len() > MAX_PATH_BYTES {
         Err(Error::runtime("invalid Lua file path"))
@@ -902,14 +901,9 @@ fn validate_path(path: &str) -> Result<()> {
     }
 }
 
-fn resolve_path(path: String) -> Result<String> {
-    validate_path(&path)?;
-    Ok(path)
-}
-
 async fn remove_path(state: Arc<FilePackageState>, path: String) -> Result<bool> {
     ensure_active(&state)?;
-    let path = resolve_path(path)?;
+    validate_path(&path)?;
     let metadata = state.filesystem.metadata(&path).await.map_err(file_error)?;
     if metadata.is_dir() {
         state
@@ -929,8 +923,8 @@ async fn remove_path(state: Arc<FilePackageState>, path: String) -> Result<bool>
 
 async fn rename_path(state: Arc<FilePackageState>, from: String, to: String) -> Result<bool> {
     ensure_active(&state)?;
-    let from = resolve_path(from)?;
-    let to = resolve_path(to)?;
+    validate_path(&from)?;
+    validate_path(&to)?;
     state
         .filesystem
         .rename(&from, &to)
@@ -1007,8 +1001,7 @@ fn file_error(error: FsError) -> Error {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use alloc::{boxed::Box, sync::Arc, vec};
-    use core::sync::atomic::Ordering;
+    use alloc::{boxed::Box, vec};
 
     use barracuda_plugin::manager::{Plugin, PluginDeclaration, PluginFilesystem};
     use barracuda_vfs::{FsError, MountOptions, Vfs};
@@ -1016,6 +1009,8 @@ mod tests {
     use barracuda_vm_plugin::{Lua, LuaPackage, Package, Result, UserDataHandle};
     use embedded_io_async::Read as _;
     use futures_lite::future::block_on;
+    use portable_atomic::Ordering;
+    use portable_atomic_util::Arc;
 
     use super::{FilePackage, VmFile, VmFileTransfer, VmFilesystemPlugin};
 
@@ -1095,7 +1090,10 @@ mod tests {
             let package = FilePackage::new(filesystem);
             let state = Arc::clone(&package.state);
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             let file: UserDataHandle<VmFile> = lua
                 .load(
@@ -1132,7 +1130,10 @@ mod tests {
             let filesystem = filesystem().await?;
             let package = FilePackage::new(filesystem.clone());
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             let file: UserDataHandle<VmFile> = lua
                 .load(
@@ -1372,7 +1373,10 @@ mod tests {
             let filesystem = filesystem().await?;
             let package = FilePackage::new(filesystem);
             let mut lua = Lua::new()?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::all().install(&mut lua)?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(&mut lua)?;
             package.install(&mut lua)?;
             package.revoke();
 
@@ -1397,10 +1401,12 @@ mod tests {
         }
 
         pub(super) fn install(package: impl Package) -> Result<Installed> {
-            let mut lua = FixedMemoryLua::new(96 * 1024)
+            let mut lua = FixedMemoryLua::with_default_heap()
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(lua.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(lua.lua_mut())?;
             package.install(lua.lua_mut())?;
             Ok(Installed { lua: Some(lua) })
         }

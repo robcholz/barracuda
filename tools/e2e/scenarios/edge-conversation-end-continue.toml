@@ -1,0 +1,33 @@
+name = "Conversation end then continue"
+description = "conversation_end trims its final message, ends the turn after the whole Tool batch without another model call, and does not close the Session: the next user message continues the same Session with the final message in its history."
+
+[model]
+mode = "scripted"
+
+# tool_search in the same batch still runs; the Finish effect is reduced after
+# the batch and no further model call is made in this turn.
+[[model.responses]]
+tool_calls = [
+  { name = "tool_search", arguments = {} },
+  { name = "conversation_end", arguments = { final_message = "  Goodbye for now.  " } },
+]
+
+[[model.responses]]
+request_contains = ['"content":"Goodbye for now."', '"content":"Are you still there?"']
+text = "Yes, I am still here."
+
+[[steps]]
+send = "Something out of bounds."
+reply_matches = ['^Goodbye for now\.$']
+tool_contains = [
+  'conversation_end{"final_message": "  Goodbye for now.  "}Conversation ended.',
+  'tool_search{}{"tool_groups":[',
+]
+
+[[steps]]
+send = "Are you still there?"
+reply_matches = ['^Yes, I am still here\.$']
+
+[logs]
+expect = ["Agent created session `session-1`"]
+forbid = ['\bERROR\b', 'panicked at', "created session `session-2`"]

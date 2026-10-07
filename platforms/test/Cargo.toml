@@ -22,9 +22,6 @@ embedded-nal-async = "0.9"
 embedded-storage-async.workspace = true
 thiserror = { version = "2", default-features = false }
 
-[dev-dependencies]
-anyhow = "1"
-
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

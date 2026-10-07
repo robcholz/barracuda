@@ -1,5 +1,8 @@
 //! Full picoserve request/response path with allocation-counted, bounded test IO.
 #![allow(clippy::expect_used, clippy::panic)]
+// The whole connection future is instantiated here with test IO; rustc 1.99
+// needs more than the default 128 query depth to lay it out.
+#![recursion_limit = "256"]
 
 use core::future::Future;
 use core::task::{Context, Poll, Waker};

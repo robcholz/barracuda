@@ -1,0 +1,52 @@
+name = "Gateway media worker capacity"
+description = "gateway_send_media accepts at most four concurrently open media streams, answers a fifth start with busy, and frees capacity as soon as a stream is finished."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+# Four starts in one batch occupy every media worker.
+[[model.responses]]
+tool_calls = [
+  { name = "gateway_send_media", arguments = { action = "start", stream_id = "b1", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } },
+  { name = "gateway_send_media", arguments = { action = "start", stream_id = "b2", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } },
+  { name = "gateway_send_media", arguments = { action = "start", stream_id = "b3", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } },
+  { name = "gateway_send_media", arguments = { action = "start", stream_id = "b4", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "b5", sequence = 0, channel = "web", conversation_id = "conversation", kind = "file" } }]
+
+# An empty stream may be finished directly at sequence 1.
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"busy\"}","is_error":true']
+tool_calls = [
+  { name = "gateway_send_media", arguments = { action = "finish", stream_id = "b1", sequence = 1 } },
+  { name = "gateway_send_media", arguments = { action = "finish", stream_id = "b2", sequence = 1 } },
+  { name = "gateway_send_media", arguments = { action = "finish", stream_id = "b3", sequence = 1 } },
+  { name = "gateway_send_media", arguments = { action = "finish", stream_id = "b4", sequence = 1 } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "b5", sequence = 0, channel = "web", conversation_id = "conversation", kind = "audio" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "finish", stream_id = "b5", sequence = 1 } }]
+
+[[model.responses]]
+text = "Capacity checked."
+
+[[steps]]
+send = "Open many media streams."
+reply_contains = ["Capacity checked."]
+tool_contains = [
+  '"stream_id": "b4", "sequence": 0, "channel": "web", "conversation_id": "conversation", "kind": "file"}{"accepted_sequence":0}',
+  '"stream_id": "b5", "sequence": 0, "channel": "web", "conversation_id": "conversation", "kind": "file"}{"error":"busy"}',
+  '{"action": "finish", "stream_id": "b1", "sequence": 1}{"accepted_sequence":1}',
+  '{"action": "finish", "stream_id": "b4", "sequence": 1}{"accepted_sequence":1}',
+  '"stream_id": "b5", "sequence": 0, "channel": "web", "conversation_id": "conversation", "kind": "audio"}{"accepted_sequence":0}',
+  '{"action": "finish", "stream_id": "b5", "sequence": 1}{"accepted_sequence":1}',
+]
+tool_errors_allowed = true

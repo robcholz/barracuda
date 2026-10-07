@@ -1,14 +1,13 @@
 use alloc::{
-    borrow::ToOwned,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, collections::BTreeMap, collections::BTreeSet, collections::VecDeque,
+    string::String, string::ToString, vec::Vec,
 };
+use core::cell::OnceCell;
 use core::task::{Context, Poll};
 
 use barracuda_agent_tool::ToolGroup;
-use futures_channel::oneshot;
+use barracuda_runtime_utils::oneshot;
+use portable_atomic_util::Arc;
 
 use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};
@@ -33,6 +32,11 @@ enum DispatchPurpose {
         completed: oneshot::Sender<Result<(), MultiagentCommandError>>,
     },
 }
+
+/// Subagents one Session may keep at once, across every depth. Each one is a
+/// full Agent with its own transcript, so the bound keeps a model from
+/// exhausting device memory by fanning out or nesting.
+const MAX_LIVE_SUBAGENTS: usize = 3;
 
 enum PendingEffect {
     Spawn {
@@ -82,7 +86,9 @@ struct RemovalPlan {
 /// Session identity, timers, or persistence.
 pub struct Multiagent {
     state: MultiagentState,
-    bridge: Arc<MultiagentBridge>,
+    /// Created when tools first need it, so an orchestration that never runs
+    /// Agents allocates nothing.
+    bridge: OnceCell<Arc<MultiagentBridge>>,
     effects: VecDeque<MultiagentEffect>,
     pending_effects: BTreeMap<EffectId, PendingEffect>,
     next_effect_id: u64,
@@ -95,7 +101,7 @@ impl Multiagent {
     pub fn new() -> Self {
         Self {
             state: MultiagentState::default(),
-            bridge: Arc::new(MultiagentBridge::new()),
+            bridge: OnceCell::new(),
             effects: VecDeque::new(),
             pending_effects: BTreeMap::new(),
             next_effect_id: 1,
@@ -106,7 +112,7 @@ impl Multiagent {
     }
 
     pub fn tool_group(&self, caller: AgentId, kind: &AgentKind) -> Option<ToolGroup> {
-        super::tools::tool_group(caller, kind, Arc::clone(&self.bridge))
+        super::tools::tool_group(caller, kind, Arc::clone(self.bridge()))
     }
 
     pub fn register_root(&mut self, id: AgentId, kind: AgentKind) -> bool {
@@ -135,7 +141,10 @@ impl Multiagent {
             return Poll::Ready(Some(effect));
         }
 
-        let Poll::Ready(command) = self.bridge.poll_command(context) else {
+        let Some(bridge) = self.bridge.get() else {
+            return Poll::Pending;
+        };
+        let Poll::Ready(command) = bridge.poll_command(context) else {
             return Poll::Pending;
         };
         let (requester, action) = command.into_parts();
@@ -359,7 +368,9 @@ impl Multiagent {
         self.routes.clear();
         self.pending_interrupts.clear();
         self.removals.clear();
-        self.bridge.clear();
+        if let Some(bridge) = self.bridge.get() {
+            bridge.clear();
+        }
     }
 
     fn prepare_spawn(&mut self, requester: AgentId, command: SpawnCommand) {
@@ -391,6 +402,14 @@ impl Multiagent {
             });
         if let Err(error) = validation {
             let _ = command.accepted.send(Err(error));
+            return;
+        }
+        if self.live_subagents() >= MAX_LIVE_SUBAGENTS {
+            let _ = command
+                .accepted
+                .send(Err(MultiagentCommandError::LimitReached(
+                    MAX_LIVE_SUBAGENTS,
+                )));
             return;
         }
         let SpawnCommand {
@@ -623,6 +642,17 @@ impl Multiagent {
         let id = EffectId(self.next_effect_id);
         self.next_effect_id = self.next_effect_id.wrapping_add(1);
         id
+    }
+
+    /// Committed subagents plus spawns still waiting for their Agent, so
+    /// concurrent spawn calls cannot pass the limit together.
+    fn live_subagents(&self) -> usize {
+        let pending = self
+            .pending_effects
+            .values()
+            .filter(|effect| matches!(effect, PendingEffect::Spawn { .. }))
+            .count();
+        self.state.subagent_count().saturating_add(pending)
     }
 
     fn reserve_effect(&mut self, pending: PendingEffect) -> EffectId {
@@ -901,8 +931,13 @@ impl Multiagent {
         }
     }
 
-    fn publish_snapshot(&self) {
+    fn bridge(&self) -> &Arc<MultiagentBridge> {
         self.bridge
+            .get_or_init(|| Arc::new(MultiagentBridge::new()))
+    }
+
+    fn publish_snapshot(&self) {
+        self.bridge()
             .publish_snapshot(MultiagentSnapshot::new(self.state.snapshots()));
     }
 }
@@ -923,6 +958,21 @@ mod tests {
 
     fn timeout() -> SubagentTimeout {
         SubagentTimeout::new(core::num::NonZeroU32::new(60_000).expect("test timeout is non-zero"))
+    }
+
+    #[test]
+    fn an_unused_orchestration_creates_no_bridge() {
+        let mut multiagent = Multiagent::new();
+        let waker = core::task::Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(multiagent.poll_effect(&mut context).is_pending());
+        multiagent.clear();
+        assert!(multiagent.bridge.get().is_none());
+
+        assert!(
+            multiagent.register_root(AgentId::new(1), barracuda_agent::baked::root_kind().clone())
+        );
+        assert!(multiagent.bridge.get().is_some());
     }
 
     fn take_spawn_effect(multiagent: &mut Multiagent) -> (EffectId, SubagentSpec) {
@@ -972,7 +1022,7 @@ mod tests {
         multiagent.publish_snapshot();
 
         let control =
-            super::super::tool_port::SubagentControl::new(first, Arc::clone(&multiagent.bridge));
+            super::super::tool_port::SubagentControl::new(first, Arc::clone(multiagent.bridge()));
         assert!(control.get(second).is_none());
     }
 
@@ -982,7 +1032,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let bridge = Arc::clone(&multiagent.bridge);
+        let bridge = Arc::clone(multiagent.bridge());
         let (mut accepted, _completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
@@ -1013,7 +1063,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let bridge = Arc::clone(&multiagent.bridge);
+        let bridge = Arc::clone(multiagent.bridge());
         let (mut accepted, mut completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
@@ -1288,13 +1338,69 @@ mod tests {
     }
 
     #[test]
+    fn spawns_beyond_the_live_limit_are_rejected_until_one_finishes() {
+        let root = AgentId(1);
+        let mut multiagent = Multiagent::new();
+        assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+        multiagent.on_agent_started(root);
+        let spawn = |multiagent: &Multiagent| {
+            multiagent.bridge().spawn(
+                root,
+                super::super::model::SubagentSpec::new(
+                    AgentKind::from_static("worker"),
+                    None,
+                    Message::text("goal"),
+                    timeout(),
+                ),
+            )
+        };
+
+        // Spawns still waiting for their Agent count toward the limit.
+        let mut accepted = Vec::new();
+        let mut pending = Vec::new();
+        for _ in 0..MAX_LIVE_SUBAGENTS {
+            let (receiver, completion) = spawn(&multiagent);
+            accepted.push((receiver, completion));
+            pending.push(take_spawn_effect(&mut multiagent));
+        }
+        let (mut rejected, _completion) = spawn(&multiagent);
+        let waker = core::task::Waker::noop();
+        assert!(matches!(
+            multiagent.poll_effect(&mut Context::from_waker(waker)),
+            Poll::Ready(None)
+        ));
+        assert_eq!(
+            rejected.try_recv(),
+            Ok(Some(Err(MultiagentCommandError::LimitReached(
+                MAX_LIVE_SUBAGENTS
+            ))))
+        );
+
+        for (index, (effect, spec)) in pending.into_iter().enumerate() {
+            let child = AgentId(10 + index as u32);
+            assert_eq!(apply_spawned(&mut multiagent, effect, spec, child), None);
+        }
+        while multiagent.take_effect().is_some() {}
+
+        // A delivered result frees its slot.
+        multiagent.on_agent_completed(AgentId(10), "done".to_owned(), true);
+        while multiagent.take_effect().is_some() {}
+        multiagent.physical_agent_removed(AgentId(10), Ok(()));
+        multiagent.acknowledge_delivery(root, AgentId(10));
+        assert!(!multiagent.contains(AgentId(10)));
+        let (mut admitted, _completion) = spawn(&multiagent);
+        take_spawn_effect(&mut multiagent);
+        assert_eq!(admitted.try_recv(), Ok(None));
+    }
+
+    #[test]
     fn spawn_commit_rolls_back_when_requester_started_reaping() {
         let root = AgentId(1);
         let child = AgentId(2);
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (mut accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge().spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1630,7 +1736,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (mut accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge().spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),

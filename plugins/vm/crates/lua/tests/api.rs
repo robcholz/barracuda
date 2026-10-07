@@ -25,6 +25,26 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
 }
 
 #[test]
+fn numbers_convert_like_the_c_library() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let text: String = lua
+        .load(
+            "return table.concat({ tostring(0.1), tostring(1e100), tostring(2^63), \
+             tostring(-0.0), string.format('%5.2f|%-4d|%#x|%g|%e|%c', 3.14159, 7, 255, \
+             1e20, 12.5, 65), tostring(tonumber('0x1.8p1')), tostring(tonumber(' 12e-1 ')), \
+             tostring(3 // 2), tostring(3 / 2) }, ' ')",
+        )
+        .eval()?;
+    assert_eq!(
+        text,
+        "0.1 1e+100 9.2233720368548e+18 -0.0  3.14|7   |0xff|1e+20|1.250000e+01|A 3.0 1.2 1 1.5"
+    );
+    let hexadecimal: String = lua.load("return string.format('%a %q', 1, 1.5)").eval()?;
+    assert_eq!(hexadecimal, "0x1p+0 0x1.8p+0");
+    Ok(())
+}
+
+#[test]
 fn lua_new_exposes_table_metaprogramming_without_runtime_control() -> Result<()> {
     let mut lua = Lua::new()?;
     let compatible: bool = lua
@@ -52,35 +72,16 @@ fn lua_new_includes_safe_computation_standard_libraries() -> Result<()> {
         .load(
             "return string == require('string') \
              and table == require('table') \
-             and math == require('math') \
              and utf8 == require('utf8') \
+             and math == nil \
              and string.upper('barracuda') == 'BARRACUDA' \
              and table.concat({'bar', 'rac', 'uda'}) == 'barracuda' \
-             and math.floor(4.2) == 4 \
-             and utf8.len('汉字') == 2",
+             and utf8.len('汉字') == 2 \
+             and 7 // 2 == 3 and 7 % -3 == -2 and 2 ^ 10 == 1024.0",
         )
         .eval()?;
 
     assert!(libraries_work);
-    Ok(())
-}
-
-#[test]
-fn math_random_does_not_reveal_a_clock_or_native_address_seed() -> Result<()> {
-    let mut lua = Lua::new()?;
-    let isolated: bool = lua
-        .load(
-            "local first_seed, second_seed = math.randomseed() \
-             local first = math.random() \
-             local repeated_first_seed, repeated_second_seed = math.randomseed() \
-             local repeated = math.random() \
-             return first_seed == 0 and second_seed == 0 \
-                and repeated_first_seed == 0 and repeated_second_seed == 0 \
-                and first == repeated",
-        )
-        .eval()?;
-
-    assert!(isolated);
     Ok(())
 }
 
@@ -286,9 +287,9 @@ use core::{
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+use portable_atomic::{AtomicUsize, Ordering};
 use std::alloc::System;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct CountingAllocator {
     allocations: AtomicUsize,

@@ -1,4 +1,7 @@
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 #![allow(clippy::arc_with_non_send_sync)]
 
 //! Session lifecycle, public stream/control API, and actor-owned state.

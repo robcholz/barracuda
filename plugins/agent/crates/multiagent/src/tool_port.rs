@@ -1,13 +1,12 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::{
     cell::{RefCell, RefMut},
-    pin::Pin,
     task::{Context, Poll},
 };
 
-use async_channel::{Receiver, Sender};
-use futures_channel::oneshot;
-use futures_core::Stream;
+use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
+use barracuda_runtime_utils::oneshot;
+use portable_atomic_util::Arc;
 
 use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};
@@ -26,6 +25,10 @@ pub(crate) enum MultiagentCommandError {
     TargetBusy,
     #[error("subagent kind '{0}' is not permitted for the requesting agent")]
     ForbiddenKind(String),
+    #[error(
+        "at most {0} subagents may be live at once; wait for one to finish or delete one before spawning another"
+    )]
+    LimitReached(usize),
     #[error("failed to create subagent: {0}")]
     CreateFailed(String),
     #[error("failed to remove subagent storage: {0}")]
@@ -84,7 +87,7 @@ pub(crate) struct MultiagentBridge {
     command_tx: Sender<MultiagentCommand>,
     // `Receiver` is `!Unpin`, so it is pinned on the heap to be polled as a
     // `Stream` through the shared bridge.
-    command_rx: RefCell<Pin<Box<Receiver<MultiagentCommand>>>>,
+    command_rx: Receiver<MultiagentCommand>,
     snapshot: RefCell<MultiagentSnapshot>,
 }
 
@@ -154,10 +157,10 @@ impl SubagentControl {
 
 impl MultiagentBridge {
     pub(crate) fn new() -> Self {
-        let (command_tx, command_rx) = async_channel::unbounded();
+        let (command_tx, command_rx) = local_channel::channel();
         Self {
             command_tx,
-            command_rx: RefCell::new(Box::pin(command_rx)),
+            command_rx,
             snapshot: RefCell::new(MultiagentSnapshot::default()),
         }
     }
@@ -169,7 +172,7 @@ impl MultiagentBridge {
     fn push(&self, command: MultiagentCommand) {
         // The bridge holds a sender for its whole life, so the unbounded channel
         // is never closed here and the send cannot fail.
-        let _ = self.command_tx.try_send(command);
+        let _ = self.command_tx.send(command);
     }
 
     pub(crate) fn spawn(
@@ -194,8 +197,7 @@ impl MultiagentBridge {
     }
 
     pub(crate) fn poll_command(&self, context: &mut Context<'_>) -> Poll<MultiagentCommand> {
-        let mut receiver = self.command_rx.borrow_mut();
-        match receiver.as_mut().poll_next(context) {
+        match self.command_rx.poll_recv(context) {
             Poll::Ready(Some(command)) => Poll::Ready(command),
             // The bridge keeps a live sender, so the stream never ends; treat a
             // spurious close the same as "no command pending".
@@ -206,9 +208,7 @@ impl MultiagentBridge {
     pub(crate) fn clear(&self) {
         // Drain queued commands without closing the channel so later spawns keep
         // delivering.
-        let receiver = self.command_rx.borrow_mut();
-        while receiver.try_recv().is_ok() {}
-        drop(receiver);
+        while self.command_rx.try_recv().is_ok() {}
         *self.snapshot() = MultiagentSnapshot::default();
     }
 

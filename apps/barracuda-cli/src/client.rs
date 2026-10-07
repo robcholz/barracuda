@@ -87,7 +87,7 @@ async fn run_connected(
                             RenderAction::Delta(delta) => {
                                 editor.print_stream_fragment(&delta)?;
                             }
-                            RenderAction::Print(message) => {
+                            RenderAction::Print(message) | RenderAction::Prompt(message) => {
                                 editor.finish_stream_line()?;
                                 editor.print(message)?;
                             }
@@ -116,20 +116,31 @@ async fn run_connected(
 
 /// Maps the Web protocol's message lifecycle onto terminal rendering actions.
 #[derive(Default)]
-struct Renderer {
+pub(crate) struct Renderer {
     extra: Option<MessageKind>,
+    approval: Option<ApprovalRequest>,
+}
+
+/// A permission request being assembled from its streamed fields.
+#[derive(Default)]
+struct ApprovalRequest {
+    tool: String,
+    arguments: String,
+    reason: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum RenderAction {
+pub(crate) enum RenderAction {
     Start(MessageKind),
     Delta(String),
     Print(String),
+    /// A notice the Agent waits on: the user's next message answers it.
+    Prompt(String),
     End,
 }
 
 impl Renderer {
-    fn absorb(&mut self, frame: &str) -> Vec<RenderAction> {
+    pub(crate) fn absorb(&mut self, frame: &str) -> Vec<RenderAction> {
         let mut actions = Vec::new();
         let Some(frame) = parse_sse(frame) else {
             return actions;
@@ -153,34 +164,6 @@ impl Renderer {
                 }
             }
             "message.event" => self.semantic_event(&data, &mut actions),
-            "message.extra"
-                if data.get("field").and_then(serde_json::Value::as_str) == Some("notice") =>
-            {
-                if let Some(notice) = data
-                    .get("content")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|notice| !notice.is_empty())
-                {
-                    actions.push(RenderAction::Print(MessageKind::Notice.render(notice)));
-                }
-            }
-            "message.extra" => {
-                let kind = match data.get("field").and_then(serde_json::Value::as_str) {
-                    Some("reasoning") => Some(MessageKind::Reasoning),
-                    Some("effect_result") => Some(MessageKind::Reply),
-                    Some("tool_output") => Some(MessageKind::Tool),
-                    _ => None,
-                };
-                if let Some(kind) = kind {
-                    let content = data
-                        .get("content")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default();
-                    let complete = data.get("boundary").and_then(serde_json::Value::as_str)
-                        == Some("complete");
-                    self.stream_extra(kind, content, complete, &mut actions);
-                }
-            }
             "message.end" => {
                 if self.extra.take().is_some() {
                     actions.push(RenderAction::End);
@@ -209,20 +192,53 @@ impl Renderer {
                 self.stream_reply(event_text(payload), actions);
             }
             "reasoning_delta" => {
-                self.stream_extra(MessageKind::Reasoning, event_text(payload), false, actions);
+                self.stream_extra(MessageKind::Reasoning, event_text(payload), actions);
             }
             "reasoning_ended" => self.finish_extra(MessageKind::Reasoning, actions),
             "tool_result_started" => {
-                self.stream_extra(MessageKind::Tool, "", false, actions);
+                self.stream_extra(MessageKind::Tool, "", actions);
             }
             "tool_name_delta" | "tool_arguments_delta" | "tool_output_delta" => {
-                self.stream_extra(MessageKind::Tool, event_text(payload), false, actions);
+                self.stream_extra(MessageKind::Tool, event_text(payload), actions);
             }
             "tool_result_ended" => self.finish_extra(MessageKind::Tool, actions),
             "turn_error" | "session_error" => {
                 self.print_notice(payload.get("message"), actions);
             }
             "stream_error" => self.print_notice(payload.get("error"), actions),
+            "input_request_started" => self.approval = Some(ApprovalRequest::default()),
+            "input_request_tool_name_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.tool.push_str(event_text(payload));
+                }
+            }
+            "input_request_arguments_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.arguments.push_str(event_text(payload));
+                }
+            }
+            "input_request_reason_delta" => {
+                if let Some(request) = self.approval.as_mut() {
+                    request.reason.push_str(event_text(payload));
+                }
+            }
+            // The Agent waits for the reply, so the user must see the request.
+            "input_requested" => {
+                if let Some(request) = self.approval.take() {
+                    let mut text = format!(
+                        "permission needed for {} {}",
+                        request.tool, request.arguments
+                    );
+                    if !request.reason.is_empty() {
+                        text.push_str(&format!(": {}", request.reason.trim_end_matches('.')));
+                    }
+                    text.push_str(". Reply to approve or refuse.");
+                    if self.extra.take().is_some() {
+                        actions.push(RenderAction::End);
+                    }
+                    actions.push(RenderAction::Prompt(MessageKind::Notice.render(&text)));
+                }
+            }
             _ => {}
         }
     }
@@ -255,13 +271,7 @@ impl Renderer {
         }
     }
 
-    fn stream_extra(
-        &mut self,
-        kind: MessageKind,
-        content: &str,
-        complete: bool,
-        actions: &mut Vec<RenderAction>,
-    ) {
+    fn stream_extra(&mut self, kind: MessageKind, content: &str, actions: &mut Vec<RenderAction>) {
         if self.extra != Some(kind) {
             if self.extra.replace(kind).is_some() {
                 actions.push(RenderAction::End);
@@ -270,10 +280,6 @@ impl Renderer {
         }
         if !content.is_empty() {
             actions.push(RenderAction::Delta(content.to_string()));
-        }
-        if complete {
-            self.extra = None;
-            actions.push(RenderAction::End);
         }
     }
 }
@@ -287,7 +293,7 @@ fn event_text(payload: &serde_json::Value) -> &str {
 
 /// Presentation role mirrored from the gateway `kind`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum MessageKind {
+pub(crate) enum MessageKind {
     #[default]
     Reply,
     Reasoning,
@@ -296,6 +302,16 @@ enum MessageKind {
 }
 
 impl MessageKind {
+    /// Stable machine-readable role used by the scripted channel.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Reply => "reply",
+            Self::Reasoning => "reasoning",
+            Self::Tool => "tool",
+            Self::Notice => "notice",
+        }
+    }
+
     fn from_data(data: &serde_json::Value) -> Self {
         match data.get("kind").and_then(serde_json::Value::as_str) {
             Some("reasoning") => Self::Reasoning,
@@ -399,22 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn notice_extra_is_rendered() {
-        let actions = render_actions(&[
-            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"notice\",\"boundary\":\"complete\",\"content\":\"failed to initialize LLM chat: request timed out\"}\n\n",
-            "event: message.end\ndata: {\"error\":null}\n\n",
-        ]);
-
-        assert_eq!(actions.len(), 3);
-        assert_eq!(actions[0], RenderAction::Start(MessageKind::Reply));
-        assert!(
-            matches!(&actions[1], RenderAction::Print(text) if text.contains("note") && text.contains("request timed out"))
-        );
-        assert_eq!(actions[2], RenderAction::End);
-    }
-
-    #[test]
     fn message_end_error_is_rendered() {
         let actions = render_actions(&[
             "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
@@ -450,25 +450,30 @@ mod tests {
     }
 
     #[test]
-    fn web_reasoning_extras_follow_stream_boundaries() {
-        let actions = render_actions(&[
-            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"reasoning\",\"boundary\":\"more\",\"content\":\"think\"}\n\n",
-            "event: message.extra\ndata: {\"field\":\"reasoning\",\"boundary\":\"complete\",\"content\":\"ing\"}\n\n",
-            "event: message.end\ndata: {\"error\":null}\n\n",
-        ]);
+    fn permission_requests_render_as_a_notice_asking_for_a_reply() {
+        let event = |kind: &str, text: &str| {
+            format!(
+                "event: message.event\ndata: {}\n\n",
+                serde_json::json!({ "type": kind, "payload": { "text": text } })
+            )
+        };
+        let frames = [
+            event("input_request_started", ""),
+            event("input_request_tool_name_delta", "file_write"),
+            event("input_request_arguments_delta", r#"{"path":"/data/a.txt"}"#),
+            event("input_request_reason_delta", "writes a file"),
+            event("input_requested", ""),
+        ];
+        let actions = render_actions(&frames.iter().map(String::as_str).collect::<Vec<_>>());
 
-        assert_eq!(
-            actions,
-            vec![
-                RenderAction::Start(MessageKind::Reply),
-                RenderAction::Start(MessageKind::Reasoning),
-                RenderAction::Delta("think".to_string()),
-                RenderAction::Delta("ing".to_string()),
-                RenderAction::End,
-                RenderAction::End,
-            ]
-        );
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0],
+            RenderAction::Prompt(text) if text.contains("permission needed for file_write")
+                && text.contains("/data/a.txt")
+                && text.contains("writes a file")
+                && text.contains("Reply to approve or refuse")
+        ));
     }
 
     #[test]

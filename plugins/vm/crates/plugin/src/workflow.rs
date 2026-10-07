@@ -103,7 +103,7 @@ mod tests {
     };
 
     use barracuda_vm_package_api::LuaPackageRegistry;
-    use barracuda_vm_runtime::{Vm, VmRunRequest};
+    use barracuda_vm_runtime::{SeedSource, Vm, VmRunRequest};
     use barracuda_workflow_plugin::WorkflowActionHandler as _;
     use embassy_executor::{Executor, Spawner};
 
@@ -112,8 +112,10 @@ mod tests {
     #[embassy_executor::task]
     async fn exercise_awaited_action(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
         let result = async {
-            let vm =
-                Rc::new(Vm::new(LuaPackageRegistry::new()).map_err(|error| error.to_string())?);
+            let vm = Rc::new(
+                Vm::new(LuaPackageRegistry::new(), SeedSource::unavailable())
+                    .map_err(|error| error.to_string())?,
+            );
             vm.start(spawner).map_err(|error| error.to_string())?;
             let response = RunAction(vm)
                 .invoke(VmRunRequest {

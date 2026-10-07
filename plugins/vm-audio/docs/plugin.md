@@ -19,7 +19,6 @@ Lua API:
 - `audio.available() -> boolean`
 - `audio.open() -> handle`
 - `handle:descriptor() -> sample_rate_hz, channels, bits_per_sample`
-- `handle:format() -> sample_rate_hz, channels, bits_per_sample`
 - `handle:set_volume(percent)`
 - `handle:play(pcm_le_bytes)`
 - `handle:play_wav(wav_bytes)`
@@ -29,7 +28,7 @@ Lua API:
 
 `set_volume` accepts an integer percentage from 0 through 100 and maps it to
 the codec capability's portable 0-through-255 output scale. `descriptor`
-reports the required stream format; `format` is its compatibility alias.
+reports the required stream format.
 `play` and `record` use interleaved signed 16-bit little-endian PCM matching
 that format. `play_wav` accepts an uncompressed 16-bit integer PCM RIFF/WAVE
 file, validates its sample rate and channel count against the codec, skips

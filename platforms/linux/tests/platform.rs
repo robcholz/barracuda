@@ -7,7 +7,6 @@ use barracuda_platform::PartitionFilesystem;
 use barracuda_platform_linux::{
     FileLayout, FileRegion, LinuxPlatform, LinuxPlatformError, LinuxSettings,
 };
-use barracuda_tls::ClientTls as _;
 
 const REGIONS: &[FileRegion] = &[
     FileRegion::read_write("fs", 0, 4096, PartitionFilesystem::LittleFs),
@@ -30,12 +29,6 @@ static MACOS_BOARD: Board = Board::new(
 fn linux_platform_installs_its_os_reactor_for_embassy() {
     LinuxPlatform::install_reactor().expect("install Tokio reactor");
     assert!(tokio::runtime::Handle::try_current().is_ok());
-}
-
-#[test]
-fn linux_platform_owns_host_tls_initialization() {
-    let tls = LinuxPlatform::initialize_tls().expect("initialize Linux TLS");
-    assert!(tls.config().is_some());
 }
 
 #[tokio::test(flavor = "current_thread")]

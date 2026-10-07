@@ -3,18 +3,24 @@ name = "barracuda-runtime-utils"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Shared utilities: cooperative tasks, yield streams, log-safe text, and prefixed ids"
+description = "Shared utilities: cancellation, yield streams, and prefixed ids"
 
 [lib]
 name = "barracuda_runtime_utils"
 crate-type = ["rlib"]
 
 [dependencies]
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-core = { version = "0.3", default-features = false }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+critical-section = "1"
+# Selects the intrusive, allocation-free wait list for every async-channel and
+# async lock in the System instead of a heap-allocated queue per event.
+event-listener.workspace = true
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
+futures-core.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"

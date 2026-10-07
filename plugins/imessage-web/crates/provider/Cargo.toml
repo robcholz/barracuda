@@ -12,10 +12,11 @@ default = []
 server = ["dep:barracuda-webserver-plugin"]
 
 [dependencies]
-base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+barracuda-bulk-memory.workspace = true
+barracuda-json-writer.workspace = true
 barracuda-webserver-plugin = { workspace = true, optional = true }
 embassy-sync.workspace = true
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
 log.workspace = true
@@ -24,6 +25,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 futures-lite = "2"
 
 [lints.rust]

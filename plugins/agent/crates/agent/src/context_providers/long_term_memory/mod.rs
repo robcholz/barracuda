@@ -3,7 +3,8 @@
 //! Global and per-agent stores appear as one catalog; id prefixes route writes
 //! back to the owning store.
 
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String};
+use portable_atomic_util::Arc;
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
@@ -107,7 +108,10 @@ impl LongTermMemoryContextProvider {
         Resolver: Dns + 'static,
     {
         let extractor = LlmExtractor::shared(api_manager, &llm_factory);
-        Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
+        Arc::from(
+            Box::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
+                as Box<ProviderBuilder>,
+        )
     }
 
     fn refresh_catalog(&mut self) {

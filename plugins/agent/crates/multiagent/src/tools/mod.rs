@@ -7,7 +7,7 @@ mod run;
 mod spawn;
 mod watch;
 
-use alloc::sync::Arc;
+use portable_atomic_util::Arc;
 
 use barracuda_agent_tool::ToolGroup;
 

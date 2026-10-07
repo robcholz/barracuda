@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 use getset::CopyGetters;
 
 mod anthropic;
+mod body;
 mod openai_compatible;
 pub(crate) mod shared;
 pub(crate) mod sse;

@@ -6,6 +6,7 @@ description = "Agent Tool adapter for Barracuda Workflow"
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-agent-message = { path = "../../../agent/crates/message" }
 barracuda-agent-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true

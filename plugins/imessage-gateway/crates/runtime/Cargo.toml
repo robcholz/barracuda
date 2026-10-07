@@ -6,7 +6,7 @@ publish = false
 description = "Typed operation runtime for the IMessage Gateway"
 
 [dependencies]
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 barracuda-workflow-plugin.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway = { path = "../gateway" }

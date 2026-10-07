@@ -98,6 +98,9 @@ fn platform_runtime_controllers_are_composed_without_board_protocol_configuratio
         platform_directory.join("platform.yml"),
         r#"
 name: acme
+info:
+  family: acme
+  environment: bare-metal
 package: barracuda-platform-acme
 crate: barracuda_platform_acme
 type: AcmePlatform
@@ -535,7 +538,7 @@ fn renders_a_static_hal_from_only_board_and_implementation_yaml() {
         r#"
 name: nucleo-copy
 hardware:
-  chip: stm32f429zi
+  chip: stm32u5a5zj
 native-layout:
   artifact: memory.x
 peripherals:

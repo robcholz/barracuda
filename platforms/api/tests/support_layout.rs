@@ -18,7 +18,7 @@ fn platform_mechanisms_are_not_standalone_pseudo_platforms() {
     assert!(root.join("platforms/macos/platform.yml").is_file());
     assert!(root.join("platforms/linux/platform.yml").is_file());
     assert!(root.join("platforms/esp32c6/platform.yml").is_file());
-    for chip in ["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32p4"] {
+    for chip in ["esp32", "esp32s3", "esp32c3", "esp32p4"] {
         assert!(root
             .join("platforms")
             .join(chip)

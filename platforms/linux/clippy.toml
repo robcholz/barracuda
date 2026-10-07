@@ -1,0 +1,2 @@
+# Host-only crate: std atomics and Arc are allowed. This file replaces the
+# workspace clippy.toml, whose portable-atomic rule applies to firmware code.

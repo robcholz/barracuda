@@ -2,17 +2,17 @@
 
 use core::future::Future;
 use core::task::{Context, Poll};
-use std::sync::Arc;
 use std::task::Waker;
 
 use anyhow::{anyhow, Result};
 use barracuda_agent_persistence::{Persistence, SharedPersistence};
 use barracuda_agent_tool::{
     EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
+    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSetSource, ToolSpec,
 };
 use barracuda_platform_test::memory_vfs;
 use futures_lite::{future::block_on, StreamExt as _};
+use portable_atomic_util::Arc;
 
 #[test]
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {

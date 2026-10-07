@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::arc_with_non_send_sync)]
 
-use std::sync::Arc;
+use std::rc::Rc;
+
+use portable_atomic_util::Arc;
 
 use barracuda_agent_memory::{
     AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId,
@@ -29,22 +31,22 @@ fn message_handles_expose_drafts_and_finish_on_drop() {
         let mut user = turn.user().unwrap();
         user.append("hel");
         user.append("lo");
-        assert_eq!(store.turns()[0].messages[0]["content"], "hello");
+        assert_eq!(store.turns()[0].messages[0].to_value()["content"], "hello");
     }
 
     {
         let mut assistant = turn.assistant().unwrap();
         assistant.append(AssistantFragment::Content("wo"));
         assistant.append(AssistantFragment::Content("rld"));
-        assert_eq!(store.turns()[0].messages[1]["content"], "world");
+        assert_eq!(store.turns()[0].messages[1].to_value()["content"], "world");
     }
 
     drop(turn);
     let turns = store.turns();
     assert_eq!(turns.len(), 1);
     assert!(turns[0].id.is_some());
-    assert_eq!(turns[0].messages[0]["content"], "hello");
-    assert_eq!(turns[0].messages[1]["content"], "world");
+    assert_eq!(turns[0].messages[0].to_value()["content"], "hello");
+    assert_eq!(turns[0].messages[1].to_value()["content"], "world");
 }
 
 #[test]
@@ -60,7 +62,7 @@ fn assistant_handle_builds_structured_message() {
         ));
     }
 
-    let message = &store.turns()[0].messages[0];
+    let message = store.turns()[0].messages[0].to_value();
     assert_eq!(message["content"], "visible");
     assert_eq!(message["reasoning_content"], "hidden");
     assert_eq!(message["tool_calls"][0]["id"], "call-1");
@@ -138,7 +140,7 @@ fn tool_handle_records_one_atomic_result() {
         tool.append(r#"c":21}"#);
     }
 
-    let message = &store.turns()[0].messages[0];
+    let message = store.turns()[0].messages[0].to_value();
     assert_eq!(message["role"], "tool");
     assert_eq!(message["tool_call_id"], "call-1");
     assert_eq!(message["content"], r#"{"temp_c":21}"#);
@@ -165,13 +167,16 @@ fn turn_drop_can_persist_after_the_store_drops() {
         let reloaded = TranscriptStore::new(filesystem, 9, "/transcript-detached-turn")
             .await
             .unwrap();
-        assert_eq!(reloaded.turns()[0].messages[0]["content"], "still persists");
+        assert_eq!(
+            reloaded.turns()[0].messages[0].to_value()["content"],
+            "still persists"
+        );
     });
 }
 
 #[test]
 fn transcript_trait_is_the_only_type_erased_boundary() {
-    let transcript: Arc<dyn Transcript> = store();
+    let transcript: Rc<dyn Transcript> = Rc::new(new_store());
 
     let turn: TurnHandle = transcript.clone().open_turn().unwrap();
     {
@@ -181,7 +186,7 @@ fn transcript_trait_is_the_only_type_erased_boundary() {
     drop(turn);
 
     assert_eq!(
-        transcript.turns()[0].messages[0]["content"],
+        transcript.turns()[0].messages[0].to_value()["content"],
         "erased filesystem"
     );
     assert_eq!(transcript.turn_version(), 1);
@@ -218,11 +223,13 @@ fn persisted_transcript_restores_turn_version() {
 }
 
 fn store() -> Arc<TranscriptStore> {
+    Arc::new(new_store())
+}
+
+fn new_store() -> TranscriptStore {
     block_on(async {
-        Arc::new(
-            TranscriptStore::new(memory_vfs().await.unwrap(), 1, "/transcript-store-tests")
-                .await
-                .unwrap(),
-        )
+        TranscriptStore::new(memory_vfs().await.unwrap(), 1, "/transcript-store-tests")
+            .await
+            .unwrap()
     })
 }

@@ -1,0 +1,34 @@
+name = "Scheduled Workflow runs a Lua script"
+description = "The Agent loads a Workflow on scheduler.triggered and schedules a near-future occurrence; Scheduler emits the Event, Workflow runs vm.run, and the VM completes."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-tick", match = { event = "scheduler.triggered", topic = "e2e-tick" }, steps = [{ call = "vm.run", arguments = { source = "print('tick')" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-tick", trigger = { type = "once", at = "${now+8s}" } } }]
+
+[[model.responses]]
+text = "The reminder is scheduled."
+
+[[steps]]
+send = "Run a script in a few seconds."
+reply_contains = ["The reminder is scheduled."]
+tool_contains = ['{"id":"e2e-tick"}']
+
+[logs]
+ready = ["UTC clock synchronized from network time"]
+await = ["schedule `e2e-tick` triggered run 1", "VM run 1 finished: Success, 1 output line"]
+
+[memory]
+# Host ordinary-heap peak was 222 KiB when this budget was set; it
+# lands while the Lua state exists, after the Agent turn.
+heap_high_water_max = 241664

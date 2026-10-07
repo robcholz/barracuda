@@ -301,6 +301,11 @@ impl Scheduler {
                     break;
                 };
                 let topic = Topic::try_from(occurrence.id.as_str())?;
+                log::info!(
+                    "schedule `{}` triggered run {}",
+                    occurrence.id.as_str(),
+                    occurrence.run_number
+                );
                 workflow.emit_to::<SchedulerTriggered>(
                     topic,
                     serde_json::json!({
@@ -310,11 +315,20 @@ impl Scheduler {
                 )?;
                 let mut book = self.shared.book.lock().await;
                 if book.commit(occurrence, now_unix_seconds) {
-                    match book.persisted(&occurrence.id) {
+                    let persisted = match book.persisted(&occurrence.id) {
                         Some(record) => self.shared.storage.write(occurrence.id, record).await,
                         None => self.shared.storage.delete(occurrence.id).await,
+                    };
+                    // The run is committed in memory, so other schedules keep
+                    // firing; after a restart this one run may fire again.
+                    if let Err(error) = persisted {
+                        log::error!(
+                            "failed to persist schedule `{}` after run {}: {}",
+                            occurrence.id.as_str(),
+                            occurrence.run_number,
+                            SchedulerStorageError::from(error)
+                        );
                     }
-                    .map_err(SchedulerStorageError::from)?;
                 }
             }
 
@@ -376,9 +390,6 @@ pub enum SchedulerRunError {
     /// Workflow rejected the Event identity.
     #[error(transparent)]
     Emit(#[from] EmitError),
-    /// Committed state could not be persisted.
-    #[error(transparent)]
-    Storage(#[from] SchedulerStorageError),
 }
 
 fn parse_utc_seconds(value: &str) -> Result<u64, ScheduleError> {

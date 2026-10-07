@@ -6,10 +6,10 @@ package: barracuda-platform-stm32
 crate: barracuda_platform_stm32
 type: Stm32Platform
 build:
-  rustup-toolchain: stable
+  rustup-toolchain: "1.98.1"
   missing-toolchain-prompt: |
-    The stable Rust toolchain is required. Install it with:
-      rustup toolchain install stable
+    Rust 1.98.1 is required. Install it with:
+      rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
 hal:
   bindings: [digital-input, digital-output, gpio, i2c-device, spi-bus]
   runtime-i2c-controllers: [I2C1]
@@ -18,38 +18,34 @@ hal:
   runtime-adc-controllers:
     - controller: ADC1
       channels:
-        - { channel: ADC1_CH0, pin: PA0 }
-        - { channel: ADC1_CH1, pin: PA1 }
-        - { channel: ADC1_CH2, pin: PA2 }
-        - { channel: ADC1_CH3, pin: PA3 }
-        - { channel: ADC1_CH4, pin: PA4 }
-        - { channel: ADC1_CH5, pin: PA5 }
-        - { channel: ADC1_CH6, pin: PA6 }
-        - { channel: ADC1_CH7, pin: PA7 }
-        - { channel: ADC1_CH8, pin: PB0 }
-        - { channel: ADC1_CH9, pin: PB1 }
-        - { channel: ADC1_CH10, pin: PC0 }
-        - { channel: ADC1_CH11, pin: PC1 }
-        - { channel: ADC1_CH12, pin: PC2 }
-        - { channel: ADC1_CH13, pin: PC3 }
-        - { channel: ADC1_CH14, pin: PC4 }
-        - { channel: ADC1_CH15, pin: PC5 }
+        - { channel: ADC1_CH1, pin: PC0 }
+        - { channel: ADC1_CH2, pin: PC1 }
+        - { channel: ADC1_CH3, pin: PC2 }
+        - { channel: ADC1_CH4, pin: PC3 }
+        - { channel: ADC1_CH5, pin: PA0 }
+        - { channel: ADC1_CH6, pin: PA1 }
+        - { channel: ADC1_CH7, pin: PA2 }
+        - { channel: ADC1_CH8, pin: PA3 }
+        - { channel: ADC1_CH9, pin: PA4 }
+        - { channel: ADC1_CH10, pin: PA5 }
+        - { channel: ADC1_CH11, pin: PA6 }
+        - { channel: ADC1_CH12, pin: PA7 }
+        - { channel: ADC1_CH13, pin: PC4 }
+        - { channel: ADC1_CH14, pin: PC5 }
+        - { channel: ADC1_CH15, pin: PB0 }
+        - { channel: ADC1_CH16, pin: PB1 }
   runtime-pwm-controllers:
     - controller: TIM1
       timers: [TIM1]
       channels: [Ch1]
-  runtime-i2s-controllers:
-    - controller: SPI2
-      dma-channels: [DMA1_CH4, DMA1_CH3]
-      dma-buffer-bytes: 4096
 selection:
   board-chips:
     - "stm32*"
   targets:
     - triple: "thumb*-none-eabi*"
   features-by-chip:
-    stm32f429zi:
-      - stm32f429zi
+    stm32u5a5zj:
+      - stm32u5a5zj
 system-image:
   layout:
     driver: linker-memory
@@ -60,4 +56,4 @@ system-image:
 application:
   launcher:
     program: probe-rs
-    arguments: [run, --chip, STM32F429ZITx, "{application}"]
+    arguments: [run, --chip, STM32U5A5ZJTxQ, "{application}"]

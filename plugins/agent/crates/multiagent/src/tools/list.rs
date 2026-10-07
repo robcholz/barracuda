@@ -1,8 +1,10 @@
-use alloc::{string::ToString, sync::Arc};
+use alloc::string::ToString;
 
+use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 
 use super::super::tool_port::SubagentControl;
 
@@ -16,6 +18,11 @@ struct ListSubagentsTool {
 
 impl ToolSpec for ListSubagentsTool {
     tool_metadata!("subagent_list");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 
     fn concurrent(&self) -> bool {
         true

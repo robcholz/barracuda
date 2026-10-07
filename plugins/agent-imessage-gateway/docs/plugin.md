@@ -10,7 +10,6 @@ The bridge uses this Plugin's scoped key-value storage for the durable Gateway
 route to Agent session mapping. Pending inbound replies and the active turn
 reply remain runtime-only FIFO state. Action registration guards are retained
 for the Plugin lifetime. The Action request and response contracts are in
-`schemas/action`; their JSON shapes and stable DSL addresses are unchanged from
-the former standalone `imessage-bridge` Plugin.
+`schemas/action`.
 
 The Plugin owns no channel, streaming runtime, or background task.

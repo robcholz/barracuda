@@ -10,6 +10,8 @@ default = []
 test-fixture = []
 
 [dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vfs.workspace = true
 barracuda-vm-plugin.workspace = true

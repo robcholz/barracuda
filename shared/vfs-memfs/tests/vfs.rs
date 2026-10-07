@@ -298,3 +298,96 @@ fn scoped_vfs_accepts_paths_relative_to_its_private_root() {
         );
     });
 }
+
+/// The Plugin view the Plugin Manager builds, over one writable filesystem.
+fn plugin_view(vfs: &Vfs) -> barracuda_vfs::ScopedVfs {
+    vfs.scoped_mounts([
+        ("/data", "/data/plugins/demo"),
+        ("/workspace/media", "/media/workspace"),
+        ("/workspace/cache", "/cache/workspace"),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn mount_points_are_directories_before_their_source_exists() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        let view = plugin_view(&vfs);
+
+        for point in ["/data", "/workspace/media"] {
+            assert!(view.metadata(point).await.unwrap().is_dir(), "{point}");
+            assert!(view.list_dir(point).await.unwrap().is_empty(), "{point}");
+        }
+        assert_eq!(view.list_dir("/").await.unwrap(), ["data", "workspace"]);
+        assert_eq!(
+            view.list_dir("/workspace").await.unwrap(),
+            ["cache", "media"]
+        );
+        assert!(view.metadata("/workspace").await.unwrap().is_dir());
+        assert_eq!(
+            view.metadata("/elsewhere").await.unwrap_err(),
+            FsError::NotMounted
+        );
+
+        view.write("/workspace/media/a.txt", b"a").await.unwrap();
+        assert_eq!(view.list_dir("/workspace/media").await.unwrap(), ["a.txt"]);
+    });
+}
+
+#[test]
+fn mount_points_cannot_be_replaced_removed_or_renamed() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        let view = plugin_view(&vfs);
+        view.write("/data/keep.txt", b"k").await.unwrap();
+
+        for point in ["/data", "/workspace/media", "/workspace"] {
+            assert_eq!(
+                view.write_atomic(point, b"x").await.unwrap_err(),
+                FsError::IsDirectory,
+                "{point}"
+            );
+            assert_eq!(
+                view.remove_dir(point).await.unwrap_err(),
+                FsError::PermissionDenied,
+                "{point}"
+            );
+            assert_eq!(
+                view.rename(point, "/data/moved").await.unwrap_err(),
+                FsError::PermissionDenied,
+                "{point}"
+            );
+            assert_eq!(
+                view.rename("/data/keep.txt", point).await.unwrap_err(),
+                FsError::PermissionDenied,
+                "{point}"
+            );
+        }
+        assert_eq!(view.read("/data/keep.txt").await.unwrap(), b"k");
+        assert_eq!(
+            vfs.metadata("/media/workspace").await.unwrap_err(),
+            FsError::NotFound
+        );
+    });
+}
+
+#[test]
+fn a_directory_cannot_move_into_itself() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        vfs.create_dir_all("/loop").await.unwrap();
+        vfs.write("/loop/keep.txt", b"k").await.unwrap();
+
+        for to in ["/loop/inner", "/loop/inner/deeper"] {
+            assert_eq!(
+                vfs.rename("/loop", to).await.unwrap_err(),
+                FsError::InvalidInput,
+                "{to}"
+            );
+        }
+        assert_eq!(vfs.read("/loop/keep.txt").await.unwrap(), b"k");
+        vfs.rename("/loop", "/loop-sibling").await.unwrap();
+        assert_eq!(vfs.read("/loop-sibling/keep.txt").await.unwrap(), b"k");
+    });
+}

@@ -1,0 +1,19 @@
+# Firmware runs on targets whose atomics are not all native, so shared code
+# uses portable-atomic and its Arc. Host-only crates opt out with their own
+# clippy.toml, which replaces this file for them.
+disallowed-types = [
+    { path = "core::sync::atomic::AtomicBool", reason = "use portable_atomic::AtomicBool" },
+    { path = "core::sync::atomic::AtomicI8", reason = "use portable_atomic::AtomicI8" },
+    { path = "core::sync::atomic::AtomicI16", reason = "use portable_atomic::AtomicI16" },
+    { path = "core::sync::atomic::AtomicI32", reason = "use portable_atomic::AtomicI32" },
+    { path = "core::sync::atomic::AtomicI64", reason = "use portable_atomic::AtomicI64", allow-invalid = true },
+    { path = "core::sync::atomic::AtomicIsize", reason = "use portable_atomic::AtomicIsize" },
+    { path = "core::sync::atomic::AtomicU8", reason = "use portable_atomic::AtomicU8" },
+    { path = "core::sync::atomic::AtomicU16", reason = "use portable_atomic::AtomicU16" },
+    { path = "core::sync::atomic::AtomicU32", reason = "use portable_atomic::AtomicU32" },
+    { path = "core::sync::atomic::AtomicU64", reason = "use portable_atomic::AtomicU64", allow-invalid = true },
+    { path = "core::sync::atomic::AtomicUsize", reason = "use portable_atomic::AtomicUsize" },
+    { path = "core::sync::atomic::AtomicPtr", reason = "use portable_atomic::AtomicPtr" },
+    { path = "alloc::sync::Arc", reason = "use portable_atomic_util::Arc" },
+    { path = "alloc::sync::Weak", reason = "use portable_atomic_util::Weak" },
+]

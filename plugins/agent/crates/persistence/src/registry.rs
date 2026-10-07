@@ -3,7 +3,6 @@ use alloc::boxed::Box;
 use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap};
 use alloc::format;
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::{type_name, TypeId};
 use core::cell::RefCell;
@@ -11,6 +10,7 @@ use core::error::Error;
 use core::marker::PhantomData;
 
 use barracuda_vfs::{FsError, ScopedVfs};
+use portable_atomic_util::Arc;
 
 use crate::{
     is_valid_key, DurablePartError, DurableState, DurableStateCodec, InstanceId, PartGeneration,
@@ -254,10 +254,10 @@ impl Persistence {
             address,
             name,
             instance_id,
-            Arc::new(StateRegisteredPart {
+            Arc::from(Box::new(StateRegisteredPart {
                 state: state.downgrade(),
                 persisted_generation: RefCell::new(None),
-            }),
+            }) as Box<dyn RegisteredPart>),
         )
     }
 

@@ -8,12 +8,11 @@ use core::{
     task::{Context as TaskContext, Poll},
 };
 
-use lunka::cdef::auxlib::NO_REF;
-use lunka::cdef::{
-    MULT_RET, REGISTRY_INDEX, lua_gettop, lua_newthread, lua_pcallk, lua_pushvalue, lua_rawget,
-    lua_rawgeti, lua_rawset, lua_resetthread, lua_resume, lua_settop, lua_xmove,
+use crate::ffi::{
+    MULT_RET, NO_REF, REGISTRY_INDEX, Thread, Type, lua_gettop, lua_newthread, lua_pcallk,
+    lua_pushvalue, lua_rawget, lua_rawgeti, lua_rawset, lua_resetthread, lua_resume, lua_settop,
+    lua_xmove,
 };
-use lunka::{Thread, cdef::Type};
 
 use crate::runtime::{
     State, Task, push_native_error, state_from_thread, take_async_yield, take_lua_error,
@@ -34,7 +33,7 @@ impl<'lua> Context<'lua> {
     }
 
     pub fn create_table(&mut self) -> Result<Table> {
-        self.lua.managed().new_table();
+        self.lua.new_table();
         let table = Table::from_lua(self.lua, -1);
         unsafe { lua_settop(self.lua.as_ptr(), -2) };
         table
@@ -78,7 +77,7 @@ impl LuaRef {
 
     fn take_top(lua: &mut Thread) -> Result<Self> {
         let state = state_from_thread(lua)?;
-        let reference = lua.managed().create_ref(REGISTRY_INDEX);
+        let reference = lua.create_ref(REGISTRY_INDEX);
         Ok(Self { state, reference })
     }
 
@@ -212,7 +211,7 @@ impl Function {
 
 pub struct FunctionCall<R> {
     state: Rc<State>,
-    coroutine: *mut lunka::cdef::lua_State,
+    coroutine: *mut crate::ffi::lua_State,
     coroutine_ref: Option<LuaRef>,
     resume_args: c_int,
     pending: Option<NonNull<Task>>,

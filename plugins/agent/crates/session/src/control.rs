@@ -1,6 +1,6 @@
-use async_channel::Sender;
 use barracuda_agent_permission::PermissionLevel;
-use futures_channel::oneshot;
+use barracuda_runtime_utils::local_channel::Sender;
+use barracuda_runtime_utils::oneshot;
 use strum::IntoStaticStr;
 
 use barracuda_agent::ReasoningEffort;
@@ -89,7 +89,6 @@ impl SessionControl {
                 message,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await
@@ -114,7 +113,6 @@ impl SessionControl {
                 message,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await
@@ -133,7 +131,6 @@ impl SessionControl {
                 effort,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await
@@ -152,7 +149,6 @@ impl SessionControl {
                 level,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await
@@ -178,7 +174,6 @@ impl SessionControl {
                 lease: self.lease,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await
@@ -193,7 +188,6 @@ impl SessionControl {
                 op,
                 ack,
             })
-            .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
             .await

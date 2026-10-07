@@ -8,11 +8,9 @@ use core::{
     ptr::{NonNull, null_mut},
 };
 
-use lunka::Thread;
-use lunka::cdef::auxlib::{luaL_setmetatable, luaL_testudata};
-use lunka::cdef::{
-    REGISTRY_INDEX, lua_CFunction, lua_State, lua_pushcclosure, lua_pushvalue, lua_setfield,
-    lua_settop, lua_touserdata,
+use crate::ffi::{
+    REGISTRY_INDEX, Thread, lua_CFunction, lua_State, lua_pushcclosure, lua_pushvalue,
+    lua_setfield, lua_settop, lua_touserdata, luaL_setmetatable, luaL_testudata,
 };
 
 use crate::object::LuaRef;
@@ -200,11 +198,11 @@ impl Context<'_> {
         let state = state_from_thread(self.thread())?;
         let callback_count = state.callback_count();
         let initial_top = self.thread().top();
-        let new_metatable = self.thread().managed().new_metatable(&type_name);
+        let new_metatable = self.thread().new_metatable(&type_name);
         let metatable_index = self.thread().top();
 
         if new_metatable {
-            self.thread().managed().new_table();
+            self.thread().new_table();
             let methods_index = self.thread().top();
             unsafe {
                 lua_pushvalue(self.thread().as_ptr(), methods_index);
@@ -242,7 +240,6 @@ impl Context<'_> {
 
         let slot = unsafe {
             self.thread()
-                .managed()
                 .new_userdata_raw(core::mem::size_of::<*mut UserDataCell<T>>(), 0)
                 .cast::<*mut UserDataCell<T>>()
         };

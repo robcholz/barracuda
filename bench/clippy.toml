@@ -1,2 +1,4 @@
+# Host-only benchmarks: std atomics and Arc are allowed. This file replaces
+# the workspace clippy.toml, whose portable-atomic rule applies to firmware code.
 stack-size-threshold = 4096
 allow-large-stack-frames-in-tests = false

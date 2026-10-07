@@ -1,17 +1,18 @@
 # http-client
 
-The thin boundary between Platform networking and `reqwless`.
+The thin boundary between System networking and `reqwless`.
 
 `ClientFactory` owns or borrows a TCP connector, DNS resolver, and optional
-Platform TLS configuration. Calling `ClientFactory::create()` creates a raw
+`barracuda_tls::Tls`. Calling `ClientFactory::create()` creates a raw
 `reqwless::HttpClient`. This crate does not define request or response models,
 buffer responses, manage persistent connections, stream bodies, retry
 requests, or expose an HTTP backend trait.
 
-Platform composition constructs the default Embassy-backed resources:
+System composition constructs the default Embassy-backed resources:
 
 ```rust,ignore
-let http_clients = http_client::ClientFactory::new(platform.ip_stack, move || tls.config());
+let tls = barracuda_tls::Tls::new(platform.entropy.clone()).ok();
+let http_clients = http_client::ClientFactory::new(platform.ip_stack, tls);
 ```
 
 Subsystems that already own another `embedded-nal-async` TCP/DNS pair use the

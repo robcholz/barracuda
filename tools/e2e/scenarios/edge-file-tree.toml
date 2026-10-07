@@ -1,0 +1,215 @@
+name = "File tools: tree edge cases"
+description = "file_list ordering and paging, file_move refusal and cross-mount rules, file_delete scope, and a directory moved into itself."
+
+# file_list:   plugins/agent-file/crates/plugin/src/tools/file_list.rs:55-109
+# file_move:   plugins/agent-file/crates/plugin/src/tools/file_move.rs:46-85
+# file_delete: plugins/agent-file/crates/plugin/src/tools/file_delete.rs:33-61
+# Rename mount rule: shared/vfs/src/vfs.rs:300-310 (same global mount only).
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+# --- step 0: list ordering and paging ---------------------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/l/b.txt", content = "b" } },
+  { name = "file_write", arguments = { path = "/data/l/B.txt", content = "BB" } },
+  { name = "file_write", arguments = { path = "/data/l/a.txt", content = "aaa" } },
+  { name = "file_write", arguments = { path = "/data/l/10.txt", content = "1" } },
+  { name = "file_write", arguments = { path = "/data/l/9.txt", content = "9" } },
+  { name = "file_write", arguments = { path = "/data/l/sub/inner.txt", content = "in" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_list", arguments = { path = "/data/l" } }]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/data/l", offset = 0, limit = 2 } },
+  { name = "file_list", arguments = { path = "/data/l", offset = 4, limit = 2 } },
+  { name = "file_list", arguments = { path = "/data/l", offset = 5, limit = 256 } },
+  { name = "file_list", arguments = { path = "/data/l", offset = 99 } },
+  { name = "file_list", arguments = { path = "/data/l/a.txt" } },
+  { name = "file_list", arguments = { path = "/data/l/missing" } },
+]
+
+[[model.responses]]
+text = "Listing checked."
+
+# --- step 1: move refusals, cross-mount rules, and permitted moves ---------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/m/src.txt", content = "src" } },
+  { name = "file_write", arguments = { path = "/data/m/dst.txt", content = "dst" } },
+  { name = "file_write", arguments = { path = "/data/m/dir1/f.txt", content = "f" } },
+  { name = "file_write", arguments = { path = "/cache/m/c.txt", content = "c" } },
+  { name = "file_write", arguments = { path = "/workspace/cache/w.txt", content = "w" } },
+  { name = "file_write", arguments = { path = "/media/m.txt", content = "m" } },
+  { name = "file_write", arguments = { path = "/workspace/media/keep.txt", content = "k" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/data/m/src.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/data//m/./src.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/data/m/dst.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/data" } },
+  { name = "file_move", arguments = { from = "/data/m/nope.txt", to = "/data/m/new.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/data/m/nodir/src.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/cache/m/src.txt" } },
+  { name = "file_move", arguments = { from = "/workspace/cache/w.txt", to = "/workspace/media/w.txt" } },
+  { name = "file_move", arguments = { from = "/data/m/src.txt", to = "/workspace/resources/src.txt" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"cross_mount\",\"message\":\"operation crosses a mount boundary\"}","is_error":true',
+]
+tool_calls = [
+  { name = "file_move", arguments = { from = "/data/m/dir1", to = "/data/m/dir2" } },
+  { name = "file_move", arguments = { from = "/cache/m/c.txt", to = "/workspace/cache/c.txt" } },
+  { name = "file_move", arguments = { from = "/media/m.txt", to = "/workspace/media/m.txt" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/data/m/dir2" } },
+  { name = "file_list", arguments = { path = "/data/m/dir1" } },
+  { name = "file_read", arguments = { path = "/workspace/cache/c.txt" } },
+  { name = "file_read", arguments = { path = "/workspace/media/m.txt" } },
+  { name = "file_read", arguments = { path = "/data/m/src.txt" } },
+]
+
+[[model.responses]]
+text = "Moves checked."
+
+# --- step 2: a directory moved into its own child (suspected bug) ----------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/cache/loop/keep.txt", content = "keep" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_move", arguments = { from = "/cache/loop", to = "/cache/loop/inner" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/cache/loop" } },
+  { name = "file_read", arguments = { path = "/cache/loop/inner/keep.txt" } },
+]
+
+[[model.responses]]
+text = "Loop checked."
+
+# --- step 3: delete scope -----------------------------------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/d/f.txt", content = "f" } },
+  { name = "file_write", arguments = { path = "/data/d/keep/k.txt", content = "k" } },
+  { name = "file_write", arguments = { path = "/data/d/empty/x.txt", content = "x" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_delete", arguments = { path = "/data/d/empty/x.txt" } }]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_delete", arguments = { path = "/data/d/missing.txt" } },
+  { name = "file_delete", arguments = { path = "/data/d/keep" } },
+  { name = "file_delete", arguments = { path = "/data/d/empty" } },
+  { name = "file_delete", arguments = { path = "/data/d/f.txt/" } },
+  { name = "file_delete", arguments = { path = "/data" } },
+  { name = "file_delete", arguments = { path = "/" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_list", arguments = { path = "/data/d" } }]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"directory_not_empty\",\"message\":\"directory is not empty\"}","is_error":true',
+]
+text = "Deletes checked."
+
+[[steps]]
+send = "Check listing order and paging."
+reply_contains = ["Listing checked."]
+kinds = ["tool"]
+tool_errors_allowed = true
+tool_contains = [
+  # Byte-wise name order (file_list.rs:83): digits < uppercase < lowercase,
+  # "10" before "9"; directories are entries with bytes 0.
+  '{"path":"/data/l","entries":[{"name":"10.txt","kind":"file","bytes":1},{"name":"9.txt","kind":"file","bytes":1},{"name":"B.txt","kind":"file","bytes":2},{"name":"a.txt","kind":"file","bytes":3},{"name":"b.txt","kind":"file","bytes":1},{"name":"sub","kind":"directory","bytes":0}],"next_offset":null}',
+  # Paging (file_list.rs:84-86).
+  '{"path":"/data/l","entries":[{"name":"10.txt","kind":"file","bytes":1},{"name":"9.txt","kind":"file","bytes":1}],"next_offset":2}',
+  '{"path":"/data/l","entries":[{"name":"b.txt","kind":"file","bytes":1},{"name":"sub","kind":"directory","bytes":0}],"next_offset":null}',
+  '{"path":"/data/l","entries":[{"name":"sub","kind":"directory","bytes":0}],"next_offset":null}',
+  # An offset past the end is an empty last page, not an error.
+  '{"path":"/data/l","entries":[],"next_offset":null}',
+  'file_list{"path": "/data/l/a.txt"}{"error":"not_directory","message":"path is not a directory"}',
+  'file_list{"path": "/data/l/missing"}{"error":"not_found","message":"path not found"}',
+]
+
+[[steps]]
+send = "Check move rules."
+reply_contains = ["Moves checked."]
+tool_errors_allowed = true
+tool_contains = [
+  # file_move.rs:53-58 compares the raw strings.
+  '"to": "/data/m/src.txt"}{"error":"invalid_input","message":"source and destination must differ"}',
+  # An alias of the same path passes that check and is refused as an existing
+  # destination instead (inconsistent with the invalid_input above).
+  '"to": "/data//m/./src.txt"}{"error":"already_exists","message":"destination already exists"}',
+  '"to": "/data/m/dst.txt"}{"error":"already_exists","message":"destination already exists"}',
+  '"to": "/data"}{"error":"already_exists","message":"destination already exists"}',
+  '"to": "/data/m/new.txt"}{"error":"not_found","message":"path not found"}',
+  # Unlike file_write, file_move does not create missing parents (LittleFS NOENT).
+  '"to": "/data/m/nodir/src.txt"}{"error":"not_found","message":"path not found"}',
+  '"to": "/cache/m/src.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',
+  # Documented in .agents/docs/platform-architecture.md "Composition and operation invariants".
+  '"to": "/workspace/media/w.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',
+  # The mount check runs before the read-only check (vfs.rs:304-308).
+  '"to": "/workspace/resources/src.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',
+  '{"from":"/data/m/dir1","to":"/data/m/dir2"}',
+  # Private and shared views of the same global mount rename freely.
+  '{"from":"/cache/m/c.txt","to":"/workspace/cache/c.txt"}',
+  '{"from":"/media/m.txt","to":"/workspace/media/m.txt"}',
+  '{"path":"/data/m/dir2","entries":[{"name":"f.txt","kind":"file","bytes":1}],"next_offset":null}',
+  'file_list{"path": "/data/m/dir1"}{"error":"not_found","message":"path not found"}',
+  '{"path":"/workspace/cache/c.txt","content":"c","offset":0,"bytes":1,"next_offset":null}',
+  '{"path":"/workspace/media/m.txt","content":"m","offset":0,"bytes":1,"next_offset":null}',
+  # Every refused move left the source intact.
+  '{"path":"/data/m/src.txt","content":"src","offset":0,"bytes":3,"next_offset":null}',
+]
+
+[[steps]]
+send = "Move a directory into itself."
+reply_contains = ["Loop checked."]
+tool_errors_allowed = true
+tool_contains = [
+  # A directory cannot move into its own descendant; the tree is unchanged.
+  'file_move{"from": "/cache/loop", "to": "/cache/loop/inner"}{"error":"invalid_input","message":"invalid filesystem input"}',
+  'file_list{"path": "/cache/loop"}{"path":"/cache/loop","entries":[{"name":"keep.txt","kind":"file","bytes":4}],"next_offset":null}',
+  'file_read{"path": "/cache/loop/inner/keep.txt"}{"error":"not_found","message":"path not found"}',
+]
+
+[[steps]]
+send = "Check delete scope."
+reply_contains = ["Deletes checked."]
+tool_errors_allowed = true
+tool_contains = [
+  'file_delete{"path": "/data/d/missing.txt"}{"error":"not_found","message":"path not found"}',
+  # Non-recursive (file_delete.rs:44-48).
+  'file_delete{"path": "/data/d/keep"}{"error":"directory_not_empty","message":"directory is not empty"}',
+  '{"path":"/data/d/empty","kind":"directory"}',
+  # A trailing slash still names the file; the response echoes the raw path.
+  '{"path":"/data/d/f.txt/","kind":"file"}',
+  'file_delete{"path": "/data"}{"error":"permission_denied","message":"permission denied"}',
+  'file_delete{"path": "/"}{"error":"permission_denied","message":"permission denied"}',
+  '{"path":"/data/d","entries":[{"name":"keep","kind":"directory","bytes":0}],"next_offset":null}',
+]

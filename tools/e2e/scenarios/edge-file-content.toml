@@ -1,0 +1,231 @@
+name = "File tools: content edge cases"
+description = "Byte accounting, UTF-8 read ranges, read paging bounds, create-versus-overwrite, exact-text edit matching, and the 32 KiB edit limit."
+
+# file_read:  plugins/agent-file/crates/plugin/src/tools/file_read.rs:51-122
+# file_write: plugins/agent-file/crates/plugin/src/tools/file_write.rs:57-92
+# file_edit:  plugins/agent-file/crates/plugin/src/tools/file_edit.rs:42-127
+# Failure shape: {"error":<code>,"message":<text>} (common.rs:37-86).
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+# --- step 0: byte accounting and UTF-8 ranges -------------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/c/empty.txt", content = "" } },
+  { name = "file_write", arguments = { path = "/data/c/utf8.txt", content = "héllo 🚀" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data/c/empty.txt" } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 0, limit = 2 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 0, limit = 3 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 7, limit = 4 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 8 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 11 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 12 } },
+  { name = "file_read", arguments = { path = "/data/c/utf8.txt", offset = 9223372036854775807 } },
+  { name = "file_read", arguments = { path = "/data/c" } },
+  { name = "file_read", arguments = { path = "/data/c/missing.txt" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"invalid_utf8\",\"message\":\"selected byte range is not valid UTF-8\"}","is_error":true',
+  '\"error\":\"range_out_of_bounds\",\"message\":\"offset 12 exceeds file length 11\"}","is_error":true',
+]
+text = "Ranges checked."
+
+# --- step 1: create versus overwrite ---------------------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/c/note.txt", content = "first version" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/c/note.txt", content = "second" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/c/note.txt", content = "2nd", overwrite = true } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data/c/note.txt" } },
+  { name = "file_write", arguments = { path = "/data/c", content = "x" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/c", content = "x", overwrite = true } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_list", arguments = { path = "/data" } }]
+
+[[model.responses]]
+text = "Overwrite checked."
+
+# --- step 2: exact-text edits -----------------------------------------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/e/text.txt", content = "one fish two fish red fish" } },
+  { name = "file_write", arguments = { path = "/data/e/overlap.txt", content = "aaaa" } },
+  { name = "file_write", arguments = { path = "/data/e/accents.txt", content = "naïve café" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/e/text.txt", old_text = "blue", new_text = "x" } },
+  { name = "file_edit", arguments = { path = "/data/e/text.txt", old_text = "fish", new_text = "cat" } },
+  { name = "file_edit", arguments = { path = "/data/e/text.txt", old_text = "Fish", new_text = "cat", replace_all = true } },
+  { name = "file_edit", arguments = { path = "/data/e/missing.txt", old_text = "a", new_text = "b" } },
+  { name = "file_edit", arguments = { path = "/data/e", old_text = "a", new_text = "b" } },
+  { name = "file_edit", arguments = { path = "/data/e/overlap.txt", old_text = "aa", new_text = "b" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/e/text.txt", old_text = "fish", new_text = "cat", replace_all = true } },
+  { name = "file_edit", arguments = { path = "/data/e/overlap.txt", old_text = "aa", new_text = "b", replace_all = true } },
+  { name = "file_edit", arguments = { path = "/data/e/accents.txt", old_text = "ï", new_text = "i" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/e/text.txt", old_text = "red cat", new_text = "" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data/e/text.txt" } },
+  { name = "file_read", arguments = { path = "/data/e/overlap.txt" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '\"error\":\"ambiguous_match\",\"message\":\"old_text occurs 3 times; provide more context or set replace_all\"}","is_error":true',
+]
+text = "Edits checked."
+
+# --- step 3: the 32 KiB edit limit and default read paging -----------------
+[[model.responses]]
+tool_calls = [
+  { name = "file_write", arguments = { path = "/data/big/x.txt", content = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/big/x.txt", old_text = "x", new_text = "yyyyyyyyyyyyyyyyy", replace_all = true } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/big/x.txt", old_text = "x", new_text = "yyyyyyyyyyyyyyyy", replace_all = true } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_read", arguments = { path = "/data/big/x.txt" } }]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = { path = "/data/big/x.txt", offset = 32760, limit = 16384 } },
+  { name = "file_read", arguments = { path = "/data/big/x.txt", offset = 32768 } },
+  { name = "file_read", arguments = { path = "/data/big/x.txt", offset = 32769 } },
+]
+
+[[model.responses]]
+text = "Limits checked."
+
+[[steps]]
+send = "Check byte accounting and UTF-8 ranges."
+reply_contains = ["Ranges checked."]
+kinds = ["tool"]
+tool_errors_allowed = true
+tool_contains = [
+  # file_write reports UTF-8 bytes, not characters: h é(2) l l o ' ' 🚀(4).
+  '{"path":"/data/c/empty.txt","bytes":0}',
+  '{"path":"/data/c/utf8.txt","bytes":11}',
+  '{"path":"/data/c/empty.txt","content":"","offset":0,"bytes":0,"next_offset":null}',
+  # A range that ends inside "é" (file_read.rs:94-101).
+  '"offset": 0, "limit": 2}{"error":"invalid_utf8","message":"selected byte range is not valid UTF-8"}',
+  '{"path":"/data/c/utf8.txt","content":"hé","offset":0,"bytes":3,"next_offset":3}',
+  '{"path":"/data/c/utf8.txt","content":"🚀","offset":7,"bytes":4,"next_offset":null}',
+  # A range that starts inside "🚀".
+  '"offset": 8}{"error":"invalid_utf8","message":"selected byte range is not valid UTF-8"}',
+  # offset == length is an empty page; offset > length is out of bounds (file_read.rs:68-73).
+  '{"path":"/data/c/utf8.txt","content":"","offset":11,"bytes":0,"next_offset":null}',
+  '{"error":"range_out_of_bounds","message":"offset 12 exceeds file length 11"}',
+  '{"error":"range_out_of_bounds","message":"offset 9223372036854775807 exceeds file length 11"}',
+  # file_read.rs:64-66 reports any non-file as is_directory.
+  'file_read{"path": "/data/c"}{"error":"is_directory","message":"path is not a regular file"}',
+  'file_read{"path": "/data/c/missing.txt"}{"error":"not_found","message":"path not found"}',
+]
+
+[[steps]]
+send = "Check create versus overwrite."
+reply_contains = ["Overwrite checked."]
+tool_errors_allowed = true
+tool_contains = [
+  '{"path":"/data/c/note.txt","bytes":13}',
+  # file_write.rs:67-73.
+  'file_write{"path": "/data/c/note.txt", "content": "second"}{"error":"already_exists","message":"destination already exists; set overwrite to true to replace it"}',
+  '{"path":"/data/c/note.txt","bytes":3}',
+  # The atomic replacement truncates: nothing of "first version" remains.
+  '{"path":"/data/c/note.txt","content":"2nd","offset":0,"bytes":3,"next_offset":null}',
+  # A directory counts as an existing destination.
+  'file_write{"path": "/data/c", "content": "x"}{"error":"already_exists","message":"destination already exists; set overwrite to true to replace it"}',
+  # With overwrite, LittleFS refuses to rename the temporary file onto the
+  # directory (LFS_ERR_ISDIR -> FsError::IsDirectory).
+  '"overwrite": true}{"error":"is_directory","message":"path is a directory"}',
+  # The failed atomic write removed its "c.barracuda-tmp-N" sibling (scoped.rs:101-104).
+  '{"path":"/data","entries":[{"name":"c","kind":"directory","bytes":0}],"next_offset":null}',
+]
+
+[[steps]]
+send = "Check exact-text edits."
+reply_contains = ["Edits checked."]
+tool_errors_allowed = true
+tool_contains = [
+  '"old_text": "blue", "new_text": "x"}{"error":"no_match","message":"old_text does not occur in the file"}',
+  '"old_text": "fish", "new_text": "cat"}{"error":"ambiguous_match","message":"old_text occurs 3 times; provide more context or set replace_all"}',
+  # Matching is case-sensitive even with replace_all.
+  '"old_text": "Fish", "new_text": "cat", "replace_all": true}{"error":"no_match","message":"old_text does not occur in the file"}',
+  'file_edit{"path": "/data/e/missing.txt", "old_text": "a", "new_text": "b"}{"error":"not_found","message":"path not found"}',
+  'file_edit{"path": "/data/e", "old_text": "a", "new_text": "b"}{"error":"is_directory","message":"path is not a regular file"}',
+  # match_indices counts non-overlapping matches: "aaaa" holds "aa" twice.
+  '"old_text": "aa", "new_text": "b"}{"error":"ambiguous_match","message":"old_text occurs 2 times; provide more context or set replace_all"}',
+  '{"path":"/data/e/text.txt","replacements":3,"bytes":23}',
+  '{"path":"/data/e/overlap.txt","replacements":2,"bytes":2}',
+  # "naïve café" is 12 bytes; replacing the 2-byte "ï" leaves 11.
+  '{"path":"/data/e/accents.txt","bytes":12}',
+  '{"path":"/data/e/accents.txt","replacements":1,"bytes":11}',
+  # An empty new_text deletes the match.
+  '{"path":"/data/e/text.txt","replacements":1,"bytes":16}',
+  '{"path":"/data/e/text.txt","content":"one cat two cat ","offset":0,"bytes":16,"next_offset":null}',
+  '{"path":"/data/e/overlap.txt","content":"bb","offset":0,"bytes":2,"next_offset":null}',
+]
+
+[[steps]]
+send = "Check the size limits."
+reply_contains = ["Limits checked."]
+tool_errors_allowed = true
+tool_contains = [
+  '{"path":"/data/big/x.txt","bytes":2048}',
+  # 2048 * 17 = 34816 > 32768 (file_edit.rs:104-109); the file is unchanged.
+  '{"error":"file_too_large","message":"edited file exceeds the 32768-byte limit"}',
+  # 2048 * 16 = 32768 is exactly at the limit and allowed.
+  '{"path":"/data/big/x.txt","replacements":2048,"bytes":32768}',
+  # Default limit is 4096 bytes (file_read.rs:11, 24-25).
+  '"offset":0,"bytes":4096,"next_offset":4096}',
+  '{"path":"/data/big/x.txt","content":"yyyyyyyy","offset":32760,"bytes":8,"next_offset":null}',
+  '{"path":"/data/big/x.txt","content":"","offset":32768,"bytes":0,"next_offset":null}',
+  '{"error":"range_out_of_bounds","message":"offset 32769 exceeds file length 32768"}',
+]

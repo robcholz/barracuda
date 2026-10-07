@@ -146,8 +146,17 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     }
 }
 
+/// Longest accepted API key. Tavily keys are about 40 bytes; the bound keeps
+/// the key, the longest query, and the JSON framing inside the 2 KiB request
+/// buffer.
+pub(crate) const MAX_API_KEY_BYTES: usize = 256;
+/// Longest accepted API base URL.
+const MAX_API_BASE_BYTES: usize = 512;
+
 fn valid_configuration(api_key: &str, api_base: &str) -> bool {
-    !api_key.trim().is_empty()
+    api_key.len() <= MAX_API_KEY_BYTES
+        && api_base.len() <= MAX_API_BASE_BYTES
+        && !api_key.trim().is_empty()
         && api_key.bytes().all(|byte| byte.is_ascii_graphic())
         && api_base.bytes().all(|byte| byte.is_ascii_graphic())
         && (api_base.starts_with("https://") || api_base.starts_with("http://"))
@@ -250,11 +259,11 @@ mod tests {
     }
 
     #[test]
-    fn configuration_has_no_plugin_specific_size_limit() {
-        let api_key = "k".repeat(512);
-        let api_base = format!("https://{}.example.com", "a".repeat(512));
-
-        assert!(valid_configuration(&api_key, &api_base));
+    fn configuration_fits_the_request_buffer() {
+        let base = |host_bytes: usize| format!("https://{}.example.com", "a".repeat(host_bytes));
+        assert!(valid_configuration(&"k".repeat(256), &base(492)));
+        assert!(!valid_configuration(&"k".repeat(257), DEFAULT_API_BASE));
+        assert!(!valid_configuration("secret", &base(493)));
     }
 
     #[test]

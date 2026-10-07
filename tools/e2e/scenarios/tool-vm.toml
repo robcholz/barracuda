@@ -1,0 +1,48 @@
+name = "Lua VM tool"
+description = "vm_run executes a sandboxed Lua script that uses the filesystem and message queue packages."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = """
+print('sum', 1 + 2)
+local queue = require('message_queue')
+queue.push('e2e', 'queued')
+print('queue', queue.receive('e2e'))
+local file = assert(io.open('/data/e2e.txt', 'w'))
+file:write('persisted')
+file:close()
+local reader = assert(io.open('/data/e2e.txt', 'r'))
+print('file', reader:read('a'))
+reader:close()
+""" } }]
+
+[[model.responses]]
+text = "The script is running."
+
+# The run's completion reaches the Agent either while this turn is still open
+# or right after it ends; both cost one model call before the next question.
+[[model.responses]]
+request_contains = ['success', 'queued', 'persisted']
+text = "The script printed its results."
+
+[[model.responses]]
+request_contains = ['What did it print?']
+text = "It printed the sum, the queued message, and the file."
+
+[[steps]]
+send = "Run a script."
+reply_contains = ["The script is running."]
+tool_contains = ['{"run_id":1}']
+
+[[steps]]
+send = "What did it print?"
+reply_contains = ["It printed the sum, the queued message, and the file."]
+
+[memory]
+# Host ordinary-heap peak was 226 KiB when this budget was set.
+heap_high_water_max = 245760

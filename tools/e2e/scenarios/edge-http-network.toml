@@ -1,0 +1,105 @@
+# Only GET/HEAD on /_llm_tape/health are safe: every other llm-tape path is a model-call
+# replay and would be counted as request_rejected (tools/llm-tape/src/llm_tape/replay.py:77-78,110-125).
+# Requests the aiohttp parser rejects (cases 3-4) never reach a route.
+name = "HTTP tool against the host"
+description = "http_request methods, forwarded headers, non-2xx statuses, refused connections, and workspace capacity against the host llm-tape service."
+
+[model]
+mode = "scripted"
+
+# Case 1: HEAD returns the status with an empty body (reqwless HEAD reader; aiohttp add_get allows HEAD)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "HEAD", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"status\":200,\"body\":\"\"}']
+text = "Case 1 checked."
+
+# Case 2: GET with custom headers and a body is forwarded unchanged (no GET-body restriction in http.rs)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health?probe=1", headers = [{ name = "X-E2E", value = "edge" }, { name = "Accept", value = "application/json" }], body = "ignored" } }]
+
+[[model.responses]]
+text = "Case 2 checked."
+
+# Case 3: a header name with a non-token character is refused before any request is sent
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X(Y", value = "1" }] } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_header\"}']
+text = "Case 3 checked."
+
+# Case 4: the client writes Content-Length itself, so a caller copy is refused
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "Content-Length", value = "7" }] } }]
+
+[[model.responses]]
+text = "Case 4 checked."
+
+# Case 5: refused TCP connection -> transport (http.rs:283-285)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:9/" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"transport\"}']
+text = "Case 5 checked."
+
+# Case 6: HTTPS against the plaintext llm-tape port fails the TLS handshake -> transport (http.rs:283-290)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "https://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"transport\"}']
+text = "Case 6 checked."
+
+# Case 7: three concurrent requests: two workspaces (http.rs:104,208), the third is busy
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health" } }, { name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health" } }, { name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"busy\"}']
+text = "Case 7 checked."
+
+[[steps]]
+send = "HEAD the service."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['{"status":200,"body":""}']
+
+[[steps]]
+send = "GET with headers."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['"status":200', '\"status\": \"ok\"']
+
+[[steps]]
+send = "Send an odd header."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['{"error":"invalid_header"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Send a conflicting length."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['{"error":"invalid_header"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Reach a closed port."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['{"error":"transport"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Use HTTPS on a plaintext port."
+reply_contains = ["Case 6 checked."]
+tool_contains = ['{"error":"transport"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Fetch three times at once."
+reply_contains = ["Case 7 checked."]
+tool_contains = ['{"error":"busy"}', '{"status":200']
+tool_errors_allowed = true

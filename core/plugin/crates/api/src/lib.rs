@@ -4,11 +4,11 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
 use barracuda_board_hal::{BoardResources, NoExposedIo, NoPeripherals};
 pub use barracuda_target_api::{BoardInfo, Hardware, PlatformInfo, TargetIdentity};
 pub use embassy_net::Stack;
 pub use http_client::ClientFactory;
+use portable_atomic_util::Arc;
 
 /// Fixed System resources available while constructing a Plugin.
 ///

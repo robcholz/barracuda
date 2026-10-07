@@ -8,6 +8,7 @@ description = "Barracuda system composition root that registers the fixed Plugin
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-board-hal.workspace = true
 # BEGIN GENERATED PLUGINS
 barracuda-agent-plugin.workspace = true
@@ -74,7 +75,6 @@ embedded-storage = "0.3"
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-hal.workspace = true
-embedded-hal-async.workspace = true
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true

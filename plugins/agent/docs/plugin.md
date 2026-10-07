@@ -9,11 +9,10 @@
 - Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
   plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
 - Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
-  skills from `/data/skills`, and shared bundled skills from
+  skills from `/workspace/media/skills`, and shared bundled skills from
   `/workspace/resources/skills`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
   `purpose.{root_agent,sub_agent,memory,compaction}`
-- Owned Components: none
 - Plugin-owned tasks: Agent runtime and `session.event` forwarding
 
 System constructs the Agent Plugin from the common `PluginContext`. During
@@ -34,10 +33,15 @@ Dependent Plugins may still register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
 
-The runtime scans `/data/skills` and `/workspace/resources/skills` into one
-catalog. Skill names are globally unique across both roots; their filesystem
-location has no selection priority. A duplicate aborts startup, while a failed
-runtime reload preserves the previous valid catalog. `skill_read` loads only
+The runtime scans `/workspace/media/skills` and `/workspace/resources/skills`
+into one catalog. Skills belong to the Agent application rather than the
+framework, so this is an Agent convention over existing Workspace mounts: any
+Plugin that writes files, such as `agent-file`, installs a skill by writing its
+package under `/workspace/media/skills`. Skill names are globally unique
+across both roots; their filesystem location has no selection priority. A
+malformed package, or every copy of a duplicated name, is left out with a
+warning and reported by `skill_reload`, so one bad package in the shared
+directory never stops the Agent. `skill_read` loads only
 the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
 UTF-8 file path relative to that unique skill directory without exposing the
 backing path to the model.

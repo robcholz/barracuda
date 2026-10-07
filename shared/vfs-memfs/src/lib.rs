@@ -6,7 +6,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use bare_vfs::{MemFs as BareMemFs, VfsError as BareError, VfsErrorKind};
@@ -14,6 +13,7 @@ use barracuda_vfs::{
     Backend, BackendFile, BackendFuture, DirEntry, FileType, FsError, Metadata, OpenOptions,
     SeekFrom, VfsBackend,
 };
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// A cloneable in-memory filesystem backed by `bare-vfs`.

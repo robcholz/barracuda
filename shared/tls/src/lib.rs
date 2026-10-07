@@ -1,148 +1,249 @@
-//! Platform-owned TLS client capability.
+//! TLS client engine shared by every Platform.
 //!
-//! Concrete Platforms initialize trust roots, randomness, and the TLS engine.
-//! HTTP consumers only request a fresh client configuration.
+//! System builds one [`Tls`] from the Platform's entropy source. The trust
+//! roots are Mozilla's CA store, compiled in as a compact bundle, so every
+//! Platform trusts the same roots. The HTTP client turns the handle into
+//! per-connection configuration.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::String, string::ToString};
+#[cfg(target_os = "none")]
+mod c_runtime;
+mod memory;
+mod roots;
 
-use http_client::TlsConfig;
-use mbedtls_rs::{Certificate, Tls, TlsReference, TlsVersion, X509};
+use alloc::{boxed::Box, format, string::String};
 
-/// TLS capability consumed by HTTP-client owners.
-pub trait ClientTls: Clone + 'static {
-    /// Creates an independent TLS configuration for one HTTP client.
-    fn config(&self) -> Option<TlsConfig<'static>>;
-}
+use barracuda_platform::{Entropy, EntropyUnavailable};
+use mbedtls_rs::{RngFailure, TlsRng};
 
-/// Explicit plaintext capability for tests and deliberately HTTP-only systems.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PlaintextTls;
+pub use mbedtls_rs::{Certificate, TlsReference, TlsVersion};
 
-impl ClientTls for PlaintextTls {
-    fn config(&self) -> Option<TlsConfig<'static>> {
-        None
-    }
-}
-
-/// Reusable mbedTLS capability backed by Platform-selected trust roots.
+/// The process-wide TLS engine and the roots it trusts.
+///
+/// mbedTLS allows one engine per process, so [`Tls::new`] succeeds once.
 #[derive(Clone)]
-pub struct MbedTls {
+pub struct Tls {
     certificates: Certificate<'static>,
     tls_reference: TlsReference<'static>,
 }
 
-/// Raw embedded inputs from which a Platform initializes its TLS capability.
-pub struct MbedTlsInput {
-    rng: &'static mut (dyn rand_core::CryptoRng + Send),
-    trust_roots: &'static [u8],
-}
-
-impl MbedTlsInput {
-    /// Creates embedded mbedTLS inputs from a Platform RNG and DER trust roots.
-    #[must_use]
-    pub fn new(
-        rng: &'static mut (dyn rand_core::CryptoRng + Send),
-        trust_roots: &'static [u8],
-    ) -> Self {
-        Self { rng, trust_roots }
-    }
-
-    /// Consumes the raw inputs and initializes the Platform TLS capability.
+impl Tls {
+    /// Initializes the TLS engine from the Platform's entropy source.
     ///
     /// # Errors
     ///
-    /// Returns an error when the roots or global mbedTLS engine are invalid.
-    pub fn initialize(self) -> Result<MbedTls, TlsError> {
-        MbedTls::from_der(self.rng, self.trust_roots)
-    }
-}
-
-impl MbedTls {
-    /// Initializes mbedTLS from DER-encoded trust roots and a Platform RNG.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the trust roots cannot be parsed or the process-wide
-    /// mbedTLS engine has already been initialized.
-    pub fn from_der(
-        rng: &'static mut (dyn rand_core::CryptoRng + Send),
-        certificate: &[u8],
-    ) -> Result<Self, TlsError> {
-        Self::from_x509(rng, X509::DER(certificate))
-    }
-
-    /// Initializes mbedTLS from a NUL-terminated PEM trust-root bundle.
-    ///
-    /// Platforms own discovery and reading of the bundle; this method only
-    /// initializes the shared TLS engine from the supplied bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the trust roots or global mbedTLS engine are
-    /// invalid.
-    #[cfg(feature = "pem")]
-    pub fn from_pem(
-        rng: &'static mut (dyn rand_core::CryptoRng + Send),
-        certificate: &core::ffi::CStr,
-    ) -> Result<Self, TlsError> {
-        Self::from_x509(rng, X509::PEM(certificate))
-    }
-
-    /// Initializes mbedTLS from one owned/copying X.509 input.
-    fn from_x509(
-        rng: &'static mut (dyn rand_core::CryptoRng + Send),
-        certificate: X509<'_>,
-    ) -> Result<Self, TlsError> {
-        let certificates = Certificate::new(certificate)
-            .map_err(|error| TlsError::InvalidTrustRoots(error.to_string()))?;
-        let tls =
-            Tls::new(rng).map_err(|error| TlsError::Initialize(alloc::format!("{error:?}")))?;
+    /// Returns an error when the Platform has no entropy source or the engine
+    /// is already initialized.
+    pub fn new<E: Entropy + Send>(entropy: E) -> Result<Self, TlsError> {
+        // Refuse a source that cannot produce bytes now; one that fails later
+        // fails the handshake that asked for them.
+        entropy
+            .fill(&mut [0; 1])
+            .map_err(|EntropyUnavailable| TlsError::EntropyUnavailable)?;
+        memory::install();
+        let certificates = Certificate::verified_by(roots::verify)
+            .map_err(|error| TlsError::Initialize(format!("{error:?}")))?;
+        let rng = Box::leak(Box::new(EntropyRng(entropy)));
+        let tls = mbedtls_rs::Tls::new(rng)
+            .map_err(|error| TlsError::Initialize(format!("{error:?}")))?;
         let tls = Box::leak(Box::new(tls));
+        log::info!("TLS trusts {} compiled-in roots", roots::count());
         Ok(Self {
             certificates,
             tls_reference: tls.reference(),
         })
     }
 
-    /// Creates one verified shared HTTP-client TLS configuration.
+    /// The minimum protocol version for client connections.
     #[must_use]
-    pub fn client_config(&self) -> TlsConfig<'static> {
-        TlsConfig::new(
-            TlsVersion::Tls1_2,
-            self.certificates.clone(),
-            None,
-            self.tls_reference,
-        )
+    pub fn version(&self) -> TlsVersion {
+        TlsVersion::Tls1_2
+    }
+
+    /// The roots that server certificate chains must lead to.
+    #[must_use]
+    pub fn certificates(&self) -> Certificate<'static> {
+        self.certificates.clone()
+    }
+
+    /// The engine that client connections run on.
+    #[must_use]
+    pub fn reference(&self) -> TlsReference<'static> {
+        self.tls_reference
     }
 }
 
-impl ClientTls for MbedTls {
-    fn config(&self) -> Option<TlsConfig<'static>> {
-        Some(self.client_config())
+/// The Platform entropy source as the random source mbedTLS draws from.
+struct EntropyRng<E>(E);
+
+impl<E: Entropy + Send> TlsRng for EntropyRng<E> {
+    fn try_fill(&mut self, bytes: &mut [u8]) -> Result<(), RngFailure> {
+        self.0.fill(bytes).map_err(|EntropyUnavailable| RngFailure)
     }
 }
 
-/// Failure while preparing a Platform TLS capability.
+/// Failure while initializing the TLS engine.
 #[derive(Debug, thiserror::Error)]
 pub enum TlsError {
-    /// Trust roots could not be parsed.
-    #[error("invalid TLS trust roots: {0}")]
-    InvalidTrustRoots(String),
+    /// The Platform has no entropy source.
+    #[error("the Platform has no entropy source for TLS")]
+    EntropyUnavailable,
     /// The process-wide mbedTLS engine could not be initialized.
     #[error("failed to initialize mbedTLS: {0}")]
     Initialize(String),
 }
 
 #[cfg(test)]
+#[allow(unsafe_code, clippy::expect_used)]
 mod tests {
-    use super::{ClientTls, PlaintextTls};
+    extern crate std;
+
+    // The host implementation mbedtls-rs locks its random source with.
+    use critical_section as _;
+
+    use core::ptr::{null, null_mut};
+    use std::sync::Once;
+
+    use barracuda_platform::{Entropy, EntropyUnavailable, UnavailableEntropy};
+    use mbedtls_rs::sys::{
+        mbedtls_pk_context, mbedtls_pk_free, mbedtls_pk_init, mbedtls_pk_parse_public_key,
+        mbedtls_x509_crt, mbedtls_x509_crt_free, mbedtls_x509_crt_init, mbedtls_x509_crt_parse_der,
+        mbedtls_x509_crt_verify, psa_crypto_init, MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+    };
+
+    use super::{roots, Tls, TlsError};
+
+    /// Signed by ISRG Root X1 (RSA).
+    const R11: &[u8] = include_bytes!("../tests/fixtures/r11.der");
+    /// Signed by ISRG Root X2 (ECDSA).
+    const E5: &[u8] = include_bytes!("../tests/fixtures/e5.der");
+    const ISRG_ROOT_X1: &[u8] = include_bytes!("../tests/fixtures/isrg-root-x1.der");
+    const ISRG_ROOT_X2: &[u8] = include_bytes!("../tests/fixtures/isrg-root-x2.der");
+    /// Self-signed, and not in the bundle.
+    const UNKNOWN_ROOT: &[u8] = include_bytes!("../tests/fixtures/unknown-root.der");
+
+    #[derive(Clone)]
+    struct CountingEntropy;
+
+    impl Entropy for CountingEntropy {
+        fn fill(&self, bytes: &mut [u8]) -> Result<(), EntropyUnavailable> {
+            for (index, byte) in bytes.iter_mut().enumerate() {
+                *byte = index.to_le_bytes()[0] ^ 0x5a;
+            }
+            Ok(())
+        }
+    }
+
+    /// Starts the one engine this test process may have.
+    fn engine() {
+        static START: Once = Once::new();
+        START.call_once(|| {
+            let tls = Tls::new(CountingEntropy).expect("start the TLS engine");
+            core::mem::forget(tls);
+            // SAFETY: the engine's random source is installed.
+            assert_eq!(unsafe { psa_crypto_init() }, 0);
+        });
+    }
+
+    /// The flags left after verifying `chain` (leaf first) against the bundle
+    /// alone, as a handshake does.
+    fn verify(chain: &[&[u8]]) -> u32 {
+        engine();
+        // SAFETY: both chains are initialized before use and freed after.
+        unsafe {
+            let mut certificates = core::mem::zeroed::<mbedtls_x509_crt>();
+            let mut trusted = core::mem::zeroed::<mbedtls_x509_crt>();
+            mbedtls_x509_crt_init(&mut certificates);
+            mbedtls_x509_crt_init(&mut trusted);
+            for der in chain {
+                assert_eq!(
+                    mbedtls_x509_crt_parse_der(&mut certificates, der.as_ptr(), der.len()),
+                    0
+                );
+            }
+            let mut flags = 0;
+            let _ = mbedtls_x509_crt_verify(
+                &mut certificates,
+                &mut trusted,
+                null_mut(),
+                null(),
+                &mut flags,
+                Some(roots::verify),
+                null_mut(),
+            );
+            mbedtls_x509_crt_free(&mut certificates);
+            mbedtls_x509_crt_free(&mut trusted);
+            flags
+        }
+    }
 
     #[test]
-    fn plaintext_is_explicit_and_never_produces_a_tls_config() {
-        assert!(PlaintextTls.config().is_none());
+    fn missing_entropy_is_refused_before_the_engine_starts() {
+        let result = Tls::new(UnavailableEntropy);
+        assert!(matches!(result, Err(TlsError::EntropyUnavailable)));
+    }
+
+    #[test]
+    fn the_engine_starts_once() {
+        engine();
+        assert!(matches!(
+            Tls::new(CountingEntropy),
+            Err(TlsError::Initialize(_))
+        ));
+    }
+
+    #[test]
+    fn every_root_in_the_bundle_has_a_usable_key() {
+        engine();
+        let roots: std::vec::Vec<_> = roots::roots().collect();
+        assert_eq!(roots.len(), roots::count());
+        assert!(roots.len() > 100, "only {} roots", roots.len());
+        assert!(roots.windows(2).all(|pair| pair[0].name <= pair[1].name));
+        for root in roots {
+            // SAFETY: the context is initialized before use and freed after.
+            unsafe {
+                let mut key = core::mem::zeroed::<mbedtls_pk_context>();
+                mbedtls_pk_init(&mut key);
+                let parsed =
+                    mbedtls_pk_parse_public_key(&mut key, root.key.as_ptr(), root.key.len());
+                mbedtls_pk_free(&mut key);
+                assert_eq!(parsed, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn intermediates_signed_by_bundled_roots_are_trusted() {
+        assert_eq!(verify(&[R11]), 0, "RSA");
+        assert_eq!(verify(&[E5]), 0, "ECDSA");
+    }
+
+    #[test]
+    fn a_bundled_root_sent_by_the_server_is_trusted() {
+        assert_eq!(verify(&[ISRG_ROOT_X1]), 0);
+        assert_eq!(verify(&[R11, ISRG_ROOT_X1]), 0);
+        assert_eq!(verify(&[ISRG_ROOT_X2]), 0);
+    }
+
+    #[test]
+    fn a_tampered_signature_is_not_trusted() {
+        let mut tampered = R11.to_vec();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert_eq!(
+            verify(&[&tampered]) & MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+            MBEDTLS_X509_BADCERT_NOT_TRUSTED
+        );
+    }
+
+    #[test]
+    fn a_root_outside_the_bundle_is_not_trusted() {
+        assert_eq!(
+            verify(&[UNKNOWN_ROOT]) & MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+            MBEDTLS_X509_BADCERT_NOT_TRUSTED
+        );
     }
 }

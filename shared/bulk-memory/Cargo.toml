@@ -6,6 +6,7 @@ description = "POD-only containers backed by Platform-selected bulk memory"
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic.workspace = true
 allocator-api2 = { version = "0.3.1", default-features = false, features = ["alloc"] }
 bytemuck = { version = "1.25.2", default-features = false }
 

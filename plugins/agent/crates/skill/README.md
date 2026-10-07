@@ -29,8 +29,9 @@ Run `scripts/switch.lua`.
 Selected Plugins bundle immutable packages at
 `filesystem/workspace/resources/skills/<name>/`, which Agent sees at
 `/workspace/resources/skills/<name>/`. User-installed packages live in the
-Agent Plugin's durable `/data/skills/<name>/` tree. These locations differ only
-in lifecycle; both contribute to the same unique catalog.
+shared durable `/workspace/media/skills/<name>/` tree, where any Plugin that
+writes files can install them. These locations differ only in lifecycle; both
+contribute to the same unique catalog.
 
 `name` and `description` are required. `license`, `compatibility`, `metadata`,
 and the experimental `allowed-tools` field are optional. Frontmatter is YAML,
@@ -84,8 +85,10 @@ fn build() -> Result<(), barracuda_agent_skill::SkillError> {
 ```
 
 Root order does not affect selection. A skill name must be globally unique
-across every configured root; a duplicate fails construction or reload instead
-of selecting one copy. A failed reload preserves the previous valid snapshot.
+across every configured root; every copy of a duplicate is left out instead of
+selecting one. A malformed package is left out on its own, and
+`CatalogSnapshot::rejected` lists each left-out package with its reason. A
+reload that cannot list a root preserves the previous valid snapshot.
 The crate does not install, register, enable, disable, or persist activation
 state. Resource paths stay relative to the selected skill directory and cannot
 escape it.

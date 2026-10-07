@@ -14,6 +14,7 @@ crate-type = ["rlib"]
 cache_profile = []
 
 [dependencies]
+barracuda-agent-message = { path = "../message" }
 barracuda-bulk-memory.workspace = true
 barracuda-runtime-utils.workspace = true
 http-client.workspace = true
@@ -26,7 +27,7 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 getset = "0.1.7"
 ouroboros = { version = "0.18.5", default-features = false }
@@ -34,7 +35,7 @@ reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705c
 eventsource-stream = { version = "0.2.3", default-features = false }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 # Shape-only attempt/retry spans consumed by the firmware's barracuda-agent-trace subscriber.
-tracing = { version = "0.1", default-features = false }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing" }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true
@@ -44,9 +45,7 @@ serde_json = "1"
 anyhow = "1"
 # `block_on` for tests (smol family; replaces the removed local spin executor).
 futures-lite = "2"
-tempdir = "0.3"
 # Capturing subscriber used by the attempt/retry trace contract tests.
-barracuda-agent-trace = { path = "../trace" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

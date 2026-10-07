@@ -1,0 +1,28 @@
+name = "Time tool"
+description = "The Agent calls time_now through the agent-time adapter and answers."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "time_now", arguments = {} }]
+
+[[model.responses]]
+text = "I checked the clock."
+
+[[steps]]
+send = "What time is it?"
+reply_contains = ["I checked the clock."]
+kinds = ["tool"]
+tool_contains = ['"utc":"20']
+
+[logs]
+ready = ["UTC clock synchronized from network time"]
+allow = []
+
+[memory]
+# Host ordinary-heap peak was 188 KiB when this budget was set.
+heap_high_water_max = 204800

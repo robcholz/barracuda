@@ -8,16 +8,19 @@ description = "FAT backend for the Barracuda VFS"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-vfs.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 hadris-fat = { version = "2.1", default-features = false, features = ["alloc", "async", "read", "write", "lfn"] }
 hadris-io = { version = "2.1", default-features = false, features = ["alloc", "async"] }
-embassy-sync = { workspace = true }
+# Enables hadris-fat's spin locks on targets without native atomic CAS.
+spin = { version = "0.12", default-features = false, features = ["portable_atomic"] }
+embassy-sync.workspace = true
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
-embassy-futures = { workspace = true }
+embassy-futures.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

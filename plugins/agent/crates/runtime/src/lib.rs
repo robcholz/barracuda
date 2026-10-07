@@ -5,6 +5,9 @@
 //! adapter crates above this layer.
 
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 // Public subsystem handles share ownership inside one RuntimeService task.
 #![allow(clippy::arc_with_non_send_sync)]
 
@@ -13,9 +16,10 @@ extern crate alloc;
 mod service;
 mod worker;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::cell::{Cell, RefCell};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
@@ -276,18 +280,6 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// Registers one tool group discovered during Plugin startup.
-    ///
-    /// If durable runtime state is still loading, the group is installed into
-    /// the Tool Registry as soon as it becomes available.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuntimeError::Tool`] when the Tool Registry rejects the group.
-    pub fn register_tool_group(&self, group: ToolGroup) -> RuntimeResult<()> {
-        self.tool_registry.register_group(group)
-    }
-
     /// Start every registered tool.
     ///
     /// # Errors
@@ -385,15 +377,17 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tool_registry_capability_tests {
-    use alloc::{boxed::Box, sync::Arc, vec};
+    use alloc::{boxed::Box, vec};
 
     use barracuda_agent_persistence::Persistence;
+    use barracuda_agent_tool::ToolSetSource;
     use barracuda_agent_tool::{
         DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolDetachUpdate,
         ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
     };
     use barracuda_platform_test::memory_vfs;
     use futures_lite::{future::block_on, StreamExt as _};
+    use portable_atomic_util::Arc;
 
     use super::{AgentToolRegistry, ToolGroup, ToolLifecycle};
 

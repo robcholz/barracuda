@@ -107,7 +107,7 @@ impl WorkflowService {
             .position(|workflow| &workflow.id == workflow_id)
         else {
             return Err(WorkflowServiceError::Rejected(
-                WorkflowControlRejection::Persistence,
+                WorkflowControlRejection::NotUnloadable,
             ));
         };
         next_catalog.remove(position);
@@ -131,8 +131,26 @@ impl WorkflowService {
         self.view.info()
     }
 
+    /// Returns whether a loaded Workflow would run for an untopiced `E`.
+    #[must_use]
+    pub fn has_listener<E>(&self) -> bool
+    where
+        E: Event,
+    {
+        self.control.has_listener::<E>()
+    }
+
+    /// Waits until `E`'s queued and running executions fall below the
+    /// Runtime's backlog limit.
+    pub async fn ready_for<E>(&self)
+    where
+        E: Event,
+    {
+        self.control.ready_for::<E>().await;
+    }
+
     /// Emits one typed Event directly into Workflow matching.
-    pub fn emit<E>(&self, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit<E>(&self, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -140,7 +158,7 @@ impl WorkflowService {
     }
 
     /// Emits one typed Event with a topic filter.
-    pub fn emit_to<E>(&self, topic: Topic, input: WorkflowValue) -> Result<(), EmitError>
+    pub fn emit_to<E>(&self, topic: Topic, input: impl Into<JsonText>) -> Result<(), EmitError>
     where
         E: Event,
     {
@@ -148,7 +166,7 @@ impl WorkflowService {
     }
 
     /// Emits an Event whose identity is selected at runtime.
-    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: WorkflowValue) {
+    pub fn emit_event(&self, event_id: EventId, topic: Option<Topic>, input: impl Into<JsonText>) {
         self.control.emit_event(event_id, topic, input);
     }
 
@@ -368,6 +386,15 @@ mod tests {
             .expect("valid catalog");
             assert_eq!(persisted.len(), 1);
             assert_eq!(persisted[0]["id"], "saved");
+
+            let bundled = WorkflowId::try_from("bundled").expect("Workflow ID");
+            assert!(matches!(
+                service.unload(&bundled).await,
+                Err(WorkflowServiceError::Rejected(
+                    WorkflowControlRejection::NotUnloadable
+                ))
+            ));
+            assert_eq!(service.definitions().len(), 2);
         });
     }
 

@@ -1,0 +1,52 @@
+name = "Edge: live subagent limit"
+description = "A Session keeps at most 3 live subagents across every depth. root -> worker -> worker -> worker through subagent_run fills the limit, so the deepest worker's spawn is rejected; each subagent_run blocks its caller, so model calls are strictly ordered."
+
+[model]
+mode = "scripted"
+
+# call 0 (root, agent-1)
+[[model.responses]]
+request_contains = ["You are the user-facing assistant"]
+tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "first", goal = "First goal: delegate further.", timeout_ms = 60000 } }]
+
+# call 1 (agent-2, live: 1)
+[[model.responses]]
+request_contains = ["First goal: delegate further."]
+tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "second", goal = "Second goal: delegate further.", timeout_ms = 50000 } }]
+
+# call 2 (agent-3, live: 2)
+[[model.responses]]
+request_contains = ["Second goal: delegate further."]
+tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "third", goal = "Third goal: try one more.", timeout_ms = 40000 } }]
+
+# call 3 (agent-4, live: 3): a fourth subagent exceeds the limit.
+[[model.responses]]
+request_contains = ["Third goal: try one more."]
+tool_calls = [{ name = "subagent_spawn", arguments = { kind = "worker", name = "fourth", goal = "g", timeout_ms = 1000 } }]
+
+# call 4 (agent-4): the rejection, as the model sees it.
+[[model.responses]]
+request_contains = [
+  "tool invocation rejected: at most 3 subagents may be live at once; wait for one to finish or delete one before spawning another",
+]
+text = "third done"
+
+# call 5 (agent-3)
+[[model.responses]]
+request_contains = ["[subagent] id: agent-4, result: true, message: third done"]
+text = "second done"
+
+# call 6 (agent-2)
+[[model.responses]]
+request_contains = ["[subagent] id: agent-3, result: true, message: second done"]
+text = "first done"
+
+# call 7 (root)
+[[model.responses]]
+request_contains = ["[subagent] id: agent-2, result: true, message: first done"]
+text = "The subagent limit held."
+
+[[steps]]
+send = "Delegate a deep chain of tasks."
+reply_contains = ["The subagent limit held."]
+tool_contains = ["[subagent] id: agent-2, result: true, message: first done"]

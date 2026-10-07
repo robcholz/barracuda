@@ -1,0 +1,74 @@
+name = "Time tool edges"
+description = "time_now is hidden until its group loads, is not callable in the same response that loads it, rejects arguments, and reports re-loads."
+
+[model]
+mode = "scripted"
+
+# Case 1: time_now before tool_load: hidden group tool is not found (set.rs:698-713)
+[[model.responses]]
+tool_calls = [{ name = "time_now", arguments = {} }]
+
+[[model.responses]]
+request_contains = ['tool not found: time_now']
+text = "Case 1 checked."
+
+# Case 2: tool_load and time_now in one response: calls are classified before tool_load runs
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }, { name = "time_now", arguments = {} }]
+
+[[model.responses]]
+text = "Case 2 checked."
+
+# Case 3: time_now after the load returns RFC3339 UTC milliseconds (agent-time lib.rs:65,85-94)
+[[model.responses]]
+tool_calls = [{ name = "time_now", arguments = {} }]
+
+[[model.responses]]
+request_contains = ['\"utc\":\"20']
+text = "Case 3 checked."
+
+# Case 4: unexpected argument is rejected by the empty-object schema
+[[model.responses]]
+tool_calls = [{ name = "time_now", arguments = { timezone = "UTC" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.timezone: AdditionalProperty']
+text = "Case 4 checked."
+
+# Case 5: loading an already loaded group reports already_loaded (tool_discovery/tools.rs:61-67)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
+
+[[model.responses]]
+text = "Case 5 checked."
+
+[[steps]]
+send = "What time is it?"
+reply_contains = ["Case 1 checked."]
+tool_contains = ['tool not found: time_now']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Load and read the clock together."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['"available_next_turn":true', 'tool not found: time_now']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Read the clock."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['"utc":"20', 'Z"}']
+
+[[steps]]
+send = "Read the clock in UTC."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.timezone: AdditionalProperty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Load the clock again."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['{"already_loaded":true,"group_id":"time","loaded":true}']
+
+[logs]
+ready = ['UTC clock synchronized from network time']

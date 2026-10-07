@@ -6,10 +6,12 @@
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory provider.
 
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 
+use portable_atomic_util::Arc;
 use serde_json::json;
 
+use barracuda_agent_memory::ChatMessage;
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -65,7 +67,7 @@ where
         api_manager: SharedApiManager,
         llm_factory: &ModelApiFactory<Tcp, Resolver>,
     ) -> Arc<dyn Extractor> {
-        Arc::new(Self::new(api_manager, llm_factory))
+        Arc::from(Box::new(Self::new(api_manager, llm_factory)) as Box<dyn Extractor>)
     }
 }
 
@@ -82,7 +84,9 @@ where
                 render_existing(input.existing),
                 input.transcript
             );
-            let messages = [json!({ "role": "user", "content": prompt })];
+            let messages = [ChatMessage::new(
+                &json!({ "role": "user", "content": prompt }),
+            )];
 
             let tool_schemas = extraction_tools.schemas().map_err(ExtractError::from)?;
             let request =

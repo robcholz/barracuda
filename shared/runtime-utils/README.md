@@ -1,13 +1,12 @@
 # barracuda-runtime-utils
 
-Small, dependency-light helpers shared across the barracuda Rust crates. Four things
-live here, all used widely enough to deserve a single home rather than being
-copied per crate:
+Small, dependency-light helpers shared across the barracuda Rust crates:
 
-1. **`stream::StreamPart`** — shared `Delta`/`End` vocabulary for logical streams.
-2. **`yield_stream`** — safe single-task async generator adapters.
-3. **`TruncatedText`** — log-safe text truncation.
+1. **`Cancel` / `CancellationFlag`** — cooperative cancellation signals.
+2. **`stream::StreamPart`** — shared `Delta`/`End` vocabulary for logical streams.
+3. **`yield_stream`** — safe single-task async generator adapters.
 4. **`define_prefixed_id!`** — the strongly typed, wire-prefixed id newtype macro.
+5. **`define_id_allocator!`** — a monotonic allocator for a prefixed id type.
 
 The crate name is `barracuda-runtime-utils`; the library is imported as `barracuda_runtime_utils`.
 
@@ -33,29 +32,9 @@ this wrapper.
 the consumer takes it. The implementation uses `Rc<RefCell>` and is therefore
 intentionally local (`!Send`) and suitable for one cooperative executor task.
 
-## `TruncatedText<T>` — log-safe truncation
-
-A `Display` wrapper that renders at most `limit` bytes of text, always backing
-off to a UTF-8 char boundary, and appends `"..."` when it had to cut. It never
-allocates and never panics on multi-byte input.
-
-```rust
-use barracuda_runtime_utils::TruncatedText;
-
-// Default ceiling: 96 bytes on every target.
-log::debug!("payload = {}", TruncatedText::new(&body));
-
-// Explicit, testable ceiling.
-let s = TruncatedText::with_limit(&body, 96).to_string();
-```
-
-The default limit is 96 bytes on every target. This keeps firmware, host tests,
-and CLI behavior consistent and prevents unexpectedly large log records. Use
-`with_limit` to override it at a call site.
-
 ## `define_prefixed_id!` — wire-prefixed id newtypes
 
-Defines a `usize` newtype whose wire form carries a fixed string prefix
+Defines a `u32` newtype whose wire form carries a fixed string prefix
 (`session-1`, `task-2`, …). This gives each domain id its own type — a `TaskId`
 can't be passed where a `SessionId` is expected — while keeping a compact,
 human-readable serialized form.
@@ -74,7 +53,7 @@ assert_eq!(SessionId::from_wire("session-1").unwrap(), id);
 Each generated type derives `Clone, Copy, Debug, PartialEq, Eq, Hash` and
 implements:
 
-- `new(usize)` / `From<usize>` — construct from the raw number.
+- `new(u32)` / `From<u32>` — construct from the raw number.
 - `to_wire()` / `Display` — render to the prefixed string.
 - `from_wire(&str)` / `FromStr` — parse and validate the prefix.
 - `Serialize` / `Deserialize` — (de)serialize **by the wire string**, so the
@@ -86,8 +65,7 @@ is exposed as the shared parsing primitive the macro builds on.
 
 ## Where it fits
 
-`barracuda-runtime-utils` has no platform dependencies (only `thiserror`), so it compiles and
+`barracuda-runtime-utils` has no platform dependencies, so it compiles and
 tests identically on device and host. Higher-level crates such as `barracuda_agent_runtime`
 build their domain ids (`IterationId`, `TaskId`, `StepId`, `WorkerId`,
-`SessionId`) with `define_prefixed_id!` and use `TruncatedText` whenever
-untrusted or large strings reach a log or trace line.
+`SessionId`) with `define_prefixed_id!`.

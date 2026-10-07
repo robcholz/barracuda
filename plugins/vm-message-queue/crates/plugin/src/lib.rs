@@ -4,13 +4,14 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use barracuda_runtime_utils::{Cancel, CancellationFlag};
+use barracuda_vm_plugin::{Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use futures_util::future::{AbortHandle, Abortable};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// Maximum number of distinct queue keys.
@@ -34,12 +35,6 @@ impl MessageQueuePlugin {
     }
 }
 
-impl Default for MessageQueuePlugin {
-    fn default() -> Self {
-        Self
-    }
-}
-
 impl Plugin for MessageQueuePlugin {
     fn register<Storage>(
         &mut self,
@@ -59,7 +54,8 @@ impl Plugin for MessageQueuePlugin {
     }
 }
 
-type Queue = Channel<CriticalSectionRawMutex, Vec<u8>, QUEUE_DEPTH>;
+/// Queued payloads live in bulk memory; the channel itself holds only handles.
+type Queue = Channel<CriticalSectionRawMutex, Bytes, QUEUE_DEPTH>;
 
 struct MessageQueuePackage {
     state: Arc<SharedState>,
@@ -81,7 +77,7 @@ struct SharedState {
 }
 
 struct Lifecycle {
-    operations: Vec<(usize, AbortHandle)>,
+    operations: Vec<(usize, Arc<CancellationFlag>)>,
 }
 
 impl SharedState {
@@ -123,7 +119,7 @@ impl SharedState {
         Ok(queue)
     }
 
-    async fn push(self: Arc<Self>, key: String, message: Vec<u8>) -> Result<()> {
+    async fn push(&self, key: String, message: Bytes) -> Result<()> {
         if message.len() > MESSAGE_MAX_LEN {
             return Err(Error::runtime(format!(
                 "message exceeds {MESSAGE_MAX_LEN} bytes"
@@ -133,48 +129,46 @@ impl SharedState {
         self.run(async move { queue.send(message).await }).await
     }
 
-    async fn receive(self: Arc<Self>, key: String) -> Result<Vec<u8>> {
+    async fn receive(&self, key: String) -> Result<Bytes> {
         let queue = self.queue(key)?;
         self.run(async move { queue.receive().await }).await
     }
 
-    async fn run<T>(
-        self: Arc<Self>,
-        operation: impl core::future::Future<Output = T>,
-    ) -> Result<T> {
+    async fn run<T>(&self, operation: impl core::future::Future<Output = T>) -> Result<T> {
         let id = self.next_operation.fetch_add(1, Ordering::Relaxed);
-        let (handle, registration) = AbortHandle::new_pair();
+        let cancellation = Arc::new(CancellationFlag::new());
         {
             let mut lifecycle = self.lifecycle.lock();
             if !self.active.load(Ordering::Acquire) {
                 return Err(revoked_error());
             }
-            lifecycle.operations.push((id, handle));
+            lifecycle.operations.push((id, Arc::clone(&cancellation)));
         }
-        let _guard = OperationGuard {
-            state: Arc::clone(&self),
-            id,
-        };
-        Abortable::new(operation, registration)
-            .await
-            .map_err(|_| revoked_error())
+        let _guard = OperationGuard { state: self, id };
+        // Revocation wins over an operation that is ready in the same poll.
+        let revoked = core::pin::pin!(Cancel::new(&cancellation).cancelled());
+        let operation = core::pin::pin!(operation);
+        match futures_util::future::select(revoked, operation).await {
+            futures_util::future::Either::Left(_) => Err(revoked_error()),
+            futures_util::future::Either::Right((output, _)) => Ok(output),
+        }
     }
 
     fn revoke(&self) {
         let mut lifecycle = self.lifecycle.lock();
         self.active.store(false, Ordering::Release);
-        for (_, handle) in lifecycle.operations.drain(..) {
-            handle.abort();
+        for (_, cancellation) in lifecycle.operations.drain(..) {
+            cancellation.cancel();
         }
     }
 }
 
-struct OperationGuard {
-    state: Arc<SharedState>,
+struct OperationGuard<'a> {
+    state: &'a SharedState,
     id: usize,
 }
 
-impl Drop for OperationGuard {
+impl Drop for OperationGuard<'_> {
     fn drop(&mut self) {
         self.state
             .lifecycle
@@ -189,7 +183,7 @@ impl Package for MessageQueuePackage {
         let push = Arc::clone(&self.state);
         let receive = Arc::clone(&self.state);
         lua.register_lib("message_queue", move |package| {
-            package.register_async("push", move |(key, message): (String, Vec<u8>)| {
+            package.register_async("push", move |(key, message): (String, Bytes)| {
                 let state = Arc::clone(&push);
                 async move { Some(state.push(key, message).await) }
             })?;
@@ -226,6 +220,10 @@ mod tests {
     use futures_lite::future::{block_on, poll_once, zip};
 
     use super::*;
+
+    fn bytes(value: &[u8]) -> Bytes {
+        Bytes::copy_from(value).expect("allocate message")
+    }
 
     fn lua_with(package: &MessageQueuePackage) -> Lua {
         let mut lua = Lua::new().expect("create Lua");
@@ -272,15 +270,15 @@ mod tests {
     fn empty_receive_waits_until_push() {
         let state = Arc::new(SharedState::new());
         block_on(async {
-            let receive = Arc::clone(&state).receive("key".into());
+            let receive = state.receive("key".into());
             let push = async {
                 state
-                    .push("key".into(), b"ready".to_vec())
+                    .push("key".into(), bytes(b"ready"))
                     .await
                     .expect("push");
             };
             let (message, ()) = zip(receive, push).await;
-            assert_eq!(message.expect("receive"), b"ready");
+            assert_eq!(&*message.expect("receive"), b"ready");
         });
     }
 
@@ -289,20 +287,14 @@ mod tests {
         let state = Arc::new(SharedState::new());
         block_on(async {
             for value in 0..QUEUE_DEPTH {
-                Arc::clone(&state)
-                    .push("key".into(), vec![value as u8])
+                state
+                    .push("key".into(), bytes(&[value as u8]))
                     .await
                     .expect("fill");
             }
-            let mut blocked = pin!(Arc::clone(&state).push("key".into(), b"last".to_vec()));
+            let mut blocked = pin!(state.push("key".into(), bytes(b"last")));
             assert!(poll_once(blocked.as_mut()).await.is_none());
-            assert_eq!(
-                Arc::clone(&state)
-                    .receive("key".into())
-                    .await
-                    .expect("receive"),
-                vec![0]
-            );
+            assert_eq!(&*state.receive("key".into()).await.expect("receive"), [0]);
             blocked.await.expect("unblocked push");
         });
     }
@@ -311,36 +303,26 @@ mod tests {
     fn limits_return_clear_errors() {
         let state = Arc::new(SharedState::new());
         block_on(async {
+            assert!(state.push(String::new(), bytes(&[])).await.is_err());
             assert!(
-                Arc::clone(&state)
-                    .push(String::new(), vec![])
+                state
+                    .push("k".repeat(KEY_MAX_LEN + 1), bytes(&[]))
                     .await
                     .is_err()
             );
             assert!(
-                Arc::clone(&state)
-                    .push("k".repeat(KEY_MAX_LEN + 1), vec![])
-                    .await
-                    .is_err()
-            );
-            assert!(
-                Arc::clone(&state)
-                    .push("large".into(), vec![0; MESSAGE_MAX_LEN + 1])
+                state
+                    .push("large".into(), bytes(&[0; MESSAGE_MAX_LEN + 1]))
                     .await
                     .is_err()
             );
             for index in 0..MAX_KEYS {
-                Arc::clone(&state)
-                    .push(format!("key-{index}"), vec![])
+                state
+                    .push(format!("key-{index}"), bytes(&[]))
                     .await
                     .expect("create key");
             }
-            assert!(
-                Arc::clone(&state)
-                    .push("overflow".into(), vec![])
-                    .await
-                    .is_err()
-            );
+            assert!(state.push("overflow".into(), bytes(&[])).await.is_err());
         });
     }
 
@@ -357,13 +339,10 @@ mod tests {
         let state = Arc::new(SharedState::new());
         block_on(async {
             for _ in 0..QUEUE_DEPTH {
-                Arc::clone(&state)
-                    .push("full".into(), vec![])
-                    .await
-                    .expect("fill");
+                state.push("full".into(), bytes(&[])).await.expect("fill");
             }
-            let mut push = pin!(Arc::clone(&state).push("full".into(), vec![]));
-            let mut receive = pin!(Arc::clone(&state).receive("empty".into()));
+            let mut push = pin!(state.push("full".into(), bytes(&[])));
+            let mut receive = pin!(state.receive("empty".into()));
             assert!(poll_once(push.as_mut()).await.is_none());
             assert!(poll_once(receive.as_mut()).await.is_none());
             state.revoke();
@@ -380,8 +359,8 @@ mod tests {
                 let state = Arc::clone(&state);
                 async move {
                     for value in range {
-                        Arc::clone(&state)
-                            .push("shared".into(), vec![value])
+                        state
+                            .push("shared".into(), bytes(&[value]))
                             .await
                             .expect("push");
                     }
@@ -392,12 +371,7 @@ mod tests {
                 async move {
                     let mut values = Vec::new();
                     for _ in 0..16 {
-                        values.push(
-                            Arc::clone(&state)
-                                .receive("shared".into())
-                                .await
-                                .expect("receive")[0],
-                        );
+                        values.push(state.receive("shared".into()).await.expect("receive")[0]);
                     }
                     values
                 }

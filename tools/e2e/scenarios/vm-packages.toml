@@ -1,0 +1,47 @@
+name = "VM system packages"
+description = "One Lua run uses the http, os.time/os.date, systeminfo, and webserver packages; the served mount answers a real HTTP request."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = """
+local http = require('http')
+local response = assert(http.request({ method = 'GET', url = 'http://10.42.0.1:18787/_llm_tape/health' }))
+print('http', response.status)
+print('year', os.date('!*t', os.time()).year >= 2026)
+local info = require('systeminfo')
+print('board', info.board.name, info.platform.name)
+local webserver = require('webserver')
+webserver.serve({
+  mount = 'e2e',
+  handler = function(request)
+    return { status = 200, content_type = 'text/plain', body = 'served ' .. request.path }
+  end,
+})
+""" } }]
+
+[[model.responses]]
+text = "The site is up."
+
+[[steps]]
+send = "Start the site."
+reply_contains = ["The site is up."]
+tool_contains = ['{"run_id":1}']
+
+[[http]]
+when = "after"
+path = "/vm/e2e/hello"
+body_contains = ["served /hello"]
+
+[[http]]
+when = "after"
+path = "/vm/unknown/"
+status = 404
+
+[memory]
+# Host ordinary-heap peak was 233 KiB when this budget was set.
+heap_high_water_max = 253952

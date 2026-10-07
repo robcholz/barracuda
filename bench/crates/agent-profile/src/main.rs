@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::{collections::BTreeMap, io};
 
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
-use barracuda_model_api::{BackendKind, ChatRequest, ModelApi, ModelApiConfig};
+use barracuda_model_api::{BackendKind, ChatMessage, ChatRequest, ModelApi, ModelApiConfig};
 use barracuda_platform_test::{memory_vfs, NeverStack, ScriptStep, ScriptedStack};
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 use barracuda_runtime_utils::Cancel;
@@ -80,10 +80,10 @@ fn profile_tape_replay(output_file: &Path) -> Result<AllocationStats, Box<dyn st
 
     block_on(async {
         for turn in 0..responses.len() {
-            let messages = [serde_json::json!({
+            let messages = [ChatMessage::new(&serde_json::json!({
                 "role": "user",
                 "content": format!("deterministic replay turn {turn}"),
-            })];
+            }))];
             let request = ChatRequest::new("profiling replay", &messages);
             let mut stream = api.chat_stream(&request, Cancel::never()).await?;
             while let Some(event) = stream.next().await {

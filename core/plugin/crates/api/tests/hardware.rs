@@ -1,6 +1,6 @@
 //! The shared Plugin context carries the complete HAL without splitting it.
 
-use std::sync::Arc;
+use portable_atomic_util::Arc;
 
 use barracuda_board_hal::{BoardResources, ExposedIo};
 use barracuda_platform_test::never_embassy_stack;

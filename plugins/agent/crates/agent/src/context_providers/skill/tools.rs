@@ -1,19 +1,17 @@
 //! Skill tools owned by the skill context provider.
 
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{borrow::ToOwned, format, string::String, string::ToString};
 use core::cell::RefCell;
 
+use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_skill::{
     SkillError, SkillName, SkillResourcePage, SkillSet, DEFAULT_RESOURCE_READ_BYTES,
 };
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput,
+    ToolSpec,
 };
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::lock_skill_set;
@@ -45,6 +43,11 @@ pub(super) struct ListSkillTool {
 
 impl ToolSpec for ListSkillTool {
     tool_metadata!("skill_list");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ListSkillTool {
@@ -69,6 +72,11 @@ pub(super) struct ReadSkillTool {
 
 impl ToolSpec for ReadSkillTool {
     tool_metadata!("skill_read");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReadSkillTool {
@@ -103,6 +111,11 @@ pub(super) struct ReadSkillResourceTool {
 
 impl ToolSpec for ReadSkillResourceTool {
     tool_metadata!("skill_resource_read");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReadSkillResourceTool {
@@ -166,6 +179,11 @@ pub(super) struct ReloadSkillsTool {
 
 impl ToolSpec for ReloadSkillsTool {
     tool_metadata!("skill_reload");
+
+    /// Re-reads the skill roots; nothing on disk changes.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReloadSkillsTool {
@@ -181,11 +199,37 @@ impl ToolHandler for ReloadSkillsTool {
                     ok: false,
                 });
             }
+            let rejected = skills.catalog().rejected().to_vec();
+            for error in &rejected {
+                log::warn!("skill package left out of the catalog: {error}");
+            }
             Ok(ToolOutput {
-                content: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
+                content: reload_success_content(&rejected),
                 ok: true,
             })
         })
+    }
+}
+
+fn reload_success_content(rejected: &[SkillError]) -> String {
+    let mut content = String::from("Skills refreshed. Use skill_list to inspect the catalog.");
+    if !rejected.is_empty() {
+        content.push_str("\nThese skill packages were left out:");
+        for error in rejected {
+            content.push_str("\n- ");
+            content.push_str(&rejection_reason(error));
+        }
+    }
+    content
+}
+
+/// Why a package was left out, without the backing directories.
+fn rejection_reason(error: &SkillError) -> String {
+    match error {
+        SkillError::DuplicateSkill { name, .. } => {
+            format!("duplicate skill \"{name}\": every copy is left out until one is removed")
+        }
+        _ => error.to_string(),
     }
 }
 
@@ -200,13 +244,15 @@ fn reload_failure_content(error: &SkillError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::boxed::Box;
+    use barracuda_agent_skill::SkillSetSource;
     use core::cell::RefCell;
 
     use barracuda_agent_skill::FsSkillRegistry;
     use barracuda_agent_tool::{EmptyArgs, ToolHandler};
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
+    use portable_atomic_util::Arc;
 
     use super::{
         ReadArgs, ReadResourceArgs, ReadSkillResourceTool, ReadSkillTool, ReloadSkillsTool,
@@ -326,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_error_hides_backend_directories() -> Result<(), Box<dyn core::error::Error>> {
+    fn reload_report_hides_backend_directories() -> Result<(), Box<dyn core::error::Error>> {
         block_on(async {
             let filesystem = memory_vfs().await?;
             filesystem
@@ -361,7 +407,7 @@ mod tests {
             .invoke(EmptyArgs {})
             .await?;
 
-            assert!(!output.ok);
+            assert!(output.ok);
             assert!(output.content.contains("duplicate skill \"example\""));
             assert!(!output.content.contains("user-skills"));
             assert!(!output.content.contains("bundled-skills"));

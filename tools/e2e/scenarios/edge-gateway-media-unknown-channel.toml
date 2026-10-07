@@ -1,0 +1,26 @@
+name = "Gateway media to an unregistered channel"
+description = "gateway_send_media start refuses an unregistered channel at once, so no stream exists and the next chunk reports unknown_stream."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "start", stream_id = "u1", sequence = 0, channel = "telegram", conversation_id = "conversation", kind = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send_media", arguments = { action = "chunk", stream_id = "u1", sequence = 1, content_base64 = "aGVsbG8=" } }]
+
+[[model.responses]]
+text = "Unroutable media checked."
+
+[[steps]]
+send = "Send media to telegram."
+reply_contains = ["Unroutable media checked."]
+tool_contains = [
+  '"channel": "telegram", "conversation_id": "conversation", "kind": "file"}{"error":"unknown_channel"}',
+  '{"action": "chunk", "stream_id": "u1", "sequence": 1, "content_base64": "aGVsbG8="}{"error":"unknown_stream"}',
+]
+tool_errors_allowed = true

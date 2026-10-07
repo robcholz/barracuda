@@ -1,0 +1,66 @@
+name = "Workflow runtime link failures"
+description = "Load-time validation checks argument names but not Event-input fields or value types: a mapping from a missing Event field and a numeric vm.run source both load, then fail when their Event fires; a mapping from a present Event field runs."
+
+# The two failing executions are logged at ERROR by the Workflow runtime
+# (`Workflow `<id>` failed: ...`); only those exact lines are allowed.
+# `--e2e-src` is both the schedule ID and, through `$event.input.id`, the Lua
+# source: a Lua comment, so the run succeeds with no output.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-missing", match = { event = "scheduler.triggered", topic = "e2e-missing" }, steps = [{ call = "vm.run", arguments = { source = "$event.input.missing" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-typed", match = { event = "scheduler.triggered", topic = "e2e-typed" }, steps = [{ call = "vm.run", arguments = { source = 42 } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-event-src", match = { event = "scheduler.triggered", topic = "--e2e-src" }, steps = [{ call = "vm.run", arguments = { source = "$event.input.id" } }] } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-missing", trigger = { type = "once", at = "${now+12s}" } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-typed", trigger = { type = "once", at = "${now+14s}" } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "--e2e-src", trigger = { type = "once", at = "${now+16s}" } } }]
+
+[[model.responses]]
+text = "All three Workflows are scheduled."
+
+[[steps]]
+send = "Load and schedule the three Workflows."
+reply_contains = ["All three Workflows are scheduled."]
+tool_contains = [
+    '"arguments": {"source": "$event.input.missing"}}]}{}',
+    '"arguments": {"source": 42}}]}{}',
+    '"arguments": {"source": "$event.input.id"}}]}{}',
+    '{"id":"e2e-missing"}',
+    '{"id":"e2e-typed"}',
+    '{"id":"--e2e-src"}',
+]
+
+[logs]
+ready = ["UTC clock synchronized from network time"]
+await = [
+    "schedule `e2e-missing` triggered run 1",
+    "Workflow `e2e-missing` failed: Workflow Event input omitted field missing",
+    "schedule `e2e-typed` triggered run 1",
+    'Workflow `e2e-typed` failed: Workflow Action step 0 failed: invalid Workflow Action request: JSON schema validation failed at \$\.source: Type \{ expected: String \}',
+    "schedule `--e2e-src` triggered run 1",
+    "VM run 1 finished: Success, 0 output line",
+]
+await_seconds = 45
+allow = [
+    "Workflow `e2e-missing` failed: Workflow Event input omitted field missing",
+    'Workflow `e2e-typed` failed: Workflow Action step 0 failed: invalid Workflow Action request: JSON schema validation failed at \$\.source: Type \{ expected: String \}',
+]
+forbid = ['\bERROR\b', 'panicked at', 'VM run 2 started']

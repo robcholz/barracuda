@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
         'replay', help='serve a tape with its original timing'
     )
     replay.add_argument('--listen', default=DEFAULT_LISTEN, metavar='HOST:PORT')
+    replay.add_argument(
+        '--capture-requests',
+        type=Path,
+        metavar='DIR',
+        help='write each matched request body to DIR (test harnesses only)',
+    )
     replay.add_argument('tape', type=Path, metavar='TAPE')
     _add_log_level_argument(replay)
     return parser
@@ -57,7 +63,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             app = create_recorder_app(upstream=args.upstream, output=args.output)
             detail = f'upstream={args.upstream} output={args.output}'
         else:
-            app = create_replay_app(args.tape)
+            app = create_replay_app(args.tape, args.capture_requests)
             detail = f'tape={args.tape}'
     except (FileExistsError, OSError, TapeFormatError, ValueError) as exc:
         logger.error('startup failed error={}', exc)

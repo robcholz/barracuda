@@ -2,6 +2,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use barracuda_agent_message::ChatMessage;
 use barracuda_runtime_utils::stream::StreamPart;
 use serde::{Deserialize, Serialize};
 
@@ -303,14 +304,14 @@ pub struct ChatJsonResponse<T> {
 
 /// A request for [`crate::ModelApi::chat`].
 ///
-/// `messages` is a JSON array of chat messages (e.g.
-/// `[{ "role": "user", "content": "..." }]`). Tools are optional; the per-call
+/// `messages` is the chat history as shared [`ChatMessage`] encodings (e.g.
+/// `{ "role": "user", "content": "..." }`). Tools are optional; the per-call
 /// [`RetryPolicy`] defaults and is overridable via
 /// [`with_retry`](ChatRequest::with_retry).
 ///
 /// ```
-/// use barracuda_model_api::{ChatRequest, RetryPolicy};
-/// let messages = [serde_json::json!({ "role": "user", "content": "hi" })];
+/// use barracuda_model_api::{ChatRequest, ChatMessage, RetryPolicy};
+/// let messages = [ChatMessage::new(&serde_json::json!({ "role": "user", "content": "hi" }))];
 /// let req = ChatRequest::new("be terse", &messages)
 ///     .with_retry(RetryPolicy::fixed(3, 250));
 /// # let _ = req;
@@ -319,13 +320,13 @@ pub struct ChatJsonResponse<T> {
 pub struct ChatRequest<'a> {
     /// System prompt / instructions.
     pub system_prompt: &'a str,
-    /// JSON array of chat messages (the persisted history segment).
-    pub messages: &'a [serde_json::Value],
+    /// Chat messages (the persisted history segment).
+    pub messages: &'a [ChatMessage],
     /// Ephemeral trailing messages appended after `messages` for this request
     /// only (never persisted). Kept as a separate segment so the history is not
     /// cloned to append them; the backend iterates `messages` then `reminders`.
-    /// Defaults to empty; set with [`with_reminders`](Self::with_reminders).
-    pub reminders: &'a [serde_json::Value],
+    /// Defaults to empty.
+    pub reminders: &'a [ChatMessage],
     /// Optional OpenAI-style tools JSON array.
     pub tools_json: Option<&'a str>,
     /// Per-call retry policy. Defaults to [`RetryPolicy::default`]; use
@@ -336,7 +337,7 @@ pub struct ChatRequest<'a> {
 impl<'a> ChatRequest<'a> {
     /// A tool-less chat request.
     #[must_use]
-    pub fn new(system_prompt: &'a str, messages: &'a [serde_json::Value]) -> Self {
+    pub fn new(system_prompt: &'a str, messages: &'a [ChatMessage]) -> Self {
         ChatRequest {
             system_prompt,
             messages,
@@ -350,13 +351,6 @@ impl<'a> ChatRequest<'a> {
     #[must_use]
     pub fn with_tools(mut self, tools_json: &'a str) -> Self {
         self.tools_json = Some(tools_json);
-        self
-    }
-
-    /// Attach ephemeral trailing reminder messages for this request only.
-    #[must_use]
-    pub fn with_reminders(mut self, reminders: &'a [serde_json::Value]) -> Self {
-        self.reminders = reminders;
         self
     }
 

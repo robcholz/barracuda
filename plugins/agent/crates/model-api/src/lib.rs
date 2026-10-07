@@ -1,4 +1,7 @@
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 
 //! `barracuda-model-api` — LLM client: OpenAI-/Anthropic-compatible chat, structured JSON
 //! output, and image inference over an injected HTTP transport.
@@ -71,6 +74,7 @@ mod transport;
 mod types;
 
 pub use backends::{BackendKind, ParseBackendKindError};
+pub use barracuda_agent_message::ChatMessage;
 pub use barracuda_runtime_utils::stream;
 pub use chat_stream::ChatStream;
 pub use client::{ModelApi, ModelApiFactory};
