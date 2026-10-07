@@ -364,13 +364,31 @@ impl LongTermMemory {
     /// capped at `limit`.
     ///
     /// Empty `labels` matches every live item (query/limit still apply).
+    /// The live item whose content matches `content` under the [`store`](Self::store)
+    /// dedup rule.
+    pub fn find_duplicate(&self, content: &str) -> Option<MemoryItem> {
+        let key = normalize(content);
+        self.lock()
+            .items
+            .iter()
+            .find(|item| normalize(&item.content) == key)
+            .cloned()
+    }
+
+    /// Labels match tags without regard to ASCII case, as tier routing does.
     pub fn recall(&self, labels: &[String], query: Option<&str>, limit: usize) -> Vec<MemoryItem> {
         let state = self.lock();
         let query = query.map(str::to_lowercase);
         let mut hits: Vec<MemoryItem> = state
             .items
             .iter()
-            .filter(|item| labels.is_empty() || item.tags.iter().any(|tag| labels.contains(tag)))
+            .filter(|item| {
+                labels.is_empty()
+                    || item
+                        .tags
+                        .iter()
+                        .any(|tag| labels.iter().any(|label| label.eq_ignore_ascii_case(tag)))
+            })
             .filter(|item| {
                 query
                     .as_deref()

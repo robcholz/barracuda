@@ -239,37 +239,42 @@ where
     }
 
     async fn reduce_agent_effects(&mut self) -> Result<Option<AgentEngineEvent>, AgentError> {
-        let mut effects = self.effect_inbox.drain();
+        let effects = self.effect_inbox.drain();
         if effects.len() > 1 {
+            // Every effect ends the turn with a message, and each tool already
+            // reported success, so the user gets all of them in order.
             let count = effects.len();
-            log::error!("Agent effect conflict: count={count}");
-            tracing::error!(name: "agent_effect_conflict", count = count as u64);
-            return Err(AgentError::ConflictingEffects { count });
+            log::warn!("Agent merged {count} turn-ending effects from one tool round");
+            tracing::warn!(name: "agent_effects_merged", count = count as u64);
         }
-        match effects.pop() {
-            Some(effect) => self.reduce_tool_effect(effect).await.map(Some),
+        let mut merged: Option<String> = None;
+        for effect in effects {
+            let (AgentEffect::Finish {
+                final_message: message,
+            }
+            | AgentEffect::Yield { message }) = effect;
+            match merged.as_mut() {
+                Some(text) => {
+                    text.push_str("\n\n");
+                    text.push_str(&message);
+                }
+                None => merged = Some(message),
+            }
+        }
+        match merged {
+            Some(message) => self.finish_with_message(message).await.map(Some),
             None => Ok(None),
         }
     }
 
-    async fn reduce_tool_effect(
+    /// Ends the task with `message` as its final assistant message.
+    async fn finish_with_message(
         &mut self,
-        effect: AgentEffect,
+        message: String,
     ) -> Result<AgentEngineEvent, AgentError> {
-        let message = match effect {
-            AgentEffect::Finish { final_message } => {
-                self.finish_effect_assistant(&final_message)?;
-                self.commit_active_turn().await?;
-                self.stop(StopReason::Completed);
-                final_message
-            }
-            AgentEffect::Yield { message } => {
-                self.finish_effect_assistant(&message)?;
-                self.commit_active_turn().await?;
-                self.stop(StopReason::Completed);
-                message
-            }
-        };
+        self.finish_effect_assistant(&message)?;
+        self.commit_active_turn().await?;
+        self.stop(StopReason::Completed);
         Ok(AgentEngineEvent::Finished(AgentOutcome::Completed(
             AgentCompletion::EffectOutput(message),
         )))

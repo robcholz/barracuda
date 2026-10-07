@@ -55,12 +55,17 @@ impl Clone for MemoryStores {
 }
 
 impl MemoryStores {
-    /// Store a draft in the tier determined by its tags.
+    /// Store a draft in the tier determined by its tags, unless either tier
+    /// already holds the same fact.
     pub(crate) async fn store(&self, draft: MemoryDraft) -> StoreOutcome {
-        match classify_tier(&draft) {
-            MemoryTier::Global => self.global.store(draft).await,
-            MemoryTier::Agent => self.agent.store(draft).await,
+        let (target, other) = match classify_tier(&draft) {
+            MemoryTier::Global => (&self.global, &self.agent),
+            MemoryTier::Agent => (&self.agent, &self.global),
+        };
+        if let Some(existing) = other.find_duplicate(&draft.content) {
+            return StoreOutcome::Duplicate(existing);
         }
+        target.store(draft).await
     }
 
     /// Recall across both stores (global first), capped at `limit` total.

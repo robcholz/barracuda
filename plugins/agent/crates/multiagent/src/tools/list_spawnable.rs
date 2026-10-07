@@ -1,5 +1,6 @@
+use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use super::super::policy::SpawnPolicy;
@@ -14,6 +15,11 @@ struct ListSpawnableAgentsTool {
 
 impl ToolSpec for ListSpawnableAgentsTool {
     tool_metadata!("subagent_list_spawnable");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 
     fn concurrent(&self) -> bool {
         true
