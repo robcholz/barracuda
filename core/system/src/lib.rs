@@ -308,13 +308,11 @@ where
         let cache = MemFs::new().into_backend();
         mount("/cache", cache, MountOptions::read_write()).await?;
         log::info!("mounted System cache filesystem");
+        // Only inserted media, mounted below it, are writable: a write to the
+        // empty namespace itself would land in RAM and could later be hidden
+        // by a slot mount of the same name.
         let removable_namespace = MemFs::new().into_backend();
-        mount(
-            "/removable",
-            removable_namespace,
-            MountOptions::read_write(),
-        )
-        .await?;
+        mount("/removable", removable_namespace, MountOptions::read_only()).await?;
         log::info!("mounted removable-filesystem namespace");
         let removable_storage = prepared.board_hal.peripherals.take_removable_storage();
         let mut plugins =

@@ -182,3 +182,46 @@ fn provisioned_partition_entry_mounts_without_formatting() {
         assert_eq!(vfs.read("/resource").await.unwrap(), b"bundled");
     });
 }
+
+#[test]
+fn littlefs_backend_keeps_any_utf8_name() {
+    embassy_futures::block_on(async {
+        let storage = Storage::new(MemoryFlash::new()).unwrap();
+        let littlefs = LittleFs::mount_or_format(storage).unwrap();
+        let vfs = Vfs::new();
+        vfs.mount("/data", littlefs.into_backend(), MountOptions::read_write())
+            .await
+            .unwrap();
+        vfs.create_dir_all("/data/笔记").await.unwrap();
+        for name in ["café ☕.txt", "100%.txt", "%41.txt"] {
+            let path = format!("/data/笔记/{name}");
+            vfs.write(&path, name.as_bytes()).await.unwrap();
+            assert_eq!(vfs.read(&path).await.unwrap(), name.as_bytes(), "{name}");
+        }
+        let mut names: Vec<String> = vfs
+            .read_dir("/data/笔记")
+            .await
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["%41.txt", "100%.txt", "café ☕.txt"]);
+        assert_eq!(
+            vfs.read_dir("/data")
+                .await
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .file_name(),
+            "笔记"
+        );
+        vfs.rename("/data/笔记/café ☕.txt", "/data/笔记/thé.txt")
+            .await
+            .unwrap();
+        assert_eq!(
+            vfs.read("/data/笔记/thé.txt").await.unwrap(),
+            "café ☕.txt".as_bytes()
+        );
+    });
+}

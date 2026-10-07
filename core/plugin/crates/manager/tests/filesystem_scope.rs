@@ -69,7 +69,7 @@ async fn manager_with_vfs() -> (PluginManager<MemoryPartition>, Vfs) {
         .mount(
             "/removable",
             MemFs::new().into_backend(),
-            MountOptions::read_write(),
+            MountOptions::read_only(),
         )
         .await
         .expect("mount removable namespace");
@@ -93,6 +93,12 @@ fn existing_plugin_view_observes_removable_filesystems_mounted_by_system() {
             })
             .unwrap();
         let filesystem = filesystem.borrow().clone().unwrap();
+        assert_eq!(
+            filesystem
+                .write("/workspace/removable/stray.txt", b"s")
+                .await,
+            Err(FsError::ReadOnly)
+        );
 
         let card = MemFs::new();
         card.write_file("/identity", b"micro-sd").unwrap();
@@ -112,6 +118,10 @@ fn existing_plugin_view_observes_removable_filesystems_mounted_by_system() {
                 .unwrap(),
             b"micro-sd"
         );
+        filesystem
+            .write("/workspace/removable/micro-sd/notes.txt", b"n")
+            .await
+            .unwrap();
         assert_eq!(
             filesystem
                 .read_dir("/workspace/removable")

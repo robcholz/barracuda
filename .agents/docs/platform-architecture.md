@@ -576,7 +576,7 @@ backend:
 | `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
 | `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
 | `/media` | Target-selected installed filesystem; currently a System LittleFS subtree | Stable, durable, high-volume runtime content. Its physical medium may be soldered storage, installed storage, or FATFS on flash, but its namespace does not disappear while System is running. |
-| `/removable` | MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted at `/removable/<slot-id>`. |
+| `/removable` | Read-only MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted read-write at `/removable/<slot-id>`; the anchor itself stores nothing. |
 
 System mounts `/resources` read-only regardless of the filesystem selected by
 the native Board layout. The default `/media` mount scopes the `/media` subtree
@@ -663,6 +663,12 @@ later removable-filesystem mount is visible to already-running Plugins.
 A scoped view supports file operations and path translation; mount, unmount,
 backend inspection, concrete filesystem selection, and removable-media
 lifecycle stay at the System boundary.
+
+Every logical mount point is a directory of the view: it lists as empty until
+its source directory exists, and it cannot be written, removed, or renamed, so
+no Plugin can replace a private root or a shared Workspace directory with a
+file. Parents of mount points, such as `/` and `/workspace`, list the mount
+points below them. A rename never moves a directory into its own descendant.
 
 Path normalization contains operations within exposed logical mounts. Rename
 is confined to one mounted filesystem, so moving from `/workspace/cache` to

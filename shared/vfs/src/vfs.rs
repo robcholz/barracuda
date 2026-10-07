@@ -306,6 +306,15 @@ impl Vfs {
         }
         from.ensure_writable(true)?;
         to.ensure_writable(true)?;
+        // A directory cannot become its own descendant: backends detach the
+        // source before they look up the destination's parent inside it.
+        if to
+            .path
+            .strip_prefix(from.path.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+        {
+            return Err(FsError::InvalidInput);
+        }
         from.mount.backend.inner.rename(&from.path, &to.path).await
     }
 

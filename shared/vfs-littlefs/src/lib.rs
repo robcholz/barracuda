@@ -337,7 +337,7 @@ impl<S: Storage + Send + 'static> VfsBackend for LittleFs<S> {
                             FileType::Directory
                         };
                         entries.push(DirEntry::new(
-                            name,
+                            decoded_name(name),
                             Metadata::new(file_type, metadata.len() as u64),
                         ));
                     }
@@ -483,8 +483,60 @@ impl<S: Storage + Send + 'static> BackendFile for LittleFile<S> {
     }
 }
 
+/// The stored form of a VFS path.
+///
+/// LittleFS keeps names as bytes, but littlefs2's path type admits ASCII only.
+/// Every byte above ASCII and every `%` is stored as `%XX`, so any UTF-8 name
+/// round-trips through [`decoded_name`].
 fn little_path(path: &str) -> Result<PathBuf, FsError> {
-    PathBuf::try_from(path.as_bytes()).map_err(|_| FsError::InvalidPath)
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    if path.bytes().all(|byte| byte.is_ascii() && byte != b'%') {
+        return PathBuf::try_from(path.as_bytes()).map_err(|_| FsError::InvalidPath);
+    }
+    let mut stored = Vec::with_capacity(path.len().saturating_mul(3));
+    for byte in path.bytes() {
+        if byte.is_ascii() && byte != b'%' {
+            stored.push(byte);
+        } else {
+            stored.extend_from_slice(&[
+                b'%',
+                HEX[usize::from(byte >> 4)],
+                HEX[usize::from(byte & 0x0f)],
+            ]);
+        }
+    }
+    PathBuf::try_from(stored.as_slice()).map_err(|_| FsError::InvalidPath)
+}
+
+/// The VFS name of a stored entry name; see [`little_path`].
+fn decoded_name(stored: &str) -> String {
+    if !stored.contains('%') {
+        return stored.to_string();
+    }
+    let hex = |byte: u8| {
+        char::from(byte)
+            .to_digit(16)
+            .and_then(|digit| u8::try_from(digit).ok())
+    };
+    let mut bytes = Vec::with_capacity(stored.len());
+    let mut rest = stored.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        let escaped = match tail {
+            [high, low, ..] if byte == b'%' => hex(*high).zip(hex(*low)),
+            _ => None,
+        };
+        match (escaped, tail.get(2..)) {
+            (Some((high, low)), Some(after)) => {
+                bytes.push(high << 4 | low);
+                rest = after;
+            }
+            _ => {
+                bytes.push(byte);
+                rest = tail;
+            }
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| stored.to_string())
 }
 
 fn configure<'a>(
