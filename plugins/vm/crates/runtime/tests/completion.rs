@@ -4,7 +4,8 @@
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
-use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_lua::{Lua, Package};
+use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 use barracuda_vm_runtime::{
     SeedSource, Vm, VmExecutionError, VmInputRequest, VmRunInfo, VmRunOutcome, VmRunProgress,
     VmRunRequest, VmRunState, VmRunUpdate,
@@ -178,6 +179,54 @@ async fn exercise_vm_completion(spawner: Spawner, completed: SyncSender<Result<(
     let _ignored = completed.send(result);
 }
 
+/// A package whose only function never completes, like a server loop.
+struct Parked;
+
+impl Package for Parked {
+    fn install(&self, lua: &mut Lua) -> barracuda_lua::Result<()> {
+        lua.register_lib("parked", |package| {
+            package.register_async("wait", |(): ()| async {
+                core::future::pending::<Option<barracuda_lua::Result<()>>>().await
+            })
+        })
+    }
+}
+
+impl LuaPackage for Parked {
+    fn name(&self) -> &'static str {
+        "parked"
+    }
+}
+
+#[embassy_executor::task]
+async fn exercise_vm_parked_cancel(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
+    let result = async {
+        let packages = LuaPackageRegistry::new();
+        let _registration = packages
+            .register(Parked)
+            .map_err(|error| error.to_string())?;
+        let vm = Vm::new(packages, SeedSource::unavailable()).map_err(|error| error.to_string())?;
+        vm.start(spawner).map_err(|error| error.to_string())?;
+        let run = vm
+            .run(VmRunRequest {
+                source: "require('parked').wait()".into(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run_id = run.run_id();
+        // Let the execution park inside the native call before cancelling it.
+        Timer::after_millis(50).await;
+        vm.cancel(barracuda_vm_runtime::VmRunReference { run_id })
+            .map_err(|error| error.to_string())?;
+        let completion = run.await.map_err(|error| error.to_string())?;
+        if completion.outcome != VmRunOutcome::Cancelled {
+            return Err(format!("unexpected parked completion: {completion:?}"));
+        }
+        wait_for_no_active_runs(&vm).await
+    }
+    .await;
+    let _ignored = completed.send(result);
+}
+
 #[embassy_executor::task]
 async fn exercise_vm_handle_drop(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
     let result = async {
@@ -237,4 +286,22 @@ fn dropping_run_handle_cancels_the_execution() {
         .recv_timeout(Duration::from_secs(10))
         .expect("VM handle-drop test timed out")
         .expect("VM handle-drop test failed");
+}
+
+#[test]
+fn cancelling_a_run_parked_in_an_async_call_completes_it() {
+    let (completed, result) = sync_channel(1);
+    std::thread::spawn(move || {
+        let executor = Box::leak(Box::new(Executor::new()));
+        executor.run(|spawner| {
+            spawner.spawn(
+                exercise_vm_parked_cancel(spawner, completed).expect("spawn VM parked test"),
+            );
+        });
+    });
+
+    result
+        .recv_timeout(Duration::from_secs(10))
+        .expect("VM parked-cancel test timed out")
+        .expect("VM parked-cancel test failed");
 }

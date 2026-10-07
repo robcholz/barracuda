@@ -58,6 +58,8 @@ struct RunSlot {
     cancelled: Cell<bool>,
     input: RefCell<Option<InputMessage>>,
     waiter: RefCell<Option<Waker>>,
+    // Wakes an execution parked in an async native call so it sees cancellation.
+    execution_waiter: RefCell<Option<Waker>>,
 }
 
 impl RunSlot {
@@ -70,6 +72,7 @@ impl RunSlot {
             cancelled: Cell::new(false),
             input: RefCell::new(None),
             waiter: RefCell::new(None),
+            execution_waiter: RefCell::new(None),
         }
     }
 
@@ -80,11 +83,15 @@ impl RunSlot {
         self.cancelled.set(false);
         *self.input.borrow_mut() = None;
         *self.waiter.borrow_mut() = None;
+        *self.execution_waiter.borrow_mut() = None;
         self.active.set(true);
     }
 
     fn wake(&self) {
         if let Some(waker) = self.waiter.borrow_mut().take() {
+            waker.wake();
+        }
+        if let Some(waker) = self.execution_waiter.borrow_mut().take() {
             waker.wake();
         }
     }
@@ -103,6 +110,7 @@ impl RunSlot {
             self.waiting_for_input.set(false);
             *self.input.borrow_mut() = None;
             *self.waiter.borrow_mut() = None;
+            *self.execution_waiter.borrow_mut() = None;
             self.id.set(0);
             self.active.set(false);
         }
@@ -320,6 +328,20 @@ impl RunControl {
 
     pub(crate) fn is_cancelled(&self) -> bool {
         self.slot().is_none_or(|slot| slot.cancelled.get())
+    }
+
+    /// Registers the waker of an execution poll, so cancelling the run wakes
+    /// an execution parked in an async native call.
+    pub(crate) fn register_execution_waker(&self, waker: &Waker) {
+        if let Some(slot) = self.slot() {
+            let mut waiter = slot.execution_waiter.borrow_mut();
+            if waiter
+                .as_ref()
+                .is_none_or(|registered| !registered.will_wake(waker))
+            {
+                *waiter = Some(waker.clone());
+            }
+        }
     }
 
     pub(crate) async fn next_input(&self) -> Option<InputMessage> {

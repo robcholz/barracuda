@@ -264,7 +264,10 @@ async fn next_execution_event(
         match core::pin::Pin::new(&mut *execution).poll(context) {
             Poll::Ready(result) => Poll::Ready(ExecutionEvent::Complete(result)),
             Poll::Pending if yield_signal.take() => Poll::Ready(ExecutionEvent::Yielded),
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                control.register_execution_waker(context.waker());
+                Poll::Pending
+            }
         }
     })
     .await
