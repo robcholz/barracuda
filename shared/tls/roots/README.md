@@ -4,6 +4,9 @@
 source ESP-IDF's certificate bundle uses. Every Platform trusts exactly these
 roots; no Platform reads its operating system's certificate store.
 
+`build.rs` compiles them into a compact bundle: each root that has not expired
+by the store's date, reduced to its subject name and public key (both DER).
+
 | Field | Value |
 | --- | --- |
 | Source | <https://curl.se/ca/cacert.pem> |

@@ -759,16 +759,26 @@ on every Platform.
 
 `shared/tls` owns the TLS engine and the trust roots. `Tls::new(entropy)`
 initializes the process-wide mbedTLS engine from the Platform's entropy source
-and refuses `UnavailableEntropy` rather than fall back to a weaker generator.
-The trust roots are Mozilla's CA store, pinned in `shared/tls/roots` and
-compiled into the firmware or host binary, so every Platform trusts exactly the
-same roots. Device Platforms do not have them yet: the PEM bundle is too large
-to parse into device RAM, so until the compact bundle verified on demand lands,
-`Tls::new` reports that a device has no trust roots. No Platform reads its operating system's certificate store, and
-`shared/tls` inspects no environment variables or certificate files. It also
-owns the few C library functions mbedTLS calls on bare-metal targets. A Plugin
-must not load certificates, initialize a TLS backend, or select a TLS
-implementation.
+and refuses `UnavailableEntropy` rather than fall back to a weaker generator; a
+source that fails later fails the handshake with an entropy error.
+
+The trust roots are Mozilla's CA store, pinned in `shared/tls/roots`, the same
+on every Platform. As in ESP-IDF's certificate bundle, `build.rs` reduces each
+root to its subject name and public key and compiles the result in (about
+54 KiB for 121 roots). mbedTLS gets an empty CA chain and a verify callback:
+the top certificate of a server chain arrives untrusted, and the callback
+trusts it only when a bundled root of its issuer's name verifies its
+signature. mbedTLS verifies the rest of the chain. The roots stay in flash and
+only the matching root's key is parsed, so no Platform keeps parsed roots in
+RAM. mbedTLS checks no certificate dates, so expired roots are left out of the
+bundle when it is generated. `mbedtls-rs` is vendored in
+`shared/tls/mbedtls-rs` with the verify callback and a fallible random source
+added.
+
+No Platform reads its operating system's certificate store, and `shared/tls`
+inspects no environment variables or certificate files. It also owns the few
+C library functions mbedTLS calls on bare-metal targets. A Plugin must not
+load certificates, initialize a TLS backend, or select a TLS implementation.
 
 HTTP is a shared software service above the Platform boundary:
 

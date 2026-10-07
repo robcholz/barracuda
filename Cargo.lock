@@ -2214,9 +2214,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-platform",
  "cc",
+ "critical-section",
  "log",
  "mbedtls-rs",
- "rand_core 0.10.1",
  "thiserror 2.0.18",
 ]
 
@@ -5824,8 +5824,6 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 [[package]]
 name = "mbedtls-rs"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f164d9b6133a4a07ffdd96416c0898d728009df55a86456378f21b78d36c98c"
 dependencies = [
  "critical-section",
  "embedded-io 0.7.1",
@@ -5855,7 +5853,6 @@ dependencies = [
  "log",
  "sha1 0.10.7",
  "sha2 0.10.9",
- "time",
 ]
 
 [[package]]
