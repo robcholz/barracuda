@@ -37,9 +37,11 @@ The runtime scans `/workspace/media/skills` and `/workspace/resources/skills`
 into one catalog. Skills belong to the Agent application rather than the
 framework, so this is an Agent convention over existing Workspace mounts: any
 Plugin that writes files, such as `agent-file`, installs a skill by writing its
-package under `/workspace/media/skills`. Skill names are globally unique across both roots; their filesystem
-location has no selection priority. A duplicate aborts startup, while a failed
-runtime reload preserves the previous valid catalog. `skill_read` loads only
+package under `/workspace/media/skills`. Skill names are globally unique
+across both roots; their filesystem location has no selection priority. A
+malformed package, or every copy of a duplicated name, is left out with a
+warning and reported by `skill_reload`, so one bad package in the shared
+directory never stops the Agent. `skill_read` loads only
 the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
 UTF-8 file path relative to that unique skill directory without exposing the
 backing path to the model.

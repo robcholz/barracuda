@@ -85,8 +85,10 @@ fn build() -> Result<(), barracuda_agent_skill::SkillError> {
 ```
 
 Root order does not affect selection. A skill name must be globally unique
-across every configured root; a duplicate fails construction or reload instead
-of selecting one copy. A failed reload preserves the previous valid snapshot.
+across every configured root; every copy of a duplicate is left out instead of
+selecting one. A malformed package is left out on its own, and
+`CatalogSnapshot::rejected` lists each left-out package with its reason. A
+reload that cannot list a root preserves the previous valid snapshot.
 The crate does not install, register, enable, disable, or persist activation
 state. Resource paths stay relative to the selected skill directory and cannot
 escape it.

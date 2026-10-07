@@ -124,8 +124,9 @@ where
 /// Build the shared, globally unique skill catalog from `skill_roots`.
 ///
 /// A missing root scans as empty but stays registered, so skills installed
-/// there later appear on `skill_reload`; a real scan failure (e.g. a malformed
-/// `SKILL.md`) aborts construction.
+/// there later appear on `skill_reload`. A malformed or duplicated package is
+/// left out with a warning; only a root that cannot be listed aborts
+/// construction, since user skills share a writable Workspace directory.
 async fn build_fs_skill_registry(
     filesystem: ScopedVfs,
     skill_roots: Vec<String>,
@@ -150,6 +151,10 @@ async fn build_fs_skill_registry(
                 return Err(error);
             }
         }
+    }
+    for rejected in registry.catalog().rejected() {
+        log::warn!("skill package left out of the catalog: {rejected}");
+        tracing::warn!(name: "skill_rejected", "");
     }
     Ok(Arc::from(Box::new(registry) as Box<dyn SkillRegistry>))
 }

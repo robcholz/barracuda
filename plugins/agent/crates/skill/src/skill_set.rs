@@ -49,6 +49,11 @@ impl SkillSet {
         self.registry.reload().await
     }
 
+    /// The backing registry's current catalog snapshot.
+    pub fn catalog(&self) -> Arc<CatalogSnapshot> {
+        self.registry.catalog()
+    }
+
     /// JSON catalog for tool output. The returned borrow is valid until the next
     /// mutable method call on this `SkillSet`.
     pub fn list_skills(&mut self) -> &str {
