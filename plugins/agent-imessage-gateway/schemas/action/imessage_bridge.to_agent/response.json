@@ -18,7 +18,8 @@
     {
       "type": "object",
       "properties": {
-        "session": { "type": "string", "pattern": "^session-[0-9]+$" }
+        "session": { "type": "string", "pattern": "^session-[0-9]+$" },
+        "input_request": { "type": "string", "pattern": "^input-[0-9]+$" }
       },
       "required": ["session"],
       "additionalProperties": false

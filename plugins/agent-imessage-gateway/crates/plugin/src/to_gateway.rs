@@ -28,17 +28,25 @@ struct TurnStartedPayload {
     origin: String,
 }
 
-/// The only payload this Action reads: a `turn_started` payload, or `None`
-/// for any other shape.
+#[derive(Deserialize)]
+struct InputRequestedPayload {
+    request: String,
+}
+
+/// The only payloads this Action reads: `turn_started` and `input_requested`.
+/// Any other shape reads as neither.
 ///
 /// The payload is inspected where it lies in the request text, so a large
 /// text or tool-output payload is skipped without being copied.
-struct TurnStart(Option<TurnStartedPayload>);
+struct TurnStart(Option<TurnStartedPayload>, Option<InputRequestedPayload>);
 
 impl<'de> Deserialize<'de> for TurnStart {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = <&'de RawValue>::deserialize(deserializer)?;
-        Ok(Self(serde_json::from_str(raw.get()).ok()))
+        Ok(Self(
+            serde_json::from_str(raw.get()).ok(),
+            serde_json::from_str(raw.get()).ok(),
+        ))
     }
 }
 
@@ -102,7 +110,7 @@ fn response(target: Option<GatewayTarget>) -> ToGatewayResponse {
 
 async fn invoke<Storage>(
     shared: &BridgeShared<Storage>,
-    request: ToGatewayRequest,
+    mut request: ToGatewayRequest,
 ) -> ToGatewayResponse
 where
     Storage: PluginStorage,
@@ -114,11 +122,16 @@ where
         request.sequence
     );
     let result = match gateway_event(&request) {
-        Ok(event) => shared
-            .book
-            .lock()
-            .await
-            .gateway_target(&request.session, event),
+        Ok(event) => {
+            let mut book = shared.book.lock().await;
+            let target = book.gateway_target(&request.session, event);
+            if request.event_type == "input_requested"
+                && let Some(input) = request.payload.1.take()
+            {
+                book.input_requested(&request.session, input.request);
+            }
+            target
+        }
         Err(error) => Err(error),
     };
     match &result {

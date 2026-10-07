@@ -45,6 +45,9 @@ pub(crate) enum ToAgentResponse {
     },
     Bound {
         session: String,
+        /// The open input request this message answers with `session.respond`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_request: Option<String>,
     },
     Error {
         error: BridgeError,
@@ -112,7 +115,7 @@ where
                 Ok(route) => {
                     let mut book = shared.book.lock().await;
                     match book.prepare_binding(route, &message_id, &session) {
-                        Ok(mapping) => {
+                        Ok((mapping, input_request)) => {
                             if let Err(error) = persist_mapping(&shared.storage, &mapping).await {
                                 log::warn!(
                                     "IMessage Bridge failed to persist binding for `{session}`: {}",
@@ -121,10 +124,18 @@ where
                                 Err(error)
                             } else {
                                 book.commit_mapping(mapping);
-                                log::info!(
-                                    "IMessage Bridge queued reply `{message_id}` for `{session}`"
-                                );
-                                return ToAgentResponse::Bound { session };
+                                match &input_request {
+                                    Some(request) => log::info!(
+                                        "IMessage Bridge routed `{message_id}` as the answer to `{session}` {request}"
+                                    ),
+                                    None => log::info!(
+                                        "IMessage Bridge queued reply `{message_id}` for `{session}`"
+                                    ),
+                                }
+                                return ToAgentResponse::Bound {
+                                    session,
+                                    input_request,
+                                };
                             }
                         }
                         Err(error) => Err(error),
