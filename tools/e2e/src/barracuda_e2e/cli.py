@@ -21,6 +21,7 @@ from .assertions import (
     check_transcript,
     heap_high_water,
 )
+from . import coverage
 from .ntp import LocalNtp
 from .scenario import Scenario, ScenarioError, discover, load_scenario
 from .system import (
@@ -88,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument('--skip-build', action='store_true', help='reuse existing builds')
     run.add_argument(
+        '--coverage',
+        action='store_true',
+        help='run an instrumented System and report source coverage per component '
+        'under target/e2e/coverage',
+    )
+    run.add_argument(
         '--shard',
         type=_shard_spec,
         metavar='K/N',
@@ -139,9 +146,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         os.environ['BARRACUDA_TLS_TEST_ROOTS'] = str(arguments.test_roots.resolve())
     try:
         require_network()
-        binaries = build(skip=arguments.skip_build)
+        binaries = build(
+            skip=arguments.skip_build,
+            coverage=coverage.TARGET_DIR if arguments.coverage else None,
+        )
     except HarnessError as exc:
         sys.exit(f'error: {exc}')
+    coverage_dir = ARTIFACTS / 'coverage'
+    if arguments.coverage:
+        shutil.rmtree(coverage_dir, ignore_errors=True)
+        (coverage_dir / 'profraw').mkdir(parents=True)
+        os.environ['LLVM_PROFILE_FILE'] = str(
+            coverage_dir / 'profraw' / coverage.PROFILE_PATTERN
+        )
 
     failed = 0
     summary: dict[str, dict[str, object]] = {}
@@ -166,6 +183,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     (ARTIFACTS / 'summary.json').write_text(
         json.dumps(summary, indent=2) + '\n', encoding='utf-8'
     )
+    if arguments.coverage:
+        try:
+            components = coverage.report(
+                binaries.system, coverage_dir / 'profraw', coverage_dir
+            )
+        except HarnessError as exc:
+            sys.exit(f'error: {exc}')
+        print(f'\n{coverage.format_table(components)}')
+        print(f'coverage report: {coverage_dir / "html" / "index.html"}')
     print(f'\n{len(selected) - failed} passed, {failed} failed')
     print(f'artifacts: {ARTIFACTS}')
     sys.exit(1 if failed else 0)

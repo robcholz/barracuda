@@ -46,8 +46,12 @@ def lean_cargo_env() -> dict[str, str]:
     return {**os.environ, 'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': '0'}
 
 
-def build(skip: bool = False) -> Binaries:
-    """Build the selected host System, CLI, and Plugin resources image."""
+def build(skip: bool = False, coverage: Path | None = None) -> Binaries:
+    """Build the selected host System, CLI, and Plugin resources image.
+
+    With `coverage`, the System is also built instrumented into that target
+    directory and that build is the one returned.
+    """
 
     selected = WORKSPACE / '.barracuda' / 'selected-board'
     if not selected.exists() or selected.read_text().strip() != BOARD:
@@ -59,11 +63,21 @@ def build(skip: bool = False) -> Binaries:
             ['cargo', 'image', 'build'],
         ):
             _run(command)
-    host = _host_triple()
+    host = host_triple()
     debug = WORKSPACE / 'target' / host / 'debug'
+    system = debug / 'barracuda-system'
+    if coverage is not None:
+        from .coverage import RUSTFLAGS
+
+        if not skip:
+            _run(
+                ['cargo', 'build'],
+                {'CARGO_TARGET_DIR': str(coverage), 'RUSTFLAGS': RUSTFLAGS},
+            )
+        system = coverage / host / 'debug' / 'barracuda-system'
     capacity, offset = _resources_region()
     binaries = Binaries(
-        system=debug / 'barracuda-system',
+        system=system,
         cli=debug / 'barracuda',
         resources_image=WORKSPACE / 'target' / 'barracuda-system.img',
         flash_capacity=capacity,
@@ -305,16 +319,20 @@ def _no_proxy_open(request: str | urllib.request.Request, timeout: float):
     return opener.open(request, timeout=timeout)
 
 
-def _run(command: Sequence[str]) -> None:
+def _run(command: Sequence[str], extra_env: dict[str, str] | None = None) -> None:
     result = subprocess.run(
-        command, cwd=WORKSPACE, env=lean_cargo_env(), check=False, capture_output=True
+        command,
+        cwd=WORKSPACE,
+        env={**lean_cargo_env(), **(extra_env or {})},
+        check=False,
+        capture_output=True,
     )
     if result.returncode != 0:
         output = result.stderr.decode('utf-8', 'replace')[-4000:]
         raise HarnessError(f'{" ".join(command)} failed:\n{output}')
 
 
-def _host_triple() -> str:
+def host_triple() -> str:
     output = subprocess.run(
         ['rustc', '-vV'], capture_output=True, text=True, check=True
     ).stdout

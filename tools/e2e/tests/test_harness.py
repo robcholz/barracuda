@@ -188,3 +188,32 @@ def test_shards_partition_the_scenarios():
 def test_invalid_shards_are_rejected(spec):
     with pytest.raises(SystemExit):
         build_parser().parse_args(['run', '--shard', spec])
+
+
+def test_coverage_groups_files_by_plugin_crate_and_skips_dependencies():
+    from barracuda_e2e.coverage import component_of, summarize
+    from barracuda_e2e.system import WORKSPACE
+
+    session = str(WORKSPACE / 'plugins/agent/crates/session/src/lib.rs')
+    assert component_of(session) == 'plugins/agent/session'
+    assert component_of(str(WORKSPACE / 'shared/vfs/src/lib.rs')) == 'shared/vfs'
+    assert component_of('/root/.cargo/registry/src/serde/lib.rs') is None
+
+    def entry(path, covered, count):
+        stats = {'covered': covered, 'count': count}
+        return {
+            'filename': str(WORKSPACE / path),
+            'summary': {'lines': stats, 'functions': stats, 'regions': stats},
+        }
+
+    components = summarize(
+        [
+            entry('platforms/linux/src/a.rs', 1, 2),
+            entry('shared/vfs/src/a.rs', 3, 4),
+            entry('shared/vfs/src/b.rs', 1, 4),
+        ]
+    )
+    assert [(c.name, c.business, c.lines) for c in components] == [
+        ('shared/vfs', True, (4, 8)),
+        ('platforms/linux', False, (1, 2)),
+    ]

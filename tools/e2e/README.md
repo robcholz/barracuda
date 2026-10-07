@@ -47,6 +47,20 @@ NTP instead.
 `--shard K/N` runs every N-th selected scenario starting with the K-th, so N
 parallel runs cover the set once. CI runs the whole set in four shards.
 
+## Coverage
+
+```bash
+rustup component add llvm-tools
+uv run --package barracuda-e2e barracuda-e2e run --coverage
+```
+
+`--coverage` also builds the System with LLVM source-based coverage into
+`target/coverage` and runs that build. Its profile runtime writes counters
+continuously, so they survive the interrupt that ends each scenario. The run
+prints line coverage per crate, business code (`plugins/`, `shared/`, `core/`)
+first, and writes `target/e2e/coverage/summary.json` and an HTML report of the
+business code under `target/e2e/coverage/html/`.
+
 ## Scenarios
 
 Scenarios live in `scenarios/*.toml`.
