@@ -1,0 +1,74 @@
+name = "WebServer and configuration endpoint errors"
+description = "Direct HTTP checks of rejected requests: unknown paths, non-GET requests to the portal, Wi-Fi changes and scans on a host-managed network, and malformed or invalid model API configuration."
+
+[model]
+mode = "none"
+
+[[http]]
+path = "/does-not-exist"
+status = 404
+
+[[http]]
+method = "POST"
+path = "/portal/"
+body = "{}"
+status = 405
+
+[[http]]
+method = "DELETE"
+path = "/portal/entries.json"
+status = 405
+
+[[http]]
+method = "PUT"
+path = "/api/wifi"
+body = '{"ssid":"home","password":"secret123"}'
+status = 409
+body_contains = ['"platform_managed"']
+
+[[http]]
+method = "DELETE"
+path = "/api/wifi"
+status = 409
+body_contains = ['"platform_managed"']
+
+[[http]]
+method = "POST"
+path = "/api/wifi"
+body = "{}"
+status = 405
+
+[[http]]
+path = "/api/wifi/scan"
+status = 409
+body_contains = ['"platform_managed"']
+
+[[http]]
+method = "POST"
+path = "/api/wifi/scan"
+body = "{}"
+status = 405
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = "{not json"
+status = 400
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024}]'
+status = 422
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = '[{"backend":"anthropic_compatible","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024}]'
+status = 204
+
+[[http]]
+method = "POST"
+path = "/api/tavily"
+body = "[]"
+status = 400

@@ -1,0 +1,10 @@
+name = "Live Anthropic Messages backend"
+description = "The Agent talks to a real model through the Anthropic-compatible Messages wire format and streams a reasoning and text reply. Later turns are left out: the backend replays reasoning as a thinking block without its signature, which the provider rejects."
+
+[model]
+mode = "recorded"
+backend = "anthropic_compatible"
+
+[[steps]]
+send = "What is two plus two? Reply with one word."
+kinds = ["reply"]
