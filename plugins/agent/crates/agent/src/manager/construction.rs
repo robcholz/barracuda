@@ -123,8 +123,9 @@ where
 
 /// Build the shared, globally unique skill catalog from `skill_roots`.
 ///
-/// A missing root is skipped so the agent still starts; a real scan failure
-/// (e.g. a malformed `SKILL.md`) aborts construction.
+/// A missing root scans as empty but stays registered, so skills installed
+/// there later appear on `skill_reload`; a real scan failure (e.g. a malformed
+/// `SKILL.md`) aborts construction.
 async fn build_fs_skill_registry(
     filesystem: ScopedVfs,
     skill_roots: Vec<String>,
@@ -138,9 +139,8 @@ async fn build_fs_skill_registry(
             .await
             .map_err(|error| SkillError::ScanFailed(root.clone(), error))?
         {
-            log::warn!("skill catalog root is missing: {root}");
-            tracing::warn!(name: "root_missing", "");
-            continue;
+            log::info!("skill catalog root {root} is empty until it is created");
+            tracing::info!(name: "root_missing", "");
         }
         match registry.add_root(root).await {
             Ok(next) => registry = next,

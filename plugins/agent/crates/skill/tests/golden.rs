@@ -11,7 +11,7 @@
 use portable_atomic_util::Arc;
 use std::path::{Path, PathBuf};
 
-use barracuda_agent_skill::{FsSkillRegistry, SkillName, SkillSetSource};
+use barracuda_agent_skill::{FsSkillRegistry, SkillName, SkillRegistry as _, SkillSetSource};
 use barracuda_platform_test::memory_vfs;
 use futures_lite::future::block_on;
 use serde_json::Value;
@@ -178,5 +178,35 @@ fn reading_unknown_skill_is_not_found() {
             .read_skill(&SkillName::new("does-not-exist"))
             .await
             .is_err());
+    });
+}
+
+#[test]
+fn a_root_created_after_startup_is_scanned_on_reload() {
+    block_on(async {
+        let filesystem = memory_vfs().await.expect("mount memory VFS");
+        let registry = FsSkillRegistry::new(filesystem.clone())
+            .add_root("later")
+            .await
+            .expect("a missing root scans as empty");
+        assert!(catalog_ids(&catalog_json(&Arc::new(registry))).is_empty());
+
+        let registry = FsSkillRegistry::new(filesystem.clone())
+            .add_root("later")
+            .await
+            .expect("a missing root scans as empty");
+        filesystem
+            .write_atomic(
+                "later/greeter/SKILL.md",
+                b"---\nname: greeter\ndescription: Greet someone.\n---\n\nSay hello.\n",
+            )
+            .await
+            .expect("install a skill");
+        registry.reload().await.expect("reload the catalog");
+        let registry = Arc::new(registry);
+        assert_eq!(
+            catalog_ids(&catalog_json(&registry)),
+            vec!["greeter".to_owned()]
+        );
     });
 }
