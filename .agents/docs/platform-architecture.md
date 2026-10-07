@@ -785,7 +785,9 @@ bundle when it is generated. `mbedtls-rs` is vendored in
 added.
 
 No Platform reads its operating system's certificate store, and `shared/tls`
-inspects no environment variables or certificate files. It also owns the few
+reads no environment variables or certificate files at run time. Only a host
+test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
+a test network that intercepts TLS); device firmware refuses it. It also owns the few
 C library functions mbedTLS calls on bare-metal targets. A Plugin must not
 load certificates, initialize a TLS backend, or select a TLS implementation.
 

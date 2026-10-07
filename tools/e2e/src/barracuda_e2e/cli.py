@@ -69,6 +69,19 @@ def build_parser() -> argparse.ArgumentParser:
         help='record "recorded" scenarios against the live provider',
     )
     run.add_argument(
+        '--direct',
+        action='store_true',
+        help='run "recorded" scenarios with the System calling the live provider '
+        'itself, through its own TLS, without a tape',
+    )
+    run.add_argument(
+        '--test-roots',
+        type=Path,
+        metavar='PEM',
+        help='build the host System to also trust these roots (for a network '
+        'that intercepts TLS); never use for firmware',
+    )
+    run.add_argument(
         '--env-file',
         type=Path,
         help='KEY=VALUE file providing BARRACUDA_LLM_BASE_URL/API_KEY/MODEL',
@@ -107,7 +120,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     missing = set(arguments.names) - {s.slug for s in selected}
     if missing:
         sys.exit(f'error: unknown scenario(s): {", ".join(sorted(missing))}')
-    live = _live_model(arguments.env_file) if arguments.record else None
+    if arguments.record and arguments.direct:
+        sys.exit('error: --record and --direct are exclusive')
+    live = (
+        _live_model(arguments.env_file)
+        if arguments.record or arguments.direct
+        else None
+    )
+    if arguments.test_roots is not None:
+        os.environ['BARRACUDA_TLS_TEST_ROOTS'] = str(arguments.test_roots.resolve())
     try:
         require_network()
         binaries = build(skip=arguments.skip_build)
@@ -118,7 +139,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     summary: dict[str, dict[str, object]] = {}
     with _local_ntp(enabled=not arguments.no_local_ntp):
         for scenario in selected:
-            failures = run_scenario(scenario, binaries, live, arguments.heap_limit)
+            failures = run_scenario(
+                scenario, binaries, live, arguments.heap_limit, arguments.direct
+            )
             peak = _heap_peak(scenario)
             status = 'PASS' if not failures else 'FAIL'
             heap = f' [heap {peak / 1024:.0f} KiB]' if peak is not None else ''
@@ -145,6 +168,7 @@ def run_scenario(
     binaries: Binaries,
     live: LiveModel | None,
     heap_limit: int | None = None,
+    direct: bool = False,
 ) -> list[str]:
     """Run one scenario in an isolated state directory and return failures."""
 
@@ -155,13 +179,20 @@ def run_scenario(
     system = SystemProcess(
         binaries, artifacts / 'state', artifacts / 'system.log', heap_limit
     )
-    recording = scenario.mode == 'recorded' and live is not None
+    recording = scenario.mode == 'recorded' and live is not None and not direct
+    direct = direct and scenario.mode == 'recorded' and live is not None
+    model_url = None
     try:
         if scenario.mode == 'scripted':
             tape = artifacts / 'scripted.jsonl'
             interactions = write_scripted_tape(scenario.responses, tape)
             api_path, model, api_key = SCRIPTED_API_PATH, 'scripted', 'scripted'
             tape_server.replay(tape, artifacts / 'requests')
+        elif direct:
+            assert live is not None
+            interactions, api_path = 0, ''
+            model, api_key = live.model, live.api_key
+            model_url = live.base_url.rstrip('/')
         elif recording:
             assert live is not None
             parts = urlsplit(live.base_url)
@@ -183,7 +214,7 @@ def run_scenario(
         http_failures = _run_http(scenario, 'before')
         records: list[dict[str, object]] = []
         if scenario.steps:
-            configure_model(tape_server.base_url(api_path), model, api_key)
+            configure_model(model_url or tape_server.base_url(api_path), model, api_key)
             records = chat(
                 binaries.cli,
                 [step.send for step in scenario.steps],
@@ -207,7 +238,7 @@ def run_scenario(
         failures.append(f'System exited with {system.early_exit} during the scenario')
     failures += check_logs(scenario, system.log())
     failures += check_heap(scenario, system.log())
-    if not recording and scenario.mode != 'none':
+    if not recording and not direct and scenario.mode != 'none':
         failures += check_replay(tape_server.counts(), interactions)
         failures += check_requests(scenario, artifacts / 'requests')
     return failures

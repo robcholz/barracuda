@@ -3,6 +3,27 @@
 
 use std::{env, error::Error, fs, path::PathBuf};
 
+/// A PEM file of extra roots for host test builds, such as the interception CA
+/// of a test network. Device firmware refuses it.
+const TEST_ROOTS: &str = "BARRACUDA_TLS_TEST_ROOTS";
+
+/// Reads the test-only roots named by [`TEST_ROOTS`], if any.
+fn test_roots(device: bool) -> Result<Option<String>, Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed={TEST_ROOTS}");
+    let Some(path) = env::var_os(TEST_ROOTS).filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    if device {
+        return Err(format!("{TEST_ROOTS} is for host test builds; unset it for firmware").into());
+    }
+    println!("cargo:rerun-if-changed={}", path.to_string_lossy());
+    println!(
+        "cargo:warning=TLS also trusts the test roots in {}; do not ship this build",
+        path.to_string_lossy()
+    );
+    Ok(Some(fs::read_to_string(path)?))
+}
+
 /// The copied musl sources and Barracuda's wrappers, relative to `c/`.
 const SOURCES: [&str; 7] = [
     "musl/memchr.c",
@@ -18,17 +39,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let out = PathBuf::from(env::var_os("OUT_DIR").ok_or("missing out dir")?);
 
+    let device = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("none");
     let roots = manifest.join("roots/cacert.pem");
     println!("cargo:rerun-if-changed={}", roots.display());
+    let test_roots = test_roots(device)?;
     fs::write(
         out.join("roots.bin"),
-        bundle::generate(&fs::read_to_string(roots)?)?,
+        bundle::generate(&fs::read_to_string(roots)?, test_roots.as_deref())?,
     )?;
 
     let c = manifest.join("c");
     println!("cargo:rerun-if-changed={}", c.display());
     // Host targets link their system C library.
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("none") {
+    if !device {
         return Ok(());
     }
     cc::Build::new()
@@ -61,10 +84,14 @@ mod bundle {
 
     type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-    pub fn generate(pem: &str) -> Result<Vec<u8>> {
+    pub fn generate(pem: &str, test_roots: Option<&str>) -> Result<Vec<u8>> {
         let as_of = store_date(pem)?;
         let mut roots = Vec::new();
-        for der in certificates(pem)? {
+        let mut ders = certificates(pem)?;
+        if let Some(test_roots) = test_roots {
+            ders.extend(certificates(test_roots)?);
+        }
+        for der in ders {
             let root = parse(&der)?;
             if root.not_after >= as_of {
                 roots.push((root.subject.to_vec(), root.key.to_vec()));

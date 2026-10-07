@@ -127,3 +127,25 @@ host figure is an upper bound on the device's.
   of model calls, so keep recorded scenarios short and write tolerant
   assertions. Treat tapes as sensitive: responses are stored verbatim.
 - `none` makes no model calls; use it for `[[http]]`-only scenarios.
+
+### Direct
+
+`run --direct --env-file FILE` runs `recorded` scenarios without a tape: the
+System calls the provider itself, through its own TLS and trust roots, so this
+is the end-to-end check of HTTPS. Nothing is recorded and the replay checks
+are skipped.
+
+A network that intercepts TLS (such as a sandbox egress gateway) presents its
+own CA, which the System rightly rejects. `--test-roots PEM` builds the host
+System to also trust the roots in that file; device firmware refuses the
+option, and the build warns not to ship it:
+
+```bash
+uv run --package barracuda-e2e barracuda-e2e run live-chat --direct \
+  --env-file /path/to/llm.env --test-roots /path/to/gateway-ca.pem
+```
+
+`provision.sh` clamps the TCP MSS of forwarded connections to the path MTU:
+the System's TCP stack ignores ICMP "fragmentation needed", so without the
+clamp a full-size segment vanishes when the outbound link's MTU is smaller
+than the TUN's.
