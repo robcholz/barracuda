@@ -9,7 +9,7 @@ mounting, persistence, and image composition remain outside the subsystem.
 
 ~~~text
 System-owned VFS
-  +-- /data/skills ---------------------+
+  +-- /workspace/media/skills ----------+
   `-- /workspace/resources/skills ------+--> Skill Registry
                                                 |
                                                 +--> catalog metadata
@@ -20,7 +20,7 @@ System-owned VFS
                                                    Agent skill Tools
 ~~~
 
-The writable data root contains user-installed packages. The shared resources
+The writable shared media root contains user-installed packages. The shared resources
 root contains immutable packages contributed by the selected Plugin set. Both
 roots supply one catalog and retain their existing filesystem lifecycle.
 

@@ -31,7 +31,9 @@ pub use barracuda_agent_runtime::{
 pub use model_api_http::SET_API_PATH;
 
 const PERSISTENCE_ROOT: &str = "/data";
-const USER_SKILLS_ROOT: &str = "/data/skills";
+/// Skills a user or another Plugin installs. The shared durable Workspace
+/// keeps them reachable by every Plugin that writes files.
+const USER_SKILLS_ROOT: &str = "/workspace/media/skills";
 const BUNDLED_SKILLS_ROOT: &str = "/workspace/resources/skills";
 
 fn runtime_storage_config() -> RuntimeStorageConfig {
@@ -216,7 +218,7 @@ mod tests {
         assert_eq!(
             roots,
             [
-                String::from("/data/skills"),
+                String::from("/workspace/media/skills"),
                 String::from("/workspace/resources/skills"),
             ]
         );

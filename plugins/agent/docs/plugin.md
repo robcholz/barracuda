@@ -9,7 +9,7 @@
 - Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
   plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
 - Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
-  skills from `/data/skills`, and shared bundled skills from
+  skills from `/workspace/media/skills`, and shared bundled skills from
   `/workspace/resources/skills`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
   `purpose.{root_agent,sub_agent,memory,compaction}`
@@ -33,8 +33,11 @@ Dependent Plugins may still register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
 
-The runtime scans `/data/skills` and `/workspace/resources/skills` into one
-catalog. Skill names are globally unique across both roots; their filesystem
+The runtime scans `/workspace/media/skills` and `/workspace/resources/skills`
+into one catalog. Skills belong to the Agent application rather than the
+framework, so this is an Agent convention over existing Workspace mounts: any
+Plugin that writes files, such as `agent-file`, installs a skill by writing its
+package under `/workspace/media/skills`. Skill names are globally unique across both roots; their filesystem
 location has no selection priority. A duplicate aborts startup, while a failed
 runtime reload preserves the previous valid catalog. `skill_read` loads only
 the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded

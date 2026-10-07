@@ -1,0 +1,14 @@
+name = "Live skills"
+description = "A real model installs a skill on the filesystem, reloads the catalog, and reads the skill and its resource."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = """Use the file tools to write /workspace/media/skills/greeter/SKILL.md with exactly this content (keep the line breaks): ---\\nname: greeter\\ndescription: Greet someone by name. Use when asked to greet.\\n---\\n\\n# Greeter\\n\\nRead the resource notes.txt, then greet the person in the style it gives.\\n and write /workspace/media/skills/greeter/notes.txt containing exactly: Greet with the word Ahoy. Then call skill_reload and skill_list."""
+tool_contains = ['"name":"greeter"']
+
+[[steps]]
+send = "Use skill_read on the greeter skill, then skill_resource_read for notes.txt, and greet Rob as it says."
+tool_contains = ['Read the resource notes.txt', 'Greet with the word Ahoy']
+reply_matches = ['(?i)ahoy']

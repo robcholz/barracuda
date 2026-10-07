@@ -29,8 +29,9 @@ Run `scripts/switch.lua`.
 Selected Plugins bundle immutable packages at
 `filesystem/workspace/resources/skills/<name>/`, which Agent sees at
 `/workspace/resources/skills/<name>/`. User-installed packages live in the
-Agent Plugin's durable `/data/skills/<name>/` tree. These locations differ only
-in lifecycle; both contribute to the same unique catalog.
+shared durable `/workspace/media/skills/<name>/` tree, where any Plugin that
+writes files can install them. These locations differ only in lifecycle; both
+contribute to the same unique catalog.
 
 `name` and `description` are required. `license`, `compatibility`, `metadata`,
 and the experimental `allowed-tools` field are optional. Frontmatter is YAML,
