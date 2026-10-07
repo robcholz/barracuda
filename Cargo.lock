@@ -940,6 +940,7 @@ dependencies = [
 name = "barracuda-driver-bq27220"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -993,6 +994,7 @@ version = "0.1.0"
 name = "barracuda-driver-ina226"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -1014,6 +1016,7 @@ dependencies = [
 name = "barracuda-driver-pi4ioe5v6408"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 
@@ -1021,6 +1024,7 @@ dependencies = [
 name = "barracuda-driver-rx8130ce"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-virtual-io",
  "embedded-hal 1.0.0",
 ]
 

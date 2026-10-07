@@ -20,3 +20,6 @@ todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
 arithmetic_side_effects = "deny"
+
+[dev-dependencies]
+barracuda-platform-virtual-io.workspace = true
