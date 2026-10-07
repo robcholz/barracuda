@@ -97,7 +97,7 @@ mod tests {
             );
             let root = tool.invoke(DeleteArgs { path: "/".into() }).await?;
             assert!(!root.ok);
-            assert_eq!(json(&root.content)?["error"], "directory_not_empty");
+            assert_eq!(json(&root.content)?["error"], "permission_denied");
             Ok::<_, Box<dyn core::error::Error>>(())
         })
     }
