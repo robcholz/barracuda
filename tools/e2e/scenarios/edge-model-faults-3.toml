@@ -1,0 +1,38 @@
+name = "Edge: model stream ordering and error bodies"
+description = "Reasoning that arrives after answer text fails the turn and keeps the text, a long error body is truncated on a UTF-8 boundary, and HTTP 408 is retried."
+
+[model]
+mode = "scripted"
+
+# Step 0: reasoning after answer text.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial answer\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"late\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+
+# Step 1: a 1.2 KB error body of two-byte characters.
+[[model.responses]]
+status = 400
+raw = "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+
+# Step 2: request timeout is transient.
+[[model.responses]]
+status = 408
+raw = "timeout"
+
+[[model.responses]]
+text = "After 408."
+
+[[steps]]
+send = "One."
+reply_contains = ["partial answer"]
+notice_contains = ["failed to parse LLM JSON response"]
+
+[[steps]]
+send = "Two."
+notice_contains = ["HTTP 400: ééé", "é…"]
+
+[[steps]]
+send = "Three."
+reply_contains = ["After 408."]
+
+[logs]
+allow = ['Agent run failed: ']
