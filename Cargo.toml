@@ -159,6 +159,7 @@ barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
 barracuda-runtime-utils = { path = "shared/runtime-utils" }
+barracuda-platform-virtual-io = { path = "platforms/virtual-io" }
 barracuda-system = { path = "core/system" }
 barracuda-target = { path = "composition/selected" }
 barracuda-target-api = { path = "composition/api" }
