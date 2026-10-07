@@ -3,10 +3,10 @@
 #![no_std]
 
 /// Platform-owned GPIO implementation.
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 pub mod hal;
 
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 #[doc(hidden)]
 pub mod application;
 
@@ -156,7 +156,7 @@ impl<const N: usize> Stm32PartitionTable<N> {
 
 include!(concat!(env!("OUT_DIR"), "/stm32_layout.rs"));
 
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 mod internal_flash {
     use core::cell::RefCell;
 
@@ -168,13 +168,13 @@ mod internal_flash {
     use embassy_embedded_hal::flash::partition::BlockingPartition;
     use embassy_executor::Spawner;
     use embassy_net::Stack;
-    use embassy_stm32::flash::{Async, Flash};
+    use embassy_stm32::flash::{Blocking, Flash};
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 
     use crate::{board_partition_table, LinkerRegionError, Stm32RegionAccess};
 
-    /// STM32 internal flash driver with both blocking and asynchronous HAL APIs.
-    pub type Stm32Flash = Flash<'static, Async>;
+    /// STM32 internal flash driver; the STM32U5 HAL exposes blocking access only.
+    pub type Stm32Flash = Flash<'static, Blocking>;
 
     /// One linker-defined partition backed by Embassy STM32 flash.
     pub type Stm32Partition = BlockingPartition<'static, CriticalSectionRawMutex, Stm32Flash>;
@@ -182,7 +182,7 @@ mod internal_flash {
     /// Generic named STM32 partitions available to System.
     pub type Stm32Partitions = Partitions<Stm32Partition, 16>;
 
-    /// STM32 Platform implementation for the selected STM32F429 target.
+    /// STM32 Platform implementation for the selected STM32U5A5 target.
     pub struct Stm32Platform;
 
     /// Board/HAL bindings consumed by [`Stm32Platform`].
@@ -194,19 +194,18 @@ mod internal_flash {
     impl Stm32PlatformBindings {
         /// Binds initialized STM32 Platform services to a compatible Board.
         ///
-        /// The selected Board/HAL composition owns the Ethernet wiring and
-        /// hands the resulting Platform IP service and internal flash to this
-        /// binding.
+        /// The selected Board/HAL composition hands the Platform IP service
+        /// and internal flash to this binding.
         ///
         /// # Errors
         ///
-        /// Returns an error when the selected Board does not use STM32F429ZI.
+        /// Returns an error when the selected Board does not use STM32U5A5ZJ.
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
         ) -> Result<Self, Stm32PlatformError> {
-            if board.hardware().chip() != "stm32f429zi" {
+            if board.hardware().chip() != "stm32u5a5zj" {
                 return Err(Stm32PlatformError::IncompatibleChip);
             }
             Ok(Self { ip_stack, flash })
@@ -295,7 +294,7 @@ mod internal_flash {
         }
     }
 
-    /// STM32F429 Platform initialization failure.
+    /// STM32 Platform initialization failure.
     #[derive(Debug)]
     pub enum Stm32PlatformError {
         /// The selected Board targets a different chip family.
@@ -327,7 +326,7 @@ mod internal_flash {
     impl core::error::Error for Stm32PlatformError {}
 }
 
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 pub use internal_flash::{
     partitions, Stm32Flash, Stm32Partition, Stm32Partitions, Stm32PartitionsError, Stm32Platform,
     Stm32PlatformBindings, Stm32PlatformError,

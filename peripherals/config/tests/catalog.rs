@@ -538,7 +538,7 @@ fn renders_a_static_hal_from_only_board_and_implementation_yaml() {
         r#"
 name: nucleo-copy
 hardware:
-  chip: stm32f429zi
+  chip: stm32u5a5zj
 native-layout:
   artifact: memory.x
 peripherals:

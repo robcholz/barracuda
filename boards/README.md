@@ -159,8 +159,8 @@ Boards that use the same module are still separate Board bundles: add their
 exact fixed wiring to that bundle as the Board schema grows rather than treating
 one development kit as an alias for every product built around the chip.
 
-`stm32f429zi-nucleo` demonstrates the same YAML-only composition outside the
-ESP family. Its config builds the active-high green LD1 on PB0 through the
+`nucleo-u5a5zj-q` demonstrates the same YAML-only composition outside the
+ESP family. Its config builds the active-high green LD1 on PC7 through the
 shared `indicator-led` implementation and explicitly exposes PC13 as the dynamic GPIO
 name `user-button`. The STM32 Platform HAL replaces its former Board-specific
 HAL crate. The name `user-button` identifies the physical PC13 pin; an

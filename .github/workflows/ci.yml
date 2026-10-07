@@ -303,7 +303,7 @@ jobs:
             toolchain: esp
             chip: esp32s3
           - name: stm32
-            board: stm32f429zi-nucleo
+            board: nucleo-u5a5zj-q
             os: ubuntu-latest
             package: barracuda-platform-stm32
             toolchain: rust

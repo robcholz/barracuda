@@ -38,7 +38,7 @@ pub struct PartitionStorage<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: 
 /// [`ReadNorFlash::capacity`] is a runtime value. This entry point performs the
 /// type erasure once, inside the backend crate, so Platform and System do not
 /// need Board-specific LittleFS types. The currently supported geometries
-/// cover the native filesystem regions of the standard, ESP32-C6, and STM32F4
+/// cover the native filesystem regions of the standard, ESP32-C6, and STM32U5
 /// targets. A partition whose erase-block count lies between two supported
 /// geometries uses the lower geometry; the unused tail remains outside the
 /// filesystem rather than being addressed with an invalid compile-time size.

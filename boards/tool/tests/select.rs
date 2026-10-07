@@ -462,15 +462,15 @@ fn target_prints_the_boards_declared_toolchain_triple() {
 #[test]
 fn target_reads_the_persisted_selection_when_no_board_is_named() {
     let root = tempdir().expect("temporary workspace");
-    add_cross_board(root.path(), "stm32f429zi-nucleo", "thumbv7em-none-eabihf");
-    write_selected_board(root.path(), "stm32f429zi-nucleo").expect("select Board");
+    add_cross_board(root.path(), "nucleo-u5a5zj-q", "thumbv8m.main-none-eabihf");
+    write_selected_board(root.path(), "nucleo-u5a5zj-q").expect("select Board");
     let mut output = Vec::new();
 
     run(["target"], root.path(), &mut output).expect("read selected Board target");
 
     assert_eq!(
         String::from_utf8(output).expect("UTF-8 output"),
-        "thumbv7em-none-eabihf\n"
+        "thumbv8m.main-none-eabihf\n"
     );
 }
 
@@ -540,7 +540,7 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
     assert!(!manifest.contains("\"tools/barracuda-build\","));
     assert!(!manifest.contains("boards/chips"));
     assert!(!manifest.contains("\"boards/configs/*/hal\","));
-    assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
+    assert!(!manifest.contains("\"boards/nucleo-u5a5zj-q\","));
 }
 
 #[test]

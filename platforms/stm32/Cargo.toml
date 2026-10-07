@@ -6,7 +6,7 @@ description = "STM32-native Board storage integration for Barracuda"
 
 [features]
 default = []
-stm32f429zi = [
+stm32u5a5zj = [
     "dep:barracuda-board-hal",
     "dep:cortex-m",
     "dep:cortex-m-rt",
@@ -24,7 +24,7 @@ stm32f429zi = [
     "dep:panic-halt",
     "dep:rtt-target",
     "dep:static_cell",
-    "embassy-stm32/stm32f429zi",
+    "embassy-stm32/stm32u5a5zj",
 ]
 
 [dependencies]

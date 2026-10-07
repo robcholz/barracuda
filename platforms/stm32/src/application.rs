@@ -21,18 +21,41 @@ pub use log as __log;
 pub use static_cell::StaticCell as __StaticCell;
 
 /// Bytes of internal RAM given to the global allocator.
-const HEAP_SIZE: usize = 96 * 1024;
+const HEAP_SIZE: usize = 512 * 1024;
 
 #[global_allocator]
 static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
 
-embassy_stm32::bind_interrupts!(struct Irqs {
-    FLASH => embassy_stm32::flash::InterruptHandler;
-});
-
 #[embassy_executor::task]
 async fn run_network(mut runner: Runner<'static, UnavailableNetworkDriver>) -> ! {
     runner.run().await
+}
+
+/// Runs the system clock at 160 MHz from PLL1 fed by the 16 MHz HSI.
+#[doc(hidden)]
+#[must_use]
+pub fn clock_config() -> embassy_stm32::Config {
+    use embassy_stm32::rcc::{
+        AHBPrescaler, APBPrescaler, Pll, PllDiv, PllMul, PllPreDiv, PllSource, Sysclk, VoltageScale,
+    };
+
+    let mut config = embassy_stm32::Config::default();
+    config.rcc.hsi = true;
+    config.rcc.pll1 = Some(Pll {
+        source: PllSource::HSI,
+        prediv: PllPreDiv::DIV1,
+        mul: PllMul::MUL20,
+        divp: None,
+        divq: None,
+        divr: Some(PllDiv::DIV2),
+    });
+    config.rcc.sys = Sysclk::PLL1_R;
+    config.rcc.ahb_pre = AHBPrescaler::DIV1;
+    config.rcc.apb1_pre = APBPrescaler::DIV1;
+    config.rcc.apb2_pre = APBPrescaler::DIV1;
+    config.rcc.apb3_pre = APBPrescaler::DIV1;
+    config.rcc.voltage_range = VoltageScale::RANGE1;
+    config
 }
 
 /// Installs a static internal-RAM region as the global heap.
@@ -55,8 +78,8 @@ pub fn bindings(
     static FLASH: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>> =
         StaticCell::new();
 
-    // The Board's Ethernet is not wired into the Platform yet, so the IP
-    // stack never has a link.
+    // The STM32U5A5 has no Ethernet MAC and no Board network interface is
+    // wired yet, so the IP stack never has a link.
     let (ip_stack, runner) = embassy_net::new(
         UnavailableNetworkDriver,
         embassy_net::Config::default(),
@@ -65,7 +88,7 @@ pub fn bindings(
     );
     let network = run_network(runner).map_err(|_error| Stm32PlatformError::NetworkTask)?;
     spawner.spawn(network);
-    let flash = FLASH.init(Mutex::new(RefCell::new(Flash::new(flash_token, Irqs))));
+    let flash = FLASH.init(Mutex::new(RefCell::new(Flash::new_blocking(flash_token))));
     Stm32PlatformBindings::from_initialized_services(board, ip_stack, flash)
 }
 
@@ -106,8 +129,7 @@ macro_rules! platform_entry {
         #[$crate::application::__rt::entry]
         fn main() -> ! {
             $crate::application::initialize_allocator();
-            let peripherals =
-                $crate::application::__hal::init($crate::application::__hal::Config::default());
+            let peripherals = $crate::application::__hal::init($crate::application::clock_config());
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
             static EXECUTOR: $crate::application::__StaticCell<embassy_executor::Executor> =

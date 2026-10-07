@@ -1429,14 +1429,14 @@ mod tests {
     #[test]
     fn interactive_select_lists_boards_in_name_order_and_persists_the_choice() {
         let root = tempdir().expect("temporary workspace");
-        add_board(root.path(), "stm32f429zi-nucleo");
+        add_board(root.path(), "nucleo-u5a5zj-q");
         add_board(root.path(), "esp32c6-devkitc-1");
         fs::write(root.path().join("boards/configs/README.txt"), "not a Board")
             .expect("non-Board file");
         let mut output = Vec::new();
 
         run_with_selector(["select"], root.path(), &mut output, |boards, default| {
-            assert_eq!(boards, ["esp32c6-devkitc-1", "stm32f429zi-nucleo"]);
+            assert_eq!(boards, ["esp32c6-devkitc-1", "nucleo-u5a5zj-q"]);
             assert_eq!(default, None);
             Ok(Some(1))
         })
@@ -1444,7 +1444,7 @@ mod tests {
 
         assert_eq!(
             read_selected_board(root.path()).expect("read selection"),
-            Some(String::from("stm32f429zi-nucleo"))
+            Some(String::from("nucleo-u5a5zj-q"))
         );
     }
 
