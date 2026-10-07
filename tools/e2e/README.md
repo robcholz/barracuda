@@ -81,6 +81,11 @@ tool_calls = [{ name = "time_now", arguments = {} }]
 request_contains = ['"utc"']   # the request answered here must contain this
 text = "I checked the clock."
 
+[[model.responses]]            # a model fault instead of a normal response
+status = 503                   # HTTP status (default 200)
+raw = '{"error":"overloaded"}' # verbatim body instead of synthesized SSE
+# abort = true                 # drop the connection after the body
+
 [[steps]]                  # one stdin line to the CLI per step
 send = "What time is it?"
 reply_contains = ["I checked the clock."]
@@ -88,6 +93,7 @@ reply_matches = ['clock\.$']
 tool_contains = ['"utc":"20']
 notice_contains = []       # CLI notices, such as a permission prompt
 kinds = ["tool"]           # message roles that must appear in the turn
+# request_contains = []    # recorded only: some model request of this step
 # tool_errors_allowed = true
 
 [[http]]                   # direct WebServer request after startup
@@ -196,6 +202,19 @@ host figure is an upper bound on the device's.
   of model calls, so keep recorded scenarios short and write tolerant
   assertions. Treat tapes as sensitive: responses are stored verbatim.
 - `none` makes no model calls; use it for `[[http]]`-only scenarios.
+
+Use `recorded` for everything a real model can do when the step text tells it
+to, including invalid arguments and error paths. Keep `scripted` for faults a
+real provider cannot produce on demand: HTTP error statuses, truncated or
+aborted streams, malformed SSE or tool-call JSON, and similar. A scripted
+response's `raw` replaces the synthesized stream, so it can carry any of
+these; a body that starts with `data:` is served as `text/event-stream`, any
+other as `application/json`.
+
+A recorded step's `request_contains` is checked against the model requests
+made while the step was active: from the first request whose body carries the
+step's message up to the first one carrying the next step's message, so a
+subagent's or a detached turn's requests in between count for the step.
 
 ### Direct
 

@@ -11,6 +11,7 @@ from llm_tape.tape import load_tape
 
 from barracuda_e2e.cli import build_parser, shard
 from barracuda_e2e.assertions import (
+    check_step_requests,
     check_heap,
     check_logs,
     check_replay,
@@ -59,6 +60,34 @@ def test_scripted_tape_round_trips_through_llm_tape(tmp_path):
     assert '"content": "done"' in second
 
 
+def test_scripted_faults_set_status_body_and_abort(tmp_path):
+    tape = tmp_path / 'faults.jsonl'
+    responses = [
+        ModelResponse(status=503, raw='{"error": "busy"}'),
+        ModelResponse(raw='data: {"choices": []}\n\n', abort=True),
+    ]
+    assert write_scripted_tape(responses, tape) == 2
+
+    first, second = load_tape(tape).interactions
+    assert first.response_start.status == 503
+    assert ('content-type', 'application/json') in first.response_start.headers
+    assert b''.join(chunk.data for chunk in first.chunks) == b'{"error": "busy"}'
+    assert first.response_end.outcome == 'eof'
+    assert ('content-type', 'text/event-stream') in second.response_start.headers
+    assert second.response_end.outcome == 'upstream_error'
+
+
+def test_raw_responses_exclude_text_and_tool_calls(tmp_path):
+    path = tmp_path / 'raw.toml'
+    path.write_text(
+        'name = "x"\n[model]\nmode = "scripted"\n[[model.responses]]\n'
+        'raw = "data: x"\ntext = "y"\n[[steps]]\nsend = "hi"\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ScenarioError):
+        load_scenario(path)
+
+
 def test_now_placeholders_expand_to_rfc3339_milliseconds():
     now = datetime(2026, 1, 2, 3, 4, 5, 678_900, tzinfo=UTC)
     expanded = expand_placeholders({'at': '${now+8s}', 'list': ['${now}'], 'n': 1}, now)
@@ -67,6 +96,42 @@ def test_now_placeholders_expand_to_rfc3339_milliseconds():
         'list': ['2026-01-02T03:04:05.678Z'],
         'n': 1,
     }
+
+
+def test_recorded_step_requests_are_checked_within_each_step(tmp_path):
+    scenario_path = tmp_path / 'scenarios' / 'demo.toml'
+    scenario_path.parent.mkdir()
+    scenario_path.write_text(
+        'name = "demo"\n[model]\nmode = "recorded"\n'
+        '[[steps]]\nsend = "first \\"step\\""\nrequest_contains = ["alpha", "beta"]\n'
+        '[[steps]]\nsend = "second"\nrequest_contains = ["gamma"]\n',
+        encoding='utf-8',
+    )
+    scenario = load_scenario(scenario_path)
+    requests = tmp_path / 'requests'
+    requests.mkdir()
+    for index, body in enumerate(
+        [
+            '{"content":"first \\"step\\"","x":"alpha"}',
+            '{"goal":"beta"}',
+            '{"content":"first \\"step\\"","y":"second","z":"delta"}',
+        ]
+    ):
+        (requests / f'call-{index:06d}.body').write_text(body, encoding='utf-8')
+    assert check_step_requests(scenario, requests) == [
+        "step 1: no model request contains 'gamma'"
+    ]
+
+
+def test_step_request_checks_need_a_recorded_scenario(tmp_path):
+    path = tmp_path / 'scripted.toml'
+    path.write_text(
+        'name = "x"\n[model]\nmode = "scripted"\n[[model.responses]]\ntext = "y"\n'
+        '[[steps]]\nsend = "hi"\nrequest_contains = ["z"]\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ScenarioError):
+        load_scenario(path)
 
 
 def test_transcript_checks_replies_tools_and_failures(tmp_path):

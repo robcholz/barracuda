@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -136,3 +137,41 @@ def check_requests(scenario: Scenario, requests: Path) -> list[str]:
             if needle not in body:
                 failures.append(f'model call {index} request lacks {needle!r}')
     return failures
+
+
+def check_step_requests(scenario: Scenario, requests: Path) -> list[str]:
+    """Each recorded step's model requests contain its declared substrings.
+
+    A step's requests run from the first request whose body carries the step's
+    message to the first one carrying the next step's message, so subagent and
+    detached-turn requests made in between count for the step.
+    """
+
+    if not any(step.request_contains for step in scenario.steps):
+        return []
+    bodies = [
+        path.read_text(encoding='utf-8', errors='replace')
+        for path in sorted(requests.glob('call-*.body'))
+    ]
+    starts = [_first_request_with(bodies, step.send) for step in scenario.steps]
+    failures: list[str] = []
+    for turn, step in enumerate(scenario.steps):
+        if not step.request_contains:
+            continue
+        start = starts[turn]
+        if start is None:
+            failures.append(f'step {turn}: no model request carried its message')
+            continue
+        later = [index for index in starts[turn + 1 :] if index is not None]
+        window = bodies[start : min(later, default=len(bodies))]
+        for needle in step.request_contains:
+            if not any(needle in body for body in window):
+                failures.append(f'step {turn}: no model request contains {needle!r}')
+    return failures
+
+
+def _first_request_with(bodies: Sequence[str], message: str) -> int | None:
+    encoded = json.dumps(message, ensure_ascii=False)[1:-1]
+    return next(
+        (index for index, body in enumerate(bodies) if encoded in body), None
+    )

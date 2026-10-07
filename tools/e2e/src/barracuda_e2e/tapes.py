@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
@@ -121,17 +122,27 @@ def _interaction(
         'body_sha256': '',
         'body_size': 0,
     }
+    if response.raw is None:
+        frames: list[str] = list(sse_frames(response, now))
+        content_type = 'text/event-stream'
+    else:
+        frames = [response.raw]
+        content_type = (
+            'text/event-stream'
+            if response.raw.startswith(('data:', ':', 'event:'))
+            else 'application/json'
+        )
     yield {
         'kind': 'response_start',
         'interaction_id': interaction_id,
         'at_us': CHUNK_INTERVAL_US,
-        'status': 200,
-        'reason': 'OK',
-        'headers': [['content-type', 'text/event-stream']],
+        'status': response.status,
+        'reason': _reason(response.status),
+        'headers': [['content-type', content_type]],
     }
     at_us = CHUNK_INTERVAL_US
     seq = 0
-    for seq, frame in enumerate(sse_frames(response, now)):
+    for seq, frame in enumerate(frames):
         at_us += CHUNK_INTERVAL_US
         yield {
             'kind': 'response_chunk',
@@ -144,8 +155,15 @@ def _interaction(
         'kind': 'response_end',
         'interaction_id': interaction_id,
         'at_us': at_us + CHUNK_INTERVAL_US,
-        'outcome': 'eof',
+        'outcome': 'upstream_error' if response.abort else 'eof',
     }
+
+
+def _reason(status: int) -> str:
+    try:
+        return HTTPStatus(status).phrase
+    except ValueError:
+        return 'Unknown'
 
 
 def _frame(delta: dict[str, Any]) -> str:

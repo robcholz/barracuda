@@ -18,6 +18,7 @@ from .assertions import (
     check_logs,
     check_replay,
     check_requests,
+    check_step_requests,
     check_transcript,
     heap_high_water,
 )
@@ -303,6 +304,7 @@ def run_scenario(
     if not recording and not direct and scenario.mode != 'none':
         failures += check_replay(tape_server.counts(), interactions)
         failures += check_requests(scenario, artifacts / 'requests')
+        failures += check_step_requests(scenario, artifacts / 'requests')
     return failures
 
 
