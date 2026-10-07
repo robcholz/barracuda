@@ -29,6 +29,7 @@ default-members = [
 exclude = [
     # Vendored third-party crate, patched below.
     "shared/tls/mbedtls-rs",
+    "apps/barracuda-cli/rustyline",
 ]
 
 [workspace.dependencies]
@@ -191,6 +192,9 @@ static_cell = "2"
 # mbedtls-rs 0.1.0 with a verify callback and a fallible RNG; see
 # shared/tls/mbedtls-rs/BARRACUDA.md.
 mbedtls-rs = { path = "shared/tls/mbedtls-rs" }
+# rustyline 18.0.1 that reads buffered input before waiting; see
+# apps/barracuda-cli/rustyline/BARRACUDA.md.
+rustyline = { path = "apps/barracuda-cli/rustyline" }
 # picoserve 0.19.0 gates core Error implementations on its `std` feature,
 # which breaks when another workspace crate enables serde/std. This upstream
 # commit keeps the same release API and derives portable Error implementations.
