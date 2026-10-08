@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-driver-datasheet-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Tests of the chip drivers against datasheet models of their chips on the virtual buses."
+
+[dev-dependencies]
+barracuda-driver-bq27220.workspace = true
+barracuda-driver-es7210.workspace = true
+barracuda-driver-es8311.workspace = true
+barracuda-driver-es8389.workspace = true
+barracuda-driver-ina226.workspace = true
+barracuda-driver-pi4ioe5v6408.workspace = true
+barracuda-driver-rx8130ce.workspace = true
+barracuda-driver-ws2812-spi.workspace = true
+barracuda-platform-virtual-io.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
