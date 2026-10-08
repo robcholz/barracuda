@@ -37,6 +37,9 @@ pub struct ToolCall {
 pub enum ChatStreamEvent {
     /// Provider thinking/reasoning content and its explicit boundary.
     Reasoning(StreamPart<String>),
+    /// Provider signature over the reasoning just streamed. It arrives before
+    /// `Reasoning(End)` and must be sent back verbatim with that reasoning.
+    ReasoningSignature(String),
     /// Assistant-visible text and its explicit boundary.
     Output(StreamPart<String>),
     /// Complete requested tool calls and their explicit boundary.

@@ -8,8 +8,8 @@
 //!
 //! Ordering contract (both providers): within one response the three logical
 //! streams are explicitly closed in order: `Reasoning(Delta)* ->
-//! Reasoning(End) -> Output(Delta)* -> Output(End) -> ToolCalls(Delta)* ->
-//! ToolCalls(End)`. With cache profiling enabled, one final `Usage` event may
+//! ReasoningSignature? -> Reasoning(End) -> Output(Delta)* -> Output(End) ->
+//! ToolCalls(Delta)* -> ToolCalls(End)`. With cache profiling enabled, one final `Usage` event may
 //! follow those boundaries.
 
 use alloc::string::String;
@@ -367,7 +367,9 @@ enum AnthropicDelta {
     ThinkingDelta {
         thinking: Option<String>,
     },
-    SignatureDelta,
+    SignatureDelta {
+        signature: Option<String>,
+    },
     TextDelta {
         text: Option<String>,
     },
@@ -385,6 +387,11 @@ pub(crate) struct AnthropicSse {
     events: ContentEvents,
     /// Content blocks by their Anthropic content-block index (contiguous).
     blocks: Vec<AnthBlock>,
+    /// Signature of the response's thinking, kept only while it covers the
+    /// whole reasoning text: one thinking block and no redacted thinking.
+    signature: String,
+    thinking_blocks: u8,
+    redacted_thinking: bool,
     #[cfg(feature = "cache_profile")]
     usage: Option<ProviderUsage>,
 }
@@ -430,6 +437,7 @@ impl AnthropicSse {
                 if !self.events.has_delta() {
                     return Err(Error::EmptyResponse);
                 }
+                self.flush_signature(out);
                 self.events.finish(out)?;
                 #[cfg(feature = "cache_profile")]
                 if let Some(usage) = self.usage.take() {
@@ -458,6 +466,11 @@ impl AnthropicSse {
         content_block: Option<AnthropicBlockStart>,
     ) -> Result<(), Error> {
         let index = block_index(raw_index)?;
+        match content_block.as_ref().map(|block| block.kind.as_str()) {
+            Some("thinking") => self.thinking_blocks = self.thinking_blocks.saturating_add(1),
+            Some("redacted_thinking") => self.redacted_thinking = true,
+            _ => {}
+        }
         let block = match content_block {
             Some(content_block) if content_block.kind == "tool_use" => AnthBlock::ToolUse {
                 id: content_block.id.unwrap_or_default(),
@@ -488,10 +501,15 @@ impl AnthropicSse {
                     }
                 }
             }
-            AnthropicDelta::SignatureDelta => {}
+            AnthropicDelta::SignatureDelta { signature } => {
+                if let Some(fragment) = signature {
+                    self.signature.push_str(&fragment);
+                }
+            }
             AnthropicDelta::TextDelta { text } => {
                 if let Some(fragment) = text {
                     if !fragment.is_empty() {
+                        self.flush_signature(out);
                         self.events.output(fragment, out)?;
                     }
                 }
@@ -522,6 +540,7 @@ impl AnthropicSse {
             return Ok(());
         };
         if !name.is_empty() {
+            self.flush_signature(out);
             self.events.tool_call(
                 ToolCall {
                     id,
@@ -532,6 +551,22 @@ impl AnthropicSse {
             )?;
         }
         Ok(())
+    }
+}
+
+impl AnthropicSse {
+    /// Emits the thinking signature as the reasoning stream closes. Several
+    /// thinking blocks, or redacted thinking, have no single signature over
+    /// the merged reasoning text, so none is emitted for them.
+    fn flush_signature(&mut self, out: &mut Vec<ChatStreamEvent>) {
+        let signature = core::mem::take(&mut self.signature);
+        if self.events.phase == ContentPhase::Reasoning
+            && !signature.is_empty()
+            && self.thinking_blocks == 1
+            && !self.redacted_thinking
+        {
+            out.push(ChatStreamEvent::ReasoningSignature(signature));
+        }
     }
 }
 
@@ -722,6 +757,75 @@ mod tests {
     }
 
     // ----- Anthropic -----
+
+    fn anthropic_thinking_body(blocks: &str) -> String {
+        alloc::format!(
+            "{blocks}{}{}",
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":9,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+             event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":9,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        )
+    }
+
+    fn anthropic_thinking_block(index: u32, thinking: &str, signature: &str) -> String {
+        alloc::format!(
+            "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"thinking\",\"thinking\":\"\"}}}}\n\n\
+             event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":{index},\"delta\":{{\"type\":\"thinking_delta\",\"thinking\":\"{thinking}\"}}}}\n\n\
+             event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":{index},\"delta\":{{\"type\":\"signature_delta\",\"signature\":\"{signature}\"}}}}\n\n\
+             event: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":{index}}}\n\n"
+        )
+    }
+
+    fn anthropic_padding(count: u32) -> String {
+        (0..count)
+            .map(|index| alloc::format!(
+                "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"other\"}}}}\n\n"
+            ))
+            .collect()
+    }
+
+    #[test]
+    fn anthropic_emits_the_thinking_signature_before_reasoning_ends() {
+        let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
+        let body = anthropic_thinking_body(&alloc::format!(
+            "{}{}",
+            anthropic_thinking_block(0, "hmm", "c2ln"),
+            anthropic_padding(0)
+        ));
+        let events = drive(&mut parser, &body.replace("\"index\":9", "\"index\":1"));
+        assert_eq!(
+            &events[..3],
+            &[
+                ChatStreamEvent::Reasoning(StreamPart::Delta("hmm".to_string())),
+                ChatStreamEvent::ReasoningSignature("c2ln".to_string()),
+                ChatStreamEvent::Reasoning(StreamPart::End),
+            ]
+        );
+    }
+
+    #[test]
+    fn anthropic_drops_the_signature_when_it_cannot_cover_the_reasoning() {
+        let two_blocks = alloc::format!(
+            "{}{}",
+            anthropic_thinking_block(0, "a", "s1"),
+            anthropic_thinking_block(1, "b", "s2")
+        );
+        let redacted = alloc::format!(
+            "{}event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{{\"type\":\"redacted_thinking\",\"data\":\"x\"}}}}\n\n",
+            anthropic_thinking_block(0, "a", "s1")
+        );
+        for blocks in [two_blocks, redacted] {
+            let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
+            let body = anthropic_thinking_body(&blocks).replace("\"index\":9", "\"index\":2");
+            let events = drive(&mut parser, &body);
+            assert!(events.contains(&ChatStreamEvent::Output(StreamPart::Delta(
+                "ok".to_string()
+            ))));
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event, ChatStreamEvent::ReasoningSignature(_))));
+        }
+    }
 
     #[test]
     fn anthropic_emits_explicit_content_stream_boundaries_in_order() {

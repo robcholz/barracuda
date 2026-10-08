@@ -162,6 +162,13 @@ where
                             )))
                             .await;
                     }
+                    Some(Ok(ChatStreamEvent::ReasoningSignature(signature))) => {
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(
+                                IterationEvent::ReasoningSignature(signature),
+                            ))
+                            .await;
+                    }
                     Some(Ok(ChatStreamEvent::Output(part))) => {
                         if let StreamPart::Delta(output) = &part {
                             output_bytes = output_bytes.saturating_add(output.len() as u64);
