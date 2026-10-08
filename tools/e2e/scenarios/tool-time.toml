@@ -24,5 +24,6 @@ ready = ["UTC clock synchronized from network time"]
 allow = []
 
 [memory]
-# Host ordinary-heap peak was 188 KiB when this budget was set.
-heap_high_water_max = 204800
+# Host ordinary-heap peak was 202 KiB when this budget was set; the host
+# Board now composes runtime exposed I/O and the virtual hardware behind it.
+heap_high_water_max = 212992
