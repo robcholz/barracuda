@@ -240,6 +240,7 @@ where
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
+    Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RemovableStorage: Send + 'static,
     Io: ExposedIo
         + AnalogProvider
@@ -375,6 +376,7 @@ where
             barracuda_imu_plugin::ImuPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
+            barracuda_power_monitor_plugin::PowerMonitorPlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_vm_systeminfo_plugin::VmSystemInfoPlugin::new(&mut plugin_context),

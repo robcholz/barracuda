@@ -1956,6 +1956,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-power-monitor-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-profile"
 version = "0.1.0"
 dependencies = [
@@ -2099,6 +2111,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-tool",
+ "barracuda-power-monitor-plugin",
  "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
  "barracuda-spi-plugin",

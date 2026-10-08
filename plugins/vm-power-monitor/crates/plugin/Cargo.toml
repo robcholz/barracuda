@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-power-monitor-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin exposing the built-in power monitor to Lua"
+license = "Apache-2.0"
+
+[dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
+barracuda-board-hal.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+critical-section = "1"
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
