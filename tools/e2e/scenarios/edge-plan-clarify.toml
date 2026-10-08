@@ -2,86 +2,41 @@ name = "Edge: plan_clarify"
 description = "plan_clarify works outside Plan Mode, trims its question, ends the turn without another model call, runs alongside other Tools, and two task effects in one round fail the turn."
 
 [model]
-mode = "scripted"
-
-# --- Step 0: clarify outside Plan Mode ends the turn -------------------------
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
-tool_calls = [{ name = "plan_clarify", arguments = { question = "  Which color should the LED be?  " } }]
-
-# --- Step 1: blank question, then clarify alongside another Tool -------------
-
-# The trimmed question was recorded as the assistant message and the mode is
-# still normal.
-[[model.responses]]
-request_contains = [
-  '<system-reminder>\nnormal\n</system-reminder>',
-  '{"content":"Which color should the LED be?","role":"assistant"}',
-]
-tool_calls = [{ name = "plan_clarify", arguments = { question = " \n " } }]
-
-# "Call a Plan Mode control tool by itself" is prompt guidance only: the other
-# Tool in the round still runs before the turn yields.
-[[model.responses]]
-tool_calls = [
-  { name = "memory_store", arguments = { content = "The LED should be red." } },
-  { name = "plan_clarify", arguments = { question = "Anything else?" } },
-]
-
-# --- Step 2: two task effects in one round -----------------------------------
-
-[[model.responses]]
-tool_calls = [{ name = "memory_list", arguments = {} }]
-
-[[model.responses]]
-tool_calls = [
-  { name = "plan_clarify", arguments = { question = "First question?" } },
-  { name = "plan_clarify", arguments = { question = "Second question?" } },
-]
-
-# --- Step 3: the Session still answers after the failed turn -----------------
-
-# `abandon_open_task` drops the open TurnHandle, and dropping a TurnHandle
-# commits it (plugins/agent/crates/agent/src/engine/driver.rs:506-509,
-# plugins/agent/crates/memory/src/transcript_store.rs:891-911), so the failed
-# turn's user message and tool calls stay in the history.
-[[model.responses]]
-request_contains = [
-  '{"content":"No, ask me two things.","role":"user"}',
-  'Second question?',
-  '{"content":"Are you still there?","role":"user"}',
-]
-text = "Still here."
+mode = "recorded"
 
 [[steps]]
-send = "Set up the LED."
+send = '''This is a test of plan_clarify. Call plan_clarify {"question": "  Which color should the LED be?  "} with the question exactly as written, including the surrounding spaces.'''
 reply_matches = ['^Which color should the LED be\?$']
-tool_contains = ['plan_clarify{"question": "  Which color should the LED be?  "}Clarification presented to the user.']
+tool_contains = ['Which color should the LED be?"}Clarification presented to the user.']
+request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
 
 [[steps]]
-send = "Red."
+send = '''Red. Now, as a validation test, first call plan_clarify with a question that is only a space, a newline, and a space. Then, in one single response, make two parallel tool calls together: memory_store {"content": "The LED should be red."} and plan_clarify {"question": "Anything else?"}.'''
 reply_matches = ['^Anything else\?$']
 tool_errors_allowed = true
 tool_contains = [
-  'plan_clarify{"question": " \n "}invalid arguments: JSON schema validation failed at $.question: TrimmedEmpty',
-  'memory_store{"content": "The LED should be red."}Stored memory a-0.',
-  'plan_clarify{"question": "Anything else?"}Clarification presented to the user.',
+  'invalid arguments: JSON schema validation failed at $.question: TrimmedEmpty',
+  '"The LED should be red.", "tags": ["fact"]}Stored memory g-0.',
+  '{"question": "Anything else?"}Clarification presented to the user.',
 ]
+request_contains = ['{"content":"Which color should the LED be?","role":"assistant"}']
 
 [[steps]]
-send = "No, ask me two things."
+send = '''No, ask me two things. Call memory_list {} first. Then, in one single response, make two parallel plan_clarify calls together: plan_clarify {"question": "First question?"} and plan_clarify {"question": "Second question?"}.'''
 tool_contains = [
-  "memory_list{}All memories:\n- [a-0] The LED should be red.\n",
-  'plan_clarify{"question": "First question?"}Clarification presented to the user.',
-  'plan_clarify{"question": "Second question?"}Clarification presented to the user.',
+  "All memories:\n- [g-0] (fact) The LED should be red.\n",
+  '{"question": "First question?"}Clarification presented to the user.',
+  '{"question": "Second question?"}Clarification presented to the user.',
 ]
-# Two turn-ending effects in one round are delivered together.
 reply_matches = ['^First question\?\n\nSecond question\?$']
 
 [[steps]]
-send = "Are you still there?"
-reply_contains = ["Still here."]
+send = "Are you still there? Answer in a few words without calling tools."
+request_contains = [
+  '{"content":"No, ask me two things.',
+  'Second question?',
+  '{"content":"Are you still there?',
+]
 
 [logs]
 expect = ["Agent merged 2 turn-ending effects from one tool round"]

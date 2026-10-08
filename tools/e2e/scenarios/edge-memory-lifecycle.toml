@@ -2,103 +2,22 @@ name = "Edge: memory lifecycle"
 description = "Duplicate stores, updates and forgets of unknown or already-forgotten ids, trimmed ids, tag clearing, and id allocation across turns."
 
 [model]
-mode = "scripted"
-
-# --- Step 0: store, normalized duplicate, list -------------------------------
-
-[[model.responses]]
-tool_calls = [{ name = "memory_store", arguments = { content = "The user's dog is named Rex.", tags = ["pets"] } }]
-
-# Case- and whitespace-insensitive dedup returns the existing item and does not
-# merge the new tags (plugins/agent/crates/memory/src/long_term_memory.rs:333-339).
-[[model.responses]]
-tool_calls = [{ name = "memory_store", arguments = { content = "  the USER'S dog\tis   named rex.  ", tags = ["animals"] } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_list", arguments = {} }]
-
-# The catalog projected into the system prompt holds only `pets`, so the
-# duplicate's `animals` tag was dropped.
-[[model.responses]]
-request_contains = [
-  '"content":"Already remembered (as a-0); nothing changed.","is_error":false',
-  'Your long-term memory topics: pets\n',
-]
-text = "Stored once."
-
-# --- Step 1: update paths ----------------------------------------------------
-
-[[model.responses]]
-request_contains = ['Your long-term memory topics: pets\n']
-tool_calls = [{ name = "memory_update", arguments = { id = "a-0", content = "The user's dog is named Max." } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_update", arguments = { id = "a-7", content = "Nothing." } }]
-
-# The id is trimmed before lookup; an empty tags array replaces (clears) tags.
-[[model.responses]]
-request_contains = ['"content":"Could not update a-7: no memory item with id a-7.","is_error":true']
-tool_calls = [{ name = "memory_update", arguments = { id = " a-0 ", tags = [] } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_recall", arguments = { labels = ["pets"] } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_recall", arguments = { query = "MAX" } }]
-
-[[model.responses]]
-text = "Updated."
-
-# --- Step 2: forget paths and id allocation ----------------------------------
-
-[[model.responses]]
-tool_calls = [{ name = "memory_forget", arguments = { id = "a-0" } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_forget", arguments = { id = "a-0" } }]
-
-[[model.responses]]
-request_contains = ['"content":"Could not forget a-0: no memory item with id a-0.","is_error":true']
-tool_calls = [{ name = "memory_forget", arguments = { id = "g-0" } }]
-
-# Sequence numbers are never reused after a forget.
-[[model.responses]]
-tool_calls = [{ name = "memory_store", arguments = { content = "The user's cat is named Tom." } }]
-
-[[model.responses]]
-tool_calls = [{ name = "memory_list", arguments = { limit = 1 } }]
-
-[[model.responses]]
-request_contains = ['"content":"Could not forget g-0: no memory item with id g-0.","is_error":true']
-text = "Forgot it."
+mode = "recorded"
 
 [[steps]]
-send = "Remember that my dog is Rex."
-reply_contains = ["Stored once."]
-tool_contains = [
-  "memory_store{\"content\": \"The user's dog is named Rex.\", \"tags\": [\"pets\"]}Stored memory a-0.",
-  "Already remembered (as a-0); nothing changed.",
-  "memory_list{}All memories:\n- [a-0] (pets) The user's dog is named Rex.\n",
-]
+send = "Remember that my dog is Rex. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. memory_store {\"content\": \"The user's dog is named Rex.\", \"tags\": [\"pets\"]} 2. memory_store {\"content\": \"  the USER'S dog   is   named rex.  \", \"tags\": [\"animals\"]} 3. memory_list {}. Then reply with only: Stored once."
+reply_contains = ['Stored once.']
+tool_contains = ["memory_store{\"content\": \"The user's dog is named Rex.\", \"tags\": [\"pets\"]}Stored memory a-0.", 'Already remembered (as a-0); nothing changed.', "memory_list{}All memories:\n- [a-0] (pets) The user's dog is named Rex.\n"]
+request_contains = ['"content":"Already remembered (as a-0); nothing changed.","is_error":false', 'Your long-term memory topics: pets\n']
 
 [[steps]]
-send = "Actually the dog is called Max."
-reply_contains = ["Updated."]
-tool_contains = [
-  "memory_update{\"id\": \"a-0\", \"content\": \"The user's dog is named Max.\"}Updated memory a-0.",
-  "Could not update a-7: no memory item with id a-7.",
-  'memory_update{"id": " a-0 ", "tags": []}Updated memory a-0.',
-  'memory_recall{"labels": ["pets"]}No matching memories.',
-  "memory_recall{\"query\": \"MAX\"}Recalled memories:\n- [a-0] The user's dog is named Max.\n",
-]
+send = "Actually the dog is called Max. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. memory_update {\"id\": \"a-0\", \"content\": \"The user's dog is named Max.\"} 2. memory_update {\"id\": \"a-7\", \"content\": \"Nothing.\"} 3. memory_update {\"id\": \" a-0 \", \"tags\": []} 4. memory_recall {\"labels\": [\"pets\"]} 5. memory_recall {\"query\": \"MAX\"}. Then reply with only: Updated."
+reply_contains = ['Updated.']
+tool_contains = ["memory_update{\"id\": \"a-0\", \"content\": \"The user's dog is named Max.\"}Updated memory a-0.", 'Could not update a-7: no memory item with id a-7.', '"tags": []}Updated memory a-0.', 'memory_recall{"labels": ["pets"]}No matching memories.', "memory_recall{\"query\": \"MAX\"}Recalled memories:\n- [a-0] The user's dog is named Max.\n"]
+request_contains = ['Your long-term memory topics: pets\n', '"content":"Could not update a-7: no memory item with id a-7.","is_error":true']
 
 [[steps]]
-send = "Forget the dog, remember my cat Tom."
-reply_contains = ["Forgot it."]
-tool_contains = [
-  'memory_forget{"id": "a-0"}Forgot memory a-0.',
-  'memory_forget{"id": "a-0"}Could not forget a-0: no memory item with id a-0.',
-  'memory_forget{"id": "g-0"}Could not forget g-0: no memory item with id g-0.',
-  "Stored memory a-1.",
-  "memory_list{\"limit\": 1}All memories:\n- [a-1] The user's cat is named Tom.\n",
-]
+send = "Forget the dog, remember my cat Tom. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. memory_forget {\"id\": \"a-0\"} 2. memory_forget {\"id\": \"a-0\"} 3. memory_forget {\"id\": \"g-0\"} 4. memory_store {\"content\": \"The user's cat is named Tom.\"} 5. memory_list {\"limit\": 1}. Then reply with only: Forgot it."
+reply_contains = ['Forgot it.']
+tool_contains = ['memory_forget{"id": "a-0"}Forgot memory a-0.', 'memory_forget{"id": "a-0"}Could not forget a-0: no memory item with id a-0.', 'memory_forget{"id": "g-0"}Could not forget g-0: no memory item with id g-0.', 'Stored memory a-1.', "memory_list{\"limit\": 1}All memories:\n- [a-1] The user's cat is named Tom.\n"]
+request_contains = ['"content":"Could not forget a-0: no memory item with id a-0.","is_error":true', '"content":"Could not forget g-0: no memory item with id g-0.","is_error":true']

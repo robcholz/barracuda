@@ -2,64 +2,16 @@ name = "Edge: permission level deny"
 description = "A Workflow switches session-1 to the deny level on each inbound message; Safe Tools still run while every Tool above Safe is refused with the policy reason and never executes."
 
 [model]
-mode = "scripted"
-
-# ---- Step 0 (allow_all, the PermissionLevel default): install the switch ---
-
-[[model.responses]]
-tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
-
-[[model.responses]]
-tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
-
-[[model.responses]]
-tool_calls = [{ name = "workflow_load", arguments = { id = "perm-deny", match = { event = "gateway.message.received" }, steps = [{ call = "session.set_permission_level", arguments = { session = "session-1", level = "deny" } }] } }]
-
-[[model.responses]]
-text = "Deny switch installed."
+mode = "recorded"
 
 [[steps]]
-send = "Install the deny switch."
-reply_contains = ["Deny switch installed."]
-tool_contains = ["perm-deny"]
+send = 'Install the deny switch. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "workflow"} 2. tool_load {"group_id": "file"} 3. workflow_load {"id": "perm-deny", "match": {"event": "gateway.message.received"}, "steps": [{"call": "session.set_permission_level", "arguments": {"session": "session-1", "level": "deny"}}]}. Then reply with only: Deny switch installed.'
+reply_contains = ['Deny switch installed.']
+tool_contains = ['perm-deny']
 
-# ---- Step 1 (deny) ---------------------------------------------------------
-
-# A Safe call first (watch.rs:26-28) so the Workflow triggered by this message
-# has settled before the first side-effecting call is classified.
-[[model.responses]]
-tool_calls = [{ name = "subagent_watch", arguments = { agent = "agent-9" } }]
-
-# level.rs:29-35: Moderate file_write is refused; run.rs:310-320 returns the
-# reason as the Tool result without invoking the Tool.
-[[model.responses]]
-tool_calls = [{ name = "file_write", arguments = { path = "/data/denied.txt", content = "x" } }]
-
-# skill_list only reads the catalog, so it is Safe and runs under deny.
-[[model.responses]]
-tool_calls = [{ name = "skill_list", arguments = {} }]
-
-# run.rs:27-29 Moderate: refused before any subagent is created, so no
-# subagent model call is made.
-[[model.responses]]
-tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "w", goal = "g", timeout_ms = 1000 } }]
-
-# Safe file_read still runs and proves the denied write never happened.
-[[model.responses]]
+[[steps]]
+send = 'Try to change things. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. subagent_watch {"agent": "agent-9"} 2. file_write {"path": "/data/denied.txt", "content": "x"} 3. skill_list {} 4. subagent_run {"kind": "worker", "name": "w", "goal": "g", "timeout_ms": 1000} 5. file_read {"path": "/data/denied.txt"}. Then reply with only: Side effects are denied.'
+reply_contains = ['Side effects are denied.']
+tool_contains = ['No subagent agent-9 in your subtree (unknown id, or not one of yours).', "'file_write' is a Moderate-risk action and this session denies side effects.", 'skill_list{}[]', "'subagent_run' is a Moderate-risk action and this session denies side effects.", '{"error":"not_found","message":"path not found"}']
 request_contains = ["'subagent_run' is a Moderate-risk action and this session denies side effects."]
-tool_calls = [{ name = "file_read", arguments = { path = "/data/denied.txt" } }]
-
-[[model.responses]]
-text = "Side effects are denied."
-
-[[steps]]
-send = "Try to change things."
 tool_errors_allowed = true
-reply_contains = ["Side effects are denied."]
-tool_contains = [
-  "No subagent agent-9 in your subtree (unknown id, or not one of yours).",
-  "'file_write' is a Moderate-risk action and this session denies side effects.",
-  "skill_list{}[]",
-  "'subagent_run' is a Moderate-risk action and this session denies side effects.",
-  '{"error":"not_found","message":"path not found"}',
-]
