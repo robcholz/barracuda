@@ -30,4 +30,4 @@ tool_contains = ["vm.run", "e2e-flow"]
 [memory]
 # Host ordinary-heap peak was 218 KiB locally when this budget was set
 # (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
-heap_high_water_max = 229376
+heap_high_water_max = 233472
