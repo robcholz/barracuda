@@ -11,7 +11,9 @@ mod endpoint;
 use alloc::{boxed::Box, rc::Rc};
 use core::{future::Future, net::Ipv4Addr, pin::Pin, time::Duration};
 
-use barracuda_captive_portal_plugin::{AssetsProvider, CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{
+    AssetsProvider, CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_platform::{StationState, WifiDevice};
 use barracuda_plugin::{
     api::PluginContext,
@@ -96,7 +98,18 @@ impl Plugin for WifiPlugin {
             .register(
                 WebEntry {
                     id: "wifi",
-                    title: "Wi-Fi",
+                    group: WebGroup::Device,
+                    order: 10,
+                    title: WebText {
+                        zh: "Wi-Fi",
+                        en: "Wi-Fi",
+                    },
+                    summary: WebText {
+                        zh: "扫描、连接或忘记无线网络",
+                        en: "Scan, join or forget wireless networks",
+                    },
+                    icon: Some("icon.svg"),
+                    figure: Some("figure.js"),
                     module: "entry.js",
                 },
                 ResourceFiles::from(context.filesystem()?.clone()),

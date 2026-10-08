@@ -3,7 +3,9 @@
 #![recursion_limit = "256"]
 
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
-use barracuda_captive_portal_plugin::{AssetsProvider, CaptivePortal, WebEntry};
+use barracuda_captive_portal_plugin::{
+    AssetsProvider, CaptivePortal, PortalError, WebEntry, WebGroup, WebText,
+};
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
 use barracuda_plugin::api::{ClientFactory, PluginContext};
 use barracuda_plugin::manager::{
@@ -29,16 +31,7 @@ fn resource_provider_reports_unmounted_volume_and_rejects_escape() {
 fn entry_ids_follow_plugin_identity_rules() {
     let portal = CaptivePortal::new(Assets);
     for id in ["-wifi", "wifi-", "wifi--config", "-", "WiFi"] {
-        assert!(portal
-            .register(
-                WebEntry {
-                    id,
-                    title: "invalid",
-                    module: "entry.js"
-                },
-                Assets
-            )
-            .is_err());
+        assert!(portal.register(entry(id, "invalid"), Assets).is_err());
     }
 }
 use std::cell::RefCell;
@@ -59,6 +52,23 @@ impl Plugin for Observer {
     }
 }
 
+const CONSUMER_ENTRY: WebEntry = WebEntry {
+    id: "wifi",
+    group: WebGroup::Device,
+    order: 10,
+    title: WebText {
+        zh: "Wi-Fi \"network\"\n设置",
+        en: "Wi-Fi",
+    },
+    summary: WebText {
+        zh: "扫描、连接或忘记无线网络",
+        en: "Scan, join or forget wireless networks",
+    },
+    icon: Some("icon.svg"),
+    figure: Some("figure.js"),
+    module: "entry.js",
+};
+
 struct Consumer;
 impl PluginDeclaration for Consumer {
     const ID: &'static str = "wifi";
@@ -75,16 +85,29 @@ impl Plugin for Consumer {
         let portal = context.require::<CaptivePortal>(Self::DEPENDS_ON[0])?;
         let entry = portal
             .register(
-                WebEntry {
-                    id: "wifi",
-                    title: "Wi-Fi \"network\"\n设置",
-                    module: "entry.js",
-                },
+                CONSUMER_ENTRY,
                 barracuda_captive_portal_plugin::ResourceFiles::from(context.filesystem()?.clone()),
             )
             .map_err(barracuda_plugin::manager::PluginError::registration)?;
         context.retain(entry);
         Ok(())
+    }
+}
+
+/// A minimal entry with the given ID and label in both languages.
+fn entry(id: &'static str, title: &'static str) -> WebEntry {
+    WebEntry {
+        id,
+        group: WebGroup::Device,
+        order: 10,
+        title: WebText {
+            zh: title,
+            en: title,
+        },
+        summary: WebText { zh: "", en: "" },
+        icon: None,
+        figure: None,
+        module: "entry.js",
     }
 }
 
@@ -99,14 +122,7 @@ impl AssetsProvider for Assets {
 fn entry_registration_controls_asset_visibility() {
     let portal = CaptivePortal::new(Assets);
     let entry = portal
-        .register(
-            WebEntry {
-                id: "wifi",
-                title: "Wi-Fi",
-                module: "entry.js",
-            },
-            Assets,
-        )
+        .register(entry("wifi", "Wi-Fi"), Assets)
         .expect("register");
     let response = block_on(portal.serve("/portal/assets/wifi/chunks/main.js"));
     assert_eq!(response.status(), 200);
@@ -122,35 +138,10 @@ fn entry_registration_controls_asset_visibility() {
 fn rejects_duplicate_ids_and_unsafe_resource_paths() {
     let portal = CaptivePortal::new(Assets);
     let _entry = portal
-        .register(
-            WebEntry {
-                id: "wifi",
-                title: "Wi-Fi",
-                module: "entry.js",
-            },
-            Assets,
-        )
+        .register(entry("wifi", "Wi-Fi"), Assets)
         .expect("register");
-    assert!(portal
-        .register(
-            WebEntry {
-                id: "wifi",
-                title: "duplicate",
-                module: "entry.js"
-            },
-            Assets
-        )
-        .is_err());
-    assert!(portal
-        .register(
-            WebEntry {
-                id: "../bad",
-                title: "bad",
-                module: "entry.js"
-            },
-            Assets
-        )
-        .is_err());
+    assert!(portal.register(entry("wifi", "duplicate"), Assets).is_err());
+    assert!(portal.register(entry("../bad", "bad"), Assets).is_err());
     for path in [
         "/portal/assets/wifi/../data/secret",
         "/portal/assets/wifi/%2e%2e/data",
@@ -208,6 +199,9 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
     resources
         .write_file("/plugins/wifi/entry.js", b"entry.js")
         .expect("consumer module");
+    resources
+        .write_file("/plugins/wifi/icon.svg", b"<svg/>")
+        .expect("consumer icon");
     let filesystem = barracuda_vfs::Vfs::new();
     filesystem
         .mount(
@@ -267,8 +261,16 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
     let response = request(server.clone(), "/portal/entries.json").await;
     let entries: serde_json::Value = serde_json::from_slice(body(&response)).expect("manifest");
     assert_eq!(entries[0]["id"], "wifi");
-    assert_eq!(entries[0]["title"], "Wi-Fi \"network\"\n设置");
+    assert_eq!(entries[0]["title"]["zh"], "Wi-Fi \"network\"\n设置");
+    assert_eq!(entries[0]["icon"], "/portal/assets/wifi/icon.svg");
+    assert_eq!(entries[0]["figure"], "/portal/assets/wifi/figure.js");
     assert_eq!(entries[0]["module"], "/portal/assets/wifi/entry.js");
+    let response = request(server.clone(), "/portal/assets/wifi/icon.svg").await;
+    assert_eq!(body(&response), b"<svg/>");
+    assert!(std::str::from_utf8(&response)
+        .expect("response")
+        .to_ascii_lowercase()
+        .contains("content-type: image/svg+xml"));
     let response = request(server.clone(), "/portal/assets/wifi/entry.js").await;
     assert_eq!(body(&response), b"entry.js");
     assert!(std::str::from_utf8(&response)
@@ -299,6 +301,216 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
     assert_eq!(entries.as_array().expect("array").len(), 1);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
+    let portal = Rc::new(CaptivePortal::new(Assets));
+    let _wifi = portal
+        .register(
+            WebEntry {
+                id: "wifi",
+                group: WebGroup::Device,
+                order: 10,
+                title: WebText {
+                    zh: "Wi-Fi",
+                    en: "Wi-Fi",
+                },
+                summary: WebText {
+                    zh: "扫描、连接或忘记无线网络",
+                    en: "Scan, join or forget wireless networks",
+                },
+                icon: Some("icon.svg"),
+                figure: Some("figure.js"),
+                module: "entry.js",
+            },
+            Assets,
+        )
+        .expect("register wifi");
+    let _qq = portal
+        .register(
+            WebEntry {
+                id: "imessage-qq",
+                group: WebGroup::Channel,
+                order: 40,
+                title: WebText { zh: "QQ", en: "QQ" },
+                summary: WebText {
+                    zh: "QQ Bot 消息通道",
+                    en: "QQ bot message channel",
+                },
+                icon: None,
+                figure: None,
+                module: "chunks/entry.js",
+            },
+            Assets,
+        )
+        .expect("register qq");
+    let _agent = portal
+        .register(
+            WebEntry {
+                id: "agent",
+                group: WebGroup::Agent,
+                order: 10,
+                title: WebText {
+                    zh: "模型配置",
+                    en: "Models",
+                },
+                summary: WebText { zh: "", en: "" },
+                icon: Some("icons/cpu.png"),
+                figure: None,
+                module: "entry.js",
+            },
+            Assets,
+        )
+        .expect("register agent");
+
+    let server = WebServer::new();
+    let _route = server
+        .serve("/portal/*", PortalRoute(portal.clone()))
+        .expect("route");
+    let response = request(Rc::new(server), "/portal/entries.json").await;
+    let manifest: serde_json::Value = serde_json::from_slice(body(&response)).expect("manifest");
+    assert_eq!(
+        manifest,
+        serde_json::json!([
+            {
+                "id": "wifi",
+                "group": "device",
+                "order": 10,
+                "title": {"zh": "Wi-Fi", "en": "Wi-Fi"},
+                "summary": {
+                    "zh": "扫描、连接或忘记无线网络",
+                    "en": "Scan, join or forget wireless networks"
+                },
+                "icon": "/portal/assets/wifi/icon.svg",
+                "figure": "/portal/assets/wifi/figure.js",
+                "module": "/portal/assets/wifi/entry.js"
+            },
+            {
+                "id": "imessage-qq",
+                "group": "channel",
+                "order": 40,
+                "title": {"zh": "QQ", "en": "QQ"},
+                "summary": {"zh": "QQ Bot 消息通道", "en": "QQ bot message channel"},
+                "icon": null,
+                "figure": null,
+                "module": "/portal/assets/imessage-qq/chunks/entry.js"
+            },
+            {
+                "id": "agent",
+                "group": "agent",
+                "order": 10,
+                "title": {"zh": "模型配置", "en": "Models"},
+                "summary": {"zh": "", "en": ""},
+                "icon": "/portal/assets/agent/icons/cpu.png",
+                "figure": null,
+                "module": "/portal/assets/agent/entry.js"
+            }
+        ])
+    );
+    // Field order is part of the wire contract shown in docs/plugin.md.
+    let text = std::str::from_utf8(body(&response)).expect("utf-8 manifest");
+    assert!(text.starts_with(
+        "[{\"id\":\"wifi\",\"group\":\"device\",\"order\":10,\"title\":{\"zh\":\"Wi-Fi\",\"en\":\"Wi-Fi\"},\"summary\":"
+    ));
+}
+
+#[test]
+fn rejects_invalid_icon_and_figure_paths() {
+    let portal = CaptivePortal::new(Assets);
+    for path in [
+        "",
+        "/icon.svg",
+        "../icon.svg",
+        "./icon.svg",
+        "icons//icon.svg",
+        "icon.svg?v=1",
+        "%2e%2e/icon.svg",
+        "icons\\icon.svg",
+    ] {
+        let icon = WebEntry {
+            icon: Some(path),
+            ..entry("wifi", "Wi-Fi")
+        };
+        assert!(
+            matches!(
+                portal.register(icon, Assets),
+                Err(PortalError::InvalidEntry)
+            ),
+            "icon {path:?}"
+        );
+        let figure = WebEntry {
+            figure: Some(path),
+            ..entry("wifi", "Wi-Fi")
+        };
+        assert!(
+            matches!(
+                portal.register(figure, Assets),
+                Err(PortalError::InvalidEntry)
+            ),
+            "figure {path:?}"
+        );
+    }
+    // Rejected entries leave no partial registration behind.
+    let _entry = portal
+        .register(entry("wifi", "Wi-Fi"), Assets)
+        .expect("register after rejections");
+}
+
+#[test]
+fn icon_and_figure_are_served_by_the_entry_provider() {
+    struct Named(&'static str);
+    impl AssetsProvider for Named {
+        async fn serve(&self, path: &str) -> HttpResponse {
+            HttpResponse::new(200, "text/plain", format!("{}:{path}", self.0).into_bytes())
+        }
+    }
+    let portal = CaptivePortal::new(Named("scaffold"));
+    let wifi = portal
+        .register(
+            WebEntry {
+                icon: Some("icon.svg"),
+                figure: Some("figure.js"),
+                ..entry("wifi", "Wi-Fi")
+            },
+            Named("wifi"),
+        )
+        .expect("register wifi");
+    let _inkbox = portal
+        .register(
+            WebEntry {
+                icon: Some("icon.png"),
+                ..entry("imessage-inkbox", "Inkbox")
+            },
+            Named("inkbox"),
+        )
+        .expect("register inkbox");
+    for (path, expected) in [
+        ("/portal/assets/wifi/icon.svg", &b"wifi:icon.svg"[..]),
+        ("/portal/assets/wifi/figure.js", b"wifi:figure.js"),
+        (
+            "/portal/assets/imessage-inkbox/icon.png",
+            b"inkbox:icon.png",
+        ),
+    ] {
+        let response = block_on(portal.serve(path));
+        assert_eq!(response.status(), 200, "{path}");
+        assert_eq!(response.body(), Some(expected), "{path}");
+    }
+    drop(wifi);
+    for path in [
+        "/portal/assets/wifi/icon.svg",
+        "/portal/assets/wifi/figure.js",
+    ] {
+        assert_eq!(block_on(portal.serve(path)).status(), 404, "{path}");
+    }
+}
+
+struct PortalRoute(Rc<CaptivePortal>);
+impl AssetsProvider for PortalRoute {
+    async fn serve(&self, path: &str) -> HttpResponse {
+        self.0.serve(path).await
+    }
+}
+
 #[test]
 fn cached_manifest_and_leaf_dispatch_do_not_allocate() {
     use std::future::Future;
@@ -311,14 +523,7 @@ fn cached_manifest_and_leaf_dispatch_do_not_allocate() {
     }
     let portal = CaptivePortal::new(StaticAssets);
     let _entry = portal
-        .register(
-            WebEntry {
-                id: "wifi",
-                title: "Wi-Fi",
-                module: "entry.js",
-            },
-            StaticAssets,
-        )
+        .register(entry("wifi", "Wi-Fi"), StaticAssets)
         .expect("register");
     let allocations = allocation_counter::measure(|| {
         for path in [

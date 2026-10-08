@@ -1,5 +1,6 @@
 use alloc::format;
 use alloc::rc::{Rc, Weak};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -8,13 +9,47 @@ use barracuda_webserver_plugin::{HttpProviderHandle, HttpResponse};
 use embedded_io_async::{ErrorType, Read};
 use serde::Serialize;
 
+/// Where an entry sits in the portal's navigation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebGroup {
+    /// Device settings, such as networking.
+    Device,
+    /// Agent and model configuration.
+    Agent,
+    /// Message channels.
+    Channel,
+}
+
+/// A label in both portal languages (JSON escaped by the portal).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct WebText {
+    /// Simplified Chinese text.
+    pub zh: &'static str,
+    /// English text.
+    pub en: &'static str,
+}
+
 /// One independently removable navigation entry.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct WebEntry {
     /// Stable plugin ID, used as the resource namespace.
     pub id: &'static str,
-    /// Human-readable navigation label (JSON escaped by the portal).
-    pub title: &'static str,
+    /// Navigation group containing this entry.
+    pub group: WebGroup,
+    /// Position within the group, ascending. The manifest keeps registration
+    /// order; the portal page sorts by group, order, then ID.
+    pub order: u8,
+    /// Navigation label.
+    pub title: WebText,
+    /// One line describing the entry on overview tiles and rows.
+    pub summary: WebText,
+    /// Optional relative icon path within this provider, for example
+    /// `icon.svg`; `.svg` icons are monochrome, other formats are images.
+    pub icon: Option<&'static str>,
+    /// Optional relative module path of a live figure within this provider,
+    /// for example `figure.js`.
+    pub figure: Option<&'static str>,
     /// Relative entry module within this provider, for example `entry.js`.
     pub module: &'static str,
 }
@@ -22,8 +57,8 @@ pub struct WebEntry {
 /// Failure registering a web entry.
 #[derive(Debug, thiserror::Error)]
 pub enum PortalError {
-    /// The ID or module path is invalid.
-    #[error("invalid portal entry ID or module path")]
+    /// The ID, module, icon, or figure path is invalid.
+    #[error("invalid portal entry ID or asset path")]
     InvalidEntry,
     /// Another entry owns this ID.
     #[error("portal entry ID is already registered")]
@@ -96,6 +131,8 @@ impl CaptivePortal {
                         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
             })
             || !valid_path(entry.module)
+            || entry.icon.is_some_and(|path| !valid_path(path))
+            || entry.figure.is_some_and(|path| !valid_path(path))
         {
             return Err(PortalError::InvalidEntry);
         }
@@ -106,14 +143,24 @@ impl CaptivePortal {
         #[derive(Serialize)]
         struct ManifestEntry<'a> {
             id: &'a str,
-            title: &'a str,
-            module: &'a str,
+            group: WebGroup,
+            order: u8,
+            title: WebText,
+            summary: WebText,
+            icon: Option<String>,
+            figure: Option<String>,
+            module: String,
         }
-        let module = format!("/portal/assets/{}/{}", entry.id, entry.module);
+        let asset = |path: &str| format!("/portal/assets/{}/{path}", entry.id);
         let json = serde_json::to_vec(&ManifestEntry {
             id: entry.id,
+            group: entry.group,
+            order: entry.order,
             title: entry.title,
-            module: &module,
+            summary: entry.summary,
+            icon: entry.icon.map(asset),
+            figure: entry.figure.map(asset),
+            module: asset(entry.module),
         })?;
         registry.entries.push(Entry {
             id: entry.id,

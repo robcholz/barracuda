@@ -9,7 +9,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -64,7 +64,18 @@ impl Plugin for IMessageBlueBubblePlugin {
                 .register(
                     WebEntry {
                         id: "imessage-bluebubble",
-                        title: "BlueBubbles",
+                        group: WebGroup::Channel,
+                        order: 50,
+                        title: WebText {
+                            zh: "BlueBubbles",
+                            en: "BlueBubbles",
+                        },
+                        summary: WebText {
+                            zh: "经 BlueBubbles 接入 iMessage",
+                            en: "iMessage through BlueBubbles",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),

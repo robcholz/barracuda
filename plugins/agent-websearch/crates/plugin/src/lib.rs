@@ -12,7 +12,7 @@ use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{Tool, ToolGroup},
 };
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginEntryIterator, PluginError, PluginReadTransaction, PluginRegisterContext,
@@ -66,7 +66,18 @@ impl Plugin for AgentWebsearchPlugin {
                 .register(
                     WebEntry {
                         id: "agent-websearch",
-                        title: "网页搜索",
+                        group: WebGroup::Agent,
+                        order: 20,
+                        title: WebText {
+                            zh: "网页搜索",
+                            en: "Web search",
+                        },
+                        summary: WebText {
+                            zh: "让 Agent 通过 Tavily 搜索网页",
+                            en: "Let the agent search the web with Tavily",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),

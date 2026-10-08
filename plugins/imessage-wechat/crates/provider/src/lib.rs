@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+mod login;
+
 use alloc::{
     boxed::Box,
     format,
@@ -20,7 +22,10 @@ use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
-const DEFAULT_API_BASE: &str = "https://ilinkai.weixin.qq.com";
+pub use login::{LoginCredentials, LoginError, LoginQrCode, LoginStatus, WechatLogin};
+
+/// Default WeChat iLink API base URL.
+pub const DEFAULT_API_BASE: &str = "https://ilinkai.weixin.qq.com";
 const MAX_TEXT_BYTES: usize = 4_000;
 
 /// Connection settings matching the headers used by the WeChat iLink bot API.

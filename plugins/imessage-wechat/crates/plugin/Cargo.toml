@@ -12,13 +12,25 @@ barracuda-captive-portal-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
+embassy-time.workspace = true
 http-client.workspace = true
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 wechat = { path = "../provider" }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+barracuda-vfs.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+serde_json = "1"
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

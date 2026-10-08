@@ -9,7 +9,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -64,7 +64,18 @@ impl Plugin for IMessageTelegramPlugin {
                 .register(
                     WebEntry {
                         id: "imessage-telegram",
-                        title: "Telegram",
+                        group: WebGroup::Channel,
+                        order: 20,
+                        title: WebText {
+                            zh: "Telegram",
+                            en: "Telegram",
+                        },
+                        summary: WebText {
+                            zh: "通过 Bot 收发消息",
+                            en: "Send and receive through a bot",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),

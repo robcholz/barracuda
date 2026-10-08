@@ -11,7 +11,7 @@ mod model_api_http;
 mod workflow;
 
 use barracuda_agent_runtime::{ModelApiFactory, RuntimeService, RuntimeStorageConfig};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -87,7 +87,18 @@ impl Plugin for AgentPlugin {
                 .register(
                     WebEntry {
                         id: "agent",
-                        title: "模型配置",
+                        group: WebGroup::Agent,
+                        order: 10,
+                        title: WebText {
+                            zh: "模型配置",
+                            en: "Models",
+                        },
+                        summary: WebText {
+                            zh: "为主 Agent、子 Agent、记忆与压缩注册模型",
+                            en: "Register models for the main agent, sub-agents, memory and compaction",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),

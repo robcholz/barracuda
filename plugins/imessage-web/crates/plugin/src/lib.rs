@@ -8,7 +8,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -77,7 +77,18 @@ impl Plugin for IMessageWebPlugin {
                 .register(
                     WebEntry {
                         id: "imessage-web",
-                        title: "Web 聊天",
+                        group: WebGroup::Channel,
+                        order: 10,
+                        title: WebText {
+                            zh: "Web 聊天",
+                            en: "Web chat",
+                        },
+                        summary: WebText {
+                            zh: "在浏览器里直接和设备对话",
+                            en: "Talk to the device right in the browser",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),

@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+mod signup;
+
 use alloc::{
     boxed::Box,
     format,
@@ -18,7 +20,10 @@ use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
-const DEFAULT_API_BASE: &str = "https://inkbox.ai";
+pub use signup::{InkboxSignup, SignupAccount, SignupError, SignupRequest};
+
+/// Production Inkbox service origin, without the `/api` suffix.
+pub const DEFAULT_API_BASE: &str = "https://inkbox.ai";
 
 /// Connection settings for the Inkbox iMessage API.
 pub struct InkboxConfig {
