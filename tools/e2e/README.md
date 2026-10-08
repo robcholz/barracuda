@@ -139,7 +139,10 @@ counts too. Split longer cases into numbered files such as `edge-vm-output-2`.
 Every run starts the System with `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:18790`
 and connects to its virtual peripherals manager (protocol in
 `platforms/virtual-io/README.md`). The Board exposes `vio-0` to `vio-7` and
-the I2C controllers `I2C0` and `I2C1`; the first `i2c.open` gets `I2C0`. A
+the I2C controllers `I2C0` and `I2C1`; the first `i2c.open` gets `I2C0`. Its
+declared peripherals sit on `I2C2`: the `real-time-clock` RX8130CE model at
+`0x32` and the `power-monitor` INA226 model at `0x40`, initialized during
+boot. A
 `[virtual_io]` table sets hardware up after startup and checks it after the
 chat:
 

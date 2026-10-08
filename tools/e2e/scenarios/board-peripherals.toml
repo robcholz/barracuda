@@ -1,0 +1,41 @@
+name = "Board-declared peripherals"
+description = "The host Board's real-time clock and power monitor initialize during boot through their real drivers against the RX8130CE and INA226 models on I2C2, without a datasheet violation."
+
+[model]
+mode = "none"
+
+# Any request: the peripherals initialize before the WebServer starts.
+[[http]]
+path = "/api/wifi"
+body_contains = ['"station"']
+
+[virtual_io]
+
+# RX8130CE probe: the Flag Register reads VLF = 0, so the clock kept time.
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C2"
+address = 0x32
+operations = [{ write = "1d" }, { read = "04" }]
+result = "ok"
+
+# INA226 identity: Manufacturer ID 5449h and Die ID 2260h.
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C2"
+address = 0x40
+operations = [{ write = "fe" }, { read = "5449" }]
+result = "ok"
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C2"
+address = 0x40
+operations = [{ write = "ff" }, { read = "2260" }]
+result = "ok"
+
+[logs]
+expect = [
+  'virtual rx8130ce at I2C2/0x32 backs peripheral `real-time-clock` \(rx8130ce-rtc\)',
+  'virtual ina226 at I2C2/0x40 backs peripheral `power-monitor` \(ina226-power-monitor\)',
+]
