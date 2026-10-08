@@ -16,6 +16,7 @@
 
 mod clock;
 pub mod control;
+pub mod declared;
 pub mod device;
 mod gpio;
 pub mod hal;

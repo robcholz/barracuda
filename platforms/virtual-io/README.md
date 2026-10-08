@@ -6,9 +6,17 @@ Platforms. It never enters firmware.
 - **Platform HAL.** `barracuda_platform_virtual_io::hal` is re-exported as
   the `hal` module of both host Platforms. It provides the virtual peripheral
   singleton (`VirtualPeripherals`: pins `GPIO0`..`GPIO15`, I2C controllers
-  `I2C0` and `I2C1`), the `RuntimePlatform` adapter behind the Board's exposed
-  I/O, and the `i2c-device` constructors for peripheral implementations. The
-  host Boards expose `vio-0`..`vio-7` on `GPIO0`..`GPIO7`.
+  `I2C0`, `I2C1`, and `I2C2`), the `RuntimePlatform` adapter behind the
+  Board's exposed I/O, and the `i2c-device` constructors for peripheral
+  implementations. The host Boards expose `vio-0`..`vio-7` on
+  `GPIO0`..`GPIO7` and leave `I2C0` and `I2C1` to runtime I/O.
+- **Board-declared peripherals.** The host Boards declare peripherals in
+  `board.yml` like any Board. The host Platforms set `peripheral-models` in
+  their HAL manifest, so generated Board composition calls
+  `hal::declare_peripheral` for each one before initializing any; the HAL
+  attaches the chip model for its implementation at the declared bus and
+  address (see below), and the System runs the real chip driver and
+  peripheral implementation against it.
 - **Virtual peripherals manager.** One process-wide `VirtualHardware` holds
   pin state, I2C buses with attached device models, fault rules, and a
   timestamped event log. It listens on the loopback address in
@@ -18,6 +26,26 @@ Platforms. It never enters firmware.
   may report datasheet order and timing violations. They are independent of
   the manager and the System, so a chip driver test can run the driver over a
   standalone `VirtualHardware` with a manual `Clock` and `VirtualDelay`.
+
+## Board-declared peripherals
+
+`declared` maps a peripheral implementation to its chip model, placed on the
+controller of the implementation's `i2c` binding at its `address` parameter:
+
+| Implementation | Model | Initial state |
+| --- | --- | --- |
+| `rx8130ce-rtc` | `rx8130ce` | kept time on its backup supply: VLF = 0, the clock running from the host's UTC time (initial power-on outside 2000–2099) |
+| `ina226-power-monitor` | `ina226` | power-on state, measuring a 5.000 V bus and 200 mA through the declared `shunt-micro-ohms` |
+| `bq27220-power-monitor` | `bq27220` | power-on state |
+
+A peripheral without a model is logged and uses its bindings directly. The
+host Boards declare `real-time-clock` (RX8130CE at `32h`) and `power-monitor`
+(INA226 at `40h`, 5 mΩ shunt) on `I2C2` (`GPIO8`/`GPIO9`, 400 kHz). Their
+models are ordinary attached devices: the manager reads and writes their
+registers, injects faults at their addresses, and records their
+transactions and datasheet violations, which the System also logs as
+warnings. `buses` names the peripheral of each such device, and `reset`
+keeps them.
 
 ## Pin model
 
@@ -65,7 +93,7 @@ hex without separators.
 | `pins` | | `pins`: every pin |
 | `pin` | `pin` | `pin` |
 | `set_input` | `pin`, `level`: `true`, `false`, or `null` to release | `pin` |
-| `buses` | | `buses`: controllers, their pins and clock while open, and devices |
+| `buses` | | `buses`: controllers, their pins and clock while open, and devices (with `peripheral` for a Board-declared one) |
 | `add_device` | `bus`, `address`, `model` (default `registers`), `data` (optional initial bytes from offset 0) | |
 | `remove_device` | `bus`, `address` | |
 | `read_registers` | `bus`, `address`, `offset` (default 0), `length` | `data` |
@@ -80,8 +108,9 @@ hex without separators.
 A pin is reported as `{name, chip, function, mode, pull, drive, output,
 driven, level}`. Register access through the manager has no bus side effects
 and is not recorded. `reset` removes devices, faults, external drives,
-events, and violations; pin modes, output latches, and controller claims
-belong to the running System and stay.
+events, and violations; pin modes, output latches, controller claims, and
+the devices behind Board-declared peripherals belong to the running System
+and stay.
 
 Events carry `seq`, `at_us` (microseconds since the manager started), and
 `kind`:

@@ -134,6 +134,33 @@ impl Rx8130ceModel {
         model
     }
 
+    /// Creates a device that kept time on its backup supply and now reads
+    /// the UTC time `unix_seconds`: VLF = 0 and the clock running.
+    ///
+    /// Returns `None` outside the calendar's years 2000–2099 (13.1).
+    #[must_use]
+    pub fn keeping_utc(unix_seconds: u64) -> Option<Self> {
+        const UNIX_2000: u64 = 946_684_800;
+        /// 2000–2099: 100 years, 25 of them leap years under the 13.1 rule.
+        const CALENDAR_DAYS: u64 = 36_525;
+        let seconds_since_2000 = unix_seconds.checked_sub(UNIX_2000)?;
+        let days = seconds_since_2000 / 86_400;
+        if days >= CALENDAR_DAYS {
+            return None;
+        }
+        let mut registers = [0; REGISTER_END];
+        // 1 January 2000 was a Saturday; bit 0 of the Week register is Sunday.
+        let weekday = u32::try_from((days + 6) % 7).ok()?;
+        Calendar {
+            seconds_since_2000,
+            weekday,
+        }
+        .encode(&mut registers);
+        let mut clock = [0; 7];
+        clock.copy_from_slice(&registers[usize::from(SECONDS)..=usize::from(YEAR)]);
+        Some(Self::running(clock))
+    }
+
     fn stopped(&self) -> bool {
         self.registers[usize::from(CONTROL0)] & STOP != 0
     }
@@ -501,6 +528,23 @@ mod tests {
         // 17:39:45 + 6:20:15 = next day 00:00:00, Monday 1 March 2088.
         assert_eq!(clock, [0x00, 0x00, 0x00, 0x02, 0x01, 0x03, 0x88]);
         assert!(rules(&hardware).is_empty(), "{:?}", hardware.violations());
+    }
+
+    #[test]
+    fn a_kept_clock_reads_the_given_utc_time() {
+        // 2026-10-08T12:34:56Z, a Thursday.
+        let model = Rx8130ceModel::keeping_utc(1_791_462_896).expect("in range");
+        let (hardware, mut bus) = setup(model);
+        let mut clock = [0; 7];
+        bus.write_read(ADDRESS, &[SECONDS], &mut clock)
+            .expect("read");
+        assert_eq!(clock, [0x56, 0x34, 0x12, 1 << 4, 0x08, 0x10, 0x26]);
+        let mut flag = [0];
+        bus.write_read(ADDRESS, &[FLAG], &mut flag).expect("read");
+        assert_eq!(flag[0] & VLF, 0);
+        assert!(rules(&hardware).is_empty(), "{:?}", hardware.violations());
+        assert!(Rx8130ceModel::keeping_utc(946_684_799).is_none());
+        assert!(Rx8130ceModel::keeping_utc(4_102_444_800).is_none(), "2100");
     }
 
     #[test]

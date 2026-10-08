@@ -23,8 +23,10 @@ use barracuda_board_hal::{
 };
 use embedded_hal::spi::Mode;
 
+pub use crate::declared::PeripheralDeclaration;
 use crate::{
-    clock::Clock, control, gpio::VirtualDigitalPin, hardware::VirtualHardware, i2c::VirtualI2cBus,
+    clock::Clock, control, declared, gpio::VirtualDigitalPin, hardware::VirtualHardware,
+    i2c::VirtualI2cBus,
 };
 
 /// Environment variable naming the loopback address of the control server.
@@ -37,7 +39,7 @@ pub const PIN_NAMES: [&str; 16] = [
 ];
 
 /// Names of the virtual I2C controllers, in index order.
-pub const I2C_CONTROLLER_NAMES: [&str; 2] = ["I2C0", "I2C1"];
+pub const I2C_CONTROLLER_NAMES: [&str; 3] = ["I2C0", "I2C1", "I2C2"];
 
 static HARDWARE: OnceLock<VirtualHardware> = OnceLock::new();
 static CONTROL_ADDRESS: OnceLock<SocketAddr> = OnceLock::new();
@@ -141,7 +143,7 @@ virtual_peripherals!(
         GPIO8 = 8, GPIO9 = 9, GPIO10 = 10, GPIO11 = 11, GPIO12 = 12, GPIO13 = 13, GPIO14 = 14,
         GPIO15 = 15,
     ],
-    i2c: [I2C0 = 0, I2C1 = 1]
+    i2c: [I2C0 = 0, I2C1 = 1, I2C2 = 2]
 );
 
 impl VirtualPeripherals {
@@ -393,6 +395,43 @@ pub const fn runtime_pin(pin: VirtualPinToken) -> VirtualPinToken {
 #[must_use]
 pub const fn runtime_i2c_controller(controller: VirtualI2cController) -> VirtualI2cController {
     controller
+}
+
+/// Attaches the device model behind one Board-declared peripheral.
+///
+/// Generated Board composition calls this for every declared peripheral
+/// before it initializes any of them, because this Platform declares
+/// `peripheral-models` in its HAL manifest. The model is chosen by the
+/// peripheral's implementation identifier and placed at its declared bus
+/// and `address`, so the real chip driver and peripheral implementation run
+/// against it. It stays controllable through the manager and survives its
+/// `reset`. A peripheral without a model, such as an LED on a virtual pin,
+/// uses its bindings directly; one on an I2C bus then meets an empty bus
+/// and fails initialization like a missing chip.
+pub fn declare_peripheral(declaration: &PeripheralDeclaration) {
+    let unix_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    match declared::attach(hardware(), declaration, unix_seconds) {
+        Ok(Some(device)) => log::info!(
+            "virtual {} at {}/{:#04x} backs peripheral `{}` ({})",
+            device.model,
+            device.bus,
+            device.address,
+            declaration.name,
+            declaration.implementation
+        ),
+        Ok(None) => log::info!(
+            "no virtual device model backs peripheral `{}` ({})",
+            declaration.name,
+            declaration.implementation
+        ),
+        Err(error) => log::error!(
+            "virtual device model for peripheral `{}` ({}) not attached: {error}",
+            declaration.name,
+            declaration.implementation
+        ),
+    }
 }
 
 /// Blocking virtual I2C bus consumed by statically selected peripheral implementations.

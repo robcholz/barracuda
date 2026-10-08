@@ -101,6 +101,9 @@ pub struct DeviceSnapshot {
     pub address: u8,
     /// Device model name.
     pub model: &'static str,
+    /// Board peripheral the device was declared for, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peripheral: Option<String>,
 }
 
 /// Failure injected into I2C transactions.
@@ -339,6 +342,8 @@ struct BusState {
     sda: Option<usize>,
     frequency_hz: Option<u32>,
     devices: BTreeMap<u8, Box<dyn I2cDevice>>,
+    /// Board peripheral names of devices the Board declared, by address.
+    peripherals: BTreeMap<u8, String>,
 }
 
 struct SpiBusState {
@@ -391,6 +396,7 @@ impl VirtualHardware {
                     sda: None,
                     frequency_hz: None,
                     devices: BTreeMap::new(),
+                    peripherals: BTreeMap::new(),
                 })
                 .collect(),
             spi: Vec::new(),
@@ -602,6 +608,7 @@ impl VirtualHardware {
                     .map(|(address, device)| DeviceSnapshot {
                         address: *address,
                         model: device.model(),
+                        peripheral: bus.peripherals.get(address).cloned(),
                     })
                     .collect(),
             })
@@ -618,7 +625,37 @@ impl VirtualHardware {
         &self,
         bus: &str,
         address: u64,
+        device: Box<dyn I2cDevice>,
+    ) -> Result<(), HardwareError> {
+        self.attach_device(bus, address, device, None)
+    }
+
+    /// Attaches the device model behind a Board-declared peripheral.
+    ///
+    /// It behaves like [`VirtualHardware::attach`], except that the device
+    /// is part of the Board: snapshots name its peripheral, and
+    /// [`VirtualHardware::reset`] keeps it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown bus, an invalid address, or an address
+    /// that already answers.
+    pub fn attach_peripheral(
+        &self,
+        bus: &str,
+        address: u64,
+        device: Box<dyn I2cDevice>,
+        peripheral: &str,
+    ) -> Result<(), HardwareError> {
+        self.attach_device(bus, address, device, Some(peripheral))
+    }
+
+    fn attach_device(
+        &self,
+        bus: &str,
+        address: u64,
         mut device: Box<dyn I2cDevice>,
+        peripheral: Option<&str>,
     ) -> Result<(), HardwareError> {
         let address = seven_bit(address)?;
         let now = self.clock.now();
@@ -634,6 +671,11 @@ impl VirtualHardware {
         let notes = context.into_notes();
         let model = device.model();
         hardware.buses[index].devices.insert(address, device);
+        if let Some(peripheral) = peripheral {
+            hardware.buses[index]
+                .peripherals
+                .insert(address, String::from(peripheral));
+        }
         hardware.record_notes(now, name, address, model, notes);
         hardware.record_violations(0, micros(now), name, address, model, violations);
         Ok(())
@@ -649,6 +691,7 @@ impl VirtualHardware {
         let mut hardware = self.lock();
         let index = bus_index(&hardware, bus)?;
         let state = &mut hardware.buses[index];
+        let _declared = state.peripherals.remove(&address);
         state
             .devices
             .remove(&address)
@@ -799,12 +842,14 @@ impl VirtualHardware {
 
     /// Removes devices, faults, external drives, events, and violations.
     ///
-    /// Pin modes, output latches, and controller claims belong to the System
-    /// and are kept.
+    /// Pin modes, output latches, controller claims, and the devices behind
+    /// Board-declared peripherals belong to the System and are kept.
     pub fn reset(&self) {
         let mut hardware = self.lock();
         for bus in &mut hardware.buses {
-            bus.devices.clear();
+            let declared = &bus.peripherals;
+            bus.devices
+                .retain(|address, _device| declared.contains_key(address));
         }
         for bus in &mut hardware.spi {
             bus.device = None;
@@ -1372,6 +1417,32 @@ mod tests {
         assert!(hardware.buses()[0].devices.is_empty());
         assert_eq!(hardware.pin("GPIO1").expect("pin").driven, None);
         assert!(hardware.pin("vio-0").expect("pin").level);
+    }
+
+    #[test]
+    fn board_declared_devices_survive_reset_and_are_named() {
+        let hardware = hardware();
+        hardware
+            .attach_peripheral(
+                "I2C0",
+                0x32,
+                Box::new(RegisterDevice::new()),
+                "real-time-clock",
+            )
+            .expect("declared device");
+        hardware
+            .attach("I2C0", 0x50, Box::new(RegisterDevice::new()))
+            .expect("test device");
+        hardware.reset();
+        let devices = &hardware.buses()[0].devices;
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].address, 0x32);
+        assert_eq!(devices[0].peripheral.as_deref(), Some("real-time-clock"));
+        hardware.detach("I2C0", 0x32).expect("detach");
+        hardware
+            .attach("I2C0", 0x32, Box::new(RegisterDevice::new()))
+            .expect("reattach");
+        assert_eq!(hardware.buses()[0].devices[0].peripheral, None);
     }
 
     #[test]
