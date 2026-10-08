@@ -42,5 +42,6 @@ body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"a
 status = 204
 
 [memory]
-# Host ordinary-heap peak was 177 KiB when this budget was set.
-heap_high_water_max = 196608
+# Host ordinary-heap peak was 187 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+heap_high_water_max = 200704

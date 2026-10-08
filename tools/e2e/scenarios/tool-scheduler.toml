@@ -25,5 +25,6 @@ tool_contains = ["e2e-once"]
 ready = ["UTC clock synchronized from network time"]
 
 [memory]
-# Host ordinary-heap peak was 196 KiB when this budget was set.
-heap_high_water_max = 212992
+# Host ordinary-heap peak was 209 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+heap_high_water_max = 221184

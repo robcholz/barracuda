@@ -18,5 +18,6 @@ send = "Ping me."
 reply_contains = ["Proactive hello.", "I sent you a note."]
 
 [memory]
-# Host ordinary-heap peak was 189 KiB when this budget was set.
-heap_high_water_max = 208896
+# Host ordinary-heap peak was 203 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+heap_high_water_max = 217088

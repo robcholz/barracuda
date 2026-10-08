@@ -66,6 +66,6 @@ expect = ["Agent created session `session-1`"]
 forbid = ['\bERROR\b', 'panicked at', 'conversation compaction', "created session `session-2`"]
 
 [memory]
-# Host ordinary-heap peak was 213 KiB on CI when this budget was set; the host
-# Board now composes runtime exposed I/O and the virtual hardware behind it.
+# Host ordinary-heap peak was 214 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
 heap_high_water_max = 225280

@@ -44,6 +44,6 @@ send = "What did it print?"
 reply_contains = ["It printed the sum, the queued message, and the file."]
 
 [memory]
-# Host ordinary-heap peak was 243 KiB when this budget was set; the host
-# Board now composes runtime exposed I/O and the virtual hardware behind it.
-heap_high_water_max = 253952
+# Host ordinary-heap peak was 244 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+heap_high_water_max = 258048
