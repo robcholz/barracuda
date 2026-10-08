@@ -299,7 +299,7 @@ fn validate_headers(headers: &[(&str, &str)]) -> Result<(), Error> {
     Ok(())
 }
 
-fn split_url(url: &str) -> Result<(&str, &str), Error> {
+pub(crate) fn split_url(url: &str) -> Result<(&str, &str), Error> {
     let scheme_end = url.find("://").ok_or(Error::InvalidUrl)?;
     let authority_start = scheme_end.checked_add(3).ok_or(Error::InvalidUrl)?;
     let scheme = url.get(..scheme_end).ok_or(Error::InvalidUrl)?;

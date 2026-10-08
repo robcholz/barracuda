@@ -146,6 +146,9 @@ impl ModelApiConfig {
         if self.base_url.is_empty() {
             return Err(crate::InitError::MissingBaseUrl);
         }
+        if crate::transport::split_url(&self.base_url).is_err() {
+            return Err(crate::InitError::InvalidBaseUrl);
+        }
         Ok(())
     }
 }

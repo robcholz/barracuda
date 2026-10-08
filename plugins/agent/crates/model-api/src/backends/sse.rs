@@ -21,8 +21,25 @@ use super::super::errors::Error;
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
 use super::super::types::{ChatStreamEvent, ToolCall};
+use super::shared::{map_status_error, truncated_error_body};
 #[cfg(feature = "cache_profile")]
 use super::shared::{AnthropicUsage, OpenAiUsage};
+
+/// An error object a provider sends inside an otherwise successful stream.
+///
+/// A numeric `code` that is an HTTP status is classified like the status of a
+/// failed response, so transient conditions are retried and the rest are not.
+#[derive(Deserialize)]
+struct StreamError {
+    code: Option<serde_json::Value>,
+}
+
+fn stream_error(status: Option<u16>, payload: &str) -> Error {
+    match status.filter(|status| (100..600).contains(status)) {
+        Some(status) => map_status_error(status, String::from(payload)),
+        None => Error::ProviderError(truncated_error_body(String::from(payload))),
+    }
+}
 
 #[cfg(feature = "cache_profile")]
 fn merge_usage(current: &mut Option<ProviderUsage>, incoming: ProviderUsage) {
@@ -162,6 +179,7 @@ struct OpenAiToolCall {
 struct OpenAiChunk {
     #[serde(default)]
     choices: Vec<OpenAiChunkChoice>,
+    error: Option<StreamError>,
     #[cfg(feature = "cache_profile")]
     usage: Option<OpenAiUsage>,
 }
@@ -214,6 +232,13 @@ impl OpenAiSse {
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), Error> {
         let chunk: OpenAiChunk = serde_json::from_str(payload).map_err(|_| Error::Parse)?;
+        if let Some(error) = chunk.error {
+            let status = error
+                .code
+                .and_then(|code| code.as_u64())
+                .and_then(|code| u16::try_from(code).ok());
+            return Err(stream_error(status, payload));
+        }
         #[cfg(feature = "cache_profile")]
         if let Some(usage) = chunk.usage.and_then(OpenAiUsage::profile) {
             merge_usage(&mut self.usage, usage);
@@ -343,8 +368,33 @@ enum AnthropicEvent {
         index: u64,
     },
     MessageStop,
+    Error {
+        error: Option<AnthropicStreamError>,
+    },
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamError {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+
+/// HTTP status Anthropic documents for each error type
+/// (https://docs.anthropic.com/en/api/errors).
+fn anthropic_error_status(kind: &str) -> Option<u16> {
+    Some(match kind {
+        "invalid_request_error" => 400,
+        "authentication_error" => 401,
+        "permission_error" => 403,
+        "not_found_error" => 404,
+        "request_too_large" => 413,
+        "rate_limit_error" => 429,
+        "api_error" => 500,
+        "overloaded_error" => 529,
+        _ => return None,
+    })
 }
 
 #[derive(Deserialize)]
@@ -444,6 +494,12 @@ impl AnthropicSse {
                     out.push(ChatStreamEvent::Usage(usage));
                 }
                 self.done = true;
+            }
+            AnthropicEvent::Error { error } => {
+                let status = error
+                    .and_then(|error| error.kind)
+                    .and_then(|kind| anthropic_error_status(&kind));
+                return Err(stream_error(status, payload));
             }
             AnthropicEvent::Other => {}
         }
@@ -754,6 +810,56 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn stream_error_objects_fail_the_stream_with_status_based_retry() {
+        let cases: [(ProviderSse, &str, Option<u16>, bool); 5] = [
+            (
+                ProviderSse::OpenAi(OpenAiSse::new()),
+                r#"{"error":{"code":502,"message":"upstream failed"}}"#,
+                Some(502),
+                true,
+            ),
+            (
+                ProviderSse::OpenAi(OpenAiSse::new()),
+                r#"{"error":{"code":400,"message":"bad request"}}"#,
+                Some(400),
+                false,
+            ),
+            (
+                ProviderSse::OpenAi(OpenAiSse::new()),
+                r#"{"error":{"code":"server_error","message":"?"}}"#,
+                None,
+                false,
+            ),
+            (
+                ProviderSse::Anthropic(AnthropicSse::new()),
+                r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+                Some(529),
+                true,
+            ),
+            (
+                ProviderSse::Anthropic(AnthropicSse::new()),
+                r#"{"type":"error","error":{"type":"invalid_request_error","message":"no"}}"#,
+                Some(400),
+                false,
+            ),
+        ];
+        for (mut parser, payload, status, retryable) in cases {
+            let error = parser
+                .process_data(payload, &mut Vec::new())
+                .expect_err(payload);
+            let actual = match &error {
+                Error::HttpStatus { status, .. } | Error::TransientHttpStatus { status, .. } => {
+                    Some(*status)
+                }
+                Error::ProviderError(_) => None,
+                other => panic!("unexpected error for {payload}: {other:?}"),
+            };
+            assert_eq!(actual, status, "{payload}");
+            assert_eq!(error.is_retryable(), retryable, "{payload}");
+        }
     }
 
     // ----- Anthropic -----

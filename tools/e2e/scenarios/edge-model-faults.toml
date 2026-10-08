@@ -37,8 +37,8 @@ abort = true
 [[model.responses]]
 raw = "data: {not json\n\n"
 
-# Step 5: a provider error event ends the stream without a completion, so it
-# is retried like a truncated stream.
+# Step 5: a provider error event in the stream is classified by its code like
+# an HTTP status; 502 is transient, so the request is retried.
 [[model.responses]]
 raw = "data: {\"error\":{\"message\":\"provider failed\",\"code\":502}}\n\n"
 
@@ -57,6 +57,10 @@ raw = '{"error":{"message":"rate limited"}}'
 [[model.responses]]
 status = 429
 raw = '{"error":{"message":"rate limited, last"}}'
+
+# Step 7: a provider error event with a permanent code is reported, not retried.
+[[model.responses]]
+raw = "data: {\"error\":{\"message\":\"bad key\",\"code\":401}}\n\n"
 
 [[steps]]
 send = "Hello."
@@ -86,6 +90,10 @@ reply_contains = ["After the provider error."]
 [[steps]]
 send = "Last one."
 notice_contains = ['transient HTTP 429: {"error":{"message":"rate limited, last"}}']
+
+[[steps]]
+send = "After the key change."
+notice_contains = ['HTTP 401: {"error":{"message":"bad key","code":401}}']
 
 [logs]
 expect = ["Agent run failed: failed to initialize LLM chat: HTTP 400"]

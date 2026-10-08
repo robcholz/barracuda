@@ -575,6 +575,27 @@ mod tests {
     }
 
     #[test]
+    fn a_base_url_that_is_not_an_http_url_is_rejected_before_it_is_used() {
+        let called = Rc::new(RefCell::new(false));
+        let target = Rc::clone(&called);
+        let endpoint = SetApiEndpoint::with_handler(move |_api, _purpose, _default| {
+            *target.borrow_mut() = true;
+            Ok(())
+        });
+
+        for base_url in ["not a url", "ftp://example.invalid/v1", "https://"] {
+            let body = alloc::format!(
+                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
+            );
+            let response = futures_lite::future::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())),
+            );
+            assert_eq!(response.status(), 422, "{base_url}");
+        }
+        assert!(!*called.borrow());
+    }
+
+    #[test]
     fn non_post_methods_are_rejected_without_setting() {
         let called = Rc::new(RefCell::new(false));
         let target = Rc::clone(&called);
