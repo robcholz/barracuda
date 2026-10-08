@@ -936,3 +936,46 @@ fn atom_matrix_reserves_a_platform_spi_controller_without_a_fake_clock_pin() {
     assert!(rust.contains("hal::spi_output("));
     assert!(!rust.contains("led_strip_spi_sck"));
 }
+
+#[test]
+fn host_boards_declare_their_peripherals_to_a_hal_with_device_models() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let catalog = load_catalog(root).expect("repository Implementation catalog");
+    for name in ["local-linux", "local-macos", "espressif-esp-vocat-v1-2"] {
+        let yaml = fs::read_to_string(root.join("boards/configs").join(name).join("board.yml"))
+            .expect("Board YAML");
+        let board = parse(&yaml).expect("valid Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("repository Board resolves");
+        let platform = resolve_board_platform(
+            root,
+            board.hardware().chip(),
+            board.toolchain().map(|toolchain| toolchain.target()),
+        )
+        .expect("repository Board Platform resolves");
+        let rust = render_board_hal_for_platform(&board, &resolved, &platform)
+            .expect("repository Board HAL generates");
+        assert_valid_rust(&rust);
+
+        if !platform.hal().peripheral_models() {
+            assert!(!rust.contains("declare_peripheral"), "{name}");
+            continue;
+        }
+        assert!(rust.contains(
+            r#"hal::declare_peripheral(&::barracuda_platform_selected::__platform::hal::PeripheralDeclaration { name: "real-time-clock", implementation: "rx8130ce-rtc", bindings: &[("i2c", "I2C2")], parameters: &[("address", "50")] });"#
+        ));
+        assert!(rust.contains(
+            r#"PeripheralDeclaration { name: "power-monitor", implementation: "ina226-power-monitor", bindings: &[("i2c", "I2C2")], parameters: &[("address", "64"), ("shunt-micro-ohms", "5000")] }"#
+        ));
+        let last_declaration = rust.rfind("declare_peripheral").expect("declarations");
+        let first_initialization = rust.find("::initialize(").expect("initializations");
+        assert!(last_declaration < first_initialization, "{name}");
+        // The peripherals' controller leaves the runtime I2C pool.
+        assert!(
+            rust.contains("hal::RuntimeIo<8, 2, 0, 0, 0, 0, 0>"),
+            "{name}"
+        );
+    }
+}

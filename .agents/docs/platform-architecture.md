@@ -123,6 +123,17 @@ the generated Board bindings move the declared virtual tokens out of it. The
 application still uses the same `resources_with_bindings` boundary, and the
 virtual hardware never enters firmware.
 
+Host Boards declare peripherals in `board.yml` like device Boards. Because
+the host has no physical chips, its Platform HAL manifest sets
+`peripheral-models`: generated Board composition then announces every
+declared peripheral (name, implementation identifier, chip-native bindings,
+and scalar parameters) to `hal::declare_peripheral` before initializing any
+of them, and the virtual Platform attaches the chip model for that
+implementation at the declared bus and address. The Board stays the single
+declaration and the generator keeps no Platform or implementation special
+case. Device Platforms do not set it, so their generated composition is
+unchanged.
+
 The returned shape preserves ownership:
 
 ~~~rust,ignore

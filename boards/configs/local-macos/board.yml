@@ -3,6 +3,33 @@ hardware:
   chip: macos
 native-layout:
   artifact: file-layout.yml
+# Peripherals on a private virtual bus: the host Platform attaches each chip's
+# datasheet model at its address before the System initializes it.
+peripherals:
+  io:
+    i2c-device:
+      board-peripherals:
+        peripheral: I2C2
+        scl: GPIO8
+        sda: GPIO9
+        frequency-hz: 400000
+  devices:
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings:
+        i2c: board-peripherals
+      parameters:
+        # RX8130CE fixed slave address 32h.
+        address: 50
+    power-monitor:
+      implementation: ina226-power-monitor
+      bindings:
+        i2c: board-peripherals
+      parameters:
+        # INA226 with A1 = A0 = GND: 40h.
+        address: 64
+        shunt-micro-ohms: 5000
+
 # Virtual pins served by the host Platform's peripherals manager.
 exposed-io:
   pins:
