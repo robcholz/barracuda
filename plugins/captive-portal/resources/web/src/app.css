@@ -383,3 +383,36 @@ body {
 .portal-topbar--phone .portal-brand-name {
   font-size: 15px;
 }
+
+/* Entry status asides (GET /portal/status) */
+.portal-aside {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a label is a short word or two: it keeps its width and the summary wraps instead */
+.portal-aside--label {
+  flex: none;
+}
+.portal-aside--small {
+  font-size: 12px;
+}
+.portal-aside--phone.bc-mono {
+  font-size: 13px;
+}
+.portal-nav-item__label {
+  flex: 1 1 auto;
+}
+.portal-nav-aside {
+  flex: 0 1 auto;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.portal-step__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+}

@@ -29,6 +29,18 @@ export interface WebEntry {
 
 export type Lang = "zh" | "en";
 
+/** How an entry is doing, for the navigation and the overview: set up, needs a look, or not set up. */
+export type EntryState = "ready" | "attention" | "off";
+
+/** One entry's record in `GET /portal/status`: its state, a short label, and a machine value. */
+export interface EntryStatus {
+  state: EntryState;
+  /** 「已连接」, 「已配置」; absent when the state alone says enough. */
+  label?: PortalText;
+  /** A machine value the shell shows in mono, for example the network name. */
+  detail?: string;
+}
+
 export interface Toast {
   kind: "success" | "error" | "info";
   title: string;
@@ -47,6 +59,16 @@ export interface PortalContext {
   toast(toast: Toast): void;
   /** Go to another entry by ID, or `"overview"` for home. */
   navigate(id: string): void;
+  /**
+   * The latest `GET /portal/status` record for an entry (this page's own by default), or `null`
+   * when the entry reports none or the portal could not read it.
+   */
+  status(id?: string): EntryStatus | null;
+  /**
+   * Reads the status again and redraws the navigation and overview with it. Call it after a save
+   * succeeds; it resolves once the new status is shown (or the read failed), and never rejects.
+   */
+  refreshStatus(): Promise<void>;
 }
 
 export type Cleanup = () => void;

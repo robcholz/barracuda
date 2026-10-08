@@ -146,6 +146,7 @@ export const mount = definePage((context) => {
         end();
         view = { kind: "linked" };
         render();
+        void context.refreshStatus();
       },
       success: {
         action: {
@@ -339,6 +340,7 @@ export const mount = definePage((context) => {
         session = false;
         finish({ kind: "linked" });
         context.toast({ kind: "success", title: t.linked });
+        void context.refreshStatus();
         return;
       case "expired":
       case "idle":

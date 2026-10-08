@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   ModuleSession,
   parseEntries,
+  parseStatus,
   sortEntries,
   type PortalContext,
   type Toast,
@@ -91,13 +92,24 @@ test("entries sort by group, then order, then ID", () => {
 function host(lang: "zh" | "en" = "zh") {
   const toasts: Toast[] = [];
   const routes: string[] = [];
+  const asked: string[] = [];
+  const refreshes = { count: 0 };
   return {
     toasts,
     routes,
+    asked,
+    refreshes,
     host: {
       lang,
       toast: (toast: Toast) => toasts.push(toast),
       navigate: (id: string) => routes.push(id),
+      status: (id: string) => {
+        asked.push(id);
+        return id === "wifi" ? { state: "ready" as const } : null;
+      },
+      refreshStatus: async () => {
+        refreshes.count++;
+      },
     },
   };
 }
@@ -198,4 +210,56 @@ test("a module without mount, or with an invalid cleanup, fails", async () => {
       },
     }),
   ).rejects.toThrow("offline");
+});
+
+test("status: valid records are kept, malformed ones left out, a non-object rejected", () => {
+  const status = parseStatus({
+    entries: {
+      wifi: {
+        state: "ready",
+        label: { zh: "已连接", en: "Connected" },
+        detail: "HomeNet",
+        extra: 1,
+      },
+      agent: { state: "off", label: { zh: "未配置", en: "Not set up" } },
+      "imessage-web": { state: "ready" },
+      "bad state": { state: "ready" },
+      odd: { state: "busy" },
+      half: { state: "ready", label: { zh: "只有中文" } },
+      empty: { state: "attention", detail: "" },
+      long: { state: "attention", detail: "x".repeat(129) },
+      number: { state: "ready", detail: 7 },
+    },
+  });
+  expect([...status.keys()]).toEqual(["wifi", "agent", "imessage-web"]);
+  expect(status.get("wifi")).toEqual({
+    state: "ready",
+    label: { zh: "已连接", en: "Connected" },
+    detail: "HomeNet",
+  });
+  expect(status.get("imessage-web")).toEqual({ state: "ready" });
+  for (const value of [null, [], {}, { entries: [] }, { entries: "x" }])
+    expect(() => parseStatus(value)).toThrow();
+  expect(parseStatus({ entries: {} }).size).toBe(0);
+});
+
+test("a mount reads its own status by default and asks the shell to refresh it, until it is left", async () => {
+  const session = new ModuleSession();
+  const { host: shell, asked, refreshes } = host();
+  let context: PortalContext | undefined;
+  await session.open(entry, {} as HTMLElement, shell, {
+    load: async () => ({
+      mount: (_root: HTMLElement, value: PortalContext) => {
+        context = value;
+      },
+    }),
+  });
+  expect(context?.status()).toEqual({ state: "ready" });
+  expect(context?.status("agent")).toBeNull();
+  expect(asked).toEqual(["wifi", "agent"]);
+  await context?.refreshStatus();
+  expect(refreshes.count).toBe(1);
+  session.close();
+  await context?.refreshStatus();
+  expect(refreshes.count).toBe(1);
 });

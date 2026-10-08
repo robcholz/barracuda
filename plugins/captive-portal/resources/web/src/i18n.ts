@@ -39,6 +39,8 @@ const zh = {
     agent: "注册模型",
     channel: "接入消息通道",
   },
+  /** A done 「连接 Wi-Fi」 step, with the device's detail (the network name). */
+  connectedTo: (detail: string) => joinZh("已连接", detail),
   open: (title: string) => joinZh("前往", title),
   tryFirst: (title: string) => joinZh(joinZh("先用", title), "试试"),
   modules: "模块",
@@ -101,6 +103,7 @@ const en: Strings = {
     agent: "Register a model",
     channel: "Connect a channel",
   },
+  connectedTo: (detail: string) => `Connected to ${detail}`,
   open: (title: string) => `Open ${title}`,
   tryFirst: (title: string) => `Try ${title} first`,
   modules: "Modules",

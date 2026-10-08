@@ -4,7 +4,9 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -14,6 +16,7 @@ use barracuda_plugin::manager::{
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
+use core::cell::Cell;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
@@ -54,9 +57,11 @@ impl Plugin for IMessageQQPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let configured = Rc::new(Cell::new(false));
+        let status = Rc::clone(&configured);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "imessage-qq",
                         group: WebGroup::Channel,
@@ -71,6 +76,7 @@ impl Plugin for IMessageQQPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || EntryStatus::configured(status.get()),
                 )
                 .map_err(PluginError::registration)?,
         );
@@ -82,10 +88,12 @@ impl Plugin for IMessageQQPlugin {
             &gateway,
             &self.http_clients,
         ))?;
+        configured.set(channel_registration.is_some());
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),
             channel_registration: Mutex::new(channel_registration),
+            configured,
             storage: context.storage().clone(),
         };
         let webserver = context.require::<WebServer>(
@@ -149,11 +157,22 @@ struct ConfigEndpoint<Storage, T: 'static = http_client::Tcp, D: 'static = http_
     gateway: Rc<IMessageGateway>,
     http_clients: ClientFactory<'static, T, D>,
     channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
+    /// Whether a channel is registered with the Gateway, readable without the lock.
+    configured: Rc<Cell<bool>>,
     storage: Storage,
 }
 impl<Storage, T: 'static, D: 'static> ConfigEndpoint<Storage, T, D> {
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+    }
+
+    /// `GET` body: whether a channel is configured, never its settings.
+    fn configured_response(configured: bool) -> HttpResponse {
+        if configured {
+            Self::response(200, br#"{"configured":true}"#)
+        } else {
+            Self::response(200, br#"{"configured":false}"#)
+        }
     }
 
     fn error_response(status: u16, body: &ErrorBody<'_>) -> HttpResponse {
@@ -198,8 +217,10 @@ where
 {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+            match request.method() {
+                HttpMethod::Post => {}
+                HttpMethod::Get => return Self::configured_response(self.configured.get()),
+                _ => return Self::response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
                 log::warn!("rejected invalid QQ gateway configuration");
@@ -234,9 +255,11 @@ where
             }
             let channel: Rc<dyn MessageChannel> = qq;
             channel_registration.take();
+            self.configured.set(false);
             match self.gateway.register(channel) {
                 Ok(registration) => {
                     channel_registration.replace(registration);
+                    self.configured.set(true);
                     log::info!("configured QQ gateway provider");
                     Self::response(204, b"")
                 }
@@ -316,8 +339,6 @@ where
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use core::cell::Cell;
-
     use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
@@ -394,12 +415,22 @@ mod tests {
                     assert!(self.network.requests().is_empty());
                 }
                 scenario => {
+                    let configured = Rc::new(Cell::new(false));
                     let endpoint = ConfigEndpoint {
                         gateway,
                         http_clients,
                         channel_registration: Mutex::new(None),
+                        configured: Rc::clone(&configured),
                         storage: storage.clone(),
                     };
+                    let get = || {
+                        let response = block_on(
+                            endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())),
+                        );
+                        assert_eq!(response.status(), 200);
+                        response.body().map(<[u8]>::to_vec)
+                    };
+                    assert_eq!(get().as_deref(), Some(&br#"{"configured":false}"#[..]));
                     let body: &[u8] = match scenario {
                         Scenario::LegacyRequestBody => {
                             br#"{"app_id":"app","access_token":"old-token"}"#
@@ -414,6 +445,13 @@ mod tests {
                     let response_body = response.body().expect("buffered response");
                     let stored = block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY))?;
                     let registered = block_on(endpoint.channel_registration.lock()).is_some();
+                    assert_eq!(configured.get(), registered);
+                    let expected: &[u8] = if registered {
+                        br#"{"configured":true}"#
+                    } else {
+                        br#"{"configured":false}"#
+                    };
+                    assert_eq!(get().as_deref(), Some(expected));
                     match scenario {
                         Scenario::RejectedCredentials => {
                             assert_eq!(response.status(), 422);

@@ -10,8 +10,11 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -26,7 +29,7 @@ use embassy_futures::select::select;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
-use login::{LoginEndpoint, LoginRuntime, LoginTiming};
+use login::{LoginEndpoint, LoginRuntime, LoginTiming, LoginWatch};
 use serde::{Deserialize, Serialize};
 use wechat::{Wechat, WechatConfig};
 
@@ -69,30 +72,6 @@ impl Plugin for IMessageWechatPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
-        let portal = context.require::<CaptivePortal>("captive-portal")?;
-        context.retain(
-            portal
-                .register(
-                    WebEntry {
-                        id: "imessage-wechat",
-                        group: WebGroup::Channel,
-                        order: 30,
-                        title: WebText {
-                            zh: "微信",
-                            en: "WeChat",
-                        },
-                        summary: WebText {
-                            zh: "微信消息通道",
-                            en: "WeChat message channel",
-                        },
-                        icon: Some("icon.svg"),
-                        figure: None,
-                        module: "entry.js",
-                    },
-                    ResourceFiles::from(context.filesystem()?.clone()),
-                )
-                .map_err(PluginError::registration)?,
-        );
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
@@ -110,6 +89,7 @@ impl Plugin for IMessageWechatPlugin {
         let configuration = Rc::new(ChannelConfiguration {
             gateway,
             http_clients: self.http_clients.clone(),
+            configured: Cell::new(channel_registration.is_some()),
             channel_registration: Mutex::new(channel_registration),
             storage: context.storage().clone(),
         });
@@ -117,6 +97,33 @@ impl Plugin for IMessageWechatPlugin {
             Rc::clone(&configuration),
             default_wechat_api_base(),
             LoginTiming::DEVICE,
+        );
+        let status_configuration = Rc::clone(&configuration);
+        let login_watch = login_endpoint.watch();
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        context.retain(
+            portal
+                .register_with_status(
+                    WebEntry {
+                        id: "imessage-wechat",
+                        group: WebGroup::Channel,
+                        order: 30,
+                        title: WebText {
+                            zh: "微信",
+                            en: "WeChat",
+                        },
+                        summary: WebText {
+                            zh: "微信消息通道",
+                            en: "WeChat message channel",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(&status_configuration, &login_watch),
+                )
+                .map_err(PluginError::registration)?,
         );
         context.retain(
             webserver
@@ -144,6 +151,25 @@ impl Plugin for IMessageWechatPlugin {
             wechat_login_task(runtime, context.task_token()).map_err(PluginError::registration)?;
         context.task_spawner()?.spawn(task);
         Ok(())
+    }
+}
+
+/// `attention` while a QR login waits for its scan, otherwise whether a channel
+/// is registered.
+fn entry_status<Storage, T, D>(
+    configuration: &ChannelConfiguration<Storage, T, D>,
+    login: &LoginWatch,
+) -> EntryStatus {
+    if login.waiting_for_scan() {
+        EntryStatus::new(
+            EntryState::Attention,
+            WebText {
+                zh: "等待扫码",
+                en: "Waiting for scan",
+            },
+        )
+    } else {
+        EntryStatus::configured(configuration.is_configured())
     }
 }
 
@@ -226,7 +252,16 @@ struct ChannelConfiguration<
     gateway: Rc<IMessageGateway>,
     http_clients: ClientFactory<'static, T, D>,
     channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
+    /// Whether a channel is registered with the Gateway, readable without the lock.
+    configured: Cell<bool>,
     storage: Storage,
+}
+
+impl<Storage, T, D> ChannelConfiguration<Storage, T, D> {
+    /// Returns whether this Plugin currently has a WeChat channel registered.
+    fn is_configured(&self) -> bool {
+        self.configured.get()
+    }
 }
 
 /// Why a configuration was not applied.
@@ -268,9 +303,11 @@ where
         let channel: Rc<dyn MessageChannel> =
             Rc::new(Wechat::new(self.http_clients.clone(), config.into()));
         channel_registration.take();
+        self.configured.set(false);
         match self.gateway.register(channel) {
             Ok(registration) => {
                 channel_registration.replace(registration);
+                self.configured.set(true);
                 log::info!("configured Wechat gateway provider");
                 Ok(())
             }
@@ -290,11 +327,6 @@ where
                 Err(ConfigureError::Registration)
             }
         }
-    }
-
-    /// Returns whether this Plugin currently has a WeChat channel registered.
-    async fn is_configured(&self) -> bool {
-        self.channel_registration.lock().await.is_some()
     }
 
     /// Returns the API base of the stored configuration, if one is stored.
@@ -325,8 +357,13 @@ where
 {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return json_response(405, br#"{"error":"method_not_allowed"}"#);
+            match request.method() {
+                HttpMethod::Post => {}
+                HttpMethod::Get if self.configuration.is_configured() => {
+                    return json_response(200, br#"{"configured":true}"#);
+                }
+                HttpMethod::Get => return json_response(200, br#"{"configured":false}"#),
+                _ => return json_response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
                 log::warn!("rejected invalid Wechat gateway configuration");
@@ -336,7 +373,7 @@ where
                 Ok(()) => json_response(204, b""),
                 Err(ConfigureError::Storage) => json_response(500, br#"{"error":"storage"}"#),
                 Err(ConfigureError::Registration) => {
-                    json_response(422, br#"{"error":"invalid_configuration"}"#)
+                    json_response(422, br#"{"error":"registration_failed"}"#)
                 }
             }
         })

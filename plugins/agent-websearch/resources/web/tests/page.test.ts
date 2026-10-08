@@ -36,6 +36,7 @@ async function render(lang: Lang = "zh") {
   const controller = new AbortController();
   const toasts: Toast[] = [];
   const routes: string[] = [];
+  const refreshes = { count: 0 };
   const context: PortalContext = {
     signal: controller.signal,
     lang,
@@ -43,6 +44,10 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    status: () => null,
+    refreshStatus: async () => {
+      refreshes.count++;
+    },
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
@@ -52,6 +57,7 @@ async function render(lang: Lang = "zh") {
     root,
     toasts,
     routes,
+    refreshes,
     controller,
     cleanup: cleanup as () => void,
     input: (name: string) =>
@@ -122,7 +128,7 @@ test("the key is required and the API base must be http(s)", async () => {
 });
 
 test("posts the key and API base, toasts success and clears the key", async () => {
-  const { input, submit, toasts, routes } = await render("zh");
+  const { input, submit, toasts, routes, refreshes } = await render("zh");
   input("api_key").value = "tvly-secret";
   await submit();
   expect(calls).toHaveLength(1);
@@ -138,15 +144,17 @@ test("posts the key and API base, toasts success and clears the key", async () =
   toasts[0].action?.run();
   expect(routes).toEqual(["imessage-web"]);
   expect(input("api_key").value).toBe("");
+  expect(refreshes.count).toBe(1);
 });
 
 test("a rejected key toasts the status and stays in the field", async () => {
-  const { input, submit, toasts } = await render("zh");
+  const { input, submit, toasts, refreshes } = await render("zh");
   input("api_key").value = "tvly-secret";
   respond = async () => new Response(null, { status: 400 });
   await submit();
   expect(toasts).toEqual([{ kind: "error", title: "配置被拒绝", code: "400" }]);
   expect(input("api_key").value).toBe("tvly-secret");
+  expect(refreshes.count).toBe(0);
 });
 
 test("leaving the page clears the key and empties the root", async () => {

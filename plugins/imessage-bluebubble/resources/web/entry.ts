@@ -1,10 +1,12 @@
 import {
   button,
+  configuredRow,
   definePage,
   h,
   header,
   note,
   page,
+  readChannel,
   resultCard,
   settingsForm,
 } from "../../../captive-portal/resources/web/ui";
@@ -67,10 +69,12 @@ interface ServerInfo {
 }
 
 const SAMPLE_URL = "https://bluebubbles.example.com";
+const ENDPOINT = "/api/gateway/bluebubbles";
 
 /**
  * The BlueBubbles page: the server URL and password, checked in the browser against the server's
- * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`.
+ * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`. `GET` on that path
+ * says whether a channel is configured.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -80,9 +84,10 @@ export const mount = definePage((context) => {
     variant: "outline",
     onClick: () => void check(),
   });
+  const current = configuredRow("BlueBubbles", lang);
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/bluebubbles",
+      endpoint: ENDPOINT,
       submit: t.submit,
       rows: [
         {
@@ -136,6 +141,10 @@ export const mount = definePage((context) => {
         ],
       },
       onError: (error) => ({ body: error.message }),
+      onSuccess: () => {
+        current.show(true);
+        void context.refreshStatus();
+      },
       success: {
         action: {
           label: t.tryChat,
@@ -145,6 +154,10 @@ export const mount = definePage((context) => {
     },
     context,
   );
+  form.element.prepend(current.element);
+  void readChannel(context, ENDPOINT).then((state) => {
+    if (state?.configured) current.show(true);
+  });
   const field = (name: string) =>
     form.element.querySelector<HTMLElement>(`[name="${name}"]`)!;
   const privateApi = field("use_private_api");

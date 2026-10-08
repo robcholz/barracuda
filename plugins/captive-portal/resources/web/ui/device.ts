@@ -11,6 +11,8 @@ export interface DeviceError {
   error: string;
   message?: string;
   code?: string;
+  /** The device kept what it had (`"retry": true`): sending the same request again resumes it. */
+  retry?: boolean;
 }
 
 /** Reads a failed response's `{error, message, code}` body; a missing or malformed body leaves only the status. */
@@ -19,8 +21,9 @@ export async function deviceError(response: Response): Promise<DeviceError> {
   try {
     const body: unknown = await response.json();
     if (body && typeof body === "object") {
-      const { error, message, code } = body as Record<string, unknown>;
+      const { error, message, code, retry } = body as Record<string, unknown>;
       if (typeof error === "string") out.error = error;
+      if (retry === true) out.retry = true;
       if (typeof message === "string" && message) out.message = message;
       if ((typeof code === "string" && code) || typeof code === "number")
         out.code = String(code);
@@ -100,7 +103,8 @@ export async function callDevice<T = unknown>(
 /**
  * Toasts a failed device call in the kit's words: 「配置被拒绝」 for 4xx (「接口不可用」 for 404),
  * 「提交失败」 otherwise, with the status (and upstream code) in mono and the device's `message`
- * as the body; 「未收到设备确认」 when nothing came back.
+ * as the body; 「未收到设备确认」 when nothing came back. `retry` becomes a 「重试」 action when
+ * nothing came back, or when the device's error says it can be retried (`"retry": true`).
  */
 export function toastDeviceError(
   context: PortalContext,
@@ -128,5 +132,7 @@ export function toastDeviceError(
           : s.failed,
     body: message,
     code: code ? `${status} · ${code}` : String(status),
+    action:
+      result.error.retry && retry ? { label: s.retry, run: retry } : undefined,
   });
 }

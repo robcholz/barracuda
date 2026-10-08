@@ -14,6 +14,17 @@ afterEach(async () => {
   await harness.close();
 });
 
+/** Renders the page; the mount's `GET` of the channel state (204 here: no state) is checked and set aside. */
+async function render(lang: "zh" | "en") {
+  const page = await harness.render(mount, lang);
+  expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
+    ["GET", "/api/gateway/inkbox"],
+  ]);
+  harness.calls.length = 0;
+  await settle();
+  return page;
+}
+
 type Page = Awaited<ReturnType<typeof harness.render>>;
 
 /** Titles of the rows a person sees. */
@@ -43,7 +54,7 @@ async function signUp(page: Page) {
 }
 
 test("renders the email method in Chinese: radio, email row, open fold, no footer", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   expect(page.query(".bc-header h1")?.textContent).toBe("Inkbox");
   expect(page.query(".bc-header h1 img")?.getAttribute("src")).toEndWith(
     "icon.png",
@@ -69,7 +80,7 @@ test("renders the email method in Chinese: radio, email row, open fold, no foote
 });
 
 test("renders in English", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   for (const phrase of [
     "Connect Inkbox identity and mail.",
     "Create an Inkbox identity, or use one you have",
@@ -82,7 +93,7 @@ test("renders in English", async () => {
 });
 
 test("email → code → claimed, through the device's signup, resend and verify", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   await page.click("发送验证码");
   expect(harness.calls).toHaveLength(0);
   expect(page.text()).toContain("请填写 邮箱地址。");
@@ -156,7 +167,7 @@ test("email → code → claimed, through the device's signup, resend and verify
 });
 
 test("Inkbox's signup refusal is shown on the email field", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   harness.reply = async () =>
     json(400, {
       error: "invalid_request",
@@ -178,7 +189,7 @@ test("Inkbox's signup refusal is shown on the email field", async () => {
 });
 
 test("a verify with no signup on the device goes back to the email step", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   await signUp(page);
   harness.reply = async () => json(409, { error: "conflict" });
   page.type("code", "123456");
@@ -194,7 +205,7 @@ test("a verify with no signup on the device goes back to the email step", async 
 });
 
 test("Enter in the email field sends the code instead of submitting the form", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   await signUp(page);
   harness.calls.length = 0;
   page.type("email", "other@example.com");
@@ -213,7 +224,7 @@ test("Enter in the email field sends the code instead of submitting the form", a
 });
 
 test("已有 API Key posts the key, identity and API base with the footer", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   const key = page.root.querySelector<HTMLInputElement>(
     'input[name="method"][value="key"]',
   )!;
@@ -235,4 +246,162 @@ test("已有 API Key posts the key, identity and API base with the footer", asyn
   ]);
   expect(page.toasts.at(-1)?.title).toBe("设备已接受配置");
   expect(page.input("api_key").value).toBe("");
+});
+
+/** Renders with the device's `GET /api/gateway/inkbox` answering `state`. */
+async function renderWith(state: unknown, lang: "zh" | "en" = "zh") {
+  harness.reply = async () => json(200, state);
+  const page = await harness.render(mount, lang);
+  await settle();
+  harness.calls.length = 0;
+  return page;
+}
+
+test("a reload resumes a signup at the code step", async () => {
+  for (const lang of ["zh", "en"] as const) {
+    const page = await renderWith(
+      {
+        configured: true,
+        signup: {
+          email_address: "barracuda-a1b2c3@inkboxmail.com",
+          claim_status: "agent_unclaimed",
+        },
+      },
+      lang,
+    );
+    const zh = lang === "zh";
+    expect(visibleRows(page)).toEqual(
+      zh
+        ? ["方式", "邮箱", "验证码", "高级"]
+        : ["Method", "Email", "Code", "Advanced"],
+    );
+    // the address the code went to is not stored on the device
+    expect(page.text()).toContain(
+      zh ? "验证码已发到你的邮箱·重新发送" : "Code sent to your inbox·Resend",
+    );
+    expect(visible(button(page, zh ? "发送验证码" : "Send code"))).toBe(false);
+    harness.reply = async () => json(200, { claim_status: "agent_claimed" });
+    page.type("code", "123456");
+    await page.click(zh ? "验证" : "Verify");
+    expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox/verify");
+    expect(visibleRows(page)).toEqual(
+      zh ? ["方式", "身份", "高级"] : ["Method", "Identity", "Advanced"],
+    );
+    expect(page.query(".bc-frame[role=status]")?.textContent).toContain(
+      "barracuda-a1b2c3@inkboxmail.com",
+    );
+    expect(page.refreshes.count).toBe(1);
+    page.unmount();
+  }
+});
+
+test("a reload of a claimed signup shows the identity", async () => {
+  const page = await renderWith({
+    configured: true,
+    signup: {
+      email_address: "barracuda-a1b2c3@inkboxmail.com",
+      claim_status: "agent_claimed",
+    },
+  });
+  expect(visibleRows(page)).toEqual(["方式", "身份", "高级"]);
+  const card = page.query(".bc-frame[role=status]")!;
+  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已认领");
+  expect(card.querySelector(".bc-mono")?.textContent).toBe(
+    "barracuda-a1b2c3@inkboxmail.com",
+  );
+});
+
+test("a channel saved with a key shows as configured above the form", async () => {
+  const page = await renderWith({ configured: true }, "en");
+  expect(visibleRows(page)).toEqual(["Channel", "Method", "Email", "Advanced"]);
+  const card = page.query(".bc-frame[role=status]")!;
+  expect(card.querySelector(".bc-option-title")?.textContent).toBe("Inkbox");
+  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe(
+    "Configured",
+  );
+  // not configured: nothing to show
+  page.unmount();
+  const empty = await renderWith({ configured: false });
+  expect(visibleRows(empty)).toEqual(["方式", "邮箱", "高级"]);
+});
+
+test("a signup the device kept offers 重试, which resumes it with the same email", async () => {
+  const page = await render("zh");
+  harness.reply = async () =>
+    json(422, {
+      error: "registration_failed",
+      message: "channel rejected",
+      retry: true,
+    });
+  page.type("email", "you@example.com");
+  await page.click("发送验证码");
+  const toast = page.toasts.at(-1)!;
+  expect([toast.title, toast.body, toast.code]).toEqual([
+    "配置被拒绝",
+    "channel rejected",
+    "422",
+  ]);
+  expect(toast.action?.label).toBe("重试");
+  expect(page.refreshes.count).toBe(0);
+
+  harness.reply = async () =>
+    json(200, {
+      email_address: "barracuda-a1b2c3@inkboxmail.com",
+      claim_status: "agent_unclaimed",
+    });
+  toast.action!.run();
+  await settle();
+  expect(harness.calls.map((call) => [call.url, call.body])).toEqual([
+    ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
+    ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
+  ]);
+  expect(visibleRows(page)).toEqual(["方式", "邮箱", "验证码", "高级"]);
+  expect(page.refreshes.count).toBe(1);
+
+  // a refusal without the flag offers nothing to retry
+  page.unmount();
+  harness.calls.length = 0;
+  harness.reply = async () => new Response(null, { status: 204 });
+  const other = await render("en");
+  harness.reply = async () =>
+    json(400, { error: "invalid_request", message: "bad email" });
+  other.type("email", "nope");
+  await other.click("Send code");
+  expect(other.toasts.at(-1)?.action).toBeUndefined();
+});
+
+test("a key saved through the form shows as configured and refreshes the status", async () => {
+  const page = await render("zh");
+  page.root
+    .querySelector<HTMLInputElement>('input[name="method"][value="key"]')!
+    .click();
+  await settle();
+  page.type("api_key", "ApiKey_1");
+  page.type("identity_id", "6f1c");
+  harness.reply = async () => json(422, { error: "registration_failed" });
+  await page.submit();
+  expect(page.refreshes.count).toBe(0);
+  page.type("api_key", "ApiKey_1");
+  harness.reply = async () => new Response(null, { status: 204 });
+  await page.submit();
+  expect(page.refreshes.count).toBe(1);
+  expect(visibleRows(page)).toEqual(["通道", "方式", "账号", "高级"]);
+});
+
+test("a reload with the person's address names it and prefills the email", async () => {
+  const page = await renderWith({
+    configured: true,
+    signup: {
+      email_address: "barracuda-a1b2c3@inkboxmail.com",
+      claim_status: "agent_unclaimed",
+      human_email: "you@example.com",
+    },
+  });
+  expect(visibleRows(page)).toEqual(["方式", "邮箱", "验证码", "高级"]);
+  expect(page.text()).toContain("验证码已发到you@example.com·重新发送");
+  expect(page.input("email").value).toBe("you@example.com");
+  // the address is the one the code went to: no 发送验证码 until it changes
+  expect(visible(button(page, "发送验证码"))).toBe(false);
+  page.type("email", "other@example.com");
+  expect(visible(button(page, "发送验证码"))).toBe(true);
 });

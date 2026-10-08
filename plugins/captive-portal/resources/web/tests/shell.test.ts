@@ -40,7 +40,13 @@ interface Harness {
   portal: Portal;
   document: Document;
   window: Window & typeof globalThis;
-  records: { value: unknown; offline: boolean };
+  records: {
+    value: unknown;
+    offline: boolean;
+    /** The `/portal/status` reply; `undefined` answers 404. */
+    status: unknown;
+    statusReads: number;
+  };
   loads: string[];
   contexts: PortalContext[];
   cleanups: string[];
@@ -63,6 +69,7 @@ async function start(
     entries?: unknown;
     storage?: Record<string, string>;
     width?: number;
+    status?: unknown;
   } = {},
 ): Promise<Harness> {
   const installed = installBrowser(
@@ -76,7 +83,12 @@ async function start(
     });
   for (const [key, value] of Object.entries(options.storage ?? {}))
     window.localStorage.setItem(key, value);
-  const records = { value: options.entries ?? NINE, offline: false };
+  const records = {
+    value: options.entries ?? NINE,
+    offline: false,
+    status: options.status,
+    statusReads: 0,
+  };
   const loads: string[] = [];
   const contexts: PortalContext[] = [];
   const cleanups: string[] = [];
@@ -103,8 +115,14 @@ async function start(
   const portal = new Portal({
     window,
     toastMs: 20,
-    fetch: async () => {
+    fetch: async (url) => {
       if (records.offline) throw new Error("offline fixture");
+      if (url === "/portal/status") {
+        records.statusReads++;
+        return records.status === undefined
+          ? new Response(null, { status: 404 })
+          : Response.json(records.status);
+      }
       return Response.json(records.value);
     },
     load: async (url) => {
@@ -199,7 +217,9 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   );
   expect(h.$(".bc-nav-item")?.getAttribute("aria-current")).toBe("page");
   expect(h.$(".bc-crumb--current")?.textContent).toBe("概览");
-  expect(h.$(".portal-hero__kv dd")?.textContent).toBe("9");
+  expect(
+    h.$(".portal-hero__kv dd:not([data-status-device])")?.textContent,
+  ).toBe("9");
   expect(
     h.$$(".portal-steps a").map((node) => node.getAttribute("href")),
   ).toEqual(["#wifi", "#agent", "#imessage-web"]);
@@ -537,4 +557,202 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
   expect(h.$(".portal-back")?.textContent).toBe("Overview");
   (h.$(".portal-phone-theme") as HTMLButtonElement).click();
   expect(h.window.localStorage.getItem(STORAGE.theme)).toBe("light");
+});
+
+const label = (zh: string, en: string) => ({ zh, en });
+/** A device that joined HomeNet, has one model and a Telegram channel. */
+const STATUS = {
+  entries: {
+    wifi: {
+      state: "ready",
+      label: label("已连接", "Connected"),
+      detail: "HomeNet",
+    },
+    agent: { state: "ready", label: label("已配置", "Configured") },
+    "agent-websearch": { state: "off", label: label("未配置", "Not set up") },
+    "imessage-telegram": {
+      state: "ready",
+      label: label("已配置", "Configured"),
+    },
+    "imessage-wechat": {
+      state: "attention",
+      label: label("等待扫码", "Waiting for scan"),
+    },
+    "imessage-qq": { state: "off", label: label("未配置", "Not set up") },
+  },
+} as const;
+
+test("the status fills the badge, sidebar, header, steps, tiles and channel rows", async () => {
+  const h = await start({ status: STATUS });
+  const badge = h.$(".portal-topbar--desktop .bc-badge");
+  expect(badge?.textContent).toBe("Wi-Fi 已连接");
+  expect(badge?.classList.contains("bc-badge--signal")).toBe(true);
+  // the phone header keeps to the offline badge
+  expect(h.$(".portal-topbar--phone .bc-badge")).toBeNull();
+  const wifi = h.$('.bc-nav-item[href="#wifi"]')!;
+  expect(wifi.querySelector(".portal-nav-aside")?.textContent).toBe("HomeNet");
+  expect(wifi.getAttribute("aria-label")).toBe("Wi-Fi · HomeNet");
+  expect(h.$$(".portal-nav-aside")).toHaveLength(1);
+  expect(h.$$(".portal-hero__kv > *").map((node) => node.textContent)).toEqual([
+    "Wi-Fi",
+    "HomeNet",
+    "插件页面每个页面由一个插件提供，停用插件后页面随之消失",
+    "9",
+    "连接",
+    "HTTP · 明文仅在可信网络中提交密钥",
+  ]);
+  const steps = h.$$(".portal-steps > li");
+  const visible = (node: HTMLElement | null) =>
+    !!node && node.style.display !== "none";
+  expect(
+    steps.map((step) => visible(step.querySelector(".portal-step__done"))),
+  ).toEqual([true, true, true]);
+  expect(
+    steps.map((step) => visible(step.querySelector(".portal-step__link"))),
+  ).toEqual([false, false, false]);
+  expect(
+    steps.map((step) => step.querySelector(".portal-step__done")?.textContent),
+  ).toEqual(["已连接 HomeNet", "模型配置 · 已配置", "Telegram · 已配置"]);
+  const aside = (selector: string) => {
+    const node = h.$(`${selector} .portal-aside`);
+    return visible(node) ? node!.textContent : null;
+  };
+  expect(aside('.bc-tile[href="#wifi"]')).toBe("HomeNet");
+  expect(
+    h.$('.bc-tile[href="#wifi"] .portal-aside')?.classList.contains("bc-mono"),
+  ).toBe(true);
+  expect(aside('.bc-tile[href="#agent"]')).toBeNull();
+  expect(
+    h.$$(".portal-channel-row").map((row) => {
+      const node = row.querySelector<HTMLElement>(".portal-aside");
+      return visible(node) ? node!.textContent : "";
+    }),
+  ).toEqual(["已配置", "等待扫码", "未配置", "", ""]);
+
+  h.portal.setLang("en");
+  expect(h.$(".portal-topbar--desktop .bc-badge")?.textContent).toBe(
+    "Wi-Fi connected",
+  );
+  expect(h.$(".portal-steps .portal-step__done")?.textContent).toBe(
+    "Connected to HomeNet",
+  );
+  expect(h.$(".portal-channel-row .portal-aside")?.textContent).toBe(
+    "Configured",
+  );
+});
+
+test("a status change repaints in place: figures stay, and a failed read empties the slots", async () => {
+  const h = await start({ status: STATUS });
+  await settle(20);
+  const mounted = h.figures.mounted;
+  const tile = h.$('.bc-tile[href="#wifi"]');
+  h.records.status = {
+    entries: {
+      wifi: {
+        state: "attention",
+        label: label("配置热点", "Setup hotspot"),
+        detail: "Barracuda-1A2B",
+      },
+    },
+  };
+  await h.portal.refreshStatus();
+  expect(h.$('.bc-tile[href="#wifi"]')).toBe(tile);
+  expect(h.figures.mounted).toBe(mounted);
+  expect(h.figures.destroyed).toBe(0);
+  const badge = h.$(".portal-topbar--desktop .bc-badge");
+  expect(badge?.textContent).toBe("Wi-Fi 配置热点");
+  expect(badge?.classList.contains("bc-badge--signal")).toBe(false);
+  expect(tile?.querySelector(".portal-aside")?.textContent).toBe(
+    "Barracuda-1A2B",
+  );
+  // no ready entry: every step links again
+  expect(
+    h.$$(".portal-step__link").filter((node) => node.style.display !== "none"),
+  ).toHaveLength(3);
+
+  h.records.status = undefined;
+  await h.portal.refreshStatus();
+  expect(h.$(".portal-topbar--desktop .bc-badge")).toBeNull();
+  expect(h.$$(".portal-nav-aside")).toHaveLength(0);
+  expect(
+    h.$$("[data-status-device]").every((node) => node.style.display === "none"),
+  ).toBe(true);
+  expect(
+    h.$$(".portal-aside").every((node) => node.style.display === "none"),
+  ).toBe(true);
+});
+
+test("the status is read with the manifest, on navigation, on focus and when a page asks", async () => {
+  const h = await start({ status: STATUS });
+  const reads = h.records.statusReads;
+  expect(reads).toBeGreaterThanOrEqual(1);
+  await h.go("#wifi");
+  await settle();
+  const moved = h.records.statusReads;
+  expect(moved).toBeGreaterThan(reads);
+  expect(h.contexts[0].status()).toEqual(STATUS.entries.wifi);
+  expect(h.contexts[0].status("imessage-qq")).toEqual(
+    STATUS.entries["imessage-qq"],
+  );
+  expect(h.contexts[0].status("imessage-inkbox")).toBeNull();
+  // a page that saved: the sidebar follows without remounting the page
+  h.records.status = {
+    entries: {
+      wifi: {
+        state: "ready",
+        label: label("已连接", "Connected"),
+        detail: "Office-5F",
+      },
+    },
+  };
+  await h.contexts[0].refreshStatus();
+  expect(h.records.statusReads).toBe(moved + 1);
+  expect(h.$(".portal-nav-aside")?.textContent).toBe("Office-5F");
+  expect(h.cleanups).toEqual([]);
+  h.window.dispatchEvent(new h.window.Event("focus"));
+  await settle();
+  expect(h.records.statusReads).toBe(moved + 2);
+});
+
+test("on a phone the list shows the detail and the channel labels", async () => {
+  const h = await start({ width: 390, status: STATUS });
+  const asides = h.$$(".portal-phone-home .bc-list-row").map((row) => {
+    const node = row.querySelector<HTMLElement>(".portal-aside");
+    return node && node.style.display !== "none" ? node.textContent : "";
+  });
+  expect(asides).toEqual([
+    "HomeNet",
+    "",
+    "",
+    "",
+    "已配置",
+    "等待扫码",
+    "未配置",
+    "",
+    "",
+  ]);
+});
+
+test("step 03 depends only on the channels that report a status", async () => {
+  const h = await start({
+    status: {
+      entries: {
+        wifi: STATUS.entries.wifi,
+        "imessage-telegram": {
+          state: "off",
+          label: label("未配置", "Not set up"),
+        },
+      },
+    },
+  });
+  const step = h.$('.portal-steps > li[data-step="channel"]')!;
+  expect(
+    step.querySelector<HTMLElement>(".portal-step__done")?.style.display,
+  ).toBe("none");
+  expect(
+    step.querySelector<HTMLElement>(".portal-step__link")?.style.display,
+  ).toBe("");
+  expect(step.querySelector(".portal-step__link")?.textContent).toBe(
+    "先用 Web 聊天试试",
+  );
 });

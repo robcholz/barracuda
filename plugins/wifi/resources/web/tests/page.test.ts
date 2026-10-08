@@ -91,6 +91,7 @@ afterEach(async () => {
 async function render(lang: Lang = "zh") {
   const controller = new AbortController();
   const toasts: Toast[] = [];
+  const refreshes = { count: 0 };
   const context: PortalContext = {
     signal: controller.signal,
     lang,
@@ -98,6 +99,10 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    status: () => null,
+    refreshStatus: async () => {
+      refreshes.count++;
+    },
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
@@ -128,6 +133,7 @@ async function render(lang: Lang = "zh") {
   return {
     root,
     toasts,
+    refreshes,
     controller,
     cleanup,
     text,
@@ -252,6 +258,8 @@ test("joins a secured network after validating the password", async () => {
   // the form closes, the password is gone and the status is read again
   expect(page.root.querySelector("form")).toBeNull();
   expect(calls.filter((call) => call.url === "/api/wifi")).toHaveLength(3);
+  // and the portal's: the sidebar and the overview follow
+  expect(page.refreshes.count).toBe(1);
 });
 
 test("joins an open network without a password", async () => {
@@ -277,6 +285,7 @@ test("a rejected join keeps the form and reports the status", async () => {
     { kind: "error", title: "配置被拒绝", code: "422" },
   ]);
   expect(page.input("password").value).toBe("wrong password");
+  expect(page.refreshes.count).toBe(0);
 });
 
 test("joins a network entered by name", async () => {
@@ -311,6 +320,7 @@ test("forgets the current network", async () => {
   expect(page.root.querySelector("dl")?.textContent).toContain(
     "Barracuda Setup",
   );
+  expect(page.refreshes.count).toBe(1);
 });
 
 test("reports failed reads and writes", async () => {

@@ -8,7 +8,12 @@
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/qq` for runtime configuration,
-and registers the configured QQ channel for its lifetime. See [`http.md`](http.md).
+and registers the configured QQ channel for its lifetime. `GET` on the same path
+reports only whether a channel is configured. The portal entry is registered
+with `CaptivePortal::register_with_status`; its `GET /portal/status` record is
+`EntryStatus::configured`: `ready` 已配置/Configured while a channel is
+registered with the Gateway, otherwise `off` 未配置/Not set up. It reads a flag
+the endpoint keeps beside its registration. See [`http.md`](http.md).
 
 The stored configuration is `{"app_id","app_secret","api_base","token_url"}`.
 QQ access tokens live at most two hours, so the Plugin stores the App Secret and
@@ -53,8 +58,11 @@ The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
 `{app_id, app_secret, api_base, token_url}` to `POST /api/gateway/qq` with
 「验证并保存」. The device fetches one access token before storing anything, so a 422
 `verification_failed` puts QQ's own `message` and `code` on the App Secret
-field; other errors toast the device's `message`. It does not read current
-settings. Secrets are password inputs, never persisted in browser storage, and
+field; other errors toast the device's `message`. On mount it reads `GET /api/gateway/qq`, which answers only
+`{"configured"}`; a configured channel shows as a 「通道」 row with the
+已配置 card above the form that replaces it. The row also appears after a save
+succeeds, and the page then calls `context.refreshStatus()` so the portal's
+navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never persisted in browser storage, and
 cleared on success or unmount. Requests are cancelled on unmount and are never
 retried automatically. The existing HTTP API has no authentication or transport
 encryption added here; use only within a trusted provisioning network.

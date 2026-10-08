@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   json,
   pageHarness,
+  settle,
 } from "../../../../captive-portal/resources/web/tests/page";
 import { mount } from "../entry";
 
@@ -12,6 +13,17 @@ beforeEach(() => {
 afterEach(async () => {
   await harness.close();
 });
+
+/** Renders the page; the mount's `GET` of the channel state (204 here: no state) is checked and set aside. */
+async function render(lang: "zh" | "en") {
+  const page = await harness.render(mount, lang);
+  expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
+    ["GET", "/api/gateway/bluebubbles"],
+  ]);
+  harness.calls.length = 0;
+  await settle();
+  return page;
+}
 
 /** BlueBubbles Server's reply shape (`Success` with `GeneralInterface.getServerMetadata()`). */
 const INFO = (privateApi: boolean) => ({
@@ -31,7 +43,7 @@ const privateApi = (root: ParentNode) =>
   root.querySelector<HTMLElement>('[name="use_private_api"]')!;
 
 test("renders the design in Chinese: server row with 测试连接, Private API switch, open fold", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   const { root } = page;
   expect(root.querySelector(".bc-header h1")?.textContent).toBe("BlueBubbles");
   expect(root.querySelector(".bc-lead")?.textContent).toBe(
@@ -41,7 +53,11 @@ test("renders the design in Chinese: server row with 测试连接, Private API s
     [...root.querySelectorAll(".bc-row__label .bc-title")].map(
       (node) => node.textContent,
     ),
-  ).toEqual(["服务器", "选项"]);
+  ).toEqual(["通道", "服务器", "选项"]);
+  // the 通道 row waits for the device to say a channel is configured
+  expect(root.querySelector<HTMLElement>(".bc-row")?.style.display).toBe(
+    "none",
+  );
   expect(page.text()).toContain(
     "BlueBubbles Server 的「设置 → API」里有地址和密码",
   );
@@ -60,7 +76,7 @@ test("renders the design in Chinese: server row with 测试连接, Private API s
 });
 
 test("renders in English", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   for (const phrase of [
     "Connect a BlueBubbles server to reach iMessage.",
     "Find both in BlueBubbles Server under Settings → API",
@@ -73,7 +89,7 @@ test("renders in English", async () => {
 });
 
 test("测试连接 reads the server info and sets the Private API switch to match", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   harness.reply = async () => json(200, INFO(false));
   page.type("server_url", "https://bb.example.com/");
   page.type("password", "p&w d");
@@ -106,7 +122,7 @@ test("测试连接 reads the server info and sets the Private API switch to matc
 });
 
 test("a refused password is shown on the URL field", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   harness.reply = async () =>
     json(401, {
       status: 401,
@@ -126,7 +142,7 @@ test("a refused password is shown on the URL field", async () => {
 });
 
 test("an unreachable server shows a note, and saving still posts the settings", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   harness.reply = async (call) => {
     if (call.url.startsWith("https://bb.example.com"))
       throw new TypeError("Failed to fetch");
@@ -151,9 +167,9 @@ test("an unreachable server shows a note, and saving still posts the settings", 
 });
 
 test("a rejected save toasts the device's message", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   harness.reply = async () =>
-    json(422, { error: "invalid_configuration", message: "bad url" });
+    json(422, { error: "registration_failed", message: "bad url" });
   page.type("server_url", "https://bb.example.com");
   page.type("password", "pw");
   await page.submit();
@@ -163,4 +179,37 @@ test("a rejected save toasts the device's message", async () => {
     body: "bad url",
     code: "422",
   });
+});
+
+test("a configured channel shows above the form; a save shows it and refreshes the status", async () => {
+  harness.reply = async () => json(200, { configured: true });
+  const shown = await harness.render(mount, "en");
+  await settle();
+  const current = shown.query(".bc-form > .bc-row")!;
+  expect(current.style.display).toBe("");
+  expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
+  expect(current.querySelector(".bc-option-title")?.textContent).toBe(
+    "BlueBubbles",
+  );
+  expect(current.querySelector(".bc-badge--signal")?.textContent).toBe(
+    "Configured",
+  );
+  shown.unmount();
+
+  harness.reply = async () => json(200, { configured: false });
+  const page = await harness.render(mount, "zh");
+  await settle();
+  const row = page.query(".bc-form > .bc-row")!;
+  expect(row.style.display).toBe("none");
+  page.type("server_url", "https://bluebubbles.example.com");
+  page.type("password", "s3cret");
+  harness.reply = async () => json(422, { error: "registration_failed" });
+  await page.submit();
+  expect(page.refreshes.count).toBe(0);
+  expect(row.style.display).toBe("none");
+  harness.reply = async () => new Response(null, { status: 204 });
+  await page.submit();
+  expect(page.refreshes.count).toBe(1);
+  expect(row.style.display).toBe("");
+  expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
 });

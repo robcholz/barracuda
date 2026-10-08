@@ -1,13 +1,23 @@
-import type { Lang, Toast, WebEntry } from "./contract";
-import { ModuleSession, parseEntries, sortEntries } from "./runtime";
+import type { EntryStatus, Lang, Toast, WebEntry } from "./contract";
+import {
+  ModuleSession,
+  parseEntries,
+  parseStatus,
+  sortEntries,
+} from "./runtime";
 import { STRINGS } from "./i18n";
 import {
+  asideOf,
   brandMark,
+  deviceStatus,
   entryIcon,
   groupsOf,
+  paintStatus,
   renderOverview,
   renderPhoneHome,
   renderStatus,
+  titledLabel,
+  type OverviewView,
   type StatusKind,
 } from "./overview";
 import { Toaster } from "./toast";
@@ -37,6 +47,7 @@ export const STORAGE = {
 /** Below this width the portal is the phone layout: no sidebar, the overview as a list. */
 export const PHONE_QUERY = "(max-width: 719px)";
 const MANIFEST_URL = "/portal/entries.json";
+const STATUS_URL = "/portal/status";
 const POLL_MS = 30_000;
 const MANIFEST_TIMEOUT_MS = 8_000;
 
@@ -91,6 +102,8 @@ export class Portal {
   /** Every entry seen this session, so a vanished one can still be named. */
   private readonly known = new Map<string, WebEntry>();
   manifest: "loading" | "ready" | "error" = "loading";
+  /** The latest `GET /portal/status`; empty until it is read and after a failed read. */
+  statuses = new Map<string, EntryStatus>();
   route = "overview";
   private phone: boolean;
   private langOpen = false;
@@ -98,6 +111,9 @@ export class Portal {
   private navigation = 0;
   private refreshing: Promise<void> | null = null;
   private request?: AbortController;
+  private statusing: Promise<void> | null = null;
+  private statusStale = false;
+  private statusRequest?: AbortController;
   private poll?: ReturnType<typeof setInterval>;
   private readonly media: MediaQueryList;
   private readonly scheme: MediaQueryList;
@@ -195,6 +211,9 @@ export class Portal {
       },
       { signal },
     );
+    win.addEventListener("focus", () => void this.refreshStatus(), {
+      signal,
+    });
     this.doc.addEventListener(
       "keydown",
       (event) => {
@@ -230,6 +249,7 @@ export class Portal {
       () => {
         clearInterval(this.poll);
         this.request?.abort();
+        this.statusRequest?.abort();
         this.leaveModule();
       },
       { signal },
@@ -251,6 +271,7 @@ export class Portal {
     this.lifecycle.abort();
     clearInterval(this.poll);
     this.request?.abort();
+    this.statusRequest?.abort();
     this.leaveModule();
     this.toaster.clear();
     this.app.remove();
@@ -291,12 +312,79 @@ export class Portal {
     this.renderTopbar();
   }
 
-  /** Fetches the manifest; overlapping calls share one request. */
+  /** Fetches the manifest, and the status beside it; overlapping calls share one request. */
   refresh(): Promise<void> {
+    void this.refreshStatus();
     this.refreshing ??= this.fetchManifest().finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+
+  /**
+   * Reads `/portal/status` and redraws what shows it. A call during a read (a page that just
+   * saved) reads once more after it, since the running read may predate the save. Never rejects.
+   */
+  refreshStatus(): Promise<void> {
+    if (this.statusing) {
+      this.statusStale = true;
+      return this.statusing;
+    }
+    const run = async () => {
+      do {
+        this.statusStale = false;
+        await this.fetchStatus();
+      } while (this.statusStale && !this.lifecycle.signal.aborted);
+    };
+    this.statusing = run().finally(() => {
+      this.statusing = null;
+    });
+    return this.statusing;
+  }
+
+  private async fetchStatus() {
+    const controller = new AbortController();
+    this.statusRequest = controller;
+    const timeout = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
+    let next: Map<string, EntryStatus>;
+    try {
+      const response = await this.fetcher(STATUS_URL, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      next = parseStatus(await response.json());
+    } catch {
+      // a device without the endpoint, or no reply: the status slots stay empty
+      next = new Map();
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (this.lifecycle.signal.aborted) return;
+    const changed =
+      JSON.stringify([...next]) !== JSON.stringify([...this.statuses]);
+    this.statuses = next;
+    if (changed) this.paintStatus();
+  }
+
+  private statusOf = (id: string): EntryStatus | null =>
+    this.statuses.get(id) ?? null;
+
+  /** Redraws the parts that show statuses; a mounted page and the overview's figures stay. */
+  private paintStatus() {
+    this.renderSidebar();
+    this.renderTopbar();
+    if (this.route === "overview" && this.entries.length)
+      paintStatus(this.content, this.overviewView());
+  }
+
+  private overviewView(): OverviewView {
+    return {
+      entries: this.entries,
+      lang: this.lang,
+      plain: this.plain,
+      status: this.statusOf,
+    };
   }
 
   private async fetchManifest() {
@@ -343,6 +431,7 @@ export class Portal {
     this.route = route;
     this.langOpen = false;
     this.render(false);
+    void this.refreshStatus();
     if (moved) {
       this.win.scrollTo?.(0, 0);
       this.content.focus({ preventScroll: true });
@@ -386,21 +475,39 @@ export class Portal {
       : ["Barracuda", this.route];
   }
 
-  private navItem(id: string, label: string, glyph: Element, current: boolean) {
+  private navItem(
+    id: string,
+    label: string,
+    glyph: Element,
+    current: boolean,
+    aside?: string,
+  ) {
+    const full = aside ? `${label} · ${aside}` : label;
     return h(
       "a",
       {
         class: "bc-nav-item",
         href: `#${id}`,
         "aria-current": current ? "page" : "false",
-        "aria-label": label,
+        "aria-label": full,
       },
       glyph,
-      h("span", { class: "bc-nav-text" }, label),
+      h(
+        "span",
+        { class: `bc-nav-text${aside ? " portal-nav-item__label" : ""}` },
+        label,
+      ),
+      aside
+        ? h(
+            "span",
+            { class: "bc-nav-text bc-mono bc-muted portal-nav-aside" },
+            aside,
+          )
+        : null,
       h(
         "span",
         { class: "bc-tooltip bc-tooltip--right", "aria-hidden": "true" },
-        label,
+        full,
       ),
     );
   }
@@ -451,6 +558,7 @@ export class Portal {
                     entry.title[this.lang],
                     entryIcon(entry),
                     this.route === entry.id,
+                    asideOf(this.statusOf(entry.id), this.lang)?.text,
                   ),
                 ),
               ),
@@ -476,13 +584,26 @@ export class Portal {
     );
   }
 
-  private statusBadge() {
-    if (this.manifest !== "error") return null;
+  /** 「连接未就绪」 when the manifest can't be read; on the desktop, otherwise the device's status. */
+  private statusBadge(desktop: boolean) {
+    if (this.manifest === "error")
+      return h(
+        "span",
+        { class: "bc-badge portal-badge--offline", role: "status" },
+        icon(ICON_WIFI_OFF, 12),
+        this.t.offline,
+      );
+    const device = desktop ? deviceStatus(this.entries, this.statusOf) : null;
+    const label = device?.status.label?.[this.lang];
+    if (!device || !label) return null;
     return h(
       "span",
-      { class: "bc-badge portal-badge--offline", role: "status" },
-      icon(ICON_WIFI_OFF, 12),
-      this.t.offline,
+      {
+        class: `bc-badge${device.status.state === "ready" ? " bc-badge--signal" : ""}`,
+        role: "status",
+        "data-state": device.status.state,
+      },
+      titledLabel(device.entry, label, this.lang),
     );
   }
 
@@ -619,7 +740,7 @@ export class Portal {
       h("span", { class: "bc-crumb" }, section),
       h("span", { class: "bc-crumb" }, "/"),
       h("span", { class: "bc-crumb--current portal-grow" }, page),
-      this.statusBadge(),
+      this.statusBadge(true),
       this.languageMenu(),
       this.themeControl(),
     );
@@ -643,7 +764,7 @@ export class Portal {
             ),
             h("span", { class: "portal-grow" }),
           ]),
-      this.statusBadge(),
+      this.statusBadge(false),
       ...this.phoneTools(),
     );
     this.phoneBar.classList.toggle(
@@ -685,11 +806,7 @@ export class Portal {
         else this.status(this.manifest === "error" ? "manifest" : "empty");
         return;
       }
-      const view = {
-        entries: this.entries,
-        lang: this.lang,
-        plain: this.plain,
-      };
+      const view = this.overviewView();
       this.content.replaceChildren(
         this.phone ? renderPhoneHome(view) : renderOverview(view),
       );
@@ -728,6 +845,8 @@ export class Portal {
           lang: this.lang,
           toast: (toast) => this.toast(toast),
           navigate: (id) => this.go(id),
+          status: this.statusOf,
+          refreshStatus: () => this.refreshStatus(),
         },
         {
           load: this.load,

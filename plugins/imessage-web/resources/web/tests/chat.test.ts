@@ -76,6 +76,8 @@ function open(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    status: () => null,
+    refreshStatus: async () => {},
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);

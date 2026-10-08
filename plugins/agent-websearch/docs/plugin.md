@@ -3,7 +3,7 @@
 - Plugin ID: `agent-websearch`
 - Direct Plugin dependencies: `agent`, `webserver`, `captive-portal`
 - Provided typed capabilities: none
-- Required typed capabilities: `AgentToolRegistry`, `WebServer`
+- Required typed capabilities: `AgentToolRegistry`, `WebServer`, `CaptivePortal`
 - Owned tasks: none
 
 During registration the Plugin adds the awaited `web_search` Tool directly to
@@ -16,6 +16,11 @@ then replaces the active in-memory configuration. The persisted configuration
 is restored when the Plugin registers. An active search retains an `Rc`
 snapshot of the configuration without cloning the API key. The API key is never
 logged or returned.
+
+The portal entry is registered with `CaptivePortal::register_with_status`; its
+`GET /portal/status` record is `EntryStatus::configured`: `ready`
+已配置/Configured while a Tavily configuration is active, otherwise `off`
+未配置/Not set up. It reads the shared in-memory configuration slot.
 
 One reusable HTTP workspace prevents repeated allocation of header, read, and
 request buffers. A concurrent search receives `busy`. The provider response is
@@ -47,8 +52,10 @@ the Tavily API key, and an open 高级 fold with `api_base` (default
 `https://api.tavily.com`). It renders zh or en from the portal language.
 `resources/web/icon.svg` is the Lucide `search` mark.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
+The page submits the existing POST configuration contract and, once the device
+accepts, calls `context.refreshStatus()` so the portal's navigation follows. It
+does not read current settings or claim that acceptance verifies the upstream
+service. Secrets
 are password inputs, never persisted in browser storage, and cleared on success
 or unmount. Requests are cancelled on unmount and are never retried automatically.
 The existing HTTP API has no authentication or transport encryption added here;

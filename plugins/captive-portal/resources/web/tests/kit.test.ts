@@ -46,6 +46,8 @@ function context(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    status: () => null,
+    refreshStatus: async () => {},
   };
   return { context: value, controller, toasts, routes };
 }

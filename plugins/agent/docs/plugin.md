@@ -61,6 +61,13 @@ become active. Registration restores the complete model, purpose-binding, and
 default-model snapshot before Agent work starts. Missing storage yields an empty
 configuration; malformed stored data fails Plugin registration.
 
+The portal entry is registered with `CaptivePortal::register_with_status`; its
+`GET /portal/status` record is `EntryStatus::configured`: `ready`
+已配置/Configured while the active configuration resolves a model for at least
+one purpose (explicitly or through the default), otherwise `off` 未配置/Not set
+up. It reads a flag the endpoint updates after restore and each accepted
+`POST`.
+
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
@@ -89,8 +96,10 @@ connection fields (`base_url`, `model`, `api_key`) and an open 高级 fold with
 endpoint requires, as a one-element batch, and renders zh or en from the
 portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
+The page submits the existing POST configuration contract and, once the device
+accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and
+navigation follow. It does not read current settings or claim that acceptance
+verifies the upstream service. Secrets
 are password inputs, never persisted in browser storage, and cleared on success
 or unmount. Requests are cancelled on unmount and are never retried automatically.
 The existing HTTP API has no authentication or transport encryption added here;

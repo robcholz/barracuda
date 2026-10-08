@@ -1,5 +1,11 @@
 # IMessage WeChat HTTP API
 
+## `GET /api/gateway/wechat`
+
+Returns `200` with `{"configured": true}` while a WeChat channel is registered
+with the Gateway, otherwise `{"configured": false}`. It never returns settings
+or the token. The login `GET` below carries the same `configured` value.
+
 ## `POST /api/gateway/wechat`
 
 Configures or replaces the WeChat message-channel provider. The request body is
@@ -11,8 +17,8 @@ Responses:
 - `400 Bad Request` `{"error":"invalid_request"}`: the JSON body was invalid or
   required fields were absent.
 - `405 Method Not Allowed` `{"error":"method_not_allowed"}`: the endpoint only
-  accepts `POST`.
-- `422 Unprocessable Content` `{"error":"invalid_configuration"}`: the Gateway
+  accepts `GET` and `POST`.
+- `422 Unprocessable Content` `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored.
 - `500 Internal Server Error` `{"error":"storage"}`: the configuration could not
   be read, written, or rolled back.

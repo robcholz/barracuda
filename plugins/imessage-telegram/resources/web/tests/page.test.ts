@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   json,
   pageHarness,
+  settle,
 } from "../../../../captive-portal/resources/web/tests/page";
 import { mount } from "../entry";
 
@@ -12,6 +13,17 @@ beforeEach(() => {
 afterEach(async () => {
   await harness.close();
 });
+
+/** Renders the page; the mount's `GET` of the channel state (204 here: no state) is checked and set aside. */
+async function render(lang: "zh" | "en") {
+  const page = await harness.render(mount, lang);
+  expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
+    ["GET", "/api/gateway/telegram"],
+  ]);
+  harness.calls.length = 0;
+  await settle();
+  return page;
+}
 
 const GET_ME = {
   ok: true,
@@ -27,7 +39,7 @@ const texts = (root: ParentNode, selector: string) =>
   [...root.querySelectorAll(selector)].map((node) => node.textContent);
 
 test("renders the design in Chinese: brand title, riffle, Bot row with link, verify, open fold", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   const { root } = page;
   expect(root.querySelector(".bc-header h1")?.textContent).toBe("Telegram");
   expect(root.querySelector(".bc-header h1 .bc-asset-icon")).not.toBeNull();
@@ -65,7 +77,7 @@ test("renders the design in Chinese: brand title, riffle, Bot row with link, ver
 });
 
 test("renders in English", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   const text = page.text();
   for (const phrase of [
     "Send and receive messages through a Telegram bot.",
@@ -79,7 +91,7 @@ test("renders in English", async () => {
 });
 
 test("验证 calls getMe from the browser and shows the bot and a chat link", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   await page.click("验证");
   expect(harness.calls).toHaveLength(0);
   expect(page.text()).toContain("请填写 Bot Token。");
@@ -116,7 +128,7 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
 });
 
 test("Telegram's refusal is shown on the token field; the 高级 API base is used", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   harness.reply = async () =>
     json(401, { ok: false, error_code: 401, description: "Unauthorized" });
   page.type("token", "bad");
@@ -134,7 +146,7 @@ test("Telegram's refusal is shown on the token field; the 高级 API base is use
 });
 
 test("no route to Telegram shows a note and saving still works", async () => {
-  const page = await harness.render(mount, "en");
+  const page = await render("en");
   harness.reply = async (call) => {
     if (call.url.startsWith("https://api.telegram.org"))
       throw new TypeError("Failed to fetch");
@@ -162,7 +174,7 @@ test("no route to Telegram shows a note and saving still works", async () => {
 });
 
 test("a rejected save toasts the device's message", async () => {
-  const page = await harness.render(mount, "zh");
+  const page = await render("zh");
   harness.reply = async () =>
     json(422, { error: "registration_failed", message: "gateway refused" });
   page.type("token", "123:abc");
@@ -176,4 +188,36 @@ test("a rejected save toasts the device's message", async () => {
   expect(page.input("token").value).toBe("123:abc");
   page.unmount();
   expect(page.root.childElementCount).toBe(0);
+});
+
+test("a configured channel shows above the form; a save shows it and refreshes the status", async () => {
+  harness.reply = async () => json(200, { configured: true });
+  const shown = await harness.render(mount, "en");
+  await settle();
+  const current = shown.query(".bc-form > .bc-row")!;
+  expect(current.style.display).toBe("");
+  expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
+  expect(current.querySelector(".bc-option-title")?.textContent).toBe(
+    "Telegram",
+  );
+  expect(current.querySelector(".bc-badge--signal")?.textContent).toBe(
+    "Configured",
+  );
+  shown.unmount();
+
+  harness.reply = async () => json(200, { configured: false });
+  const page = await harness.render(mount, "zh");
+  await settle();
+  const row = page.query(".bc-form > .bc-row")!;
+  expect(row.style.display).toBe("none");
+  page.type("token", "123:abc");
+  harness.reply = async () => json(422, { error: "registration_failed" });
+  await page.submit();
+  expect(page.refreshes.count).toBe(0);
+  expect(row.style.display).toBe("none");
+  harness.reply = async () => new Response(null, { status: 204 });
+  await page.submit();
+  expect(page.refreshes.count).toBe(1);
+  expect(row.style.display).toBe("");
+  expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
 });

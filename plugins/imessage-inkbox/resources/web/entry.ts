@@ -4,12 +4,14 @@ import {
   KIT_STRINGS,
   button,
   callDevice,
+  configuredRow,
   definePage,
   fieldControl,
   h,
   header,
   note,
   page,
+  readChannel,
   resultCard,
   row,
   settingsForm,
@@ -34,6 +36,7 @@ const T = {
     code: "验证码",
     codeHint: "输入邮件里的 6 位数字",
     sentTo: "验证码已发到",
+    sentInbox: "验证码已发到你的邮箱",
     resend: "重新发送",
     verify: "验证",
     identity: "身份",
@@ -62,6 +65,7 @@ const T = {
     code: "Code",
     codeHint: "Enter the 6 digits from the email",
     sentTo: "Code sent to",
+    sentInbox: "Code sent to your inbox",
     resend: "Resend",
     verify: "Verify",
     identity: "Identity",
@@ -77,6 +81,17 @@ const T = {
 };
 
 const SAMPLE_EMAIL = "you@example.com";
+const ENDPOINT = "/api/gateway/inkbox";
+
+/** `GET /api/gateway/inkbox`: `signup` is present when the stored configuration came from signup. */
+interface InkboxState {
+  signup?: {
+    email_address?: string;
+    claim_status?: string;
+    /** The person's address the code went to. */
+    human_email?: string;
+  };
+}
 /** Upstream signups and claims can take a TLS handshake or two on the device. */
 const FLOW_TIMEOUT = 30_000;
 
@@ -87,15 +102,19 @@ const show = (node: HTMLElement, visible: boolean) =>
  * The Inkbox page. 「用邮箱新建」 signs an agent up on the device (`POST /api/gateway/inkbox/signup`,
  * which already stores and registers the channel), then claims it with the emailed code
  * (`/verify`, `/resend`). 「已有 API Key」 posts an existing key to `POST /api/gateway/inkbox`.
+ * On mount, `GET /api/gateway/inkbox` resumes a signup at its code or claimed step, or shows a
+ * channel configured with a key. A signup error with `"retry": true` offers 「重试」: the device
+ * kept the signup, so the same email resumes it without a second email.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
   const t = T[lang];
   const s = KIT_STRINGS[lang];
 
+  const current = configuredRow("Inkbox", lang);
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/inkbox",
+      endpoint: ENDPOINT,
       submit: t.submit,
       rows: [
         {
@@ -120,6 +139,10 @@ export const mount = definePage((context) => {
         ],
       },
       onError: (error) => ({ body: error.message }),
+      onSuccess: () => {
+        current.show(true);
+        void context.refreshStatus();
+      },
       success: {
         action: {
           label: t.tryChat,
@@ -199,7 +222,13 @@ export const mount = definePage((context) => {
   const identity = h("div", { style: { display: "contents" } });
   const identityRow = row(t.identity, t.identityHint, lang, identity);
 
-  form.element.prepend(methodRow, emailRow, codeRow, identityRow);
+  form.element.prepend(
+    current.element,
+    methodRow,
+    emailRow,
+    codeRow,
+    identityRow,
+  );
 
   let mode: "email" | "key" = "email";
   let step: "email" | "code" | "claimed" = "email";
@@ -264,18 +293,26 @@ export const mount = definePage((context) => {
       return;
     }
     human = address;
+    awaitCode(result.data?.email_address, address);
+    context.toast({ kind: "success", title: `${t.sentTo} ${address}` });
+    // the device stored and registered the channel before replying
+    void context.refreshStatus();
+    code.control.focus();
+  }
+
+  /** The identity card the claimed step shows: the agent's own mailbox. */
+  const showIdentity = (mailbox: string | undefined) =>
     identity.replaceChildren(
       resultCard(
-        {
-          title: t.card,
-          badge: t.claimed,
-          sub: result.data?.email_address,
-          initial: "@",
-        },
+        { title: t.card, badge: t.claimed, sub: mailbox, initial: "@" },
         lang,
       ),
     );
-    const sent = note(t.sentTo, lang, {
+
+  /** The code step; `address` is where the code went, unknown when resumed after a reload. */
+  function awaitCode(mailbox: string | undefined, address?: string) {
+    showIdentity(mailbox);
+    const sent = note(address ? t.sentTo : t.sentInbox, lang, {
       mono: address,
       action: { label: t.resend, onClick: () => void resend() },
     });
@@ -283,9 +320,8 @@ export const mount = definePage((context) => {
     sentTo.replaceChildren(sent);
     resendError.hidden = true;
     code.control.reset();
-    context.toast({ kind: "success", title: `${t.sentTo} ${address}` });
+    current.show(false);
     go("code");
-    code.control.focus();
   }
 
   /** 409: the device holds no signup (or another flow is running); start over from the email. */
@@ -354,6 +390,7 @@ export const mount = definePage((context) => {
       },
     });
     go("claimed");
+    void context.refreshStatus();
   }
 
   const onEnter = (action: () => void) => (event: KeyboardEvent) => {
@@ -370,6 +407,23 @@ export const mount = definePage((context) => {
     onEnter(() => void claim()),
   );
   paint();
+  void readChannel<InkboxState>(context, ENDPOINT).then((state) => {
+    // the person may have started on the page already
+    if (!state?.configured || busy || step !== "email") return;
+    const signup = state.signup;
+    if (!signup) return current.show(true);
+    if (signup.claim_status === "agent_claimed") {
+      showIdentity(signup.email_address);
+      go("claimed");
+    } else {
+      const address = signup.human_email?.trim() || undefined;
+      if (address) {
+        human = address;
+        emailInput.value = address;
+      }
+      awaitCode(signup.email_address, address);
+    }
+  });
 
   return page(
     header(

@@ -2,7 +2,8 @@
 
 - Plugin ID: `captive-portal`
 - Direct Plugin dependencies: `webserver`
-- Provided typed capabilities: `CaptivePortal`
+- Provided typed capabilities: `CaptivePortal` (with `WebEntry`, `EntryStatus`
+  and the `EntryStatusSource` trait in its registration API)
 - Required typed capabilities: `WebServer`
 - Workflow Actions, Events, and Agent Tools: none
 
@@ -27,6 +28,17 @@ icon, figure, module }, assets)`:
 - `figure` is an optional relative path of a live-figure module (see below).
 - `module` is the relative entry module.
 It retains the returned `WebEntryRegistration` in its registration context.
+
+An entry that can say how it is doing registers with
+`register_with_status(entry, assets, status)` instead. `status` is an
+`EntryStatusSource`, normally a closure `move || EntryStatus { .. }`; it is
+owned by the registration and dropped with it. A source is synchronous and
+cheap: it reads state its plugin already holds (a flag, a cached snapshot),
+never queries a device or network, and must not call back into the portal. An
+`EntryStatus` is `{ state, label, detail }`: `state` is `EntryState::Ready`,
+`Attention` or `Off`; `label` is an optional `WebText`; `detail` an optional
+untranslated `String` such as a network name. `EntryStatus::configured(bool)`
+gives the shared `ready` 已配置/Configured or `off` 未配置/Not set up record.
 `AssetsProvider` is the existing WebServer `HttpProvider` trait, re-exported
 under the portal's resource role; no second reader or transport contract exists.
 The provider receives a validated relative path such as `chunks/main.js` and
@@ -61,12 +73,25 @@ WebServer before dispatch.
   `icon` or `figure` is `null`. Labels are JSON escaped. The shell sorts by
   (group, order, id) and rejects the whole manifest if any record is malformed
   or names a URL outside its own `/portal/assets/<id>/`.
+- `/portal/status` returns
+  `{"entries":{"<id>":{"state":"ready","label":{"zh":"已连接","en":"Connected"},"detail":"HomeNet"},...}}`.
+  Only entries registered with a status source are listed, in registration
+  order; `state` is `"ready"`, `"attention"` or `"off"`, and `label` and
+  `detail` are omitted when absent. Every request calls each source afresh;
+  nothing is cached on the device, and the response carries no cache
+  validators.
 - `/portal/assets/<id>/<path>` dispatches only to that registered provider.
 - `/portal/` serves the portal's own `/resources/index.html`.
 - Other `/portal/<path>` URLs serve the portal's own `/resources/<path>`;
-  `entries.json` and the `assets/` subtree are reserved for aggregation.
+  `entries.json`, `status` and the `assets/` subtree are reserved for
+  aggregation.
 
-The manifest is rebuilt when registrations change, not on HTTP requests.
+`/portal/*` is a GET subtree: WebServer answers any other method, including on
+`/portal/status`, with `405 Method Not Allowed` and `Allow: GET`.
+
+The manifest is rebuilt when registrations change, not on HTTP requests. The
+status body is built per request into one buffer while the registry is
+borrowed; it holds no lock across an await.
 It is held as a shared immutable byte snapshot. Registration and removal may
 allocate; cached manifest lookup and leaf dispatch do not. WebServer's inline
 leaf-provider handle reserves 128 machine words for each leaf future, leaving
@@ -112,14 +137,28 @@ and hash routing: `#overview` (default) or `#<entry id>`; back and forward work.
 Below 720px the sidebar is replaced by the phone layout: the overview becomes a
 grouped list and pages get a back link.
 
-The overview is generated from the manifest only: the header frame (title,
-lead, the number of plugin pages, the connection, the `board` figure), one
+The overview is generated from the manifest: the header frame (title, lead,
+the number of plugin pages, the connection, the `board` figure), one
 「开始使用」 step per group that has entries (linking to its first entry), and the
 module grid. Every device and agent entry, and every channel entry with a
 `figure`, is a tile (figure, title, summary; the whole tile is a hover zone for
 the figure). Channel entries without a figure are rows in the 消息通道 card
-beside the `riffle` figure. The shell shows no device state it cannot read
-(for example the Wi-Fi network name).
+beside the `riffle` figure.
+
+Entry state comes from `/portal/status`, read with the manifest, on every
+navigation, when the window gains focus or becomes visible, and when a page
+calls `refreshStatus()`; it never blocks rendering. A status change redraws the
+sidebar and top bar and repaints the overview in place, so figures keep
+running. The first device entry with a status and a label is the top bar badge
+「<title> <label>」 (「Wi-Fi 已连接」; the signal badge when `ready`, the plain badge
+otherwise; desktop only). An entry's `detail` is shown in mono after its
+sidebar label, on its overview tile and on its phone row, and the device's
+`detail` (or label) is the header's first k/v row (Wi-Fi · HomeNet). A step is
+done when any entry of its group is `ready`: it shows a check and 「已连接
+HomeNet」 for the device group, or the ready entry's title and label (an entry
+with a label is preferred), instead of its link. Channel rows in the 消息通道
+card and on the phone list show the label (「已配置」). A failed or malformed
+read leaves every status slot empty; the shell shows no state it did not read.
 
 Status pages cover no entries (empty), an entry that is unknown or was removed
 (unavailable; the shell names it if it saw it earlier), a module import in
@@ -199,7 +238,7 @@ export function mount(root: HTMLElement, context: PortalContext) {
 }
 ```
 
-The context is `{ signal, lang, toast, navigate }`:
+The context is `{ signal, lang, toast, navigate, status, refreshStatus }`:
 
 - `signal` is aborted on navigation, language change, unload, or page exit;
 - `lang` (`"zh"` or `"en"`) is the language the module renders its own strings in;
@@ -207,9 +246,14 @@ The context is `{ signal, lang, toast, navigate }`:
 - `toast({ kind: "success" | "error" | "info", title, body?, code?, action? })`
   adds to the shell's toast stack (bottom-right; errors stay until closed,
   others close after 4 s);
-- `navigate(id)` goes to another entry, or `"overview"`.
+- `navigate(id)` goes to another entry, or `"overview"`;
+- `status(id?)` returns the latest `/portal/status` record
+  (`{ state, label?, detail? }`) of the page's own entry, or of `id`, or `null`;
+- `refreshStatus()` reads the status again and redraws what shows it; a page
+  calls it after a save succeeds. It resolves when done and never rejects; a
+  call during a read reads once more after it.
 
-`toast` and `navigate` do nothing once the signal is aborted. `mount` may return
+`toast`, `navigate` and `refreshStatus` do nothing once the signal is aborted. `mount` may return
 a promise of its cleanup function, or no cleanup function. The shell aborts the
 signal and runs cleanup before removing the module's root. Every mount gets its
 own DOM root; stale imports cannot mount into a new screen. Modules must handle
@@ -244,5 +288,6 @@ verification.
 
 Tests cover entry validation, duplicate IDs, namespace separation, resource
 path traversal rejection, cached dispatch allocation counts, actual HTTP
-manifest JSON escaping, scaffold file streaming, and Plugin Manager unload/reload
+manifest JSON escaping, the exact `/portal/status` JSON (fresh per request,
+sources dropped with their registration, 405 for other methods), scaffold file streaming, and Plugin Manager unload/reload
 removing/restoring the manifest and asset access together.

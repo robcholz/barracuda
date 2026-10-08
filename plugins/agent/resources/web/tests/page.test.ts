@@ -36,6 +36,7 @@ async function render(lang: Lang = "zh") {
   const controller = new AbortController();
   const toasts: Toast[] = [];
   const routes: string[] = [];
+  const refreshes = { count: 0 };
   const context: PortalContext = {
     signal: controller.signal,
     lang,
@@ -43,6 +44,10 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    status: () => null,
+    refreshStatus: async () => {
+      refreshes.count++;
+    },
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
@@ -53,6 +58,7 @@ async function render(lang: Lang = "zh") {
     form,
     toasts,
     routes,
+    refreshes,
     controller,
     cleanup: cleanup as () => void,
     input: (name: string) =>
@@ -168,7 +174,7 @@ test("required connection fields block the request", async () => {
 });
 
 test("posts one model as a batch with every field the endpoint requires", async () => {
-  const { root, input, submit, toasts, routes } = await render("zh");
+  const { root, input, submit, toasts, routes, refreshes } = await render("zh");
   root
     .querySelector<HTMLInputElement>('[value="anthropic_compatible"]')!
     .click();
@@ -202,10 +208,12 @@ test("posts one model as a batch with every field the endpoint requires", async 
   toasts[0].action?.run();
   expect(routes).toEqual(["imessage-web"]);
   expect(input("api_key").value).toBe("");
+  // the portal reads the status again, so 注册模型 shows as done
+  expect(refreshes.count).toBe(1);
 });
 
 test("a rejected configuration toasts the status and keeps the key", async () => {
-  const { input, submit, toasts } = await render("en");
+  const { input, submit, toasts, refreshes } = await render("en");
   input("base_url").value = "https://api.example.com/v1";
   input("model").value = "m";
   input("api_key").value = "sk-secret";
@@ -215,6 +223,7 @@ test("a rejected configuration toasts the status and keeps the key", async () =>
     { kind: "error", title: "Configuration rejected", code: "422" },
   ]);
   expect(input("api_key").value).toBe("sk-secret");
+  expect(refreshes.count).toBe(0);
 });
 
 test("leaving the page clears the key and empties the root", async () => {

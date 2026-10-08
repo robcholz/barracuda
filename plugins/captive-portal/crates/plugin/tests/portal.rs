@@ -4,7 +4,8 @@
 
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_captive_portal_plugin::{
-    AssetsProvider, CaptivePortal, PortalError, WebEntry, WebGroup, WebText,
+    AssetsProvider, CaptivePortal, EntryState, EntryStatus, PortalError, WebEntry, WebGroup,
+    WebText,
 };
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
 use barracuda_plugin::api::{ClientFactory, PluginContext};
@@ -542,6 +543,140 @@ fn cached_manifest_and_leaf_dispatch_do_not_allocate() {
     assert_eq!(allocations.count_total, 0);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn status_lists_entries_with_sources_and_reads_them_per_request() {
+    use std::cell::Cell;
+    let portal = Rc::new(CaptivePortal::new(Assets));
+    let network = Rc::new(RefCell::new(Some(String::from("Home \"Net\""))));
+    let source = Rc::clone(&network);
+    let wifi = portal
+        .register_with_status(entry("wifi", "Wi-Fi"), Assets, move || {
+            match &*source.borrow() {
+                Some(ssid) => EntryStatus::new(
+                    EntryState::Ready,
+                    WebText {
+                        zh: "已连接",
+                        en: "Connected",
+                    },
+                )
+                .with_detail(ssid.as_str()),
+                None => EntryStatus::new(
+                    EntryState::Off,
+                    WebText {
+                        zh: "未连接",
+                        en: "Not connected",
+                    },
+                ),
+            }
+        })
+        .expect("register wifi");
+    let _plain = portal
+        .register(entry("plain", "Plain"), Assets)
+        .expect("register entry without status");
+    let configured = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&configured);
+    let _agent = portal
+        .register_with_status(entry("agent", "Models"), Assets, move || {
+            EntryStatus::configured(flag.get())
+        })
+        .expect("register agent");
+    let _web = portal
+        .register_with_status(entry("imessage-web", "Web"), Assets, || EntryStatus {
+            state: EntryState::Ready,
+            label: None,
+            detail: None,
+        })
+        .expect("register web");
+    let server = WebServer::new();
+    let _route = server
+        .serve("/portal/*", PortalRoute(portal.clone()))
+        .expect("route");
+    let server = Rc::new(server);
+
+    let response = request(server.clone(), "/portal/status").await;
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert!(std::str::from_utf8(&response)
+        .expect("response")
+        .to_ascii_lowercase()
+        .contains("content-type: application/json"));
+    assert_eq!(
+        std::str::from_utf8(body(&response)).expect("UTF-8 status"),
+        concat!(
+            r#"{"entries":{"#,
+            r#""wifi":{"state":"ready","label":{"zh":"已连接","en":"Connected"},"detail":"Home \"Net\""},"#,
+            r#""agent":{"state":"off","label":{"zh":"未配置","en":"Not set up"}},"#,
+            r#""imessage-web":{"state":"ready"}"#,
+            r#"}}"#
+        )
+    );
+
+    network.replace(None);
+    configured.set(true);
+    let response = request(server.clone(), "/portal/status").await;
+    assert_eq!(
+        std::str::from_utf8(body(&response)).expect("UTF-8 status"),
+        concat!(
+            r#"{"entries":{"#,
+            r#""wifi":{"state":"off","label":{"zh":"未连接","en":"Not connected"}},"#,
+            r#""agent":{"state":"ready","label":{"zh":"已配置","en":"Configured"}},"#,
+            r#""imessage-web":{"state":"ready"}"#,
+            r#"}}"#
+        )
+    );
+
+    // The source is owned by the registration and dropped with it.
+    assert_eq!(Rc::strong_count(&network), 2);
+    drop(wifi);
+    assert_eq!(Rc::strong_count(&network), 1);
+    let response = request(server.clone(), "/portal/status").await;
+    let status: serde_json::Value = serde_json::from_slice(body(&response)).expect("status");
+    assert_eq!(
+        status,
+        serde_json::json!({"entries": {
+            "agent": {"state": "ready", "label": {"zh": "已配置", "en": "Configured"}},
+            "imessage-web": {"state": "ready"}
+        }})
+    );
+
+    for method in ["POST", "PUT", "DELETE", "PATCH"] {
+        let response = request_with(server.clone(), method, "/portal/status").await;
+        assert!(response.starts_with(b"HTTP/1.1 405"), "{method}");
+    }
+}
+
+#[test]
+fn status_without_sources_is_an_empty_map() {
+    let portal = CaptivePortal::new(Assets);
+    let _entry = portal
+        .register(entry("wifi", "Wi-Fi"), Assets)
+        .expect("register");
+    let response = block_on(portal.serve("/portal/status"));
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.content_type(), "application/json");
+    assert_eq!(response.body(), Some(&br#"{"entries":{}}"#[..]));
+}
+
+#[test]
+fn configured_status_helper_matches_the_contract() {
+    assert_eq!(
+        serde_json::to_value(EntryStatus::configured(true)).expect("JSON"),
+        serde_json::json!({"state": "ready", "label": {"zh": "已配置", "en": "Configured"}})
+    );
+    assert_eq!(
+        serde_json::to_value(EntryStatus::configured(false)).expect("JSON"),
+        serde_json::json!({"state": "off", "label": {"zh": "未配置", "en": "Not set up"}})
+    );
+    assert_eq!(
+        serde_json::to_value(EntryStatus {
+            state: EntryState::Attention,
+            label: None,
+            detail: Some("Barracuda Setup".into()),
+        })
+        .expect("JSON"),
+        serde_json::json!({"state": "attention", "detail": "Barracuda Setup"})
+    );
+}
+
 fn body(response: &[u8]) -> &[u8] {
     let offset = response
         .windows(4)
@@ -552,6 +687,10 @@ fn body(response: &[u8]) -> &[u8] {
 }
 
 async fn request(server: Rc<WebServer>, path: &str) -> Vec<u8> {
+    request_with(server, "GET", path).await
+}
+
+async fn request_with(server: Rc<WebServer>, method: &str, path: &str) -> Vec<u8> {
     use barracuda_platform_test::loopback_network;
     use embassy_net::{tcp::TcpSocket, Ipv4Address};
     use embedded_io_async::Write as _;
@@ -586,7 +725,9 @@ async fn request(server: Rc<WebServer>, path: &str) -> Vec<u8> {
         }
         socket
             .write_all(
-                format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                format!(
+                    "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
                     .as_bytes(),
             )
             .await

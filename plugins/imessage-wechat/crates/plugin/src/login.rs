@@ -116,6 +116,19 @@ impl Drop for StopOnDrop {
     }
 }
 
+/// Read-only view of the login session for the portal status.
+pub(crate) struct LoginWatch(Rc<LoginShared>);
+
+impl LoginWatch {
+    /// Returns whether a QR code is issued and not yet confirmed or ended.
+    pub(crate) fn waiting_for_scan(&self) -> bool {
+        matches!(
+            *self.0.status.borrow(),
+            SessionStatus::Wait | SessionStatus::Scanned
+        )
+    }
+}
+
 /// `POST`, `GET`, and `DELETE` on [`crate::LOGIN_API_PATH`].
 pub(crate) struct LoginEndpoint<Storage, T: 'static, D: 'static> {
     shared: Rc<LoginShared>,
@@ -178,8 +191,13 @@ where
         }
     }
 
+    /// Returns a handle reporting whether a session waits for its scan.
+    pub(crate) fn watch(&self) -> LoginWatch {
+        LoginWatch(Rc::clone(&self.shared))
+    }
+
     async fn status(&self) -> HttpResponse {
-        let configured = self.configuration.is_configured().await;
+        let configured = self.configuration.is_configured();
         let status = self.shared.status.borrow();
         to_json(
             200,

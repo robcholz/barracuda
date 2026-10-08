@@ -4,6 +4,7 @@ import { QR_VECTORS } from "./qr-vectors";
 import {
   button,
   callDevice,
+  configuredRow,
   deviceError,
   encodeQr,
   note,
@@ -11,6 +12,7 @@ import {
   qrPath,
   qrPlate,
   qrSvg,
+  readChannel,
   resultCard,
   settingsForm,
   stepList,
@@ -37,6 +39,8 @@ function context(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    status: () => null,
+    refreshStatus: async () => {},
   };
   return { context: value, controller, toasts };
 }
@@ -356,4 +360,76 @@ test("submitJson without onError keeps its plain toast", async () => {
     body: undefined,
     code: "500",
   });
+});
+
+test("an error the device can resume says so: retry is read and offered as 重试", async () => {
+  expect(
+    await deviceError(
+      json(502, { error: "upstream_unavailable", retry: true }),
+    ),
+  ).toEqual({ status: 502, error: "upstream_unavailable", retry: true });
+  expect(await deviceError(json(502, { error: "x", retry: "yes" }))).toEqual({
+    status: 502,
+    error: "x",
+  });
+
+  const { context: ctx, toasts } = context("en");
+  let retried = 0;
+  const retry = () => retried++;
+  toastDeviceError(
+    ctx,
+    { kind: "error", error: { status: 502, error: "x", retry: true } },
+    retry,
+  );
+  expect(toasts.at(-1)?.title).toBe("Submission failed");
+  expect(toasts.at(-1)?.action?.label).toBe("Retry");
+  toasts.at(-1)?.action?.run();
+  expect(retried).toBe(1);
+  // without the flag, a refusal is final
+  toastDeviceError(
+    ctx,
+    { kind: "error", error: { status: 422, error: "x" } },
+    retry,
+  );
+  expect(toasts.at(-1)?.action).toBeUndefined();
+});
+
+test("readChannel reads the configured flag; configuredRow shows the card once told", async () => {
+  const { context: ctx } = context();
+  harness.reply = async () =>
+    json(200, {
+      configured: true,
+      signup: { email_address: "a@inkboxmail.com" },
+    });
+  expect(
+    await readChannel<{ signup?: { email_address: string } }>(
+      ctx,
+      "/api/gateway/inkbox",
+    ),
+  ).toEqual({
+    configured: true,
+    signup: { email_address: "a@inkboxmail.com" },
+  });
+  expect(harness.calls.at(-1)?.method).toBe("GET");
+  expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox");
+  harness.reply = async () => json(200, { configured: "yes" });
+  expect(await readChannel(ctx, "/api/gateway/qq")).toBeNull();
+  harness.reply = async () => new Response(null, { status: 405 });
+  expect(await readChannel(ctx, "/api/gateway/qq")).toBeNull();
+
+  for (const lang of ["zh", "en"] as const) {
+    const current = configuredRow("Telegram", lang);
+    expect(current.element.style.display).toBe("none");
+    current.show(true);
+    expect(current.element.style.display).toBe("");
+    expect(current.element.querySelector(".bc-row__label")?.textContent).toBe(
+      lang === "zh" ? "通道" : "Channel",
+    );
+    expect(current.element.querySelector(".bc-option-title")?.textContent).toBe(
+      "Telegram",
+    );
+    expect(
+      current.element.querySelector(".bc-badge--signal")?.textContent,
+    ).toBe(lang === "zh" ? "已配置" : "Configured");
+  }
 });

@@ -1,8 +1,8 @@
-import type { Lang, WebEntry, WebGroup } from "./contract";
+import type { EntryStatus, Lang, WebEntry, WebGroup } from "./contract";
 import { GROUPS } from "./runtime";
-import { STRINGS } from "./i18n";
+import { STRINGS, joinZh } from "./i18n";
 import { assetIcon, h, icon, mark, twoDigits } from "../ui/dom";
-import { ICON_ARROW_RIGHT, ICON_CHEVRON_RIGHT } from "../ui/icons";
+import { ICON_ARROW_RIGHT, ICON_CHECK, ICON_CHEVRON_RIGHT } from "../ui/icons";
 import { MARK_BARE } from "../ui/marks";
 
 /** The riffle's cards 01 to 08, as viewBox points: a channel row raises its own card while the pointer is on it. */
@@ -17,12 +17,141 @@ const CARD_AT = [
   "264,96",
 ];
 
+/** Looks up an entry's latest `/portal/status` record. */
+export type StatusOf = (id: string) => EntryStatus | null;
+
 export interface OverviewView {
   /** In navigation order (see `sortEntries`). */
   entries: readonly WebEntry[];
   lang: Lang;
   /** The page came over plain HTTP: the connection row and the sidebar footer say so. */
   plain: boolean;
+  /** Entry statuses; none when absent. {@link paintStatus} redraws them in place. */
+  status?: StatusOf;
+}
+
+const NO_STATUS: StatusOf = () => null;
+
+/**
+ * What an entry's aside shows: its `detail` in mono (a network name) or, where the aside is a
+ * `label` aside (channel rows), its label when it has no detail. `null` leaves the slot empty.
+ */
+export function asideOf(
+  status: EntryStatus | null,
+  lang: Lang,
+  label = false,
+): { text: string; mono: boolean } | null {
+  if (status?.detail) return { text: status.detail, mono: true };
+  if (label && status?.label) return { text: status.label[lang], mono: false };
+  return null;
+}
+
+/** The first device entry that reports a status: the top bar badge and the overview's first k/v row. */
+export function deviceStatus(
+  entries: readonly WebEntry[],
+  status: StatusOf,
+): { entry: WebEntry; status: EntryStatus } | null {
+  for (const entry of entries) {
+    if (entry.group !== "device") continue;
+    const found = status(entry.id);
+    if (found) return { entry, status: found };
+  }
+  return null;
+}
+
+/** 「Wi-Fi 已连接」 / "Wi-Fi connected": an entry's title and its label as one phrase. */
+export function titledLabel(entry: WebEntry, label: string, lang: Lang) {
+  if (lang === "zh") return joinZh(entry.title.zh, label);
+  // sentence case after the title, unless the label starts with an acronym
+  const lower = /^[A-Z][a-z]/.test(label)
+    ? label[0].toLowerCase() + label.slice(1)
+    : label;
+  return `${entry.title.en} ${lower}`;
+}
+
+/**
+ * A group's 「开始使用」 step is done when one of its entries is `ready`. The line names it: the
+ * device step with its detail (「已连接 HomeNet」), others by title and label. Entries with a label
+ * are preferred, so the line names what the entry reports.
+ */
+export function stepDone(
+  members: readonly WebEntry[],
+  status: StatusOf,
+  lang: Lang,
+): string | null {
+  const ready = members
+    .map((entry) => ({ entry, status: status(entry.id) }))
+    .filter(
+      (item): item is { entry: WebEntry; status: EntryStatus } =>
+        item.status?.state === "ready",
+    );
+  const pick = ready.find((item) => item.status.label) ?? ready[0];
+  if (!pick) return null;
+  const { entry, status: found } = pick;
+  if (entry.group === "device" && found.detail)
+    return STRINGS[lang].connectedTo(found.detail);
+  return [entry.title[lang], found.label?.[lang], found.detail]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** An empty aside slot; {@link paintStatus} fills it. */
+function slot(entry: WebEntry, show: "detail" | "label", extra = "") {
+  return h("span", {
+    class: `portal-aside portal-aside--${show}${extra ? ` ${extra}` : ""}`,
+    "data-status-for": entry.id,
+    "data-status-show": show,
+  });
+}
+
+/**
+ * Redraws the status parts of an overview (desktop or phone) in place, so live figures keep
+ * running: tile and row asides, the device k/v row and the 「开始使用」 steps.
+ */
+export function paintStatus(root: ParentNode, view: OverviewView) {
+  const { lang, entries } = view;
+  const status = view.status ?? NO_STATUS;
+  for (const node of root.querySelectorAll<HTMLElement>("[data-status-for]")) {
+    const found = status(node.getAttribute("data-status-for")!);
+    const aside = asideOf(
+      found,
+      lang,
+      node.getAttribute("data-status-show") === "label",
+    );
+    node.textContent = aside?.text ?? "";
+    node.classList.toggle("bc-mono", !!aside?.mono);
+    node.classList.toggle("bc-small", !!aside && !aside.mono);
+    node.style.display = aside ? "" : "none";
+    if (found) node.setAttribute("data-state", found.state);
+    else node.removeAttribute("data-state");
+  }
+  const device = deviceStatus(entries, status);
+  for (const node of root.querySelectorAll<HTMLElement>(
+    "[data-status-device]",
+  )) {
+    const value =
+      device &&
+      (node.tagName === "DT"
+        ? device.entry.title[lang]
+        : (device.status.detail ?? device.status.label?.[lang]));
+    node.textContent = value || "";
+    node.style.display = value ? "" : "none";
+  }
+  for (const item of root.querySelectorAll<HTMLElement>("[data-step]")) {
+    const group = item.getAttribute("data-step") as WebGroup;
+    const done = stepDone(
+      entries.filter((entry) => entry.group === group),
+      status,
+      lang,
+    );
+    const link = item.querySelector<HTMLElement>(".portal-step__link");
+    const line = item.querySelector<HTMLElement>(".portal-step__done");
+    if (link) link.style.display = done ? "none" : "";
+    if (line) {
+      line.style.display = done ? "" : "none";
+      line.lastElementChild!.textContent = done ?? "";
+    }
+  }
 }
 
 export interface ModuleLayout {
@@ -94,6 +223,7 @@ function tile(entry: WebEntry, lang: Lang) {
         "span",
         { class: "portal-tile__head" },
         h("span", { class: "bc-title portal-grow" }, entry.title[lang]),
+        slot(entry, "detail", "bc-muted portal-aside--small"),
         h("span", { class: "bc-tile__arrow" }, icon(ICON_ARROW_RIGHT)),
       ),
       h("span", { class: "bc-small bc-muted" }, entry.summary[lang]),
@@ -142,6 +272,7 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
             { class: "bc-small bc-muted portal-grow" },
             entry.summary[lang],
           ),
+          slot(entry, "label", "bc-muted"),
           icon(ICON_CHEVRON_RIGHT),
         ),
       ),
@@ -150,7 +281,8 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
 }
 
 /** The desktop overview, from the manifest only (the design's PageOverview). */
-export function renderOverview({ entries, lang, plain }: OverviewView) {
+export function renderOverview(view: OverviewView) {
+  const { entries, lang, plain } = view;
   const t = STRINGS[lang];
   const layout = layoutModules(entries);
   const steps = groupsOf(entries);
@@ -158,7 +290,7 @@ export function renderOverview({ entries, lang, plain }: OverviewView) {
     group === "channel"
       ? t.tryFirst(entry.title[lang])
       : t.open(entry.title[lang]);
-  return h(
+  const root = h(
     "div",
     { class: "bc-page portal-overview" },
     h(
@@ -176,6 +308,8 @@ export function renderOverview({ entries, lang, plain }: OverviewView) {
         h(
           "dl",
           { class: "bc-kv bc-mono portal-hero__kv" },
+          h("dt", { "data-status-device": "" }),
+          h("dd", { "data-status-device": "" }),
           h("dt", null, term(t.kvPages, t.pagesTip)),
           h("dd", null, String(entries.length)),
           h("dt", null, t.kvConn),
@@ -203,13 +337,19 @@ export function renderOverview({ entries, lang, plain }: OverviewView) {
             steps.map(({ group, entries: members }, index) =>
               h(
                 "li",
-                null,
+                { "data-step": group },
                 h(
                   "span",
                   { class: "bc-mono bc-muted portal-count" },
                   twoDigits(index + 1),
                 ),
                 h("span", { class: "bc-title" }, t.steps[group]),
+                h(
+                  "span",
+                  { class: "bc-small portal-step__done" },
+                  icon(ICON_CHECK, 14),
+                  h("span"),
+                ),
                 h(
                   "a",
                   {
@@ -245,12 +385,15 @@ export function renderOverview({ entries, lang, plain }: OverviewView) {
       ),
     ),
   );
+  paintStatus(root, view);
+  return root;
 }
 
 /** The phone overview: the board, then the entries as a full-bleed list grouped by caption (the design's MobileHome). */
-export function renderPhoneHome({ entries, lang, plain }: OverviewView) {
+export function renderPhoneHome(view: OverviewView) {
+  const { entries, lang, plain } = view;
   const t = STRINGS[lang];
-  return h(
+  const root = h(
     "div",
     { class: "portal-phone-home" },
     h(
@@ -271,6 +414,11 @@ export function renderPhoneHome({ entries, lang, plain }: OverviewView) {
             { class: "bc-list-row", href: `#${entry.id}` },
             entryIcon(entry, 18),
             h("span", { class: "portal-grow" }, entry.title[lang]),
+            slot(
+              entry,
+              group === "channel" ? "label" : "detail",
+              "bc-muted portal-aside--phone",
+            ),
             icon(ICON_CHEVRON_RIGHT),
           ),
         ),
@@ -284,6 +432,8 @@ export function renderPhoneHome({ entries, lang, plain }: OverviewView) {
         )
       : null,
   );
+  paintStatus(root, view);
+  return root;
 }
 
 export type StatusKind =

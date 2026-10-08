@@ -4,6 +4,8 @@
  */
 export type {
   Cleanup,
+  EntryState,
+  EntryStatus,
   FigureDefinition,
   FigureHandle,
   FigureTarget,
@@ -76,6 +78,12 @@ export {
   type DeviceRequest,
   type DeviceResult,
 } from "./device";
+export {
+  configuredRow,
+  readChannel,
+  type ChannelState,
+  type ConfiguredRow,
+} from "./channel";
 export { encodeQr, qrPath, qrSvg, type QrCode } from "./qr";
 export * from "./icons";
 export * from "./marks";

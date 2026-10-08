@@ -7,7 +7,9 @@
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,
 mounts the WebSocket bridge, and publishes `IMessageWebRoute` for consumers of
-the built-in Web conversation.
+the built-in Web conversation. Its portal entry registers no status source:
+Web chat is built in rather than an external channel, so `imessage-web` is
+absent from `GET /portal/status`.
 
 ## Portal page
 

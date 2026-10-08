@@ -10,7 +10,12 @@ The Plugin starts without provider credentials when storage is empty. It require
 and `WebServer` capabilities, exposes `/api/gateway/telegram` for runtime configuration, and
 registers the configured channel for its lifetime. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
-stored data fails registration. See [`http.md`](http.md).
+stored data fails registration. `GET` on the same path reports only whether a
+channel is configured. The portal entry is registered with
+`CaptivePortal::register_with_status`; its `GET /portal/status` record is
+`EntryStatus::configured`: `ready` 已配置/Configured while a channel is
+registered with the Gateway, otherwise `off` 未配置/Not set up. It reads a flag
+the endpoint keeps beside its registration. See [`http.md`](http.md).
 
 ## Portal page
 
@@ -40,7 +45,11 @@ a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
 `description` are shown on the token field. When the browser has no route out (a
 phone on the device's hotspot) the page notes that the token is unverified;
 verifying never gates saving. The device's error `message` is shown in the
-toast. It does not read current settings. Secrets are password inputs, never
+toast. On mount it reads `GET /api/gateway/telegram`, which answers only
+`{"configured"}`; a configured channel shows as a 「通道」 row with the
+已配置 card above the form that replaces it. The row also appears after a save
+succeeds, and the page then calls `context.refreshStatus()` so the portal's
+navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never
 persisted in browser storage, and cleared on success or unmount. Requests are
 cancelled on unmount and are never retried automatically. The existing HTTP API
 has no authentication or transport encryption added here; use only within a

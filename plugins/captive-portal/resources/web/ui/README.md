@@ -22,16 +22,25 @@ design system lacks, and then removes it on cleanup.
 A page exports `mount(root, context)`; the shell gives each mount its own `root`
 and a `PortalContext`:
 
-| member         | meaning                                                                             |
-| -------------- | ----------------------------------------------------------------------------------- |
-| `signal`       | aborted on navigation, language change and unload: pass it to `fetch` and listeners |
-| `lang`         | `"zh"` or `"en"`; render every string in it (a language change remounts the page)   |
-| `toast(toast)` | the shell's stack, bottom-right: `{ kind, title, body?, code?, action? }`           |
-| `navigate(id)` | go to another entry ID, or `"overview"`                                             |
+| member            | meaning                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `signal`          | aborted on navigation, language change and unload: pass it to `fetch` and listeners        |
+| `lang`            | `"zh"` or `"en"`; render every string in it (a language change remounts the page)          |
+| `toast(toast)`    | the shell's stack, bottom-right: `{ kind, title, body?, code?, action? }`                  |
+| `navigate(id)`    | go to another entry ID, or `"overview"`                                                    |
+| `status(id?)`     | the entry's latest `GET /portal/status` record (this page's own by default), or `null`     |
+| `refreshStatus()` | reads the status again and redraws the sidebar and overview; call it after a save succeeds |
 
 `mount` may return a cleanup function (or a promise of one). After the signal
-aborts, `toast` and `navigate` do nothing. Types: `PortalModule`, `PortalContext`,
-`Toast`, `Lang`, `PortalText` (all exported by the kit).
+aborts, `toast`, `navigate` and `refreshStatus` do nothing. Types: `PortalModule`,
+`PortalContext`, `Toast`, `Lang`, `PortalText`, `EntryStatus`, `EntryState` (all
+exported by the kit).
+
+An `EntryStatus` is `{ state, label?, detail? }`: `state` is `"ready"`, `"attention"`
+or `"off"`, `label` a `{ zh, en }` phrase (「已配置」), `detail` a machine value the
+shell shows in mono (a network name). Every page that saves calls
+`void context.refreshStatus()` once the device accepts, so the sidebar, the top bar
+badge and the 「开始使用」 steps follow without a reload.
 
 ## Exports
 
@@ -125,13 +134,34 @@ Device calls (`device.ts`), for flows beyond one POST (QR login, signup codes)
   the page) and resolves `{ kind: "ok", status, data }` (parsed JSON, `null` for 204),
   `{ kind: "error", error: DeviceError }`, `{ kind: "offline" }` (no reply) or
   `{ kind: "aborted" }` (report nothing). It never toasts.
-- `DeviceError` is `{ status, error, message?, code? }`, read from the device's
-  `{"error", "message"?, "code"?}` body by `deviceError(response)`; `message` and `code`
-  are the upstream service's own words. A numeric `code` becomes a string.
+- `DeviceError` is `{ status, error, message?, code?, retry? }`, read from the device's
+  `{"error", "message"?, "code"?, "retry"?}` body by `deviceError(response)`; `message`
+  and `code` are the upstream service's own words. A numeric `code` becomes a string.
+  `retry: true` means the device kept what it had and the same request resumes it.
 - `toastDeviceError(context, result, retry?)` toasts an `error` or `offline` result in the
   kit's words: 「配置被拒绝」 (4xx), 「接口不可用」 (404), 「提交失败」 (5xx) with the
   status (and upstream code) in mono and `message` as the body; 「未收到设备确认」 with
-  「重试」 when nothing came back.
+  「重试」 when nothing came back. An error with `retry: true` also gets 「重试」 when
+  `retry` is given.
+
+Channel state (`channel.ts`)
+
+- `readChannel<T>(context, endpoint)`: `GET` a channel's config path, which answers
+  `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T` adds
+  page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
+  in that shape. It never toasts.
+- `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
+  the result card `name` and the 已配置 badge, hidden until `show(true)`. Put it first in
+  the form; show it when `readChannel` says `configured`, and after a save succeeds:
+
+  ```ts
+  const current = configuredRow("Telegram", lang);
+  form.element.prepend(current.element);
+  void readChannel(context, "/api/gateway/telegram").then((state) => {
+    if (state?.configured) current.show(true);
+  });
+  // settingsForm options: onSuccess: () => { current.show(true); void context.refreshStatus(); }
+  ```
 
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 

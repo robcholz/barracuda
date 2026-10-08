@@ -1,5 +1,11 @@
 import { installBrowser, settle } from "./browser";
-import type { Lang, PortalContext, PortalModule, Toast } from "../ui";
+import type {
+  EntryStatus,
+  Lang,
+  PortalContext,
+  PortalModule,
+  Toast,
+} from "../ui";
 
 export interface FetchCall {
   url: string;
@@ -21,11 +27,15 @@ export function pageHarness() {
     calls,
     reply: async (_call: FetchCall): Promise<Response> =>
       new Response(null, { status: 204 }),
+    /** What `context.status(id)` answers. */
+    statuses: new Map<string, EntryStatus>(),
     /** Mounts `mount` in a fresh root with a recording context. */
     async render(mount: PortalModule["mount"], lang: Lang = "zh") {
       const controller = new AbortController();
       const toasts: Toast[] = [];
       const routes: string[] = [];
+      /** How many times the page asked the shell to read the status again. */
+      const refreshes = { count: 0 };
       const context: PortalContext = {
         signal: controller.signal,
         lang,
@@ -33,6 +43,10 @@ export function pageHarness() {
           if (!controller.signal.aborted) toasts.push(toast);
         },
         navigate: (id) => routes.push(id),
+        status: (id = "page") => harness.statuses.get(id) ?? null,
+        refreshStatus: async () => {
+          if (!controller.signal.aborted) refreshes.count++;
+        },
       };
       const root = browser.document.createElement("div");
       browser.document.body.append(root);
@@ -44,6 +58,7 @@ export function pageHarness() {
         context,
         toasts,
         routes,
+        refreshes,
         query,
         input: (name: string) =>
           root.querySelector<HTMLInputElement>(`[name="${name}"]`)!,

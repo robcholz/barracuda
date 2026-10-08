@@ -1,5 +1,7 @@
 import type {
   Cleanup,
+  EntryState,
+  EntryStatus,
   Lang,
   PortalContext,
   PortalModule,
@@ -11,6 +13,8 @@ import type {
 
 export type {
   Cleanup,
+  EntryState,
+  EntryStatus,
   Lang,
   PortalContext,
   PortalModule,
@@ -91,6 +95,49 @@ export function parseEntries(value: unknown): WebEntry[] {
   });
 }
 
+const STATES: readonly EntryState[] = ["ready", "attention", "off"];
+/** Longer details are not machine values the shell can show on one line. */
+const DETAIL_MAX = 128;
+
+/**
+ * Validates `GET /portal/status` (`{"entries": {"<id>": {state, label?, detail?}}}`). A record with
+ * an unknown state, a malformed label or detail, or an invalid ID is left out; anything but an
+ * object with an `entries` object rejects the whole reply.
+ */
+export function parseStatus(value: unknown): Map<string, EntryStatus> {
+  const entries = (value as { entries?: unknown } | null)?.entries;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !entries ||
+    typeof entries !== "object" ||
+    Array.isArray(entries)
+  )
+    throw new Error("Status is not an object of entries");
+  const out = new Map<string, EntryStatus>();
+  for (const [id, item] of Object.entries(entries as Record<string, unknown>)) {
+    const record = item as Record<string, unknown> | null;
+    if (!ID.test(id) || id.length > 64 || !record || typeof record !== "object")
+      continue;
+    const state = record.state as EntryState;
+    const label = record.label === undefined ? null : text(record.label);
+    const detail = record.detail;
+    if (
+      !STATES.includes(state) ||
+      label === undefined ||
+      (detail !== undefined &&
+        (typeof detail !== "string" || !detail || detail.length > DETAIL_MAX))
+    )
+      continue;
+    const status: EntryStatus = { state };
+    if (label) status.label = label;
+    if (typeof detail === "string") status.detail = detail;
+    out.set(id, status);
+  }
+  return out;
+}
+
 /** The portal's navigation order: device, agent, channel; then `order`; then ID. */
 export function sortEntries(entries: readonly WebEntry[]): WebEntry[] {
   return [...entries].sort(
@@ -106,6 +153,8 @@ export interface SessionHost {
   lang: Lang;
   toast(toast: Toast): void;
   navigate(id: string): void;
+  status(id: string): EntryStatus | null;
+  refreshStatus(): Promise<void>;
 }
 
 export interface OpenOptions {
@@ -155,6 +204,9 @@ export class ModuleSession {
       navigate: (id: string) => {
         if (!signal.aborted) host.navigate(id);
       },
+      status: (id: string = entry.id) => host.status(id),
+      refreshStatus: () =>
+        signal.aborted ? Promise.resolve() : host.refreshStatus(),
     });
     const module = (await load(entry.module)) as Partial<PortalModule> | null;
     if (signal.aborted) return false;

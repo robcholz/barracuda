@@ -34,6 +34,7 @@ export const mount = definePage((context) => {
           },
         ],
       },
+      onSuccess: () => void context.refreshStatus(),
       success: {
         action: {
           label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },

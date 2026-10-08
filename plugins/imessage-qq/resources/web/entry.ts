@@ -1,8 +1,10 @@
 import {
   KIT_STRINGS,
+  configuredRow,
   definePage,
   header,
   page,
+  readChannel,
   settingsForm,
 } from "../../../captive-portal/resources/web/ui";
 
@@ -28,17 +30,20 @@ const T = {
   },
 };
 
+const ENDPOINT = "/api/gateway/qq";
+
 /**
  * The QQ page: App ID and App Secret, posted to `POST /api/gateway/qq`. The device fetches one access
  * token before it stores anything; QQ's own rejection (422 `verification_failed`) is shown on the
- * secret field.
+ * secret field. `GET` on the same path says whether a channel is configured.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
   const t = T[lang];
+  const current = configuredRow("QQ", lang);
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/qq",
+      endpoint: ENDPOINT,
       submit: t.submit,
       rows: [
         {
@@ -77,6 +82,10 @@ export const mount = definePage((context) => {
           );
         return { body: error.message };
       },
+      onSuccess: () => {
+        current.show(true);
+        void context.refreshStatus();
+      },
       success: {
         action: {
           label: t.tryChat,
@@ -86,6 +95,10 @@ export const mount = definePage((context) => {
     },
     context,
   );
+  form.element.prepend(current.element);
+  void readChannel(context, ENDPOINT).then((state) => {
+    if (state?.configured) current.show(true);
+  });
   return page(
     header(
       {

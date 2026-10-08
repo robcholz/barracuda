@@ -14,7 +14,15 @@ The Plugin starts without provider credentials when storage is empty. It require
 and `WebServer` capabilities, exposes `/api/gateway/wechat` for runtime configuration, and
 registers the configured channel for its lifetime. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
-stored data fails registration. See [`http.md`](http.md).
+stored data fails registration. `GET` on the same path reports only whether a
+channel is configured. See [`http.md`](http.md).
+
+The portal entry is registered with `CaptivePortal::register_with_status`. Its
+`GET /portal/status` record is `attention` 等待扫码/Waiting for scan while a QR
+login session is in `wait` or `scanned`; otherwise it is
+`EntryStatus::configured`: `ready` 已配置/Configured while a channel is
+registered with the Gateway, `off` 未配置/Not set up when none is. It reads the
+login session's last status and a flag kept beside the channel registration.
 
 The configuration can also be obtained by QR login at
 `/api/gateway/wechat/login`. Registration retains both HTTP routes. Both routes
@@ -61,7 +69,9 @@ goes away. A `GET` that reports `configured` with no session running shows the
 linked state with 「重新绑定」 instead of starting a login. On a phone (narrower than
 720 px) it shows the steps and a 「复制链接」 button instead of the code and starts no
 session. A token entered by hand under 「高级」 posts to `POST /api/gateway/wechat`;
-the footer shows only while that fold is open. Secrets are password inputs,
+the footer shows only while that fold is open. After a confirmed login or an
+accepted token the page calls `context.refreshStatus()`, so the portal's
+navigation and overview follow. Secrets are password inputs,
 never persisted in browser storage, and cleared on success or unmount. Requests
 are cancelled on unmount and are never retried automatically. The existing HTTP
 API has no authentication or transport encryption added here; use only within a

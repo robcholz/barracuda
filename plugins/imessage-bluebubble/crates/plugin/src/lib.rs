@@ -8,8 +8,11 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -59,9 +62,11 @@ impl Plugin for IMessageBlueBubblePlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let configured = Rc::new(Cell::new(false));
+        let status = Rc::clone(&configured);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "imessage-bluebubble",
                         group: WebGroup::Channel,
@@ -79,6 +84,7 @@ impl Plugin for IMessageBlueBubblePlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || EntryStatus::configured(status.get()),
                 )
                 .map_err(PluginError::registration)?,
         );
@@ -96,10 +102,12 @@ impl Plugin for IMessageBlueBubblePlugin {
                     gateway.register(channel).map_err(PluginError::registration)
                 })
                 .transpose()?;
+        configured.set(channel_registration.is_some());
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),
             channel_registration: Mutex::new(channel_registration),
+            configured,
             storage: context.storage().clone(),
         };
         let registration = webserver
@@ -149,6 +157,8 @@ struct ConfigEndpoint<Storage> {
     gateway: Rc<IMessageGateway>,
     http_clients: ClientFactory<'static>,
     channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
+    /// Whether a channel is registered with the Gateway, readable without the lock.
+    configured: Rc<Cell<bool>>,
     storage: Storage,
 }
 
@@ -156,13 +166,24 @@ impl<Storage> ConfigEndpoint<Storage> {
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
     }
+
+    /// `GET` body: whether a channel is configured, never its settings.
+    fn configured_response(configured: bool) -> HttpResponse {
+        if configured {
+            Self::response(200, br#"{"configured":true}"#)
+        } else {
+            Self::response(200, br#"{"configured":false}"#)
+        }
+    }
 }
 
 impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+            match request.method() {
+                HttpMethod::Post => {}
+                HttpMethod::Get => return Self::configured_response(self.configured.get()),
+                _ => return Self::response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
                 log::warn!("rejected invalid BlueBubbles gateway configuration");
@@ -194,9 +215,11 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
             let channel: Rc<dyn MessageChannel> =
                 Rc::new(BlueBubbles::new(self.http_clients.clone(), config.into()));
             channel_registration.take();
+            self.configured.set(false);
             match self.gateway.register(channel) {
                 Ok(registration) => {
                     channel_registration.replace(registration);
+                    self.configured.set(true);
                     log::info!("configured BlueBubbles gateway provider");
                     Self::response(204, b"")
                 }
@@ -213,7 +236,7 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                         return Self::response(500, br#"{"error":"storage"}"#);
                     }
                     log::warn!("rejected BlueBubbles gateway configuration: {error}");
-                    Self::response(422, br#"{"error":"invalid_configuration"}"#)
+                    Self::response(422, br#"{"error":"registration_failed"}"#)
                 }
             }
         })
@@ -270,17 +293,20 @@ mod tests {
         }
     }
 
-    struct RejectedConfigurationProbe {
+    /// Exercises the configuration endpoint against the real Gateway, with the
+    /// `imessage` channel already taken by another provider when `occupied`.
+    struct ConfigurationProbe {
         http_clients: ClientFactory<'static>,
-        rolled_back: Rc<RefCell<bool>>,
+        occupied: bool,
+        completed: Rc<RefCell<bool>>,
     }
 
-    impl PluginDeclaration for RejectedConfigurationProbe {
-        const ID: &'static str = "rejected-configuration-probe";
+    impl PluginDeclaration for ConfigurationProbe {
+        const ID: &'static str = "configuration-probe";
         const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
     }
 
-    impl Plugin for RejectedConfigurationProbe {
+    impl Plugin for ConfigurationProbe {
         fn register<Storage>(
             &mut self,
             context: &mut PluginRegisterContext<'_, Storage>,
@@ -289,24 +315,51 @@ mod tests {
             Storage: PluginStorage,
         {
             let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
-            let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedImessageChannel);
-            context.retain(
-                gateway
-                    .register(occupied)
-                    .map_err(PluginError::registration)?,
-            );
+            if self.occupied {
+                let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedImessageChannel);
+                context.retain(
+                    gateway
+                        .register(occupied)
+                        .map_err(PluginError::registration)?,
+                );
+            }
+            let configured = Rc::new(Cell::new(false));
             let endpoint = ConfigEndpoint {
                 gateway,
                 http_clients: self.http_clients.clone(),
                 channel_registration: Mutex::new(None),
+                configured: Rc::clone(&configured),
                 storage: context.storage().clone(),
             };
+            let get = || {
+                let response =
+                    block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+                assert_eq!(response.status(), 200);
+                response.body().map(<[u8]>::to_vec)
+            };
+            assert_eq!(get().as_deref(), Some(&br#"{"configured":false}"#[..]));
             let body = br#"{"server_url":"https://blue.example","password":"secret"}"#;
             let response =
                 block_on(endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())));
             let stored = block_on(context.storage().get_bytes(CONFIGURATION_STORAGE_KEY))?;
-            self.rolled_back
-                .replace(response.status() == 422 && stored.is_none());
+            if self.occupied {
+                assert_eq!(response.status(), 422);
+                assert_eq!(
+                    response.body(),
+                    Some(&br#"{"error":"registration_failed"}"#[..])
+                );
+                assert!(stored.is_none());
+                assert!(!configured.get());
+                assert_eq!(get().as_deref(), Some(&br#"{"configured":false}"#[..]));
+            } else {
+                assert_eq!(response.status(), 204);
+                assert!(stored.is_some());
+                assert!(configured.get());
+                assert_eq!(get().as_deref(), Some(&br#"{"configured":true}"#[..]));
+            }
+            let response = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Put, Vec::new())));
+            assert_eq!(response.status(), 405);
+            self.completed.replace(true);
             Ok(())
         }
     }
@@ -347,14 +400,13 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn rejected_channel_registration_rolls_back_persisted_configuration() {
+    fn run(occupied: bool) {
         block_on(install_global_memory_vfs()).expect("install test VFS");
         let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
         let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
         manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
         let mut context = plugin_context();
-        let rolled_back = Rc::new(RefCell::new(false));
+        let completed = Rc::new(RefCell::new(false));
 
         manager
             .register(WorkflowPlugin::new(&mut context))
@@ -363,12 +415,23 @@ mod tests {
             .register(IMessageGatewayPlugin::new(&mut context))
             .expect("register IMessage Gateway Plugin");
         manager
-            .register(RejectedConfigurationProbe {
+            .register(ConfigurationProbe {
                 http_clients: context.http_clients.clone(),
-                rolled_back: Rc::clone(&rolled_back),
+                occupied,
+                completed: Rc::clone(&completed),
             })
-            .expect("exercise rejected provider configuration");
+            .expect("exercise provider configuration");
 
-        assert!(*rolled_back.borrow());
+        assert!(*completed.borrow());
+    }
+
+    #[test]
+    fn accepted_configuration_is_reported_by_get_and_status() {
+        run(false);
+    }
+
+    #[test]
+    fn rejected_channel_registration_rolls_back_persisted_configuration() {
+        run(true);
     }
 }

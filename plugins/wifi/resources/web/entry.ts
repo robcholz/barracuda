@@ -481,6 +481,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
       picked = null;
     }
     await refresh();
+    if (outcome === "accepted") void context.refreshStatus();
   }
 
   async function forget() {
@@ -497,6 +498,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     if (outcome === "aborted") return;
     busy = false;
     await refresh();
+    if (outcome === "accepted") void context.refreshStatus();
   }
 
   // ---- layout

@@ -1,5 +1,11 @@
 # IMessage QQ HTTP API
 
+## `GET /api/gateway/qq`
+
+Returns `200` with `{"configured": true}` while a QQ channel is registered
+with the Gateway, otherwise `{"configured": false}`. It never returns settings,
+the App Secret, or a token, and makes no request to QQ.
+
 ## `POST /api/gateway/qq`
 
 Configures or replaces the QQ message-channel provider. The request body is a
@@ -30,7 +36,7 @@ Responses:
   required fields were absent, or an unknown field was present. Nothing is
   requested from QQ.
 - `405 Method Not Allowed` `{"error":"method_not_allowed"}`: the endpoint only
-  accepts `POST`.
+  accepts `GET` and `POST`.
 - `422 Unprocessable Content`
   `{"error":"verification_failed","message":"<QQ message>","code":"<QQ code>"}`:
   QQ refused to issue a token. `message` and `code` are QQ's own, passed through

@@ -1,7 +1,18 @@
 # IMessage Inkbox HTTP API
 
-Every route is an exact path that accepts only `POST`; any other method returns
-`405 Method Not Allowed` with `{"error":"method_not_allowed"}`.
+Every route is an exact path that accepts `POST`; `/api/gateway/inkbox` also
+accepts `GET`. Any other method returns `405 Method Not Allowed` with
+`{"error":"method_not_allowed"}`.
+
+## `GET /api/gateway/inkbox`
+
+Returns `200` with `{"configured": false}` when no Inkbox channel is registered
+with the Gateway. Otherwise it returns `{"configured": true}`, plus
+`"signup": {"human_email": "<address entered>", "email_address": "<agent mailbox>", "claim_status": "<status>"}`
+when the stored configuration came from signup. `human_email` is the address
+the person entered (trimmed), which Inkbox sent the code to. `claim_status` is the last one
+Inkbox reported, at signup or at a later verify. The API key and identity are
+never returned. A storage read failure returns `500` `{"error":"storage"}`.
 
 ## `POST /api/gateway/inkbox`
 
@@ -12,8 +23,13 @@ Responses:
 
 - `204 No Content`: the provider was configured and registered.
 - `400 Bad Request`: the JSON body was invalid or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `POST`.
-- `422 Unprocessable Content`: the Gateway rejected channel registration.
+- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `422 Unprocessable Content` `{"error":"registration_failed"}`: the Gateway
+  rejected channel registration. The previous stored configuration is restored
+  and no Inkbox channel stays registered.
+- `500 Internal Server Error` `{"error":"storage"}`: storage failed.
+
+The stored configuration has no `signup` record afterwards.
 
 Credentials are accepted only in the request body and are never included in the
 response or logs.
@@ -47,10 +63,12 @@ flow runs returns `409` `conflict` immediately instead of waiting.
 Every error response of these routes is JSON:
 
 ```json
-{"error":"<kind>","message":"<text>","code":"<upstream code>"}
+{"error":"<kind>","message":"<text>","code":"<upstream code>","retry":true}
 ```
 
-`message` and `code` are present only when known. When Inkbox returned its own
+`message` and `code` are present only when known. `retry` is present, and
+`true`, only on a signup failure after Inkbox accepted the signup: repeating
+the same request resumes it (see below). When Inkbox returned its own
 message or code, they are passed through verbatim. Inkbox reports them as
 `{"detail":"<message>"}`, `{"detail":{"code","message"}}`, or a validation
 list `{"detail":[{"msg",…}]}`, whose first `msg` becomes `message`.
@@ -58,7 +76,7 @@ list `{"detail":[{"msg",…}]}`, whose first `msg` becomes `message`.
 | Status | `error` | Meaning |
 | --- | --- | --- |
 | 400 | `invalid_request` | The body was invalid, or Inkbox rejected the signup request (any upstream 4xx, including its 422 validation error). |
-| 405 | `method_not_allowed` | The route only accepts `POST`. |
+| 405 | `method_not_allowed` | The method is not accepted by the route. |
 | 409 | `conflict` | No configuration is stored for verify or resend, or another flow is running. |
 | 422 | `verification_failed` | Inkbox rejected the code or the stored API key (any upstream 4xx on verify or resend). |
 | 422 | `registration_failed` | The Gateway rejected the channel after signup. |
@@ -78,8 +96,9 @@ a 6-digit code to the person.
 
 The returned `agent_handle` is resolved to the identity UUID with the identity
 lookup above (the response's `id`), and the device stores
-`{"api_key","identity_id","api_base":"https://inkbox.ai"}` under the same key
-and format as `POST /api/gateway/inkbox`, then (re)registers the channel. An
+`{"api_key","identity_id","api_base":"https://inkbox.ai","signup":{"human_email","email_address","claim_status"}}`
+under the same key as `POST /api/gateway/inkbox`, then (re)registers the
+channel. An
 unclaimed agent can already send within its limits, so no verification is
 needed before registration.
 
@@ -89,9 +108,14 @@ Responses:
   for example `agent_unclaimed`.
 - `400`, `405`, `409`, `422 registration_failed`, `500`, `502` as above.
 
-Inkbox shows the API key only once. If the identity lookup, storage, or
-registration fails after a successful upstream signup, nothing is stored and
-the person signs up again.
+Inkbox shows the API key only once. If the identity lookup (`502`), storage
+(`500`), or registration (`422 registration_failed`) fails after a successful
+upstream signup, nothing is stored, the error carries `"retry": true`, and the
+device keeps the signup result in RAM until it is stored or the Plugin
+unloads. A later signup for the same email (after trimming) resumes from it:
+Inkbox signup is not called again, so no second email is sent, and an identity
+already resolved is not looked up again. A signup for a different email drops
+the kept result and signs up anew.
 
 ### `POST /api/gateway/inkbox/verify`
 
@@ -101,7 +125,9 @@ submits it with the stored API key and stored `api_base`.
 
 Responses:
 
-- `200 OK`: `{"claim_status":"<status>"}`, for example `agent_claimed`.
+- `200 OK`: `{"claim_status":"<status>"}`, for example `agent_claimed`. When
+  the stored configuration came from signup with this key, its `claim_status`
+  is updated; failing to store it is logged and does not change the response.
 - `409 conflict`: no configuration is stored.
 - `422 verification_failed`: Inkbox rejected the code, with its message (for
   example `Invalid verification code`).

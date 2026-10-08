@@ -8,8 +8,11 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -22,7 +25,7 @@ use barracuda_webserver_plugin::{
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
-use inkbox::{Inkbox, InkboxConfig, InkboxSignup, SignupError, SignupRequest};
+use inkbox::{Inkbox, InkboxConfig, InkboxSignup, SignupAccount, SignupError, SignupRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -70,10 +73,37 @@ impl Plugin for IMessageInkboxPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
+        let channel_registration =
+            embassy_futures::block_on(load_configuration(context.storage()))?
+                .map(|config| {
+                    let channel: Rc<dyn MessageChannel> = Rc::new(Inkbox::new(
+                        self.http_clients.clone(),
+                        config.into_inkbox_config(),
+                    ));
+                    gateway.register(channel).map_err(PluginError::registration)
+                })
+                .transpose()?;
+        let state = Rc::new(InkboxState {
+            gateway,
+            http_clients: self.http_clients.clone(),
+            configured: Cell::new(channel_registration.is_some()),
+            channel_registration: Mutex::new(channel_registration),
+            upstream: Mutex::new(()),
+            pending_signup: RefCell::new(None),
+            storage: context.storage().clone(),
+            signup_api_base: inkbox::DEFAULT_API_BASE.into(),
+        });
+        let status = Rc::clone(&state);
         let portal = context.require::<CaptivePortal>("captive-portal")?;
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "imessage-inkbox",
                         group: WebGroup::Channel,
@@ -91,31 +121,10 @@ impl Plugin for IMessageInkboxPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || EntryStatus::configured(status.configured.get()),
                 )
                 .map_err(PluginError::registration)?,
         );
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
-        let channel_registration =
-            embassy_futures::block_on(load_configuration(context.storage()))?
-                .map(|config| {
-                    let channel: Rc<dyn MessageChannel> =
-                        Rc::new(Inkbox::new(self.http_clients.clone(), config.into()));
-                    gateway.register(channel).map_err(PluginError::registration)
-                })
-                .transpose()?;
-        let state = Rc::new(InkboxState {
-            gateway,
-            http_clients: self.http_clients.clone(),
-            channel_registration: Mutex::new(channel_registration),
-            upstream: Mutex::new(()),
-            storage: context.storage().clone(),
-            signup_api_base: inkbox::DEFAULT_API_BASE.into(),
-        });
         for (path, route) in [
             (CONFIG_API_PATH, Route::Config),
             (SIGNUP_API_PATH, Route::Signup),
@@ -144,14 +153,55 @@ struct ConfigRequest {
     api_base: String,
 }
 
-impl From<ConfigRequest> for InkboxConfig {
+/// Stored channel configuration: the accepted settings and, when they came
+/// from signup, the account they belong to. Older records have no `signup`.
+#[derive(Deserialize, Serialize)]
+struct StoredConfiguration {
+    api_key: String,
+    identity_id: String,
+    api_base: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signup: Option<SignupRecord>,
+}
+
+/// Account details of a signup, reported by `GET` without the key.
+#[derive(Clone, Deserialize, Serialize)]
+struct SignupRecord {
+    /// Address the person entered, which Inkbox sent the code to.
+    human_email: String,
+    email_address: String,
+    /// Last claim status Inkbox reported, from signup or a later verify.
+    claim_status: String,
+}
+
+impl From<ConfigRequest> for StoredConfiguration {
     fn from(value: ConfigRequest) -> Self {
-        InkboxConfig {
+        Self {
             api_key: value.api_key,
             identity_id: value.identity_id,
             api_base: value.api_base,
+            signup: None,
         }
     }
+}
+
+impl StoredConfiguration {
+    /// Returns the channel settings, leaving out the signup record.
+    fn into_inkbox_config(self) -> InkboxConfig {
+        InkboxConfig {
+            api_key: self.api_key,
+            identity_id: self.identity_id,
+            api_base: self.api_base,
+        }
+    }
+}
+
+/// A signup whose one-time API key is not stored yet. It is kept only in RAM,
+/// so a retry for the same email resumes without a second signup email.
+struct PendingSignup {
+    human_email: String,
+    account: SignupAccount,
+    identity_id: Option<String>,
 }
 
 fn default_inkbox_api_base() -> String {
@@ -175,9 +225,13 @@ struct InkboxState<Storage, T: 'static = http_client::Tcp, D: 'static = http_cli
     gateway: Rc<IMessageGateway>,
     http_clients: ClientFactory<'static, T, D>,
     channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
+    /// Whether a channel is registered with the Gateway, readable without the lock.
+    configured: Cell<bool>,
     /// Admits one signup, verify, or resend flow at a time, so the Plugin
     /// opens at most one upstream connection for them.
     upstream: Mutex<NoopRawMutex, ()>,
+    /// Signup result that failed to be stored or registered, until it is.
+    pending_signup: RefCell<Option<PendingSignup>>,
     storage: Storage,
     /// Inkbox service origin used for signup and stored with its result.
     signup_api_base: String,
@@ -213,16 +267,43 @@ where
     T: TcpConnect + 'static,
     D: Dns + 'static,
 {
+    /// `GET`: whether a channel is configured and, for a signup, its account.
+    async fn configuration_status(&self) -> HttpResponse {
+        if !self.configured.get() {
+            return static_response(200, br#"{"configured":false}"#);
+        }
+        let signup = match self.stored_configuration().await {
+            Ok(stored) => stored.signup,
+            Err(StoredSignupError::Missing) => None,
+            Err(StoredSignupError::Storage) => {
+                return static_response(500, br#"{"error":"storage"}"#);
+            }
+        };
+        #[derive(Serialize)]
+        struct Body {
+            configured: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            signup: Option<SignupRecord>,
+        }
+        match serde_json::to_vec(&Body {
+            configured: true,
+            signup,
+        }) {
+            Ok(body) => HttpResponse::new(200, JSON_CONTENT_TYPE, body),
+            Err(_) => static_response(500, br#"{"error":"internal"}"#),
+        }
+    }
+
     async fn configure(&self, body: &[u8]) -> HttpResponse {
         let Ok(config) = serde_json::from_slice::<ConfigRequest>(body) else {
             log::warn!("rejected invalid Inkbox gateway configuration");
             return static_response(400, br#"{"error":"invalid_request"}"#);
         };
-        match self.apply(config).await {
+        match self.apply(config.into()).await {
             Ok(()) => static_response(204, b""),
             Err(ApplyError::Storage) => static_response(500, br#"{"error":"storage"}"#),
             Err(ApplyError::Rejected) => {
-                static_response(422, br#"{"error":"invalid_configuration"}"#)
+                static_response(422, br#"{"error":"registration_failed"}"#)
             }
         }
     }
@@ -245,47 +326,80 @@ where
             return busy_response();
         };
         let client = InkboxSignup::new(self.http_clients.clone(), self.signup_api_base.as_str());
-        let account = match client
-            .sign_up(&SignupRequest {
-                human_email: email,
-                note_to_human: SIGNUP_NOTE_TO_HUMAN,
-                display_name: Some(SIGNUP_DISPLAY_NAME),
-                harness: Some(SIGNUP_HARNESS),
-            })
-            .await
-        {
-            Ok(account) => account,
-            Err(error) => {
-                log::warn!("Inkbox signup failed: {error}");
-                return upstream_failure(error, 400, "invalid_request");
+        // A kept result for another email is dropped: that person asked to start over.
+        let pending = self
+            .pending_signup
+            .borrow_mut()
+            .take()
+            .filter(|pending| pending.human_email == email);
+        let mut pending = if let Some(pending) = pending {
+            log::info!("resuming the Inkbox signup kept from a failed attempt");
+            pending
+        } else {
+            match client
+                .sign_up(&SignupRequest {
+                    human_email: email,
+                    note_to_human: SIGNUP_NOTE_TO_HUMAN,
+                    display_name: Some(SIGNUP_DISPLAY_NAME),
+                    harness: Some(SIGNUP_HARNESS),
+                })
+                .await
+            {
+                Ok(account) => PendingSignup {
+                    human_email: email.into(),
+                    account,
+                    identity_id: None,
+                },
+                Err(error) => {
+                    log::warn!("Inkbox signup failed: {error}");
+                    return upstream_failure(error, 400, "invalid_request", false);
+                }
             }
         };
-        let identity_id = match client
-            .resolve_identity(&account.api_key, &account.agent_handle)
-            .await
-        {
-            Ok(identity_id) => identity_id,
-            Err(error) => {
-                log::error!("failed to resolve the Inkbox signup identity: {error}");
-                return upstream_failure(error, 502, "upstream_unavailable");
+        let identity_id = if let Some(identity_id) = &pending.identity_id {
+            identity_id.clone()
+        } else {
+            match client
+                .resolve_identity(&pending.account.api_key, &pending.account.agent_handle)
+                .await
+            {
+                Ok(identity_id) => {
+                    pending.identity_id = Some(identity_id.clone());
+                    identity_id
+                }
+                Err(error) => {
+                    log::error!("failed to resolve the Inkbox signup identity: {error}");
+                    self.pending_signup.replace(Some(pending));
+                    return upstream_failure(error, 502, "upstream_unavailable", true);
+                }
             }
         };
-        let config = ConfigRequest {
-            api_key: account.api_key,
+        let signup = SignupRecord {
+            human_email: pending.human_email.clone(),
+            email_address: pending.account.email_address.clone(),
+            claim_status: pending.account.claim_status.clone(),
+        };
+        let config = StoredConfiguration {
+            api_key: pending.account.api_key.clone(),
             identity_id,
             api_base: self.signup_api_base.clone(),
+            signup: Some(signup.clone()),
         };
-        match self.apply(config).await {
-            Ok(()) => json_response(
-                200,
-                &json!({
-                    "email_address": account.email_address,
-                    "claim_status": account.claim_status,
-                }),
-            ),
-            Err(ApplyError::Storage) => static_response(500, br#"{"error":"storage"}"#),
-            Err(ApplyError::Rejected) => error_response(422, "registration_failed", None, None),
-        }
+        let failure = match self.apply(config).await {
+            Ok(()) => {
+                return json_response(
+                    200,
+                    &json!({
+                        "email_address": signup.email_address,
+                        "claim_status": signup.claim_status,
+                    }),
+                );
+            }
+            Err(ApplyError::Storage) => error_reply(500, "storage", None, None, true),
+            Err(ApplyError::Rejected) => error_reply(422, "registration_failed", None, None, true),
+        };
+        self.pending_signup.replace(Some(pending));
+        failure
     }
 
     async fn verify(&self, body: &[u8]) -> HttpResponse {
@@ -303,30 +417,32 @@ where
                 Some("code must be 6 digits".into()),
             );
         }
-        let config = match self.signup_configuration().await {
+        let config = match self.stored_configuration().await {
             Ok(config) => config,
             Err(error) => return error.response(),
         };
         let Ok(_flow) = self.upstream.try_lock() else {
             return busy_response();
         };
-        match InkboxSignup::new(self.http_clients.clone(), config.api_base)
+        match InkboxSignup::new(self.http_clients.clone(), config.api_base.as_str())
             .verify(&config.api_key, code)
             .await
         {
             Ok(claim_status) => {
                 log::info!("verified Inkbox signup");
+                self.record_claim_status(&config.api_key, &claim_status)
+                    .await;
                 json_response(200, &json!({ "claim_status": claim_status }))
             }
             Err(error) => {
                 log::warn!("Inkbox signup verification failed: {error}");
-                upstream_failure(error, 422, "verification_failed")
+                upstream_failure(error, 422, "verification_failed", false)
             }
         }
     }
 
     async fn resend(&self) -> HttpResponse {
-        let config = match self.signup_configuration().await {
+        let config = match self.stored_configuration().await {
             Ok(config) => config,
             Err(error) => return error.response(),
         };
@@ -340,13 +456,37 @@ where
             Ok(()) => static_response(204, b""),
             Err(error) => {
                 log::warn!("Inkbox verification resend failed: {error}");
-                upstream_failure(error, 422, "verification_failed")
+                upstream_failure(error, 422, "verification_failed", false)
             }
         }
     }
 
+    /// Stores the claim status a verify returned, if the stored configuration
+    /// is still the signup that `api_key` belongs to.
+    async fn record_claim_status(&self, api_key: &str, claim_status: &str) {
+        let _registration = self.channel_registration.lock().await;
+        let Ok(mut config) = self.stored_configuration().await else {
+            return;
+        };
+        let Some(signup) = config.signup.as_mut().filter(|_| config.api_key == api_key) else {
+            return;
+        };
+        signup.claim_status = claim_status.into();
+        let Ok(bytes) = encode_configuration(&config) else {
+            log::error!("failed to encode the Inkbox claim status");
+            return;
+        };
+        if let Err(error) = self
+            .storage
+            .put(CONFIGURATION_STORAGE_KEY, bytes.as_slice())
+            .await
+        {
+            log::error!("failed to store the Inkbox claim status: {error}");
+        }
+    }
+
     /// Reads the stored configuration whose API key verify and resend use.
-    async fn signup_configuration(&self) -> Result<ConfigRequest, StoredSignupError> {
+    async fn stored_configuration(&self) -> Result<StoredConfiguration, StoredSignupError> {
         let bytes = match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return Err(StoredSignupError::Missing),
@@ -363,7 +503,7 @@ where
 
     /// Persists `config` and replaces the registered channel with it, restoring
     /// the previous stored configuration when the Gateway rejects the channel.
-    async fn apply(&self, config: ConfigRequest) -> Result<(), ApplyError> {
+    async fn apply(&self, config: StoredConfiguration) -> Result<(), ApplyError> {
         let mut channel_registration = self.channel_registration.lock().await;
         let previous_configuration = match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
             Ok(configuration) => configuration,
@@ -384,12 +524,16 @@ where
             log::error!("failed to persist Inkbox gateway configuration: {error}");
             return Err(ApplyError::Storage);
         }
-        let channel: Rc<dyn MessageChannel> =
-            Rc::new(Inkbox::new(self.http_clients.clone(), config.into()));
+        let channel: Rc<dyn MessageChannel> = Rc::new(Inkbox::new(
+            self.http_clients.clone(),
+            config.into_inkbox_config(),
+        ));
         channel_registration.take();
+        self.configured.set(false);
         match self.gateway.register(channel) {
             Ok(registration) => {
                 channel_registration.replace(registration);
+                self.configured.set(true);
                 log::info!("configured Inkbox gateway provider");
                 Ok(())
             }
@@ -434,8 +578,12 @@ where
 {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return static_response(405, br#"{"error":"method_not_allowed"}"#);
+            match (request.method(), self.route) {
+                (HttpMethod::Post, _) => {}
+                (HttpMethod::Get, Route::Config) => {
+                    return self.state.configuration_status().await;
+                }
+                _ => return static_response(405, br#"{"error":"method_not_allowed"}"#),
             }
             match self.route {
                 Route::Config => self.state.configure(request.body()).await,
@@ -465,6 +613,18 @@ fn error_response(
     code: Option<String>,
     message: Option<String>,
 ) -> HttpResponse {
+    error_reply(status, kind, code, message, false)
+}
+
+/// Error body `{"error", "message"?, "code"?, "retry"?}`. `retry` is `true` when
+/// the device kept a signup result that the same request can resume.
+fn error_reply(
+    status: u16,
+    kind: &str,
+    code: Option<String>,
+    message: Option<String>,
+    retry: bool,
+) -> HttpResponse {
     let mut body = Map::new();
     body.insert("error".into(), kind.into());
     if let Some(message) = message {
@@ -472,6 +632,9 @@ fn error_response(
     }
     if let Some(code) = code {
         body.insert("code".into(), code.into());
+    }
+    if retry {
+        body.insert("retry".into(), true.into());
     }
     json_response(status, &Value::Object(body))
 }
@@ -487,28 +650,33 @@ fn busy_response() -> HttpResponse {
 
 /// Maps an Inkbox 4xx to `rejected_status`/`rejected_kind` and every other
 /// failure to `502 upstream_unavailable`, passing Inkbox's code and message through.
-fn upstream_failure(error: SignupError, rejected_status: u16, rejected_kind: &str) -> HttpResponse {
+fn upstream_failure(
+    error: SignupError,
+    rejected_status: u16,
+    rejected_kind: &str,
+    retry: bool,
+) -> HttpResponse {
     match error {
         SignupError::Rejected { code, message, .. } => {
-            error_response(rejected_status, rejected_kind, code, message)
+            error_reply(rejected_status, rejected_kind, code, message, retry)
         }
         SignupError::Unavailable { code, message } => {
-            error_response(502, "upstream_unavailable", code, message)
+            error_reply(502, "upstream_unavailable", code, message, retry)
         }
     }
 }
 
-fn encode_configuration(config: &ConfigRequest) -> Result<Vec<u8>, serde_json::Error> {
+fn encode_configuration(config: &StoredConfiguration) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(config)
 }
 
-fn decode_configuration(bytes: &[u8]) -> Result<ConfigRequest, serde_json::Error> {
+fn decode_configuration(bytes: &[u8]) -> Result<StoredConfiguration, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
 async fn load_configuration<Storage: PluginStorage>(
     storage: &Storage,
-) -> PluginResult<Option<ConfigRequest>> {
+) -> PluginResult<Option<StoredConfiguration>> {
     storage
         .get_bytes(CONFIGURATION_STORAGE_KEY)
         .await?
@@ -521,15 +689,18 @@ async fn load_configuration<Storage: PluginStorage>(
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use core::cell::RefCell;
-
-    use barracuda_imessage_gateway_plugin::{GatewaySendRequest, IMessageGatewayPlugin};
+    use barracuda_imessage_gateway_plugin::{
+        ChannelError, ChannelFuture, GatewaySendRequest, IMessageGatewayPlugin, Operation,
+        SendMessageRequest, SendReceipt,
+    };
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
     };
     use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
     use barracuda_workflow_plugin::WorkflowPlugin;
     use futures_lite::future::block_on;
+
+    use alloc::format;
 
     use super::*;
 
@@ -549,6 +720,21 @@ mod tests {
         verify: Box<dyn HttpEndpoint>,
         resend: Box<dyn HttpEndpoint>,
         stored: Box<dyn Fn() -> Option<Vec<u8>>>,
+        entry_status: Box<dyn Fn() -> EntryStatus>,
+        /// Another `imessage` channel holding the name while present.
+        occupant: RefCell<Option<MessageChannelRegistration>>,
+    }
+
+    struct OccupyingChannel;
+
+    impl MessageChannel for OccupyingChannel {
+        fn channel(&self) -> &str {
+            "imessage"
+        }
+
+        fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
+            Box::pin(async { Err(ChannelError::unsupported(Operation::SendMessage)) })
+        }
     }
 
     struct Reply {
@@ -583,7 +769,11 @@ mod tests {
             assert_eq!(Self::post(&*self.config, body).status, 204);
         }
 
-        fn stored(&self) -> Option<ConfigRequest> {
+        fn get(&self) -> Reply {
+            Self::call(&*self.config, HttpMethod::Get, "")
+        }
+
+        fn stored(&self) -> Option<StoredConfiguration> {
             (self.stored)().map(|bytes| decode_configuration(&bytes).expect("stored JSON"))
         }
 
@@ -605,6 +795,7 @@ mod tests {
 
     struct Probe {
         network: &'static ScriptedStack,
+        occupied: bool,
         harness: Rc<RefCell<Option<Harness>>>,
     }
 
@@ -622,15 +813,28 @@ mod tests {
             Storage: PluginStorage,
         {
             let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+            let occupant = if self.occupied {
+                let channel: Rc<dyn MessageChannel> = Rc::new(OccupyingChannel);
+                Some(
+                    gateway
+                        .register(channel)
+                        .map_err(PluginError::registration)?,
+                )
+            } else {
+                None
+            };
             let storage = context.storage().clone();
             let state = Rc::new(InkboxState {
                 gateway: Rc::clone(&gateway),
                 http_clients: ClientFactory::from_network(self.network, self.network),
                 channel_registration: Mutex::new(None),
+                configured: Cell::new(false),
                 upstream: Mutex::new(()),
+                pending_signup: RefCell::new(None),
                 storage: storage.clone(),
                 signup_api_base: API_BASE.into(),
             });
+            let status = Rc::clone(&state);
             let endpoint = |route| -> Box<dyn HttpEndpoint> {
                 Box::new(InkboxEndpoint {
                     state: Rc::clone(&state),
@@ -647,6 +851,8 @@ mod tests {
                 stored: Box::new(move || {
                     block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY)).expect("read storage")
                 }),
+                entry_status: Box::new(move || EntryStatus::configured(status.configured.get())),
+                occupant: RefCell::new(occupant),
             }));
             Ok(())
         }
@@ -666,6 +872,15 @@ mod tests {
 
     /// Runs `scenario` against Inkbox routes whose upstream replies are `steps`.
     fn with_harness(steps: impl IntoIterator<Item = ScriptStep>, scenario: impl FnOnce(&Harness)) {
+        with_gateway(steps, false, scenario);
+    }
+
+    /// As [`with_harness`], with the `imessage` channel taken while `occupied`.
+    fn with_gateway(
+        steps: impl IntoIterator<Item = ScriptStep>,
+        occupied: bool,
+        scenario: impl FnOnce(&Harness),
+    ) {
         block_on(install_global_memory_vfs()).expect("install test VFS");
         let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
         let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
@@ -681,6 +896,7 @@ mod tests {
         manager
             .register(Probe {
                 network: Box::leak(Box::new(ScriptedStack::new(steps))),
+                occupied,
                 harness: Rc::clone(&harness),
             })
             .expect("register Inkbox probe");
@@ -699,10 +915,15 @@ mod tests {
 
     #[test]
     fn stored_configuration_round_trips_every_field() -> Result<(), serde_json::Error> {
-        let config = ConfigRequest {
+        let config = StoredConfiguration {
             api_key: "secret".into(),
             identity_id: "identity".into(),
             api_base: "https://inkbox.example".into(),
+            signup: Some(SignupRecord {
+                human_email: "person@example.com".into(),
+                email_address: "agent@inkboxmail.com".into(),
+                claim_status: "agent_unclaimed".into(),
+            }),
         };
 
         let bytes = encode_configuration(&config)?;
@@ -711,6 +932,20 @@ mod tests {
         assert_eq!(restored.api_key, config.api_key);
         assert_eq!(restored.identity_id, config.identity_id);
         assert_eq!(restored.api_base, config.api_base);
+        let signup = restored.signup.expect("signup record");
+        assert_eq!(signup.human_email, "person@example.com");
+        assert_eq!(signup.email_address, "agent@inkboxmail.com");
+        assert_eq!(signup.claim_status, "agent_unclaimed");
+        Ok(())
+    }
+
+    #[test]
+    fn configuration_stored_before_signup_records_still_decodes() -> Result<(), serde_json::Error> {
+        let restored = decode_configuration(
+            br#"{"api_key":"secret","identity_id":"identity","api_base":"https://inkbox.example"}"#,
+        )?;
+        assert_eq!(restored.api_key, "secret");
+        assert!(restored.signup.is_none());
         Ok(())
     }
 
@@ -738,6 +973,21 @@ mod tests {
                 assert_eq!(stored.api_key, API_KEY);
                 assert_eq!(stored.identity_id, IDENTITY_ID);
                 assert_eq!(stored.api_base, API_BASE);
+                let get = harness.get();
+                assert_eq!(get.status, 200);
+                assert_eq!(
+                    get.json,
+                    json!({
+                        "configured": true,
+                        "signup": {
+                            "human_email": "person@example.com",
+                            "email_address": "barracuda-a1b2@inkboxmail.com",
+                            "claim_status": "agent_unclaimed",
+                        },
+                    })
+                );
+                assert!(!get.raw.contains(API_KEY));
+                assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
 
                 assert!(harness.send_text());
                 let requests = harness.requests();
@@ -805,12 +1055,21 @@ mod tests {
         });
     }
 
+    fn signup_count(harness: &Harness) -> usize {
+        harness
+            .requests()
+            .iter()
+            .filter(|request| request_line(request) == "POST /api/v1/agent-signup HTTP/1.1")
+            .count()
+    }
+
     #[test]
-    fn unresolved_identity_is_upstream_unavailable_and_stores_nothing() {
+    fn unresolved_identity_keeps_the_signup_and_a_retry_resumes_it() {
         with_harness(
             [
                 ScriptStep::json(200, SIGNUP_RESPONSE),
                 ScriptStep::json(404, r#"{"detail":"Identity not found"}"#),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
             ],
             |harness| {
                 let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
@@ -818,11 +1077,153 @@ mod tests {
                 assert_eq!(reply.status, 502);
                 assert_eq!(
                     reply.json,
-                    json!({"error": "upstream_unavailable", "message": "Identity not found"})
+                    json!({
+                        "error": "upstream_unavailable",
+                        "message": "Identity not found",
+                        "retry": true,
+                    })
                 );
+                assert!(!reply.raw.contains(API_KEY));
+                assert!(harness.stored().is_none());
+                assert_eq!(harness.get().json, json!({"configured": false}));
+
+                let reply = Harness::post(&*harness.signup, r#"{"email":" person@example.com "}"#);
+
+                assert_eq!(reply.status, 200);
+                assert_eq!(
+                    reply.json,
+                    json!({
+                        "email_address": "barracuda-a1b2@inkboxmail.com",
+                        "claim_status": "agent_unclaimed",
+                    })
+                );
+                assert_eq!(signup_count(harness), 1);
+                let requests = harness.requests();
+                assert_eq!(requests.len(), 3);
+                assert_eq!(
+                    request_line(&requests[2]),
+                    "GET /api/v1/identities/barracuda-a1b2 HTTP/1.1"
+                );
+                let stored = harness.stored().expect("configuration stored");
+                assert_eq!(stored.api_key, API_KEY);
+                assert_eq!(stored.identity_id, IDENTITY_ID);
+            },
+        );
+    }
+
+    #[test]
+    fn rejected_registration_keeps_the_signup_and_a_retry_resumes_it() {
+        with_gateway(
+            [
+                ScriptStep::json(200, SIGNUP_RESPONSE),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
+            ],
+            true,
+            |harness| {
+                let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
+
+                assert_eq!(reply.status, 422);
+                assert_eq!(
+                    reply.json,
+                    json!({"error": "registration_failed", "retry": true})
+                );
+                assert!(harness.stored().is_none());
+                assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+
+                harness.occupant.replace(None);
+                let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
+
+                assert_eq!(reply.status, 200);
+                assert_eq!(reply.json["email_address"], "barracuda-a1b2@inkboxmail.com");
+                // Neither signup nor the identity lookup is repeated.
+                assert_eq!(harness.requests().len(), 2);
+                assert_eq!(signup_count(harness), 1);
+                assert_eq!(
+                    harness.stored().expect("configuration stored").api_key,
+                    API_KEY
+                );
+                assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+            },
+        );
+    }
+
+    #[test]
+    fn storage_failure_keeps_the_signup_and_a_retry_resumes_it() {
+        // A key longer than one storage value makes every store fail.
+        let api_key = format!("ApiKey_{}", "k".repeat(1100));
+        let signup = SIGNUP_RESPONSE.replace(API_KEY, &api_key);
+        with_harness(
+            [
+                ScriptStep::json(200, &signup),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
+            ],
+            |harness| {
+                for _ in 0..2 {
+                    let reply =
+                        Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
+
+                    assert_eq!(reply.status, 500);
+                    assert_eq!(reply.json, json!({"error": "storage", "retry": true}));
+                    assert!(!reply.raw.contains("ApiKey_"));
+                }
+                assert_eq!(signup_count(harness), 1);
+                assert_eq!(harness.requests().len(), 2);
                 assert!(harness.stored().is_none());
             },
         );
+    }
+
+    #[test]
+    fn a_kept_signup_is_not_reused_for_another_email() {
+        with_gateway(
+            [
+                ScriptStep::json(200, SIGNUP_RESPONSE),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
+                ScriptStep::json(200, SIGNUP_RESPONSE),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
+            ],
+            true,
+            |harness| {
+                let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
+                assert_eq!(reply.status, 422);
+
+                harness.occupant.replace(None);
+                let reply = Harness::post(&*harness.signup, r#"{"email":"other@example.com"}"#);
+
+                assert_eq!(reply.status, 200);
+                assert_eq!(signup_count(harness), 2);
+            },
+        );
+    }
+
+    #[test]
+    fn manual_configuration_rejected_by_the_gateway_is_registration_failed() {
+        with_gateway([], true, |harness| {
+            let body = r#"{"api_key":"ApiKey_once","identity_id":"eeee5555-0000-0000-0000-000000000001","api_base":"http://inkbox.test"}"#;
+            let reply = Harness::post(&*harness.config, body);
+
+            assert_eq!(reply.status, 422);
+            assert_eq!(reply.json, json!({"error": "registration_failed"}));
+            assert!(harness.stored().is_none());
+            assert_eq!(harness.get().json, json!({"configured": false}));
+        });
+    }
+
+    #[test]
+    fn get_reports_configuration_without_secrets() {
+        with_harness([], |harness| {
+            let reply = harness.get();
+            assert_eq!(reply.status, 200);
+            assert_eq!(reply.json, json!({"configured": false}));
+            assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+
+            harness.configure();
+
+            let reply = harness.get();
+            assert_eq!(reply.status, 200);
+            assert_eq!(reply.raw, r#"{"configured":true}"#);
+            assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+        });
     }
 
     #[test]
@@ -838,6 +1239,8 @@ mod tests {
 
                 assert_eq!(reply.status, 200);
                 assert_eq!(reply.json, json!({"claim_status": "agent_claimed"}));
+                // A manual configuration has no signup record to update.
+                assert_eq!(harness.get().json, json!({"configured": true}));
                 let requests = harness.requests();
                 assert_eq!(
                     request_line(&requests[0]),
@@ -847,6 +1250,43 @@ mod tests {
                 assert_eq!(
                     body_of(&requests[0]),
                     json!({"verification_code": "483921"})
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn verify_updates_the_stored_claim_status_of_a_signup() {
+        with_harness(
+            [
+                ScriptStep::json(200, SIGNUP_RESPONSE),
+                ScriptStep::json(200, IDENTITY_RESPONSE),
+                ScriptStep::json(
+                    200,
+                    r#"{"claim_status":"agent_claimed","organization_id":"org-2","message":"ok"}"#,
+                ),
+            ],
+            |harness| {
+                let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
+                assert_eq!(reply.status, 200);
+
+                let reply = Harness::post(&*harness.verify, r#"{"code":"483921"}"#);
+
+                assert_eq!(reply.status, 200);
+                assert_eq!(
+                    harness.get().json,
+                    json!({
+                        "configured": true,
+                        "signup": {
+                            "human_email": "person@example.com",
+                            "email_address": "barracuda-a1b2@inkboxmail.com",
+                            "claim_status": "agent_claimed",
+                        },
+                    })
+                );
+                assert_eq!(
+                    harness.stored().expect("configuration stored").api_key,
+                    API_KEY
                 );
             },
         );
@@ -959,11 +1399,16 @@ mod tests {
                 &harness.verify,
                 &harness.resend,
             ] {
-                for method in [HttpMethod::Get, HttpMethod::Put, HttpMethod::Delete] {
+                for method in [HttpMethod::Put, HttpMethod::Delete, HttpMethod::Patch] {
                     let reply = Harness::call(&**endpoint, method, "");
                     assert_eq!(reply.status, 405);
                     assert_eq!(reply.json, json!({"error": "method_not_allowed"}));
                 }
+            }
+            // Only the configuration path answers GET.
+            for endpoint in [&harness.signup, &harness.verify, &harness.resend] {
+                let reply = Harness::call(&**endpoint, HttpMethod::Get, "");
+                assert_eq!(reply.status, 405);
             }
         });
     }

@@ -116,6 +116,7 @@ test("the manual token sits under 高级, and the footer shows only while it is 
     x_wechat_uin: "MA==",
   });
   expect(page.toasts.at(-1)?.title).toBe("设备已接受配置");
+  expect(page.refreshes.count).toBe(1);
   // the hand-entered token replaced the QR session: cancel it and show the link
   expect(requests().at(-1)).toBe(`DELETE ${LOGIN}`);
   expect(page.text()).toContain("微信已绑定");
@@ -131,6 +132,7 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   status = { status: "scanned", configured: false };
   await advance(2000);
   expect(plate(page).textContent).toBe("已扫码");
+  expect(page.refreshes.count).toBe(0);
   expect(steps(page)).toEqual([null, "step", null]);
   expect(page.query("ol li svg")).not.toBeNull();
   status = { status: "confirmed", configured: true };
@@ -141,6 +143,8 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   expect(card.textContent).toContain("微信已绑定");
   expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已绑定");
   expect(page.toasts).toEqual([{ kind: "success", title: "微信已绑定" }]);
+  // linked: the portal reads the channel's status again
+  expect(page.refreshes.count).toBe(1);
   const count = harness.calls.length;
   await advance(10_000);
   expect(harness.calls).toHaveLength(count);

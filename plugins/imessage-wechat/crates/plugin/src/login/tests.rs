@@ -9,6 +9,7 @@ use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
 
+use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGateway, IMessageGatewayPlugin, MessageChannel, Operation,
     SendMessageRequest, SendReceipt,
@@ -45,6 +46,7 @@ const TEST_TIMING: LoginTiming = LoginTiming {
 };
 
 type StoredReader = Box<dyn Fn() -> Pin<Box<dyn Future<Output = Option<Vec<u8>>>>>>;
+type StatusReader = Box<dyn Fn() -> EntryStatus>;
 
 /// Endpoints and runtime built against Plugin storage and a real Gateway.
 struct Parts {
@@ -53,6 +55,7 @@ struct Parts {
     runtime: LoginRuntime,
     gateway: Rc<IMessageGateway>,
     stored: StoredReader,
+    entry_status: StatusReader,
 }
 
 struct Probe {
@@ -87,10 +90,15 @@ impl Plugin for Probe {
             gateway: Rc::clone(&gateway),
             http_clients: ClientFactory::from_network(self.network, self.network),
             channel_registration: Mutex::new(None),
+            configured: core::cell::Cell::new(false),
             storage: context.storage().clone(),
         });
         let (login, runtime) =
             LoginEndpoint::new(Rc::clone(&configuration), API_BASE.into(), self.timing);
+        let watch = login.watch();
+        let status_configuration = Rc::clone(&configuration);
+        let entry_status: StatusReader =
+            Box::new(move || crate::entry_status(&status_configuration, &watch));
         let storage = context.storage().clone();
         let stored: StoredReader = Box::new(move || {
             let storage = storage.clone();
@@ -107,6 +115,7 @@ impl Plugin for Probe {
             runtime,
             gateway,
             stored,
+            entry_status,
         }));
         Ok(())
     }
@@ -130,6 +139,7 @@ struct Harness {
     config: Rc<dyn HttpEndpoint>,
     gateway: Rc<IMessageGateway>,
     stored: StoredReader,
+    entry_status: StatusReader,
     network: &'static ScriptedStack,
     _manager: Box<dyn Any>,
 }
@@ -261,12 +271,14 @@ where
         runtime,
         gateway,
         stored,
+        entry_status,
     } = parts.take().expect("probe built the login service");
     let harness = Rc::new(Harness {
         login,
         config,
         gateway,
         stored,
+        entry_status,
         network,
         _manager: Box::new(manager),
     });
@@ -566,9 +578,88 @@ fn wrong_methods_return_405() {
             assert_eq!(code, 405);
             assert_eq!(body, json!({ "error": "method_not_allowed" }));
         }
+        for method in [HttpMethod::Put, HttpMethod::Delete] {
+            let (code, body) = call(harness.config.as_ref(), method, b"").await;
+            assert_eq!(code, 405);
+            assert_eq!(body, json!({ "error": "method_not_allowed" }));
+        }
+    });
+}
+
+#[test]
+fn config_get_reports_only_whether_a_channel_is_configured() {
+    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
         let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
-        assert_eq!(code, 405);
-        assert_eq!(body, json!({ "error": "method_not_allowed" }));
+        assert_eq!(code, 200);
+        assert_eq!(body, json!({ "configured": false }));
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+
+        let (code, _body) = call(
+            harness.config.as_ref(),
+            HttpMethod::Post,
+            br#"{"token":"manual-token"}"#,
+        )
+        .await;
+        assert_eq!(code, 204);
+
+        let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        assert_eq!(code, 200);
+        assert_eq!(body, json!({ "configured": true }));
+        assert!(!body.to_string().contains("manual-token"));
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+    });
+}
+
+#[test]
+fn config_rejected_by_the_gateway_is_registration_failed() {
+    scenario(Vec::new(), TEST_TIMING, true, |harness| async move {
+        let (code, body) = call(
+            harness.config.as_ref(),
+            HttpMethod::Post,
+            br#"{"token":"manual-token"}"#,
+        )
+        .await;
+
+        assert_eq!(code, 422);
+        assert_eq!(body, json!({ "error": "registration_failed" }));
+        assert!((harness.stored)().await.is_none());
+        let (_code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        assert_eq!(body, json!({ "configured": false }));
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+    });
+}
+
+#[test]
+fn entry_status_waits_for_the_scan_until_the_login_is_confirmed() {
+    let steps = Vec::from([qrcode("qr-1", QR_URL_1), status("scaned"), long_poll()]);
+    let waiting = EntryStatus::new(
+        EntryState::Attention,
+        WebText {
+            zh: "等待扫码",
+            en: "Waiting for scan",
+        },
+    );
+    scenario(steps, TEST_TIMING, false, |harness| async move {
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+        let (code, _body) = harness.call(HttpMethod::Post, b"").await;
+        assert_eq!(code, 200);
+        // The session reports `wait` before the start request is answered.
+        assert_eq!((harness.entry_status)(), waiting);
+        harness.wait_for_status("scanned").await;
+        assert_eq!((harness.entry_status)(), waiting);
+
+        harness.call(HttpMethod::Delete, b"").await;
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+    });
+}
+
+#[test]
+fn entry_status_is_ready_after_a_confirmed_login() {
+    let steps = Vec::from([qrcode("qr-1", QR_URL_1), confirmed()]);
+    scenario(steps, TEST_TIMING, false, |harness| async move {
+        harness.call(HttpMethod::Post, b"").await;
+        harness.wait_for_status("confirmed").await;
+        assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
     });
 }
 

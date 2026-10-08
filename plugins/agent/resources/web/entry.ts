@@ -163,6 +163,7 @@ export const mount = definePage((context) => {
       },
       // the endpoint takes a batch; this page registers one model at a time
       body: (values) => [values],
+      onSuccess: () => void context.refreshStatus(),
       success: {
         action: {
           label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },

@@ -1,11 +1,13 @@
 import {
   button,
+  configuredRow,
   definePage,
   h,
   header,
   note,
   page,
   qrLink,
+  readChannel,
   resultCard,
   row,
   settingsForm,
@@ -55,9 +57,12 @@ interface GetMe {
 const show = (node: HTMLElement, visible: boolean) =>
   (node.style.display = visible ? "" : "none");
 
+const ENDPOINT = "/api/gateway/telegram";
+
 /**
  * The Telegram page: the bot token, checked in the browser with Bot API `getMe` (Telegram allows any
- * origin), then saved with `POST /api/gateway/telegram`.
+ * origin), then saved with `POST /api/gateway/telegram`. `GET` on the same path says whether a
+ * channel is configured; the page then shows it above the form that replaces it.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -67,9 +72,10 @@ export const mount = definePage((context) => {
     variant: "outline",
     onClick: () => void check(),
   });
+  const current = configuredRow("Telegram", lang);
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/telegram",
+      endpoint: ENDPOINT,
       submit: t.submit,
       rows: [
         {
@@ -106,6 +112,10 @@ export const mount = definePage((context) => {
         ],
       },
       onError: (error) => ({ body: error.message }),
+      onSuccess: () => {
+        current.show(true);
+        void context.refreshStatus();
+      },
       success: {
         action: {
           label: t.tryChat,
@@ -115,6 +125,10 @@ export const mount = definePage((context) => {
     },
     context,
   );
+  form.element.prepend(current.element);
+  void readChannel(context, ENDPOINT).then((state) => {
+    if (state?.configured) current.show(true);
+  });
   const token = form.element.querySelector<HTMLInputElement>('[name="token"]')!;
   const chat = row(t.chat, t.chatHint, lang);
   show(chat, false);

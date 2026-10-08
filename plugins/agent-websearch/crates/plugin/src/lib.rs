@@ -12,7 +12,9 @@ use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{Tool, ToolGroup},
 };
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginEntryIterator, PluginError, PluginReadTransaction, PluginRegisterContext,
@@ -61,9 +63,13 @@ impl Plugin for AgentWebsearchPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let config = Rc::new(RefCell::new(
+            embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
+        ));
+        let status = Rc::clone(&config);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "agent-websearch",
                         group: WebGroup::Agent,
@@ -81,14 +87,12 @@ impl Plugin for AgentWebsearchPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(&status),
                 )
                 .map_err(PluginError::registration)?,
         );
         let tools = context.require::<AgentToolRegistry>("agent")?;
         let webserver = context.require::<WebServer>("webserver")?;
-        let config = Rc::new(RefCell::new(
-            embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
-        ));
         let web_search = WebSearchTool::new(Rc::clone(&config), self.http_clients.clone());
         tools
             .register_group(ToolGroup::new("websearch", false, [Tool::new(web_search)]))
@@ -105,6 +109,13 @@ impl Plugin for AgentWebsearchPlugin {
         context.retain(registration);
         Ok(())
     }
+}
+
+type SharedConfig = RefCell<Option<Rc<TavilyConfig>>>;
+
+/// `ready` once Tavily credentials are active, otherwise `off`.
+fn entry_status(config: &SharedConfig) -> EntryStatus {
+    EntryStatus::configured(config.borrow().is_some())
 }
 
 #[derive(Deserialize)]
@@ -261,6 +272,17 @@ mod tests {
             <AgentWebsearchPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
             "agent-websearch"
         );
+    }
+
+    #[test]
+    fn portal_status_follows_the_active_configuration() {
+        let config = RefCell::new(None);
+        assert_eq!(entry_status(&config), EntryStatus::configured(false));
+        config.replace(Some(Rc::new(TavilyConfig {
+            api_key: "secret".into(),
+            search_url: search_url(DEFAULT_API_BASE),
+        })));
+        assert_eq!(entry_status(&config), EntryStatus::configured(true));
     }
 
     #[test]
