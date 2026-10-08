@@ -1043,6 +1043,7 @@ pub fn render_board_hal_for_platform(
             adc: platform.hal().runtime_adc_controllers(),
             pwm: platform.hal().runtime_pwm_controllers(),
             i2s: platform.hal().runtime_i2s_controllers(),
+            peripheral_models: platform.hal().peripheral_models(),
         },
     )
 }
@@ -1127,6 +1128,7 @@ struct RenderedPeripheral {
     factory: String,
     bindings: String,
     config: String,
+    declaration: String,
 }
 
 #[derive(Debug)]
@@ -1156,6 +1158,7 @@ struct RuntimeResources<'a> {
     adc: &'a [RuntimeAdcController],
     pwm: &'a [RuntimePwmController],
     i2s: &'a [RuntimeI2sController],
+    peripheral_models: bool,
 }
 
 fn render_generic_hal(
@@ -1170,6 +1173,7 @@ fn render_generic_hal(
         adc: runtime_adc_controllers,
         pwm: runtime_pwm_controllers,
         i2s: runtime_i2s_controllers,
+        peripheral_models,
     } = resources;
     let mut state = RenderState::default();
     let mut rendered = Vec::new();
@@ -1262,6 +1266,7 @@ fn render_generic_hal(
             factory,
             bindings,
             config,
+            declaration: render_declaration(board, peripheral)?,
         });
     }
 
@@ -1648,6 +1653,16 @@ fn render_generic_hal(
             bus.error_variant,
         ));
     }
+    if peripheral_models {
+        // The HAL attaches each declared peripheral's device model before
+        // any implementation starts talking to its bus.
+        for peripheral in &rendered {
+            source.push_str(&format!(
+                "        ::barracuda_platform_selected::__platform::hal::declare_peripheral(&{});\n",
+                peripheral.declaration
+            ));
+        }
+    }
     for peripheral in &rendered {
         source.push_str(&format!(
             "        let {} = <{}Factory as PeripheralImplementation>::initialize({}, {}).await.map_err(GeneratedBoardError::{})?;\n",
@@ -1756,6 +1771,53 @@ fn render_generic_hal(
     source.push_str("        Ok(BoardResources::new(peripherals, exposed_io))\n    }\n}\n}\n\n");
     source.push_str("pub use generated_board_hal::*;\n");
     Ok(source)
+}
+
+/// Renders the Board declaration of one peripheral as a
+/// `hal::PeripheralDeclaration` expression for a HAL with peripheral models.
+///
+/// Bindings name the chip-native resource each role resolves to: the
+/// controller of an I2C device and the pin of a digital binding. Other
+/// binding kinds and structured parameters are omitted.
+fn render_declaration(
+    board: &BoardDefinition,
+    peripheral: &ResolvedPeripheral<'_>,
+) -> Result<String, GenerateError> {
+    let mut bindings = Vec::new();
+    for (role, schema) in peripheral.implementation().bindings() {
+        let Some(resource) = peripheral.binding(role) else {
+            continue;
+        };
+        let native = match schema.kind() {
+            BindingKind::I2cDevice => board
+                .peripheral_io()
+                .i2c_device(resource)
+                .map(|i2c| i2c.peripheral()),
+            BindingKind::DigitalInput | BindingKind::DigitalOutput => Some(resource),
+            _ => None,
+        };
+        if let Some(native) = native {
+            validate_hardware_identifier(native)?;
+            bindings.push(format!("({role:?}, {native:?})"));
+        }
+    }
+    let mut parameters = Vec::new();
+    for name in peripheral.implementation().parameters.keys() {
+        let value = match peripheral.parameter(name) {
+            Some(PeripheralParameter::Boolean(value)) => value.to_string(),
+            Some(PeripheralParameter::Integer(value)) => value.to_string(),
+            Some(PeripheralParameter::String(value)) => value.clone(),
+            _ => continue,
+        };
+        parameters.push(format!("({name:?}, {value:?})"));
+    }
+    Ok(format!(
+        "::barracuda_platform_selected::__platform::hal::PeripheralDeclaration {{ name: {:?}, implementation: {:?}, bindings: &[{}], parameters: &[{}] }}",
+        peripheral.name(),
+        peripheral.implementation().id(),
+        bindings.join(", "),
+        parameters.join(", "),
+    ))
 }
 
 fn optional_binding_type(

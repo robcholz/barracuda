@@ -163,6 +163,8 @@ pub struct HalConfig {
     runtime_pwm_controllers: Vec<RuntimePwmController>,
     #[serde(default, rename = "runtime-i2s-controllers")]
     runtime_i2s_controllers: Vec<RuntimeI2sController>,
+    #[serde(default, rename = "peripheral-models")]
+    peripheral_models: bool,
 }
 
 impl HalConfig {
@@ -212,6 +214,19 @@ impl HalConfig {
     #[must_use]
     pub fn runtime_i2s_controllers(&self) -> &[RuntimeI2sController] {
         &self.runtime_i2s_controllers
+    }
+
+    /// Returns whether the HAL places a device model behind each declared
+    /// peripheral.
+    ///
+    /// A Platform without physical hardware, such as a host Platform over
+    /// virtual I/O, sets this. Generated Board composition then announces
+    /// every declared peripheral to the HAL's `declare_peripheral` before
+    /// initializing any of them, so the HAL can attach the model the
+    /// implementation's driver will talk to.
+    #[must_use]
+    pub const fn peripheral_models(&self) -> bool {
+        self.peripheral_models
     }
 
     fn validate(&self, path: &Path) -> Result<(), ResolveError> {
