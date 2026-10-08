@@ -62,6 +62,13 @@ Point the agent at the replay server using the same base URL. Incoming requests
 consume recorded interactions in order. A method or path mismatch returns HTTP
 409 without consuming the interaction. Exhausting the tape also returns 409.
 
+Recording tags each chat request with a `match_key`, a hash of its first user
+message, so concurrent conversations (an agent and its subagents) can be told
+apart. A tape with keys is consumed in order per key: a request receives the
+earliest unconsumed interaction recorded for its conversation, and a request
+whose conversation has nothing left gets 409. Tapes without keys are consumed
+strictly in order as before.
+
 Replay has no speed option: response headers and chunks are always scheduled at
 their original monotonic offsets from the start of the matching request.
 

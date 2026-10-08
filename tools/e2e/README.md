@@ -201,8 +201,10 @@ host figure is an upper bound on the device's.
 
   The env file provides `BARRACUDA_LLM_BASE_URL`, `BARRACUDA_LLM_API_KEY`, and
   `BARRACUDA_LLM_MODEL`. Replay requires the Agent to make the same sequence
-  of model calls, so keep recorded scenarios short and write tolerant
-  assertions. Treat tapes as sensitive: responses are stored verbatim.
+  of model calls within each conversation, so keep recorded scenarios short
+  and write tolerant assertions. Calls from concurrent conversations (an
+  agent and its subagents) may arrive in any order: new recordings carry a
+  per-conversation key and llm-tape matches on it. Treat tapes as sensitive: responses are stored verbatim.
 - `none` makes no model calls; use it for `[[http]]`-only scenarios.
 
 Use `recorded` for everything a real model can do when the step text tells it
