@@ -56,8 +56,18 @@ Radio state, socket state, futures, locks, and atomics remain in internal RAM.
 WebServer TCP and HTTP byte buffers use `BulkBox<[u8]>`, allowing the selected
 Platform to place those POD buffers in PSRAM safely.
 
+Portal page: the `wifi` entry (group Device, order 10) is built on the
+portal UI kit from `resources/web/entry.ts`. Its header shows the station
+state, network and setup-hotspot state from `GET /api/wifi`, beside the
+`router` figure (`resources/web/figure.js`), whose antennas sweep while
+`GET /api/wifi/scan` runs. The page scans on open and on 重新扫描, lists
+nearby networks strongest first with signal bars and a lock for secured
+ones, joins a listed or manually named network with `PUT /api/wifi`, and
+offers `DELETE /api/wifi` for the connected network. Phones get the design's
+list layout. Results are reported as portal toasts, in Chinese or English.
+
 Cargo automatically runs the declared `build` task before compiling this
-Plugin. To rebuild only the Portal module, run
-`cargo plugin run --plugin wifi build` from the repository root. The generated
-module is stored at `filesystem/resources/entry.js` and is bundled as the
-Plugin's private `/resources/entry.js`.
+Plugin. To rebuild only the Portal assets, run
+`cargo plugin run --plugin wifi build` from the repository root. It writes
+`filesystem/resources/entry.js`, `figure.js` and `icon.svg` (the Lucide
+`wifi` icon), bundled as the Plugin's private `/resources/` files.

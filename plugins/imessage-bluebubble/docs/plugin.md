@@ -15,9 +15,11 @@ stored data fails registration. See [`http.md`](http.md).
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
-scope. Registration retains a `WebEntryRegistration` with ID `imessage-bluebubble`, title
-`BlueBubbles`, module `entry.js`, and a `ResourceFiles` provider. Unload removes
-the navigation entry and resource provider; no extra HTTP route is registered.
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-bluebubble`, group `WebGroup::Channel`, order 50, title `BlueBubbles`,
+a bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-bluebubble`
@@ -30,9 +32,16 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
-are password inputs, never persisted in browser storage, and cleared on success
-or unmount. Requests are cancelled on unmount and are never retried automatically.
-The existing HTTP API has no authentication or transport encryption added here;
-use only within a trusted provisioning network.
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+`{server_url, password, use_private_api, stream_edit_min_delta_bytes,
+stream_max_edits}` to `POST /api/gateway/bluebubbles`. Its 「测试连接」 button calls
+the server's `GET /api/v1/server/info?password=…` straight from the browser: the
+server version, macOS version and Private API state are shown, and the Private
+API switch is set to the server's value; the server's refusal is shown on the
+URL field. When the browser cannot reach the server (no route or CORS) the page
+notes that the connection is untested; testing never gates saving. It does not
+read current settings. Secrets are password inputs, never persisted in browser
+storage, and cleared on success or unmount. Requests are cancelled on unmount
+and are never retried automatically. The existing HTTP API has no authentication
+or transport encryption added here; use only within a trusted provisioning
+network.

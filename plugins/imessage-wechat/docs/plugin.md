@@ -3,6 +3,10 @@
 - Plugin ID: `imessage-wechat`
 - Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Provided typed capabilities: none
+- Required typed capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`
+- Workflow Actions, Events, and Agent Tools: none
+- Owned tasks: one `wechat_login_task` (pool size 1), started in `start` with a
+  `PluginTaskToken`
 - Storage: complete provider configuration under the Plugin-scoped KV key
   `configuration`
 
@@ -12,12 +16,31 @@ registers the configured channel for its lifetime. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
 stored data fails registration. See [`http.md`](http.md).
 
+The configuration can also be obtained by QR login at
+`/api/gateway/wechat/login`. Registration retains both HTTP routes. Both routes
+store and register through one shared path, so a confirmed login writes the
+same `configuration` key and format as a manual `POST /api/gateway/wechat`:
+the iLink `bot_token` as `token`, iLink's `baseurl` (or the `api_base` used for
+the login) as `api_base`, and every other field at its default.
+
+`wechat_login_task` owns the single login session. While no session runs it is
+parked on a command signal and holds no iLink connection and no QR data. A
+`POST` wakes it to fetch a QR code; it then long-polls iLink, one request at a
+time, until the session is confirmed, expires, reaches 480 s, is cancelled by
+`DELETE` or replaced by a new `POST`. Each session's state is boxed only while
+the session runs; between sessions the task keeps only the last status. The
+task races its loop with the `PluginTaskToken`, so unload, startup rollback,
+and Plugin Manager teardown drop the running iLink request and release any
+waiting `POST` with `502`.
+
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
-scope. Registration retains a `WebEntryRegistration` with ID `imessage-wechat`, title
-`微信`, module `entry.js`, and a `ResourceFiles` provider. Unload removes
-the navigation entry and resource provider; no extra HTTP route is registered.
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-wechat`, group `WebGroup::Channel`, order 30, title `微信` / `WeChat`, a
+bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-wechat`
@@ -30,9 +53,16 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
-are password inputs, never persisted in browser storage, and cleared on success
-or unmount. Requests are cancelled on unmount and are never retried automatically.
-The existing HTTP API has no authentication or transport encryption added here;
-use only within a trusted provisioning network.
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit) starts
+a QR login on mount (`POST /api/gateway/wechat/login`), draws the returned `url`
+as a QR Code with a countdown from `expires_in`, polls `GET` every 2 s (wait,
+scanned, confirmed, expired or failed) and sends a `keepalive` `DELETE` when it
+goes away. A `GET` that reports `configured` with no session running shows the
+linked state with 「重新绑定」 instead of starting a login. On a phone (narrower than
+720 px) it shows the steps and a 「复制链接」 button instead of the code and starts no
+session. A token entered by hand under 「高级」 posts to `POST /api/gateway/wechat`;
+the footer shows only while that fold is open. Secrets are password inputs,
+never persisted in browser storage, and cleared on success or unmount. Requests
+are cancelled on unmount and are never retried automatically. The existing HTTP
+API has no authentication or transport encryption added here; use only within a
+trusted provisioning network.

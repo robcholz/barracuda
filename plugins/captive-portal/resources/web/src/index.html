@@ -1,78 +1,38 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#141c24" />
-    <title>Barracuda · 设备控制台</title>
-    <link rel="icon" href="data:," />
+    <meta name="color-scheme" content="light dark" />
+    <title>Barracuda</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 135.6 135.6'%3E%3Crect width='135.6' height='135.6' rx='29.8' style='fill: %2309090B'%3E%3C/rect%3E%3Cg transform='translate(21.5 28.2)'%3E%3Cg style='fill: none; stroke: %2309090B; stroke-linejoin: round; stroke-linecap: round'%3E%3Cpath d='M0.5 10.8L0.1 11.1L0 11.5L0 21L0.1 21.4L0.5 21.7L1.1 22.1L36.1 39.6L1.1 57.1L0.5 57.5L0.1 57.8L0 58.2L0 67.7L0.1 68L0.5 68.4L1.1 68.8L20.9 78.7L21.6 78.9L22.3 79.1L23 79.2L23.7 79.1L24.4 78.9L25.1 78.7L91.6 45.4L92.2 45.1L92.5 44.7L92.6 44.4L92.6 34.8L92.5 34.5L92.2 34.1L91.6 33.8L25.1 0.5L24.4 0.2L23.7 0.1L23 0L22.3 0.1L21.6 0.2L20.9 0.5L1.1 10.4Z' style='fill: %23CCFF00; stroke-width: 2.4'%3E%3C/path%3E%3Cpath d='M20.9 0.5L21.6 0.2L22.3 0.1L23 0L23.7 0.1L24.4 0.2L25.1 0.5L91.6 33.8L92.2 34.1L92.5 34.5L92.6 34.8L92.5 35.2L92.2 35.5L91.6 35.9L25.1 69.1L24.4 69.4L23.7 69.6L23 69.7L22.3 69.6L21.6 69.4L20.9 69.1L1.1 59.2L0.5 58.9L0.1 58.5L0 58.2L0.1 57.8L0.5 57.5L1.1 57.1L43.5 35.9L44.1 35.5L44.4 35.2L44.5 34.8L44.4 34.5L44.1 34.1L43.5 33.8L1.1 12.6L0.5 12.2L0.1 11.8L0 11.5L0.1 11.1L0.5 10.8L1.1 10.4Z' style='stroke-width: 1.1'%3E%3C/path%3E%3C/g%3E%3C/g%3E%3C/svg%3E"
+    />
+    <script>
+      // Paint in the chosen theme from the first frame; the shell keeps it in sync afterwards.
+      try {
+        var mode = localStorage.getItem("barracuda.theme");
+        var dark =
+          mode === "dark" ||
+          (mode !== "light" &&
+            matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute(
+          "data-theme",
+          dark ? "dark" : "light",
+        );
+        if (localStorage.getItem("barracuda.lang") === "en")
+          document.documentElement.lang = "en";
+      } catch (error) {}
+    </script>
     <link rel="stylesheet" href="/portal/app.css" />
     <script type="module" src="/portal/app.js"></script>
   </head>
   <body>
-    <a class="skip" href="#workspace">跳到内容</a>
-    <aside class="sidebar">
-      <a class="brand" href="#"
-        ><span class="brand-mark" aria-hidden="true">B</span
-        ><span>Barracuda<small>DEVICE CONSOLE</small></span></a
-      >
-      <div class="nav-label">工作空间</div>
-      <nav id="navigation" aria-label="主导航">
-        <button class="nav-item active" data-home>概览</button>
-      </nav>
-      <div class="sidebar-footer">
-        <span class="local-dot"></span>本地设备界面<small
-          >所有模块由设备提供</small
-        >
-      </div>
-    </aside>
-    <div class="main">
-      <header class="topbar">
-        <span
-          >控制台 <span class="divider">/</span>
-          <span id="breadcrumb">概览</span></span
-        >
-        <div class="actions">
-          <span id="connection" class="connection" role="status">正在连接</span
-          ><button id="refresh" class="button" type="button">
-            ↻ <span>刷新模块</span>
-          </button>
-        </div>
-      </header>
-      <main id="workspace" tabindex="-1">
-        <div class="page-heading">
-          <div>
-            <p class="eyebrow">YOUR DEVICE, YOUR WORKSPACE</p>
-            <h1 id="page-title">设备工作台</h1>
-            <p id="subtitle">在一个地方，访问设备的全部已启用模块。</p>
-          </div>
-          <span class="page-badge">Barracuda / Portal</span>
-        </div>
-        <p id="notice" class="notice" role="status" hidden></p>
-        <section id="overview" aria-label="设备模块">
-          <div class="section-heading">
-            <h2>已启用模块 <span id="count" class="count">—</span></h2>
-            <span>按需加载 · 独立运行</span>
-          </div>
-          <div id="cards" class="cards"></div>
-          <div id="empty" class="empty">
-            <div class="empty-symbol" aria-hidden="true">＋</div>
-            <h2 id="empty-title">正在读取模块</h2>
-            <p id="empty-description">正在获取这台设备的模块清单。</p>
-          </div>
-        </section>
-        <section
-          id="module-panel"
-          class="module-panel"
-          aria-label="模块内容"
-          hidden
-        ></section>
-        <footer class="workspace-footer">
-          <span>BARRACUDA</span><span>轻量、可组合的设备工作空间</span>
-        </footer>
-      </main>
-    </div>
-    <noscript>请启用 JavaScript 以使用设备控制台。</noscript>
+    <div id="portal"></div>
+    <noscript
+      >请启用 JavaScript 以使用设备门户。Enable JavaScript to use the device
+      portal.</noscript
+    >
   </body>
 </html>

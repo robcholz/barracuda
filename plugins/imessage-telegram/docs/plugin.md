@@ -15,9 +15,11 @@ stored data fails registration. See [`http.md`](http.md).
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
-scope. Registration retains a `WebEntryRegistration` with ID `imessage-telegram`, title
-`Telegram`, module `entry.js`, and a `ResourceFiles` provider. Unload removes
-the navigation entry and resource provider; no extra HTTP route is registered.
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-telegram`, group `WebGroup::Channel`, order 20, title `Telegram`, a
+bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-telegram`
@@ -30,9 +32,16 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
-are password inputs, never persisted in browser storage, and cleared on success
-or unmount. Requests are cancelled on unmount and are never retried automatically.
-The existing HTTP API has no authentication or transport encryption added here;
-use only within a trusted provisioning network.
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+`{token, api_base, draft_min_delta_bytes}` to `POST /api/gateway/telegram`. Its
+「验证」 button calls the Bot API's `getMe` straight from the browser (Telegram
+allows any origin) at the 「高级」 `api_base`: a bot shows its name, `@username` and
+a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
+`description` are shown on the token field. When the browser has no route out (a
+phone on the device's hotspot) the page notes that the token is unverified;
+verifying never gates saving. The device's error `message` is shown in the
+toast. It does not read current settings. Secrets are password inputs, never
+persisted in browser storage, and cleared on success or unmount. Requests are
+cancelled on unmount and are never retried automatically. The existing HTTP API
+has no authentication or transport encryption added here; use only within a
+trusted provisioning network.
