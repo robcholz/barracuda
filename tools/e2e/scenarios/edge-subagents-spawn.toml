@@ -24,12 +24,10 @@ text = "done done done done done done done done done done done done done done do
 [[model.responses]]
 text = "done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done"
 
-# call 3 (root): instance.rs:466-484 notification + model.rs:77-83 result.
+# call 3 (root): instance.rs render_notifications + model.rs:77-83 result.
 [[model.responses]]
 request_contains = [
-  "[background:completed]",
-  "tool: subagent_spawn",
-  "call_id: call_0",
+  '[background:completed]\nid: 1\ntool: subagent_spawn',
   "[subagent] id: agent-2, result: true, message: done done done",
 ]
 text = "Background job delivered."
