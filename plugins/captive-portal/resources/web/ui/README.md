@@ -73,7 +73,9 @@ Layout (`layout.ts`)
   a polite status region.
 - `term(label, tip, lang, { start? })`: the dotted-underline aside (`明文`, `名额`).
 - `badge(label, lang, { signal? })`, `button(label, lang, { variant, size, icon, type, onClick })`,
-  `frame(...children)`, `row(title, hint, lang, ...children)` (a label-left row).
+  `frame(...children)`, `row(title, hint, lang, ...children)` (a label-left row; `backticks` in the
+  hint mark machine values, set in mono: 「在 `@BotFather` 发送 `/newbot` 获得 Token」).
+- `monoParts(text)`: the same backtick split, for any line that mixes words and machine values.
 
 Settings form (`settings.ts`)
 
@@ -95,8 +97,8 @@ Settings form (`settings.ts`)
     (`{ status, error, message?, code? }`, see below) before the toast; return
     `{ title?, body? }` to replace the toast's, typically `{ body: error.message }`, and
     call `setError` to put an upstream refusal on its field.
-  - `setError(name, message, code?)`: marks a field; `code` follows the message in mono
-    (「QQ 开放平台：机器人不存在 · `10004`」). `footer` is the footer element, for pages
+  - `setError(name, message, code?)`: marks a field; the message says what to do and ends in
+    「。」, `code` follows it in mono (「检查 App ID 和 App Secret。 · `10004`」). `footer` is the footer element, for pages
     that show it only in some states (hide it with `style.display = "none"`).
 - Fields, all with `name`, `label`, optional `hint` and `optional`:
   - `{ kind: "text" | "url", value?, placeholder?, mono? }` — trimmed; `url` must be http(s);
@@ -116,7 +118,7 @@ Settings form (`settings.ts`)
   posts JSON (`redirect: "error"`, `cache: "no-store"`, 15 s timeout, aborted with
   the page) and toasts the outcome: 2xx 「设备已接受配置」; 404 「接口不可用」;
   other 4xx 「配置被拒绝」; 5xx 「提交失败」 (status in mono); no reply
-  「未收到设备确认 · 配置可能已生效。」 with 「重试」 when `retry` is given.
+  「未收到设备确认」 with 「重试」 when `retry` is given (no disclaimer line).
   Resolves `"accepted" | "rejected" | "failed" | "aborted"`; nothing is toasted
   after the page is gone. `settingsForm` uses it and allows one request at a time.
 - `fieldControl(field, lang)`: one field on its own, for pages that lay out
@@ -172,10 +174,12 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 `{"remove": id}` or `{"rotate": true}`.
 
 - `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
-  returns `{ rows, attach(form), apply(status), refresh() }`: the two rows below, wired to the
+  returns `{ rows, alert, attach(form), apply(status), refresh() }`: the two rows below, wired to the
   device. `onStatus(status)` runs with each state the rows show (WeChat offers 「重新绑定」 when
   its receive state is the 「需要重新扫码」 error).
   - `attach(form)` puts them before the form's 「高级」 fold (or its footer).
+  - `alert` is the no-slot caution alert: put it in the page under the header frame, before the form
+    (`page(header(…), inbound.alert, form.element)`).
   - `apply(status)` shows the state the page's own `readChannel` read; `refresh()` reads it again
     (call it after a save succeeds). Both rows show only while `configured`.
   - A mode change reads the channel again, then calls `context.refreshStatus()`. In `send_receive`
@@ -198,13 +202,14 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 - `modeRow({ endpoint, channel, modes?, onChange? }, context)` returns `{ element, update(status) }`:
   the 「模式」 row, one radio card per mode in `modes` (default `CHANNEL_MODES`: 停用 / 仅发送 /
   收发; WeChat passes `["disabled", "send_receive"]`). Under the cards, the state badge: 收发中
-  (signal) for `receiving`, 连接中 for `starting` and `idle`, 等待名额 with the slot count
-  (`名额 N/N`, mono, a `.bc-term` saying what sets it) and the alert 「收发通道已达上限（N）」 for
-  `no_slot`, 连接中断 with the device's `message` in mono for `error`; 仅发送 and 已停用 for the
+  (signal) for `receiving`, 连接中 for `starting` and `idle`, 等待名额 for `no_slot`, 连接中断 with
+  the device's `message` in mono for `error`, followed by the slots in use (the term 「名额」, saying
+  what sets them, and the count `1/2` in mono); `no_slot` also shows the returned `alert`
+  (「收发名额已满」, `triangle-alert` in `warning`); 仅发送 and 已停用 for the
   other modes. Choosing posts `{mode}` at once; a 204 or a 409 `no_slot` (the mode is saved) runs
   `onChange`, any other answer is toasted and the choice goes back.
 - `accountsRow({ endpoint, how, command? }, context)` returns `{ element, load(), hide(), count() }`:
-  the 「授权账号」 row. A card holds the binding code (`.bc-page-title bc-mono`, `command(code)` when
+  the 「授权账号」 row. A card holds the binding code (`.bc-code-display`, `command(code)` when
   given) under `how`, its countdown (「有效期还剩 m:ss」, counted locally; the list is read again when
   it ends) and 「换一个绑定码」 (`{"rotate": true}`); `pairing: null` drops that box. Then each account,
   `label` over its `id` in mono (the `id` alone, in mono, without a label), with 「移除」
@@ -215,14 +220,17 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 
-- `resultCard({ title, badge, sub?, initial?, rows?, action? }, lang)`: what a check found
+- `resultCard({ title, badge, live?, sub?, initial?, rows?, action? }, lang)`: what a check found
   (`role="status"`): a 40px tile with `initial` (a check mark without one), the title, `sub`
-  in mono, the green badge, key-value `rows` (mono values) and one `action` node.
-- `stepList(steps, { current, done }, lang)`: numbered steps; the first `done` show a check
-  on the signal fill, `current` (`aria-current="step"`, or `-1` for none) is outlined in ink.
+  in mono, the badge (neutral; the signal chip only with `live`, a live connection such as
+  BlueBubbles' 「已连接」), a `.bc-kv` of `rows` (values mono unless the row's third item is
+  `false`) and one `action` node.
+- `stepList(steps, { current, done }, lang)`: numbered steps on `radius-sm` tiles with mono
+  numbers (`01`); the first `done` show a check in `success`, `current` (`aria-current="step"`, or
+  `-1` for none) fills `muted`.
 - `note(text, lang, { mono?, action?: { label, onClick } })`: a small muted line with a
   mono value and a link-styled button after a dot (「验证码已发到 `you@example.com` · 重新发送」).
-- `qrPlate(data, px, lang, { dim?, padding? = 8 })`: a QR Code on a plate that stays light
+- `qrPlate(data, px, lang, { dim? })`: a QR Code on a `radius-sm` plate that stays light
   in the dark theme (`data-theme="light"`); `data: null` is the empty plate while a code
   loads; `dim` fades the code under a label (「已扫码」, 「二维码已过期」).
 - `qrLink(url, label, lang, { px? = 120 })`: a link to open on a phone: its code, the URL
@@ -257,10 +265,10 @@ export const mount = definePage((context) => {
       submit: { zh: "保存并替换通道", en: "Save and replace channel" },
       rows: [
         {
-          title: "Bot",
+          title: { zh: "机器人", en: "Bot" },
           hint: {
-            zh: "在 @BotFather 创建 Bot 后获得 Token",
-            en: "Create a bot with @BotFather to get its token",
+            zh: "在 `@BotFather` 发送 `/newbot` 获得 Token",
+            en: "Send `/newbot` to `@BotFather` to get a token",
           },
           fields: [{ kind: "secret", name: "token", label: "Bot Token" }],
         },

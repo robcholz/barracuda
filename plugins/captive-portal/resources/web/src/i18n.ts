@@ -17,12 +17,6 @@ const zh = {
   light: "浅色",
   dark: "深色",
   system: "跟随系统",
-  langButton: "中文",
-  themeLabel: {
-    system: "主题：跟随系统",
-    light: "主题：浅色",
-    dark: "主题：深色",
-  },
   offline: "连接未就绪",
   close: "关闭",
   lead: "配置这台设备的网络、模型与消息通道。",
@@ -32,37 +26,36 @@ const zh = {
   pagesTip: "每个页面由一个插件提供，停用插件后页面随之消失",
   kvConn: "连接",
   plain: "明文",
-  plainTip: "仅在可信网络中提交密钥",
   start: "开始使用",
   steps: {
     device: "连接 Wi-Fi",
     agent: "注册模型",
     channel: "接入消息通道",
   },
-  /** A done 「连接 Wi-Fi」 step, with the device's detail (the network name). */
-  connectedTo: (detail: string) => joinZh("已连接", detail),
+  /** A done 「连接 Wi-Fi」 step, before the device's detail in mono (「已连接 `HomeNet`」). */
+  connectedTo: "已连接",
   open: (title: string) => joinZh("前往", title),
   tryFirst: (title: string) => joinZh(joinZh("先用", title), "试试"),
-  modules: "模块",
+  modules: "插件页面",
   channels: "消息通道",
   empty: {
-    title: "还没有启用的网页模块",
-    body: "插件注册的网页模块会出现在这里。",
+    title: "还没有插件页面",
+    body: "在设备上启用插件后，它的页面会出现在这里。",
   },
   unavailable: {
-    title: (name: string) => joinZh(name, "模块已停用"),
+    title: (name: string) => joinZh(name, "插件已停用"),
     body: (name: string) =>
       joinZh(joinZh("在设备上启用", name), "插件后刷新。"),
   },
-  loading: "正在加载模块…",
-  failed: { title: "模块加载失败", body: "检查与设备的连接后重试。" },
+  loading: "正在加载页面…",
+  failed: { title: "页面加载失败", body: "检查与设备的连接后重试。" },
   manifestFailed: {
-    title: "无法读取模块清单",
+    title: "无法读取页面列表",
     body: "检查与设备的连接后重试。",
   },
-  refresh: "刷新模块",
+  refresh: "刷新页面列表",
   back: "返回概览",
-  retry: "重试加载",
+  retry: "重新加载",
 };
 
 type Strings = typeof zh;
@@ -80,12 +73,6 @@ const en: Strings = {
   light: "Light",
   dark: "Dark",
   system: "System",
-  langButton: "EN",
-  themeLabel: {
-    system: "Theme: system",
-    light: "Theme: light",
-    dark: "Theme: dark",
-  },
   offline: "Not connected",
   close: "Dismiss",
   lead: "Set up this device's network, models and message channels.",
@@ -96,39 +83,38 @@ const en: Strings = {
     "Each page comes from a plugin and goes away when the plugin is turned off",
   kvConn: "Connection",
   plain: "plain text",
-  plainTip: "Submit keys only on a trusted network",
   start: "Get started",
   steps: {
     device: "Connect Wi-Fi",
     agent: "Register a model",
     channel: "Connect a channel",
   },
-  connectedTo: (detail: string) => `Connected to ${detail}`,
+  connectedTo: "Connected to",
   open: (title: string) => `Open ${title}`,
   tryFirst: (title: string) => `Try ${title} first`,
-  modules: "Modules",
+  modules: "Plugin pages",
   channels: "Message channels",
   empty: {
-    title: "No web modules yet",
-    body: "Web modules that plugins register show up here.",
+    title: "No plugin pages yet",
+    body: "Turn a plugin on on the device and its page shows up here.",
   },
   unavailable: {
-    title: (name: string) => `The ${name} module is turned off`,
+    title: (name: string) => `The ${name} plugin is turned off`,
     body: (name: string) =>
       `Turn the ${name} plugin on on the device, then refresh.`,
   },
-  loading: "Loading module…",
+  loading: "Loading page…",
   failed: {
-    title: "The module didn't load",
+    title: "The page didn't load",
     body: "Check the connection to the device and try again.",
   },
   manifestFailed: {
-    title: "Couldn't read the module list",
+    title: "Couldn't read the page list",
     body: "Check the connection to the device and try again.",
   },
-  refresh: "Refresh modules",
+  refresh: "Refresh page list",
   back: "Back to overview",
-  retry: "Retry",
+  retry: "Reload",
 };
 
 export const STRINGS: Record<Lang, Strings> = { zh, en };

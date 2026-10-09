@@ -7,9 +7,8 @@ import {
   ICON_DOWNLOAD,
   ICON_FILE,
   ICON_LIGHTBULB,
-  ICON_MESSAGE_DASHED,
+  ICON_REFRESH,
   ICON_REPLY,
-  ICON_ROTATE_CW,
   ICON_SHIELD_ALERT,
   ICON_WIFI_OFF,
   ICON_WRENCH,
@@ -34,14 +33,16 @@ const STRINGS = {
   zh: {
     log: "聊天记录",
     sent: "已发送",
-    sentTip: "设备不回执送达或已读",
     reasoning: "思考过程",
     ok: "成功",
     failed: "失败",
     args: "参数",
     output: "输出",
-    step: "第 {n} 步",
-    usage: "输入 {i} · 输出 {o} tokens",
+    /** The turn footer's words; the numbers between them are mono: 「第 `1` 步 · 输入 `1,284` · 输出 `212 tokens`」. */
+    stepA: "第 ",
+    stepB: " 步",
+    in: "输入 ",
+    out: "输出 ",
     reply: "回复",
     edited: "已编辑",
     typing: "正在输入",
@@ -61,12 +62,12 @@ const STRINGS = {
       "总结一下我今天的日程",
       "提醒我 6 点下班",
     ],
-    incomplete: "未完成 · 事件流中断",
+    incomplete: "未完成 · 连接中断",
     lagged: "错过 {n} 个事件",
     turnError: "这一轮出错",
     offline: "连接已中断",
-    unconfirmed: "{n} 条未确认",
-    unconfirmedTip: "不会自动重发",
+    /** After the count in mono: 「`1` 条消息未确认，重新连接后再发送」. */
+    unconfirmed: (_n: number) => " 条消息未确认，重新连接后再发送",
     reconnect: "重新连接",
     reconnected: "已重新连接",
     label: "消息",
@@ -89,14 +90,15 @@ const STRINGS = {
   en: {
     log: "Conversation",
     sent: "Sent",
-    sentTip: "The device sends no delivery or read receipt",
     reasoning: "Reasoning",
     ok: "Succeeded",
     failed: "Failed",
     args: "Arguments",
     output: "Output",
-    step: "Step {n}",
-    usage: "{i} in · {o} out tokens",
+    stepA: "Step ",
+    stepB: "",
+    in: "In ",
+    out: "Out ",
     reply: "Reply",
     edited: "Edited",
     typing: "Typing",
@@ -116,12 +118,12 @@ const STRINGS = {
       "Summarize today's schedule",
       "Remind me to leave at 6",
     ],
-    incomplete: "Incomplete · event stream cut off",
+    incomplete: "Incomplete · connection lost",
     lagged: "Missed {n} events",
     turnError: "This turn failed",
     offline: "Disconnected",
-    unconfirmed: "{n} unconfirmed",
-    unconfirmedTip: "Not resent automatically",
+    unconfirmed: (n: number) =>
+      ` ${n === 1 ? "message" : "messages"} unconfirmed; send again after reconnecting`,
     reconnect: "Reconnect",
     reconnected: "Reconnected",
     label: "Message",
@@ -266,11 +268,6 @@ export const mount = definePage((context: PortalContext) => {
       style:
         "flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:96px 0;text-align:center",
     },
-    h(
-      "span",
-      { class: "bc-muted", style: "display:inline-flex" },
-      icon(ICON_MESSAGE_DASHED, 32),
-    ),
     h("h2", { class: "bc-title" }, t.emptyTitle),
     h(
       "p",
@@ -289,7 +286,6 @@ export const mount = definePage((context: PortalContext) => {
           {
             class: "bc-button bc-button--outline bc-button--sm",
             type: "button",
-            style: "font-weight:400",
             onclick: () => {
               input.value = text;
               changed();
@@ -342,16 +338,21 @@ export const mount = definePage((context: PortalContext) => {
     },
     icon(ICON_ARROW_UP),
   );
+  // a hairline row: the icon carries the warning colour, the text stays foreground
+  const answeringText = h("span");
   const answering = h(
     "div",
     {
       style:
-        "display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--amber-100);border-radius:7px 7px 0 0;color:var(--amber-1000);font-size:12px",
+        "display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px",
     },
-    h("span", { style: "display:inline-flex" }, icon(ICON_SHIELD_ALERT, 14)),
+    h(
+      "span",
+      { style: "display:inline-flex;color:var(--warning)" },
+      icon(ICON_SHIELD_ALERT),
+    ),
+    answeringText,
   );
-  const answeringText = h("span");
-  answering.append(answeringText);
   show(answering, false);
   const quote = h("span", {
     style:
@@ -366,19 +367,19 @@ export const mount = definePage((context: PortalContext) => {
     h(
       "span",
       { class: "bc-muted", style: "display:inline-flex" },
-      icon(ICON_REPLY, 12),
+      icon(ICON_REPLY),
     ),
     h("span", { class: "bc-muted", style: "flex:none" }, t.replying),
     quote,
     h(
       "button",
       {
-        class: "bc-toast__close",
+        class: "bc-icon-button",
         type: "button",
         "aria-label": t.cancelReply,
         onclick: () => setReply(null),
       },
-      icon(ICON_X, 14),
+      icon(ICON_X),
     ),
   );
   show(replyBar, false);
@@ -444,7 +445,7 @@ export const mount = definePage((context: PortalContext) => {
         type: "button",
         onclick: () => connect(true),
       },
-      icon(ICON_ROTATE_CW, 14),
+      icon(ICON_REFRESH),
       t.reconnect,
     ),
   );
@@ -517,11 +518,7 @@ export const mount = definePage((context: PortalContext) => {
   }
 
   function reactionBadge() {
-    const badge = h("span", {
-      class: "bc-badge",
-      style: "height:20px;padding:0 6px;font-size:12px",
-      "aria-label": t.reaction,
-    });
+    const badge = h("span", { class: "bc-badge", "aria-label": t.reaction });
     show(badge, false);
     return badge;
   }
@@ -541,9 +538,9 @@ export const mount = definePage((context: PortalContext) => {
             {
               class: "bc-small bc-muted",
               style:
-                "display:flex;align-items:center;gap:6px;max-width:100%;padding-left:8px;border-left:2px solid var(--border)",
+                "display:flex;align-items:center;gap:6px;max-width:100%;padding-left:8px;border-left:1px solid var(--border)",
             },
-            icon(ICON_REPLY, 12),
+            icon(ICON_REPLY),
             h(
               "span",
               {
@@ -561,7 +558,7 @@ export const mount = definePage((context: PortalContext) => {
           style: "display:flex;align-items:center;gap:8px;font-size:12px",
         },
         reaction,
-        term(t.sent, t.sentTip, lang),
+        t.sent,
       ),
     );
     const record = { root: node, reaction, confirmed: false };
@@ -622,7 +619,7 @@ export const mount = definePage((context: PortalContext) => {
               style:
                 stream === "notice" || stream === "tool" ? "margin:0" : null,
             });
-      if (stream === "tool") node.append(icon(ICON_WRENCH, 12), " ");
+      if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
       const content = doc.createTextNode("");
       node.append(content);
       if (stream !== "reasoning") put(record, node);
@@ -645,14 +642,14 @@ export const mount = definePage((context: PortalContext) => {
     const panel = h("p", {
       class: "bc-small bc-muted",
       style:
-        "margin:6px 0 0;padding-left:12px;border-left:2px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere",
+        "margin:6px 0 0;padding-left:12px;border-left:1px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere",
     });
     const button = h(
       "button",
       { class: "bc-fold-link", type: "button" },
-      icon(ICON_LIGHTBULB, 14),
+      icon(ICON_LIGHTBULB),
       t.reasoning,
-      icon(ICON_CHEVRON_RIGHT, 14),
+      icon(ICON_CHEVRON_RIGHT),
     );
     fold(button, panel, false);
     put(record, h("div", null, button, panel));
@@ -680,7 +677,7 @@ export const mount = definePage((context: PortalContext) => {
       h(
         "span",
         { class: "bc-muted", style: "display:inline-flex" },
-        icon(ICON_WRENCH, 14),
+        icon(ICON_WRENCH),
       ),
       name,
       summary,
@@ -688,7 +685,7 @@ export const mount = definePage((context: PortalContext) => {
       h(
         "span",
         { class: "bc-muted", style: "display:inline-flex" },
-        icon(ICON_CHEVRON_RIGHT, 14),
+        icon(ICON_CHEVRON_RIGHT),
       ),
     );
     const code = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px";
@@ -733,7 +730,7 @@ export const mount = definePage((context: PortalContext) => {
           type: "button",
           onclick: () => answer(t.allow),
         },
-        icon(ICON_CHECK, 14),
+        icon(ICON_CHECK),
         t.allow,
       ),
       h(
@@ -743,7 +740,7 @@ export const mount = definePage((context: PortalContext) => {
           type: "button",
           onclick: () => answer(t.deny),
         },
-        icon(ICON_X, 14),
+        icon(ICON_X),
         t.deny,
       ),
       h(
@@ -755,11 +752,7 @@ export const mount = definePage((context: PortalContext) => {
     const title = `imessage-web-approval-${record.id}`;
     const card = h(
       "section",
-      {
-        class: "bc-card",
-        "aria-labelledby": title,
-        style: "border-color:var(--amber-400)",
-      },
+      { class: "bc-card", "aria-labelledby": title },
       h(
         "div",
         {
@@ -769,11 +762,11 @@ export const mount = definePage((context: PortalContext) => {
         h(
           "span",
           { style: "display:inline-flex;color:var(--warning)" },
-          icon(ICON_SHIELD_ALERT, 18),
+          icon(ICON_SHIELD_ALERT),
         ),
         h(
           "h3",
-          { id: title, class: "bc-title", style: "font-size:14px;margin:0" },
+          { id: title, class: "bc-title", style: "margin:0" },
           t.approvalTitle,
         ),
       ),
@@ -803,7 +796,7 @@ export const mount = definePage((context: PortalContext) => {
   function showFooter(record: Agent) {
     if (record.kind !== "reply") return;
     if (!record.footer) {
-      const facts = h("span", { class: "bc-mono bc-muted" });
+      const facts = h("span", { class: "bc-muted" });
       record.footer = h(
         "div",
         {
@@ -812,16 +805,16 @@ export const mount = definePage((context: PortalContext) => {
         },
         facts,
         record.reaction,
+        // the design's 24px muted inline action
         h(
           "button",
           {
-            class: "bc-button bc-button--ghost bc-button--sm",
+            class: "bc-fold-link",
             type: "button",
-            style:
-              "height:24px;padding:0 6px;font-size:12px;font-weight:400;color:var(--muted-foreground)",
+            style: "margin:0",
             onclick: () => setReply({ id: record.id, text: textOf(record) }),
           },
-          icon(ICON_REPLY, 12),
+          icon(ICON_REPLY),
           t.reply,
         ),
       );
@@ -830,21 +823,22 @@ export const mount = definePage((context: PortalContext) => {
     footer(record);
   }
 
-  /** Refreshes the footer's facts, if it is shown. */
+  /** Refreshes the footer's facts, if it is shown: words in sans, numbers and `tokens` in mono. */
   function footer(record: Agent) {
     if (!record.footer) return;
-    const parts: string[] = [];
-    if (record.steps) parts.push(fill(t.step, { n: record.steps }));
+    const mono = (text: string) => h("span", { class: "bc-mono" }, text);
+    const count = (value: number | undefined) =>
+      value === undefined ? "—" : numbers.format(value);
+    const parts: (string | HTMLElement)[][] = [];
+    if (record.steps)
+      parts.push([t.stepA, mono(String(record.steps)), t.stepB]);
     const { i, o } = record.usage;
     if (i !== undefined || o !== undefined)
-      parts.push(
-        fill(t.usage, {
-          i: i === undefined ? "—" : numbers.format(i),
-          o: o === undefined ? "—" : numbers.format(o),
-        }),
-      );
+      parts.push([t.in, mono(count(i))], [t.out, mono(`${count(o)} tokens`)]);
     const facts = record.footer.firstElementChild as HTMLElement;
-    facts.textContent = parts.join(" · ");
+    facts.replaceChildren(
+      ...parts.flatMap((part, index) => (index ? [" · ", ...part] : part)),
+    );
     show(facts, parts.length > 0);
   }
 
@@ -871,13 +865,20 @@ export const mount = definePage((context: PortalContext) => {
     }
     request = next;
     show(answering, !!next);
-    answeringText.textContent = next
-      ? `${t.answering} · ${next.tool.textContent}`
-      : "";
+    // 「正在答复 · `fs.remove`」: the tool's name is a machine value
+    answeringText.replaceChildren(
+      ...(next
+        ? [
+            `${t.answering} · `,
+            h("span", { class: "bc-mono" }, next.tool.textContent),
+          ]
+        : []),
+    );
     input.placeholder = next ? t.answerPh : t.placeholder;
   }
 
-  function alert(title: string, text: string) {
+  /** A failed turn: an error alert written into the conversation, a record in the log rather than a page alert. */
+  function errorRecord(title: string, text: string) {
     add(
       h(
         "div",
@@ -914,7 +915,7 @@ export const mount = definePage((context: PortalContext) => {
         "div",
         {
           role: "separator",
-          class: "bc-mono bc-muted",
+          class: "bc-muted",
           style: "display:flex;align-items:center;gap:12px;font-size:12px",
         },
         line(),
@@ -1014,7 +1015,7 @@ export const mount = definePage((context: PortalContext) => {
       case "turn_error":
       case "session_error":
         caret.remove();
-        return alert(t.turnError, str(payload.message));
+        return errorRecord(t.turnError, str(payload.message));
     }
   }
 
@@ -1081,8 +1082,8 @@ export const mount = definePage((context: PortalContext) => {
         known.run = null;
         caret.remove();
         if (request?.owner === known) setRequest(null);
-        const error = str(value.error);
-        if (error)
+        // the device's reason is internal (no plumbing on screen): the line says what happened
+        if (str(value.error))
           put(
             known,
             h(
@@ -1092,9 +1093,8 @@ export const mount = definePage((context: PortalContext) => {
                 style:
                   "display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--destructive)",
               },
-              icon(ICON_CIRCLE_ALERT, 14),
+              icon(ICON_CIRCLE_ALERT),
               t.incomplete,
-              h("span", { class: "bc-mono", style: MONO12 }, error),
             ),
           );
         return showFooter(known);
@@ -1151,7 +1151,7 @@ export const mount = definePage((context: PortalContext) => {
       const record = agent(id, "media");
       const filename = str(value.filename);
       const mime = str(value.mime_type);
-      const meta = h("span", { class: "bc-mono bc-muted", style: MONO12 });
+      const meta = h("span", { class: "bc-muted", style: MONO12 });
       const slot = h("span", { style: "flex:none;display:inline-flex" });
       record.media = {
         chunks: [],
@@ -1170,14 +1170,7 @@ export const mount = definePage((context: PortalContext) => {
             class: "bc-card",
             style: "display:flex;align-items:center;gap:12px;padding:10px 12px",
           },
-          h(
-            "span",
-            {
-              style:
-                "flex:none;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);background:var(--muted)",
-            },
-            icon(ICON_FILE, 18),
-          ),
+          h("span", { class: "bc-option-icon" }, icon(ICON_FILE, 16)),
           h(
             "span",
             {
@@ -1234,13 +1227,14 @@ export const mount = definePage((context: PortalContext) => {
             href: url,
             download: item.filename || "attachment",
           },
-          icon(ICON_DOWNLOAD, 14),
+          icon(ICON_DOWNLOAD),
           t.download,
         ),
       );
     }
   }
 
+  /** 「`application/gpx+xml · 18 KB` · 已接收」: the machine values mono, the state in words. */
   function describe(item: Media, status: string) {
     const size =
       item.size < 1024
@@ -1248,9 +1242,14 @@ export const mount = definePage((context: PortalContext) => {
         : item.size < 1024 * 1024
           ? `${Math.round(item.size / 1024)} KB`
           : `${(item.size / 1024 / 1024).toFixed(1)} MB`;
-    item.meta.textContent = [item.mime, size, status]
-      .filter(Boolean)
-      .join(" · ");
+    item.meta.replaceChildren(
+      h(
+        "span",
+        { class: "bc-mono" },
+        [item.mime, size].filter(Boolean).join(" · "),
+      ),
+      ` · ${status}`,
+    );
   }
 
   // ---- composer
@@ -1399,13 +1398,15 @@ export const mount = definePage((context: PortalContext) => {
     show(typing, false);
     caret.remove();
     const count = [...sent.values()].filter((entry) => !entry.confirmed).length;
+    // what to do with them is the reader's action, so it is said, not hidden behind a term
     offlineCount.replaceChildren(
       count
         ? h(
             "span",
             null,
             " · ",
-            term(fill(t.unconfirmed, { n: count }), t.unconfirmedTip, lang),
+            h("span", { class: "bc-mono" }, String(count)),
+            t.unconfirmed(count),
           )
         : "",
     );

@@ -178,9 +178,20 @@ test("renders the status and the scan in Chinese", async () => {
     "Cafe Guest开放-70 dBm",
     "Pixel-7加密-79 dBm",
   ]);
+  // SSIDs are machine values
+  expect(page.row("Office-5F").querySelector(".bc-mono")?.textContent).toBe(
+    "Office-5F",
+  );
   // the current network is not a join target
   expect(page.row("HomeNet").tagName).toBe("DIV");
-  expect(page.text()).toContain("设备会断开 HomeNet，并开启配置热点。");
+  // a description is a fragment: the network name in mono, no full stop
+  expect(page.text()).toContain("设备会断开 HomeNet，并开启配置热点");
+  expect(page.text()).not.toContain("配置热点。");
+  expect(
+    [...page.root.querySelectorAll(".bc-frame .bc-small .bc-mono")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["HomeNet"]);
   expect(page.button("忘记网络")).toBeTruthy();
   expect(page.root.querySelector("hl-figure")?.getAttribute("name")).toBe(
     "wifi",
@@ -265,9 +276,9 @@ test("joins a secured network after validating the password", async () => {
 test("joins an open network without a password", async () => {
   const page = await render("en");
   page.row("Cafe Guest").click();
-  expect(page.form().textContent).toContain(
-    "Password (leave empty for an open network)",
-  );
+  // an open network asks for nothing
+  expect(page.form().querySelector("input")).toBeNull();
+  expect(page.form().textContent).not.toContain("Password");
   await page.submit();
   expect(writes()[0]?.body).toBe(
     JSON.stringify({ ssid: "Cafe Guest", password: "" }),
@@ -291,6 +302,7 @@ test("a rejected join keeps the form and reports the status", async () => {
 test("joins a network entered by name", async () => {
   const page = await render("en");
   page.row("Enter a network name").click();
+  expect(page.form().textContent).toContain("Password (optional)");
   await page.submit();
   expect(page.errors()).toEqual(["Enter the Network name."]);
   page.input("ssid").value = "x".repeat(33);
@@ -370,10 +382,18 @@ test("the phone layout is the design's list", async () => {
       ?.textContent,
   ).toBe("Wi-FiConnectedHomeNet");
   expect(page.root.querySelectorAll("ul > li")).toHaveLength(5);
+  expect(page.root.querySelector("h1")?.className).toBe("bc-mobile-title");
   page.row("Office-5F").click();
-  expect(page.form().querySelector("input")?.style.fontSize).toBe("16px");
-  expect(page.button("Forget HomeNet")).toBeTruthy();
-  expect(page.text()).toContain("The device then turns on the setup hotspot.");
+  // 16px through the design system's phone rule, at control-lg
+  const input = page.form().querySelector("input")!;
+  expect(input.className).toContain("bc-input");
+  expect(input.style.height).toBe("var(--control-lg)");
+  expect(page.button("Forget network")).toBeTruthy();
+  expect(page.text()).toContain(
+    "The device leaves HomeNet and turns on the setup hotspot",
+  );
+  expect(page.text()).not.toContain("setup hotspot.");
+  expect(page.button("Rescan").style.height).toBe("var(--control-lg)");
 });
 
 test("cleans up with the page", async () => {

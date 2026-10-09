@@ -1,5 +1,4 @@
 import {
-  KIT_STRINGS,
   channelInbound,
   configuredRow,
   definePage,
@@ -17,7 +16,7 @@ const T = {
     bot: "机器人",
     botHint: "在 QQ 开放平台创建机器人，从「开发设置」复制",
     botLink: "打开 QQ 开放平台",
-    platform: "QQ 开放平台：",
+    rejected: "检查 App ID 和 App Secret。",
     tryChat: "去 Web 聊天试试",
     how: "在 QQ 里给机器人发送",
   },
@@ -28,7 +27,7 @@ const T = {
     botHint:
       "Create a bot on the QQ Open Platform and copy these from Development settings",
     botLink: "Open the QQ Open Platform",
-    platform: "QQ Open Platform: ",
+    rejected: "Check the App ID and App Secret.",
     tryChat: "Try it in Web chat",
     how: "In QQ, send the bot",
   },
@@ -83,13 +82,10 @@ export const mount = definePage((context) => {
           },
         ],
       },
+      // the field says what to do; QQ's own words go in the toast
       onError: (error) => {
         if (error.error === "verification_failed")
-          form.setError(
-            "app_secret",
-            `${t.platform}${error.message ?? KIT_STRINGS[lang].rejected}`,
-            error.code,
-          );
+          form.setError("app_secret", t.rejected, error.code);
         return { body: error.message };
       },
       onSuccess: () => {
@@ -123,6 +119,7 @@ export const mount = definePage((context) => {
       },
       lang,
     ),
+    inbound.alert,
     form.element,
   );
 });

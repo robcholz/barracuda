@@ -18,7 +18,6 @@ export const KIT_STRINGS: Record<
     missing: string;
     failed: string;
     noReply: string;
-    noReplyBody: string;
     retry: string;
     channel: string;
     configured: string;
@@ -39,7 +38,6 @@ export const KIT_STRINGS: Record<
     missing: "接口不可用",
     failed: "提交失败",
     noReply: "未收到设备确认",
-    noReplyBody: "配置可能已生效。",
     retry: "重试",
     channel: "通道",
     configured: "已配置",
@@ -59,7 +57,6 @@ export const KIT_STRINGS: Record<
     missing: "Endpoint not available",
     failed: "Submission failed",
     noReply: "No confirmation from the device",
-    noReplyBody: "The settings may already be applied.",
     retry: "Retry",
     channel: "Channel",
     configured: "Configured",

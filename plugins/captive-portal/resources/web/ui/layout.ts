@@ -164,7 +164,19 @@ export function button(label: Text, lang: Lang, options: ButtonOptions = {}) {
   );
 }
 
-/** A label-left settings row (`.bc-row`): title and one-line hint beside the controls. */
+/** Text whose `backticked` parts are machine values, set in mono (「在 `@BotFather` 发送 `/newbot`」). */
+export function monoParts(text: string): (string | HTMLElement)[] {
+  return text
+    .split("`")
+    .map((part, index) =>
+      index % 2 ? h("span", { class: "bc-mono" }, part) : part,
+    );
+}
+
+/**
+ * A label-left settings row (`.bc-row`): title and one-line hint beside the controls. `backticks`
+ * in the hint mark machine values, which render mono.
+ */
 export function row(
   title: Text,
   hint: Text | undefined,
@@ -180,7 +192,11 @@ export function row(
       h("span", { class: "bc-title" }, pick(title, lang)),
       hint === undefined
         ? null
-        : h("span", { class: "bc-small bc-muted" }, pick(hint, lang)),
+        : h(
+            "span",
+            { class: "bc-small bc-muted" },
+            monoParts(pick(hint, lang)),
+          ),
     ),
     h("div", { class: "bc-row__body" }, ...children),
   );

@@ -3,7 +3,7 @@ import type { ChannelState } from "./channel";
 import { callDevice, toastDeviceError } from "./device";
 import { h, icon, pick, type Text } from "./dom";
 import { fitColumns } from "./grid";
-import { ICON_CIRCLE_ALERT, ICON_REFRESH } from "./icons";
+import { ICON_REFRESH, ICON_TRIANGLE_ALERT } from "./icons";
 import { badge, button, row, term } from "./layout";
 import type { SettingsForm } from "./settings";
 
@@ -68,12 +68,12 @@ const STRINGS = {
     broken: "连接中断",
     sendOnly: "仅发送",
     disabled: "已停用",
-    slots: (used: number, n: number) => `名额 ${used}/${n}`,
+    slots: "名额",
     slotsTip: "每个收发通道保持一条连接，名额由设备内存决定",
-    full: (n: number) => `收发通道已达上限（${n}）`,
+    full: "收发名额已满",
     // a Latin name keeps a space before the Chinese that follows it (「QQ 会」, 「微信会」)
     fullBody: (channel: string) =>
-      `把其他通道改为仅发送或停用后，${channel}${/[\x21-\x7e]$/.test(channel) ? " " : ""}会自动开始接收。`,
+      `把其他通道改为仅发送或停用后，${channel}${/[\x21-\x7e]$/.test(channel) ? " " : ""}会自动开始接收`,
     accounts: "授权账号",
     accountsHint: "能给设备下指令的账号",
     expiresIn: "有效期还剩",
@@ -95,12 +95,12 @@ const STRINGS = {
     broken: "Disconnected",
     sendOnly: "Send only",
     disabled: "Disabled",
-    slots: (used: number, n: number) => `Slots ${used} of ${n}`,
+    slots: "Slots",
     slotsTip:
       "Each receiving channel keeps one connection open; the device memory sets how many",
-    full: (n: number) => `Receive slots are full (${n})`,
+    full: "Receive slots are full",
     fullBody: (channel: string) =>
-      `Set another channel to Send only or Disabled and ${channel} starts receiving on its own.`,
+      `Set another channel to Send only or Disabled and ${channel} starts receiving`,
     accounts: "Allowed accounts",
     accountsHint: "Accounts that can command the device",
     expiresIn: "Expires in",
@@ -130,15 +130,18 @@ export interface ModeRowOptions {
 export interface ModeRow {
   /** The 「模式」 row; hidden until {@link ModeRow.update} gets a configured channel with a mode. */
   element: HTMLElement;
+  /** The 「收发名额已满」 caution alert, shown while every receive slot is taken; place it under the header frame. */
+  alert: HTMLElement;
   /** Shows the channel's mode and receive state, or hides the row (`null`, not configured). */
   update(status: ChannelStatus | null): void;
 }
 
 /**
  * The 「模式」 row: one radio card per mode, the receive state badge under them (收发中, 连接中,
- * 等待名额, 连接中断 with the device's message in mono) followed by the slots in use (「名额 1/2」)
- * whenever the device reports them and, while every receive slot is taken, an alert naming the limit. Choosing a mode posts `{mode}` at once; a refusal is
- * toasted and the choice goes back.
+ * 等待名额, 连接中断 with the device's message in mono) followed by the slots in use (the term
+ * 「名额」 and the mono count `1/2`) whenever the device reports them, and, while every receive slot
+ * is taken, a caution alert (`alert`, for under the header frame). Choosing a mode posts `{mode}` at
+ * once; a refusal is toasted and the choice goes back.
  */
 export function modeRow(
   options: ModeRowOptions,
@@ -166,14 +169,21 @@ export function modeRow(
   const state = h("span", { class: "bc-small bc-muted", role: "status" });
   state.style.cssText =
     "display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0";
-  // shown while every receive slot is taken: a standing fact, so an alert rather than a toast
-  const alertTitle = h("span", { class: "bc-alert__title" });
-  const alertBody = h("span", { class: "bc-small bc-muted" });
-  const alertText = h("span", null, alertTitle, alertBody);
+  // shown while every receive slot is taken: a standing fact, so a caution alert rather than a toast
+  const alertText = h(
+    "span",
+    null,
+    h("span", { class: "bc-alert__title" }, s.full),
+    h(
+      "span",
+      { class: "bc-small bc-muted" },
+      s.fullBody(pick(options.channel, lang)),
+    ),
+  );
   alertText.style.cssText =
     "display:flex;flex-direction:column;gap:2px;min-width:0";
-  const alertMark = icon(ICON_CIRCLE_ALERT);
-  alertMark.style.cssText = "flex:none;margin-top:2px";
+  const alertMark = icon(ICON_TRIANGLE_ALERT);
+  alertMark.style.cssText = "flex:none;margin-top:2px;color:var(--warning)";
   const alert = h(
     "div",
     { class: "bc-alert", role: "status" },
@@ -181,8 +191,8 @@ export function modeRow(
     alertText,
   );
   const body = h("div", null, group, state);
-  body.style.cssText = "display:flex;flex-direction:column;gap:10px";
-  const element = row(s.mode, s.modeHint, lang, body, alert);
+  body.style.cssText = "display:flex;flex-direction:column;gap:var(--space-3)";
+  const element = row(s.mode, s.modeHint, lang, body);
   show(element, false);
 
   /** The mode the device holds, and the one being posted. */
@@ -235,7 +245,7 @@ export function modeRow(
     let label: string = s.connecting;
     let signal = false;
     let extra: Node | null = null;
-    let full: number | null = null;
+    let full = false;
     // a device that predates `slots` reports only the limit, and only with no_slot
     let slots =
       status.mode === "send_receive" && receive?.slots ? receive.slots : null;
@@ -248,7 +258,7 @@ export function modeRow(
       label = s.waiting;
       const capacity = receive.capacity ?? receive.slots?.capacity;
       if (typeof capacity === "number") {
-        full = capacity;
+        full = true;
         slots ??= { in_use: capacity, capacity };
       }
     } else if (receive?.state === "error") {
@@ -258,24 +268,21 @@ export function modeRow(
         (extra as HTMLElement).style.overflowWrap = "anywhere";
       }
     }
-    let count: HTMLElement | null = null;
-    if (slots) {
-      count = term(s.slots(slots.in_use, slots.capacity), s.slotsTip, lang);
-      count.classList.add("bc-mono");
-    }
-    state.replaceChildren(
-      badge(label, lang, { signal }),
-      count ?? "",
-      extra ?? "",
-    );
-    if (full !== null) {
-      alertTitle.textContent = s.full(full);
-      alertBody.textContent = s.fullBody(pick(options.channel, lang));
-    }
-    show(alert, full !== null);
+    // the term is the word 名额; the count beside it is a machine value
+    const count = slots
+      ? h(
+          "span",
+          null,
+          term(s.slots, s.slotsTip, lang),
+          " ",
+          h("span", { class: "bc-mono" }, `${slots.in_use}/${slots.capacity}`),
+        )
+      : "";
+    state.replaceChildren(badge(label, lang, { signal }), count, extra ?? "");
+    show(alert, full);
   };
   show(alert, false);
-  return { element, update };
+  return { element, alert, update };
 }
 
 export interface AccountsRowOptions {
@@ -338,7 +345,7 @@ export function accountsRow(
 
   const line = (first: boolean, ...children: (Node | string)[]) => {
     const node = h("div", null, ...children);
-    node.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 16px${first ? "" : ";border-top:1px solid var(--border)"}`;
+    node.style.cssText = `display:flex;align-items:center;gap:12px;padding:12px 16px${first ? "" : ";border-top:1px solid var(--border)"}`;
     return node;
   };
 
@@ -351,7 +358,7 @@ export function accountsRow(
       const countdown = h("span", { class: "bc-mono" }, clock(left()));
       const code = h(
         "span",
-        { class: "bc-page-title bc-mono" },
+        { class: "bc-code-display" },
         options.command
           ? options.command(reply.pairing.code)
           : reply.pairing.code,
@@ -459,6 +466,8 @@ export interface ChannelInboundOptions {
 export interface ChannelInbound {
   /** The 「模式」 and 「授权账号」 rows, hidden until the channel is configured. */
   rows: [HTMLElement, HTMLElement];
+  /** The no-slot caution alert: put it in the page under the header frame, before the form. */
+  alert: HTMLElement;
   /** Puts the rows into `form` before its 「高级」 fold (or its footer when it has none). */
   attach(form: Pick<SettingsForm, "element" | "footer">): void;
   /** Shows a channel state the page read itself (the mount's `readChannel`). */
@@ -540,6 +549,7 @@ export function channelInbound(
 
   return {
     rows: [mode.element, accounts.element],
+    alert: mode.alert,
     attach(form) {
       const fold = form.element
         .querySelector(".bc-disclosure")

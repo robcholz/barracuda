@@ -51,10 +51,16 @@ test("renders the design in Chinese: brand title, riffle, Bot row with link, ver
     [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
       .filter((row) => row.style.display !== "none")
       .map((row) => row.querySelector(".bc-title")?.textContent),
-  ).toEqual(["Bot", undefined]);
+  ).toEqual(["机器人", undefined]);
   expect(root.querySelector(".bc-row__label .bc-muted")?.textContent).toBe(
     "在 @BotFather 发送 /newbot 获得 Token",
   );
+  // the handle and the command are machine values
+  expect(
+    [...root.querySelectorAll(".bc-row__label .bc-muted .bc-mono")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["@BotFather", "/newbot"]);
   const link = root.querySelector<HTMLAnchorElement>(".bc-row__label a")!;
   expect([link.textContent, link.getAttribute("href")]).toEqual([
     "打开 @BotFather",
@@ -106,7 +112,9 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
     "Barracuda Home",
   );
   expect(card.textContent).toContain("@barracuda_home_bot");
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已验证");
+  expect(
+    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已验证");
   const chat = [...page.root.querySelectorAll<HTMLElement>(".bc-row")].find(
     (row) => row.textContent?.startsWith("开始对话"),
   )!;
@@ -137,9 +145,11 @@ test("Telegram's refusal is shown on the token field; the 高级 API base is use
     .input("token")
     .closest(".bc-field")!
     .querySelector(".bc-hint--error")!;
+  // the field says what to do, then Telegram's status in mono
   expect(error.textContent).toBe(
-    "Telegram 拒绝了这个 Token · 401 Unauthorized",
+    "检查 Bot Token 后重新验证。 · 401 Unauthorized",
   );
+  expect(error.querySelector(".bc-mono")?.textContent).toBe("401 Unauthorized");
   expect(page.input("token").getAttribute("aria-invalid")).toBe("true");
 });
 
@@ -203,9 +213,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(current.querySelector(".bc-option-title")?.textContent).toBe(
     "Telegram",
   );
-  expect(current.querySelector(".bc-badge--signal")?.textContent).toBe(
-    "Configured",
-  );
+  expect(
+    current.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("Configured");
   shown.unmount();
 
   harness.reply = async () => json(200, { configured: false });
@@ -222,7 +232,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   await page.submit();
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
-  expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+  expect(
+    row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已配置");
 });
 
 /** The device's channel state and allowed accounts, as a receiving Telegram channel answers them. */
@@ -259,7 +271,7 @@ test("a configured channel shows its mode, the /start code and the allowed accou
       [...page.root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
         .filter((row) => row.style.display !== "none")
         .map((row) => row.querySelector(".bc-title")?.textContent),
-    ).toEqual(["通道", "Bot", "模式", "授权账号", undefined]);
+    ).toEqual(["通道", "机器人", "模式", "授权账号", undefined]);
     expect(
       page.query<HTMLInputElement>('input[value="send_receive"]')?.checked,
     ).toBe(true);
@@ -267,7 +279,7 @@ test("a configured channel shows its mode, the /start code and the allowed accou
       page.query("[role=radiogroup] + [role=status] .bc-badge--signal")
         ?.textContent,
     ).toBe("收发中");
-    const code = page.query(".bc-form .bc-page-title.bc-mono")!;
+    const code = page.query(".bc-form .bc-code-display")!;
     expect(code.textContent).toBe("/start 482913");
     expect(code.previousElementSibling?.textContent).toBe(
       "在 Telegram 里给 Bot 发送",

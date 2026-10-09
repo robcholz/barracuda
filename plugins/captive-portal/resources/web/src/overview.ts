@@ -71,14 +71,15 @@ export function titledLabel(entry: WebEntry, label: string, lang: Lang) {
 
 /**
  * A group's 「开始使用」 step is done when one of its entries is `ready`. The line names it: the
- * device step with its detail (「已连接 HomeNet」), others by title and label. Entries with a label
- * are preferred, so the line names what the entry reports.
+ * device step with its detail in mono (「已连接 `HomeNet`」), others by title and label. Entries
+ * with a label are preferred, so the line names what the entry reports. Returns the words and the
+ * machine value, if any.
  */
 export function stepDone(
   members: readonly WebEntry[],
   status: StatusOf,
   lang: Lang,
-): string | null {
+): [string, string?] | null {
   const ready = members
     .map((entry) => ({ entry, status: status(entry.id) }))
     .filter(
@@ -89,10 +90,12 @@ export function stepDone(
   if (!pick) return null;
   const { entry, status: found } = pick;
   if (entry.group === "device" && found.detail)
-    return STRINGS[lang].connectedTo(found.detail);
-  return [entry.title[lang], found.label?.[lang], found.detail]
-    .filter(Boolean)
-    .join(" · ");
+    return [STRINGS[lang].connectedTo, found.detail];
+  return [
+    [entry.title[lang], found.label?.[lang], found.detail]
+      .filter(Boolean)
+      .join(" · "),
+  ];
 }
 
 /** An empty aside slot; {@link paintStatus} fills it. */
@@ -136,6 +139,11 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
         : (device.status.detail ?? device.status.label?.[lang]));
     node.textContent = value || "";
     node.style.display = value ? "" : "none";
+    // a detail (the network name) is a machine value; a label is words
+    node.classList.toggle(
+      "bc-mono",
+      node.tagName === "DD" && !!device?.status.detail,
+    );
   }
   for (const item of root.querySelectorAll<HTMLElement>("[data-step]")) {
     const group = item.getAttribute("data-step") as WebGroup;
@@ -149,7 +157,11 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
     if (link) link.style.display = done ? "none" : "";
     if (line) {
       line.style.display = done ? "" : "none";
-      line.lastElementChild!.textContent = done ?? "";
+      line.lastElementChild!.replaceChildren(
+        done?.[0] ?? "",
+        done?.[1] ? " " : "",
+        done?.[1] ? h("span", { class: "bc-mono" }, done[1]) : "",
+      );
     }
   }
 }
@@ -307,16 +319,17 @@ export function renderOverview(view: OverviewView) {
         ),
         h(
           "dl",
-          { class: "bc-kv bc-mono portal-hero__kv" },
+          { class: "bc-kv portal-hero__kv" },
           h("dt", { "data-status-device": "" }),
           h("dd", { "data-status-device": "" }),
           h("dt", null, term(t.kvPages, t.pagesTip)),
-          h("dd", null, String(entries.length)),
+          h("dd", { class: "bc-mono" }, String(entries.length)),
           h("dt", null, t.kvConn),
           h(
             "dd",
             null,
-            plain ? ["HTTP · ", term(t.plain, t.plainTip)] : "HTTPS",
+            h("span", { class: "bc-mono" }, plain ? "HTTP" : "HTTPS"),
+            plain ? ` · ${t.plain}` : null,
           ),
         ),
       ),
@@ -347,7 +360,7 @@ export function renderOverview(view: OverviewView) {
                 h(
                   "span",
                   { class: "bc-small portal-step__done" },
-                  icon(ICON_CHECK, 14),
+                  icon(ICON_CHECK),
                   h("span"),
                 ),
                 h(
@@ -357,7 +370,7 @@ export function renderOverview(view: OverviewView) {
                     href: `#${members[0].id}`,
                   },
                   stepLink(group, members[0]),
-                  icon(ICON_ARROW_RIGHT, 14),
+                  icon(ICON_ARROW_RIGHT),
                 ),
               ),
             ),
@@ -400,7 +413,7 @@ export function renderPhoneHome(view: OverviewView) {
       "section",
       { class: "portal-phone-hero" },
       h("hl-figure", { name: "board", "aria-label": t.figAlt }),
-      h("h1", { class: "bc-page-title" }, t.overview),
+      h("h1", { class: "bc-mobile-title" }, t.overview),
       h("p", { class: "bc-lead" }, t.phoneLead),
     ),
     groupsOf(entries).map(({ group, entries: members }) => [

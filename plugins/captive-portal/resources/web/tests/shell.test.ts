@@ -311,14 +311,14 @@ test("an unknown or vanished entry shows the unavailable state, and comes back",
   expect(h.$(".portal-status")?.getAttribute("data-status")).toBe(
     "unavailable",
   );
-  expect(h.$(".portal-status__title")?.textContent).toBe("nope 模块已停用");
+  expect(h.$(".portal-status__title")?.textContent).toBe("nope 插件已停用");
 
   await h.go("#imessage-qq");
   expect(h.$(".module-text")?.textContent).toBe("imessage-qq:zh");
   h.records.value = NINE.filter((entry) => entry.id !== "imessage-qq");
   await h.portal.refresh();
   expect(h.cleanups).toEqual(["imessage-qq"]);
-  expect(h.$(".portal-status__title")?.textContent).toBe("QQ 模块已停用");
+  expect(h.$(".portal-status__title")?.textContent).toBe("QQ 插件已停用");
   expect(h.$(".portal-status__text .bc-lead")?.textContent).toBe(
     "在设备上启用 QQ 插件后刷新。",
   );
@@ -388,7 +388,7 @@ test("a stored language and theme apply at start; the theme control switches and
   expect(h.$(".bc-display + .bc-lead, .portal-hero__lead")?.textContent).toBe(
     "Set up this device's network, models and message channels.",
   );
-  const buttons = h.$$(".bc-segmented button");
+  const buttons = h.$$(".portal-topbar--desktop .bc-segmented button");
   expect(buttons.map((node) => node.getAttribute("aria-pressed"))).toEqual([
     "false",
     "true",
@@ -419,11 +419,12 @@ test("a failed import shows the failed state; retry loads again", async () => {
     h.modules.set("/portal/assets/wifi/entry.js", failing);
     await h.go("#wifi");
     expect(h.$(".portal-status")?.getAttribute("data-status")).toBe("failed");
-    expect(h.$(".portal-status__title")?.textContent).toBe("模块加载失败");
+    expect(h.$(".portal-status__title")?.textContent).toBe("页面加载失败");
     expect(h.$("main")?.hasAttribute("aria-busy")).toBe(false);
     fail = false;
     const [back, retry] = h.$$(".portal-status__actions button");
     expect(back.textContent).toBe("返回概览");
+    expect(retry.textContent).toBe("重新加载");
     retry.click();
     await settle();
     expect(h.$(".portal-module")?.textContent).toBe("recovered");
@@ -481,16 +482,20 @@ test("no entries shows the empty state; an unreachable manifest says so and reco
   try {
     const h = await start({ entries: [] });
     expect(h.$(".portal-status")?.getAttribute("data-status")).toBe("empty");
-    expect(h.$(".portal-status__title")?.textContent).toBe(
-      "还没有启用的网页模块",
-    );
+    expect(h.$(".portal-status__title")?.textContent).toBe("还没有插件页面");
+    expect(h.$(".portal-status__actions")?.textContent).toBe("刷新页面列表");
     expect(h.$$(".bc-nav-item")).toHaveLength(1);
     expect(h.$(".portal-badge--offline")).toBeNull();
 
     h.records.offline = true;
     await h.portal.refresh();
     expect(h.$(".portal-status")?.getAttribute("data-status")).toBe("manifest");
+    // a neutral badge in destructive text: no icon, no destructive edge
     expect(h.$(".portal-badge--offline")?.textContent).toBe("连接未就绪");
+    expect(h.$(".portal-badge--offline")?.className).toBe(
+      "bc-badge portal-badge--offline",
+    );
+    expect(h.$(".portal-badge--offline svg")).toBeNull();
 
     h.records.offline = false;
     h.records.value = NINE;
@@ -550,13 +555,32 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
   expect(h.$(".portal-topbar--phone .portal-brand-name")?.textContent).toBe(
     "Barracuda",
   );
-  (h.$(".portal-phone-lang") as HTMLButtonElement).click();
+  expect(h.$(".portal-phone-home h1")?.className).toBe("bc-mobile-title");
+  // the phone top bar has the design's LanguageMenu and ThemeToggle, as the desktop one
+  const lang = h.$(".portal-topbar--phone .portal-lang") as HTMLButtonElement;
+  expect(lang.textContent).toBe("简体中文");
+  expect(lang.getAttribute("aria-haspopup")).toBe("menu");
+  lang.click();
+  (
+    h.$('.portal-topbar--phone .bc-menu-item[lang="en"]') as HTMLButtonElement
+  ).click();
   expect(h.$(".portal-phone-home .bc-list-label")?.textContent).toBe("Device");
   await h.go("#wifi");
   expect(h.$(".portal-back")?.getAttribute("href")).toBe("#overview");
   expect(h.$(".portal-back")?.textContent).toBe("Overview");
-  (h.$(".portal-phone-theme") as HTMLButtonElement).click();
+  const theme = h.$$(".portal-topbar--phone .bc-segmented button");
+  expect(theme.map((node) => node.getAttribute("aria-label"))).toEqual([
+    "Light",
+    "Dark",
+    "System",
+  ]);
+  theme[0].click();
   expect(h.window.localStorage.getItem(STORAGE.theme)).toBe("light");
+  expect(
+    h
+      .$(".portal-topbar--phone .bc-segmented [aria-pressed=true]")
+      ?.getAttribute("aria-label"),
+  ).toBe("Light");
 });
 
 const label = (zh: string, en: string) => ({ zh, en });
@@ -599,8 +623,14 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
     "插件页面每个页面由一个插件提供，停用插件后页面随之消失",
     "9",
     "连接",
-    "HTTP · 明文仅在可信网络中提交密钥",
+    "HTTP · 明文",
   ]);
+  // one term in the header; only the machine values are mono
+  expect(h.$$(".portal-hero__kv .bc-term")).toHaveLength(1);
+  expect(h.$(".portal-hero__kv")?.classList.contains("bc-mono")).toBe(false);
+  expect(
+    h.$$(".portal-hero__kv .bc-mono").map((node) => node.textContent),
+  ).toEqual(["HomeNet", "9", "HTTP"]);
   const steps = h.$$(".portal-steps > li");
   const visible = (node: HTMLElement | null) =>
     !!node && node.style.display !== "none";
@@ -613,6 +643,9 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   expect(
     steps.map((step) => step.querySelector(".portal-step__done")?.textContent),
   ).toEqual(["已连接 HomeNet", "模型配置 · 已配置", "Telegram · 已配置"]);
+  expect(
+    steps[0].querySelector(".portal-step__done .bc-mono")?.textContent,
+  ).toBe("HomeNet");
   const aside = (selector: string) => {
     const node = h.$(`${selector} .portal-aside`);
     return visible(node) ? node!.textContent : null;

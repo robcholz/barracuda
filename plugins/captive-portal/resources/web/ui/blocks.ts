@@ -1,5 +1,5 @@
 import type { Lang } from "../src/contract";
-import { h, icon, pick, type Children, type Text } from "./dom";
+import { h, icon, pick, twoDigits, type Children, type Text } from "./dom";
 import { ICON_CHECK, ICON_EXTERNAL_LINK } from "./icons";
 import { qrSvg } from "./qr";
 
@@ -11,14 +11,16 @@ import { qrSvg } from "./qr";
 export interface ResultCardOptions {
   /** What was found: a bot's name, 「微信已绑定」. */
   title: Text;
-  /** The solid green state chip: 「已验证」, 「已连接」. */
+  /** The state badge: 「已验证」, 「已配置」; the signal chip only when {@link ResultCardOptions.live}. */
   badge: Text;
+  /** The badge marks a live connection (「已连接」): the green signal chip instead of a neutral badge. */
+  live?: boolean;
   /** A machine value under the title, in mono (`@barracuda_home_bot`, a URL). */
   sub?: string;
   /** One or two characters in the 40px tile (a name's initial); a check mark when absent. */
   initial?: string;
-  /** Key-value rows under the head; values are mono. */
-  rows?: readonly (readonly [Text, Children])[];
+  /** Key-value rows under the head; values are mono unless the row's third item is `false` (「已启用」). */
+  rows?: readonly (readonly [Text, Children, boolean?])[];
   /** One action under everything, for example an outline `button(…, { size: "sm" })`. */
   action?: Node;
 }
@@ -33,7 +35,7 @@ export function resultCard(
     { class: "bc-option-icon" },
     options.initial ?? icon(ICON_CHECK),
   );
-  tile.style.fontWeight = "600";
+  tile.style.fontWeight = "500";
   const text = h(
     "span",
     null,
@@ -52,32 +54,23 @@ export function resultCard(
     h(
       "span",
       {
-        class: "bc-badge bc-badge--signal",
+        class: `bc-badge${options.live ? " bc-badge--signal" : ""}`,
         style: { flex: "none", whiteSpace: "nowrap" },
       },
       pick(options.badge, lang),
     ),
   );
   head.style.cssText = "display:flex;align-items:center;gap:12px";
-  let rows: HTMLElement | null = null;
-  if (options.rows?.length) {
-    rows = h(
-      "div",
-      null,
-      options.rows.map(([label, value]) => {
-        const line = h(
-          "div",
-          null,
-          h("span", { class: "bc-muted" }, pick(label, lang)),
-          h("span", { class: "bc-mono" }, value),
-        );
-        line.style.cssText =
-          "display:grid;grid-template-columns:120px minmax(0,1fr);padding:8px 0;border-bottom:1px solid var(--border)";
-        return line;
-      }),
-    );
-    rows.style.cssText = "border-top:1px solid var(--border);font-size:13px";
-  }
+  const rows = options.rows?.length
+    ? h(
+        "dl",
+        { class: "bc-kv" },
+        options.rows.map(([label, value, mono = true]) => [
+          h("dt", null, pick(label, lang)),
+          h("dd", { class: mono ? "bc-mono" : undefined }, value),
+        ]),
+      )
+    : null;
   const card = h(
     "div",
     { class: "bc-frame", role: "status" },
@@ -91,8 +84,9 @@ export function resultCard(
 }
 
 /**
- * Numbered steps (`ol`): steps before `done` show a check on the signal fill, step `current`
- * (`aria-current="step"`) is outlined in ink, the rest are muted. `current: -1` marks none.
+ * Numbered steps (`ol`): `radius-sm` tiles with mono numbers (`01`). Steps before `done` show a check
+ * in `success`, step `current` (`aria-current="step"`) fills `muted`, the rest keep the hairline.
+ * `current: -1` marks none.
  */
 export function stepList(
   steps: readonly Text[],
@@ -107,15 +101,15 @@ export function stepList(
       const current = index === state.current;
       const mark = h(
         "span",
-        { "aria-hidden": "true" },
-        done ? icon(ICON_CHECK, 14) : String(index + 1),
+        { class: "bc-mono", "aria-hidden": "true" },
+        done ? icon(ICON_CHECK) : twoDigits(index + 1),
       );
-      mark.style.cssText = `flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:11px;font-size:12px;font-weight:500;${
+      mark.style.cssText = `flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;${
         done
-          ? "background:var(--signal);color:var(--signal-foreground)"
+          ? "color:var(--success)"
           : current
-            ? "border:1px solid var(--foreground);color:var(--foreground)"
-            : "border:1px solid var(--border);color:var(--muted-foreground)"
+            ? "background:var(--muted);color:var(--foreground)"
+            : "color:var(--muted-foreground)"
       }`;
       const label = h("span", null, pick(step, lang));
       label.style.cssText = current
@@ -127,7 +121,7 @@ export function stepList(
         mark,
         label,
       );
-      item.style.cssText = "display:flex;align-items:center;gap:10px";
+      item.style.cssText = "display:flex;align-items:center;gap:var(--space-3)";
       return item;
     }),
   );
@@ -187,7 +181,7 @@ export function qrPlate(
   data: string | null,
   px: number,
   lang: Lang,
-  options: { dim?: Text; padding?: number } = {},
+  options: { dim?: Text } = {},
 ): HTMLElement {
   const code = data === null ? h("div") : h("div", null, qrSvg(data, px));
   code.style.cssText = `width:${px}px;height:${px}px;opacity:${options.dim === undefined ? 1 : 0.08}`;
@@ -197,7 +191,8 @@ export function qrPlate(
     code,
     options.dim === undefined ? null : h("div", null, pick(options.dim, lang)),
   );
-  plate.style.cssText = `position:relative;flex:none;padding:${options.padding ?? 8}px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);color:var(--foreground)`;
+  plate.style.cssText =
+    "position:relative;flex:none;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--background);color:var(--foreground)";
   if (options.dim !== undefined)
     (plate.lastElementChild as HTMLElement).style.cssText =
       "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;font-size:13px;font-weight:500";
@@ -233,7 +228,7 @@ export function qrLink(
   const card = h(
     "div",
     { class: "bc-frame" },
-    qrPlate(url, options.px ?? 120, lang, { padding: 6 }),
+    qrPlate(url, options.px ?? 120, lang),
     text,
   );
   card.style.cssText =

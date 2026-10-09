@@ -81,7 +81,8 @@ test("on mount it starts a login and shows the code, the steps and the expiry", 
   expect(plate(page).querySelector("svg")?.getAttribute("width")).toBe("168");
   expect(plate(page).textContent).toBe("");
   expect(steps(page)).toEqual(["step", null, null]);
-  expect(page.text()).toContain("1用微信扫描二维码2在手机上确认3绑定完成");
+  // step numbers are mono and two digits
+  expect(page.text()).toContain("01用微信扫描二维码02在手机上确认03绑定完成");
   expect(page.text()).toContain("二维码过期还剩 8:00");
   expect(button(page, "换一张二维码")?.className).toContain(
     "bc-button--outline",
@@ -144,7 +145,9 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   expect(page.text()).toContain("这台设备在微信里的 ClawBot");
   const card = page.query(".bc-frame[role=status]")!;
   expect(card.textContent).toContain("微信已绑定");
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已绑定");
+  expect(
+    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已绑定");
   expect(page.toasts).toEqual([{ kind: "success", title: "微信已绑定" }]);
   // linked: the portal reads the channel's status again
   expect(page.refreshes.count).toBe(1);

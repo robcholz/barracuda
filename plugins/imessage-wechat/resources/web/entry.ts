@@ -462,6 +462,7 @@ export const mount = definePage((context) => {
       },
       lang,
     ),
+    inbound.alert,
     form.element,
   );
 });

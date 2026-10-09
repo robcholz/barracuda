@@ -19,11 +19,12 @@ const T = {
   zh: {
     lead: "通过 Telegram Bot 收发消息。",
     submit: "保存并替换通道",
-    botHint: "在 @BotFather 发送 /newbot 获得 Token",
+    bot: "机器人",
+    botHint: "在 `@BotFather` 发送 `/newbot` 获得 Token",
     botLink: "打开 @BotFather",
     verify: "验证",
     verified: "已验证",
-    invalid: "Telegram 拒绝了这个 Token",
+    invalid: "检查 Bot Token 后重新验证。",
     unreachable: "连不上 Telegram，Token 未验证",
     chat: "开始对话",
     chatHint: "用手机扫码，打开和 Bot 的对话",
@@ -35,11 +36,12 @@ const T = {
   en: {
     lead: "Send and receive messages through a Telegram bot.",
     submit: "Save and replace channel",
-    botHint: "Send /newbot to @BotFather to get a token",
+    bot: "Bot",
+    botHint: "Send `/newbot` to `@BotFather` to get a token",
     botLink: "Open @BotFather",
     verify: "Verify",
     verified: "Verified",
-    invalid: "Telegram rejected this token",
+    invalid: "Check the bot token and verify again.",
     unreachable: "Couldn't reach Telegram; the token is not verified",
     chat: "Start a chat",
     chatHint: "Scan with your phone to open a chat with the bot",
@@ -90,7 +92,7 @@ export const mount = definePage((context) => {
       submit: t.submit,
       rows: [
         {
-          title: "Bot",
+          title: t.bot,
           hint: t.botHint,
           link: { label: t.botLink, href: "https://t.me/BotFather" },
           fields: [
@@ -222,6 +224,7 @@ export const mount = definePage((context) => {
       },
       lang,
     ),
+    inbound.alert,
     form.element,
   );
 });

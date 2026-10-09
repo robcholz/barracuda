@@ -672,7 +672,7 @@
   border-left: 1px solid var(--border);
 }
 
-/* Settings form: label-left rows, hairline dividers, a footer with the endpoint */
+/* Settings form: label-left rows, hairline dividers, a footer with the buttons */
 .bc-form {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1126,6 +1126,58 @@
 }
 .bc-toast__title {
   font-weight: 500;
+}
+.bc-icon-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
+}
+.bc-icon-button:hover {
+  background: var(--ghost-hover);
+  color: var(--foreground);
+}
+.bc-icon-button:active {
+  background: var(--ghost-active);
+}
+.bc-icon-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.bc-icon-button .bc-icon {
+  width: 16px;
+  height: 16px;
+}
+.bc-code-display {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.bc-mobile-title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+@media (max-width: 719px) {
+  .bc-input {
+    font-size: 16px;
+  }
 }
 .bc-toast__close {
   flex: none;

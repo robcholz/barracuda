@@ -116,7 +116,6 @@ export function toastDeviceError(
     context.toast({
       kind: "error",
       title: s.noReply,
-      body: s.noReplyBody,
       action: retry && { label: s.retry, run: retry },
     });
     return;

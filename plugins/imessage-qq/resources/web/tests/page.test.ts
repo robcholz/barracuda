@@ -121,7 +121,8 @@ test("QQ's rejection lands on the secret field with its code", async () => {
     .input("app_secret")
     .closest(".bc-field")!
     .querySelector(".bc-hint--error")!;
-  expect(error.textContent).toBe("QQ 开放平台：机器人不存在 · 10004");
+  // the field says what to do; QQ's own words stay in the toast
+  expect(error.textContent).toBe("检查 App ID 和 App Secret。 · 10004");
   expect(error.querySelector(".bc-mono")?.textContent).toBe("10004");
   expect(page.toasts.at(-1)).toEqual({
     kind: "error",
@@ -163,9 +164,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(current.style.display).toBe("");
   expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
   expect(current.querySelector(".bc-option-title")?.textContent).toBe("QQ");
-  expect(current.querySelector(".bc-badge--signal")?.textContent).toBe(
-    "Configured",
-  );
+  expect(
+    current.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("Configured");
   shown.unmount();
 
   harness.reply = async () => json(200, { configured: false });
@@ -183,7 +184,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   await page.submit();
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
-  expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+  expect(
+    row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已配置");
 });
 
 test("with every receive slot taken it says so and names the limit", async () => {
@@ -207,9 +210,9 @@ test("with every receive slot taken it says so and names the limit", async () =>
     [
       "zh",
       [
-        "等待名额名额 2/2",
-        "收发通道已达上限（2）",
-        "把其他通道改为仅发送或停用后，QQ 会自动开始接收。",
+        "等待名额名额",
+        "收发名额已满",
+        "把其他通道改为仅发送或停用后，QQ 会自动开始接收",
         "在 QQ 里给机器人发送482913",
         "QQ 用户c2c:7F3A9B2E41D0移除",
       ],
@@ -217,9 +220,9 @@ test("with every receive slot taken it says so and names the limit", async () =>
     [
       "en",
       [
-        "Waiting for a slotSlots 2 of 2",
-        "Receive slots are full (2)",
-        "Set another channel to Send only or Disabled and QQ starts receiving on its own.",
+        "Waiting for a slotSlots",
+        "Receive slots are full",
+        "Set another channel to Send only or Disabled and QQ starts receiving",
         "In QQ, send the bot482913",
       ],
     ],
@@ -228,8 +231,19 @@ test("with every receive slot taken it says so and names the limit", async () =>
     await settle();
     try {
       for (const phrase of phrases) expect(page.text()).toContain(phrase);
-      expect(page.query(".bc-alert[role=status]")).not.toBeNull();
-      expect(page.query("[role=status] .bc-term.bc-mono")).not.toBeNull();
+      expect(page.text()).not.toContain("开始接收。");
+      // the caution alert sits under the header frame, before the form
+      const alert = page.query<HTMLElement>(
+        ".bc-header + .bc-alert[role=status]",
+      );
+      expect(alert?.style.display).toBe("");
+      expect(alert?.nextElementSibling?.classList.contains("bc-form")).toBe(
+        true,
+      );
+      // the term is the word 名额; the count beside it is mono
+      expect(page.query("[role=status] .bc-term + .bc-mono")?.textContent).toBe(
+        "2/2",
+      );
     } finally {
       page.unmount();
     }

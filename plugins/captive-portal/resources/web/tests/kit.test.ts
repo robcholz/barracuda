@@ -250,11 +250,10 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
     throw new Error("offline");
   };
   expect(await form.submit()).toBe("failed");
-  expect(toasts[2]).toMatchObject({
-    kind: "error",
-    title: "未收到设备确认",
-    body: "配置可能已生效。",
-  });
+  expect(toasts[2]).toMatchObject({ kind: "error", title: "未收到设备确认" });
+  // the toast never carries a disclaimer: the title and the 「重试」 action
+  expect(toasts[2].body).toBeUndefined();
+  expect(toasts[2].action?.label).toBe("重试");
   respond = async () => new Response(null, { status: 204 });
   toasts[2].action?.run();
   await settle();

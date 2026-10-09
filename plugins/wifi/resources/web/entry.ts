@@ -82,17 +82,15 @@ export const STRINGS = {
     managed: "网络由当前平台管理",
     ssid: "网络名称",
     password: "密码",
-    passwordOpen: "密码（开放网络留空）",
     join: "连接",
     joinHint: "连接后，在新网络中重新打开门户。",
     manual: "手动输入网络名称",
     forget: "忘记此网络",
-    forgetDesc: (ssid: string) => `设备会断开 ${ssid}，并开启配置热点`,
+    /** Around the network name, in mono: 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda Setup`」. */
+    forgetA: "设备会断开",
+    forgetB: "，并开启配置热点",
     forgetBtn: "忘记网络",
     phoneCurrent: "当前连接",
-    phoneForget: (ssid: string) => `忘记 ${ssid}`,
-    phoneForgetHint: "忘记后设备会开启配置热点",
-    end: "。",
     joined: (ssid: string) => `已连接 ${ssid}`,
     forgot: (ssid: string) => `已忘记 ${ssid}`,
     statusFailed: "无法读取 Wi-Fi 状态",
@@ -124,18 +122,14 @@ export const STRINGS = {
     managed: "The platform manages the network",
     ssid: "Network name",
     password: "Password",
-    passwordOpen: "Password (leave empty for an open network)",
     join: "Join",
     joinHint: "After joining, reopen the portal on the new network.",
     manual: "Enter a network name",
     forget: "Forget this network",
-    forgetDesc: (ssid: string) =>
-      `The device leaves ${ssid} and turns on the setup hotspot`,
+    forgetA: "The device leaves",
+    forgetB: " and turns on the setup hotspot",
     forgetBtn: "Forget network",
     phoneCurrent: "Current connection",
-    phoneForget: (ssid: string) => `Forget ${ssid}`,
-    phoneForgetHint: "The device then turns on the setup hotspot",
-    end: ".",
     joined: (ssid: string) => `Connected to ${ssid}`,
     forgot: (ssid: string) => `Forgot ${ssid}`,
     statusFailed: "Couldn't read the Wi-Fi status",
@@ -308,12 +302,21 @@ export const mount: PortalModule["mount"] = (root, context) => {
     return ap.state === "starting" ? t.starting : t.off;
   }
 
-  /** The setup hotspot's name, followed by the sentence end, when the device reports it. */
-  function hotspotName() {
+  /**
+   * 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda Setup`」: a fragment, no full stop; the hotspot's
+   * name only when the device reports it.
+   */
+  function forgetText(ssid: string) {
     const ap = status?.access_point;
-    return ap?.state === "started" && ap.ssid
-      ? [" ", mono(ap.ssid, "color: var(--foreground)"), "."]
-      : t.end;
+    const value = (text: string) =>
+      phone ? mono(text) : mono(text, "color: var(--foreground)");
+    return [
+      t.forgetA,
+      " ",
+      value(ssid),
+      t.forgetB,
+      ap?.state === "started" && ap.ssid ? [" ", value(ap.ssid)] : null,
+    ];
   }
 
   function security(network: VisibleNetwork) {
@@ -325,25 +328,35 @@ export const mount: PortalModule["mount"] = (root, context) => {
         class: "bc-small bc-muted",
         style: "display: inline-flex; align-items: center; gap: 6px",
       },
-      icon(ICON_LOCK, 14),
+      icon(ICON_LOCK),
       t.secured,
     );
   }
 
   // ---- join forms
 
+  /**
+   * A join form: a secured network asks for its password, an open one for nothing, and a network
+   * entered by hand for its name and an optional password.
+   */
   function joinForm(network: VisibleNetwork | null): JoinForm {
     const ssidField = network
       ? null
       : fieldControl({ kind: "text", name: "ssid", label: t.ssid }, lang);
-    const passwordLabel = network?.secured ? t.password : t.passwordOpen;
-    const passwordField = fieldControl(
-      { kind: "secret", name: "password", label: passwordLabel },
-      lang,
-    );
-    const password = passwordField.element.querySelector("input")!;
-    password.required = !!network?.secured;
-    password.maxLength = 63;
+    const passwordField =
+      network && !network.secured
+        ? null
+        : fieldControl(
+            {
+              kind: "secret",
+              name: "password",
+              label: t.password,
+              optional: !network,
+            },
+            lang,
+          );
+    const password = passwordField?.element.querySelector("input");
+    if (password) password.maxLength = 63;
     const ssidInput = ssidField?.element.querySelector("input");
     if (ssidInput) ssidInput.maxLength = 32;
     const submit = button(t.join, lang, { type: "submit" });
@@ -352,30 +365,28 @@ export const mount: PortalModule["mount"] = (root, context) => {
       "form",
       { novalidate: true, autocomplete: "off" },
       ssidField?.element,
-      passwordField.element,
+      passwordField?.element,
       submit,
       hint,
     );
     if (phone) {
+      // phone inputs are 16px through the design system, so the browser never zooms into them
       form.style.cssText =
         "display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px";
-      for (const input of form.querySelectorAll("input")) {
+      for (const input of form.querySelectorAll("input"))
         input.style.height = "var(--control-lg)";
-        input.style.fontSize = "16px";
-      }
       for (const control of form.querySelectorAll("button"))
         control.style.height = "var(--control-lg)";
-      hint.style.fontSize = "12px";
     } else {
       form.style.cssText = `display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); padding: 4px 20px 20px ${network ? 76 : 48}px`;
       ssidField?.element.style.setProperty("flex", "1 1 100%");
-      passwordField.element.style.flex = "1 1 260px";
+      passwordField?.element.style.setProperty("flex", "1 1 260px");
       hint.style.flex = "1 1 100%";
     }
 
     const validate = () => {
       const ssid = network ? network.ssid : ssidInput!.value;
-      const secret = password.value;
+      const secret = password?.value ?? "";
       const ssidError = network
         ? null
         : !ssid.trim()
@@ -385,14 +396,14 @@ export const mount: PortalModule["mount"] = (root, context) => {
             : null;
       const passwordError =
         !secret && network?.secured
-          ? kit.required(passwordLabel)
+          ? kit.required(t.password)
           : secret && (bytes(secret) < 8 || bytes(secret) > 63)
             ? t.passwordLength
             : null;
       ssidField?.control.setError(ssidError);
-      passwordField.control.setError(passwordError);
+      passwordField?.control.setError(passwordError);
       if (ssidError) ssidField!.control.focus();
-      else if (passwordError) passwordField.control.focus();
+      else if (passwordError) passwordField!.control.focus();
       return ssidError || passwordError ? null : { ssid, password: secret };
     };
 
@@ -403,8 +414,12 @@ export const mount: PortalModule["mount"] = (root, context) => {
     });
     return {
       element: form,
-      focus: () => (ssidField ?? passwordField).control.focus(),
-      clear: () => passwordField.control.clearSecret(),
+      focus: () => {
+        const first = ssidField ?? passwordField;
+        if (first) first.control.focus();
+        else submit.focus();
+      },
+      clear: () => passwordField?.control.clearSecret(),
     };
   }
 
@@ -513,17 +528,21 @@ export const mount: PortalModule["mount"] = (root, context) => {
   });
   const list = h("div");
   const forgetSlot = h("div");
-  const rescan = h(
-    "button",
-    {
-      class: "bc-button bc-button--outline bc-button--sm",
-      type: "button",
-      onclick: () => void scan(),
-    },
-    icon(ICON_REFRESH),
-  );
   const rescanLabel = h("span");
-  rescan.append(rescanLabel);
+  /** 「重新扫描」: `--sm` in the desktop card header, `control-lg` with an 18px icon on a phone. */
+  const rescanButton = () =>
+    h(
+      "button",
+      {
+        class: `bc-button bc-button--outline${phone ? "" : " bc-button--sm"}`,
+        type: "button",
+        style: phone ? "height: var(--control-lg)" : undefined,
+        onclick: () => void scan(),
+      },
+      icon(ICON_REFRESH, phone ? 18 : undefined),
+      rescanLabel,
+    );
+  let rescan: HTMLButtonElement;
 
   function desktopLayout() {
     const head = header(
@@ -591,24 +610,14 @@ export const mount: PortalModule["mount"] = (root, context) => {
         style:
           "flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0",
       },
-      h(
-        "h1",
-        {
-          class: "bc-page-title",
-          style: "font-size: 26px; line-height: 32px",
-        },
-        "Wi-Fi",
-      ),
+      h("h1", { class: "bc-mobile-title" }, "Wi-Fi"),
       statusSlot,
       networkSlot,
     );
     count.style.fontSize = "";
     return h(
       "div",
-      {
-        style:
-          "display: flex; flex-direction: column; font-size: 15px; line-height: 22px",
-      },
+      { style: "display: flex; flex-direction: column" },
       h(
         "section",
         {
@@ -642,6 +651,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
   function layout() {
     dropForms();
     picked = null;
+    rescan = rescanButton();
     const view = phone ? phoneLayout() : desktopLayout();
     figures.splice(
       0,
@@ -679,7 +689,10 @@ export const mount: PortalModule["mount"] = (root, context) => {
         },
         h(
           "span",
-          { style: "font-weight: 500; overflow-wrap: anywhere" },
+          {
+            class: "bc-mono",
+            style: "font-weight: 500; overflow-wrap: anywhere",
+          },
           network.ssid,
         ),
         current ? badge(t.current, lang) : null,
@@ -731,9 +744,17 @@ export const mount: PortalModule["mount"] = (root, context) => {
       h(
         "span",
         {
-          style: `flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere${open ? "; font-weight: 500" : ""}`,
+          style:
+            "flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere",
         },
-        network.ssid,
+        h(
+          "span",
+          {
+            class: "bc-mono",
+            style: open || current ? "font-weight: 500" : undefined,
+          },
+          network.ssid,
+        ),
         current ? badge(t.current, lang) : null,
       ),
       security(network),
@@ -753,7 +774,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
           );
     return h(
       "li",
-      { style: open ? "background: var(--background-200)" : undefined },
+      { style: open ? "background: var(--sidebar)" : undefined },
       row,
       open ? formFor(network.ssid, network).element : null,
     );
@@ -774,13 +795,13 @@ export const mount: PortalModule["mount"] = (root, context) => {
       },
       icon(ICON_PLUS, phone ? 18 : undefined),
       h("span", { style: "flex: 1 1 auto" }, t.manual),
-      phone ? null : icon(open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT),
+      icon(open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT),
     );
     return h(
       phone ? "li" : "div",
       {
         style: phone
-          ? `border-bottom: 1px solid var(--border)${open ? "; background: var(--background-200)" : ""}`
+          ? `border-bottom: 1px solid var(--border)${open ? "; background: var(--sidebar)" : ""}`
           : open
             ? "background: var(--sidebar); border-radius: 0 0 7px 7px"
             : undefined,
@@ -821,7 +842,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     forgetSlot.replaceChildren();
     if (!canJoin() || status?.station.state !== "connected") return;
     const ssid = status.station.ssid ?? "—";
-    const action = button(phone ? t.phoneForget(ssid) : t.forgetBtn, lang, {
+    const action = button(t.forgetBtn, lang, {
       variant: "danger",
       onClick: () => void forget(),
     });
@@ -832,12 +853,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
         "padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: 8px";
       forgetSlot.append(
         action,
-        h(
-          "span",
-          { class: "bc-hint", style: "font-size: 12px" },
-          t.phoneForgetHint,
-          hotspotName(),
-        ),
+        h("span", { class: "bc-hint" }, forgetText(ssid)),
       );
       return;
     }
@@ -858,12 +874,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
               "flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px",
           },
           h("h2", { id: "wifi-forget", class: "bc-title" }, t.forget),
-          h(
-            "span",
-            { class: "bc-small bc-muted" },
-            t.forgetDesc(ssid),
-            hotspotName(),
-          ),
+          h("span", { class: "bc-small bc-muted" }, forgetText(ssid)),
         ),
         action,
       ),
@@ -876,7 +887,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     const ssid =
       status?.station.state === "connected" ? status.station.ssid : undefined;
     networkSlot.replaceChildren(
-      ssid ? mono(ssid, phone ? "font-size: 14px" : "") : phone ? "" : "—",
+      ssid ? mono(ssid, phone ? "font-size: 13px" : "") : phone ? "" : "—",
     );
     hotspotSlot.replaceChildren(hotspotValue());
     count.textContent = networks ? twoDigits(networks.length) : "";

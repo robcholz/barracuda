@@ -124,10 +124,8 @@ export const mount = definePage((context) => {
               kind: "text",
               name: "model",
               label: { zh: "模型名称", en: "Model" },
-              placeholder: {
-                zh: "服务商使用的模型 ID",
-                en: "The provider's model ID",
-              },
+              // an example ID: the field is mono, so its placeholder is a machine value too
+              placeholder: "gpt-4o-mini",
             },
             { kind: "secret", name: "api_key", label: "API Key" },
           ],

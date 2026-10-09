@@ -88,7 +88,10 @@ async function render(
     });
     inbound.attach(form);
     void readChannel<ChannelStatus>(context, ENDPOINT).then(inbound.apply);
-    return form.element;
+    // as the pages place it: the alert under the header frame, before the form
+    const body = document.createElement("div");
+    body.append(inbound.alert, form.element);
+    return body;
   });
   const page = await harness.render(mount, lang);
   mounted.push(page);
@@ -115,6 +118,17 @@ const modeRow = (page: Page) =>
     ),
   )!;
 const accountsRow = (page: Page) => modeRow(page).nextElementSibling!;
+/** The no-slot alert, which the page places before the form. */
+const pageAlert = (page: Page) =>
+  page.root.querySelector<HTMLElement>(":scope > div > .bc-alert")!;
+/** The slots in use: the term 「名额」 and the mono count beside it (「名额 1/2」). */
+const slotText = (page: Page) => {
+  const term = stateLine(page).querySelector(".bc-term");
+  const count = term?.nextElementSibling;
+  expect(term?.classList.contains("bc-mono")).toBe(false);
+  expect(count?.className).toBe("bc-mono");
+  return term ? `${term.firstChild?.textContent} ${count?.textContent}` : null;
+};
 const stateLine = (page: Page) =>
   modeRow(page).querySelector<HTMLElement>("[role=status]")!;
 const radio = (page: Page, mode: string) =>
@@ -155,19 +169,23 @@ test("a configured channel shows 模式 and 授权账号 before the fold, in the
   expect(stateLine(page).querySelector(".bc-badge--signal")?.textContent).toBe(
     "收发中",
   );
-  expect(mode.querySelector<HTMLElement>(".bc-alert")?.style.display).toBe(
-    "none",
+  expect(mode.querySelector(".bc-alert")).toBeNull();
+  expect(pageAlert(page).style.display).toBe("none");
+  expect(pageAlert(page).nextElementSibling).toBe(
+    page.root.querySelector("form"),
   );
 
   const accounts = accountsRow(page);
   expect(accounts.querySelector(".bc-row__label")?.textContent).toBe(
     "授权账号能给设备下指令的账号",
   );
-  const code = accounts.querySelector(".bc-page-title.bc-mono")!;
+  // the binding code is the design's code display, not a second page title
+  expect(accounts.querySelector(".bc-page-title")).toBeNull();
+  const code = accounts.querySelector(".bc-code-display")!;
   expect(code.textContent).toBe("482913");
   expect(code.previousElementSibling?.textContent).toBe("在 QQ 里给机器人发送");
   expect(accounts.textContent).toContain("有效期还剩 9:41");
-  expect(accounts.querySelector(".bc-mono:not(.bc-page-title)")).not.toBeNull();
+  expect(accounts.querySelector(".bc-mono")?.textContent).toBe("9:41");
   expect(accounts.textContent).toContain("换一个绑定码");
   expect(accounts.textContent).toContain("QQ 用户c2c:7F3A9B2E41D0移除");
   expect(
@@ -204,7 +222,7 @@ test("in English, with the Telegram command and only the modes a channel offers"
   expect(accounts.textContent).toContain(
     "Accounts that can command the device",
   );
-  expect(accounts.querySelector(".bc-page-title")?.textContent).toBe(
+  expect(accounts.querySelector(".bc-code-display")?.textContent).toBe(
     "/start 012345",
   );
   expect(accounts.textContent).toContain("Expires in 10:00");
@@ -279,36 +297,39 @@ test("the receive state badge: connecting, waiting for a slot with the limit, di
   };
   const full = await render("zh");
   const slots = stateLine(full).querySelector(".bc-term")!;
-  expect(slots.classList.contains("bc-mono")).toBe(true);
   expect(slots.getAttribute("tabindex")).toBe("0");
-  expect(slots.firstChild?.textContent).toBe("名额 2/2");
+  expect(slotText(full)).toBe("名额 2/2");
   expect(slots.querySelector(".bc-tooltip")?.textContent).toBe(
     "每个收发通道保持一条连接，名额由设备内存决定",
   );
   expect(stateLine(full).querySelector(".bc-badge")?.textContent).toBe(
     "等待名额",
   );
-  const alert = modeRow(full).querySelector<HTMLElement>(".bc-alert")!;
+  // a caution alert under the header frame: triangle-alert in the warning colour, no full stop
+  const alert = pageAlert(full);
   expect(alert.style.display).toBe("");
+  expect(alert.getAttribute("role")).toBe("status");
+  expect(alert.querySelector("svg")?.style.color).toBe("var(--warning)");
   expect(alert.querySelector(".bc-alert__title")?.textContent).toBe(
-    "收发通道已达上限（2）",
+    "收发名额已满",
   );
-  expect(alert.textContent).toContain(
-    "把其他通道改为仅发送或停用后，QQ 会自动开始接收。",
+  expect(alert.textContent).toEndWith(
+    "把其他通道改为仅发送或停用后，QQ 会自动开始接收",
   );
   full.unmount();
 
   const fullEn = await render("en", { channel: "WeChat" });
-  expect(stateLine(fullEn).textContent).toContain(
-    "Waiting for a slotSlots 2 of 2",
+  expect(stateLine(fullEn).querySelector(".bc-badge")?.textContent).toBe(
+    "Waiting for a slot",
   );
-  expect(modeRow(fullEn).querySelector(".bc-alert")?.textContent).toBe(
-    "Receive slots are full (2)Set another channel to Send only or Disabled and WeChat starts receiving on its own.",
+  expect(slotText(fullEn)).toBe("Slots 2/2");
+  expect(pageAlert(fullEn).textContent).toBe(
+    "Receive slots are fullSet another channel to Send only or Disabled and WeChat starts receiving",
   );
   fullEn.unmount();
   const fullWechat = await render("zh", { channel: "微信" });
-  expect(modeRow(fullWechat).querySelector(".bc-alert")?.textContent).toContain(
-    "停用后，微信会自动开始接收。",
+  expect(pageAlert(fullWechat).textContent).toEndWith(
+    "停用后，微信会自动开始接收",
   );
   fullWechat.unmount();
 
@@ -335,17 +356,14 @@ test("the slots in use follow the receive badge whenever the device reports them
     owners: { count: 1 },
   };
   const receiving = await render("zh");
-  expect(stateLine(receiving).textContent).toStartWith("收发中名额 1/2");
+  expect(stateLine(receiving).firstElementChild?.textContent).toBe("收发中");
   const slots = stateLine(receiving).querySelector(".bc-term")!;
-  expect(slots.classList.contains("bc-mono")).toBe(true);
   expect(slots.getAttribute("tabindex")).toBe("0");
-  expect(slots.firstChild?.textContent).toBe("名额 1/2");
+  expect(slotText(receiving)).toBe("名额 1/2");
   expect(slots.querySelector(".bc-tooltip")?.textContent).toBe(
     "每个收发通道保持一条连接，名额由设备内存决定",
   );
-  expect(
-    modeRow(receiving).querySelector<HTMLElement>(".bc-alert")!.style.display,
-  ).toBe("none");
+  expect(pageAlert(receiving).style.display).toBe("none");
   receiving.unmount();
 
   status = {
@@ -355,7 +373,8 @@ test("the slots in use follow the receive badge whenever the device reports them
     owners: { count: 1 },
   };
   const starting = await render("en");
-  expect(stateLine(starting).textContent).toStartWith("ConnectingSlots 2 of 2");
+  expect(stateLine(starting).firstElementChild?.textContent).toBe("Connecting");
+  expect(slotText(starting)).toBe("Slots 2/2");
   starting.unmount();
 
   status = {
@@ -371,9 +390,7 @@ test("the slots in use follow the receive badge whenever the device reports them
   const broken = await render("zh");
   const line = stateLine(broken);
   expect(line.querySelector(".bc-badge")?.textContent).toBe("连接中断");
-  expect(line.querySelector(".bc-term")?.firstChild?.textContent).toBe(
-    "名额 1/3",
-  );
+  expect(slotText(broken)).toBe("名额 1/3");
   expect(line.lastElementChild?.textContent).toBe(
     "Conflict: terminated by other getUpdates request",
   );
@@ -392,13 +409,11 @@ test("the slots in use follow the receive badge whenever the device reports them
   };
   const full = await render("zh");
   expect(stateLine(full).querySelectorAll(".bc-term")).toHaveLength(1);
-  expect(
-    stateLine(full).querySelector(".bc-term")?.firstChild?.textContent,
-  ).toBe("名额 2/2");
-  const alert = modeRow(full).querySelector<HTMLElement>(".bc-alert")!;
+  expect(slotText(full)).toBe("名额 2/2");
+  const alert = pageAlert(full);
   expect(alert.style.display).toBe("");
   expect(alert.querySelector(".bc-alert__title")?.textContent).toBe(
-    "收发通道已达上限（2）",
+    "收发名额已满",
   );
   full.unmount();
 
@@ -453,8 +468,9 @@ test("a full receive pool (409 no_slot) still saves the mode and shows the limit
   ]);
   expect(page.toasts).toEqual([]);
   expect(radio(page, "send_receive").checked).toBe(true);
-  expect(modeRow(page).querySelector(".bc-alert__title")?.textContent).toBe(
-    "收发通道已达上限（2）",
+  expect(pageAlert(page).style.display).toBe("");
+  expect(pageAlert(page).querySelector(".bc-alert__title")?.textContent).toBe(
+    "收发名额已满",
   );
   expect(page.refreshes.count).toBe(1);
 });
@@ -506,7 +522,7 @@ test("while receiving, the channel is read every 5 s; the badge, the shell and t
   harness.calls.length = 0;
   await advance(5_000);
   expect(requests()).toEqual([`GET ${ENDPOINT}`, `GET ${ENDPOINT}/owners`]);
-  expect(accountsRow(page).querySelector(".bc-page-title")?.textContent).toBe(
+  expect(accountsRow(page).querySelector(".bc-code-display")?.textContent).toBe(
     "730055",
   );
   // an account without a label shows its ID, in mono
@@ -557,7 +573,7 @@ test("the code counts down locally and is read again when it expires", async () 
   owners = { ...owners, pairing: { code: "555000", expires_in: 600 } };
   await advance(2_000);
   expect(requests()).toEqual([`GET ${ENDPOINT}/owners`]);
-  expect(accountsRow(page).querySelector(".bc-page-title")?.textContent).toBe(
+  expect(accountsRow(page).querySelector(".bc-code-display")?.textContent).toBe(
     "555000",
   );
   expect(accountsRow(page).textContent).toContain("有效期还剩 10:00");
@@ -573,7 +589,7 @@ test("换一个绑定码 and 移除 post at once, without asking, and read the l
     `POST ${ENDPOINT}/owners {"rotate":true}`,
     `GET ${ENDPOINT}/owners`,
   ]);
-  expect(accountsRow(page).querySelector(".bc-page-title")?.textContent).toBe(
+  expect(accountsRow(page).querySelector(".bc-code-display")?.textContent).toBe(
     "100200",
   );
 
@@ -602,7 +618,7 @@ test("pairing: null (a full list) hides the code box", async () => {
   owners = { ...owners, pairing: null };
   const page = await render("zh");
   const accounts = accountsRow(page);
-  expect(accounts.querySelector(".bc-page-title")).toBeNull();
+  expect(accounts.querySelector(".bc-code-display")).toBeNull();
   expect(accounts.textContent).not.toContain("换一个绑定码");
   expect(accounts.textContent).toContain("QQ 用户");
   const first = accounts.querySelector<HTMLElement>(".bc-frame > div")!;

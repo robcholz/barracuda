@@ -112,6 +112,12 @@ test("测试连接 reads the server info and sets the Private API switch to matc
   expect(card.textContent).toContain("服务器版本1.9.9");
   expect(card.textContent).toContain("macOS15.5");
   expect(card.textContent).toContain("Private API未启用");
+  // the server's facts are a key-value table: versions mono, the Private API state in words
+  expect(
+    [...card.querySelectorAll(".bc-kv dd")].map((node) =>
+      node.classList.contains("bc-mono"),
+    ),
+  ).toEqual([true, true, false]);
   expect(privateApi(page.root).getAttribute("aria-checked")).toBe("false");
 
   harness.reply = async () => json(200, INFO(true));
@@ -142,8 +148,12 @@ test("a refused password is shown on the URL field", async () => {
     .input("server_url")
     .closest(".bc-field")!
     .querySelector(".bc-hint--error")!;
+  // the field says what to do; the server's status and words follow in mono
   expect(error.textContent).toBe(
-    "BlueBubbles Server: You are not authorized to access this resource · 401",
+    "Check the server URL and password, then test again. · 401 You are not authorized to access this resource",
+  );
+  expect(error.querySelector(".bc-mono")?.textContent).toBe(
+    "401 You are not authorized to access this resource",
   );
 });
 
@@ -202,9 +212,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(current.querySelector(".bc-option-title")?.textContent).toBe(
     "BlueBubbles",
   );
-  expect(current.querySelector(".bc-badge--signal")?.textContent).toBe(
-    "Configured",
-  );
+  expect(
+    current.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("Configured");
   shown.unmount();
 
   harness.reply = async () => json(200, { configured: false });
@@ -222,7 +232,9 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   await page.submit();
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
-  expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+  expect(
+    row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已配置");
 });
 
 test("a configured channel shows its mode and the code to send from iMessage", async () => {

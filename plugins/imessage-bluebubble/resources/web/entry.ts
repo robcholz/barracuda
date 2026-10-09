@@ -26,7 +26,7 @@ const T = {
     version: "服务器版本",
     enabled: "已启用",
     disabled: "未启用",
-    rejected: "BlueBubbles Server：",
+    rejected: "检查服务器 URL 和密码后重新测试。",
     unreachable: "连不上这台服务器，连接未测试",
     options: "选项",
     optionsHint: "需要服务器已启用 Private API",
@@ -49,7 +49,7 @@ const T = {
     version: "Server",
     enabled: "Enabled",
     disabled: "Disabled",
-    rejected: "BlueBubbles Server: ",
+    rejected: "Check the server URL and password, then test again.",
     unreachable: "Couldn't reach the server; the connection is not tested",
     options: "Options",
     optionsHint: "Needs the Private API enabled on the server",
@@ -214,24 +214,37 @@ export const mount = definePage((context) => {
       if (mine !== run || context.signal.aborted) return;
       const info = reply.data;
       if (!response.ok || !info) {
+        // the field says what to do; the server's status and words follow in mono
         form.setError(
           "server_url",
-          `${t.rejected}${reply.message ?? response.statusText}`,
-          String(response.status),
+          t.rejected,
+          [response.status, reply.message ?? response.statusText]
+            .filter(Boolean)
+            .join(" "),
         );
         return;
       }
-      const rows: [string, string][] = [];
+      const rows: [string, string, boolean?][] = [];
       if (info.server_version) rows.push([t.version, info.server_version]);
       if (info.os_version) rows.push(["macOS", info.os_version]);
       if (typeof info.private_api === "boolean") {
-        rows.push(["Private API", info.private_api ? t.enabled : t.disabled]);
+        rows.push([
+          "Private API",
+          info.private_api ? t.enabled : t.disabled,
+          false,
+        ]);
         privateApi.setAttribute("aria-checked", String(info.private_api));
         if (info.private_api) optionsHint.textContent = t.matched;
       }
       result.replaceChildren(
         resultCard(
-          { title: "BlueBubbles Server", badge: t.connected, sub: base, rows },
+          {
+            title: "BlueBubbles Server",
+            badge: t.connected,
+            live: true,
+            sub: base,
+            rows,
+          },
           lang,
         ),
       );
@@ -257,6 +270,7 @@ export const mount = definePage((context) => {
       },
       lang,
     ),
+    inbound.alert,
     form.element,
   );
 });

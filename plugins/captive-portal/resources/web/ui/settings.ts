@@ -218,7 +218,6 @@ export async function submitJson(
     context.toast({
       kind: "error",
       title: s.noReply,
-      body: s.noReplyBody,
       action: options.retry && { label: s.retry, run: options.retry },
     });
     return "failed";
@@ -651,8 +650,8 @@ export function settingsForm(
     let open = advanced.open ?? false;
     const body = h("div", null, advanced.fields.map(build));
     body.style.cssText = advanced.columns
-      ? `display:grid;grid-template-columns:${fitColumns(advanced.columns, 160, "var(--space-3)")};gap:var(--space-3);padding-top:4px`
-      : "display:flex;flex-direction:column;gap:16px;padding-top:4px";
+      ? `display:grid;grid-template-columns:${fitColumns(advanced.columns, 160, "var(--space-4)")};gap:var(--space-4);padding-top:4px`
+      : "display:flex;flex-direction:column;gap:var(--space-4);padding-top:4px";
     const chevron = icon(ICON_CHEVRON_RIGHT);
     const disclosure = h(
       "button",

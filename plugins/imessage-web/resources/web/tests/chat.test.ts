@@ -137,6 +137,12 @@ test("sends WebClientFrame JSON and validates the byte limit", () => {
   expect(input.hasAttribute("aria-invalid")).toBe(false);
   expect(root.querySelector(".bc-bubble")!.textContent).toBe("hello");
   expect(root.textContent).toContain("已发送");
+  // 已发送 is plain status text: the composer's 临时会话 is this screen's term
+  expect(
+    [...root.querySelectorAll(".bc-term")].map(
+      (node) => node.firstChild?.textContent,
+    ),
+  ).toEqual(["临时会话"]);
   expect(root.textContent).not.toContain("还没有消息");
 });
 
@@ -196,10 +202,20 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   expect(tool.getAttribute("aria-expanded")).toBe("true");
   expect(root.textContent).toContain("HTTP 503");
   expect(root.textContent).toContain("第 1 步 · 输入 1,284 · 输出 212 tokens");
+  // words in sans, the numbers and the unit in mono
+  expect(
+    [...root.querySelectorAll(".bc-reply ~ div .bc-mono")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["1", "1,284", "212 tokens"]);
 
-  // reply to the turn
+  // reply to the turn: the design's inline action, cancelled with the small icon button
+  expect(button("回复").className).toBe("bc-fold-link");
   button("回复").click();
   expect(root.textContent).toContain("回复 Barracuda");
+  expect(
+    root.querySelector(".bc-icon-button")?.getAttribute("aria-label"),
+  ).toBe("取消回复");
   submit("后天呢？");
   expect(JSON.parse(sent[1])).toEqual({ text: "后天呢？", reply_to: "web-1" });
   expect(root.querySelectorAll(".bc-bubble")).toHaveLength(2);
@@ -258,8 +274,13 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   ws.emit("message.end", { error: "worker_stopped", message_id: "web-3" });
   expect(root.textContent).toContain("这一轮出错");
   expect(root.textContent).toContain("429 Too Many Requests");
-  expect(root.textContent).toContain("未完成 · 事件流中断");
-  expect(root.textContent).toContain("worker_stopped");
+  expect(root.textContent).toContain("未完成 · 连接中断");
+  // the device's internal reason stays off the page
+  expect(root.textContent).not.toContain("worker_stopped");
+  // the failed turn is a record in the log
+  expect(
+    root.querySelector("[role=log] .bc-alert--error")?.textContent,
+  ).toContain("这一轮出错");
 
   ws.emit("message.file", {
     caption: "路线",
@@ -294,7 +315,9 @@ test("a dropped connection counts unconfirmed sends and reconnects on request", 
     reply_to: "web-in-1",
   });
   socket().dispatchEvent(new NativeEvent("close"));
-  expect(root.textContent).toContain("连接已中断 · 1 条未确认");
+  expect(root.textContent).toContain(
+    "连接已中断 · 1 条消息未确认，重新连接后再发送",
+  );
   expect(input.disabled).toBe(true);
   expect(toasts).toHaveLength(0);
   button("重新连接").click();

@@ -97,6 +97,8 @@ test("qrPlate stays light in either theme and dims the code under a label", () =
   });
   expect(plate.getAttribute("data-theme")).toBe("light");
   expect(plate.style.background).toBe("var(--background)");
+  // nested in a frame: radius-sm
+  expect(plate.style.borderRadius).toBe("var(--radius-sm)");
   expect(plate.querySelector("svg")?.getAttribute("width")).toBe("168");
   expect(plate.textContent).toBe("Scanned");
   expect((plate.firstElementChild as HTMLElement).style.opacity).toBe("0.08");
@@ -118,16 +120,23 @@ test("qrLink shows the URL in mono and opens it in a new tab", () => {
   expect(open.getAttribute("rel")).toBe("noreferrer");
   expect(open.textContent).toBe("在 Telegram 中打开");
   expect(card.querySelector("[data-theme=light] svg")).not.toBeNull();
+  // the same 8px plate as WeChat's
+  expect(
+    card.querySelector<HTMLElement>("[data-theme=light]")?.style.padding,
+  ).toBe("8px");
 });
 
-test("resultCard: initial or check tile, mono sub, signal badge, rows and one action", () => {
+test("resultCard: initial or check tile, mono sub, neutral or live badge, rows and one action", () => {
   const card = resultCard(
     {
       title: "Barracuda Home",
       badge: { zh: "已验证", en: "Verified" },
       sub: "@barracuda_home_bot",
       initial: "B",
-      rows: [[{ zh: "服务器版本", en: "Server" }, "1.9.9"]],
+      rows: [
+        [{ zh: "服务器版本", en: "Server" }, "1.9.9"],
+        ["Private API", "Enabled", false],
+      ],
       action: button("重新绑定", "zh", { variant: "outline", size: "sm" }),
     },
     "en",
@@ -140,8 +149,29 @@ test("resultCard: initial or check tile, mono sub, signal badge, rows and one ac
   expect(card.querySelector(".bc-mono.bc-muted")?.textContent).toBe(
     "@barracuda_home_bot",
   );
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("Verified");
+  // a verified result is a neutral badge; the initial is set at 500
+  expect(card.querySelector(".bc-badge--signal")).toBeNull();
+  expect(card.querySelector(".bc-badge")?.textContent).toBe("Verified");
+  expect(
+    (card.querySelector(".bc-option-icon") as HTMLElement).style.fontWeight,
+  ).toBe("500");
+  // the rows are a key-value table; machine values mono, words not
+  expect(
+    [...card.querySelectorAll(".bc-kv dd")].map((node) => [
+      node.textContent,
+      node.classList.contains("bc-mono"),
+    ]),
+  ).toEqual([
+    ["1.9.9", true],
+    ["Enabled", false],
+  ]);
   expect(card.textContent).toContain("Server1.9.9");
+  // only a live connection is the signal chip
+  const live = resultCard(
+    { title: "BlueBubbles Server", badge: "已连接", live: true },
+    "zh",
+  );
+  expect(live.querySelector(".bc-badge--signal")?.textContent).toBe("已连接");
   expect(card.querySelector("button")?.textContent).toBe("重新绑定");
   const bare = resultCard({ title: "微信已绑定", badge: "已绑定" }, "zh");
   expect(bare.querySelector(".bc-option-icon svg")).not.toBeNull();
@@ -156,10 +186,18 @@ test("stepList marks done, current and later steps", () => {
     null,
   ]);
   expect(items[0].querySelector("svg")).not.toBeNull();
-  expect(items[1].textContent).toBe("2二");
-  expect((items[0].firstElementChild as HTMLElement).style.background).toBe(
-    "var(--signal)",
-  );
+  expect(items[1].textContent).toBe("02二");
+  expect(items[2].textContent).toBe("03三");
+  const marks = items.map((item) => item.firstElementChild as HTMLElement);
+  // radius-sm tiles with mono numbers: done is a success check, current a muted fill; never lime
+  for (const mark of marks) {
+    expect(mark.className).toBe("bc-mono");
+    expect(mark.style.borderRadius).toBe("var(--radius-sm)");
+    expect(mark.style.cssText).not.toContain("signal");
+  }
+  expect(marks[0].style.color).toBe("var(--success)");
+  expect(marks[1].style.background).toBe("var(--muted)");
+  expect(marks[2].style.background).toBe("");
   const none = stepList(["一", "二"], { current: -1, done: 0 }, "zh");
   expect(none.querySelector("[aria-current]")).toBeNull();
 });
@@ -428,8 +466,10 @@ test("readChannel reads the configured flag; configuredRow shows the card once t
     expect(current.element.querySelector(".bc-option-title")?.textContent).toBe(
       "Telegram",
     );
-    expect(
-      current.element.querySelector(".bc-badge--signal")?.textContent,
-    ).toBe(lang === "zh" ? "已配置" : "Configured");
+    // a stored configuration is not a live connection: a neutral badge
+    expect(current.element.querySelector(".bc-badge--signal")).toBeNull();
+    expect(current.element.querySelector(".bc-badge")?.textContent).toBe(
+      lang === "zh" ? "已配置" : "Configured",
+    );
   }
 });

@@ -141,7 +141,11 @@ test("email → code → claimed, through the device's signup, resend and verify
   page.type("code", "12");
   await page.click("验证");
   expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox/resend");
-  expect(page.text()).toContain("输入邮件里的 6 位数字");
+  // a field error is a sentence that says what to do
+  expect(
+    page.input("code").closest(".bc-field")!.querySelector(".bc-hint--error")
+      ?.textContent,
+  ).toBe("输入邮件里的 6 位数字。");
   harness.reply = async () =>
     json(422, {
       error: "verification_failed",
@@ -166,7 +170,9 @@ test("email → code → claimed, through the device's signup, resend and verify
     "Inkbox 身份",
   );
   expect(card.textContent).toContain("barracuda-a1b2c3@inkboxmail.com");
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已认领");
+  expect(
+    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已认领");
   expect(page.toasts.at(-1)?.title).toBe("Inkbox 身份已认领");
   page.toasts.at(-1)?.action?.run();
   expect(page.routes).toEqual(["imessage-web"]);
@@ -313,7 +319,9 @@ test("a reload of a claimed signup shows the identity", async () => {
   });
   expect(visibleRows(page)).toEqual(["方式", "身份", "高级"]);
   const card = page.query(".bc-frame[role=status]")!;
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe("已认领");
+  expect(
+    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("已认领");
   expect(card.querySelector(".bc-mono")?.textContent).toBe(
     "barracuda-a1b2c3@inkboxmail.com",
   );
@@ -324,9 +332,9 @@ test("a channel saved with a key shows as configured above the form", async () =
   expect(visibleRows(page)).toEqual(["Channel", "Method", "Email", "Advanced"]);
   const card = page.query(".bc-frame[role=status]")!;
   expect(card.querySelector(".bc-option-title")?.textContent).toBe("Inkbox");
-  expect(card.querySelector(".bc-badge--signal")?.textContent).toBe(
-    "Configured",
-  );
+  expect(
+    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
+  ).toBe("Configured");
   // not configured: nothing to show
   page.unmount();
   const empty = await renderWith({ configured: false });

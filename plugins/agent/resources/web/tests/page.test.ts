@@ -115,7 +115,7 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
     "设为默认模型该用途优先使用这个模型",
   );
   expect(input("base_url").placeholder).toBe("https://api.example.com/v1");
-  expect(input("model").placeholder).toBe("服务商使用的模型 ID");
+  expect(input("model").placeholder).toBe("gpt-4o-mini");
   expect(input("api_key").type).toBe("password");
   expect(
     root.querySelector(".bc-disclosure")?.getAttribute("aria-expanded"),

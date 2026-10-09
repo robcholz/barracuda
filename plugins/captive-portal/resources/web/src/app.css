@@ -81,7 +81,7 @@ body {
   padding: 12px 8px 4px;
   border-top: 1px solid var(--border);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 16px;
 }
 
 /* Top bar */
@@ -94,12 +94,9 @@ body {
   margin: 0 4px;
   background: var(--border);
 }
+/* a neutral badge: `destructive` is the one colour it may take */
 .portal-badge--offline {
   color: var(--destructive);
-  border-color: var(--destructive-border);
-}
-.portal-lang {
-  font-weight: 400;
 }
 .portal-menu-check {
   display: inline-flex;
@@ -114,19 +111,15 @@ body {
   gap: 8px;
   padding-left: var(--space-4);
 }
-.portal-phone-lang {
-  padding: 0 8px;
-  font-weight: 400;
-}
-.portal-phone-theme {
-  width: var(--control-lg);
-  height: var(--control-lg);
+/* icons are 18px on a phone */
+.portal-topbar--phone .bc-icon {
+  width: 18px;
+  height: 18px;
 }
 .portal-back {
   height: var(--control-lg);
   padding: 0 8px;
   gap: 4px;
-  font-weight: 400;
 }
 
 /* Overview */
@@ -142,13 +135,13 @@ body {
 .portal-hero__title {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 .portal-hero__lead {
   max-width: 420px;
 }
 .portal-hero__kv {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   grid-template-columns: 112px minmax(0, 1fr);
 }
 .portal-hero__figure {
@@ -256,22 +249,20 @@ body {
   }
 }
 
-/* Status pages: no modules, a module turned off, loading, failed */
+/* Status pages: no plugin pages, a plugin turned off, loading, failed */
 .portal-status {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-  padding: 56px 32px 64px;
+  gap: var(--space-6);
+  padding: var(--space-10) var(--space-8);
   text-align: center;
 }
+/* the figure sits directly on the ground: no box */
 .portal-status__figure {
   display: block;
   width: 280px;
   max-width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
 }
 .portal-status__text {
   display: flex;
@@ -281,10 +272,6 @@ body {
 }
 .portal-status__text .bc-lead {
   max-width: none;
-}
-.portal-status__title {
-  font-size: 22px;
-  line-height: 28px;
 }
 .portal-status__actions {
   display: flex;
@@ -333,8 +320,6 @@ body {
 .portal-phone-home {
   display: flex;
   flex-direction: column;
-  font-size: 15px;
-  line-height: 22px;
 }
 .portal-phone-hero {
   display: flex;
@@ -348,14 +333,6 @@ body {
   max-width: 100%;
   align-self: center;
 }
-.portal-phone-hero .bc-page-title {
-  font-size: 26px;
-  line-height: 32px;
-}
-.portal-phone-hero .bc-lead {
-  font-size: 14px;
-  line-height: 20px;
-}
 .portal-phone-group {
   border-bottom: 1px solid var(--border);
 }
@@ -363,7 +340,7 @@ body {
   margin: 0;
   padding: var(--space-4);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 16px;
 }
 @media (max-width: 719px) {
   .bc-app {
@@ -379,9 +356,6 @@ body {
   .bc-page {
     padding: var(--space-4);
   }
-}
-.portal-topbar--phone .portal-brand-name {
-  font-size: 15px;
 }
 
 /* Entry status asides (GET /portal/status) */

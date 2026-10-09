@@ -17,6 +17,17 @@ test("device output is self-contained, carries the kernel once and imports plugi
   ).not.toMatch(/https?:\/\/(?!\/)/);
   expect(css).toContain("--sidebar-width");
   expect(css).toContain(".bc-toaster");
+  // the design system's answers to its gaps ship with it
+  for (const name of [
+    ".bc-icon-button",
+    ".bc-code-display",
+    ".bc-mobile-title",
+  ])
+    expect(css).toContain(name);
+  // phone inputs are 16px, so the browser never zooms into them
+  expect(css).toMatch(
+    /@media \(max-width: ?719px\) ?\{ ?\.bc-input ?\{ ?font-size: ?16px/,
+  );
   expect(
     resource("index.html").size +
       resource("app.js").size +

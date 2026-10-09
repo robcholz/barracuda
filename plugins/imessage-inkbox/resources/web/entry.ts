@@ -37,6 +37,7 @@ const T = {
     send: "发送验证码",
     code: "验证码",
     codeHint: "输入邮件里的 6 位数字",
+    codeError: "输入邮件里的 6 位数字。",
     sentTo: "验证码已发到",
     sentInbox: "验证码已发到你的邮箱",
     resend: "重新发送",
@@ -67,6 +68,7 @@ const T = {
     send: "Send code",
     code: "Code",
     codeHint: "Enter the 6 digits from the email",
+    codeError: "Enter the 6 digits from the email.",
     sentTo: "Code sent to",
     sentInbox: "Code sent to your inbox",
     resend: "Resend",
@@ -371,7 +373,7 @@ export const mount = definePage((context) => {
       ? s.required(t.code)
       : /^\d{6}$/.test(value)
         ? null
-        : t.codeHint;
+        : t.codeError;
     code.control.setError(message);
     if (message) return code.control.focus();
     const result = await flow<{ claim_status?: string }>(
@@ -451,6 +453,7 @@ export const mount = definePage((context) => {
       },
       lang,
     ),
+    inbound.alert,
     form.element,
   );
 });

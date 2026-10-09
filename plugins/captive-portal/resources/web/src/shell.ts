@@ -33,7 +33,6 @@ import {
   ICON_OVERVIEW,
   ICON_PANEL,
   ICON_SUN,
-  ICON_WIFI_OFF,
 } from "../ui/icons";
 
 export type ThemeMode = "light" | "dark" | "system";
@@ -584,13 +583,15 @@ export class Portal {
     );
   }
 
-  /** 「连接未就绪」 when the manifest can't be read; on the desktop, otherwise the device's status. */
+  /**
+   * 「连接未就绪」 (a neutral badge in `destructive` text) when the manifest can't be read; on the
+   * desktop, otherwise the device's status.
+   */
   private statusBadge(desktop: boolean) {
     if (this.manifest === "error")
       return h(
         "span",
         { class: "bc-badge portal-badge--offline", role: "status" },
-        icon(ICON_WIFI_OFF, 12),
         this.t.offline,
       );
     const device = desktop ? deviceStatus(this.entries, this.statusOf) : null;
@@ -680,42 +681,6 @@ export class Portal {
     );
   }
 
-  private phoneTools() {
-    const t = this.t;
-    const modes: ThemeMode[] = ["system", "light", "dark"];
-    return [
-      h(
-        "button",
-        {
-          class: "bc-button bc-button--ghost bc-button--sm portal-phone-lang",
-          type: "button",
-          lang: this.lang === "zh" ? "en" : "zh-CN",
-          onclick: () => this.setLang(this.lang === "zh" ? "en" : "zh"),
-        },
-        t.langButton,
-      ),
-      h(
-        "button",
-        {
-          class:
-            "bc-button bc-button--ghost bc-button--icon portal-phone-theme",
-          type: "button",
-          "aria-label": t.themeLabel[this.mode],
-          onclick: () =>
-            this.setMode(modes[(modes.indexOf(this.mode) + 1) % modes.length]),
-        },
-        icon(
-          this.mode === "system"
-            ? ICON_MONITOR
-            : this.mode === "light"
-              ? ICON_SUN
-              : ICON_MOON,
-          18,
-        ),
-      ),
-    ];
-  }
-
   private renderTopbar() {
     const t = this.t;
     const [section, page] = this.crumbs();
@@ -759,13 +724,15 @@ export class Portal {
                 class: "bc-button bc-button--ghost portal-back",
                 href: "#overview",
               },
-              icon(ICON_ARROW_LEFT, 18),
+              icon(ICON_ARROW_LEFT),
               t.overview,
             ),
             h("span", { class: "portal-grow" }),
           ]),
       this.statusBadge(false),
-      ...this.phoneTools(),
+      // the phone top bar carries the same LanguageMenu and ThemeToggle as the desktop one
+      this.languageMenu(),
+      this.themeControl(),
     );
     this.phoneBar.classList.toggle(
       "portal-topbar--home",
