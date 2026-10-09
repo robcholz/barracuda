@@ -564,6 +564,8 @@ pub struct BuildConfig {
     #[serde(default)]
     rustup_toolchain: Option<String>,
     #[serde(default)]
+    rustup_toolchain_version: Option<String>,
+    #[serde(default)]
     build_std: Vec<String>,
     #[serde(default)]
     environment_file: Option<PathBuf>,
@@ -576,6 +578,13 @@ impl BuildConfig {
     #[must_use]
     pub fn rustup_toolchain(&self) -> Option<&str> {
         self.rustup_toolchain.as_deref()
+    }
+
+    /// Returns the exact toolchain release the Platform builds with, as `rustc --version`
+    /// reports it (`1.98.1` or, for a vendor toolchain, its own `1.98.1.0`).
+    #[must_use]
+    pub fn rustup_toolchain_version(&self) -> Option<&str> {
+        self.rustup_toolchain_version.as_deref()
     }
 
     /// Returns standard-library crates Cargo must build for the target.
@@ -601,6 +610,7 @@ impl BuildConfig {
             if self.build_std.is_empty()
                 && self.environment_file.is_none()
                 && self.missing_toolchain_prompt.is_none()
+                && self.rustup_toolchain_version.is_none()
             {
                 return Ok(());
             }
@@ -615,6 +625,20 @@ impl BuildConfig {
             return Err(ResolveError::ManifestInvalid {
                 path: path.to_owned(),
                 message: String::from("build.rustup-toolchain must not be empty"),
+            });
+        }
+        if self
+            .rustup_toolchain_version
+            .as_deref()
+            .is_some_and(|version| {
+                version.trim().is_empty() || version.contains(char::is_whitespace)
+            })
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from(
+                    "build.rustup-toolchain-version must be one version, such as `1.98.1`",
+                ),
             });
         }
         if self

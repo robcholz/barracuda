@@ -17,6 +17,9 @@ crate: barracuda_platform_esp32s3
 type: Esp32S3Platform
 build:
   rustup-toolchain: esp
+  # esp 1.99.0.0 places esp-hal's ESP32-S3 `__pre_init` literal pool after its IRAM
+  # code (it reorders esp-hal's split `global_asm!` blocks), so release builds no longer link.
+  rustup-toolchain-version: 1.98.1.0
   build-std: [core, alloc]
   environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |
