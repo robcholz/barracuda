@@ -134,8 +134,9 @@ test("the settings form follows the design: rows, secret toggle, fold, footer", 
       (node) => node.textContent,
     ),
   ).toEqual(["Bot", "选项"]);
-  expect(element.querySelector(".bc-form__endpoint")?.textContent).toBe(
-    "POST /api/gateway/telegram · 只写设备不会返回已保存的设置和密钥",
+  // the footer holds only the buttons: no API path, no method
+  expect(element.querySelector(".bc-form__footer")?.textContent).not.toContain(
+    "/api/",
   );
   expect(
     [...element.querySelectorAll(".bc-form__footer button")].map(
@@ -304,7 +305,7 @@ test("clear restores defaults; English strings follow the context language", () 
   expect(form.values()).toBeNull();
   expect(root.textContent).toContain("Enter the Bot Token.");
   expect(root.querySelector(".bc-disclosure")?.textContent).toBe("Advanced");
-  expect(root.textContent).toContain("write-only");
+  expect(root.textContent).not.toContain("write-only");
   form.setError("route_tag", "Taken");
   expect(input(root, "route_tag").getAttribute("aria-invalid")).toBe("true");
 });

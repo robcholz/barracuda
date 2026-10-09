@@ -96,7 +96,7 @@ test("the manual token sits under 高级, and the footer shows only while it is 
   expect(footer(page).style.display).toBe("none");
   page.query<HTMLButtonElement>(".bc-disclosure")!.click();
   expect(footer(page).style.display).toBe("");
-  expect(footer(page).textContent).toContain("POST /api/gateway/wechat");
+  expect(footer(page).textContent).toBe("清空用 Token 保存");
   expect(button(page, "用 Token 保存")).toBeDefined();
   page.type("token", "tok");
   page.root
@@ -349,4 +349,81 @@ test("relinking hides the mode and accounts until the channel is linked again", 
   expect(modeRow().style.display).toBe("");
   await press(page, "重新绑定");
   expect(modeRow().style.display).toBe("none");
+});
+
+test("an expired bot session offers 重新绑定, which starts a QR login", async () => {
+  status = { status: "idle", configured: true };
+  let receive: Record<string, unknown> = {
+    state: "error",
+    message: "需要重新扫码 / Scan again to relink",
+  };
+  const reply = harness.reply;
+  harness.reply = async (call: FetchCall) =>
+    call.url === "/api/gateway/wechat" && call.method === "GET"
+      ? json(200, {
+          configured: true,
+          mode: "send_receive",
+          receive,
+          owners: { count: 1 },
+        })
+      : reply(call);
+  const page = await render("zh");
+  const alert = page.query(".bc-alert--error[role=status]")!;
+  expect(alert.textContent).toBe("微信登录已失效重新绑定");
+  expect(page.text()).not.toContain("微信已绑定");
+  // the action is primary: it is the one thing to do
+  expect(button(page, "重新绑定")!.className).toBe("bc-button bc-button--sm");
+
+  // the device recovers on its own (a login elsewhere): the linked card comes back
+  receive = { state: "receiving" };
+  await advance(5_000);
+  expect(page.query(".bc-alert--error")).toBeNull();
+  expect(page.text()).toContain("微信已绑定");
+  expect(button(page, "重新绑定")!.className).toContain("bc-button--outline");
+
+  receive = { state: "error", message: "需要重新扫码 / Scan again to relink" };
+  await advance(5_000);
+  await press(page, "重新绑定");
+  expect(requests().at(-1)).toBe(`POST ${LOGIN}`);
+  expect(plate(page).querySelector("svg")).not.toBeNull();
+  expect(page.query(".bc-alert--error")).toBeNull();
+});
+
+test("another receive error keeps the linked card", async () => {
+  status = { status: "idle", configured: true };
+  const reply = harness.reply;
+  harness.reply = async (call: FetchCall) =>
+    call.url === "/api/gateway/wechat"
+      ? json(200, {
+          configured: true,
+          mode: "send_receive",
+          receive: { state: "error", message: "iLink answered HTTP 502" },
+          owners: { count: 1 },
+        })
+      : reply(call);
+  const page = await render("en");
+  expect(page.query(".bc-alert--error")).toBeNull();
+  expect(page.text()).toContain("WeChat linked");
+  expect(page.text()).toContain("iLink answered HTTP 502");
+});
+
+test("renders the expired session in English", async () => {
+  status = { status: "idle", configured: true };
+  const reply = harness.reply;
+  harness.reply = async (call: FetchCall) =>
+    call.url === "/api/gateway/wechat"
+      ? json(200, {
+          configured: true,
+          mode: "send_receive",
+          receive: {
+            state: "error",
+            message: "需要重新扫码 / Scan again to relink",
+          },
+          owners: { count: 1 },
+        })
+      : reply(call);
+  const page = await render("en");
+  expect(page.query(".bc-alert--error")?.textContent).toBe(
+    "WeChat login expiredLink again",
+  );
 });

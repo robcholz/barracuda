@@ -1174,7 +1174,9 @@ name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1184,6 +1186,7 @@ dependencies = [
  "bluebubbles",
  "embassy-executor",
  "embassy-futures",
+ "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
@@ -1191,6 +1194,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1267,7 +1271,9 @@ name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1278,6 +1284,7 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
  "inkbox",
@@ -1291,7 +1298,9 @@ name = "barracuda-imessage-qq-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1302,12 +1311,14 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
  "log",
  "qq",
  "serde",
  "serde_json",
+ "ws-client",
 ]
 
 [[package]]
@@ -1315,7 +1326,9 @@ name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1326,12 +1339,14 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
  "log",
  "serde",
  "serde_json",
  "telegram",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1352,6 +1367,7 @@ name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
  "barracuda-plugin",
@@ -1363,9 +1379,12 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
  "log",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2882,9 +2901,11 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "embassy-time",
  "futures-lite",
  "http-client",
  "percent-encoding",
+ "serde",
  "serde_json",
 ]
 
@@ -5674,6 +5695,7 @@ dependencies = [
  "barracuda-platform-test",
  "futures-lite",
  "http-client",
+ "serde",
  "serde_json",
 ]
 
@@ -6540,6 +6562,7 @@ dependencies = [
  "embedded-io 0.7.1",
  "futures-lite",
  "http-client",
+ "serde",
  "serde_json",
 ]
 
@@ -7462,8 +7485,10 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "embassy-time",
  "futures-lite",
  "http-client",
+ "serde",
  "serde_json",
 ]
 
@@ -8033,8 +8058,10 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "embassy-time",
  "futures-lite",
  "http-client",
+ "serde",
  "serde_json",
 ]
 
@@ -8243,6 +8270,16 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "ws-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "sha1 0.10.7",
+]
 
 [[package]]
 name = "wyz"

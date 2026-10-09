@@ -66,9 +66,7 @@ test("renders the design in Chinese: brand title, riffle, Bot row with link, ver
   ]);
   expect(page.input("api_base").value).toBe("https://api.telegram.org");
   expect(page.input("draft_min_delta_bytes").value).toBe("24");
-  expect(root.querySelector(".bc-form__endpoint")?.textContent).toContain(
-    "POST /api/gateway/telegram",
-  );
+  expect(root.textContent).not.toContain("/api/");
   expect(texts(root, ".bc-form__footer button")).toEqual([
     "清空",
     "保存并替换通道",

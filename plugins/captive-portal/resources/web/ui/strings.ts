@@ -10,8 +10,6 @@ export const KIT_STRINGS: Record<
     hide: string;
     clear: string;
     optional: string;
-    writeOnly: string;
-    writeOnlyTip: string;
     required: (label: string) => string;
     url: string;
     number: (min: number, max: number) => string;
@@ -33,8 +31,6 @@ export const KIT_STRINGS: Record<
     hide: "隐藏",
     clear: "清空",
     optional: "可选",
-    writeOnly: "只写",
-    writeOnlyTip: "设备不会返回已保存的设置和密钥",
     required: (label) => `请填写 ${label}。`,
     url: "请输入以 http:// 或 https:// 开头的地址。",
     number: (min, max) => `请输入 ${min} 到 ${max} 之间的整数。`,
@@ -55,8 +51,6 @@ export const KIT_STRINGS: Record<
     hide: "Hide",
     clear: "Clear",
     optional: "optional",
-    writeOnly: "write-only",
-    writeOnlyTip: "The device never sends back saved settings or keys",
     required: (label) => `Enter the ${label}.`,
     url: "Enter an address starting with http:// or https://.",
     number: (min, max) => `Enter a whole number from ${min} to ${max}.`,

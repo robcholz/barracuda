@@ -15,7 +15,7 @@ use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
 
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select, select3, Either};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 
@@ -39,7 +39,20 @@ pub trait ReceiveSlotSource: 'static {
 
     /// Number of slots held right now, across every channel.
     fn in_use(&self) -> usize;
+
+    /// Completes when a slot may have freed, so a channel waiting for one
+    /// retries at once instead of on its next `slot_retry` tick.
+    ///
+    /// The runtime races it with the retry timer and calls [`Self::acquire`]
+    /// afterwards, so a spurious wake is harmless. The default never
+    /// completes, leaving only the timer. Must be cancel-safe.
+    fn wait_available(&self) -> SlotWait<'_> {
+        Box::pin(core::future::pending())
+    }
 }
+
+/// Future of [`ReceiveSlotSource::wait_available`].
+pub type SlotWait<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 
 /// Slot source for receive paths that hold no outbound connection, such as
 /// a webhook served by the device; acquiring always succeeds.
@@ -396,6 +409,10 @@ where
     Slots: ReceiveSlotSource,
     Channel: ReceiveChannel<Slots::Lease>,
 {
+    /// Parks while receiving is disabled. The loop that runs while it is
+    /// enabled is boxed only for that time, so a parked runtime (a channel
+    /// that is not configured or not in `send_receive`) holds just this
+    /// small future.
     async fn run(self) {
         let _stopped = StopOnDrop(Rc::clone(&self.control));
         let shared = &self.control.shared;
@@ -405,10 +422,22 @@ where
                 shared.changed.wait().await;
                 continue;
             }
+            Box::pin(self.receive()).await;
+        }
+    }
+
+    /// Takes a slot and runs sessions over it until receiving is disabled.
+    async fn receive(&self) {
+        let shared = &self.control.shared;
+        while shared.enabled.get() {
             let Some(mut lease) = self.control.take_lease() else {
                 shared.set(ReceiveState::NoSlot);
-                let _woken =
-                    select(shared.changed.wait(), Timer::after(self.timing.slot_retry)).await;
+                let _woken = select3(
+                    shared.changed.wait(),
+                    Timer::after(self.timing.slot_retry),
+                    self.control.slots.wait_available(),
+                )
+                .await;
                 continue;
             };
             shared.leased.set(true);

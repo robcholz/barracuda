@@ -861,10 +861,16 @@ engine and places it in `PluginContext::receive_slots`. Each slot owns one
 statically allocated socket; a channel holds a `ReceiveLease` while it
 receives, and the lease gives either HTTP clients over its single connection
 or a raw byte stream whose read half is cancel-safe, for protocols such as
-WebSocket. The static pool has `http_client::RECEIVE_SLOTS` slots, the largest
-any Target uses. The runtime capacity is a memory budget the selected Platform
-declares in its manifest, because the Platform owns the heap and decides
-whether Board-declared external memory becomes bulk memory:
+WebSocket. The slots' socket buffers are static and sized at build time, so a
+Target pays only for the connections it can hold: `platforms/selected/build.rs`
+projects the larger of the manifest's two figures as
+`LONG_LIVED_CONNECTIONS`, the selected-target crate exposes it as
+`barracuda_target::RECEIVE_SLOTS`, and the application declares one
+`http_client::ReceiveBuffers` of that size and hands it to `System::new`. A
+Platform that allows none links no receive buffers. The runtime capacity is a
+memory budget the selected Platform declares in its manifest, because the
+Platform owns the heap and decides whether Board-declared external memory
+becomes bulk memory:
 
 ~~~yaml
 network:

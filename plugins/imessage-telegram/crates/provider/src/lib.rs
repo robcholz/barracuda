@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+pub mod updates;
+
 use alloc::{
     boxed::Box,
     format,

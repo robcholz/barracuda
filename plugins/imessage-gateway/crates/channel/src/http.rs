@@ -1,10 +1,11 @@
 //! Shared HTTP surface every channel exposes under its configuration path.
 //!
-//! The webserver matches exact paths, so each channel Plugin registers its own
-//! `/api/gateway/<channel>/mode` and `/api/gateway/<channel>/owners` with
-//! [`ModeEndpoint`] and [`OwnersEndpoint`], and answers `GET
-//! /api/gateway/<channel>` from its configuration endpoint with
-//! [`status_response`].
+//! A channel Plugin serves `/api/gateway/<channel>` and the `/mode` and
+//! `/owners` below it from one prefix registration, [`ChannelEndpoint`], which
+//! hands the configuration path itself to the Plugin's own endpoint (whose
+//! `GET` answers [`status_response`]) and the other two to [`ModeEndpoint`]
+//! and [`OwnersEndpoint`]. One route per channel instead of three keeps the
+//! webserver's route table small.
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -66,8 +67,10 @@ pub trait ChannelControl: 'static {
     /// The channel's receive-loop control.
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
 
-    /// The channel's owner book.
-    fn owners(&self) -> &Owners<Self::Storage>;
+    /// The channel's owner book, which a channel loads once it is configured
+    /// (an [`crate::OnDemand`] keeps it); `None` before, so an unconfigured
+    /// channel holds and reads none.
+    fn owners(&self) -> Option<&Owners<Self::Storage>>;
 }
 
 /// Enables receiving exactly when `channel` is configured and in
@@ -148,7 +151,7 @@ pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse 
                 )
             }),
             owners: OwnerCount {
-                count: channel.owners().count(),
+                count: channel.owners().map_or(0, Owners::count),
             },
         },
     )
@@ -183,41 +186,40 @@ struct NoSlotBody {
     capacity: usize,
 }
 
-impl<C: ChannelControl> ModeEndpoint<C> {
-    async fn set(&self, body: &[u8]) -> HttpResponse {
-        let Ok(ModeBody { mode }) = serde_json::from_slice(body) else {
-            return error(400, "invalid_request");
-        };
-        let channel = self.0.as_ref();
-        if !channel.modes().contains(&mode) {
-            return error(400, "unsupported_mode");
-        }
-        match channel.apply_mode(mode).await {
-            Ok(()) => {}
-            Err(ModeError::Storage) => return error(500, "storage"),
-            Err(ModeError::Registration) => return error(422, "registration_failed"),
-        }
-        match sync_receive(channel) {
-            Ok(()) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
-            Err(NoSlot) => to_json(
-                409,
-                &NoSlotBody {
-                    error: "no_slot",
-                    capacity: channel.receive().capacity(),
-                },
-            ),
-        }
+async fn set_mode<C: ChannelControl>(channel: &C, body: &[u8]) -> HttpResponse {
+    let Ok(ModeBody { mode }) = serde_json::from_slice(body) else {
+        return error(400, "invalid_request");
+    };
+    if !channel.modes().contains(&mode) {
+        return error(400, "unsupported_mode");
+    }
+    match channel.apply_mode(mode).await {
+        Ok(()) => {}
+        Err(ModeError::Storage) => return error(500, "storage"),
+        Err(ModeError::Registration) => return error(422, "registration_failed"),
+    }
+    match sync_receive(channel) {
+        Ok(()) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
+        Err(NoSlot) => to_json(
+            409,
+            &NoSlotBody {
+                error: "no_slot",
+                capacity: channel.receive().capacity(),
+            },
+        ),
+    }
+}
+
+async fn mode_request<C: ChannelControl>(channel: &C, request: &HttpRequest) -> HttpResponse {
+    match request.method() {
+        HttpMethod::Post => set_mode(channel, request.body()).await,
+        _ => error(405, "method_not_allowed"),
     }
 }
 
 impl<C: ChannelControl> HttpEndpoint for ModeEndpoint<C> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
-        Box::pin(async move {
-            match request.method() {
-                HttpMethod::Post => self.set(request.body()).await,
-                _ => error(405, "method_not_allowed"),
-            }
-        })
+        Box::pin(async move { mode_request(self.0.as_ref(), &request).await })
     }
 }
 
@@ -229,7 +231,8 @@ impl<C: ChannelControl> HttpEndpoint for ModeEndpoint<C> {
 /// list is full or the Platform has no entropy. `POST` takes
 /// `{"remove":"<id>"}` or `{"rotate":true}` and answers 204; 400
 /// `invalid_request` for any other body, 500 `storage` when a removal cannot
-/// be stored, 503 `entropy_unavailable` when no code can be minted.
+/// be stored, 503 `entropy_unavailable` when no code can be minted. Both
+/// answer 409 `not_configured` while the channel is not configured.
 pub struct OwnersEndpoint<C>(Rc<C>);
 
 impl<C> OwnersEndpoint<C> {
@@ -261,51 +264,96 @@ enum OwnersCommand {
     Rotate(bool),
 }
 
-impl<C: ChannelControl> OwnersEndpoint<C> {
-    fn list(&self) -> HttpResponse {
-        let owners = self.0.owners();
-        let pairing = owners.pairing().map(|pairing| PairingBody {
-            code: pairing.code.as_str().into(),
-            expires_in: pairing.expires_in.as_secs(),
-        });
-        to_json(
-            200,
-            &OwnersBody {
-                owners: owners.owners(),
-                pairing,
-                ignored: owners.ignored(),
-            },
-        )
-    }
+fn list_owners<C: ChannelControl>(channel: &C) -> HttpResponse {
+    let Some(owners) = channel.owners() else {
+        return error(409, "not_configured");
+    };
+    let pairing = owners.pairing().map(|pairing| PairingBody {
+        code: pairing.code.as_str().into(),
+        expires_in: pairing.expires_in.as_secs(),
+    });
+    to_json(
+        200,
+        &OwnersBody {
+            owners: owners.owners(),
+            pairing,
+            ignored: owners.ignored(),
+        },
+    )
+}
 
-    async fn command(&self, body: &[u8]) -> HttpResponse {
-        let owners = self.0.owners();
-        match serde_json::from_slice(body) {
-            Ok(OwnersCommand::Remove(id)) => match owners.remove(&id).await {
-                Ok(_removed) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
-                Err(storage_error) => {
-                    log::error!("failed to store an owner removal: {storage_error}");
-                    error(500, "storage")
-                }
-            },
-            Ok(OwnersCommand::Rotate(true)) => match owners.rotate() {
-                Ok(()) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
-                Err(_unavailable) => error(503, "entropy_unavailable"),
-            },
-            Ok(OwnersCommand::Rotate(false)) | Err(_) => error(400, "invalid_request"),
-        }
+async fn owners_command<C: ChannelControl>(channel: &C, body: &[u8]) -> HttpResponse {
+    let Some(owners) = channel.owners() else {
+        return error(409, "not_configured");
+    };
+    match serde_json::from_slice(body) {
+        Ok(OwnersCommand::Remove(id)) => match owners.remove(&id).await {
+            Ok(_removed) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
+            Err(storage_error) => {
+                log::error!("failed to store an owner removal: {storage_error}");
+                error(500, "storage")
+            }
+        },
+        Ok(OwnersCommand::Rotate(true)) => match owners.rotate() {
+            Ok(()) => HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new()),
+            Err(_unavailable) => error(503, "entropy_unavailable"),
+        },
+        Ok(OwnersCommand::Rotate(false)) | Err(_) => error(400, "invalid_request"),
+    }
+}
+
+async fn owners_request<C: ChannelControl>(channel: &C, request: &HttpRequest) -> HttpResponse {
+    match request.method() {
+        HttpMethod::Get => list_owners(channel),
+        HttpMethod::Post => owners_command(channel, request.body()).await,
+        _ => error(405, "method_not_allowed"),
     }
 }
 
 impl<C: ChannelControl> HttpEndpoint for OwnersEndpoint<C> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
-        Box::pin(async move {
-            match request.method() {
-                HttpMethod::Get => self.list(),
-                HttpMethod::Post => self.command(request.body()).await,
-                _ => error(405, "method_not_allowed"),
-            }
-        })
+        Box::pin(async move { owners_request(self.0.as_ref(), &request).await })
+    }
+}
+
+/// Every route of a channel under its configuration path `base`, for one
+/// prefix registration (`WebServer::serve_http_prefix(base, …)`):
+///
+/// - `base` itself goes to the channel Plugin's own `config` endpoint, whose
+///   `GET` answers [`status_response`];
+/// - `base/mode` is [`ModeEndpoint`];
+/// - `base/owners` is [`OwnersEndpoint`];
+/// - any other path below `base` answers 404 `not_found`.
+///
+/// Routes registered for exact paths below `base` (such as WeChat's
+/// `/login`) still take precedence over it.
+pub struct ChannelEndpoint<C, Config> {
+    channel: Rc<C>,
+    base: &'static str,
+    config: Config,
+}
+
+impl<C, Config> ChannelEndpoint<C, Config> {
+    /// Serves `channel`'s routes under `base`, with `config` on `base`.
+    #[must_use]
+    pub const fn new(channel: Rc<C>, base: &'static str, config: Config) -> Self {
+        Self {
+            channel,
+            base,
+            config,
+        }
+    }
+}
+
+impl<C: ChannelControl, Config: HttpEndpoint> HttpEndpoint for ChannelEndpoint<C, Config> {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        let channel = self.channel.as_ref();
+        match request.path().strip_prefix(self.base) {
+            Some("") => self.config.handle(request),
+            Some("/mode") => Box::pin(async move { mode_request(channel, &request).await }),
+            Some("/owners") => Box::pin(async move { owners_request(channel, &request).await }),
+            _ => Box::pin(async { error(404, "not_found") }),
+        }
     }
 }
 

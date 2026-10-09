@@ -3,8 +3,11 @@
 
 extern crate alloc;
 
+pub mod gateway;
+
 use alloc::{
     boxed::Box,
+    collections::VecDeque,
     format,
     string::{String, ToString},
 };
@@ -13,6 +16,7 @@ use barracuda_imessage_gateway_plugin::{
     TextBody,
 };
 use barracuda_imessage_gateway_plugin::{Method, Response};
+use core::cell::RefCell;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant};
 use futures_lite::StreamExt as _;
@@ -25,6 +29,12 @@ pub const DEFAULT_API_BASE: &str = "https://api.sgroup.qq.com";
 pub const DEFAULT_TOKEN_URL: &str = "https://bots.qq.com/app/getAppAccessToken";
 /// A cached access token is replaced once it has this little lifetime left.
 const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
+/// How long QQ accepts a passive reply to a direct message.
+pub const DIRECT_REPLY_WINDOW: Duration = Duration::from_secs(60 * 60);
+/// How long QQ accepts a passive reply to a group message.
+pub const GROUP_REPLY_WINDOW: Duration = Duration::from_secs(5 * 60);
+/// Messages whose replies are tracked; the oldest is forgotten first.
+const REPLY_BOOK_ENTRIES: usize = 16;
 
 /// Credentials and endpoints for the QQ Bot API.
 pub struct QQConfig {
@@ -101,6 +111,64 @@ impl AccessToken {
     }
 }
 
+/// One message the bot may reply to, and the `msg_seq` of its next reply.
+struct ReplyEntry {
+    msg_id: String,
+    /// When the receive loop saw it, with the window it opened.
+    received: Option<(Instant, Duration)>,
+    next_seq: u32,
+}
+
+/// Passive replies: QQ answers a reply to a received message (`msg_id`)
+/// only within that message's window, and needs a distinct `msg_seq` for
+/// each reply to the same message.
+#[derive(Default)]
+struct ReplyBook {
+    entries: VecDeque<ReplyEntry>,
+}
+
+impl ReplyBook {
+    /// The entry of `msg_id`, created when missing and moved to the back.
+    fn entry(&mut self, msg_id: &str) -> Option<&mut ReplyEntry> {
+        if let Some(index) = self.entries.iter().position(|entry| entry.msg_id == msg_id) {
+            if let Some(entry) = self.entries.remove(index) {
+                self.entries.push_back(entry);
+            }
+        } else {
+            if self.entries.len() >= REPLY_BOOK_ENTRIES {
+                self.entries.pop_front();
+            }
+            self.entries.push_back(ReplyEntry {
+                msg_id: msg_id.into(),
+                received: None,
+                next_seq: 1,
+            });
+        }
+        self.entries.back_mut()
+    }
+
+    fn note(&mut self, msg_id: &str, window: Duration, now: Instant) {
+        if let Some(entry) = self.entry(msg_id) {
+            entry.received = Some((now, window));
+        }
+    }
+
+    /// The `msg_seq` of a reply to `msg_id`, or `None` once its window has
+    /// passed. A message the receive loop never saw (one received before a
+    /// restart) is tried as a reply.
+    fn reply(&mut self, msg_id: &str, now: Instant) -> Option<u32> {
+        let entry = self.entry(msg_id)?;
+        if let Some((received, window)) = entry.received {
+            if now.saturating_duration_since(received) > window {
+                return None;
+            }
+        }
+        let seq = entry.next_seq;
+        entry.next_seq = seq.wrapping_add(1).max(1);
+        Some(seq)
+    }
+}
+
 /// Outbound QQ provider backed by the QQ Bot API.
 ///
 /// The provider exchanges the configured App Secret for an access token on
@@ -110,6 +178,7 @@ pub struct QQ<'net, T = http_client::Tcp, D = http_client::Resolver> {
     http_clients: ClientFactory<'net, T, D>,
     config: QQConfig,
     access_token: Mutex<NoopRawMutex, Option<AccessToken>>,
+    replies: RefCell<ReplyBook>,
 }
 
 impl<'net, T, D> QQ<'net, T, D>
@@ -125,7 +194,104 @@ where
             http_clients,
             config,
             access_token: Mutex::new(None),
+            replies: RefCell::new(ReplyBook::default()),
         }
+    }
+
+    /// The App ID this provider authenticates as.
+    pub fn app_id(&self) -> &str {
+        &self.config.app_id
+    }
+
+    /// A usable access token from the shared cache, fetched or refreshed when
+    /// it is missing or within a minute of expiry.
+    pub async fn token(&self) -> Result<String, TokenError> {
+        self.access_token(None).await
+    }
+
+    /// Replaces `rejected`, a token QQ refused, unless another caller already
+    /// did, and returns the current token.
+    pub async fn renew_token(&self, rejected: &str) -> Result<String, TokenError> {
+        self.access_token(Some(rejected)).await
+    }
+
+    /// When the cached token enters its refresh margin, if one is cached and
+    /// the cache is not being refreshed right now.
+    pub fn token_refresh_at(&self) -> Option<Instant> {
+        let cached = self.access_token.try_lock().ok()?;
+        let token = cached.as_ref()?;
+        Some(
+            token
+                .expires_at
+                .checked_sub(TOKEN_REFRESH_MARGIN)
+                .unwrap_or(token.expires_at),
+        )
+    }
+
+    /// Records a received message so a reply to it is sent as a passive
+    /// reply (`msg_id` and `msg_seq`) while QQ accepts one.
+    pub fn note_inbound(&self, msg_id: &str, scene: gateway::Scene) {
+        let window = match scene {
+            gateway::Scene::Direct => DIRECT_REPLY_WINDOW,
+            gateway::Scene::Group => GROUP_REPLY_WINDOW,
+        };
+        self.replies
+            .borrow_mut()
+            .note(msg_id, window, Instant::now());
+    }
+
+    /// The WebSocket gateway URL: `GET {api_base}/gateway`.
+    ///
+    /// QQ allows two calls a minute; callers cache the URL.
+    pub async fn gateway_url(&self) -> Result<String, ChannelError> {
+        let url = format!("{}/gateway", self.config.api_base.trim_end_matches('/'));
+        let token = self.access_token(None).await.map_err(token_channel_error)?;
+        let mut response = self.get(&url, &token).await?;
+        if response.status == 401 {
+            let token = self
+                .access_token(Some(token.as_str()))
+                .await
+                .map_err(token_channel_error)?;
+            response = self.get(&url, &token).await?;
+        }
+        if !(200..300).contains(&response.status) {
+            return Err(parse_response(response)
+                .err()
+                .unwrap_or_else(|| ChannelError::Platform {
+                    code: None,
+                    message: "QQ refused the gateway request".into(),
+                }));
+        }
+        let gateway: gateway::GatewayUrl =
+            serde_json::from_slice(&response.body).map_err(|error| ChannelError::Platform {
+                code: Some(response.status.to_string()),
+                message: format!("unreadable QQ gateway answer: {error}"),
+            })?;
+        if gateway.url.is_empty() {
+            return Err(ChannelError::Platform {
+                code: None,
+                message: "QQ gateway answer omitted url".into(),
+            });
+        }
+        Ok(gateway.url)
+    }
+
+    async fn get(&self, url: &str, access_token: &str) -> Result<Response, ChannelError> {
+        let authorization = format!("QQBot {access_token}");
+        barracuda_imessage_gateway_plugin::send(
+            &self.http_clients,
+            Method::GET,
+            url,
+            &[
+                ("Authorization", authorization.as_str()),
+                ("X-Union-Appid", self.config.app_id.as_str()),
+            ],
+            &[][..],
+        )
+        .await
+        .map_err(|error| ChannelError::Transport {
+            message: error.to_string(),
+        })
     }
 
     /// Exchanges the App Secret for a fresh access token and keeps it for later sends.
@@ -192,12 +358,20 @@ where
             json!({ "content": text, "msg_type": 0 })
         };
         if let Some(message_id) = reply_to {
-            let Some(fields) = payload.as_object_mut() else {
-                return Err(ChannelError::InvalidRequest {
-                    message: "failed to build QQ message payload".into(),
-                });
-            };
-            fields.insert("msg_id".into(), Value::String(message_id));
+            let seq = self.replies.borrow_mut().reply(&message_id, Instant::now());
+            // Past its window a reply would be refused, so it goes out as an
+            // ordinary message instead.
+            if let Some(seq) = seq {
+                let Some(fields) = payload.as_object_mut() else {
+                    return Err(ChannelError::InvalidRequest {
+                        message: "failed to build QQ message payload".into(),
+                    });
+                };
+                fields.insert("msg_id".into(), Value::String(message_id));
+                if !is_guild {
+                    fields.insert("msg_seq".into(), Value::from(seq));
+                }
+            }
         }
         let body = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),
@@ -401,5 +575,39 @@ fn token_channel_error(error: TokenError) -> ChannelError {
             message: message.unwrap_or_else(|| "QQ rejected the App Secret".into()),
         },
         TokenError::Unavailable { message } => ChannelError::Transport { message },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replies_count_msg_seq_per_message_until_the_window_closes() {
+        let mut book = ReplyBook::default();
+        let start = Instant::from_secs(1_000);
+        book.note("direct", DIRECT_REPLY_WINDOW, start);
+        book.note("group", GROUP_REPLY_WINDOW, start);
+        assert_eq!(book.reply("direct", start), Some(1));
+        assert_eq!(book.reply("direct", start), Some(2));
+        assert_eq!(book.reply("group", start), Some(1));
+        let later = start.saturating_add(Duration::from_secs(6 * 60));
+        assert_eq!(book.reply("group", later), None);
+        assert_eq!(book.reply("direct", later), Some(3));
+        let much_later = start.saturating_add(Duration::from_secs(61 * 60));
+        assert_eq!(book.reply("direct", much_later), None);
+        // A message received before a restart is still tried as a reply.
+        assert_eq!(book.reply("unknown", much_later), Some(1));
+    }
+
+    #[test]
+    fn the_reply_book_forgets_the_oldest_message() {
+        let mut book = ReplyBook::default();
+        let now = Instant::from_secs(1_000);
+        for index in 0..=REPLY_BOOK_ENTRIES {
+            book.note(&format!("m{index}"), GROUP_REPLY_WINDOW, now);
+        }
+        assert_eq!(book.entries.len(), REPLY_BOOK_ENTRIES);
+        assert!(book.entries.iter().all(|entry| entry.msg_id != "m0"));
     }
 }

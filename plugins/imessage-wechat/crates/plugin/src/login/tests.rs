@@ -10,6 +10,7 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
+use barracuda_imessage_gateway_channel::{channel_entry_status, ChannelMode, ReceiveState};
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGateway, IMessageGatewayPlugin, MessageChannel, Operation,
     SendMessageRequest, SendReceipt,
@@ -17,7 +18,7 @@ use barracuda_imessage_gateway_plugin::{
 use barracuda_platform_test::{
     install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
 };
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginError, PluginManager, PluginRegisterContext, PluginResult,
     PluginStorage,
@@ -25,13 +26,13 @@ use barracuda_plugin::manager::{
 use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
 use barracuda_workflow_plugin::WorkflowPlugin;
 use embassy_futures::select::{select, Either};
-use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant};
 use futures_lite::future::{block_on, yield_now};
-use http_client::ClientFactory;
+use http_client::{ClientFactory, ReceiveSlots};
 use serde_json::{json, Value};
 
 use super::{LoginEndpoint, LoginRuntime, LoginTiming};
+use crate::receive::PollTiming;
 use crate::{
     decode_configuration, ChannelConfiguration, ConfigEndpoint, CONFIGURATION_STORAGE_KEY,
 };
@@ -86,13 +87,14 @@ impl Plugin for Probe {
                     .map_err(PluginError::registration)?,
             );
         }
-        let configuration = Rc::new(ChannelConfiguration {
-            gateway: Rc::clone(&gateway),
-            http_clients: ClientFactory::from_network(self.network, self.network),
-            channel_registration: Mutex::new(None),
-            configured: core::cell::Cell::new(false),
-            storage: context.storage().clone(),
-        });
+        let configuration = Rc::new(block_on(ChannelConfiguration::load(
+            Rc::clone(&gateway),
+            ClientFactory::from_network(self.network, self.network),
+            context.storage().clone(),
+            ReceiveSlots::<ScriptedStack, ScriptedStack>::unavailable(),
+            SharedEntropy::unavailable(),
+            PollTiming::DEVICE,
+        ))?);
         let (login, runtime) =
             LoginEndpoint::new(Rc::clone(&configuration), API_BASE.into(), self.timing);
         let watch = login.watch();
@@ -317,6 +319,11 @@ fn confirmed() -> ScriptStep {
 
 fn long_poll() -> ScriptStep {
     ScriptStep::pending_after_headers(200, "application/json")
+}
+
+/// Portal status of a linked channel when the test pool has no receive slot.
+fn linked_without_slot() -> EntryStatus {
+    channel_entry_status(true, ChannelMode::SendReceive, &ReceiveState::NoSlot)
 }
 
 #[test]
@@ -591,7 +598,7 @@ fn config_get_reports_only_whether_a_channel_is_configured() {
     scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
         let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
         assert_eq!(code, 200);
-        assert_eq!(body, json!({ "configured": false }));
+        assert_eq!(body["configured"], false);
         assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
 
         let (code, _body) = call(
@@ -604,9 +611,10 @@ fn config_get_reports_only_whether_a_channel_is_configured() {
 
         let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
         assert_eq!(code, 200);
-        assert_eq!(body, json!({ "configured": true }));
+        assert_eq!(body["configured"], true);
+        assert_eq!(body["mode"], "send_receive");
         assert!(!body.to_string().contains("manual-token"));
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+        assert_eq!((harness.entry_status)(), linked_without_slot());
     });
 }
 
@@ -624,7 +632,7 @@ fn config_rejected_by_the_gateway_is_registration_failed() {
         assert_eq!(body, json!({ "error": "registration_failed" }));
         assert!((harness.stored)().await.is_none());
         let (_code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
-        assert_eq!(body, json!({ "configured": false }));
+        assert_eq!(body["configured"], false);
         assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
     });
 }
@@ -659,7 +667,7 @@ fn entry_status_is_ready_after_a_confirmed_login() {
     scenario(steps, TEST_TIMING, false, |harness| async move {
         harness.call(HttpMethod::Post, b"").await;
         harness.wait_for_status("confirmed").await;
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+        assert_eq!((harness.entry_status)(), linked_without_slot());
     });
 }
 

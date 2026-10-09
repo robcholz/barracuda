@@ -71,7 +71,7 @@ Layout (`layout.ts`)
   starts the router's sweep (also settable later with `setAttribute("scan", "true")`).
 - `kv(rows, lang, { live?, mono?, labelWidth? })`: a `.bc-kv` table; `live` makes it
   a polite status region.
-- `term(label, tip, lang, { start? })`: the dotted-underline aside (`只写`, `明文`).
+- `term(label, tip, lang, { start? })`: the dotted-underline aside (`明文`, `名额`).
 - `badge(label, lang, { signal? })`, `button(label, lang, { variant, size, icon, type, onClick })`,
   `frame(...children)`, `row(title, hint, lang, ...children)` (a label-left row).
 
@@ -84,8 +84,8 @@ Settings form (`settings.ts`)
   - `options.advanced`: `{ hint?, fields, open?, columns?, onToggle? }`, the 「高级」 fold
     (hint defaults to 「已填入默认值」); it opens by itself when one of its fields is invalid.
     `onToggle(open)` runs whenever it opens or closes (WeChat shows its footer only while open).
-  - `options.endpoint`: the POST target, shown in mono in the footer with the
-    「只写」 term; the footer also has 「清空」 (restores defaults) and the submit button.
+  - `options.endpoint`: the POST target. It is never shown: the footer holds only
+    「清空」 (restores defaults) and the submit button.
   - `options.submit`: the button label, a verb naming the result.
   - `options.body(values)`: shapes the JSON body (default: the values object;
     wrap it, for example `(v) => [v]`, when the endpoint takes a batch).
@@ -171,8 +171,10 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 (`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take
 `{"remove": id}` or `{"rotate": true}`.
 
-- `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000 })` returns
-  `{ rows, attach(form), apply(status), refresh() }`: the two rows below, wired to the device.
+- `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
+  returns `{ rows, attach(form), apply(status), refresh() }`: the two rows below, wired to the
+  device. `onStatus(status)` runs with each state the rows show (WeChat offers 「重新绑定」 when
+  its receive state is the 「需要重新扫码」 error).
   - `attach(form)` puts them before the form's 「高级」 fold (or its footer).
   - `apply(status)` shows the state the page's own `readChannel` read; `refresh()` reads it again
     (call it after a save succeeds). Both rows show only while `configured`.

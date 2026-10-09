@@ -3,8 +3,14 @@
 - Plugin ID: `imessage-inkbox`
 - Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Provided typed capabilities: none
-- Storage: complete provider configuration under the Plugin-scoped KV key
-  `configuration`
+- Gateway channel: `inkbox`
+- Owned task: `inkbox_receive_task`, one receive loop (see below)
+- Receive slots: one, while the channel is configured and in `send_receive`
+- Storage (Plugin-scoped KV):
+  - `configuration`: the provider configuration;
+  - `mode`: the channel mode (`ChannelMode` JSON string);
+  - `owners`: the allowed accounts (owner book);
+  - `cursor`: the receive cursor, `{"start":"<created_at>","recent":["<id>",…]}`.
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/inkbox` for runtime configuration, and
@@ -29,8 +35,7 @@ handle to its identity UUID, stores the configuration with the production
 resend the emailed code; a successful verify stores the new claim status. The
 Plugin retains one `WebRouteRegistration` per path. Signup, verify, and resend
 run inside their HTTP request, one at a time, with at most one upstream
-connection; the Plugin owns no long-running task. The API key is never returned
-or logged.
+connection. The API key is never returned or logged.
 
 Inkbox shows an API key only once. When signup succeeds but the identity
 lookup, storage, or Gateway registration fails, the endpoint state keeps that
@@ -39,10 +44,70 @@ identity) in RAM, never in storage, until it is stored or the Plugin unloads.
 A later signup for the same email resumes from it without a second upstream
 signup; a signup for another email drops it.
 
-The portal entry is registered with `CaptivePortal::register_with_status`; its
-`GET /portal/status` record is `EntryStatus::configured`: `ready`
-已配置/Configured while a channel is registered with the Gateway, otherwise
-`off` 未配置/Not set up. It reads a flag kept beside the channel registration.
+The Plugin follows the channel plumbing of
+[`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
+`/api/gateway/inkbox/mode` and `/api/gateway/inkbox/owners` are the shared mode
+and owner endpoints, served with `/api/gateway/inkbox` from one prefix route
+(`ChannelEndpoint`); the allowed accounts are loaded only once the channel is
+configured, and the cursor by the first receive session. The `inkbox` channel is registered with the Gateway
+exactly while it is configured and its mode is `send` or `send_receive`. A
+configuration stored before modes existed loads as `send`. A device without an
+Inkbox channel starts in `send_receive`, and a signup on such a device sets
+`send_receive` before storing its result. The portal entry's `GET
+/portal/status` record is `entry_status` of the channel (未配置, 已停用, 仅发送,
+收发中, 连接中, 名额已满, or 连接中断).
+
+## Receiving
+
+Inkbox offers no long poll, WebSocket, or push a device on a private network
+can receive, so the Plugin polls. It owns one Embassy task,
+`inkbox_receive_task`, spawned in `start` and raced against the Plugin's task
+token, running the channel crate's `receive_runtime`. Parked without a slot
+unless the channel is configured and in `send_receive`, it leases one receive
+slot (never a request pool connection) and opens one kept-alive connection on
+it with `client_factory()`. Every 3 s it sends
+
+```
+GET {api_base}/api/v1/imessage/messages?limit=50&start_datetime=<cursor>
+X-API-Key: <api key>
+```
+
+after awaiting `IMessageGateway::ready()`. The list is newest first and
+`start_datetime` is inclusive.
+
+- **Cursor.** `start` is the `created_at` of the newest message seen, sent
+  percent-encoded. The 32 most recent ids handled are kept beside it and
+  dropped when the inclusive start repeats them (also across reconnects and
+  restarts). The cursor is stored at most every 10 s, and at once after the
+  first poll.
+- **First poll.** Without a cursor (a new identity), the poll asks for one
+  message and only records where to start, so earlier messages are not
+  replayed to the agent. An empty inbox starts at the epoch.
+- **Messages.** Each page is handled oldest first. Only `direction` `inbound`
+  messages with text are handled; the sender is `remote_number` and the route
+  is `inkbox`/`conversation_id`, the conversation the send path takes. An
+  owner's message is published with the Inkbox message `id`; a pairing code
+  from a new sender adds them and sends 「已绑定，可以开始对话了」 to that
+  conversation through the normal send path; anyone else is dropped and
+  counted. Group messages are not listed (Inkbox's `include_groups` stays off).
+- **Large pages.** A body over 32 KiB is asked for again with half the limit;
+  more than a full page of new messages within one interval skips the oldest,
+  with a warning.
+- **Errors.** 401 or 403 halts receiving with
+  「Inkbox 拒绝了 API Key / Inkbox rejected the API key」 until the
+  configuration changes; 429 waits `Retry-After` seconds (60 when absent);
+  other statuses and failed connections retry with the runtime's backoff; a
+  connection that ends after a healthy poll is reopened at once.
+
+Mail is not polled: a signup's agent mailbox receives mail at Inkbox, but only
+iMessage reaches the Gateway.
+
+Memory per receiving Inkbox channel: the receive slot's static socket buffers
+(1 KiB send, 4 KiB receive), one TLS session from the lease (about 35 KiB idle
+on device; see the Platform manifests), a 2 KiB response-head buffer, a
+response body of at most 32 KiB while one poll is parsed (usually one or two
+messages, under 2 KiB), the parsed page, and the cursor (up to 32 ids, about
+2 KiB).
 
 ## Portal page
 
@@ -73,7 +138,7 @@ step. A signup error with `"retry": true` (the device kept the signup) offers
 「重试」, which posts the same email again and resumes it without a second email.
 「已有 API Key」 posts `{api_key, identity_id, api_base}` to `POST
 /api/gateway/inkbox`; the form footer shows only in this mode. On mount the page
-reads `GET /api/gateway/inkbox`: a stored signup resumes at the code step
+reads `GET /api/gateway/inkbox` (the channel status plus `signup`): a stored signup resumes at the code step
 (`claim_status` other than `agent_claimed`; the note names `human_email` and
 prefills the email field, or says the code went to the person's inbox when
 `human_email` is absent) or at the claimed

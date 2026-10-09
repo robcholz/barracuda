@@ -707,18 +707,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   padding: 16px var(--space-6);
   border-top: 1px solid var(--border);
   border-radius: 0 0 7px 7px;
   background: var(--sidebar);
 }
-.bc-form__endpoint {
-  flex: 1 1 200px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
+
 .bc-disclosure {
   display: inline-flex;
   align-items: center;

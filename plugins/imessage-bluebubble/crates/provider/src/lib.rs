@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+pub mod inbound;
+
 use alloc::{
     boxed::Box,
     format,
@@ -71,6 +73,12 @@ where
             config,
             next_local_id: Cell::new(0),
         }
+    }
+
+    /// The server URL from the configuration.
+    #[must_use]
+    pub fn server_url(&self) -> &str {
+        &self.config.server_url
     }
 
     fn next_id(&self) -> u64 {

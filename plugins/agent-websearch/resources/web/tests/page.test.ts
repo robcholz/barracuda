@@ -95,9 +95,7 @@ test("renders the design in Chinese: untitled-icon header, loupe figure, key row
   ).toBe("true");
   expect(root.textContent).toContain("已填入默认值");
   expect(input("api_base").value).toBe("https://api.tavily.com");
-  expect(root.querySelector(".bc-form__endpoint")?.textContent).toBe(
-    "POST /api/tavily · 只写设备不会返回已保存的设置和密钥",
-  );
+  expect(root.textContent).not.toContain("/api/");
   expect(texts(root, ".bc-form__footer button")).toEqual(["清空", "保存配置"]);
 });
 

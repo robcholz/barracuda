@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use barracuda_imessage_gateway_channel::{
     receive_runtime, NoSlot, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture,
-    ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming,
+    ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait,
 };
 use embassy_futures::join::join;
 use embassy_futures::select::{select, Either};
@@ -298,6 +298,65 @@ fn reports_no_slot_and_takes_one_when_freed() {
         drop(other);
         wait_until("receiving", || control.state() == ReceiveState::Receiving).await;
         assert_eq!(pool.in_use(), 1);
+    });
+}
+
+/// A pool that tells a waiting channel when a slot frees.
+struct Waking {
+    pool: Pool,
+    freed: Rc<Signal<NoopRawMutex, ()>>,
+}
+
+impl ReceiveSlotSource for Waking {
+    type Lease = Lease;
+
+    fn acquire(&self) -> Option<Lease> {
+        self.pool.acquire()
+    }
+
+    fn capacity(&self) -> usize {
+        self.pool.capacity
+    }
+
+    fn in_use(&self) -> usize {
+        self.pool.in_use()
+    }
+
+    fn wait_available(&self) -> SlotWait<'_> {
+        Box::pin(self.freed.wait())
+    }
+}
+
+#[test]
+fn a_freed_slot_wakes_the_waiting_channel_before_the_retry_timer() {
+    let pool = Pool::new(1);
+    let freed = Rc::new(Signal::new());
+    let control = Rc::new(ReceiveControl::new(Waking {
+        pool: pool.clone(),
+        freed: Rc::clone(&freed),
+    }));
+    let timing = ReceiveTiming {
+        slot_retry: Duration::from_secs(3600),
+        ..TIMING
+    };
+    let script = Script::new([Step::Forever]);
+    let runtime = receive_runtime(Rc::clone(&control), Rc::clone(&script), timing);
+    block_on(async move {
+        let test = async {
+            let other = pool.acquire().expect("another channel's slot");
+            assert_eq!(control.set_enabled(true), Err(NoSlot));
+            Timer::after_millis(20).await;
+            assert_eq!(control.state(), ReceiveState::NoSlot);
+
+            drop(other);
+            freed.signal(());
+            wait_until("receiving", || control.state() == ReceiveState::Receiving).await;
+            assert_eq!(pool.in_use(), 1);
+        };
+        match select(runtime, test).await {
+            Either::First(()) => panic!("receive runtime ended"),
+            Either::Second(()) => {}
+        }
     });
 }
 

@@ -111,6 +111,7 @@ pub trait ReceiveSlotSource: 'static {
     fn acquire(&self) -> Option<Self::Lease>;
     fn capacity(&self) -> usize;
     fn in_use(&self) -> usize;               // held right now, across every channel
+    fn wait_available(&self) -> SlotWait<'_> // default: never completes
 }
 pub struct UnlimitedSlots;                   // Lease = (); webhook receivers
 pub trait ReceiveChannel<Lease>: 'static {
@@ -138,12 +139,28 @@ pub struct ReceiveTiming { initial_backoff, max_backoff, slot_retry }
 // ReceiveTiming::DEVICE = 1 s, 30 s, 5 s
 pub fn receive_runtime<Slots, Channel>(control: Rc<ReceiveControl<Slots>>,
     channel: Rc<Channel>, timing: ReceiveTiming) -> ReceiveRuntime;
+pub struct OnDemand<T>;                      // Box<T> loaded by the first session
+impl<T> OnDemand<T> {
+    pub const fn new() -> Self;
+    pub fn get(&self) -> Option<&T>;
+    pub async fn get_or_load<E, F>(&self, load: impl FnOnce() -> F) -> Result<&T, E>
+        where F: Future<Output = Result<T, E>>;
+}
 ```
 
 - The runtime parks on a signal while receiving is disabled and holds no slot.
+  The parked runtime is a small future (about 100 bytes); the loop that runs
+  while receiving is enabled is boxed only for that time.
+- A channel keeps what only a receiving channel needs (its cursor, recent
+  message ids, a gateway session) in an `OnDemand`, loaded from storage by
+  the first session, and its owner book in one loaded once the channel is
+  configured. An unconfigured channel holds one pointer for each and reads
+  none of them at boot.
 - `set_enabled(true)` takes a slot at once, so the caller can answer
   `no_slot`. Without a free slot the control stays enabled, reports `no_slot`,
-  and the runtime retries every `slot_retry`.
+  and the runtime retries when `wait_available` completes (an adapter over
+  `ReceiveSlots` returns `Box::pin(slots.wait_available())`) or every
+  `slot_retry`, whichever comes first.
 - While enabled, the runtime runs the channel's session over the lease. It
   reconnects at once after a session that called `receiving()`.
 - After an error it waits 1 s, doubling to a 30 s cap; the wait resets once a
@@ -167,13 +184,24 @@ pub trait ChannelControl: 'static {
     fn modes(&self) -> &'static [ChannelMode] { ChannelMode::ALL }
     fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
-    fn owners(&self) -> &Owners<Self::Storage>;
+    fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
 }
 pub fn sync_receive<C: ChannelControl + ?Sized>(channel: &C) -> Result<(), NoSlot>;
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse;
+pub struct ChannelEndpoint<C, Config>; // ChannelEndpoint::new(Rc<C>, base, config): HttpEndpoint
 pub struct ModeEndpoint<C>;   // ModeEndpoint::new(Rc<C>): HttpEndpoint
 pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
 ```
+
+A channel registers one prefix route for its configuration path,
+`serve_http_prefix(base, ChannelEndpoint::new(channel, base, config))`:
+`base` goes to the Plugin's own `config` endpoint, `base/mode` to
+`ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any other path below
+`base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
+`/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
+(BlueBubbles' `/webhook`) still take their own requests. One route per channel
+instead of three keeps the webserver's route table within its first
+allocation.
 
 | Request | Response |
 | --- | --- |
@@ -200,6 +228,9 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
   - 422 `{"error":"registration_failed"}`;
   - 500 `{"error":"storage"}`;
   - 503 `{"error":"entropy_unavailable"}` when a rotation cannot mint a code;
+  - 409 `{"error":"not_configured"}` from `/owners` while the channel is not
+    configured (it has no owner book yet; `owners.count` reads 0);
+  - 404 `{"error":"not_found"}` for another path below the channel's;
   - 405 `{"error":"method_not_allowed"}` for other methods.
 
 **Portal status.** `entry_status(&channel)` (or
@@ -232,7 +263,11 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
    - load the configuration;
    - `load_mode(storage, configured, ChannelMode::legacy())` (WeChat:
      `ChannelMode::SendReceive`);
-   - `Owners::load(storage.clone(), entropy)`;
+   - keep the owner book in an `OnDemand<Owners<_>>`, loaded with
+     `Owners::load(storage.clone(), entropy)` only when the channel is
+     configured, here or before a configuration is stored;
+   - keep cursors and other receive bookkeeping in an `OnDemand` the first
+     session loads, so an unconfigured channel holds and reads none of it;
    - register the `MessageChannel` only when `configured && mode.registers()`;
    - build `Rc<ReceiveControl<_>>`;
    - put all of this in one channel-state type that implements
@@ -244,7 +279,11 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
    `ModeError::Storage` or `ModeError::Registration`.
 5. **Receiver.** Implement `ReceiveChannel<Lease>`. Each session loops:
    1. await `IMessageGateway::ready()`;
-   2. fetch one batch over the lease;
+   2. fetch one batch over the lease. A polling channel uses
+      `barracuda_imessage_gateway_plugin::poll` over `lease.client_factory()`
+      (one kept-alive connection; `GET` or `POST`, a per-request deadline, a
+      body cap with an optional tail): only the Gateway's HTTP crate and
+      `shared/http-client` may use reqwless (`workspace_boundary`);
    3. call `session.receiving()`;
    4. for each new message (deduplicated), call
       `owners.classify(sender, label, text)`:
@@ -264,8 +303,9 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
    - The configuration endpoint's `GET` returns `status_response(&*state)`.
    - After a successful configuration `POST`, it calls `sync_receive` and
      `control.restart()`.
-   - Register `/api/gateway/<channel>/mode` with `ModeEndpoint::new(state)`
-     and `/api/gateway/<channel>/owners` with `OwnersEndpoint::new(state)`.
+   - Register the configuration endpoint, `/mode`, and `/owners` as one
+     prefix route:
+     `serve_http_prefix(CONFIG_API_PATH, ChannelEndpoint::new(state, CONFIG_API_PATH, config))`.
 8. **Portal.** `register_with_status(.., move || entry_status(&*state))`.
 9. **Task.** In `start`, spawn one task that owns the runtime:
 

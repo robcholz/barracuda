@@ -2,9 +2,38 @@
 
 ## `GET /api/gateway/qq`
 
-Returns `200` with `{"configured": true}` while a QQ channel is registered
-with the Gateway, otherwise `{"configured": false}`. It never returns settings,
-the App Secret, or a token, and makes no request to QQ.
+Returns `200` with the shared channel status (see the
+[Gateway's channel HTTP surface](../../imessage-gateway/docs/plugin.md)):
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":1}},
+ "owners":{"count":1}}
+```
+
+`configured` is whether a configuration is stored. `receive` is present only
+in `send_receive`; its `state` is `idle`, `starting`, `receiving`, `no_slot`
+(with `capacity`), or `error` (with `message`, for example
+「QQ 机器人已下架，只能连接沙箱环境 / The QQ bot is delisted and may only use the
+sandbox」 after close code 4914). It never returns settings, the App Secret,
+or a token, and makes no request to QQ.
+
+## `POST /api/gateway/qq/mode`
+
+`{"mode":"disabled"|"send"|"send_receive"}`. 204 when applied; 409
+`{"error":"no_slot","capacity":n}` when `send_receive` finds every receive
+slot in use (the mode is saved and receiving starts once a slot frees); 400
+`invalid_request` or `unsupported_mode`; 422 `registration_failed`; 500
+`storage`.
+
+## `GET` and `POST /api/gateway/qq/owners`
+
+`GET` answers
+`{"owners":[{"id":"<openid>","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`.
+Owner ids are QQ openids: `user_openid` for direct messages and
+`member_openid` in groups. `POST` takes `{"remove":"<id>"}` or
+`{"rotate":true}` and answers 204. Before the channel is configured both answer
+`409` `{"error":"not_configured"}`: there is no owner book yet.
 
 ## `POST /api/gateway/qq`
 
@@ -30,8 +59,10 @@ The token itself is never stored.
 
 Responses:
 
-- `204 No Content`: the credentials were verified and the provider was stored
-  and registered.
+- `204 No Content`: the credentials were verified and the provider was stored;
+  it is registered with the Gateway unless the mode is `disabled`, and
+  receiving restarts with it. Configuring a different App ID or API origin
+  forgets the stored gateway session.
 - `400 Bad Request` `{"error":"invalid_request"}`: the JSON body was invalid,
   required fields were absent, or an unknown field was present. Nothing is
   requested from QQ.

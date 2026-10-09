@@ -30,11 +30,18 @@ ordinary request and multipart helpers.
 ## Receive slots
 
 Long-lived receive loops use a separate pool so they never take a connection
-from the request pool. System builds it once from the request factory, which
-shares DNS and TLS, with the Target's long-lived connection budget:
+from the request pool. The slots' socket buffers are static and sized at build
+time: the application declares one `ReceiveBuffers` with the selected
+Platform's largest long-lived connection budget (`barracuda_target::RECEIVE_SLOTS`,
+generated from `platform.yml`), so a Target that allows none links no receive
+buffers. System builds the pool once from the request factory, which shares DNS
+and TLS, with the selected Board's runtime limit:
 
 ```rust,ignore
-let receive_slots = http_client::ReceiveSlots::new(stack, &http_clients, limit);
+static RECEIVE_BUFFERS: http_client::ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }> =
+    http_client::ReceiveBuffers::new();
+let receive_slots =
+    http_client::ReceiveSlots::new(stack, &http_clients, RECEIVE_BUFFERS.take(), limit);
 ```
 
 Plugins find it in `PluginContext::receive_slots`:

@@ -1,18 +1,45 @@
 # IMessage Inkbox HTTP API
 
-Every route is an exact path that accepts `POST`; `/api/gateway/inkbox` also
-accepts `GET`. Any other method returns `405 Method Not Allowed` with
-`{"error":"method_not_allowed"}`.
+Every route is an exact path that accepts `POST`; `/api/gateway/inkbox` and
+`/api/gateway/inkbox/owners` also accept `GET`. Any other method returns `405
+Method Not Allowed` with `{"error":"method_not_allowed"}`.
 
 ## `GET /api/gateway/inkbox`
 
-Returns `200` with `{"configured": false}` when no Inkbox channel is registered
-with the Gateway. Otherwise it returns `{"configured": true}`, plus
-`"signup": {"human_email": "<address entered>", "email_address": "<agent mailbox>", "claim_status": "<status>"}`
-when the stored configuration came from signup. `human_email` is the address
-the person entered (trimmed), which Inkbox sent the code to. `claim_status` is the last one
-Inkbox reported, at signup or at a later verify. The API key and identity are
-never returned. A storage read failure returns `500` `{"error":"storage"}`.
+Returns `200` with the shared channel status (see the
+[Gateway's channel HTTP surface](../../imessage-gateway/docs/plugin.md)) plus,
+when the stored configuration came from signup,
+`"signup": {"human_email": "<address entered>", "email_address": "<agent mailbox>", "claim_status": "<status>"}`:
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":1}},
+ "owners":{"count":1},
+ "signup":{"human_email":"person@example.com","email_address":"barracuda-a1b2@inkboxmail.com","claim_status":"agent_claimed"}}
+```
+
+`configured` is whether a configuration is stored. `receive` is present only
+in `send_receive`; its `state` is `idle`, `starting`, `receiving`, `no_slot`
+(with `capacity`), or `error` (with `message`). `human_email` is the address
+the person entered (trimmed), which Inkbox sent the code to. `claim_status` is
+the last one Inkbox reported, at signup or at a later verify. The API key and
+identity are never returned.
+
+## `POST /api/gateway/inkbox/mode`
+
+`{"mode":"disabled"|"send"|"send_receive"}`. 204 when applied; 409
+`{"error":"no_slot","capacity":n}` when `send_receive` finds every receive
+slot in use (the mode is saved and receiving starts once a slot frees); 400
+`invalid_request` or `unsupported_mode`; 422 `registration_failed`; 500
+`storage`.
+
+## `GET` and `POST /api/gateway/inkbox/owners`
+
+`GET` answers
+`{"owners":[{"id":"+15555550123","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`;
+owner ids are Inkbox `remote_number`s. `POST` takes `{"remove":"<id>"}` or
+`{"rotate":true}` and answers 204. Before the channel is configured both answer
+`409` `{"error":"not_configured"}`: there is no owner book yet.
 
 ## `POST /api/gateway/inkbox`
 
@@ -21,7 +48,10 @@ a JSON object containing `api_key`, `identity_id`, and `api_base`. Fields with p
 
 Responses:
 
-- `204 No Content`: the provider was configured and registered.
+- `204 No Content`: the provider was configured; it is registered with the
+  Gateway unless the mode is `disabled`, and receiving restarts with it. A
+  different API key, identity, or origin starts from that identity's newest
+  message.
 - `400 Bad Request`: the JSON body was invalid or required fields were absent.
 - `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
 - `422 Unprocessable Content` `{"error":"registration_failed"}`: the Gateway

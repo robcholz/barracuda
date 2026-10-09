@@ -26,6 +26,12 @@ pub const TARGET_IDENTITY: TargetIdentity = TargetIdentity::new(
     barracuda_board_selected::BOARD_INFO,
 );
 
+/// Static receive slots the application reserves: the largest long-lived
+/// connection budget the selected Platform declares for any Board. The
+/// selected Board's runtime limit (`TARGET_IDENTITY.long_lived_connections()`)
+/// is at most this.
+pub const RECEIVE_SLOTS: usize = barracuda_platform_selected::LONG_LIVED_CONNECTIONS;
+
 /// Failure while composing the independently selected target axes.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

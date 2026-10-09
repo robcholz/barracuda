@@ -174,6 +174,11 @@ where
 
 pub use resources::SystemResourceError;
 
+/// Static socket buffers of the receive slots, declared once by the
+/// application and sized from the selected Platform's long-lived connection
+/// budget.
+pub use http_client::{ReceiveBuffers, ReceiveSlotBuffers};
+
 /// The selected Target's Platform and Board resources, as System consumes them.
 type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
     PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
@@ -276,9 +281,10 @@ where
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
     /// The caller supplies resources from the selected-target resource
-    /// factory and the current Embassy executor spawner. System consumes them,
-    /// owns the complete Plugin registration order, and exposes the spawner
-    /// only to Plugin startup hooks.
+    /// factory, the static receive-slot buffers sized for the selected
+    /// Platform ([`ReceiveBuffers`]), and the current Embassy executor
+    /// spawner. System consumes them, owns the complete Plugin registration
+    /// order, and exposes the spawner only to Plugin startup hooks.
     ///
     /// # Errors
     ///
@@ -286,6 +292,7 @@ where
     pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send + Sync>(
         resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
+        receive_buffers: &'static mut [ReceiveSlotBuffers],
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
@@ -334,13 +341,18 @@ where
         };
         let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
         let receive_limit = usize::from(target_identity.long_lived_connections());
-        let receive_slots =
-            http_client::ReceiveSlots::new(prepared.ip_stack, &http_clients, receive_limit);
+        let receive_static = receive_buffers.len();
+        let receive_slots = http_client::ReceiveSlots::new(
+            prepared.ip_stack,
+            &http_clients,
+            receive_buffers,
+            receive_limit,
+        );
         log::info!(
             "receive connections: {} of {} allowed by the Target ({} static)",
             receive_slots.capacity(),
             receive_limit,
-            http_client::RECEIVE_SLOTS
+            receive_static
         );
         let mut plugin_context = PluginContext::from_hal(
             target_identity,

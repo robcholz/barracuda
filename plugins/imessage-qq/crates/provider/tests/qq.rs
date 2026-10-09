@@ -317,3 +317,53 @@ fn rejects_untyped_or_unsafe_destination() {
         assert!(http.network.requests().is_empty());
     });
 }
+
+#[test]
+fn gateway_url_is_fetched_with_the_cached_token() {
+    block_on(async {
+        let http = MockHttp::scripted([
+            ScriptStep::json(200, TOKEN),
+            ScriptStep::json(401, "{}"),
+            ScriptStep::json(200, r#"{"access_token":"token-2","expires_in":"7200"}"#),
+            ScriptStep::json(200, r#"{"url":"wss://api.sgroup.qq.com/websocket/"}"#),
+            ScriptStep::json(200, r#"{"code":100001,"message":"rate limited"}"#),
+        ]);
+        let channel = provider(&http);
+        assert_eq!(
+            channel.gateway_url().await.expect("gateway url"),
+            "wss://api.sgroup.qq.com/websocket/"
+        );
+        let requests = http.network.requests();
+        assert!(requests[1].starts_with("GET /gateway HTTP/1.1"));
+        assert!(requests[1].contains("Authorization: QQBot token-1"));
+        assert!(requests[3].contains("Authorization: QQBot token-2"));
+        assert!(channel.token_refresh_at().is_some());
+        assert!(matches!(
+            channel.gateway_url().await,
+            Err(ChannelError::Platform { .. })
+        ));
+    });
+}
+
+#[test]
+fn replies_to_a_received_message_carry_msg_id_and_an_increasing_msg_seq() {
+    block_on(async {
+        let http = MockHttp::responding(3);
+        let channel = provider(&http);
+        channel.note_inbound("ROBOT1.0_in", qq::gateway::Scene::Direct);
+        for _ in 0..2 {
+            let mut request = c2c("reply");
+            request.reply_to = Some("ROBOT1.0_in".into());
+            channel.send_message(request).await.expect("reply");
+        }
+        let mut request = SendMessageRequest::text(MessageTarget::new("qq", "channel:42"), "x");
+        request.reply_to = Some("guild-msg".into());
+        channel.send_message(request).await.expect("guild reply");
+        let requests = http.network.requests();
+        assert!(requests[1].contains(r#""msg_id":"ROBOT1.0_in""#));
+        assert!(requests[1].contains(r#""msg_seq":1"#));
+        assert!(requests[2].contains(r#""msg_seq":2"#));
+        assert!(requests[3].contains(r#""msg_id":"guild-msg""#));
+        assert!(!requests[3].contains("msg_seq"));
+    });
+}

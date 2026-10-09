@@ -3,8 +3,11 @@
 
 extern crate alloc;
 
+mod context;
 mod login;
+mod updates;
 
+use alloc::rc::Rc;
 use alloc::{
     boxed::Box,
     format,
@@ -22,11 +25,19 @@ use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
+pub use context::{ContextTokens, MAX_CONTEXT_TOKENS};
 pub use login::{LoginCredentials, LoginError, LoginQrCode, LoginStatus, WechatLogin};
+pub use updates::{
+    authorization, parse_oversized_updates, parse_updates, updates_body, updates_headers,
+    wechat_uin, InboundText, Updates, UpdatesError, DEFAULT_LONG_POLL_MS, MAX_UPDATES_BYTES,
+    MAX_UPDATES_TAIL_BYTES, SESSION_EXPIRED_CODE, UPDATES_HEADER_BYTES, UPDATES_PATH,
+};
 
 /// Default WeChat iLink API base URL.
 pub const DEFAULT_API_BASE: &str = "https://ilinkai.weixin.qq.com";
 const MAX_TEXT_BYTES: usize = 4_000;
+/// `base_info.channel_version` sent with every iLink request.
+const CHANNEL_VERSION: &str = "barracuda-wechat";
 
 /// Connection settings matching the headers used by the WeChat iLink bot API.
 pub struct WechatConfig {
@@ -56,6 +67,7 @@ impl WechatConfig {
 pub struct Wechat<'net, T = http_client::Tcp, D = http_client::Resolver> {
     http_clients: ClientFactory<'net, T, D>,
     config: WechatConfig,
+    context_tokens: Rc<ContextTokens>,
     next_client_id: Cell<u64>,
 }
 
@@ -65,11 +77,28 @@ where
     D: http_client::embedded_nal_async::Dns,
 {
     pub fn new(http_clients: ClientFactory<'net, T, D>, config: WechatConfig) -> Self {
+        Self::with_context_tokens(http_clients, config, Rc::default())
+    }
+
+    /// Creates a provider whose sends attach the latest `context_token` that
+    /// `context_tokens` holds for the recipient, unless the target's
+    /// `thread_id` names one.
+    pub fn with_context_tokens(
+        http_clients: ClientFactory<'net, T, D>,
+        config: WechatConfig,
+        context_tokens: Rc<ContextTokens>,
+    ) -> Self {
         Self {
             http_clients,
             config,
+            context_tokens,
             next_client_id: Cell::new(0),
         }
+    }
+
+    /// The connection settings.
+    pub fn config(&self) -> &WechatConfig {
+        &self.config
     }
 
     fn next_client_id(&self) -> String {
@@ -119,17 +148,21 @@ where
                 "text_item": { "text": text },
             }],
         });
-        if let Some(context_token) = &target.thread_id {
+        let context_token = target
+            .thread_id
+            .clone()
+            .or_else(|| self.context_tokens.get(&target.conversation_id));
+        if let Some(context_token) = context_token {
             let Some(fields) = msg.as_object_mut() else {
                 return Err(ChannelError::InvalidRequest {
                     message: "failed to build WeChat message payload".into(),
                 });
             };
-            fields.insert("context_token".into(), Value::String(context_token.clone()));
+            fields.insert("context_token".into(), Value::String(context_token));
         }
         let payload = json!({
             "msg": msg,
-            "base_info": { "channel_version": "barracuda-wechat" },
+            "base_info": { "channel_version": CHANNEL_VERSION },
         });
         let bytes = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),
@@ -193,8 +226,9 @@ where
     /// Sends text to the target user.
     ///
     /// iLink cannot quote a specific message, so `reply_to` is accepted and
-    /// ignored; inbound replies thread through the `context_token` carried by
-    /// the target instead.
+    /// ignored. The send carries the recipient's latest inbound
+    /// `context_token`: the target's `thread_id` when set, otherwise the one
+    /// the receive loop stored for that user.
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             match request.body {

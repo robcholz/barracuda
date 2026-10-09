@@ -18,6 +18,9 @@ send = "Check the service."
 reply_contains = ["The service is healthy."]
 
 [memory]
-# Host ordinary-heap peak was 204 KiB locally when this budget was set
+# Host ordinary-heap peak was 215 KiB locally when this budget was set
 # (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
-heap_high_water_max = 217088
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 229376

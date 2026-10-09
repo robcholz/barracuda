@@ -171,6 +171,7 @@ barracuda-vfs-fat = { path = "shared/vfs-fat" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }
 barracuda-vfs-memfs = { path = "shared/vfs-memfs" }
 http-client = { path = "shared/http-client" }
+ws-client = { path = "shared/ws-client" }
 json-validator = { path = "shared/json-validator" }
 json-validator-macros = { path = "shared/json-validator-macros" }
 

@@ -21,6 +21,9 @@ use reqwless::request::RequestBuilder as _;
 
 pub use reqwless::request::{Method, RequestBody};
 
+mod poll;
+pub use poll::{poll, PollEnd, PollLimits, PollRequest, Polled, Poller};
+
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
@@ -35,6 +38,9 @@ pub enum Error {
     /// The exchange missed its [`SEND_TIMEOUT`] deadline.
     #[error("HTTP request timed out")]
     Timeout,
+    /// The response body exceeded the limit given to [`send_limited`].
+    #[error("HTTP response body is too large")]
+    BodyTooLarge,
     #[error(transparent)]
     Reqwless(#[from] reqwless::Error),
 }
@@ -67,8 +73,62 @@ where
     send_within(SEND_TIMEOUT, http_clients, method, url, headers, body).await
 }
 
+/// [`send`] that stops reading once the response body exceeds `limit` bytes
+/// and fails with [`Error::BodyTooLarge`], so a receive path never buffers
+/// more than it can afford.
+pub async fn send_limited<T, D, B>(
+    http_clients: &http_client::ClientFactory<'_, T, D>,
+    method: Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: B,
+    limit: usize,
+) -> Result<Response, Error>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+    B: RequestBody,
+{
+    send_bounded(
+        SEND_TIMEOUT,
+        limit,
+        http_clients,
+        method,
+        url,
+        headers,
+        body,
+    )
+    .await
+}
+
 async fn send_within<T, D, B>(
     timeout: Duration,
+    http_clients: &http_client::ClientFactory<'_, T, D>,
+    method: Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: B,
+) -> Result<Response, Error>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+    B: RequestBody,
+{
+    send_bounded(
+        timeout,
+        usize::MAX,
+        http_clients,
+        method,
+        url,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn send_bounded<T, D, B>(
+    timeout: Duration,
+    limit: usize,
     http_clients: &http_client::ClientFactory<'_, T, D>,
     method: Method,
     url: &str,
@@ -85,10 +145,13 @@ where
         body,
         deadline: &deadline,
     };
-    futures_lite::future::or(exchange(http_clients, method, url, headers, body), async {
-        deadline.expired().await;
-        Err(Error::Timeout)
-    })
+    futures_lite::future::or(
+        exchange(http_clients, method, url, headers, body, limit),
+        async {
+            deadline.expired().await;
+            Err(Error::Timeout)
+        },
+    )
     .await
 }
 
@@ -98,6 +161,7 @@ async fn exchange<T, D, B>(
     url: &str,
     headers: &[(&str, &str)],
     body: B,
+    limit: usize,
 ) -> Result<Response, Error>
 where
     T: http_client::embedded_nal_async::TcpConnect,
@@ -124,6 +188,9 @@ where
             break;
         }
         let chunk = read_buffer.get(..read).ok_or(reqwless::Error::Codec)?;
+        if bytes.len().saturating_add(read) > limit {
+            return Err(Error::BodyTooLarge);
+        }
         bytes.extend_from_slice(chunk);
     }
     Ok(Response {

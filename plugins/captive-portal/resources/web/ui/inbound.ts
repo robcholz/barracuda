@@ -24,10 +24,19 @@ export const CHANNEL_MODES: readonly ChannelMode[] = [
 export type ReceiveState =
   "idle" | "starting" | "receiving" | "no_slot" | "error";
 
-/** `GET <channel endpoint>`: `receive` only in `send_receive`, `message` only with `error`, `capacity` only with `no_slot`. */
+/**
+ * `GET <channel endpoint>`: `receive` only in `send_receive`, `message` only with `error`, `capacity`
+ * only with `no_slot`, `slots` (the device's receive slots held now, across every channel) whenever
+ * the channel draws from that bounded pool (a webhook channel holds none).
+ */
 export interface ChannelStatus extends ChannelState {
   mode?: ChannelMode;
-  receive?: { state: ReceiveState; message?: string; capacity?: number };
+  receive?: {
+    state: ReceiveState;
+    message?: string;
+    capacity?: number;
+    slots?: { in_use: number; capacity: number };
+  };
   owners?: { count: number };
 }
 
@@ -59,7 +68,7 @@ const STRINGS = {
     broken: "连接中断",
     sendOnly: "仅发送",
     disabled: "已停用",
-    slots: (n: number) => `名额 ${n}/${n}`,
+    slots: (used: number, n: number) => `名额 ${used}/${n}`,
     slotsTip: "每个收发通道保持一条连接，名额由设备内存决定",
     full: (n: number) => `收发通道已达上限（${n}）`,
     // a Latin name keeps a space before the Chinese that follows it (「QQ 会」, 「微信会」)
@@ -86,7 +95,7 @@ const STRINGS = {
     broken: "Disconnected",
     sendOnly: "Send only",
     disabled: "Disabled",
-    slots: (n: number) => `Slots ${n} of ${n}`,
+    slots: (used: number, n: number) => `Slots ${used} of ${n}`,
     slotsTip:
       "Each receiving channel keeps one connection open; the device memory sets how many",
     full: (n: number) => `Receive slots are full (${n})`,
@@ -127,8 +136,8 @@ export interface ModeRow {
 
 /**
  * The 「模式」 row: one radio card per mode, the receive state badge under them (收发中, 连接中,
- * 等待名额 with the slot count, 连接中断 with the device's message in mono) and, while every receive
- * slot is taken, an alert naming the limit. Choosing a mode posts `{mode}` at once; a refusal is
+ * 等待名额, 连接中断 with the device's message in mono) followed by the slots in use (「名额 1/2」)
+ * whenever the device reports them and, while every receive slot is taken, an alert naming the limit. Choosing a mode posts `{mode}` at once; a refusal is
  * toasted and the choice goes back.
  */
 export function modeRow(
@@ -227,6 +236,9 @@ export function modeRow(
     let signal = false;
     let extra: Node | null = null;
     let full: number | null = null;
+    // a device that predates `slots` reports only the limit, and only with no_slot
+    let slots =
+      status.mode === "send_receive" && receive?.slots ? receive.slots : null;
     if (status.mode === "disabled") label = s.disabled;
     else if (status.mode === "send") label = s.sendOnly;
     else if (receive?.state === "receiving") {
@@ -234,10 +246,10 @@ export function modeRow(
       signal = true;
     } else if (receive?.state === "no_slot") {
       label = s.waiting;
-      if (typeof receive.capacity === "number") {
-        full = receive.capacity;
-        extra = term(s.slots(full), s.slotsTip, lang);
-        (extra as HTMLElement).classList.add("bc-mono");
+      const capacity = receive.capacity ?? receive.slots?.capacity;
+      if (typeof capacity === "number") {
+        full = capacity;
+        slots ??= { in_use: capacity, capacity };
       }
     } else if (receive?.state === "error") {
       label = s.broken;
@@ -246,7 +258,16 @@ export function modeRow(
         (extra as HTMLElement).style.overflowWrap = "anywhere";
       }
     }
-    state.replaceChildren(badge(label, lang, { signal }), extra ?? "");
+    let count: HTMLElement | null = null;
+    if (slots) {
+      count = term(s.slots(slots.in_use, slots.capacity), s.slotsTip, lang);
+      count.classList.add("bc-mono");
+    }
+    state.replaceChildren(
+      badge(label, lang, { signal }),
+      count ?? "",
+      extra ?? "",
+    );
     if (full !== null) {
       alertTitle.textContent = s.full(full);
       alertBody.textContent = s.fullBody(pick(options.channel, lang));
@@ -431,6 +452,8 @@ export interface ChannelInboundOptions {
   command?: (code: string) => string;
   /** How often to read the channel while it receives (default 5 s). */
   pollMs?: number;
+  /** Runs with each channel state the rows show, so the page can react to it too. */
+  onStatus?: (status: ChannelStatus | null) => void;
 }
 
 export interface ChannelInbound {
@@ -481,6 +504,7 @@ export function channelInbound(
     const before = last?.receive?.state;
     last = status;
     mode.update(status);
+    options.onStatus?.(status);
     if (!status?.configured) {
       accounts.hide();
       return;

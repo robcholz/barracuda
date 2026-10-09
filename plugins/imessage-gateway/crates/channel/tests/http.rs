@@ -15,16 +15,17 @@ use std::rc::Rc;
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
 use barracuda_imessage_gateway_channel::{
     entry_status, load_mode, receive_runtime, status_response, store_mode, sync_receive,
-    ChannelControl, ChannelMode, Classification, ModeEndpoint, ModeError, ModeFuture, Owners,
-    OwnersEndpoint, PairingEntropy, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture,
-    ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, MODE_STORAGE_KEY,
+    ChannelControl, ChannelEndpoint, ChannelMode, Classification, ModeEndpoint, ModeError,
+    ModeFuture, Owners, OwnersEndpoint, PairingEntropy, ReceiveChannel, ReceiveControl,
+    ReceiveError, ReceiveFuture, ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming,
+    MODE_STORAGE_KEY,
 };
 use barracuda_platform::{Entropy, EntropyUnavailable};
 use barracuda_platform_test::memory_partition;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
 };
-use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
+use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Timer};
 use futures_lite::future::block_on;
@@ -78,6 +79,8 @@ struct Mock<Storage> {
     failure: Cell<Option<ModeError>>,
     receive: Rc<ReceiveControl<Pool>>,
     owners: Owners<Storage>,
+    /// Whether `owners` is offered: a channel loads its book once configured.
+    owners_loaded: Cell<bool>,
 }
 
 impl<Storage: PluginStorage> ChannelControl for Mock<Storage> {
@@ -113,8 +116,8 @@ impl<Storage: PluginStorage> ChannelControl for Mock<Storage> {
         &self.receive
     }
 
-    fn owners(&self) -> &Owners<Storage> {
-        &self.owners
+    fn owners(&self) -> Option<&Owners<Storage>> {
+        self.owners_loaded.get().then_some(&self.owners)
     }
 }
 
@@ -145,6 +148,7 @@ impl<Storage: PluginStorage> Harness<Storage> {
             owners: Owners::load(storage.clone(), entropy)
                 .await
                 .expect("owners"),
+            owners_loaded: Cell::new(true),
             storage,
             configured: Cell::new(true),
             mode: Cell::new(ChannelMode::Send),
@@ -316,6 +320,102 @@ fn status_and_mode_endpoints_report_exact_json() {
     with_storage(StatusAndMode);
 }
 
+/// A channel's own configuration endpoint: answers with the method it got.
+struct Config;
+
+impl HttpEndpoint for Config {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        let body = format!("config {:?}", request.method()).into_bytes();
+        Box::pin(async move { HttpResponse::new(200, "text/plain", body) })
+    }
+}
+
+struct Routes;
+
+impl Scenario for Routes {
+    fn run<Storage: PluginStorage>(self, storage: Storage) {
+        block_on(async {
+            let harness = Harness::new(storage, entropy(), ChannelMode::ALL).await;
+            let endpoint =
+                ChannelEndpoint::new(Rc::clone(&harness.channel), "/api/gateway/probe", Config);
+            let call = |method: HttpMethod, path: &str, body: &str| {
+                let request = HttpRequest::with_path(method, path.into(), body.as_bytes().to_vec());
+                let response = endpoint.handle(request);
+                async move {
+                    let response = response.await;
+                    let body = response.body().expect("buffered").to_vec();
+                    (response.status(), String::from_utf8(body).expect("UTF-8"))
+                }
+            };
+
+            assert_eq!(
+                call(HttpMethod::Get, "/api/gateway/probe", "").await,
+                (200, "config Get".into())
+            );
+            assert_eq!(
+                call(HttpMethod::Post, "/api/gateway/probe", "{}").await,
+                (200, "config Post".into())
+            );
+            assert_eq!(
+                call(
+                    HttpMethod::Post,
+                    "/api/gateway/probe/mode",
+                    r#"{"mode":"disabled"}"#
+                )
+                .await,
+                (204, String::new())
+            );
+            assert_eq!(harness.channel.mode(), ChannelMode::Disabled);
+            assert_eq!(
+                call(HttpMethod::Get, "/api/gateway/probe/mode", "").await,
+                (405, r#"{"error":"method_not_allowed"}"#.into())
+            );
+            let (status, owners) = call(HttpMethod::Get, "/api/gateway/probe/owners", "").await;
+            assert_eq!(status, 200);
+            assert!(
+                owners.starts_with(r#"{"owners":[],"pairing":{"code":""#),
+                "{owners}"
+            );
+            // Before a channel is configured it has no owner book to show.
+            harness.channel.owners_loaded.set(false);
+            assert_eq!(
+                call(HttpMethod::Get, "/api/gateway/probe/owners", "").await,
+                (409, r#"{"error":"not_configured"}"#.into())
+            );
+            assert_eq!(
+                call(
+                    HttpMethod::Post,
+                    "/api/gateway/probe/owners",
+                    r#"{"rotate":true}"#
+                )
+                .await,
+                (409, r#"{"error":"not_configured"}"#.into())
+            );
+            assert_eq!(
+                harness.status(),
+                r#"{"configured":true,"mode":"disabled","owners":{"count":0}}"#
+            );
+            for path in [
+                "/api/gateway/probe/",
+                "/api/gateway/probe/modes",
+                "/api/gateway/probe/owners/x",
+                "/api/gateway/other",
+            ] {
+                assert_eq!(
+                    call(HttpMethod::Get, path, "").await,
+                    (404, r#"{"error":"not_found"}"#.into()),
+                    "{path}"
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn one_channel_endpoint_serves_the_configuration_mode_and_owners() {
+    with_storage(Routes);
+}
+
 struct ModeErrors;
 
 impl Scenario for ModeErrors {
@@ -422,7 +522,7 @@ impl Scenario for OwnersFlow {
                         .into()
                 )
             );
-            let owners = harness.channel.owners();
+            let owners = harness.channel.owners().expect("loaded");
             assert_eq!(
                 owners.classify("9", None, "hi").await,
                 Classification::Ignored

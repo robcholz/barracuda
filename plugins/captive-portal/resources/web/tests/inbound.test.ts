@@ -327,6 +327,97 @@ test("the receive state badge: connecting, waiting for a slot with the limit, di
   );
 });
 
+test("the slots in use follow the receive badge whenever the device reports them", async () => {
+  status = {
+    configured: true,
+    mode: "send_receive",
+    receive: { state: "receiving", slots: { in_use: 1, capacity: 2 } },
+    owners: { count: 1 },
+  };
+  const receiving = await render("zh");
+  expect(stateLine(receiving).textContent).toStartWith("收发中名额 1/2");
+  const slots = stateLine(receiving).querySelector(".bc-term")!;
+  expect(slots.classList.contains("bc-mono")).toBe(true);
+  expect(slots.getAttribute("tabindex")).toBe("0");
+  expect(slots.firstChild?.textContent).toBe("名额 1/2");
+  expect(slots.querySelector(".bc-tooltip")?.textContent).toBe(
+    "每个收发通道保持一条连接，名额由设备内存决定",
+  );
+  expect(
+    modeRow(receiving).querySelector<HTMLElement>(".bc-alert")!.style.display,
+  ).toBe("none");
+  receiving.unmount();
+
+  status = {
+    configured: true,
+    mode: "send_receive",
+    receive: { state: "starting", slots: { in_use: 2, capacity: 2 } },
+    owners: { count: 1 },
+  };
+  const starting = await render("en");
+  expect(stateLine(starting).textContent).toStartWith("ConnectingSlots 2 of 2");
+  starting.unmount();
+
+  status = {
+    configured: true,
+    mode: "send_receive",
+    receive: {
+      state: "error",
+      message: "Conflict: terminated by other getUpdates request",
+      slots: { in_use: 1, capacity: 3 },
+    },
+    owners: { count: 1 },
+  };
+  const broken = await render("zh");
+  const line = stateLine(broken);
+  expect(line.querySelector(".bc-badge")?.textContent).toBe("连接中断");
+  expect(line.querySelector(".bc-term")?.firstChild?.textContent).toBe(
+    "名额 1/3",
+  );
+  expect(line.lastElementChild?.textContent).toBe(
+    "Conflict: terminated by other getUpdates request",
+  );
+  broken.unmount();
+
+  // the limit the device reports with no_slot; the alert stays
+  status = {
+    configured: true,
+    mode: "send_receive",
+    receive: {
+      state: "no_slot",
+      capacity: 2,
+      slots: { in_use: 2, capacity: 2 },
+    },
+    owners: { count: 1 },
+  };
+  const full = await render("zh");
+  expect(stateLine(full).querySelectorAll(".bc-term")).toHaveLength(1);
+  expect(
+    stateLine(full).querySelector(".bc-term")?.firstChild?.textContent,
+  ).toBe("名额 2/2");
+  const alert = modeRow(full).querySelector<HTMLElement>(".bc-alert")!;
+  expect(alert.style.display).toBe("");
+  expect(alert.querySelector(".bc-alert__title")?.textContent).toBe(
+    "收发通道已达上限（2）",
+  );
+  full.unmount();
+
+  // a webhook channel holds no slot, and send only shows none
+  for (const state of [
+    {
+      configured: true,
+      mode: "send_receive",
+      receive: { state: "receiving" },
+    },
+    { configured: true, mode: "send" },
+  ] satisfies ChannelStatus[]) {
+    status = { ...state, owners: { count: 1 } };
+    const page = await render("zh");
+    expect(stateLine(page).querySelector(".bc-term")).toBeNull();
+    page.unmount();
+  }
+});
+
 test("choosing a mode posts it at once, reads the channel again and refreshes the shell's status", async () => {
   const page = await render("zh");
   harness.calls.length = 0;

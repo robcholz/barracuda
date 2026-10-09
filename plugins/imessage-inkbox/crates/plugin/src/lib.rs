@@ -4,32 +4,44 @@
 
 extern crate alloc;
 
+mod receive;
+#[cfg(test)]
+mod receive_tests;
+
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use barracuda_captive_portal_plugin::{
-    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_imessage_gateway_channel::{
+    entry_status, load_mode, receive_runtime, status_response, store_mode, sync_receive,
+    ChannelControl, ChannelEndpoint, ChannelMode, ModeError, ModeFuture, OnDemand, Owners,
+    OwnersError, PairingEntropy, ReceiveControl, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
-use barracuda_plugin::api::PluginContext;
+use barracuda_imessage_gateway_plugin::{GatewayError, MessageChannel, MessageChannelRegistration};
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStorage,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
+    PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
+use embassy_futures::select::select;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_time::Duration;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::ClientFactory;
+use http_client::{ClientFactory, ReceiveSlots};
 use inkbox::{Inkbox, InkboxConfig, InkboxSignup, SignupAccount, SignupError, SignupRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-/// HTTP path accepting Inkbox configuration.
+use crate::receive::{Cursor, InkboxSlots, CURSOR_STORAGE_KEY, POLL_INTERVAL};
+
+/// HTTP path accepting Inkbox configuration and reporting channel status.
 pub const CONFIG_API_PATH: &str = "/api/gateway/inkbox";
 /// HTTP path starting Inkbox agent self-signup for an email address.
 pub const SIGNUP_API_PATH: &str = "/api/gateway/inkbox/signup";
@@ -37,6 +49,10 @@ pub const SIGNUP_API_PATH: &str = "/api/gateway/inkbox/signup";
 pub const VERIFY_API_PATH: &str = "/api/gateway/inkbox/verify";
 /// HTTP path asking Inkbox to resend the verification email.
 pub const RESEND_API_PATH: &str = "/api/gateway/inkbox/resend";
+/// HTTP path setting the channel mode.
+pub const MODE_API_PATH: &str = "/api/gateway/inkbox/mode";
+/// HTTP path listing owners and the pairing code.
+pub const OWNERS_API_PATH: &str = "/api/gateway/inkbox/owners";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 const CONFIGURATION_STORAGE_KEY: &str = "configuration";
@@ -45,18 +61,26 @@ const SIGNUP_DISPLAY_NAME: &str = "Barracuda";
 const SIGNUP_HARNESS: &str = "barracuda";
 const VERIFICATION_CODE_DIGITS: usize = 6;
 
-/// Plugin that exposes Inkbox configuration and registers the resulting channel.
+/// Plugin that exposes Inkbox configuration, registers the resulting
+/// channel, and polls it for inbound iMessages.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageInkboxPlugin {
     http_clients: ClientFactory<'static>,
+    receive_slots: ReceiveSlots,
+    entropy: SharedEntropy,
+    runtime: Option<ReceiveRuntime>,
 }
 
 impl IMessageInkboxPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources.
+    /// Creates an unconfigured provider using Platform HTTP resources, the
+    /// receive slots, and the Platform entropy for pairing codes.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            receive_slots: context.receive_slots.clone(),
+            entropy: context.entropy.clone(),
+            runtime: None,
         }
     }
 }
@@ -79,26 +103,15 @@ impl Plugin for IMessageInkboxPlugin {
         let webserver = context.require::<WebServer>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
-        let channel_registration =
-            embassy_futures::block_on(load_configuration(context.storage()))?
-                .map(|config| {
-                    let channel: Rc<dyn MessageChannel> = Rc::new(Inkbox::new(
-                        self.http_clients.clone(),
-                        config.into_inkbox_config(),
-                    ));
-                    gateway.register(channel).map_err(PluginError::registration)
-                })
-                .transpose()?;
-        let state = Rc::new(InkboxState {
+        let (state, runtime) = build_state(
+            context.storage().clone(),
             gateway,
-            http_clients: self.http_clients.clone(),
-            configured: Cell::new(channel_registration.is_some()),
-            channel_registration: Mutex::new(channel_registration),
-            upstream: Mutex::new(()),
-            pending_signup: RefCell::new(None),
-            storage: context.storage().clone(),
-            signup_api_base: inkbox::DEFAULT_API_BASE.into(),
-        });
+            self.http_clients.clone(),
+            InkboxSlots(self.receive_slots.clone()),
+            PairingEntropy::new(self.entropy.clone()),
+            inkbox::DEFAULT_API_BASE.into(),
+            Timing::DEVICE,
+        )?;
         let status = Rc::clone(&state);
         let portal = context.require::<CaptivePortal>("captive-portal")?;
         context.retain(
@@ -121,12 +134,26 @@ impl Plugin for IMessageInkboxPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
-                    move || EntryStatus::configured(status.configured.get()),
+                    move || entry_status(&*status),
                 )
                 .map_err(PluginError::registration)?,
         );
+        // One route serves the configuration path and its `/mode` and `/owners`;
+        // the exact sign-up routes take their own requests.
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&state),
+            CONFIG_API_PATH,
+            InkboxEndpoint {
+                state: Rc::clone(&state),
+                route: Route::Config,
+            },
+        );
+        context.retain(
+            webserver
+                .serve_http_prefix(CONFIG_API_PATH, endpoint)
+                .map_err(PluginError::registration)?,
+        );
         for (path, route) in [
-            (CONFIG_API_PATH, Route::Config),
             (SIGNUP_API_PATH, Route::Signup),
             (VERIFY_API_PATH, Route::Verify),
             (RESEND_API_PATH, Route::Resend),
@@ -140,9 +167,43 @@ impl Plugin for IMessageInkboxPlugin {
                 .map_err(PluginError::registration)?;
             context.retain(registration);
         }
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(ReceiveRuntimeUnavailable))?;
+        let task = inkbox_receive_task(runtime, context.task_token())
+            .map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
         Ok(())
     }
 }
+
+/// Owns the receive loop; parked without a slot unless the channel is
+/// configured and in `send_receive`.
+#[embassy_executor::task]
+async fn inkbox_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime).await;
+    log::info!("stopped Inkbox receive task");
+}
+
+#[derive(Debug)]
+struct ReceiveRuntimeUnavailable;
+
+impl core::fmt::Display for ReceiveRuntimeUnavailable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("Inkbox receive runtime was not prepared during Plugin registration")
+    }
+}
+
+impl core::error::Error for ReceiveRuntimeUnavailable {}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -155,7 +216,7 @@ struct ConfigRequest {
 
 /// Stored channel configuration: the accepted settings and, when they came
 /// from signup, the account they belong to. Older records have no `signup`.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct StoredConfiguration {
     api_key: String,
     identity_id: String,
@@ -187,12 +248,19 @@ impl From<ConfigRequest> for StoredConfiguration {
 
 impl StoredConfiguration {
     /// Returns the channel settings, leaving out the signup record.
-    fn into_inkbox_config(self) -> InkboxConfig {
+    fn inkbox_config(&self) -> InkboxConfig {
         InkboxConfig {
-            api_key: self.api_key,
-            identity_id: self.identity_id,
-            api_base: self.api_base,
+            api_key: self.api_key.clone(),
+            identity_id: self.identity_id.clone(),
+            api_base: self.api_base.clone(),
         }
+    }
+
+    /// Whether `other` reads the same Inkbox identity's messages.
+    fn same_inbox(&self, other: &Self) -> bool {
+        self.api_key == other.api_key
+            && self.identity_id == other.identity_id
+            && self.api_base == other.api_base
     }
 }
 
@@ -220,21 +288,132 @@ struct VerifyBody {
     code: String,
 }
 
-/// Channel state shared by every Inkbox HTTP route.
-struct InkboxState<Storage, T: 'static = http_client::Tcp, D: 'static = http_client::Resolver> {
-    gateway: Rc<IMessageGateway>,
+/// A stored configuration and the provider built from it.
+pub(crate) struct Settings {
+    pub(crate) config: StoredConfiguration,
+    /// Sends through the shared request pool, never a receive slot.
+    pub(crate) sender: Rc<dyn MessageChannel>,
+}
+
+/// Builds the sending provider for a configuration.
+type Connect = Box<dyn Fn(InkboxConfig) -> Rc<dyn MessageChannel>>;
+
+/// Channel state shared by every Inkbox HTTP route, the portal status, and
+/// the receive loop.
+pub(crate) struct InkboxState<
+    Storage,
+    T: 'static = http_client::Tcp,
+    C: 'static = http_client::ReceiveSocket,
+    D: 'static = http_client::Resolver,
+> {
+    pub(crate) gateway: Rc<IMessageGateway>,
     http_clients: ClientFactory<'static, T, D>,
-    channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
-    /// Whether a channel is registered with the Gateway, readable without the lock.
-    configured: Cell<bool>,
+    connect: Connect,
+    settings: RefCell<Option<Rc<Settings>>>,
+    mode: Cell<ChannelMode>,
+    /// Present exactly while configured and the mode registers.
+    registration: RefCell<Option<MessageChannelRegistration>>,
+    receive: Rc<ReceiveControl<InkboxSlots<C, D>>>,
+    /// Loaded once the channel is configured.
+    owners: OnDemand<Owners<Storage>>,
+    entropy: PairingEntropy,
+    /// Loaded by the first receive session.
+    pub(crate) cursor: OnDemand<Cursor>,
+    /// Time between two polls of a healthy connection.
+    pub(crate) poll_interval: Duration,
+    /// Serializes configuration, mode, and claim-status changes.
+    changes: Mutex<NoopRawMutex, ()>,
     /// Admits one signup, verify, or resend flow at a time, so the Plugin
     /// opens at most one upstream connection for them.
     upstream: Mutex<NoopRawMutex, ()>,
     /// Signup result that failed to be stored or registered, until it is.
     pending_signup: RefCell<Option<PendingSignup>>,
-    storage: Storage,
+    pub(crate) storage: Storage,
     /// Inkbox service origin used for signup and stored with its result.
     signup_api_base: String,
+}
+
+/// Time limits of the receive loop.
+#[derive(Clone, Copy)]
+pub(crate) struct Timing {
+    /// Reconnect backoff and slot retry.
+    pub(crate) receive: ReceiveTiming,
+    /// Time between two polls of a healthy connection.
+    pub(crate) poll: Duration,
+}
+
+impl Timing {
+    /// Limits used on the device.
+    pub(crate) const DEVICE: Self = Self {
+        receive: ReceiveTiming::DEVICE,
+        poll: POLL_INTERVAL,
+    };
+}
+
+/// The state and the receive runtime its task owns.
+pub(crate) type Built<Storage, T, C, D> = (Rc<InkboxState<Storage, T, C, D>>, ReceiveRuntime);
+
+/// Loads the channel from storage, registers it with the Gateway when its
+/// mode asks for it, and builds the receive runtime the Plugin's task owns.
+pub(crate) fn build_state<Storage, T, C, D>(
+    storage: Storage,
+    gateway: Rc<IMessageGateway>,
+    http_clients: ClientFactory<'static, T, D>,
+    slots: InkboxSlots<C, D>,
+    entropy: PairingEntropy,
+    signup_api_base: String,
+    timing: Timing,
+) -> PluginResult<Built<Storage, T, C, D>>
+where
+    Storage: PluginStorage,
+    T: TcpConnect + 'static,
+    C: TcpConnect + 'static,
+    D: Dns + 'static,
+{
+    let config = embassy_futures::block_on(load_configuration(&storage))?;
+    let mode =
+        embassy_futures::block_on(load_mode(&storage, config.is_some(), ChannelMode::legacy()))?;
+    let senders = http_clients.clone();
+    let connect: Connect = Box::new(move |config| {
+        let sender: Rc<dyn MessageChannel> = Rc::new(Inkbox::new(senders.clone(), config));
+        sender
+    });
+    let settings = config.map(|config| {
+        Rc::new(Settings {
+            sender: connect(config.inkbox_config()),
+            config,
+        })
+    });
+    let receive = Rc::new(ReceiveControl::new(slots));
+    let state = Rc::new(InkboxState {
+        gateway,
+        http_clients,
+        connect,
+        settings: RefCell::new(settings),
+        mode: Cell::new(mode),
+        registration: RefCell::new(None),
+        receive: Rc::clone(&receive),
+        owners: OnDemand::new(),
+        entropy,
+        cursor: OnDemand::new(),
+        poll_interval: timing.poll,
+        changes: Mutex::new(()),
+        upstream: Mutex::new(()),
+        pending_signup: RefCell::new(None),
+        storage,
+        signup_api_base,
+    });
+    if state.configured() {
+        embassy_futures::block_on(state.load_owners()).map_err(PluginError::registration)?;
+    }
+    state
+        .register_for(mode)
+        .map_err(PluginError::registration)?;
+    let runtime = receive_runtime(receive, Rc::clone(&state), timing.receive);
+    if sync_receive(&*state).is_err() {
+        log::warn!("Inkbox waits for a free receive slot");
+    }
+    Ok((state, runtime))
 }
 
 enum ApplyError {
@@ -261,37 +440,57 @@ impl StoredSignupError {
     }
 }
 
-impl<Storage, T, D> InkboxState<Storage, T, D>
+impl<Storage, T, C, D> InkboxState<Storage, T, C, D>
 where
     Storage: PluginStorage,
     T: TcpConnect + 'static,
+    C: TcpConnect + 'static,
     D: Dns + 'static,
 {
-    /// `GET`: whether a channel is configured and, for a signup, its account.
-    async fn configuration_status(&self) -> HttpResponse {
-        if !self.configured.get() {
-            return static_response(200, br#"{"configured":false}"#);
-        }
-        let signup = match self.stored_configuration().await {
-            Ok(stored) => stored.signup,
-            Err(StoredSignupError::Missing) => None,
-            Err(StoredSignupError::Storage) => {
-                return static_response(500, br#"{"error":"storage"}"#);
-            }
+    /// The current configuration and its provider.
+    pub(crate) fn settings(&self) -> Option<Rc<Settings>> {
+        self.settings.borrow().clone()
+    }
+
+    /// `GET`: the shared channel status and, for a signup, its account.
+    fn configuration_status(&self) -> HttpResponse {
+        let status = status_response(self);
+        let signup = self
+            .settings()
+            .and_then(|settings| settings.config.signup.clone());
+        let Some(signup) = signup else {
+            return status;
         };
-        #[derive(Serialize)]
-        struct Body {
-            configured: bool,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            signup: Option<SignupRecord>,
-        }
-        match serde_json::to_vec(&Body {
-            configured: true,
-            signup,
-        }) {
-            Ok(body) => HttpResponse::new(200, JSON_CONTENT_TYPE, body),
+        let Some(mut body) = status
+            .body()
+            .and_then(|body| serde_json::from_slice::<Map<String, Value>>(body).ok())
+        else {
+            return status;
+        };
+        match serde_json::to_value(signup) {
+            Ok(signup) => {
+                body.insert("signup".into(), signup);
+                json_response(200, &Value::Object(body))
+            }
             Err(_) => static_response(500, br#"{"error":"internal"}"#),
         }
+    }
+
+    /// Registers or unregisters with the Gateway so that a registration
+    /// exists exactly while configured and `mode` registers.
+    fn register_for(&self, mode: ChannelMode) -> Result<(), GatewayError> {
+        let wanted = self.settings().filter(|_settings| mode.registers());
+        let mut registration = self.registration.borrow_mut();
+        match (wanted, registration.is_some()) {
+            (Some(settings), false) => {
+                *registration = Some(self.gateway.register(Rc::clone(&settings.sender))?);
+            }
+            (None, true) => {
+                registration.take();
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn configure(&self, body: &[u8]) -> HttpResponse {
@@ -385,7 +584,7 @@ where
             api_base: self.signup_api_base.clone(),
             signup: Some(signup.clone()),
         };
-        let failure = match self.apply(config).await {
+        let failure = match self.apply_signup(config).await {
             Ok(()) => {
                 return json_response(
                     200,
@@ -464,7 +663,7 @@ where
     /// Stores the claim status a verify returned, if the stored configuration
     /// is still the signup that `api_key` belongs to.
     async fn record_claim_status(&self, api_key: &str, claim_status: &str) {
-        let _registration = self.channel_registration.lock().await;
+        let _change = self.changes.lock().await;
         let Ok(mut config) = self.stored_configuration().await else {
             return;
         };
@@ -482,6 +681,14 @@ where
             .await
         {
             log::error!("failed to store the Inkbox claim status: {error}");
+            return;
+        }
+        let current = self.settings();
+        if let Some(current) = current.filter(|current| current.config.same_inbox(&config)) {
+            self.settings.replace(Some(Rc::new(Settings {
+                sender: Rc::clone(&current.sender),
+                config,
+            })));
         }
     }
 
@@ -501,10 +708,37 @@ where
         })
     }
 
+    /// Loads the owner book, once; a configured channel needs it.
+    async fn load_owners(&self) -> Result<&Owners<Storage>, OwnersError> {
+        self.owners
+            .get_or_load(|| Owners::load(self.storage.clone(), self.entropy.clone()))
+            .await
+    }
+
+    /// Applies a configuration from signup. A signup on a device without an
+    /// Inkbox channel starts it sending and receiving.
+    async fn apply_signup(&self, config: StoredConfiguration) -> Result<(), ApplyError> {
+        if !self.configured() && self.mode.get() != ChannelMode::SendReceive {
+            let _change = self.changes.lock().await;
+            store_mode(&self.storage, ChannelMode::SendReceive)
+                .await
+                .map_err(|error| {
+                    log::error!("failed to store the Inkbox mode: {error}");
+                    ApplyError::Storage
+                })?;
+            self.mode.set(ChannelMode::SendReceive);
+        }
+        self.apply(config).await
+    }
+
     /// Persists `config` and replaces the registered channel with it, restoring
     /// the previous stored configuration when the Gateway rejects the channel.
     async fn apply(&self, config: StoredConfiguration) -> Result<(), ApplyError> {
-        let mut channel_registration = self.channel_registration.lock().await;
+        let _change = self.changes.lock().await;
+        if let Err(error) = self.load_owners().await {
+            log::error!("failed to read the Inkbox owners: {error}");
+            return Err(ApplyError::Storage);
+        }
         let previous_configuration = match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
             Ok(configuration) => configuration,
             Err(error) => {
@@ -524,35 +758,95 @@ where
             log::error!("failed to persist Inkbox gateway configuration: {error}");
             return Err(ApplyError::Storage);
         }
-        let channel: Rc<dyn MessageChannel> = Rc::new(Inkbox::new(
-            self.http_clients.clone(),
-            config.into_inkbox_config(),
-        ));
-        channel_registration.take();
-        self.configured.set(false);
-        match self.gateway.register(channel) {
-            Ok(registration) => {
-                channel_registration.replace(registration);
-                self.configured.set(true);
-                log::info!("configured Inkbox gateway provider");
-                Ok(())
+        let same_inbox = self
+            .settings()
+            .is_some_and(|settings| settings.config.same_inbox(&config));
+        let settings = Rc::new(Settings {
+            sender: (self.connect)(config.inkbox_config()),
+            config,
+        });
+        self.registration.take();
+        self.settings.replace(Some(settings));
+        if let Err(error) = self.register_for(self.mode.get()) {
+            self.settings.replace(None);
+            let _no_slot = sync_receive(self);
+            let restored = if let Some(previous) = previous_configuration.as_deref() {
+                self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
+            } else {
+                self.storage.delete(CONFIGURATION_STORAGE_KEY).await
+            };
+            if let Err(storage_error) = restored {
+                log::error!(
+                    "failed to roll back rejected Inkbox gateway configuration: {storage_error}"
+                );
+                return Err(ApplyError::Storage);
             }
-            Err(error) => {
-                let restored = if let Some(previous) = previous_configuration.as_deref() {
-                    self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
-                } else {
-                    self.storage.delete(CONFIGURATION_STORAGE_KEY).await
-                };
-                if let Err(storage_error) = restored {
-                    log::error!(
-                        "failed to roll back rejected Inkbox gateway configuration: {storage_error}"
-                    );
-                    return Err(ApplyError::Storage);
-                }
-                log::warn!("rejected Inkbox gateway configuration: {error}");
-                Err(ApplyError::Rejected)
+            log::warn!("rejected Inkbox gateway configuration: {error}");
+            return Err(ApplyError::Rejected);
+        }
+        if !same_inbox {
+            // Another identity's messages: start from its newest one.
+            let forgotten = match self.cursor.get() {
+                Some(cursor) => cursor.forget(&self.storage).await,
+                None => self.storage.delete(CURSOR_STORAGE_KEY).await,
+            };
+            if let Err(error) = forgotten {
+                log::warn!("failed to clear the Inkbox receive cursor: {error}");
             }
         }
+        if sync_receive(self).is_err() {
+            log::warn!("Inkbox waits for a free receive slot");
+        }
+        self.receive.restart();
+        log::info!("configured Inkbox gateway provider");
+        Ok(())
+    }
+}
+
+impl<Storage, T, C, D> ChannelControl for InkboxState<Storage, T, C, D>
+where
+    Storage: PluginStorage,
+    T: TcpConnect + 'static,
+    C: TcpConnect + 'static,
+    D: Dns + 'static,
+{
+    type Storage = Storage;
+    type Slots = InkboxSlots<C, D>;
+
+    fn configured(&self) -> bool {
+        self.settings.borrow().is_some()
+    }
+
+    fn mode(&self) -> ChannelMode {
+        self.mode.get()
+    }
+
+    fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_> {
+        Box::pin(async move {
+            let _change = self.changes.lock().await;
+            let previous = self.mode.get();
+            store_mode(&self.storage, mode).await.map_err(|error| {
+                log::error!("failed to store the Inkbox mode: {error}");
+                ModeError::Storage
+            })?;
+            if let Err(error) = self.register_for(mode) {
+                log::warn!("the Gateway rejected the Inkbox channel: {error}");
+                if let Err(error) = store_mode(&self.storage, previous).await {
+                    log::error!("failed to restore the Inkbox mode: {error}");
+                }
+                return Err(ModeError::Registration);
+            }
+            self.mode.set(mode);
+            Ok(())
+        })
+    }
+
+    fn receive(&self) -> &ReceiveControl<InkboxSlots<C, D>> {
+        &self.receive
+    }
+
+    fn owners(&self) -> Option<&Owners<Storage>> {
+        self.owners.get()
     }
 }
 
@@ -565,15 +859,21 @@ enum Route {
 }
 
 /// One registered Inkbox HTTP route.
-struct InkboxEndpoint<Storage, T: 'static = http_client::Tcp, D: 'static = http_client::Resolver> {
-    state: Rc<InkboxState<Storage, T, D>>,
+struct InkboxEndpoint<
+    Storage,
+    T: 'static = http_client::Tcp,
+    C: 'static = http_client::ReceiveSocket,
+    D: 'static = http_client::Resolver,
+> {
+    state: Rc<InkboxState<Storage, T, C, D>>,
     route: Route,
 }
 
-impl<Storage, T, D> HttpEndpoint for InkboxEndpoint<Storage, T, D>
+impl<Storage, T, C, D> HttpEndpoint for InkboxEndpoint<Storage, T, C, D>
 where
     Storage: PluginStorage,
     T: TcpConnect + 'static,
+    C: TcpConnect + 'static,
     D: Dns + 'static,
 {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
@@ -581,7 +881,7 @@ where
             match (request.method(), self.route) {
                 (HttpMethod::Post, _) => {}
                 (HttpMethod::Get, Route::Config) => {
-                    return self.state.configuration_status().await;
+                    return self.state.configuration_status();
                 }
                 _ => return static_response(405, br#"{"error":"method_not_allowed"}"#),
             }
@@ -689,6 +989,7 @@ async fn load_configuration<Storage: PluginStorage>(
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use barracuda_captive_portal_plugin::{EntryState, EntryStatus};
     use barracuda_imessage_gateway_plugin::{
         ChannelError, ChannelFuture, GatewaySendRequest, IMessageGatewayPlugin, Operation,
         SendMessageRequest, SendReceipt,
@@ -824,16 +1125,16 @@ mod tests {
                 None
             };
             let storage = context.storage().clone();
-            let state = Rc::new(InkboxState {
-                gateway: Rc::clone(&gateway),
-                http_clients: ClientFactory::from_network(self.network, self.network),
-                channel_registration: Mutex::new(None),
-                configured: Cell::new(false),
-                upstream: Mutex::new(()),
-                pending_signup: RefCell::new(None),
-                storage: storage.clone(),
-                signup_api_base: API_BASE.into(),
-            });
+            let receive: &'static ScriptedStack = Box::leak(Box::new(ScriptedStack::new([])));
+            let (state, _runtime) = build_state(
+                storage.clone(),
+                Rc::clone(&gateway),
+                ClientFactory::from_network(self.network, self.network),
+                InkboxSlots(ReceiveSlots::from_connectors([receive.clone()], receive)),
+                PairingEntropy::unavailable(),
+                API_BASE.into(),
+                Timing::DEVICE,
+            )?;
             let status = Rc::clone(&state);
             let endpoint = |route| -> Box<dyn HttpEndpoint> {
                 Box::new(InkboxEndpoint {
@@ -851,7 +1152,7 @@ mod tests {
                 stored: Box::new(move || {
                     block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY)).expect("read storage")
                 }),
-                entry_status: Box::new(move || EntryStatus::configured(status.configured.get())),
+                entry_status: Box::new(move || entry_status(&*status)),
                 occupant: RefCell::new(occupant),
             }));
             Ok(())
@@ -975,19 +1276,18 @@ mod tests {
                 assert_eq!(stored.api_base, API_BASE);
                 let get = harness.get();
                 assert_eq!(get.status, 200);
+                assert_eq!(get.json["configured"], json!(true));
+                assert_eq!(get.json["mode"], json!("send_receive"));
                 assert_eq!(
-                    get.json,
+                    get.json["signup"],
                     json!({
-                        "configured": true,
-                        "signup": {
                             "human_email": "person@example.com",
                             "email_address": "barracuda-a1b2@inkboxmail.com",
                             "claim_status": "agent_unclaimed",
-                        },
                     })
                 );
                 assert!(!get.raw.contains(API_KEY));
-                assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+                assert_ne!((harness.entry_status)().state, EntryState::Off);
 
                 assert!(harness.send_text());
                 let requests = harness.requests();
@@ -1085,7 +1385,7 @@ mod tests {
                 );
                 assert!(!reply.raw.contains(API_KEY));
                 assert!(harness.stored().is_none());
-                assert_eq!(harness.get().json, json!({"configured": false}));
+                assert_eq!(harness.get().json["configured"], json!(false));
 
                 let reply = Harness::post(&*harness.signup, r#"{"email":" person@example.com "}"#);
 
@@ -1128,7 +1428,7 @@ mod tests {
                     json!({"error": "registration_failed", "retry": true})
                 );
                 assert!(harness.stored().is_none());
-                assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+                assert_eq!((harness.entry_status)().state, EntryState::Off);
 
                 harness.occupant.replace(None);
                 let reply = Harness::post(&*harness.signup, r#"{"email":"person@example.com"}"#);
@@ -1142,7 +1442,7 @@ mod tests {
                     harness.stored().expect("configuration stored").api_key,
                     API_KEY
                 );
-                assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+                assert_ne!((harness.entry_status)().state, EntryState::Off);
             },
         );
     }
@@ -1205,7 +1505,7 @@ mod tests {
             assert_eq!(reply.status, 422);
             assert_eq!(reply.json, json!({"error": "registration_failed"}));
             assert!(harness.stored().is_none());
-            assert_eq!(harness.get().json, json!({"configured": false}));
+            assert_eq!(harness.get().json["configured"], json!(false));
         });
     }
 
@@ -1214,15 +1514,22 @@ mod tests {
         with_harness([], |harness| {
             let reply = harness.get();
             assert_eq!(reply.status, 200);
-            assert_eq!(reply.json, json!({"configured": false}));
-            assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+            assert_eq!(reply.json["configured"], json!(false));
+            assert!(reply.json.get("signup").is_none());
+            assert_eq!((harness.entry_status)().state, EntryState::Off);
 
             harness.configure();
 
             let reply = harness.get();
             assert_eq!(reply.status, 200);
-            assert_eq!(reply.raw, r#"{"configured":true}"#);
-            assert_eq!((harness.entry_status)(), EntryStatus::configured(true));
+            assert_eq!(
+                reply.json,
+                json!({"configured": true, "mode": "send_receive",
+                       "receive": {"state": "starting", "slots": {"in_use": 1, "capacity": 1}},
+                       "owners": {"count": 0}})
+            );
+            assert!(!reply.raw.contains(API_KEY));
+            assert_ne!((harness.entry_status)().state, EntryState::Off);
         });
     }
 
@@ -1240,7 +1547,8 @@ mod tests {
                 assert_eq!(reply.status, 200);
                 assert_eq!(reply.json, json!({"claim_status": "agent_claimed"}));
                 // A manual configuration has no signup record to update.
-                assert_eq!(harness.get().json, json!({"configured": true}));
+                assert_eq!(harness.get().json["configured"], json!(true));
+                assert!(harness.get().json.get("signup").is_none());
                 let requests = harness.requests();
                 assert_eq!(
                     request_line(&requests[0]),
@@ -1274,14 +1582,11 @@ mod tests {
 
                 assert_eq!(reply.status, 200);
                 assert_eq!(
-                    harness.get().json,
+                    harness.get().json["signup"],
                     json!({
-                        "configured": true,
-                        "signup": {
-                            "human_email": "person@example.com",
-                            "email_address": "barracuda-a1b2@inkboxmail.com",
-                            "claim_status": "agent_claimed",
-                        },
+                        "human_email": "person@example.com",
+                        "email_address": "barracuda-a1b2@inkboxmail.com",
+                        "claim_status": "agent_claimed",
                     })
                 );
                 assert_eq!(

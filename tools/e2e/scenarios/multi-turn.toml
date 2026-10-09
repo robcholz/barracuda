@@ -23,6 +23,9 @@ expect = ["Agent created session `session-1`"]
 forbid = ['\bERROR\b', 'panicked at', "created session `session-2`"]
 
 [memory]
-# Host ordinary-heap peak was 195 KiB locally when this budget was set
+# Host ordinary-heap peak was 206 KiB locally when this budget was set
 # (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
-heap_high_water_max = 208896
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 217088

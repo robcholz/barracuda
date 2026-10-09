@@ -1,4 +1,5 @@
 import {
+  ICON_CIRCLE_ALERT,
   ICON_COPY,
   ICON_REFRESH,
   button,
@@ -8,6 +9,7 @@ import {
   definePage,
   h,
   header,
+  icon,
   page,
   qrPlate,
   resultCard,
@@ -37,6 +39,7 @@ const T = {
     linked: "微信已绑定",
     linkedBadge: "已绑定",
     relink: "重新绑定",
+    relogin: "微信登录已失效",
     elsewhere: "在电脑或另一台设备上打开此页扫码",
     copy: "复制链接",
     copied: "已复制链接",
@@ -64,6 +67,7 @@ const T = {
     linked: "WeChat linked",
     linkedBadge: "Linked",
     relink: "Link again",
+    relogin: "WeChat login expired",
     elsewhere: "Open this page on another device to scan",
     copy: "Copy link",
     copied: "Link copied",
@@ -79,6 +83,8 @@ const LOGIN = "/api/gateway/wechat/login";
 /** The shell's phone breakpoint: no one scans a code on the screen of the phone that scans it. */
 const PHONE = "(max-width: 719px)";
 const POLL_MS = 2_000;
+/** How the device's receive error starts when iLink ended the bot session (-14). */
+const SESSION_EXPIRED = "需要重新扫码";
 
 type Status = "idle" | "wait" | "scanned" | "confirmed" | "expired" | "failed";
 interface LoginState {
@@ -162,12 +168,24 @@ export const mount = definePage((context) => {
     context,
   );
   show(form.footer, false);
+  /** The device halted receiving because iLink ended the bot session: only a new QR login helps. */
+  let expired = false;
   // iLink needs the inbound context token to keep sending, so WeChat has no 「仅发送」
   const inbound = channelInbound(context, {
     endpoint: "/api/gateway/wechat",
     channel: t.title,
     modes: ["disabled", "send_receive"],
     how: t.how,
+    onStatus: (status) => {
+      const receive = status?.receive;
+      const halted =
+        status?.mode === "send_receive" &&
+        receive?.state === "error" &&
+        !!receive.message?.startsWith(SESSION_EXPIRED);
+      if (halted === expired) return;
+      expired = halted;
+      if (view.kind === "linked") render();
+    },
   });
   inbound.attach(form);
   /** The mode and accounts rows show the device's channel while the page shows it linked. */
@@ -213,22 +231,21 @@ export const mount = definePage((context) => {
     countdown = null;
     let next: HTMLElement;
     if (view.kind === "linked") {
+      const relink = button(t.relink, lang, {
+        variant: expired ? "primary" : "outline",
+        size: "sm",
+        onClick: () => void begin(),
+      });
       next = row(
         t.link,
         t.linkHint,
         lang,
-        resultCard(
-          {
-            title: t.linked,
-            badge: t.linkedBadge,
-            action: button(t.relink, lang, {
-              variant: "outline",
-              size: "sm",
-              onClick: () => void begin(),
-            }),
-          },
-          lang,
-        ),
+        expired
+          ? relogin(relink)
+          : resultCard(
+              { title: t.linked, badge: t.linkedBadge, action: relink },
+              lang,
+            ),
       );
     } else {
       const steps = stepList(
@@ -298,6 +315,26 @@ export const mount = definePage((context) => {
     linkedShown = view.kind === "linked";
     if (linkedShown) void inbound.refresh();
     else inbound.apply(null);
+  }
+
+  /** The link row while the bot session has expired: what happened, and 「重新绑定」. */
+  function relogin(relink: HTMLButtonElement) {
+    const mark = icon(ICON_CIRCLE_ALERT);
+    mark.style.cssText = "flex:none;margin-top:2px";
+    const text = h(
+      "span",
+      null,
+      h("span", { class: "bc-alert__title" }, t.relogin),
+      h("span", null, relink),
+    );
+    text.style.cssText =
+      "display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-width:0";
+    return h(
+      "div",
+      { class: "bc-alert bc-alert--error", role: "status" },
+      mark,
+      text,
+    );
   }
 
   const finish = (next: View) => {

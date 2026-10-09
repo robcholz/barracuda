@@ -22,8 +22,8 @@ pub use reqwless;
 mod receive;
 
 pub use receive::{
-    ReceiveConnection, ReceiveLease, ReceiveSlots, ReceiveSocket, ReceiveStream, StreamError,
-    RECEIVE_SLOTS,
+    ReceiveBuffers, ReceiveConnection, ReceiveLease, ReceiveSlotBuffers, ReceiveSlots,
+    ReceiveSocket, ReceiveStream, StreamError,
 };
 
 const TCP_CONNECTIONS: usize = 4;

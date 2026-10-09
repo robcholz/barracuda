@@ -120,6 +120,18 @@ impl Drop for StopOnDrop {
 pub(crate) struct LoginWatch(Rc<LoginShared>);
 
 impl LoginWatch {
+    /// A watch of a login service that never ran, for tests.
+    #[cfg(test)]
+    pub(crate) fn idle() -> Self {
+        Self(Rc::new(LoginShared {
+            status: RefCell::new(SessionStatus::Idle),
+            commands: Signal::new(),
+            started: Signal::new(),
+            control: Mutex::new(()),
+            stopped: Cell::new(false),
+        }))
+    }
+
     /// Returns whether a QR code is issued and not yet confirmed or ended.
     pub(crate) fn waiting_for_scan(&self) -> bool {
         matches!(
@@ -130,22 +142,23 @@ impl LoginWatch {
 }
 
 /// `POST`, `GET`, and `DELETE` on [`crate::LOGIN_API_PATH`].
-pub(crate) struct LoginEndpoint<Storage, T: 'static, D: 'static> {
+pub(crate) struct LoginEndpoint<Storage, T: 'static, D: 'static, R: 'static> {
     shared: Rc<LoginShared>,
-    configuration: Rc<ChannelConfiguration<Storage, T, D>>,
+    configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
 }
 
-impl<Storage, T, D> LoginEndpoint<Storage, T, D>
+impl<Storage, T, D, R> LoginEndpoint<Storage, T, D, R>
 where
     Storage: PluginStorage,
     T: TcpConnect + 'static,
     D: Dns + 'static,
+    R: TcpConnect + 'static,
 {
     /// Creates the endpoint and the runtime future that must run as one task.
     ///
     /// `default_api_base` is used when no configuration is stored.
     pub(crate) fn new(
-        configuration: Rc<ChannelConfiguration<Storage, T, D>>,
+        configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
         default_api_base: String,
         timing: LoginTiming,
     ) -> (Self, LoginRuntime) {
@@ -217,11 +230,12 @@ where
     }
 }
 
-impl<Storage, T, D> HttpEndpoint for LoginEndpoint<Storage, T, D>
+impl<Storage, T, D, R> HttpEndpoint for LoginEndpoint<Storage, T, D, R>
 where
     Storage: PluginStorage,
     T: TcpConnect + 'static,
     D: Dns + 'static,
+    R: TcpConnect + 'static,
 {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
@@ -285,18 +299,19 @@ struct Confirmed {
     api_base: String,
 }
 
-struct LoginRunner<Storage, T: 'static, D: 'static> {
+struct LoginRunner<Storage, T: 'static, D: 'static, R: 'static> {
     shared: Rc<LoginShared>,
-    configuration: Rc<ChannelConfiguration<Storage, T, D>>,
+    configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
     default_api_base: String,
     timing: LoginTiming,
 }
 
-impl<Storage, T, D> LoginRunner<Storage, T, D>
+impl<Storage, T, D, R> LoginRunner<Storage, T, D, R>
 where
     Storage: PluginStorage,
     T: TcpConnect + 'static,
     D: Dns + 'static,
+    R: TcpConnect + 'static,
 {
     async fn run(self) {
         let _stopped = StopOnDrop(Rc::clone(&self.shared));
@@ -384,7 +399,8 @@ where
         }
     }
 
-    /// Stores and registers the confirmed bot through the configuration path.
+    /// Stores and registers the confirmed bot through the configuration
+    /// path, then restarts receiving with it.
     async fn confirm(&self, confirmed: Confirmed) {
         let Confirmed {
             credentials,
@@ -395,7 +411,8 @@ where
             .filter(|base| base.starts_with("https://") || base.starts_with("http://"))
             .unwrap_or(api_base);
         let config = ConfigRequest::from_login(credentials.bot_token, api_base);
-        let status = match self.configuration.apply(config).await {
+        let bot_id = credentials.bot_id.as_deref();
+        let status = match self.configuration.link(config, bot_id).await {
             Ok(()) => {
                 log::info!("configured WeChat channel from QR login");
                 SessionStatus::Confirmed

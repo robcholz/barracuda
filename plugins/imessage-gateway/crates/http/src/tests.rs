@@ -8,7 +8,7 @@ use futures_lite::{future::block_on, stream};
 use gateway::{BinaryBody, BinaryChunk};
 use http_client::ClientFactory;
 
-use super::{send_within, Error, Method, Multipart};
+use super::{send_limited, send_within, Error, Method, Multipart};
 
 const TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -124,4 +124,34 @@ fn the_response_after_a_streamed_body_is_bounded() {
 
     assert!(matches!(result, Err(Error::Timeout)));
     assert_eq!(network.requests().len(), 1);
+}
+
+#[test]
+fn a_limited_send_rejects_a_body_over_its_limit() {
+    let network = network([
+        ScriptStep::json(200, r#"{"ok":true}"#),
+        ScriptStep::json(200, r#"{"ok":false,"padding":"0123456789"}"#),
+    ]);
+    let factory = factory(network);
+
+    let fits = block_on(send_limited(
+        &factory,
+        Method::GET,
+        "http://gateway.test/small",
+        &[],
+        (),
+        11,
+    ))
+    .expect("an 11-byte body fits an 11-byte limit");
+    let too_large = block_on(send_limited(
+        &factory,
+        Method::GET,
+        "http://gateway.test/large",
+        &[],
+        (),
+        11,
+    ));
+
+    assert_eq!(fits.body, br#"{"ok":true}"#.to_vec());
+    assert!(matches!(too_large, Err(Error::BodyTooLarge)));
 }

@@ -8,7 +8,7 @@ import {
   ICON_EYE,
   ICON_EYE_OFF,
 } from "./icons";
-import { row, term } from "./layout";
+import { row } from "./layout";
 import { KIT_STRINGS } from "./strings";
 
 interface FieldBase {
@@ -86,7 +86,7 @@ export interface SettingsRow {
 export type Values = Record<string, string | number | boolean>;
 
 export interface SettingsFormOptions {
-  /** The POST target, shown in mono in the footer (`POST /api/model-api · 只写`). */
+  /** Where the form posts. Never shown on the page. */
   endpoint: string;
   rows: readonly SettingsRow[];
   /** The 「高级」 fold: defaults the user rarely changes. */
@@ -121,7 +121,7 @@ export interface SettingsForm {
   values(): Values | null;
   /** Marks a field invalid with a message (and a machine `code` in mono after it), or clears it with `null`. */
   setError(name: string, message: string | null, code?: string): void;
-  /** The footer (endpoint, 「清空」, submit), for pages that show it only in some states. */
+  /** The footer (「清空」, submit), for pages that show it only in some states. */
   footer: HTMLElement;
   /** Validates and posts; resolves with the outcome (also reported by toast). */
   submit(): Promise<SubmitOutcome>;
@@ -601,8 +601,8 @@ export function fieldControl(
 }
 
 /**
- * A settings form with label-left rows, an optional 「高级」 fold and a footer holding the endpoint,
- * the 「只写」 term, 「清空」 and the submit button. Submitting validates every field (red border and
+ * A settings form with label-left rows, an optional 「高级」 fold and a footer holding 「清空」 and the
+ * submit button. Submitting validates every field (red border and
  * message), then posts JSON with {@link submitJson}. Secrets are cleared after the device accepts them
  * and when the module goes away.
  */
@@ -704,16 +704,9 @@ export function settingsForm(
     { class: "bc-button", type: "submit" },
     pick(options.submit, lang),
   );
-  const method = "POST";
   const footer = h(
     "div",
     { class: "bc-form__footer" },
-    h(
-      "span",
-      { class: "bc-form__endpoint" },
-      `${method} ${options.endpoint} · `,
-      term(s.writeOnly, s.writeOnlyTip, lang),
-    ),
     h(
       "button",
       { class: "bc-button bc-button--outline", type: "reset" },
@@ -761,7 +754,7 @@ export function settingsForm(
     form.setAttribute("aria-busy", "true");
     pending = submitJson(context, {
       endpoint: options.endpoint,
-      method,
+      method: "POST",
       body: options.body ? options.body(current) : current,
       success: options.success,
       onError: options.onError,

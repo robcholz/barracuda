@@ -2,9 +2,49 @@
 
 ## `GET /api/gateway/wechat`
 
-Returns `200` with `{"configured": true}` while a WeChat channel is registered
-with the Gateway, otherwise `{"configured": false}`. It never returns settings
-or the token. The login `GET` below carries the same `configured` value.
+Returns `200` with the shared channel status (`status_response`):
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":2}},
+ "owners":{"count":1}}
+```
+
+- `configured`: a WeChat bot is linked (a configuration is stored).
+- `mode`: `disabled` or `send_receive`.
+- `receive` (only in `send_receive`): `state` is `idle`, `starting`,
+  `receiving`, `no_slot` (with `capacity`), or `error` (with `message`).
+  After iLink reports the bot session expired (code -14) it is
+  `{"state":"error","message":"需要重新扫码 / Scan again to relink"}` until a
+  new QR login is confirmed.
+- `owners.count`: allowed accounts.
+
+It never returns settings or the token.
+
+## `POST /api/gateway/wechat/mode`
+
+Body `{"mode":"disabled"}` or `{"mode":"send_receive"}`; `send` is not offered
+because iLink sends need inbound activity.
+
+- `204`: applied. `disabled` unregisters the channel and stops receiving;
+  `send_receive` registers it (when linked) and starts receiving.
+- `409` `{"error":"no_slot","capacity":n}`: every receive slot is in use. The
+  mode is saved; receiving starts once a slot frees.
+- `400` `{"error":"invalid_request"}` or `{"error":"unsupported_mode"}`,
+  `422` `{"error":"registration_failed"}`, `500` `{"error":"storage"}`,
+  `405` for other methods.
+
+## `GET`/`POST /api/gateway/wechat/owners`
+
+The allowed accounts (授权账号) and the pairing code (绑定码), served by the
+shared `OwnersEndpoint`. `GET` answers
+`{"owners":[{"id":"…@im.wechat","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`;
+`POST` `{"remove":"<id>"}` or `{"rotate":true}` answers `204`. A WeChat owner
+id is the sender's `from_user_id`; it has no label. A message whose trimmed
+text is the current code adds its sender and is answered once with
+「已绑定，可以开始对话了」 / "Paired. You can start chatting.". Before a bot is
+linked both answer `409` `{"error":"not_configured"}`: there is no owner book
+yet.
 
 ## `POST /api/gateway/wechat`
 
@@ -13,7 +53,8 @@ a JSON object containing `token`, `api_base`, `app_id`, `client_version`, `route
 
 Responses:
 
-- `204 No Content`: the provider was configured and registered.
+- `204 No Content`: the provider was configured and, unless the mode is
+  `disabled`, registered. Receiving restarts with the new configuration.
 - `400 Bad Request` `{"error":"invalid_request"}`: the JSON body was invalid or
   required fields were absent.
 - `405 Method Not Allowed` `{"error":"method_not_allowed"}`: the endpoint only
@@ -81,9 +122,9 @@ Always returns `200 OK` immediately:
   - `failed`: a status poll failed or iLink reported an error, or storing or
     registering the confirmed channel failed. A `message` field describes the
     failure.
-- `configured` says whether a WeChat channel is currently registered with the
-  Gateway, from either this login or `POST /api/gateway/wechat`, whatever the
-  session state.
+- `configured` says whether a WeChat bot is linked (a configuration is
+  stored), from either this login or `POST /api/gateway/wechat`, whatever the
+  session state or mode.
 
 The final state of a finished session stays readable until the next `POST` or
 `DELETE`.
@@ -104,8 +145,11 @@ On `confirmed` iLink returns `bot_token`, `ilink_bot_id`, and `baseurl`. The
 task stores `{"token":"<bot_token>","api_base":"<baseurl, or the api_base used
 for the login>"}` with every other field at its default, through the same path
 as `POST /api/gateway/wechat`: the configuration is persisted, the channel is
-re-registered, and a Gateway rejection restores the previous configuration. It
-then reports `confirmed`, or `failed` if storing or registration failed.
+re-registered, and a Gateway rejection restores the previous configuration.
+When `ilink_bot_id` differs from the bot of the previous login, the stored
+`getupdates` cursor and context tokens are cleared. Receiving then restarts,
+which also clears an expired-session error. It then reports `confirmed`, or
+`failed` if storing or registration failed.
 
 The session ends on `confirmed`, `expired`, after 480 s, on `DELETE`, on a new
 `POST`, or when the Plugin stops. While no session runs the task is parked and

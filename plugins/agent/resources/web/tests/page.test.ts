@@ -125,9 +125,7 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
   expect(input("max_tokens").value).toBe("8192");
   expect(input("image_max_bytes").value).toBe("524288");
   expect(root.textContent).toContain("超时与大小上限");
-  expect(root.querySelector(".bc-form__endpoint")?.textContent).toBe(
-    "POST /api/model-api · 只写设备不会返回已保存的设置和密钥",
-  );
+  expect(root.textContent).not.toContain("/api/");
   expect(texts(root, ".bc-form__footer button")).toEqual(["清空", "注册模型"]);
 });
 

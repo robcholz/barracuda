@@ -13,7 +13,7 @@ use barracuda_imessage_gateway_plugin::{
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use http_client::ClientFactory;
-use wechat::{Wechat, WechatConfig};
+use wechat::{ContextTokens, Wechat, WechatConfig};
 
 struct Header {
     name: String,
@@ -198,5 +198,37 @@ fn splits_long_text_only_on_utf8_boundaries() {
             "a".repeat(3999)
         );
         assert_eq!(second["msg"]["item_list"][0]["text_item"]["text"], "好");
+    });
+}
+
+#[test]
+fn attaches_the_stored_context_token_unless_the_target_names_one() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding(3));
+        let tokens = Rc::new(ContextTokens::new());
+        tokens.remember("wx-user", "stored-token");
+        let channel = Wechat::with_context_tokens(http.factory(), config("token"), tokens);
+        let plain = MessageTarget::new("wechat", "wx-user");
+        let unknown = MessageTarget::new("wechat", "other-user");
+
+        for target in [plain, unknown, target()] {
+            channel
+                .send_message(SendMessageRequest::text(target, "hello"))
+                .await
+                .expect("send succeeds");
+        }
+
+        let requests = http.requests();
+        assert_eq!(
+            body_json(&requests[0])["msg"]["context_token"],
+            "stored-token"
+        );
+        assert!(body_json(&requests[1])["msg"]
+            .get("context_token")
+            .is_none());
+        assert_eq!(
+            body_json(&requests[2])["msg"]["context_token"],
+            "context-token"
+        );
     });
 }

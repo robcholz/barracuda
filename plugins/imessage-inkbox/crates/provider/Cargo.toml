@@ -10,6 +10,7 @@ license = "Apache-2.0"
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
 http-client.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
