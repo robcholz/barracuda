@@ -82,7 +82,7 @@ export const mount = definePage((context) => {
         extra: kv(
           [
             [{ zh: "状态", en: "Status" }, status.slot],
-            ["API Base", base],
+            ["API Base URL", base],
           ],
           context.lang,
           { live: true },

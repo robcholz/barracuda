@@ -162,7 +162,7 @@ test("the header shows the API base the device holds", async () => {
     });
   const { root } = await render("en");
   expect(root.querySelector(".bc-kv")?.textContent).toBe(
-    "Status—API Basehttps://tavily.example",
+    "Status—API Base URLhttps://tavily.example",
   );
 });
 
