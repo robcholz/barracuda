@@ -70,6 +70,10 @@ impl ReceiveSlotSource for Pool {
     fn capacity(&self) -> usize {
         self.capacity
     }
+
+    fn in_use(&self) -> usize {
+        self.in_use.get()
+    }
 }
 
 /// What one scripted session does.

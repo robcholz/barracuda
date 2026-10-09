@@ -110,6 +110,7 @@ pub trait ReceiveSlotSource: 'static {
     type Lease: 'static;                     // dropping it frees the slot
     fn acquire(&self) -> Option<Self::Lease>;
     fn capacity(&self) -> usize;
+    fn in_use(&self) -> usize;               // held right now, across every channel
 }
 pub struct UnlimitedSlots;                   // Lease = (); webhook receivers
 pub trait ReceiveChannel<Lease>: 'static {
@@ -131,6 +132,7 @@ impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
     pub fn is_enabled(&self) -> bool;
     pub fn state(&self) -> ReceiveState;
     pub fn capacity(&self) -> usize;
+    pub fn in_use(&self) -> usize;
 }
 pub struct ReceiveTiming { initial_backoff, max_backoff, slot_retry }
 // ReceiveTiming::DEVICE = 1 s, 30 s, 5 s
@@ -183,7 +185,10 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
 
 - `receive` is present only in `send_receive`. `state` is one of `idle`,
   `starting`, `receiving`, `no_slot`, or `error`. `message` comes only with
-  `error`, and `capacity` only with `no_slot`.
+  `error`, and `capacity` only with `no_slot`. `slots`
+  (`{"in_use":n,"capacity":n}`) comes whenever the channel draws from a
+  bounded slot pool, so the portal can show 「名额 1/2」; webhook receivers
+  (`UnlimitedSlots`) have none.
 - A 409 still saves the mode; receive then reports `no_slot` until a slot
   frees.
 - `pairing` is `null` while the owner list is full or the Platform has no

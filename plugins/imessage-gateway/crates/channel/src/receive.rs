@@ -36,6 +36,9 @@ pub trait ReceiveSlotSource: 'static {
 
     /// Number of slots, shown to the user when none is free.
     fn capacity(&self) -> usize;
+
+    /// Number of slots held right now, across every channel.
+    fn in_use(&self) -> usize;
 }
 
 /// Slot source for receive paths that hold no outbound connection, such as
@@ -52,6 +55,10 @@ impl ReceiveSlotSource for UnlimitedSlots {
 
     fn capacity(&self) -> usize {
         usize::MAX
+    }
+
+    fn in_use(&self) -> usize {
+        0
     }
 }
 
@@ -318,6 +325,12 @@ impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.slots.capacity()
+    }
+
+    /// Number of receive slots held right now, across every channel.
+    #[must_use]
+    pub fn in_use(&self) -> usize {
+        self.slots.in_use()
     }
 
     fn take_lease(&self) -> Option<Slots::Lease> {

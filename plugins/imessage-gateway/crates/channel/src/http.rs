@@ -99,14 +99,24 @@ struct ReceiveBody<'a> {
     message: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capacity: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slots: Option<SlotsBody>,
+}
+
+#[derive(Serialize)]
+struct SlotsBody {
+    in_use: usize,
+    capacity: usize,
 }
 
 impl<'a> ReceiveBody<'a> {
-    fn new(state: &'a ReceiveState, capacity: usize) -> Self {
+    fn new(state: &'a ReceiveState, capacity: usize, in_use: usize) -> Self {
         Self {
             state: state.name(),
             message: state.message(),
             capacity: (*state == ReceiveState::NoSlot).then_some(capacity),
+            // a channel that holds no outbound connection has no slot count to show
+            slots: (capacity != usize::MAX).then_some(SlotsBody { in_use, capacity }),
         }
     }
 }
@@ -117,10 +127,11 @@ struct OwnerCount {
 }
 
 /// `GET /api/gateway/<channel>`:
-/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"capacity"?},"owners":{"count":n}}`.
+/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"capacity"?,"slots"?:{"in_use":n,"capacity":n}},"owners":{"count":n}}`.
 ///
 /// `receive` is present only in `send_receive`; `message` only with `error`;
-/// `capacity` only with `no_slot`.
+/// `capacity` only with `no_slot`; `slots` whenever the channel draws from a
+/// bounded slot pool.
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse {
     let mode = channel.mode();
     let state = channel.receive().state();
@@ -129,9 +140,13 @@ pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse 
         &StatusBody {
             configured: channel.configured(),
             mode,
-            receive: mode
-                .receives()
-                .then(|| ReceiveBody::new(&state, channel.receive().capacity())),
+            receive: mode.receives().then(|| {
+                ReceiveBody::new(
+                    &state,
+                    channel.receive().capacity(),
+                    channel.receive().in_use(),
+                )
+            }),
             owners: OwnerCount {
                 count: channel.owners().count(),
             },

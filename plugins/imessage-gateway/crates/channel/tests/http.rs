@@ -64,6 +64,10 @@ impl ReceiveSlotSource for Pool {
     fn capacity(&self) -> usize {
         1
     }
+
+    fn in_use(&self) -> usize {
+        usize::from(self.taken.get())
+    }
 }
 
 struct Mock<Storage> {
@@ -253,7 +257,7 @@ impl Scenario for StatusAndMode {
             assert!(harness.taken.get(), "the slot is taken at once");
             assert_eq!(
                 harness.status(),
-                r#"{"configured":true,"mode":"send_receive","receive":{"state":"starting"},"owners":{"count":0}}"#
+                r#"{"configured":true,"mode":"send_receive","receive":{"state":"starting","slots":{"in_use":1,"capacity":1}},"owners":{"count":0}}"#
             );
 
             assert_eq!(
@@ -276,7 +280,7 @@ impl Scenario for StatusAndMode {
             assert_eq!(harness.stored_mode().await, r#""send_receive""#);
             assert_eq!(
                 harness.status(),
-                r#"{"configured":true,"mode":"send_receive","receive":{"state":"no_slot","capacity":1},"owners":{"count":0}}"#
+                r#"{"configured":true,"mode":"send_receive","receive":{"state":"no_slot","capacity":1,"slots":{"in_use":1,"capacity":1}},"owners":{"count":0}}"#
             );
             assert_eq!(
                 entry_status(harness.channel.as_ref()),
@@ -297,7 +301,7 @@ impl Scenario for StatusAndMode {
             assert!(!harness.taken.get());
             assert_eq!(
                 harness.status(),
-                r#"{"configured":false,"mode":"send_receive","receive":{"state":"idle"},"owners":{"count":0}}"#
+                r#"{"configured":false,"mode":"send_receive","receive":{"state":"idle","slots":{"in_use":0,"capacity":1}},"owners":{"count":0}}"#
             );
             assert_eq!(
                 entry_status(harness.channel.as_ref()),
@@ -378,7 +382,7 @@ impl Scenario for ErrorState {
                 }
                 assert_eq!(
                     harness.status(),
-                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"error","message":"closed"},"owners":{"count":0}}"#
+                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"error","message":"closed","slots":{"in_use":1,"capacity":1}},"owners":{"count":0}}"#
                 );
                 assert_eq!(
                     entry_status(harness.channel.as_ref()),
