@@ -343,6 +343,38 @@ fn default_stream_projection_consumes_semantic_events_and_delivers_only_output_d
     });
 }
 
+#[test]
+fn default_stream_projection_decodes_escaped_output_delta_text() {
+    block_on(async {
+        let (gateway, state, _registration) = fixture("imessage");
+        let events = stream::iter([
+            Ok(SendStreamEvent::new(
+                "session-1",
+                1,
+                "output_delta",
+                r#"{"text":"Sure:\n- \"one\""}"#,
+            )),
+            Ok(SendStreamEvent::new(
+                "session-1",
+                2,
+                "output_delta",
+                r#"{"text":"\n\u4f60\u597d"}"#,
+            )),
+        ]);
+
+        gateway
+            .send_stream(SendStreamRequest {
+                target: target("imessage"),
+                events: Box::pin(events),
+                reply_to: None,
+            })
+            .await
+            .expect("send projected stream");
+
+        assert_eq!(state.borrow().streamed_text, "Sure:\n- \"one\"\n你好");
+    });
+}
+
 struct TextOnlyChannel;
 
 impl MessageChannel for TextOnlyChannel {

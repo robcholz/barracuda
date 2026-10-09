@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{borrow::Cow, boxed::Box};
 use core::{future::Future, pin::Pin};
 
 use crate::{
@@ -46,7 +46,7 @@ pub trait MessageChannel: 'static {
                                     ));
                                 }
                             };
-                            let Some(text) = TextChunk::inline(payload.text) else {
+                            let Some(text) = TextChunk::inline(&payload.text) else {
                                 return Some((
                                     Err(StreamError::failed("output_delta exceeds stream frame")),
                                     events,
@@ -93,6 +93,8 @@ pub trait MessageChannel: 'static {
 
 #[derive(Deserialize)]
 struct OutputDelta<'a> {
+    /// Borrowed from the payload unless the JSON string has escapes, such as
+    /// a newline or a quote, which only an owned copy can hold decoded.
     #[serde(borrow)]
-    text: &'a str,
+    text: Cow<'a, str>,
 }
