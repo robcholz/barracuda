@@ -1,14 +1,15 @@
 /**
- * The device's web server holds only a few connections at once, and it refuses (does not queue)
- * any connection beyond them. A browser opens up to six at a time, so a page that loads its
- * icons, figure, module and data together loses some of them at random.
+ * The page requests its resources one at a time. The device's web server holds only a few
+ * connections and refuses (does not queue) any beyond them, while a browser left alone opens up
+ * to six at once, so icons, figures, modules and data would fail at random.
  *
- * The shell therefore sends every request through one queue with a small concurrency limit, and
- * retries a request whose connection was refused. Modules load through the same queue.
+ * `index.html` loads the stylesheet, then the shell; the shell sends every request after that
+ * (icons, page modules, figures, API calls) through this one queue, in order. A GET whose
+ * connection was still refused (another tab holding the slots) is retried with backoff.
  */
 
-/** Requests in flight at once. The server has four slots; Web chat keeps one, so two stay free. */
-export const MAX_IN_FLIGHT = 2;
+/** Requests in flight at once: one, so the page's resources load in turn, as the device serves them. */
+export const MAX_IN_FLIGHT = 1;
 /** Retries after a refused connection, with the delay doubling from `RETRY_MS`. */
 export const RETRIES = 4;
 export const RETRY_MS = 250;

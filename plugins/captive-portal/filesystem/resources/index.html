@@ -25,8 +25,24 @@
           document.documentElement.lang = "en";
       } catch (error) {}
     </script>
-    <link rel="stylesheet" href="/portal/app.css" />
-    <script type="module" src="/portal/app.js"></script>
+    <!-- The page asks for its resources one at a time: the stylesheet, then the shell, which
+         queues everything after it. -->
+    <script>
+      function barracudaShell() {
+        if (window.barracudaShellLoading) return;
+        window.barracudaShellLoading = true;
+        var script = document.createElement("script");
+        script.type = "module";
+        script.src = "/portal/app.js";
+        document.head.appendChild(script);
+      }
+    </script>
+    <link
+      rel="stylesheet"
+      href="/portal/app.css"
+      onload="barracudaShell()"
+      onerror="barracudaShell()"
+    />
   </head>
   <body>
     <div id="portal"></div>

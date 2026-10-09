@@ -77,6 +77,11 @@ async fn serve_worker(webserver: Rc<WebServer>, stack: Stack<'static>, port: u16
                 "WebServer worker {worker} closed connection from {remote:?} after {} request(s)",
                 disconnection.handled_requests_count
             ),
+            // a browser opens connections ahead of need and drops them unused; one that times
+            // out without a request is routine, not a failure
+            Err(crate::ServeConnectionError::Connection(picoserve::Error::ReadTimeout(_))) => {
+                log::debug!("WebServer worker {worker} connection from {remote:?} timed out idle");
+            }
             Err(error) => {
                 log::warn!("WebServer worker {worker} connection from {remote:?} failed: {error}");
             }
