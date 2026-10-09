@@ -1,4 +1,5 @@
-//! Thin System-to-reqwless construction boundary.
+//! Thin System-to-reqwless construction boundary, plus the dedicated
+//! connection slots of long-lived receive loops.
 #![no_std]
 
 extern crate alloc;
@@ -17,6 +18,13 @@ use static_cell::ConstStaticCell;
 
 pub use embedded_nal_async;
 pub use reqwless;
+
+mod receive;
+
+pub use receive::{
+    ReceiveBuffers, ReceiveConnection, ReceiveLease, ReceiveSlotBuffers, ReceiveSlots,
+    ReceiveSocket, ReceiveStream, StreamError,
+};
 
 const TCP_CONNECTIONS: usize = 4;
 const TCP_TX_BYTES: usize = 4 * 1024;

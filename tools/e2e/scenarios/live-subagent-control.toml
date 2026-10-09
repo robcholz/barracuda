@@ -1,0 +1,20 @@
+name = "Live nested subagent control"
+description = "A real model delegates to a manager subagent that spawns, interrupts, and deletes its own child; a slow subagent run times out; and controlling unknown subagents fails."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Call subagent_run with kind worker, name manager, timeout_ms 120000, and this goal: Do exactly these four steps in order, one tool call per step. Step 1: call subagent_spawn with kind worker, name storyteller, timeout_ms 120000, and goal: Write a 500-word story about a lighthouse keeper without using any tools. Step 2: call subagent_interrupt with the agent id that step 1 returned and the message: Stop the story and reply with exactly the word stopped. Step 3: call subagent_delete with that same agent id. Step 4: reply with exactly the words manager done. After subagent_run returns, tell me in one short sentence what the manager reported."
+tool_contains = ['subagent_run']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Call subagent_run with kind worker, name slowpoke, timeout_ms 3000, and goal: Write a 600-word story about a desert caravan without using any tools. Then tell me in one short sentence what happened."
+tool_contains = ['subagent timed out after 3000 ms']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Call subagent_interrupt with agent agent-99 and message hello, then call subagent_delete with agent agent-99, then call subagent_watch with agent agent-99. Report the three results in one short sentence."
+tool_contains = ['agent-99']
+tool_errors_allowed = true

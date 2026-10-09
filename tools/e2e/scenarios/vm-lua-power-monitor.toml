@@ -1,0 +1,33 @@
+name = "Lua power monitor"
+description = "A real model runs a Lua script that opens the host Board's power monitor and measures the INA226 model's 5 V bus and 200 mA load through the real driver, without a datasheet violation."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character without any change. Then reply with only the word started. Lua source: local pm = require('power_monitor') assert(pm.available()) local monitor <close> = assert(pm.open()) assert(not pm.available() and monitor:is_open()) local bus_uv, shunt_nv, current_ua, power_uw = assert(monitor:measure()) assert(math.abs(bus_uv - 5000000) <= 2500, 'bus voltage') assert(math.abs(shunt_nv - 1000000) <= 5000, 'shunt voltage') assert(math.abs(current_ua - 200000) <= 1000, 'current') assert(math.abs(power_uw - 1000000) <= 10000, 'power') print(string.format('power monitor: %.2f V %.0f mA %.0f mW', bus_uv / 1e6, current_ua / 1e3, power_uw / 1e3))'''
+tool_contains = ['"run_id":1']
+# The run's completion reaches the model with its printed line.
+request_contains = ['power monitor: 5.00 V 200 mA 1000 mW']
+
+[virtual_io]
+
+# The measurement reads the INA226 Bus Voltage (02h: 4000 x 1.25 mV) and
+# Shunt Voltage (01h: 400 x 2.5 uV across 5 mOhm) registers.
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C2"
+address = 0x40
+operations = [{ write = "02" }, { read = "0fa0" }]
+result = "ok"
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C2"
+address = 0x40
+operations = [{ write = "01" }, { read = "0190" }]
+result = "ok"
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

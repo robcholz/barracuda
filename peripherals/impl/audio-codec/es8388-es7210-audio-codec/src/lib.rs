@@ -277,10 +277,12 @@ mod tests {
         assert_eq!(codec.descriptor().sample_rate_hz(), 48_000);
         assert_eq!(
             &codec.control.writes[..3],
+            // The expander latches the output level before it enables the
+            // driver, so the amplifier pin never glitches low.
             &[
+                (0x43, [0x05, 0x02]),
                 (0x43, [0x03, 0x02]),
                 (0x43, [0x07, 0x00]),
-                (0x43, [0x05, 0x02]),
             ]
         );
         assert!(

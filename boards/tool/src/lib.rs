@@ -235,6 +235,18 @@ pub enum CommandError {
         /// Platform-owned installation guidance.
         prompt: String,
     },
+    /// The installed toolchain is not the release the Platform builds with.
+    #[error("toolchain `{toolchain}` is `{found}`, but this Platform builds with {required}\n\n{prompt}")]
+    ToolchainVersion {
+        /// rustup toolchain selected by the Platform.
+        toolchain: String,
+        /// Release the Platform requires.
+        required: String,
+        /// What `rustc --version` reported.
+        found: String,
+        /// Platform-owned installation guidance.
+        prompt: String,
+    },
     /// rustup could not be started while applying the Platform build policy.
     #[error("failed to run rustup for toolchain `{toolchain}`: {source}\n\n{prompt}")]
     ToolchainStart {
@@ -654,6 +666,13 @@ fn select_board<W: Write>(
     )
 }
 
+/// The toolchain a Platform's build policy asks for.
+struct ToolchainPolicy<'a> {
+    name: &'a str,
+    version: Option<&'a str>,
+    prompt: &'a str,
+}
+
 fn select_board_with_toolchain<W, F>(
     workspace_root: &Path,
     name: &str,
@@ -663,7 +682,7 @@ fn select_board_with_toolchain<W, F>(
 ) -> Result<(), CommandError>
 where
     W: Write,
-    F: FnOnce(&Path, &str, &str) -> Result<(), CommandError>,
+    F: FnOnce(&Path, &ToolchainPolicy<'_>) -> Result<(), CommandError>,
 {
     let bundle = workspace_root.join("boards/configs").join(name);
     let board = read_board(workspace_root, name)?;
@@ -684,7 +703,12 @@ where
             .build()
             .missing_toolchain_prompt()
             .unwrap_or_default();
-        activate_toolchain(workspace_root, toolchain, prompt)?;
+        let policy = ToolchainPolicy {
+            name: toolchain,
+            version: platform.build().rustup_toolchain_version(),
+            prompt,
+        };
+        activate_toolchain(workspace_root, &policy)?;
     }
 
     write_selected_build(workspace_root, &board, &platform)?;
@@ -710,9 +734,9 @@ where
 
 fn activate_rustup_toolchain(
     workspace_root: &Path,
-    toolchain: &str,
-    prompt: &str,
+    policy: &ToolchainPolicy<'_>,
 ) -> Result<(), CommandError> {
+    let (toolchain, prompt) = (policy.name, policy.prompt);
     let workspace_root = workspace_root
         .canonicalize()
         .map_err(|source| CommandError::Read {
@@ -721,19 +745,29 @@ fn activate_rustup_toolchain(
         })?;
     let available = ProcessCommand::new("rustup")
         .args(["run", toolchain, "rustc", "--version"])
-        .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .output()
         .map_err(|source| CommandError::ToolchainStart {
             toolchain: toolchain.to_owned(),
             prompt: prompt.to_owned(),
             source,
         })?;
-    if !available.success() {
+    if !available.status.success() {
         return Err(CommandError::ToolchainMissing {
             toolchain: toolchain.to_owned(),
             prompt: prompt.to_owned(),
         });
+    }
+    if let Some(required) = policy.version {
+        let found = String::from_utf8_lossy(&available.stdout).trim().to_owned();
+        if !reports_release(&found, required) {
+            return Err(CommandError::ToolchainVersion {
+                toolchain: toolchain.to_owned(),
+                required: required.to_owned(),
+                found,
+                prompt: prompt.to_owned(),
+            });
+        }
     }
     let activated = ProcessCommand::new("rustup")
         .args(["override", "set", toolchain, "--path"])
@@ -754,6 +788,19 @@ fn activate_rustup_toolchain(
             path: workspace_root,
         })
     }
+}
+
+/// Whether a `rustc --version` line names `release`: as the compiler version
+/// (`rustc 1.98.1 (…)`, `rustc 1.98.1-nightly (…)`) or as a vendor release in
+/// parentheses (`… (1.98.1.0)`, how espup toolchains report themselves).
+fn reports_release(version_line: &str, release: &str) -> bool {
+    version_line.split_whitespace().any(|word| {
+        word == release
+            || word.trim_start_matches('(').trim_end_matches(')') == release
+            || word
+                .strip_prefix(release)
+                .is_some_and(|rest| rest.starts_with('-'))
+    })
 }
 
 fn write_selected_build(
@@ -1145,7 +1192,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        read_environment_file, requires_platform_launcher, run_with_selector,
+        read_environment_file, reports_release, requires_platform_launcher, run_with_selector,
         select_board_with_toolchain, sync_with_report, CommandError, SyncStatus,
     };
 
@@ -1247,10 +1294,11 @@ mod tests {
             "device",
             &mut Vec::new(),
             false,
-            |workspace, toolchain, prompt| {
+            |workspace, policy| {
                 assert_eq!(workspace, root.path());
-                assert_eq!(toolchain, "vendor");
-                assert_eq!(prompt, "Install the vendor toolchain.\n");
+                assert_eq!(policy.name, "vendor");
+                assert_eq!(policy.version, None);
+                assert_eq!(policy.prompt, "Install the vendor toolchain.\n");
                 activated.set(true);
                 Ok(())
             },
@@ -1287,10 +1335,10 @@ mod tests {
             "device",
             &mut Vec::new(),
             false,
-            |_workspace, toolchain, prompt| {
+            |_workspace, policy| {
                 Err(CommandError::ToolchainMissing {
-                    toolchain: toolchain.to_owned(),
-                    prompt: prompt.to_owned(),
+                    toolchain: policy.name.to_owned(),
+                    prompt: policy.prompt.to_owned(),
                 })
             },
         )
@@ -1302,6 +1350,66 @@ mod tests {
             None
         );
         assert!(!root.path().join(".barracuda/cargo.toml").exists());
+    }
+
+    #[test]
+    fn toolchain_release_is_read_from_the_version_line() {
+        let esp = "rustc 1.98.1-nightly (183f762d6 2026-09-08) (1.98.1.0)";
+        assert!(reports_release(esp, "1.98.1.0"));
+        assert!(reports_release(esp, "1.98.1"));
+        assert!(!reports_release(
+            "rustc 1.99.0-nightly (4e103d068 2026-10-01) (1.99.0.0)",
+            "1.98.1.0"
+        ));
+        assert!(reports_release(
+            "rustc 1.98.1 (e1fd8ff58 2026-08-20)",
+            "1.98.1"
+        ));
+        assert!(!reports_release(
+            "rustc 1.98.10 (e1fd8ff58 2026-08-20)",
+            "1.98.1"
+        ));
+    }
+
+    #[test]
+    fn a_required_toolchain_release_reaches_activation() {
+        let root = tempdir().expect("temporary workspace");
+        add_board(root.path(), "device");
+        let manifest = root.path().join("platforms/test/platform.yml");
+        let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+        fs::write(
+            &manifest,
+            yaml.replace(
+                "selection:\n",
+                "build:\n  rustup-toolchain: vendor\n  rustup-toolchain-version: 1.98.1.0\n  missing-toolchain-prompt: |\n    Install vendor 1.98.1.0.\nselection:\n",
+            ),
+        )
+        .expect("Platform build policy");
+
+        let error = select_board_with_toolchain(
+            root.path(),
+            "device",
+            &mut Vec::new(),
+            false,
+            |_workspace, policy| {
+                assert_eq!(policy.version, Some("1.98.1.0"));
+                Err(CommandError::ToolchainVersion {
+                    toolchain: policy.name.to_owned(),
+                    required: "1.98.1.0".into(),
+                    found: "rustc 1.99.0-nightly (4e103d068 2026-10-01) (1.99.0.0)".into(),
+                    prompt: policy.prompt.to_owned(),
+                })
+            },
+        )
+        .expect_err("a different toolchain release must stop selection");
+
+        let message = error.to_string();
+        assert!(message.contains("builds with 1.98.1.0"));
+        assert!(message.contains("Install vendor 1.98.1.0."));
+        assert_eq!(
+            read_selected_board(root.path()).expect("read selection"),
+            None
+        );
     }
 
     fn add_catalog_board(root: &Path, name: &str) {

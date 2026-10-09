@@ -1,0 +1,44 @@
+name = "Lua I2C errors"
+description = "A real model opens the second virtual controller under an injected bus error, exhausts the controllers, and meets invalid pins, clock, and address."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character without any change. Then reply with only the word started. Lua source: local i2c = require('i2c') local first = assert(i2c.open('vio-0', 'vio-1', 100000)) local second = assert(i2c.open('vio-2', 'vio-3', 400000)) local _, err = second:read(0x50, 1) assert(err:find('Bus')) local third, third_err = i2c.open('vio-4', 'vio-5', 100000) assert(third == nil and third_err:find('no free')) local same, same_err = i2c.open('vio-6', 'vio-6', 100000) assert(same == nil and same_err:find('different')) local zero, zero_err = i2c.open('vio-6', 'vio-7', 0) assert(zero == nil and zero_err:find('greater than zero')) local _, address_err = second:read(0x80, 1) assert(address_err:find('unsigned')) print('i2c errors ok')'''
+tool_contains = ['"run_id":1']
+
+[virtual_io]
+
+[[virtual_io.devices]]
+bus = "I2C1"
+address = 0x50
+
+[[virtual_io.faults]]
+bus = "I2C1"
+fault = "bus-error"
+once = false
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C1"
+address = 0x50
+result = "bus-error"
+injected = true
+
+[[virtual_io.expect_pins]]
+pin = "vio-2"
+function = "I2C1 SCL"
+
+# A failed open claims nothing.
+[[virtual_io.expect_pins]]
+pin = "vio-4"
+claimed = false
+
+[[virtual_io.expect_pins]]
+pin = "vio-6"
+claimed = false
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

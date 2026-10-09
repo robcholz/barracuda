@@ -15,11 +15,15 @@ mod memory;
 mod roots;
 
 use alloc::{boxed::Box, format, string::String};
+use core::ffi::CStr;
 
 use barracuda_platform::{Entropy, EntropyUnavailable};
-use mbedtls_rs::{RngFailure, TlsRng};
+use mbedtls_rs::{
+    io::{Read, Write},
+    AuthMode, ClientSessionConfig, RngFailure, SessionConfig, TlsRng,
+};
 
-pub use mbedtls_rs::{Certificate, TlsReference, TlsVersion};
+pub use mbedtls_rs::{Certificate, Session, SessionError, Split, TlsReference, TlsVersion};
 
 /// The process-wide TLS engine and the roots it trusts.
 ///
@@ -74,6 +78,31 @@ impl Tls {
     pub fn reference(&self) -> TlsReference<'static> {
         self.tls_reference
     }
+
+    /// Starts a client session over `stream` that verifies the server
+    /// against the bundled roots and `server_name`, with the settings every
+    /// HTTP client uses. [`Session::connect`] runs the handshake.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when mbedTLS cannot allocate or configure the session.
+    pub fn client_session<T: Read + Write>(
+        &self,
+        stream: T,
+        server_name: &CStr,
+    ) -> Result<Session<'static, T>, SessionError> {
+        let config = SessionConfig::Client(ClientSessionConfig {
+            ca_chain: Some(self.certificates()),
+            creds: None,
+            server_name: None,
+            auth_mode: AuthMode::Required,
+            min_version: self.version(),
+            alpn_protocols: None,
+        });
+        let mut session = Session::new(self.tls_reference, stream, &config)?;
+        session.set_server_name(server_name)?;
+        Ok(session)
+    }
 }
 
 /// The Platform entropy source as the random source mbedTLS draws from.
@@ -124,6 +153,11 @@ mod tests {
     const ISRG_ROOT_X2: &[u8] = include_bytes!("../tests/fixtures/isrg-root-x2.der");
     /// Self-signed, and not in the bundle.
     const UNKNOWN_ROOT: &[u8] = include_bytes!("../tests/fixtures/unknown-root.der");
+    /// Signed by GTS Root R4 (ECDSA); served by openrouter.ai.
+    const WE1: &[u8] = include_bytes!("../tests/fixtures/we1.der");
+    /// GTS Root R4, a bundled root, cross-signed by GlobalSign Root CA, which
+    /// Mozilla no longer trusts for websites.
+    const GTS_ROOT_R4_CROSS: &[u8] = include_bytes!("../tests/fixtures/gts-root-r4-cross.der");
 
     #[derive(Clone)]
     struct CountingEntropy;
@@ -226,6 +260,12 @@ mod tests {
         assert_eq!(verify(&[ISRG_ROOT_X1]), 0);
         assert_eq!(verify(&[R11, ISRG_ROOT_X1]), 0);
         assert_eq!(verify(&[ISRG_ROOT_X2]), 0);
+    }
+
+    #[test]
+    fn a_bundled_root_cross_signed_by_an_unbundled_one_is_trusted() {
+        assert_eq!(verify(&[GTS_ROOT_R4_CROSS]), 0);
+        assert_eq!(verify(&[WE1, GTS_ROOT_R4_CROSS]), 0);
     }
 
     #[test]

@@ -163,6 +163,8 @@ pub struct HalConfig {
     runtime_pwm_controllers: Vec<RuntimePwmController>,
     #[serde(default, rename = "runtime-i2s-controllers")]
     runtime_i2s_controllers: Vec<RuntimeI2sController>,
+    #[serde(default, rename = "peripheral-models")]
+    peripheral_models: bool,
 }
 
 impl HalConfig {
@@ -212,6 +214,19 @@ impl HalConfig {
     #[must_use]
     pub fn runtime_i2s_controllers(&self) -> &[RuntimeI2sController] {
         &self.runtime_i2s_controllers
+    }
+
+    /// Returns whether the HAL places a device model behind each declared
+    /// peripheral.
+    ///
+    /// A Platform without physical hardware, such as a host Platform over
+    /// virtual I/O, sets this. Generated Board composition then announces
+    /// every declared peripheral to the HAL's `declare_peripheral` before
+    /// initializing any of them, so the HAL can attach the model the
+    /// implementation's driver will talk to.
+    #[must_use]
+    pub const fn peripheral_models(&self) -> bool {
+        self.peripheral_models
     }
 
     fn validate(&self, path: &Path) -> Result<(), ResolveError> {
@@ -462,6 +477,7 @@ pub struct PlatformDefinition {
     system_image: SystemImageConfig,
     application: ApplicationConfig,
     hal: HalConfig,
+    network: NetworkConfig,
 }
 
 impl PlatformDefinition {
@@ -475,6 +491,12 @@ impl PlatformDefinition {
     #[must_use]
     pub const fn info(&self) -> &PlatformInfoDefinition {
         &self.info
+    }
+
+    /// Returns the network capacity declared by the Platform.
+    #[must_use]
+    pub const fn network(&self) -> &NetworkConfig {
+        &self.network
     }
 
     /// Returns the host build policy required by this Platform.
@@ -542,6 +564,8 @@ pub struct BuildConfig {
     #[serde(default)]
     rustup_toolchain: Option<String>,
     #[serde(default)]
+    rustup_toolchain_version: Option<String>,
+    #[serde(default)]
     build_std: Vec<String>,
     #[serde(default)]
     environment_file: Option<PathBuf>,
@@ -554,6 +578,13 @@ impl BuildConfig {
     #[must_use]
     pub fn rustup_toolchain(&self) -> Option<&str> {
         self.rustup_toolchain.as_deref()
+    }
+
+    /// Returns the exact toolchain release the Platform builds with, as `rustc --version`
+    /// reports it (`1.98.1` or, for a vendor toolchain, its own `1.98.1.0`).
+    #[must_use]
+    pub fn rustup_toolchain_version(&self) -> Option<&str> {
+        self.rustup_toolchain_version.as_deref()
     }
 
     /// Returns standard-library crates Cargo must build for the target.
@@ -579,6 +610,7 @@ impl BuildConfig {
             if self.build_std.is_empty()
                 && self.environment_file.is_none()
                 && self.missing_toolchain_prompt.is_none()
+                && self.rustup_toolchain_version.is_none()
             {
                 return Ok(());
             }
@@ -593,6 +625,20 @@ impl BuildConfig {
             return Err(ResolveError::ManifestInvalid {
                 path: path.to_owned(),
                 message: String::from("build.rustup-toolchain must not be empty"),
+            });
+        }
+        if self
+            .rustup_toolchain_version
+            .as_deref()
+            .is_some_and(|version| {
+                version.trim().is_empty() || version.contains(char::is_whitespace)
+            })
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from(
+                    "build.rustup-toolchain-version must be one version, such as `1.98.1`",
+                ),
             });
         }
         if self
@@ -650,6 +696,49 @@ impl PlatformInfoDefinition {
     }
 }
 
+/// Network capacity a Platform's memory supports.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct NetworkConfig {
+    #[serde(default)]
+    long_lived_connections: ConnectionBudgetDefinition,
+}
+
+impl NetworkConfig {
+    /// Returns how many long-lived client connections (a TCP socket and TLS
+    /// session held open by a receive loop) the Platform holds beside the
+    /// shared request pool.
+    #[must_use]
+    pub const fn long_lived_connections(&self) -> &ConnectionBudgetDefinition {
+        &self.long_lived_connections
+    }
+}
+
+/// Long-lived connections by where bulk memory lives.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ConnectionBudgetDefinition {
+    #[serde(default)]
+    internal_memory: u8,
+    #[serde(default)]
+    external_memory: u8,
+}
+
+impl ConnectionBudgetDefinition {
+    /// Returns the connections held when bulk memory is internal RAM.
+    #[must_use]
+    pub const fn internal_memory(&self) -> u8 {
+        self.internal_memory
+    }
+
+    /// Returns the connections held when the Board declares external memory
+    /// that the Platform installs as bulk memory.
+    #[must_use]
+    pub const fn external_memory(&self) -> u8 {
+        self.external_memory
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SelectionConfig {
@@ -688,6 +777,8 @@ struct PlatformDocument {
     application: ApplicationConfig,
     #[serde(default)]
     hal: HalConfig,
+    #[serde(default)]
+    network: NetworkConfig,
 }
 
 /// Failure while discovering or resolving a Platform.
@@ -980,6 +1071,7 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
         system_image: document.system_image,
         application: document.application,
         hal: document.hal,
+        network: document.network,
     })
 }
 

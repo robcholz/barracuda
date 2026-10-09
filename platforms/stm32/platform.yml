@@ -2,6 +2,11 @@ name: stm32
 info:
   family: stm32
   environment: bare-metal
+# No network link yet, so no long-lived connections.
+network:
+  long-lived-connections:
+    internal-memory: 0
+    external-memory: 0
 package: barracuda-platform-stm32
 crate: barracuda_platform_stm32
 type: Stm32Platform

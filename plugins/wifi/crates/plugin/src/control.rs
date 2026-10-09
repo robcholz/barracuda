@@ -90,6 +90,19 @@ impl WifiStatus {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) const fn from_parts(
+        capabilities: WifiCapabilities,
+        station: StationState,
+        access_point: AccessPointState,
+    ) -> Self {
+        Self {
+            capabilities,
+            station,
+            access_point,
+        }
+    }
+
     /// Returns the supported operations.
     #[must_use]
     pub const fn capabilities(&self) -> WifiCapabilities {

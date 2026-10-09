@@ -26,6 +26,12 @@ pub const TARGET_IDENTITY: TargetIdentity = TargetIdentity::new(
     barracuda_board_selected::BOARD_INFO,
 );
 
+/// Static receive slots the application reserves: the largest long-lived
+/// connection budget the selected Platform declares for any Board. The
+/// selected Board's runtime limit (`TARGET_IDENTITY.long_lived_connections()`)
+/// is at most this.
+pub const RECEIVE_SLOTS: usize = barracuda_platform_selected::LONG_LIVED_CONNECTIONS;
+
 /// Failure while composing the independently selected target axes.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -60,30 +66,19 @@ pub async fn resources_with_bindings(
     })
 }
 
-/// Constructs the statically selected host Target bindings for the application entry.
-#[doc(hidden)]
-#[must_use]
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub fn __application_bindings() -> Bindings {
-    TargetBindings::new(&barracuda_board_selected::BOARD, ())
-}
-
 /// Generates the selected Platform ABI entry and connects it to `application`.
 ///
-/// The callback is a direct path substituted at compile time. The expanded
-/// entry contains no dynamic dispatch, boxed future, or runtime lookup.
+/// The Platform entry acquires its peripheral singleton once (a chip's on a
+/// device, the virtual peripherals on a host), moves the selected Board's
+/// tokens out of it, and calls `application` with the resulting Target
+/// bindings. The callback is a direct path substituted at compile time. The
+/// expanded entry contains no dynamic dispatch, boxed future, or runtime
+/// lookup.
 #[macro_export]
 macro_rules! application_entry {
     ($application:path) => {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        $crate::__platform::platform_entry!(|spawner| async {
-            $application(spawner, $crate::__application_bindings()).await
-        });
-
-        #[cfg(any(target_arch = "arm", target_arch = "riscv32", target_arch = "xtensa"))]
         use $crate::__board_bindings;
 
-        #[cfg(any(target_arch = "arm", target_arch = "riscv32", target_arch = "xtensa"))]
         $crate::__platform::platform_entry!(
             &$crate::BOARD,
             __board_bindings,

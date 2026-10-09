@@ -5,6 +5,11 @@
 extern crate alloc;
 
 mod application;
+/// Linux HAL: the host-only virtual GPIO and I2C hardware shared with the
+/// other host Platform, controlled through its peripherals manager.
+pub mod hal {
+    pub use barracuda_platform_virtual_io::hal::*;
+}
 mod entropy;
 mod flash;
 mod heap;

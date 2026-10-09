@@ -61,12 +61,21 @@ become active. Registration restores the complete model, purpose-binding, and
 default-model snapshot before Agent work starts. Missing storage yields an empty
 configuration; malformed stored data fails Plugin registration.
 
+The portal entry is registered with `CaptivePortal::register_with_status`; its
+`GET /portal/status` record is `EntryStatus::configured`: `ready`
+已配置/Configured while the active configuration resolves a model for at least
+one purpose (explicitly or through the default), otherwise `off` 未配置/Not set
+up. It reads a flag the endpoint updates after restore and each accepted
+`POST`.
+
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
-scope. Registration retains a `WebEntryRegistration` with ID `agent`, title
-`模型配置`, module `entry.js`, and a `ResourceFiles` provider. Unload removes
-the navigation entry and resource provider; no extra HTTP route is registered.
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`agent`, group `WebGroup::Agent`, order 10, title `模型配置` / `Models`, a bilingual
+summary, icon `icon.svg`, figure `figure.js`, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin agent`
@@ -79,8 +88,18 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page submits the existing POST configuration contract. It does not read
-current settings or claim that acceptance verifies the upstream service. Secrets
+The page is built on the portal UI kit: a header with the live `socket` figure
+(`resources/web/figure.js`, using the shell's global `HL`), radio cards for the
+API format (`backend`) and purpose, the 设为默认模型 switch (`default`),
+connection fields (`base_url`, `model`, `api_key`) and an open 高级 fold with
+`timeout_ms`, `max_tokens` and `image_max_bytes`. It sends every field the
+endpoint requires, as a one-element batch, and renders zh or en from the
+portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
+
+The page submits the existing POST configuration contract and, once the device
+accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and
+navigation follow. It does not read current settings or claim that acceptance
+verifies the upstream service. Secrets
 are password inputs, never persisted in browser storage, and cleared on success
 or unmount. Requests are cancelled on unmount and are never retried automatically.
 The existing HTTP API has no authentication or transport encryption added here;

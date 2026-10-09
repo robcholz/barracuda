@@ -1,0 +1,13 @@
+name = "Lua agent asks"
+description = "A real model runs a Lua script whose agent.ask calls start ephemeral Agent sessions: buffered and streamed answers, the two-ask limit, closing an ask early, and input validation."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character as one single line without any change. Then reply with only the word started. Lua source: local agent = require('agent') local function fails(fn, ...) local ok, r = pcall(fn, ...) return not ok or r == nil end assert(fails(agent.ask, '   ', false)) assert(fails(agent.ask, string.rep('x', 5000), false)) local out = assert(agent.ask('Reply with exactly the word pong.', false)) local answer = out:next() assert(answer and #answer > 0) assert(out:next() == nil) print('buffered', answer) local stream = assert(agent.ask('Count from one to five in words.', true)) local parts = 0 while true do local chunk = stream:next() if chunk == nil then break end parts = parts + 1 end assert(parts >= 1) print('streamed', parts) local first = assert(agent.ask('Write one short sentence about the sea.', true)) local second = assert(agent.ask('Write one short sentence about the sky.', true)) local third, busy = agent.ask('Reply with exactly the word three.', false) assert(third == nil and busy) print('busy', busy) assert(first:next()) assert(second:next()) second:close() assert(fails(second.next, second)) first:close() do local closing <close> = assert(agent.ask('Reply with exactly the word four.', true)) assert(closing:next()) end print('agent ok')'''
+tool_contains = ['"run_id":1']
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 4 output line"]

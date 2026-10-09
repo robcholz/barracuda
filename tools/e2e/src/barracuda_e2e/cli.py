@@ -18,12 +18,13 @@ from .assertions import (
     check_logs,
     check_replay,
     check_requests,
+    check_step_requests,
     check_transcript,
     heap_high_water,
 )
 from . import coverage
 from .ntp import LocalNtp
-from .scenario import Scenario, ScenarioError, discover, load_scenario
+from .scenario import Scenario, ScenarioError, Step, discover, load_scenario
 from .system import (
     WORKSPACE,
     Binaries,
@@ -37,11 +38,14 @@ from .system import (
     require_network,
 )
 from .tapes import CHAT_PATH, SCRIPTED_API_PATH, write_scripted_tape
+from . import virtual_io
 
 SCENARIOS = Path(__file__).resolve().parents[2] / 'scenarios'
 ARTIFACTS = WORKSPACE / 'target' / 'e2e'
 TAPE_PORT = 18_787
 TURN_TIMEOUT_SECONDS = 600
+# Chat path of the Anthropic Messages wire format.
+MESSAGES_PATH = '/messages'
 
 
 @dataclass(frozen=True)
@@ -264,23 +268,44 @@ def run_scenario(
         system.start()
         for pattern in scenario.ready_logs:
             system.wait_for_log(pattern, scenario.await_seconds)
+        hardware = virtual_io.VirtualIoClient()
+        if scenario.virtual_io is not None:
+            virtual_io.apply_setup(hardware, scenario.virtual_io)
         http_failures = _run_http(scenario, 'before')
         records: list[dict[str, object]] = []
         if scenario.steps:
-            configure_model(model_url or tape_server.base_url(api_path), model, api_key)
-            records = chat(
-                binaries.cli,
-                [step.send for step in scenario.steps],
-                TURN_TIMEOUT_SECONDS,
+            configure_model(
+                model_url or tape_server.base_url(api_path),
+                model,
+                api_key,
+                scenario.backend,
             )
+            for offset, segment in _segments(scenario.steps):
+                if offset:
+                    hardware.close()
+                    system.restart()
+                    for pattern in scenario.ready_logs:
+                        system.wait_for_log(pattern, scenario.await_seconds)
+                    hardware = virtual_io.VirtualIoClient()
+                for record in chat(binaries.cli, segment, TURN_TIMEOUT_SECONDS):
+                    if isinstance(record.get('turn'), int):
+                        record['turn'] = record['turn'] + offset
+                    records.append(record)
         for pattern in scenario.await_logs:
             system.wait_for_log(pattern, scenario.await_seconds)
+        if interactions:
+            tape_server.wait_consumed(interactions, scenario.await_seconds)
         http_failures += _run_http(scenario, 'after')
+        http_failures += virtual_io.check(hardware, scenario.virtual_io)
+        (artifacts / 'virtual-io.json').write_text(
+            json.dumps(virtual_io.snapshot(hardware), indent=2) + '\n', encoding='utf-8'
+        )
+        hardware.close()
         (artifacts / 'transcript.jsonl').write_text(
             ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in records),
             encoding='utf-8',
         )
-    except HarnessError as exc:
+    except (HarnessError, virtual_io.VirtualIoError) as exc:
         return [str(exc)]
     finally:
         system.stop()
@@ -294,7 +319,19 @@ def run_scenario(
     if not recording and not direct and scenario.mode != 'none':
         failures += check_replay(tape_server.counts(), interactions)
         failures += check_requests(scenario, artifacts / 'requests')
+        failures += check_step_requests(scenario, artifacts / 'requests')
     return failures
+
+
+def _segments(steps: Sequence[Step]) -> list[tuple[int, list[str]]]:
+    """Split steps into chat sessions at each step that restarts the System."""
+
+    segments: list[tuple[int, list[str]]] = []
+    for index, step in enumerate(steps):
+        if not segments or step.restart:
+            segments.append((index, []))
+        segments[-1][1].append(step.send)
+    return segments
 
 
 def _heap_peak(scenario: Scenario) -> int | None:
@@ -346,9 +383,10 @@ def _recorded_shape(tape: Path) -> tuple[int, str]:
         for event in map(json.loads, tape.read_text(encoding='utf-8').splitlines())
         if event.get('kind') == 'request'
     ]
-    if not paths or not paths[0].endswith(CHAT_PATH):
-        raise HarnessError(f'{tape} contains no chat-completions requests')
-    return len(paths), paths[0][: -len(CHAT_PATH)]
+    for suffix in (CHAT_PATH, MESSAGES_PATH):
+        if paths and paths[0].endswith(suffix):
+            return len(paths), paths[0][: -len(suffix)]
+    raise HarnessError(f'{tape} contains no chat requests')
 
 
 def _live_model(env_file: Path | None) -> LiveModel:

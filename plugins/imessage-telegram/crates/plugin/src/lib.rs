@@ -4,44 +4,68 @@
 
 extern crate alloc;
 
+mod channel;
+mod receive;
+#[cfg(test)]
+mod tests;
+
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_imessage_gateway_channel::{
+    entry_status, status_response, ChannelEndpoint, PairingEntropy, ReceiveRuntime, ReceiveTiming,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStorage,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
+    PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::ClientFactory;
+use embassy_futures::select::select;
+use http_client::{ClientFactory, ReceiveSlots};
 use serde::{Deserialize, Serialize};
-use telegram::{Telegram, TelegramConfig};
+use telegram::TelegramConfig;
 
-/// HTTP path accepting Telegram configuration.
+use crate::channel::{build_channel, ConfigureError, TelegramChannel};
+
+/// HTTP path accepting Telegram configuration and reporting channel status.
 pub const CONFIG_API_PATH: &str = "/api/gateway/telegram";
+/// HTTP path setting the channel mode.
+pub const MODE_API_PATH: &str = "/api/gateway/telegram/mode";
+/// HTTP path listing owners and the pairing code.
+pub const OWNERS_API_PATH: &str = "/api/gateway/telegram/owners";
 
+/// Gateway channel name.
+const CHANNEL: &str = "telegram";
 const JSON_CONTENT_TYPE: &str = "application/json";
 const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 
-/// Plugin that exposes Telegram configuration and registers the resulting channel.
+/// Plugin that exposes Telegram configuration, registers the resulting
+/// channel, and receives its messages.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageTelegramPlugin {
     http_clients: ClientFactory<'static>,
+    receive_slots: ReceiveSlots,
+    entropy: PairingEntropy,
+    runtime: Option<ReceiveRuntime>,
 }
 
 impl IMessageTelegramPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources.
+    /// Creates an unconfigured provider using Platform HTTP resources, the
+    /// receive slots, and the Platform entropy for pairing codes.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            receive_slots: context.receive_slots.clone(),
+            entropy: PairingEntropy::new(context.entropy.clone()),
+            runtime: None,
         }
     }
 }
@@ -59,45 +83,86 @@ impl Plugin for IMessageTelegramPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
-        context.retain(
-            portal
-                .register(
-                    WebEntry {
-                        id: "imessage-telegram",
-                        title: "Telegram",
-                        module: "entry.js",
-                    },
-                    ResourceFiles::from(context.filesystem()?.clone()),
-                )
-                .map_err(PluginError::registration)?,
-        );
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let webserver = context.require::<WebServer>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
-        let channel_registration =
-            embassy_futures::block_on(load_configuration(context.storage()))?
-                .map(|config| {
-                    let channel: Rc<dyn MessageChannel> =
-                        Rc::new(Telegram::new(self.http_clients.clone(), config.into()));
-                    gateway.register(channel).map_err(PluginError::registration)
-                })
-                .transpose()?;
-        let endpoint = ConfigEndpoint {
+        let (channel, runtime) = build_channel(
+            context.storage().clone(),
             gateway,
-            http_clients: self.http_clients.clone(),
-            channel_registration: Mutex::new(channel_registration),
-            storage: context.storage().clone(),
-        };
-        let registration = webserver
-            .serve_http(CONFIG_API_PATH, endpoint)
+            self.http_clients.clone(),
+            self.receive_slots.clone(),
+            self.entropy.clone(),
+            ReceiveTiming::DEVICE,
+        )?;
+        let status = Rc::clone(&channel);
+        context.retain(
+            portal
+                .register_with_status(
+                    WebEntry {
+                        id: "imessage-telegram",
+                        group: WebGroup::Channel,
+                        order: 20,
+                        title: WebText {
+                            zh: "Telegram",
+                            en: "Telegram",
+                        },
+                        summary: WebText {
+                            zh: "通过 Bot 收发消息",
+                            en: "Send and receive through a bot",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(&*status),
+                )
+                .map_err(PluginError::registration)?,
+        );
+        // One route serves the configuration path and its `/mode` and `/owners`.
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&channel),
+            CONFIG_API_PATH,
+            ConfigEndpoint { channel },
+        );
+        context.retain(
+            webserver
+                .serve_http_prefix(CONFIG_API_PATH, endpoint)
+                .map_err(PluginError::registration)?,
+        );
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(ReceiveRuntimeUnavailable))?;
+        let task = telegram_receive_task(runtime, context.task_token())
             .map_err(PluginError::registration)?;
-        context.retain(registration);
+        context.task_spawner()?.spawn(task);
         Ok(())
     }
 }
+
+/// Owns the receive loop; parked without a slot unless the channel is
+/// configured and in `send_receive`.
+#[embassy_executor::task]
+async fn telegram_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime).await;
+    log::info!("stopped Telegram receive task");
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Telegram receive runtime was not prepared during Plugin registration")]
+struct ReceiveRuntimeUnavailable;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -126,75 +191,37 @@ const fn default_draft_min_delta_bytes() -> usize {
     24
 }
 
-struct ConfigEndpoint<Storage> {
-    gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static>,
-    channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
-    storage: Storage,
+/// `GET` reports the channel status; `POST` stores a configuration.
+struct ConfigEndpoint<Storage, C: 'static, D: 'static> {
+    channel: Rc<TelegramChannel<Storage, C, D>>,
 }
 
-impl<Storage> ConfigEndpoint<Storage> {
-    fn response(status: u16, body: &'static [u8]) -> HttpResponse {
-        HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
-    }
+fn response(status: u16, body: &'static [u8]) -> HttpResponse {
+    HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
 }
 
-impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
+impl<Storage, C, D> HttpEndpoint for ConfigEndpoint<Storage, C, D>
+where
+    Storage: PluginStorage,
+    C: http_client::embedded_nal_async::TcpConnect + 'static,
+    D: http_client::embedded_nal_async::Dns + 'static,
+{
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+            match request.method() {
+                HttpMethod::Post => {}
+                HttpMethod::Get => return status_response(&*self.channel),
+                _ => return response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
                 log::warn!("rejected invalid Telegram gateway configuration");
-                return Self::response(400, br#"{"error":"invalid_request"}"#);
+                return response(400, br#"{"error":"invalid_request"}"#);
             };
-            let mut channel_registration = self.channel_registration.lock().await;
-            let previous_configuration =
-                match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
-                    Ok(configuration) => configuration,
-                    Err(error) => {
-                        log::error!(
-                            "failed to read the previous Telegram gateway configuration: {error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                };
-            let Ok(bytes) = encode_configuration(&config) else {
-                log::error!("failed to encode Telegram gateway configuration");
-                return Self::response(500, br#"{"error":"storage"}"#);
-            };
-            if let Err(error) = self
-                .storage
-                .put(CONFIGURATION_STORAGE_KEY, bytes.as_slice())
-                .await
-            {
-                log::error!("failed to persist Telegram gateway configuration: {error}");
-                return Self::response(500, br#"{"error":"storage"}"#);
-            }
-            let channel: Rc<dyn MessageChannel> =
-                Rc::new(Telegram::new(self.http_clients.clone(), config.into()));
-            channel_registration.take();
-            match self.gateway.register(channel) {
-                Ok(registration) => {
-                    channel_registration.replace(registration);
-                    log::info!("configured Telegram gateway provider");
-                    Self::response(204, b"")
-                }
-                Err(error) => {
-                    let restored = if let Some(previous) = previous_configuration.as_deref() {
-                        self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
-                    } else {
-                        self.storage.delete(CONFIGURATION_STORAGE_KEY).await
-                    };
-                    if let Err(storage_error) = restored {
-                        log::error!(
-                            "failed to roll back rejected Telegram gateway configuration: {storage_error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                    log::warn!("rejected Telegram gateway configuration: {error}");
-                    Self::response(422, br#"{"error":"invalid_configuration"}"#)
+            match self.channel.configure(config).await {
+                Ok(()) => response(204, b""),
+                Err(ConfigureError::Storage) => response(500, br#"{"error":"storage"}"#),
+                Err(ConfigureError::Registration) => {
+                    response(422, br#"{"error":"registration_failed"}"#)
                 }
             }
         })
@@ -207,37 +234,4 @@ fn encode_configuration(config: &ConfigRequest) -> Result<Vec<u8>, serde_json::E
 
 fn decode_configuration(bytes: &[u8]) -> Result<ConfigRequest, serde_json::Error> {
     serde_json::from_slice(bytes)
-}
-
-async fn load_configuration<Storage: PluginStorage>(
-    storage: &Storage,
-) -> PluginResult<Option<ConfigRequest>> {
-    storage
-        .get_bytes(CONFIGURATION_STORAGE_KEY)
-        .await?
-        .map(|bytes| decode_configuration(&bytes))
-        .transpose()
-        .map_err(PluginError::registration)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stored_configuration_round_trips_every_field() -> Result<(), serde_json::Error> {
-        let config = ConfigRequest {
-            token: "secret".into(),
-            api_base: "https://telegram.example".into(),
-            draft_min_delta_bytes: 31,
-        };
-
-        let bytes = encode_configuration(&config)?;
-        let restored = decode_configuration(&bytes)?;
-
-        assert_eq!(restored.token, config.token);
-        assert_eq!(restored.api_base, config.api_base);
-        assert_eq!(restored.draft_min_delta_bytes, config.draft_min_delta_bytes);
-        Ok(())
-    }
 }

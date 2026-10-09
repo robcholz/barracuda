@@ -61,7 +61,7 @@ impl ExtractionTools {
     pub(super) fn schemas(&mut self) -> Result<String, ToolInvokeError> {
         self.tools
             .begin()
-            .map(|tools| tools.static_schemas().to_owned())
+            .map(|tools| tools.schemas().to_owned())
             .map_err(extraction_runtime_error)
     }
 

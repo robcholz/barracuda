@@ -114,9 +114,25 @@ async fn application(spawner: Spawner, bindings: barracuda_target::Bindings) -> 
 barracuda_target::application_entry!(application);
 ~~~
 
-Host Targets have no chip peripheral singleton. Their selected-target entry
-macro supplies a binding pair whose Platform side is the host's unit binding;
-the application still uses the same `resources_with_bindings` boundary.
+Host Targets have no chip peripheral singleton. The Linux and macOS Platforms
+share a host-only virtual one instead (`platforms/virtual-io`): virtual pins
+and I2C controllers backed by a virtual peripherals manager that tests and
+developers drive over a loopback control interface. The host entry macro takes
+that singleton once, exactly as a device entry takes its chip singleton, and
+the generated Board bindings move the declared virtual tokens out of it. The
+application still uses the same `resources_with_bindings` boundary, and the
+virtual hardware never enters firmware.
+
+Host Boards declare peripherals in `board.yml` like device Boards. Because
+the host has no physical chips, its Platform HAL manifest sets
+`peripheral-models`: generated Board composition then announces every
+declared peripheral (name, implementation identifier, chip-native bindings,
+and scalar parameters) to `hal::declare_peripheral` before initializing any
+of them, and the virtual Platform attaches the chip model for that
+implementation at the declared bus and address. The Board stays the single
+declaration and the generator keeps no Platform or implementation special
+case. Device Platforms do not set it, so their generated composition is
+unchanged.
 
 The returned shape preserves ownership:
 
@@ -784,8 +800,12 @@ the top certificate of a server chain arrives untrusted, and the callback
 trusts it only when a bundled root of its issuer's name verifies its
 signature. mbedTLS verifies the rest of the chain. The roots stay in flash and
 only the matching root's key is parsed, so no Platform keeps parsed roots in
-RAM. Each connection's two 16 KiB record buffers come from bulk memory (see
-"Bulk memory"), which is external RAM on Boards that have it. mbedTLS checks no certificate dates, so expired roots are left out of the
+RAM. Each connection's record buffers, 16 KiB for incoming records (servers
+send full-size records) and 4 KiB for outgoing ones, come from bulk memory (see
+"Bulk memory"), which is external RAM on Boards that have it. That outgoing
+size is not the prebuilt device libraries' configuration, so every device
+Platform compiles mbedTLS and selects the C compiler for its chip through a
+`barracuda-tls` feature. mbedTLS checks no certificate dates, so expired roots are left out of the
 bundle when it is generated. `mbedtls-rs` is vendored in
 `shared/tls/mbedtls-rs` with the verify callback and a fallible random source
 added.
@@ -833,6 +853,34 @@ Each `ClientFactory::create()` result independently owns connection reuse and
 request serialization while all results share the Platform network pool. Thus
 “one shared HTTP client” means one facade, implementation, and construction
 policy, not one mandatory TCP connection for unrelated concurrent protocols.
+
+Long-lived receive loops (a channel's long poll or push connection) never take
+a connection from that request pool. System also builds
+`http_client::ReceiveSlots` over the same IP stack, DNS resolver, and TLS
+engine and places it in `PluginContext::receive_slots`. Each slot owns one
+statically allocated socket; a channel holds a `ReceiveLease` while it
+receives, and the lease gives either HTTP clients over its single connection
+or a raw byte stream whose read half is cancel-safe, for protocols such as
+WebSocket. The slots' socket buffers are static and sized at build time, so a
+Target pays only for the connections it can hold: `platforms/selected/build.rs`
+projects the larger of the manifest's two figures as
+`LONG_LIVED_CONNECTIONS`, the selected-target crate exposes it as
+`barracuda_target::RECEIVE_SLOTS`, and the application declares one
+`http_client::ReceiveBuffers` of that size and hands it to `System::new`. A
+Platform that allows none links no receive buffers. The runtime capacity is a
+memory budget the selected Platform declares in its manifest, because the
+Platform owns the heap and decides whether Board-declared external memory
+becomes bulk memory:
+
+~~~yaml
+network:
+  long-lived-connections:
+    internal-memory: 1   # TLS record buffers in internal RAM
+    external-memory: 3   # Board external memory installed as bulk memory
+~~~
+
+`TargetIdentity::long_lived_connections` picks the figure for the selected
+Board, and System never creates more slots than that.
 
 Embassy is the common task, timer, and lifecycle model used by Barracuda on
 embedded, macOS, and Linux Platforms. The operating-system Platforms may use
@@ -984,6 +1032,7 @@ platforms/
 +-- ch/
 +-- linux/
 +-- macos/
++-- virtual-io/        # host-only virtual GPIO/I2C shared by linux and macos
 
 peripherals/
 +-- api/
@@ -1052,7 +1101,7 @@ existing chip driver and adds no central renderer branch.
 - Peripheral implementation calls remain statically dispatched.
 - A device entry acquires the hardware singleton once, constructs the selected
   Target bindings, and invokes selected Target composition. Host Targets
-  construct their binding pair without a hardware singleton.
+  take their Platform's virtual peripheral singleton the same way.
 - Board HAL initialization consumes owned bindings; it does not reacquire
   peripherals or resolve pin numbers at runtime.
 - The Board HAL constructs only the optional peripherals and exposed I/O

@@ -15,6 +15,13 @@ gateway-http = { path = "../http" }
 serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
 
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+barracuda-vfs.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+futures-lite = "2"
+http-client.workspace = true
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

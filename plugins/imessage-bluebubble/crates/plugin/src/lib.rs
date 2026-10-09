@@ -1,47 +1,80 @@
 //! IMessage BlueBubbles provider Plugin.
+//!
+//! Sends through the BlueBubbles REST API and, in `send_receive`, receives by
+//! a webhook the BlueBubbles server posts to the device's own webserver.
 
 #![no_std]
 
 extern crate alloc;
 
+mod channel;
+mod receive;
+mod state;
+mod webhook;
+
+#[cfg(test)]
+mod tests;
+
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_imessage_gateway_channel::{
+    entry_status, receive_runtime, status_response, sync_receive, ChannelControl, ChannelEndpoint,
+    ReceiveRuntime, ReceiveTiming, JSON_CONTENT_TYPE,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStorage,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
+    PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer, WEB_SERVER_PORT,
 };
-use bluebubbles::{BlueBubbles, BlueBubblesConfig};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_futures::select::select;
+use embassy_net::Stack;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
-use serde::{Deserialize, Serialize};
+
+use crate::channel::{
+    BlueBubblesChannel, ChannelSetup, ConfigRequest, ConfigureError, InboundSink, LocalAddress,
+};
+use crate::receive::Receiver;
+use crate::state::HOOK_PATH;
+use crate::webhook::WebhookEndpoint;
 
 /// HTTP path accepting BlueBubbles configuration.
 pub const CONFIG_API_PATH: &str = "/api/gateway/bluebubbles";
+/// HTTP path of the channel mode.
+pub const MODE_API_PATH: &str = "/api/gateway/bluebubbles/mode";
+/// HTTP path of the allowed accounts and the pairing code.
+pub const OWNERS_API_PATH: &str = "/api/gateway/bluebubbles/owners";
+/// HTTP path prefix of the webhook; the secret follows it.
+pub const WEBHOOK_API_PATH: &str = HOOK_PATH;
 
-const JSON_CONTENT_TYPE: &str = "application/json";
-const CONFIGURATION_STORAGE_KEY: &str = "configuration";
-
-/// Plugin that exposes BlueBubbles configuration and registers the resulting channel.
+/// Plugin that exposes BlueBubbles configuration, registers the resulting
+/// channel, and receives its messages by webhook.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageBlueBubblePlugin {
     http_clients: ClientFactory<'static>,
+    stack: Stack<'static>,
+    entropy: SharedEntropy,
+    runtime: Option<ReceiveRuntime>,
 }
 
 impl IMessageBlueBubblePlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources.
+    /// Creates an unconfigured provider using Platform HTTP resources, the
+    /// IP stack whose address the webhook names, and the Platform entropy.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            stack: context.ip_stack,
+            entropy: context.entropy.clone(),
+            runtime: None,
         }
     }
 }
@@ -56,308 +89,198 @@ impl Plugin for IMessageBlueBubblePlugin {
         context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin::manager::PluginStorage,
+        Storage: PluginStorage,
     {
-        let portal = context.require::<CaptivePortal>("captive-portal")?;
-        context.retain(
-            portal
-                .register(
-                    WebEntry {
-                        id: "imessage-bluebubble",
-                        title: "BlueBubbles",
-                        module: "entry.js",
-                    },
-                    ResourceFiles::from(context.filesystem()?.clone()),
-                )
-                .map_err(PluginError::registration)?,
-        );
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
+        let stack = self.stack;
+        let address: LocalAddress = Box::new(move || {
+            stack
+                .config_v4()
+                .map(|config| format!("{}", config.address.address()))
+        });
+        let runtime = register_channel(
+            context,
+            self.http_clients.clone(),
+            self.entropy.clone(),
+            address,
         )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
-        let channel_registration =
-            embassy_futures::block_on(load_configuration(context.storage()))?
-                .map(|config| {
-                    let channel: Rc<dyn MessageChannel> =
-                        Rc::new(BlueBubbles::new(self.http_clients.clone(), config.into()));
-                    gateway.register(channel).map_err(PluginError::registration)
-                })
-                .transpose()?;
-        let endpoint = ConfigEndpoint {
-            gateway,
-            http_clients: self.http_clients.clone(),
-            channel_registration: Mutex::new(channel_registration),
-            storage: context.storage().clone(),
-        };
-        let registration = webserver
-            .serve_http(CONFIG_API_PATH, endpoint)
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(ReceiveRuntimeUnavailable))?;
+        let task = bluebubbles_receive_task(runtime, context.task_token())
             .map_err(PluginError::registration)?;
-        context.retain(registration);
+        context.task_spawner()?.spawn(task);
         Ok(())
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ConfigRequest {
-    server_url: String,
-    password: String,
-    #[serde(default = "default_true")]
-    use_private_api: bool,
-    #[serde(default = "default_stream_edit_min_delta_bytes")]
-    stream_edit_min_delta_bytes: usize,
-    #[serde(default = "default_stream_max_edits")]
-    stream_max_edits: usize,
-}
-
-impl From<ConfigRequest> for BlueBubblesConfig {
-    fn from(value: ConfigRequest) -> Self {
-        BlueBubblesConfig {
-            server_url: value.server_url,
-            password: value.password,
-            use_private_api: value.use_private_api,
-            stream_edit_min_delta_bytes: value.stream_edit_min_delta_bytes,
-            stream_max_edits: value.stream_max_edits,
-        }
+/// Builds the channel and registers its portal entry and endpoints;
+/// returns the receive runtime for the Plugin's task.
+fn register_channel<Storage, T, D>(
+    context: &mut PluginRegisterContext<'_, Storage>,
+    http_clients: ClientFactory<'static, T, D>,
+    entropy: SharedEntropy,
+    address: LocalAddress,
+) -> PluginResult<ReceiveRuntime>
+where
+    Storage: PluginStorage,
+    T: TcpConnect + 'static,
+    D: Dns + 'static,
+{
+    let portal = context.require::<CaptivePortal>("captive-portal")?;
+    let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+    let webserver = context.require::<WebServer>("webserver")?;
+    let inbound: Rc<dyn InboundSink> = gateway.clone();
+    let channel = Rc::new(embassy_futures::block_on(BlueBubblesChannel::load(
+        ChannelSetup {
+            gateway,
+            inbound,
+            http_clients,
+            storage: context.storage().clone(),
+            entropy,
+            address,
+            port: WEB_SERVER_PORT,
+        },
+    ))?);
+    let status = Rc::clone(&channel);
+    context.retain(
+        portal
+            .register_with_status(
+                WebEntry {
+                    id: "imessage-bluebubble",
+                    group: WebGroup::Channel,
+                    order: 50,
+                    title: WebText {
+                        zh: "BlueBubbles",
+                        en: "BlueBubbles",
+                    },
+                    summary: WebText {
+                        zh: "经 BlueBubbles 接入 iMessage",
+                        en: "iMessage through BlueBubbles",
+                    },
+                    icon: Some("icon.svg"),
+                    figure: None,
+                    module: "entry.js",
+                },
+                ResourceFiles::from(context.filesystem()?.clone()),
+                move || entry_status(&*status),
+            )
+            .map_err(PluginError::registration)?,
+    );
+    let runtime = receive_runtime(
+        channel.receive_control(),
+        Rc::new(Receiver(Rc::clone(&channel))),
+        ReceiveTiming::DEVICE,
+    );
+    // Webhook receiving holds no slot, so this never reports `no_slot`.
+    sync_receive(&*channel).ok();
+    // One route serves the configuration path and its `/mode` and `/owners`;
+    // the longer webhook prefix takes its own requests.
+    let routes = [
+        webserver.serve_http_prefix(
+            CONFIG_API_PATH,
+            ChannelEndpoint::new(
+                Rc::clone(&channel),
+                CONFIG_API_PATH,
+                ConfigEndpoint(Rc::clone(&channel)),
+            ),
+        ),
+        webserver.serve_http_prefix(WEBHOOK_API_PATH, WebhookEndpoint(channel)),
+    ];
+    for route in routes {
+        context.retain(route.map_err(PluginError::registration)?);
     }
+    Ok(runtime)
 }
 
-const fn default_true() -> bool {
-    true
-}
-const fn default_stream_edit_min_delta_bytes() -> usize {
-    128
-}
-const fn default_stream_max_edits() -> usize {
-    4
+#[embassy_executor::task]
+async fn bluebubbles_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime).await;
+    log::info!("stopped BlueBubbles receive task");
 }
 
-struct ConfigEndpoint<Storage> {
-    gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static>,
-    channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
-    storage: Storage,
-}
+#[derive(Debug, thiserror::Error)]
+#[error("BlueBubbles receive runtime was not prepared during Plugin registration")]
+struct ReceiveRuntimeUnavailable;
 
-impl<Storage> ConfigEndpoint<Storage> {
+/// `GET` and `POST` on [`CONFIG_API_PATH`].
+struct ConfigEndpoint<Storage, T: 'static, D: 'static>(Rc<BlueBubblesChannel<Storage, T, D>>);
+
+impl<Storage, T, D> ConfigEndpoint<Storage, T, D>
+where
+    Storage: PluginStorage,
+    T: TcpConnect + 'static,
+    D: Dns + 'static,
+{
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
     }
+
+    /// The shared channel status plus the webhook counters while receiving:
+    /// `"webhook":{"lost":n,"skipped":n}`.
+    fn status(&self) -> HttpResponse {
+        let channel = &*self.0;
+        let response = status_response(channel);
+        let Some(shared) = response
+            .body()
+            .filter(|_| channel.mode().receives())
+            .and_then(|body| body.strip_suffix(b"}"))
+        else {
+            return response;
+        };
+        let mut body = Vec::from(shared);
+        body.extend_from_slice(
+            format!(
+                r#","webhook":{{"lost":{},"skipped":{}}}}}"#,
+                channel.book.lost(),
+                channel.book.skipped()
+            )
+            .as_bytes(),
+        );
+        HttpResponse::new(200, JSON_CONTENT_TYPE, body)
+    }
+
+    async fn configure(&self, body: &[u8]) -> HttpResponse {
+        let Ok(config) = serde_json::from_slice::<ConfigRequest>(body) else {
+            log::warn!("rejected invalid BlueBubbles gateway configuration");
+            return Self::response(400, br#"{"error":"invalid_request"}"#);
+        };
+        match self.0.configure(config).await {
+            Ok(()) => {
+                sync_receive(&*self.0).ok();
+                self.0.receive().restart();
+                HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new())
+            }
+            Err(ConfigureError::Storage) => Self::response(500, br#"{"error":"storage"}"#),
+            Err(ConfigureError::Registration) => {
+                sync_receive(&*self.0).ok();
+                Self::response(422, br#"{"error":"registration_failed"}"#)
+            }
+        }
+    }
 }
 
-impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
+impl<Storage, T, D> HttpEndpoint for ConfigEndpoint<Storage, T, D>
+where
+    Storage: PluginStorage,
+    T: TcpConnect + 'static,
+    D: Dns + 'static,
+{
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
-            }
-            let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
-                log::warn!("rejected invalid BlueBubbles gateway configuration");
-                return Self::response(400, br#"{"error":"invalid_request"}"#);
-            };
-            let mut channel_registration = self.channel_registration.lock().await;
-            let previous_configuration =
-                match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
-                    Ok(configuration) => configuration,
-                    Err(error) => {
-                        log::error!(
-                            "failed to read the previous BlueBubbles gateway configuration: {error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                };
-            let Ok(bytes) = encode_configuration(&config) else {
-                log::error!("failed to encode BlueBubbles gateway configuration");
-                return Self::response(500, br#"{"error":"storage"}"#);
-            };
-            if let Err(error) = self
-                .storage
-                .put(CONFIGURATION_STORAGE_KEY, bytes.as_slice())
-                .await
-            {
-                log::error!("failed to persist BlueBubbles gateway configuration: {error}");
-                return Self::response(500, br#"{"error":"storage"}"#);
-            }
-            let channel: Rc<dyn MessageChannel> =
-                Rc::new(BlueBubbles::new(self.http_clients.clone(), config.into()));
-            channel_registration.take();
-            match self.gateway.register(channel) {
-                Ok(registration) => {
-                    channel_registration.replace(registration);
-                    log::info!("configured BlueBubbles gateway provider");
-                    Self::response(204, b"")
-                }
-                Err(error) => {
-                    let restored = if let Some(previous) = previous_configuration.as_deref() {
-                        self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
-                    } else {
-                        self.storage.delete(CONFIGURATION_STORAGE_KEY).await
-                    };
-                    if let Err(storage_error) = restored {
-                        log::error!(
-                            "failed to roll back rejected BlueBubbles gateway configuration: {storage_error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                    log::warn!("rejected BlueBubbles gateway configuration: {error}");
-                    Self::response(422, br#"{"error":"invalid_configuration"}"#)
-                }
+            match request.method() {
+                HttpMethod::Get => self.status(),
+                HttpMethod::Post => self.configure(request.body()).await,
+                _ => Self::response(405, br#"{"error":"method_not_allowed"}"#),
             }
         })
-    }
-}
-
-fn encode_configuration(config: &ConfigRequest) -> Result<Vec<u8>, serde_json::Error> {
-    serde_json::to_vec(config)
-}
-
-fn decode_configuration(bytes: &[u8]) -> Result<ConfigRequest, serde_json::Error> {
-    serde_json::from_slice(bytes)
-}
-
-async fn load_configuration<Storage: PluginStorage>(
-    storage: &Storage,
-) -> PluginResult<Option<ConfigRequest>> {
-    storage
-        .get_bytes(CONFIGURATION_STORAGE_KEY)
-        .await?
-        .map(|bytes| decode_configuration(&bytes))
-        .transpose()
-        .map_err(PluginError::registration)
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use core::cell::RefCell;
-
-    use barracuda_imessage_gateway_plugin::{
-        ChannelError, ChannelFuture, IMessageGatewayPlugin, Operation, SendMessageRequest,
-        SendReceipt,
-    };
-    use barracuda_platform_test::{
-        install_global_memory_vfs, memory_partition, never_embassy_stack,
-    };
-    use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
-    use barracuda_workflow_plugin::WorkflowPlugin;
-    use futures_lite::future::block_on;
-
-    use super::*;
-
-    struct OccupiedImessageChannel;
-
-    impl MessageChannel for OccupiedImessageChannel {
-        fn channel(&self) -> &str {
-            "imessage"
-        }
-
-        fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
-            Box::pin(async { Err(ChannelError::unsupported(Operation::SendMessage)) })
-        }
-    }
-
-    struct RejectedConfigurationProbe {
-        http_clients: ClientFactory<'static>,
-        rolled_back: Rc<RefCell<bool>>,
-    }
-
-    impl PluginDeclaration for RejectedConfigurationProbe {
-        const ID: &'static str = "rejected-configuration-probe";
-        const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
-    }
-
-    impl Plugin for RejectedConfigurationProbe {
-        fn register<Storage>(
-            &mut self,
-            context: &mut PluginRegisterContext<'_, Storage>,
-        ) -> PluginResult<()>
-        where
-            Storage: PluginStorage,
-        {
-            let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
-            let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedImessageChannel);
-            context.retain(
-                gateway
-                    .register(occupied)
-                    .map_err(PluginError::registration)?,
-            );
-            let endpoint = ConfigEndpoint {
-                gateway,
-                http_clients: self.http_clients.clone(),
-                channel_registration: Mutex::new(None),
-                storage: context.storage().clone(),
-            };
-            let body = br#"{"server_url":"https://blue.example","password":"secret"}"#;
-            let response =
-                block_on(endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())));
-            let stored = block_on(context.storage().get_bytes(CONFIGURATION_STORAGE_KEY))?;
-            self.rolled_back
-                .replace(response.status() == 422 && stored.is_none());
-            Ok(())
-        }
-    }
-
-    fn plugin_context() -> PluginContext {
-        let stack = never_embassy_stack();
-        let info = barracuda_plugin::api::TargetIdentity::new(
-            barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
-            barracuda_plugin::api::BoardInfo::new(
-                "test-board",
-                barracuda_plugin::api::Hardware::new("test-chip"),
-            ),
-        );
-        PluginContext::new(info, stack, ClientFactory::plaintext(stack))
-    }
-
-    #[test]
-    fn stored_configuration_round_trips_every_field() -> Result<(), serde_json::Error> {
-        let config = ConfigRequest {
-            server_url: "https://blue.example".into(),
-            password: "secret".into(),
-            use_private_api: false,
-            stream_edit_min_delta_bytes: 64,
-            stream_max_edits: 7,
-        };
-
-        let bytes = encode_configuration(&config)?;
-        let restored = decode_configuration(&bytes)?;
-
-        assert_eq!(restored.server_url, config.server_url);
-        assert_eq!(restored.password, config.password);
-        assert_eq!(restored.use_private_api, config.use_private_api);
-        assert_eq!(
-            restored.stream_edit_min_delta_bytes,
-            config.stream_edit_min_delta_bytes
-        );
-        assert_eq!(restored.stream_max_edits, config.stream_max_edits);
-        Ok(())
-    }
-
-    #[test]
-    fn rejected_channel_registration_rolls_back_persisted_configuration() {
-        block_on(install_global_memory_vfs()).expect("install test VFS");
-        let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
-        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
-        manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
-        let mut context = plugin_context();
-        let rolled_back = Rc::new(RefCell::new(false));
-
-        manager
-            .register(WorkflowPlugin::new(&mut context))
-            .expect("register Workflow Plugin");
-        manager
-            .register(IMessageGatewayPlugin::new(&mut context))
-            .expect("register IMessage Gateway Plugin");
-        manager
-            .register(RejectedConfigurationProbe {
-                http_clients: context.http_clients.clone(),
-                rolled_back: Rc::clone(&rolled_back),
-            })
-            .expect("exercise rejected provider configuration");
-
-        assert!(*rolled_back.borrow());
     }
 }

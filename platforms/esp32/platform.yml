@@ -2,11 +2,22 @@ name: esp32
 info:
   family: esp
   environment: bare-metal
+# Long-lived connections (receive loops) beside the shared request pool. An
+# idle TLS client session holds about 35 KiB of the 112 KiB heap (39 KiB at
+# the handshake; shared/tls/tests/session_memory.rs), so one fits beside the
+# model connection. This Platform does not install external memory as bulk
+# memory, so a Board's PSRAM does not change the figure.
+network:
+  long-lived-connections:
+    internal-memory: 1
+    external-memory: 1
 package: barracuda-platform-esp32
 crate: barracuda_platform_esp32
 type: Esp32Platform
 build:
   rustup-toolchain: esp
+  # The same `esp` release as ESP32-S3, which no longer links its release build on 1.99.0.0.
+  rustup-toolchain-version: 1.98.1.0
   build-std: [core, alloc]
   environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |

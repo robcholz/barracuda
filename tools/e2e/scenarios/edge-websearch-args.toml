@@ -1,110 +1,54 @@
-# Schema: plugins/agent-websearch/crates/plugin/resources/tools/web_search/schema.json.
-# Error text: shared/json-validator/src/lib.rs:820 via plugins/agent/crates/tool/src/definition.rs:321.
 name = "Web search argument schema (1)"
 description = "web_search rejects malformed arguments at the schema; a schema-valid call without a provider key reports not_configured."
 
 [model]
-mode = "scripted"
+mode = "recorded"
 
-# Case 1: empty query fails minLength before trimmedNonEmpty
-[[model.responses]]
-tool_calls = [{ name = "tool_load", arguments = { group_id = "websearch" } }]
-
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "", max_results = 3 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.query: MinLength']
-text = "Case 1 checked."
-
-# Case 2: whitespace query fails trimmedNonEmpty
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "   ", max_results = 3 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.query: TrimmedEmpty']
-text = "Case 2 checked."
-
-# Case 3: 256-character query exceeds maxLength 255
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", max_results = 3 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.query: MaxLength']
-text = "Case 3 checked."
-
-# Case 4: max_results 0 is below minimum
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 0 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Minimum']
-text = "Case 4 checked."
-
-# Case 5: max_results 11 is above maximum
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 11 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Maximum']
-text = "Case 5 checked."
-
-# Case 6: fractional max_results is not an integer
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 2.5 } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
-text = "Case 6 checked."
-
-# Case 7: string max_results is not an integer
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = "3" } }]
-
-[[model.responses]]
-request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
-text = "Case 7 checked."
-
-# Case 8: max_results is required
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 1 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "websearch"} 2. web_search {"query": "", "max_results": 3}. Then reply with only: Case 1 checked.'
+reply_contains = ['Case 1 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.query: MinLength']
+request_contains = ['invalid arguments: JSON schema validation failed at $.query: MinLength']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 2 checked."]
-tool_contains = ['invalid arguments: JSON schema validation failed at $.query: TrimmedEmpty']
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "   ", "max_results": 3}. Then reply with only: Case 2 checked.'
+reply_contains = ['Case 2 checked.']
+tool_contains = ['invalid arguments: JSON schema validation failed at $.query: MinLength']
+request_contains = ['invalid arguments: JSON schema validation failed at $.query: MinLength']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 3 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", "max_results": 3}. Then reply with only: Case 3 checked.'
+reply_contains = ['Case 3 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.query: MaxLength']
+request_contains = ['invalid arguments: JSON schema validation failed at $.query: MaxLength']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 4 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "barracuda", "max_results": 0}. Then reply with only: Case 4 checked.'
+reply_contains = ['Case 4 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Minimum']
+request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Minimum']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 5 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "barracuda", "max_results": 11}. Then reply with only: Case 5 checked.'
+reply_contains = ['Case 5 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Maximum']
+request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Maximum']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 6 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "barracuda", "max_results": 2.5}. Then reply with only: Case 6 checked.'
+reply_contains = ['Case 6 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
+request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
 tool_errors_allowed = true
 
 [[steps]]
-send = "Search schema case."
-reply_contains = ["Case 7 checked."]
+send = 'Search schema case. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. web_search {"query": "barracuda", "max_results": "3"}. Then reply with only: Case 7 checked.'
+reply_contains = ['Case 7 checked.']
 tool_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
+request_contains = ['invalid arguments: JSON schema validation failed at $.max_results: Type { expected: Integer }']
 tool_errors_allowed = true
-

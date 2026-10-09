@@ -3,39 +3,66 @@
 
 extern crate alloc;
 
+mod channel;
+mod receive;
+#[cfg(test)]
+mod tests;
+
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_imessage_gateway_channel::{
+    entry_status, status_response, ChannelEndpoint, ReceiveRuntime, ReceiveTiming,
+};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStorage,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
+    PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::ClientFactory;
-use qq::{QQConfig, QQ};
-use serde::{Deserialize, Serialize};
+use embassy_futures::select::select;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
+use http_client::{ClientFactory, ReceiveSlots};
+use qq::{QQConfig, TokenError, QQ};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
 
-/// HTTP path accepting QQ configuration.
+use crate::channel::{build_channel, ConfigureError, QQChannel};
+use crate::receive::QQSlots;
+
+/// HTTP path accepting QQ configuration and reporting channel status.
 pub const CONFIG_API_PATH: &str = "/api/gateway/qq";
+/// HTTP path setting the channel mode.
+pub const MODE_API_PATH: &str = "/api/gateway/qq/mode";
+/// HTTP path listing owners and the pairing code.
+pub const OWNERS_API_PATH: &str = "/api/gateway/qq/owners";
+
+/// Gateway channel name.
+const CHANNEL: &str = "qq";
 const JSON_CONTENT_TYPE: &str = "application/json";
 const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 
-/// Plugin that exposes QQ configuration and registers the resulting channel.
+/// Plugin that exposes QQ configuration, registers the resulting channel, and
+/// receives its messages over the QQ WebSocket gateway.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageQQPlugin {
     http_clients: ClientFactory<'static>,
+    receive_slots: ReceiveSlots,
+    entropy: SharedEntropy,
+    runtime: Option<ReceiveRuntime>,
 }
 
 impl IMessageQQPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources.
+    /// Creates an unconfigured provider using Platform HTTP resources, the
+    /// receive slots, and the Platform entropy.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            receive_slots: context.receive_slots.clone(),
+            entropy: context.entropy.clone(),
+            runtime: None,
         }
     }
 }
@@ -53,178 +80,246 @@ impl Plugin for IMessageQQPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
-        context.retain(
-            portal
-                .register(
-                    WebEntry {
-                        id: "imessage-qq",
-                        title: "QQ",
-                        module: "entry.js",
-                    },
-                    ResourceFiles::from(context.filesystem()?.clone()),
-                )
-                .map_err(PluginError::registration)?,
-        );
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
-        let channel_registration =
-            embassy_futures::block_on(load_configuration(context.storage()))?
-                .map(|config| {
-                    let channel: Rc<dyn MessageChannel> =
-                        Rc::new(QQ::new(self.http_clients.clone(), config.into()));
-                    gateway.register(channel).map_err(PluginError::registration)
-                })
-                .transpose()?;
-        let endpoint = ConfigEndpoint {
-            gateway,
-            http_clients: self.http_clients.clone(),
-            channel_registration: Mutex::new(channel_registration),
-            storage: context.storage().clone(),
-        };
         let webserver = context.require::<WebServer>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
-        let registration = webserver
-            .serve_http(CONFIG_API_PATH, endpoint)
-            .map_err(PluginError::registration)?;
-        context.retain(registration);
+        let (channel, runtime) = build_channel(
+            context.storage().clone(),
+            gateway,
+            self.http_clients.clone(),
+            QQSlots(self.receive_slots.clone()),
+            self.entropy.clone(),
+            ReceiveTiming::DEVICE,
+        )?;
+        let status = Rc::clone(&channel);
+        context.retain(
+            portal
+                .register_with_status(
+                    WebEntry {
+                        id: "imessage-qq",
+                        group: WebGroup::Channel,
+                        order: 40,
+                        title: WebText { zh: "QQ", en: "QQ" },
+                        summary: WebText {
+                            zh: "QQ Bot 消息通道",
+                            en: "QQ bot message channel",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(&*status),
+                )
+                .map_err(PluginError::registration)?,
+        );
+        // One route serves the configuration path and its `/mode` and `/owners`.
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&channel),
+            CONFIG_API_PATH,
+            ConfigEndpoint { channel },
+        );
+        context.retain(
+            webserver
+                .serve_http_prefix(CONFIG_API_PATH, endpoint)
+                .map_err(PluginError::registration)?,
+        );
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(ReceiveRuntimeUnavailable))?;
+        let task =
+            qq_receive_task(runtime, context.task_token()).map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
         Ok(())
     }
 }
+
+/// Owns the receive loop; parked without a slot unless the channel is
+/// configured and in `send_receive`.
+#[embassy_executor::task]
+async fn qq_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime).await;
+    log::info!("stopped QQ receive task");
+}
+
+#[derive(Debug)]
+struct ReceiveRuntimeUnavailable;
+
+impl core::fmt::Display for ReceiveRuntimeUnavailable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("QQ receive runtime was not prepared during Plugin registration")
+    }
+}
+
+impl core::error::Error for ReceiveRuntimeUnavailable {}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigRequest {
     app_id: String,
-    access_token: String,
+    app_secret: String,
     #[serde(default = "default_qq_api_base")]
     api_base: String,
+    #[serde(default = "default_qq_token_url")]
+    token_url: String,
 }
 
 impl From<ConfigRequest> for QQConfig {
     fn from(value: ConfigRequest) -> Self {
         QQConfig {
             app_id: value.app_id,
-            access_token: value.access_token,
+            app_secret: value.app_secret,
             api_base: value.api_base,
+            token_url: value.token_url,
         }
     }
 }
 fn default_qq_api_base() -> String {
-    "https://api.sgroup.qq.com".into()
+    qq::DEFAULT_API_BASE.into()
+}
+fn default_qq_token_url() -> String {
+    qq::DEFAULT_TOKEN_URL.into()
 }
 
-struct ConfigEndpoint<Storage> {
-    gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static>,
-    channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
-    storage: Storage,
+/// Stored configuration written before the App Secret replaced the
+/// short-lived `access_token`. Only its presence is detected.
+#[derive(Deserialize)]
+struct LegacyConfiguration {
+    #[serde(rename = "access_token")]
+    _access_token: IgnoredAny,
 }
-impl<Storage> ConfigEndpoint<Storage> {
-    fn response(status: u16, body: &'static [u8]) -> HttpResponse {
-        HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+
+/// JSON error body: `{"error":"<kind>","message":"<text>","code":"<upstream code>"}`.
+#[derive(Serialize)]
+struct ErrorBody<'a> {
+    error: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'a str>,
+}
+
+/// `GET` reports the channel status; `POST` verifies and stores a
+/// configuration.
+struct ConfigEndpoint<
+    Storage,
+    Slots: barracuda_imessage_gateway_channel::ReceiveSlotSource,
+    T: 'static,
+    D: 'static,
+> {
+    channel: Rc<QQChannel<Storage, Slots, T, D>>,
+}
+
+fn response(status: u16, body: &'static [u8]) -> HttpResponse {
+    HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+}
+
+fn error_response(status: u16, body: &ErrorBody<'_>) -> HttpResponse {
+    match serde_json::to_vec(body) {
+        Ok(bytes) => HttpResponse::new(status, JSON_CONTENT_TYPE, bytes),
+        Err(_) => response(500, br#"{"error":"internal"}"#),
     }
 }
-impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
+
+fn token_error_response(error: &TokenError) -> HttpResponse {
+    match error {
+        TokenError::Rejected { code, message } => {
+            log::warn!("QQ rejected the gateway credentials: {error}");
+            error_response(
+                422,
+                &ErrorBody {
+                    error: "verification_failed",
+                    message: message.as_deref(),
+                    code: code.as_deref(),
+                },
+            )
+        }
+        TokenError::Unavailable { message } => {
+            log::warn!("could not verify the QQ gateway credentials: {error}");
+            error_response(
+                502,
+                &ErrorBody {
+                    error: "upstream_unavailable",
+                    message: Some(message),
+                    code: None,
+                },
+            )
+        }
+    }
+}
+
+impl<Storage, Slots, T, D> HttpEndpoint for ConfigEndpoint<Storage, Slots, T, D>
+where
+    Storage: PluginStorage,
+    Slots: barracuda_imessage_gateway_channel::ReceiveSlotSource,
+    T: TcpConnect + 'static,
+    D: Dns + 'static,
+{
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
-            if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+            match request.method() {
+                HttpMethod::Post => {}
+                HttpMethod::Get => return status_response(&*self.channel),
+                _ => return response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
                 log::warn!("rejected invalid QQ gateway configuration");
-                return Self::response(400, br#"{"error":"invalid_request"}"#);
+                return response(400, br#"{"error":"invalid_request"}"#);
             };
-            let mut channel_registration = self.channel_registration.lock().await;
-            let previous_configuration =
-                match self.storage.get_bytes(CONFIGURATION_STORAGE_KEY).await {
-                    Ok(configuration) => configuration,
-                    Err(error) => {
-                        log::error!(
-                            "failed to read the previous QQ gateway configuration: {error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                };
-            let Ok(bytes) = encode_configuration(&config) else {
-                log::error!("failed to encode QQ gateway configuration");
-                return Self::response(500, br#"{"error":"storage"}"#);
-            };
-            if let Err(error) = self
-                .storage
-                .put(CONFIGURATION_STORAGE_KEY, bytes.as_slice())
-                .await
-            {
-                log::error!("failed to persist QQ gateway configuration: {error}");
-                return Self::response(500, br#"{"error":"storage"}"#);
+            let sender = Rc::new(QQ::new(
+                self.channel.http_clients.clone(),
+                config.clone().into(),
+            ));
+            if let Err(error) = sender.authenticate().await {
+                return token_error_response(&error);
             }
-            let channel: Rc<dyn MessageChannel> =
-                Rc::new(QQ::new(self.http_clients.clone(), config.into()));
-            channel_registration.take();
-            match self.gateway.register(channel) {
-                Ok(registration) => {
-                    channel_registration.replace(registration);
-                    log::info!("configured QQ gateway provider");
-                    Self::response(204, b"")
-                }
-                Err(error) => {
-                    let restored = if let Some(previous) = previous_configuration.as_deref() {
-                        self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await
-                    } else {
-                        self.storage.delete(CONFIGURATION_STORAGE_KEY).await
-                    };
-                    if let Err(storage_error) = restored {
-                        log::error!(
-                            "failed to roll back rejected QQ gateway configuration: {storage_error}"
-                        );
-                        return Self::response(500, br#"{"error":"storage"}"#);
-                    }
-                    log::warn!("rejected QQ gateway configuration: {error}");
-                    Self::response(422, br#"{"error":"invalid_configuration"}"#)
+            match self.channel.configure(config, sender).await {
+                Ok(()) => response(204, b""),
+                Err(ConfigureError::Storage) => response(500, br#"{"error":"storage"}"#),
+                Err(ConfigureError::Registration) => {
+                    response(422, br#"{"error":"registration_failed"}"#)
                 }
             }
         })
     }
 }
 
-fn encode_configuration(config: &ConfigRequest) -> Result<Vec<u8>, serde_json::Error> {
-    serde_json::to_vec(config)
-}
-
 fn decode_configuration(bytes: &[u8]) -> Result<ConfigRequest, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
+fn is_legacy_configuration(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<LegacyConfiguration>(bytes).is_ok()
+}
+
+/// Reads the stored configuration. One in the former `access_token` shape
+/// leaves QQ unconfigured; other malformed data fails registration.
 async fn load_configuration<Storage: PluginStorage>(
     storage: &Storage,
 ) -> PluginResult<Option<ConfigRequest>> {
-    storage
-        .get_bytes(CONFIGURATION_STORAGE_KEY)
-        .await?
-        .map(|bytes| decode_configuration(&bytes))
-        .transpose()
-        .map_err(PluginError::registration)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stored_configuration_round_trips_every_field() -> Result<(), serde_json::Error> {
-        let config = ConfigRequest {
-            app_id: "app".into(),
-            access_token: "secret".into(),
-            api_base: "https://qq.example".into(),
-        };
-
-        let bytes = encode_configuration(&config)?;
-        let restored = decode_configuration(&bytes)?;
-
-        assert_eq!(restored.app_id, config.app_id);
-        assert_eq!(restored.access_token, config.access_token);
-        assert_eq!(restored.api_base, config.api_base);
-        Ok(())
+    let Some(bytes) = storage.get_bytes(CONFIGURATION_STORAGE_KEY).await? else {
+        return Ok(None);
+    };
+    match decode_configuration(&bytes) {
+        Ok(config) => Ok(Some(config)),
+        Err(_) if is_legacy_configuration(&bytes) => {
+            log::warn!(
+                "ignoring stored QQ configuration that holds an access token instead of an App Secret; QQ stays unconfigured until it is saved again"
+            );
+            Ok(None)
+        }
+        Err(error) => Err(PluginError::registration(error)),
     }
 }

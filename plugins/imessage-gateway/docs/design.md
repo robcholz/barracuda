@@ -56,3 +56,13 @@ Provider completion emits `gateway.send_stream.finished` or
 sequence. Business failures use stable serializable error codes in both Action
 responses and terminal Events. Schema, decode, or serialization failures stay
 at the adapter boundary.
+
+## Provider HTTP
+
+Providers make their HTTP calls through the Gateway's `send` helper, which opens
+a fresh connection per request and buffers the response. Each exchange has a
+30 s deadline, matching the `http` Plugin's request deadline; a missed deadline
+drops the connection and returns `Error::Timeout`, which providers report as a
+`Transport` channel error. A body of unknown length is a caller-fed media
+stream, so time spent waiting for its next chunk does not count: connecting,
+each write, and the response after the last chunk are each bounded by 30 s.

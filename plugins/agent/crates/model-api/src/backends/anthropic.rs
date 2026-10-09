@@ -129,8 +129,23 @@ fn convert_messages_to_anthropic(
         }
 
         if role == "assistant" {
-            if let Some(reasoning) = str_field(msg, "reasoning_content").filter(|s| !s.is_empty()) {
-                blocks.insert(0, json!({"type": "thinking", "thinking": reasoning}));
+            // Anthropic verifies replayed thinking against its signature, so
+            // reasoning without one (another provider's, or a response with
+            // several thinking blocks) is left out rather than rejected.
+            let has_thinking = blocks.iter().any(|block| {
+                matches!(
+                    str_field(block, "type"),
+                    Some("thinking" | "redacted_thinking")
+                )
+            });
+            let reasoning = str_field(msg, "reasoning_content").filter(|s| !s.is_empty());
+            let signature = str_field(msg, "reasoning_signature").filter(|s| !s.is_empty());
+            if let (false, Some(reasoning), Some(signature)) = (has_thinking, reasoning, signature)
+            {
+                blocks.insert(
+                    0,
+                    json!({"type": "thinking", "thinking": reasoning, "signature": signature}),
+                );
             }
             if let Some(tool_calls) = msg.get("tool_calls").and_then(|t| t.as_array()) {
                 for tc in tool_calls {
@@ -487,4 +502,43 @@ pub(super) async fn chat_stream<'h, 'r>(
         ProviderSse::Anthropic(AnthropicSse::new()),
     )
     .await
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn assistant(fields: Value) -> ChatMessage {
+        ChatMessage::new(&fields)
+    }
+
+    fn first_block(message: ChatMessage) -> Value {
+        let converted = convert_messages_to_anthropic(&[message], &[]).expect("converted");
+        converted[0]["content"][0].clone()
+    }
+
+    #[test]
+    fn signed_reasoning_is_replayed_as_a_thinking_block() {
+        let block = first_block(assistant(json!({
+            "role": "assistant",
+            "content": "ok",
+            "reasoning_content": "think",
+            "reasoning_signature": "sig",
+        })));
+        assert_eq!(
+            block,
+            json!({"type": "thinking", "thinking": "think", "signature": "sig"})
+        );
+    }
+
+    #[test]
+    fn unsigned_reasoning_is_left_out() {
+        let block = first_block(assistant(json!({
+            "role": "assistant",
+            "content": "ok",
+            "reasoning_content": "think",
+        })));
+        assert_eq!(block, json!({"type": "text", "text": "ok"}));
+    }
 }

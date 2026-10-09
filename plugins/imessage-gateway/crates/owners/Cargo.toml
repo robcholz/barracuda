@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-imessage-gateway-owners"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Per-channel owner book and pairing codes for IMessage Gateway channels"
+
+[dependencies]
+barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

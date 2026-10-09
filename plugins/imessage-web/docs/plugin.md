@@ -7,14 +7,18 @@
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,
 mounts the WebSocket bridge, and publishes `IMessageWebRoute` for consumers of
-the built-in Web conversation.
+the built-in Web conversation. Its portal entry registers no status source:
+Web chat is built in rather than an external channel, so `imessage-web` is
+absent from `GET /portal/status`.
 
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
-scope. Registration retains a `WebEntryRegistration` with ID `imessage-web`, title
-`Web 聊天`, module `entry.js`, and a `ResourceFiles` provider. Unload removes
-the navigation entry and resource provider; no extra HTTP route is registered.
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-web`, group `WebGroup::Channel`, order 10, title `Web 聊天` / `Web
+chat`, a bilingual summary, icon `icon.svg`, figure `figure.js`, module
+`entry.js`, and a `ResourceFiles` provider. Unload removes the navigation entry
+and resource provider; no extra HTTP route is registered.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-web`
@@ -27,9 +31,20 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page connects to WebSocket `/ws/message`, sends `WebClientFrame` JSON, and renders the
-SSE-formatted text events returned by the bridge, including `output_delta`.
-It supports text messages, not attachment playback or upload. It receives live
-events only, retains at most 100 visible messages with 65,536 UTF-16 code units per remote
-message, and closes the socket when unmounted. Sends have no server receipt;
-reconnection never resends.
+The page (`resources/web/entry.ts`, built on the portal UI kit) connects to
+WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`, plus
+`reply_to` when the user replies to an Agent message) and renders the
+SSE-formatted frames the bridge returns: message start, delta, edit, delete,
+reaction and end (an end error marks the message incomplete), the Agent's
+semantic events inside `message.event` (reasoning, tool results, output and
+effect output, steps and token usage, turn and session errors), permission
+requests (Allow and Deny send a text answer; any message answers the pending
+request), typing, `stream.lagged`, and attachments, which become downloads
+once complete (at most 8 MiB is kept per attachment). Messages are capped at
+1,024 UTF-8 bytes. It receives live events only, retains at most 100 log items
+with 65,536 UTF-16 code units per text part, and closes the socket when
+unmounted. Sends have no server receipt; a send counts as confirmed only when
+an Agent message replies to it or the turn it answered goes on, and the
+disconnected notice counts the rest; reconnection never resends. The overview
+tile shows the `laptop` figure (`resources/web/figure.js`); the sidebar icon
+is `resources/web/icon.svg` (Lucide `message-square`).

@@ -9,11 +9,16 @@ license = "Apache-2.0"
 [dependencies]
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
 http-client.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+embedded-io = "0.7"
 futures-lite = "2"
 
 [lints.rust]

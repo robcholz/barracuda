@@ -46,6 +46,9 @@ pub enum Error {
     #[error("transient HTTP {status}: {body}")]
     #[strum(serialize = "transient_http_status")]
     TransientHttpStatus { status: u16, body: String },
+    #[error("provider reported an error in the stream: {0}")]
+    #[strum(serialize = "provider_error")]
+    ProviderError(String),
     #[error("failed to parse LLM JSON response")]
     #[strum(serialize = "parse")]
     Parse,
@@ -129,4 +132,6 @@ pub enum InitError {
     MissingModel,
     #[error("LLM base URL is empty")]
     MissingBaseUrl,
+    #[error("LLM base URL is not an http(s) URL with a host")]
+    InvalidBaseUrl,
 }

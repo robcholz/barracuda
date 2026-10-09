@@ -43,6 +43,17 @@ impl IMessageGateway {
         self.gateway.register(channel)
     }
 
+    /// Waits until Workflow can take another `gateway.message.received`.
+    ///
+    /// Backed by `WorkflowService::ready_for`: it resolves while fewer than
+    /// the Workflow Runtime's backlog limit (`EVENT_BACKLOG_LIMIT`, 4) of
+    /// executions started by that Event are queued or running, and resolves
+    /// at once when no Workflow listens to it. Receive loops await it before
+    /// fetching the next batch. It is cancellation-safe.
+    pub async fn ready(&self) {
+        self.ingress.ready().await;
+    }
+
     /// Publishes one normalized inbound message into Workflow matching.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         self.ingress.publish(message).await

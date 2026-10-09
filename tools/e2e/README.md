@@ -70,6 +70,7 @@ name = "Time tool"
 
 [model]
 mode = "scripted"          # scripted | recorded | none
+# backend = "anthropic_compatible"  # recorded only; default openai_compatible
 
 [[model.responses]]        # one per /chat/completions call, in order
 tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
@@ -81,6 +82,11 @@ tool_calls = [{ name = "time_now", arguments = {} }]
 request_contains = ['"utc"']   # the request answered here must contain this
 text = "I checked the clock."
 
+[[model.responses]]            # a model fault instead of a normal response
+status = 503                   # HTTP status (default 200)
+raw = '{"error":"overloaded"}' # verbatim body instead of synthesized SSE
+# abort = true                 # drop the connection after the body
+
 [[steps]]                  # one stdin line to the CLI per step
 send = "What time is it?"
 reply_contains = ["I checked the clock."]
@@ -88,6 +94,8 @@ reply_matches = ['clock\.$']
 tool_contains = ['"utc":"20']
 notice_contains = []       # CLI notices, such as a permission prompt
 kinds = ["tool"]           # message roles that must appear in the turn
+# request_contains = []    # recorded only: some model request of this step
+# restart = true           # restart the System from its flash before this step
 # tool_errors_allowed = true
 
 [[http]]                   # direct WebServer request after startup
@@ -126,6 +134,51 @@ the next scripted response and every later step shifts. A detached completion
 (a VM run that ends after its turn, for example) starts a turn of its own and
 counts too. Split longer cases into numbered files such as `edge-vm-output-2`.
 
+### Virtual GPIO and I2C
+
+Every run starts the System with `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:18790`
+and connects to its virtual peripherals manager (protocol in
+`platforms/virtual-io/README.md`). The Board exposes `vio-0` to `vio-7` and
+the I2C controllers `I2C0` and `I2C1`; the first `i2c.open` gets `I2C0`. Its
+declared peripherals sit on `I2C2`: the `real-time-clock` RX8130CE model at
+`0x32` and the `power-monitor` INA226 model at `0x40`, initialized during
+boot. A
+`[virtual_io]` table sets hardware up after startup and checks it after the
+chat:
+
+```toml
+[virtual_io]
+inputs = { vio-2 = true }            # externally driven input levels
+
+[[virtual_io.devices]]               # generic 256-byte register device
+address = 0x50                       # bus defaults to "I2C0"
+data = "0a0b"                        # optional initial bytes from offset 0
+
+[[virtual_io.faults]]
+address = 0x51                       # omit for every address on the bus
+fault = "nack"                       # nack | arbitration-loss | timeout | bus-error
+once = false                         # default true: fires once
+
+[[virtual_io.expect_pins]]           # after the chat; any of mode, level, output,
+pin = "vio-0"                        # pull, drive, function, driven, claimed
+mode = "output"
+level = true
+
+[[virtual_io.expect_registers]]
+address = 0x50
+offset = 0x10
+data = "a1b2"
+
+[[virtual_io.expect_events]]         # some recorded event has these fields;
+kind = "i2c"                         # lists match by prefix
+address = 0x51
+result = "nack"
+```
+
+Every scenario fails when a device model reports a datasheet order or timing
+violation, unless `allow_violations = true`. The final pins, buses, events,
+and violations are written to `target/e2e/<name>/virtual-io.json`.
+
 ### Memory
 
 The host Platform counts the ordinary (internal-RAM) heap separately from bulk
@@ -151,9 +204,29 @@ host figure is an upper bound on the device's.
 
   The env file provides `BARRACUDA_LLM_BASE_URL`, `BARRACUDA_LLM_API_KEY`, and
   `BARRACUDA_LLM_MODEL`. Replay requires the Agent to make the same sequence
-  of model calls, so keep recorded scenarios short and write tolerant
-  assertions. Treat tapes as sensitive: responses are stored verbatim.
+  of model calls within each conversation, so keep recorded scenarios short
+  and write tolerant assertions. Calls from concurrent conversations (an
+  agent and its subagents) may arrive in any order: new recordings carry a
+  per-conversation key and llm-tape matches on it. Treat tapes as sensitive: responses are stored verbatim.
 - `none` makes no model calls; use it for `[[http]]`-only scenarios.
+
+Use `recorded` for everything a real model can do when the step text tells it
+to, including invalid arguments and error paths. Keep `scripted` for faults a
+real provider cannot produce on demand: HTTP error statuses, truncated or
+aborted streams, malformed SSE or tool-call JSON, and similar. A scripted
+response's `raw` replaces the synthesized stream, so it can carry any of
+these; a body that starts with `data:` is served as `text/event-stream`, any
+other as `application/json`.
+
+A step with `restart = true` interrupts the System and boots it again from the
+flash its previous run left behind, then sends the step's message in a new
+chat. The model API configuration is not applied again, so the restored
+configuration is what answers.
+
+A recorded step's `request_contains` is checked against the model requests
+made while the step was active: from the first request whose body carries the
+step's message up to the first one carrying the next step's message, so a
+subagent's or a detached turn's requests in between count for the step.
 
 ### Direct
 

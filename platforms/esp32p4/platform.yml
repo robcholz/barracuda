@@ -2,6 +2,11 @@ name: esp32p4
 info:
   family: esp
   environment: bare-metal
+# No network link yet, so no long-lived connections.
+network:
+  long-lived-connections:
+    internal-memory: 0
+    external-memory: 0
 package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform

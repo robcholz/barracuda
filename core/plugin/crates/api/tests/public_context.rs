@@ -1,7 +1,9 @@
 //! Public construction context API tests.
 
 use barracuda_platform_test::never_embassy_stack;
-use barracuda_plugin_api::{BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity};
+use barracuda_plugin_api::{
+    BoardInfo, Entropy, Hardware, PlatformInfo, PluginContext, TargetIdentity,
+};
 use http_client::ClientFactory;
 
 #[test]
@@ -16,5 +18,7 @@ fn construction_resources_are_public_fields() {
     let _target_identity = context.target_identity;
     let _ip_stack = context.ip_stack;
     let _http_clients = context.http_clients;
+    assert_eq!(context.receive_slots.capacity(), 0);
+    assert!(context.entropy.fill(&mut [0; 4]).is_err());
     let _hal = context.hal;
 }

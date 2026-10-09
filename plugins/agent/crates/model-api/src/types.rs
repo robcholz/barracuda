@@ -37,6 +37,9 @@ pub struct ToolCall {
 pub enum ChatStreamEvent {
     /// Provider thinking/reasoning content and its explicit boundary.
     Reasoning(StreamPart<String>),
+    /// Provider signature over the reasoning just streamed. It arrives before
+    /// `Reasoning(End)` and must be sent back verbatim with that reasoning.
+    ReasoningSignature(String),
     /// Assistant-visible text and its explicit boundary.
     Output(StreamPart<String>),
     /// Complete requested tool calls and their explicit boundary.
@@ -142,6 +145,9 @@ impl ModelApiConfig {
         }
         if self.base_url.is_empty() {
             return Err(crate::InitError::MissingBaseUrl);
+        }
+        if crate::transport::split_url(&self.base_url).is_err() {
+            return Err(crate::InitError::InvalidBaseUrl);
         }
         Ok(())
     }

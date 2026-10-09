@@ -74,6 +74,11 @@ cargo board select
 cargo run
 ```
 
+A host Board (`local-linux`, `local-macos`) also needs the loopback address of
+its virtual peripherals manager:
+`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run` (see
+[`platforms/virtual-io`](platforms/virtual-io/README.md)).
+
 The first command opens a colored Board list. Use the arrow keys to move, type
 to fuzzy-search, and press Enter to select. It validates the Board bundle and
 records the selection in ignored local state. It resolves the matching

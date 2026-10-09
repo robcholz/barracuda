@@ -5,13 +5,16 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use core::cell::Cell;
 
 mod bundled_workflows;
 mod model_api_http;
 mod workflow;
 
 use barracuda_agent_runtime::{ModelApiFactory, RuntimeService, RuntimeStorageConfig};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -82,15 +85,29 @@ impl Plugin for AgentPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let configured = Rc::new(Cell::new(false));
+        let status = Rc::clone(&configured);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "agent",
-                        title: "模型配置",
+                        group: WebGroup::Agent,
+                        order: 10,
+                        title: WebText {
+                            zh: "模型配置",
+                            en: "Models",
+                        },
+                        summary: WebText {
+                            zh: "为主 Agent、子 Agent、记忆与压缩注册模型",
+                            en: "Register models for the main agent, sub-agents, memory and compaction",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || EntryStatus::configured(status.get()),
                 )
                 .map_err(PluginError::registration)?,
         );
@@ -122,6 +139,7 @@ impl Plugin for AgentPlugin {
                     Rc::clone(&runtime),
                     context.storage().clone(),
                     api_configuration,
+                    configured,
                 ),
             )
             .map_err(PluginError::registration)?;

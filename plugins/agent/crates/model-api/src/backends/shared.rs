@@ -22,7 +22,7 @@ use super::Backend;
 const STATUS_REQUEST_TIMEOUT: u16 = 408;
 const MAX_ERROR_BODY_BYTES: usize = 1024;
 
-fn map_status_error(status: u16, body: String) -> Error {
+pub(super) fn map_status_error(status: u16, body: String) -> Error {
     let body = truncated_error_body(body);
     if status_is_transient(status) {
         Error::TransientHttpStatus { status, body }
@@ -31,7 +31,7 @@ fn map_status_error(status: u16, body: String) -> Error {
     }
 }
 
-fn truncated_error_body(mut body: String) -> String {
+pub(super) fn truncated_error_body(mut body: String) -> String {
     if body.len() <= MAX_ERROR_BODY_BYTES {
         return body;
     }

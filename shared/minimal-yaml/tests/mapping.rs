@@ -137,3 +137,28 @@ fn malformed_top_level_lines_are_not_silently_skipped() {
         .expect_err("malformed YAML must fail");
     assert_eq!(error.line(), 2);
 }
+
+#[test]
+fn block_scalar_indentation_comes_from_its_first_line() {
+    let more_indented_later = "script: |\n  first\n    nested\n  last\n";
+    let script = mapping(more_indented_later)
+        .entries()
+        .next()
+        .expect("script entry")
+        .expect("valid script");
+    assert_eq!(
+        script.scalar().expect("literal scalar"),
+        "first\n  nested\nlast\n"
+    );
+
+    let less_indented_later = "script: |\n    first\n  second\n";
+    let script = mapping(less_indented_later)
+        .entries()
+        .next()
+        .expect("script entry")
+        .expect("valid script");
+    assert_eq!(
+        script.scalar().expect_err("dedented content").kind(),
+        ErrorKind::UnexpectedIndent
+    );
+}

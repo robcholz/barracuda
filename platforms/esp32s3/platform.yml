@@ -2,11 +2,24 @@ name: esp32s3
 info:
   family: esp
   environment: bare-metal
+# Long-lived connections (receive loops) beside the shared request pool. An
+# idle TLS client session holds about 14 KiB of internal heap plus 21 KiB of
+# record buffers (shared/tls/tests/session_memory.rs, a host upper bound).
+# Without external memory both come from the 128 KiB heap, so one fits beside
+# the model connection; with PSRAM the buffers move out and the station
+# stack's free sockets (16, about 11 in use) bound it at three.
+network:
+  long-lived-connections:
+    internal-memory: 1
+    external-memory: 3
 package: barracuda-platform-esp32s3
 crate: barracuda_platform_esp32s3
 type: Esp32S3Platform
 build:
   rustup-toolchain: esp
+  # esp 1.99.0.0 places esp-hal's ESP32-S3 `__pre_init` literal pool after its IRAM
+  # code (it reorders esp-hal's split `global_asm!` blocks), so release builds no longer link.
+  rustup-toolchain-version: 1.98.1.0
   build-std: [core, alloc]
   environment-file: ~/export-esp.sh
   missing-toolchain-prompt: |

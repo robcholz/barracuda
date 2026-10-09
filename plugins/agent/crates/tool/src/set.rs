@@ -23,7 +23,7 @@ const NO_EXTRA_TOOL_CONTEXT: &str = "no extra tool context";
 /// sized bulk text.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ToolSetCache {
-    static_schemas: Option<BulkText>,
+    schemas: Option<BulkText>,
     static_context: Option<BulkText>,
     deferred_context: Option<BulkText>,
     extra_tool_context: Option<BulkText>,
@@ -607,14 +607,17 @@ impl ToolSet {
     fn render_static_tools(&mut self) {
         let (schemas, context) = {
             let tools = self.surface(true);
+            // Loaded groups are declared beside the default surface: a model
+            // calls only the functions a request declares.
+            let callable: Vec<&Tool> = tools.iter().copied().chain(self.surface(false)).collect();
             (
-                BulkText::encode(|sink| write_schemas(sink, &tools)),
+                BulkText::encode(|sink| write_schemas(sink, &callable)),
                 BulkText::encode(|sink| {
                     write_usages(sink, &tools);
                 }),
             )
         };
-        self.cache.static_schemas = Some(schemas);
+        self.cache.schemas = Some(schemas);
         self.cache.static_context = Some(context);
     }
 
@@ -622,13 +625,7 @@ impl ToolSet {
         let context = {
             let tools = self.surface(false);
             BulkText::encode(|sink| {
-                let wrote_usage = write_usages(sink, &tools);
-                if !tools.is_empty() {
-                    if wrote_usage {
-                        sink.put(b"\n\n");
-                    }
-                    write_schemas(sink, &tools);
-                }
+                write_usages(sink, &tools);
             })
         };
         self.cache.deferred_context = Some(context);
@@ -674,9 +671,10 @@ impl<'a> ToolSetHandle<'a> {
             .and_then(|index| self.entries.get(index))
     }
 
-    /// Schemas for tools present in the default, immutable tool surface.
-    pub fn static_schemas(&self) -> &str {
-        ToolSetCache::text(&self.cache.static_schemas).unwrap_or(NO_SCHEMAS)
+    /// Schemas for every tool the model can call: the default surface, then
+    /// the groups revealed through `tool_load`.
+    pub fn schemas(&self) -> &str {
+        ToolSetCache::text(&self.cache.schemas).unwrap_or(NO_SCHEMAS)
     }
 
     /// Usage context for tools present in the default, immutable tool surface.
@@ -684,7 +682,8 @@ impl<'a> ToolSetHandle<'a> {
         ToolSetCache::text(&self.cache.static_context).unwrap_or(NO_TOOL_CONTEXT)
     }
 
-    /// Usage and schemas for hidden tools revealed through `tool_load`.
+    /// Usage for hidden tools revealed through `tool_load`; their schemas are
+    /// in [`schemas`](Self::schemas).
     pub fn deferred_context(&self) -> &str {
         ToolSetCache::text(&self.cache.deferred_context).unwrap_or_default()
     }

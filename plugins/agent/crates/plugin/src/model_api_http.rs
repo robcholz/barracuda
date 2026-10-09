@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use core::{future::Future, pin::Pin};
+use core::{cell::Cell, future::Future, pin::Pin};
 
 use barracuda_agent_runtime::{AgentRuntime, ApiPurpose, ModelApiManager};
 use barracuda_model_api::{BackendKind, InitError, ModelApiConfig};
@@ -24,6 +24,20 @@ pub(crate) struct SetApiEndpoint {
     set_api: Box<SetApiHandler>,
     configuration: Mutex<NoopRawMutex, ModelApiManager>,
     persistence: Box<dyn ConfigurationPersistence>,
+    /// Whether the active configuration has at least one model, for the portal status.
+    configured: Rc<Cell<bool>>,
+}
+
+/// Returns whether `configuration` resolves a model for any purpose.
+pub(crate) fn has_model(configuration: &ModelApiManager) -> bool {
+    [
+        ApiPurpose::RootAgent,
+        ApiPurpose::SubAgent,
+        ApiPurpose::Memory,
+        ApiPurpose::Compaction,
+    ]
+    .into_iter()
+    .any(|purpose| configuration.get_api(purpose).is_some())
 }
 
 type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
@@ -33,11 +47,14 @@ impl SetApiEndpoint {
         runtime: Rc<AgentRuntime>,
         storage: Storage,
         configuration: ModelApiManager,
+        configured: Rc<Cell<bool>>,
     ) -> Self {
+        configured.set(has_model(&configuration));
         Self {
             set_api: Box::new(move |api, purpose, default| runtime.set_api(api, purpose, default)),
             configuration: Mutex::new(configuration),
             persistence: Box::new(PluginConfigurationPersistence(storage)),
+            configured,
         }
     }
 
@@ -62,6 +79,7 @@ impl SetApiEndpoint {
             set_api: Box::new(handler),
             configuration: Mutex::new(configuration),
             persistence: Box::new(persistence),
+            configured: Rc::new(Cell::new(false)),
         }
     }
 
@@ -106,6 +124,7 @@ impl HttpEndpoint for SetApiEndpoint {
                 }
                 log::info!("configured model API for {purpose:?}, default={default}");
             }
+            self.configured.set(has_model(&configuration));
             *current = configuration;
             Self::response(204, b"")
         })
@@ -397,6 +416,7 @@ mod tests {
 
         assert_eq!(response.status(), 204);
         assert_eq!(response.body(), Some(&b""[..]));
+        assert!(endpoint.configured.get());
         let requests = observed.borrow();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].0.model, "root-model");
@@ -470,6 +490,7 @@ mod tests {
         assert_eq!(response.status(), 500);
         assert_eq!(response.body(), Some(&br#"{"error":"storage"}"#[..]));
         assert!(!*called.borrow());
+        assert!(!endpoint.configured.get());
     }
 
     #[test]
@@ -572,6 +593,51 @@ mod tests {
             response.body(),
             Some(&br#"{"error":"invalid_configuration"}"#[..])
         );
+        assert!(!endpoint.configured.get());
+    }
+
+    #[test]
+    fn has_model_counts_explicit_and_default_bindings() {
+        let api = |model: &str| {
+            barracuda_model_api::ModelApiConfig::new(
+                barracuda_model_api::BackendKind::OpenAiCompatible,
+                "key",
+                model,
+                "https://example.invalid/v1",
+            )
+        };
+        let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
+        assert!(!super::has_model(&configuration));
+        configuration
+            .set_api(api("memory"), ApiPurpose::Memory, false)
+            .expect("set memory API");
+        assert!(super::has_model(&configuration));
+        let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
+        configuration
+            .set_default_api(api("default"))
+            .expect("set default API");
+        assert!(super::has_model(&configuration));
+    }
+
+    #[test]
+    fn a_base_url_that_is_not_an_http_url_is_rejected_before_it_is_used() {
+        let called = Rc::new(RefCell::new(false));
+        let target = Rc::clone(&called);
+        let endpoint = SetApiEndpoint::with_handler(move |_api, _purpose, _default| {
+            *target.borrow_mut() = true;
+            Ok(())
+        });
+
+        for base_url in ["not a url", "ftp://example.invalid/v1", "https://"] {
+            let body = alloc::format!(
+                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
+            );
+            let response = futures_lite::future::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())),
+            );
+            assert_eq!(response.status(), 422, "{base_url}");
+        }
+        assert!(!*called.borrow());
     }
 
     #[test]

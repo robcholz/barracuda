@@ -47,6 +47,8 @@ pub(crate) struct LlmStep<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationEvent {
     Reasoning(StreamPart<String>),
+    /// Provider signature over the reasoning, recorded with it in the transcript.
+    ReasoningSignature(String),
     Output(StreamPart<String>),
     #[cfg(feature = "cache_profile")]
     Usage(ProviderUsage),

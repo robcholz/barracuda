@@ -3,6 +3,9 @@
 
 extern crate alloc;
 
+pub mod inbound;
+mod signup;
+
 use alloc::{
     boxed::Box,
     format,
@@ -18,7 +21,13 @@ use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
-const DEFAULT_API_BASE: &str = "https://inkbox.ai";
+pub use signup::{InkboxSignup, SignupAccount, SignupError, SignupRequest};
+
+/// Gateway channel name this provider registers.
+pub const CHANNEL: &str = "inkbox";
+
+/// Production Inkbox service origin, without the `/api` suffix.
+pub const DEFAULT_API_BASE: &str = "https://inkbox.ai";
 
 /// Connection settings for the Inkbox iMessage API.
 pub struct InkboxConfig {
@@ -109,16 +118,10 @@ where
         &self,
         target: barracuda_imessage_gateway_plugin::MessageTarget,
         text: String,
-        reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         if text.is_empty() {
             return Err(ChannelError::InvalidRequest {
                 message: "message text is empty".into(),
-            });
-        }
-        if reply_to.is_some() {
-            return Err(ChannelError::InvalidRequest {
-                message: "Inkbox iMessage does not support reply_to message IDs".into(),
             });
         }
         let root = self
@@ -138,11 +141,6 @@ where
         kind: MediaKind,
         request: SendMediaRequest,
     ) -> Result<SendReceipt, ChannelError> {
-        if request.reply_to.is_some() {
-            return Err(ChannelError::InvalidRequest {
-                message: "Inkbox iMessage does not support reply_to message IDs".into(),
-            });
-        }
         let filename = request
             .filename
             .unwrap_or_else(|| default_filename(kind).into());
@@ -198,9 +196,13 @@ where
     D: http_client::embedded_nal_async::Dns + 'static,
 {
     fn channel(&self) -> &str {
-        "imessage"
+        CHANNEL
     }
 
+    /// Sends text to the target conversation.
+    ///
+    /// Inkbox cannot quote a specific message, so `reply_to` is accepted and
+    /// ignored rather than failing replies to inbound messages.
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             let text = match request.body {
@@ -214,10 +216,12 @@ where
                     text
                 }
             };
-            self.send_text(request.target, text, request.reply_to).await
+            self.send_text(request.target, text).await
         })
     }
 
+    /// Uploads media and sends it to the target conversation; `reply_to` is
+    /// ignored as for text.
     fn send_media(
         &self,
         kind: MediaKind,

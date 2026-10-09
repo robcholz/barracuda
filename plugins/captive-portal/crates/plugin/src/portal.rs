@@ -1,5 +1,7 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::{Rc, Weak};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -8,13 +10,130 @@ use barracuda_webserver_plugin::{HttpProviderHandle, HttpResponse};
 use embedded_io_async::{ErrorType, Read};
 use serde::Serialize;
 
+/// Where an entry sits in the portal's navigation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebGroup {
+    /// Device settings, such as networking.
+    Device,
+    /// Agent and model configuration.
+    Agent,
+    /// Message channels.
+    Channel,
+}
+
+/// A label in both portal languages (JSON escaped by the portal).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct WebText {
+    /// Simplified Chinese text.
+    pub zh: &'static str,
+    /// English text.
+    pub en: &'static str,
+}
+
+/// How an entry is doing, for the portal's navigation and overview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryState {
+    /// Set up and working.
+    Ready,
+    /// Needs the user, or is between states.
+    Attention,
+    /// Not set up or not running.
+    Off,
+}
+
+/// One entry's status: its state, a short bilingual label, and an optional
+/// machine value such as a network name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EntryStatus {
+    /// Overall state.
+    pub state: EntryState,
+    /// Short label shown beside the entry; omitted from JSON when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<WebText>,
+    /// Untranslated value shown in monospace; omitted from JSON when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl EntryStatus {
+    /// A labelled status without a detail.
+    #[must_use]
+    pub const fn new(state: EntryState, label: WebText) -> Self {
+        Self {
+            state,
+            label: Some(label),
+            detail: None,
+        }
+    }
+
+    /// `ready` 已配置/Configured when `configured`, otherwise `off` 未配置/Not set up.
+    #[must_use]
+    pub const fn configured(configured: bool) -> Self {
+        if configured {
+            Self::new(
+                EntryState::Ready,
+                WebText {
+                    zh: "已配置",
+                    en: "Configured",
+                },
+            )
+        } else {
+            Self::new(
+                EntryState::Off,
+                WebText {
+                    zh: "未配置",
+                    en: "Not set up",
+                },
+            )
+        }
+    }
+
+    /// Returns this status with `detail` set.
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
+/// A source of an entry's status, read on every `GET /portal/status`.
+///
+/// Synchronous and cheap: it reads state its plugin already holds, never
+/// queries a device or network, and must not call back into the portal.
+/// Closures `Fn() -> EntryStatus` implement it.
+pub trait EntryStatusSource: 'static {
+    /// Returns the entry's current status.
+    fn status(&self) -> EntryStatus;
+}
+
+impl<F: Fn() -> EntryStatus + 'static> EntryStatusSource for F {
+    fn status(&self) -> EntryStatus {
+        self()
+    }
+}
+
 /// One independently removable navigation entry.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct WebEntry {
     /// Stable plugin ID, used as the resource namespace.
     pub id: &'static str,
-    /// Human-readable navigation label (JSON escaped by the portal).
-    pub title: &'static str,
+    /// Navigation group containing this entry.
+    pub group: WebGroup,
+    /// Position within the group, ascending. The manifest keeps registration
+    /// order; the portal page sorts by group, order, then ID.
+    pub order: u8,
+    /// Navigation label.
+    pub title: WebText,
+    /// One line describing the entry on overview tiles and rows.
+    pub summary: WebText,
+    /// Optional relative icon path within this provider, for example
+    /// `icon.svg`; `.svg` icons are monochrome, other formats are images.
+    pub icon: Option<&'static str>,
+    /// Optional relative module path of a live figure within this provider,
+    /// for example `figure.js`.
+    pub figure: Option<&'static str>,
     /// Relative entry module within this provider, for example `entry.js`.
     pub module: &'static str,
 }
@@ -22,8 +141,8 @@ pub struct WebEntry {
 /// Failure registering a web entry.
 #[derive(Debug, thiserror::Error)]
 pub enum PortalError {
-    /// The ID or module path is invalid.
-    #[error("invalid portal entry ID or module path")]
+    /// The ID, module, icon, or figure path is invalid.
+    #[error("invalid portal entry ID or asset path")]
     InvalidEntry,
     /// Another entry owns this ID.
     #[error("portal entry ID is already registered")]
@@ -37,6 +156,26 @@ struct Entry {
     id: &'static str,
     json: Vec<u8>,
     assets: HttpProviderHandle,
+    status: Option<Box<dyn EntryStatusSource>>,
+}
+
+/// `{"entries":{"<id>":<status>,...}}` for entries that have a status source.
+#[derive(Serialize)]
+struct StatusBody<'a> {
+    entries: Statuses<'a>,
+}
+
+struct Statuses<'a>(&'a [Entry]);
+
+impl Serialize for Statuses<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().filter_map(|entry| {
+            entry
+                .status
+                .as_ref()
+                .map(|source| (entry.id, source.status()))
+        }))
+    }
 }
 
 struct Registry {
@@ -87,6 +226,34 @@ impl CaptivePortal {
         entry: WebEntry,
         assets: impl AssetsProvider,
     ) -> Result<WebEntryRegistration, PortalError> {
+        self.insert(entry, HttpProviderHandle::new(assets), None)
+    }
+
+    /// Registers an entry as [`register`](Self::register) does, plus a source
+    /// of its status for `GET /portal/status`. The source is dropped with the
+    /// returned guard.
+    ///
+    /// # Errors
+    /// Rejects invalid paths, duplicate IDs, and manifest serialization errors.
+    pub fn register_with_status(
+        &self,
+        entry: WebEntry,
+        assets: impl AssetsProvider,
+        status: impl EntryStatusSource,
+    ) -> Result<WebEntryRegistration, PortalError> {
+        self.insert(
+            entry,
+            HttpProviderHandle::new(assets),
+            Some(Box::new(status)),
+        )
+    }
+
+    fn insert(
+        &self,
+        entry: WebEntry,
+        assets: HttpProviderHandle,
+        status: Option<Box<dyn EntryStatusSource>>,
+    ) -> Result<WebEntryRegistration, PortalError> {
         if entry.id.is_empty()
             || entry.id.len() > 64
             || !entry.id.split('-').all(|segment| {
@@ -96,6 +263,8 @@ impl CaptivePortal {
                         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
             })
             || !valid_path(entry.module)
+            || entry.icon.is_some_and(|path| !valid_path(path))
+            || entry.figure.is_some_and(|path| !valid_path(path))
         {
             return Err(PortalError::InvalidEntry);
         }
@@ -106,25 +275,48 @@ impl CaptivePortal {
         #[derive(Serialize)]
         struct ManifestEntry<'a> {
             id: &'a str,
-            title: &'a str,
-            module: &'a str,
+            group: WebGroup,
+            order: u8,
+            title: WebText,
+            summary: WebText,
+            icon: Option<String>,
+            figure: Option<String>,
+            module: String,
         }
-        let module = format!("/portal/assets/{}/{}", entry.id, entry.module);
+        let asset = |path: &str| format!("/portal/assets/{}/{path}", entry.id);
         let json = serde_json::to_vec(&ManifestEntry {
             id: entry.id,
+            group: entry.group,
+            order: entry.order,
             title: entry.title,
-            module: &module,
+            summary: entry.summary,
+            icon: entry.icon.map(asset),
+            figure: entry.figure.map(asset),
+            module: asset(entry.module),
         })?;
         registry.entries.push(Entry {
             id: entry.id,
             json,
-            assets: HttpProviderHandle::new(assets),
+            assets,
+            status,
         });
         registry.rebuild();
         Ok(WebEntryRegistration {
             id: entry.id,
             registry: Rc::downgrade(&self.registry),
         })
+    }
+
+    /// Builds `GET /portal/status` from every status source, freshly per request.
+    fn status_response(&self) -> HttpResponse {
+        let registry = self.registry.borrow();
+        let body = StatusBody {
+            entries: Statuses(&registry.entries),
+        };
+        match serde_json::to_vec(&body) {
+            Ok(bytes) => HttpResponse::new(200, "application/json", bytes),
+            Err(_) => HttpResponse::new(500, "text/plain", Vec::new()),
+        }
     }
 }
 
@@ -141,6 +333,9 @@ impl AssetsProvider for CaptivePortal {
                 bytes.len(),
                 ManifestReader { bytes, offset: 0 },
             );
+        }
+        if relative == "status" {
+            return self.status_response();
         }
         if let Some(asset) = relative.strip_prefix("assets/") {
             let Some((id, path)) = asset.split_once('/') else {

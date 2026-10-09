@@ -45,6 +45,7 @@ barracuda-i2s-plugin.workspace = true
 barracuda-imu-plugin.workspace = true
 barracuda-led-strip-plugin.workspace = true
 barracuda-message-queue-plugin.workspace = true
+barracuda-power-monitor-plugin.workspace = true
 barracuda-pwm-plugin.workspace = true
 barracuda-spi-plugin.workspace = true
 barracuda-vm-systeminfo-plugin.workspace = true

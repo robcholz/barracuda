@@ -33,5 +33,9 @@ send = "Manage my notes."
 reply_contains = ["Notes updated."]
 
 [memory]
-# Host ordinary-heap peak was 202 KiB when this budget was set.
-heap_high_water_max = 221184
+# Host ordinary-heap peak was 226 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 241664

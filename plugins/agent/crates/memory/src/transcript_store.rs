@@ -236,6 +236,7 @@ enum MessageDraft {
     Assistant {
         content: BulkVec<u8>,
         reasoning_content: BulkVec<u8>,
+        reasoning_signature: BulkVec<u8>,
         tool_calls: Vec<Value>,
     },
     Tool {
@@ -257,6 +258,7 @@ impl MessageDraft {
             Self::Assistant {
                 content,
                 reasoning_content,
+                reasoning_signature,
                 tool_calls,
             } => ChatMessage::encode_object(|object| {
                 if !content.is_empty() {
@@ -264,6 +266,9 @@ impl MessageDraft {
                 }
                 if !reasoning_content.is_empty() {
                     object.str("reasoning_content", text(reasoning_content));
+                }
+                if !reasoning_signature.is_empty() {
+                    object.str("reasoning_signature", text(reasoning_signature));
                 }
                 object.str("role", "assistant");
                 if !tool_calls.is_empty() {
@@ -514,6 +519,8 @@ pub enum AssistantFragment<'a> {
     Content(&'a str),
     /// Provider reasoning content retained in the transcript.
     Reasoning(&'a str),
+    /// Provider signature over the reasoning, replayed with it.
+    ReasoningSignature(&'a str),
     /// One provider-shaped tool call object.
     ToolCall(Value),
 }
@@ -864,6 +871,7 @@ impl TurnHandle {
             MessageDraft::Assistant {
                 content: BulkVec::new(),
                 reasoning_content: BulkVec::new(),
+                reasoning_signature: BulkVec::new(),
                 tool_calls: Vec::new(),
             },
         )?;
@@ -958,6 +966,7 @@ impl AssistantHandle<'_> {
                 Some(MessageDraft::Assistant {
                     content,
                     reasoning_content,
+                    reasoning_signature,
                     tool_calls,
                 }),
             ..
@@ -970,6 +979,9 @@ impl AssistantHandle<'_> {
             AssistantFragment::Content(fragment) => content.extend_from_slice(fragment.as_bytes()),
             AssistantFragment::Reasoning(fragment) => {
                 reasoning_content.extend_from_slice(fragment.as_bytes());
+            }
+            AssistantFragment::ReasoningSignature(signature) => {
+                reasoning_signature.extend_from_slice(signature.as_bytes());
             }
             AssistantFragment::ToolCall(tool_call) => tool_calls.push(tool_call),
         }

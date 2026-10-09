@@ -15,6 +15,7 @@ barracuda-bulk-memory.workspace = true
 barracuda-platform-macos-network-gateway = { path = "network-gateway" }
 barracuda-platform-macos-network-gateway-protocol.workspace = true
 barracuda-platform.workspace = true
+barracuda-platform-virtual-io.workspace = true
 barracuda-system-image = { path = "../../tools/system-image" }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"

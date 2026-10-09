@@ -145,7 +145,7 @@ mod tests {
             .add_group(provider.tools(&storage).expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
-        let schemas = tools.static_schemas();
+        let schemas = tools.schemas();
         assert!(schemas.contains("tool_search"));
         assert!(schemas.contains("tool_load"));
     }
@@ -164,7 +164,7 @@ mod tests {
             .add_group(provider.tools(&storage).expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
-        assert!(!tools.static_schemas().contains("hidden_test"));
+        assert!(!tools.schemas().contains("hidden_test"));
 
         let mut context = Context::new();
         let history = {

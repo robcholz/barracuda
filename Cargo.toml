@@ -7,6 +7,7 @@ members = [
     "peripherals/config",
     "peripherals/impl/*/*",
     "drivers/chips/*",
+    "drivers/datasheet-tests",
     "boards/tool",
     "bench/crates/*",
     "composition/*",
@@ -109,6 +110,7 @@ barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
 barracuda-imu-plugin = { path = "plugins/vm-imu/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
+barracuda-power-monitor-plugin = { path = "plugins/vm-power-monitor/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
@@ -159,6 +161,7 @@ barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
 barracuda-runtime-utils = { path = "shared/runtime-utils" }
+barracuda-platform-virtual-io = { path = "platforms/virtual-io" }
 barracuda-system = { path = "core/system" }
 barracuda-target = { path = "composition/selected" }
 barracuda-target-api = { path = "composition/api" }
@@ -168,6 +171,7 @@ barracuda-vfs-fat = { path = "shared/vfs-fat" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }
 barracuda-vfs-memfs = { path = "shared/vfs-memfs" }
 http-client = { path = "shared/http-client" }
+ws-client = { path = "shared/ws-client" }
 json-validator = { path = "shared/json-validator" }
 json-validator-macros = { path = "shared/json-validator-macros" }
 

@@ -1,0 +1,95 @@
+name = "Edge: malformed permission resolver replies"
+description = "The non-streaming permission resolver call fails on malformed model output: a response without a message, a non-assistant message, a reply without the resolver tool call, and an invalid decision each reject the parked call with the resolver error, and the next well-formed reply approves it."
+
+[model]
+mode = "scripted"
+
+# Step 0: a Workflow switches session-1 to ask on every inbound message.
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "perm-ask", match = { event = "gateway.message.received" }, steps = [{ call = "session.set_permission_level", arguments = { session = "session-1", level = "ask" } }] } }]
+
+[[model.responses]]
+text = "Ask switch installed."
+
+# Step 1: the write parks for approval.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/resolver.txt", content = "x" } }]
+
+# Step 2: a resolver response without a message; the model retries the write.
+[[model.responses]]
+raw = '{"choices":[]}'
+
+[[model.responses]]
+request_contains = ["approval resolution failed: malformed LLM response: response missing message"]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/resolver.txt", content = "x" } }]
+
+# Step 3: a message that is not the assistant's.
+[[model.responses]]
+raw = '{"choices":[{"index":0,"message":{"role":"user","content":"yes"},"finish_reason":"stop"}]}'
+
+[[model.responses]]
+request_contains = ["approval resolution failed: malformed LLM response: response message is not assistant"]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/resolver.txt", content = "x" } }]
+
+# Step 4: plain text instead of the resolver tool call.
+[[model.responses]]
+raw = '{"choices":[{"index":0,"message":{"role":"assistant","content":"yes"},"finish_reason":"stop"}]}'
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/resolver.txt", content = "x" } }]
+
+# Step 5: a resolver tool call with a decision outside its schema.
+[[model.responses]]
+raw = '{"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"r1","type":"function","function":{"name":"permission_resolve_reply","arguments":"{\"decision\":\"maybe\"}"}}]},"finish_reason":"tool_calls"}]}'
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/resolver.txt", content = "x" } }]
+
+# Step 6: a well-formed approval runs the write.
+[[model.responses]]
+raw = '{"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"r2","type":"function","function":{"name":"permission_resolve_reply","arguments":"{\"decision\":\"yes\"}"}}]},"finish_reason":"tool_calls"}]}'
+
+[[model.responses]]
+text = "Written."
+
+[[steps]]
+send = "Install the ask switch."
+reply_contains = ["Ask switch installed."]
+
+[[steps]]
+send = "Write the resolver file."
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes."
+tool_errors_allowed = true
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes, please."
+tool_errors_allowed = true
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes, go on."
+tool_errors_allowed = true
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes, really."
+tool_errors_allowed = true
+notice_contains = ['permission needed for file_write']
+
+[[steps]]
+send = "Yes, write it."
+reply_contains = ["Written."]
+tool_contains = ['{"path":"/data/resolver.txt","bytes":1}']
+
+[logs]
+allow = ['approval resolution failed', 'could not be resolved']

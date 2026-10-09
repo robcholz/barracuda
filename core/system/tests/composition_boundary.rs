@@ -21,9 +21,9 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(platform_entry.contains("$application"));
     assert!(!platform_entry.contains("barracuda_target"));
     assert!(!platform_entry.contains("barracuda_system_app"));
-    assert!(
-        application.contains("System::new(resources, barracuda_target::TARGET_IDENTITY, spawner)")
-    );
+    assert!(application.contains("System::new(\n        resources,\n        barracuda_target::TARGET_IDENTITY,\n        RECEIVE_BUFFERS.take(),\n        spawner,\n    )"));
+    assert!(application
+        .contains("static RECEIVE_BUFFERS: ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }>"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Partitions<"));
     assert!(system.contains("barracuda_tls::Tls::new(prepared.entropy.clone())"));

@@ -31,7 +31,7 @@ use barracuda_board_hal::{
     PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources, WifiDevice};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
@@ -174,6 +174,11 @@ where
 
 pub use resources::SystemResourceError;
 
+/// Static socket buffers of the receive slots, declared once by the
+/// application and sized from the selected Platform's long-lived connection
+/// budget.
+pub use http_client::{ReceiveBuffers, ReceiveSlotBuffers};
+
 /// The selected Target's Platform and Board resources, as System consumes them.
 type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
     PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
@@ -240,6 +245,7 @@ where
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
+    Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RemovableStorage: Send + 'static,
     Io: ExposedIo
         + AnalogProvider
@@ -275,16 +281,18 @@ where
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
     /// The caller supplies resources from the selected-target resource
-    /// factory and the current Embassy executor spawner. System consumes them,
-    /// owns the complete Plugin registration order, and exposes the spawner
-    /// only to Plugin startup hooks.
+    /// factory, the static receive-slot buffers sized for the selected
+    /// Platform ([`ReceiveBuffers`]), and the current Embassy executor
+    /// spawner. System consumes them, owns the complete Plugin registration
+    /// order, and exposes the spawner only to Plugin startup hooks.
     ///
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send>(
+    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send + Sync>(
         resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
+        receive_buffers: &'static mut [ReceiveSlotBuffers],
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
@@ -332,12 +340,28 @@ where
             }
         };
         let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
+        let receive_limit = usize::from(target_identity.long_lived_connections());
+        let receive_static = receive_buffers.len();
+        let receive_slots = http_client::ReceiveSlots::new(
+            prepared.ip_stack,
+            &http_clients,
+            receive_buffers,
+            receive_limit,
+        );
+        log::info!(
+            "receive connections: {} of {} allowed by the Target ({} static)",
+            receive_slots.capacity(),
+            receive_limit,
+            receive_static
+        );
         let mut plugin_context = PluginContext::from_hal(
             target_identity,
             prepared.ip_stack,
             http_clients,
             prepared.board_hal,
         );
+        plugin_context.receive_slots = receive_slots;
+        plugin_context.entropy = SharedEntropy::new(prepared.entropy.clone());
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins;
@@ -375,6 +399,7 @@ where
             barracuda_imu_plugin::ImuPlugin::new(&mut plugin_context),
             barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
+            barracuda_power_monitor_plugin::PowerMonitorPlugin::new(&mut plugin_context),
             barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_vm_systeminfo_plugin::VmSystemInfoPlugin::new(&mut plugin_context),

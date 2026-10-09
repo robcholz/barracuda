@@ -33,6 +33,10 @@ const SOCKETS: usize = 64;
 const TCP_BUFFER_SIZE: usize = 32 * 1024;
 const NAT_TCP_FLOW_CAPACITY: usize = 128;
 const HOST_FORWARD_CAPACITY: usize = 32;
+/// Bytes moved per read in each direction of a forwarded connection.
+const FORWARD_CHUNK: usize = 4096;
+/// How long a forwarded connection waits for the device to finish after a close.
+const GUEST_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const UDP_FLOW_CAPACITY: usize = 1024;
 const UDP_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -496,6 +500,18 @@ async fn forward_host_connection<'d>(
     guest_port: u16,
     cancellation: CancellationToken,
 ) -> Result<(), SessionError> {
+    let (mut host_reader, mut host_writer) = host.into_split();
+    // A browser opens connections before it needs them and may never use them. The device serves
+    // only a few connections at once, so reach it only once the first request bytes arrive.
+    let mut first = vec![0; FORWARD_CHUNK];
+    let first_length = tokio::select! {
+        () = cancellation.cancelled() => return Ok(()),
+        read = host_reader.read(&mut first) => read?,
+    };
+    if first_length == 0 {
+        return Ok(());
+    }
+
     let mut receive_buffer = vec![0; TCP_BUFFER_SIZE];
     let mut transmit_buffer = vec![0; TCP_BUFFER_SIZE];
     let mut guest = GuestTcpSocket::new(stack, &mut receive_buffer, &mut transmit_buffer);
@@ -504,41 +520,79 @@ async fn forward_host_connection<'d>(
         .await
         .map_err(SessionError::GuestConnect)?;
 
-    let (mut host_reader, mut host_writer) = host.into_split();
-    let (mut guest_reader, mut guest_writer) = guest.split();
-    let host_to_guest = async {
-        let mut buffer = [0; 4096];
-        loop {
-            let length = host_reader.read(&mut buffer).await?;
-            if length == 0 {
-                return Ok::<(), SessionError>(());
+    let first_direction = {
+        let (mut guest_reader, mut guest_writer) = guest.split();
+        let host_to_guest = async {
+            write_guest(&mut guest_writer, &first[..first_length]).await?;
+            let mut buffer = vec![0; FORWARD_CHUNK];
+            loop {
+                let length = host_reader.read(&mut buffer).await?;
+                if length == 0 {
+                    return Ok::<_, SessionError>(Closed::Host);
+                }
+                write_guest(&mut guest_writer, &buffer[..length]).await?;
             }
-            let mut written = 0;
-            while written < length {
-                written += guest_writer
-                    .write(&buffer[written..length])
+        };
+        let guest_to_host = async {
+            let mut buffer = vec![0; FORWARD_CHUNK];
+            loop {
+                let length = guest_reader
+                    .read(&mut buffer)
                     .await
                     .map_err(SessionError::GuestIo)?;
+                if length == 0 {
+                    return Ok::<_, SessionError>(Closed::Guest);
+                }
+                host_writer.write_all(&buffer[..length]).await?;
             }
+        };
+        tokio::select! {
+            () = cancellation.cancelled() => return Ok(()),
+            closed = host_to_guest => closed?,
+            closed = guest_to_host => closed?,
         }
     };
-    let guest_to_host = async {
-        let mut buffer = [0; 4096];
-        loop {
-            let length = guest_reader
-                .read(&mut buffer)
-                .await
-                .map_err(SessionError::GuestIo)?;
-            if length == 0 {
-                return Ok::<(), SessionError>(());
+
+    // Pass the close on as a FIN rather than dropping the socket: a dropped socket leaves the
+    // device waiting for the close until its read timeout, holding one of its few connections.
+    guest.close();
+    if first_direction == Closed::Host {
+        // the browser is done sending; deliver the rest of the response, then the device's close
+        let mut buffer = vec![0; FORWARD_CHUNK];
+        let drained = tokio::time::timeout(GUEST_CLOSE_TIMEOUT, async {
+            loop {
+                match guest.read(&mut buffer).await {
+                    Ok(0) | Err(_) => return Ok::<_, std::io::Error>(()),
+                    Ok(length) => host_writer.write_all(&buffer[..length]).await?,
+                }
             }
-            host_writer.write_all(&buffer[..length]).await?;
+        })
+        .await;
+        if let Ok(result) = drained {
+            result?;
         }
-    };
-    tokio::select! {
-        () = cancellation.cancelled() => Ok(()),
-        result = async { tokio::try_join!(host_to_guest, guest_to_host).map(|_| ()) } => result,
     }
+    let _ = host_writer.shutdown().await;
+    let _ = tokio::time::timeout(GUEST_CLOSE_TIMEOUT, guest.flush()).await;
+    Ok(())
+}
+
+/// Which side of a forwarded connection closed first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closed {
+    Host,
+    Guest,
+}
+
+async fn write_guest(
+    writer: &mut embassy_net::tcp::TcpWriter<'_>,
+    mut bytes: &[u8],
+) -> Result<(), SessionError> {
+    while !bytes.is_empty() {
+        let written = writer.write(bytes).await.map_err(SessionError::GuestIo)?;
+        bytes = &bytes[written..];
+    }
+    Ok(())
 }
 
 /// User-space network session initialization or forwarding failure.
@@ -791,6 +845,11 @@ mod tests {
                 assert_eq!(metadata.endpoint.port, 53);
             }
 
+            // a browser's idle connection must not reach the guest: the guest's one listening
+            // socket below would accept it and then wait for a request that never comes
+            let idle = TcpStream::connect(forward_address)
+                .await
+                .expect("open an idle host connection");
             let guest_server = async {
                 let mut receive_buffer = [0; 4096];
                 let mut transmit_buffer = [0; 4096];
@@ -801,6 +860,8 @@ mod tests {
                 assert_eq!(&request, b"host");
                 assert_eq!(socket.write(b"guest").await, Ok(5));
                 assert_eq!(socket.flush().await, Ok(()));
+                // the host's close arrives as a FIN, so the guest is not left waiting
+                assert_eq!(socket.read(&mut request).await, Ok(0));
             };
             let host_client = async {
                 let mut socket = TcpStream::connect(forward_address)
@@ -815,6 +876,7 @@ mod tests {
                 assert_eq!(&response, b"guest");
             };
             tokio::join!(guest_server, host_client);
+            drop(idle);
         });
         tokio::time::timeout(Duration::from_secs(5), result)
             .await

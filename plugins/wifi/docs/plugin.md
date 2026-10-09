@@ -39,7 +39,21 @@ caller can retry. `DELETE /api/wifi` removes persisted credentials,
 disconnects station mode, and starts the setup AP.
 
 The Portal registers a Wi-Fi module and exact captive-detection paths used by
-common Android, Apple, and Windows clients. Credentials are never returned by
+common Android, Apple, and Windows clients. When the Platform supports station
+configuration, the entry is registered with
+`CaptivePortal::register_with_status`; its `GET /portal/status` record maps the
+last state `WifiControl::status` observed, without a radio query:
+
+| Last observed state | `state` | `label` | `detail` |
+| --- | --- | --- | --- |
+| Station connected | `ready` | 已连接 / Connected | station SSID, when known |
+| Station connecting | `attention` | 正在连接… / Connecting… | none |
+| Disconnected, AP started | `attention` | 配置热点 / Setup hotspot | AP SSID |
+| Disconnected, AP starting | `attention` | 配置热点 / Setup hotspot | none |
+| Disconnected, AP stopped | `off` | 未连接 / Not connected | none |
+
+A Platform-managed network (no station configuration) registers no status
+source, so `wifi` is absent from `/portal/status`. Credentials are never returned by
 the status API or logged. The provisioning API currently has no authentication
 or transport encryption; the setup access point is intentionally open, so
 provision only in a trusted physical environment.
@@ -56,8 +70,20 @@ Radio state, socket state, futures, locks, and atomics remain in internal RAM.
 WebServer TCP and HTTP byte buffers use `BulkBox<[u8]>`, allowing the selected
 Platform to place those POD buffers in PSRAM safely.
 
+Portal page: the `wifi` entry (group Device, order 10) is built on the
+portal UI kit from `resources/web/entry.ts`. Its header shows the station
+state, network and setup-hotspot state from `GET /api/wifi`, beside the
+`router` figure (`resources/web/figure.js`), whose antennas sweep while
+`GET /api/wifi/scan` runs. The page scans on open and on 重新扫描, lists
+nearby networks strongest first with signal bars and a lock for secured
+ones, joins a listed or manually named network with `PUT /api/wifi`, and
+offers `DELETE /api/wifi` for the connected network. After an accepted join or
+forget it calls `context.refreshStatus()`, so the portal's top bar badge, sidebar
+and overview follow. Phones get the design's list layout. Results are reported
+as portal toasts, in Chinese or English.
+
 Cargo automatically runs the declared `build` task before compiling this
-Plugin. To rebuild only the Portal module, run
-`cargo plugin run --plugin wifi build` from the repository root. The generated
-module is stored at `filesystem/resources/entry.js` and is bundled as the
-Plugin's private `/resources/entry.js`.
+Plugin. To rebuild only the Portal assets, run
+`cargo plugin run --plugin wifi build` from the repository root. It writes
+`filesystem/resources/entry.js`, `figure.js` and `icon.svg` (the Lucide
+`wifi` icon), bundled as the Plugin's private `/resources/` files.

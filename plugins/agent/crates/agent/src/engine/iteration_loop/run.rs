@@ -118,7 +118,7 @@ where
                 system_prompt: step.system_prompt,
                 messages: step.messages,
                 reminders: step.reminders,
-                tools_json: Some(step.tools.static_schemas()),
+                tools_json: Some(step.tools.schemas()),
                 retry: loop_.retry,
             };
             let cancel = Cancel::new(loop_.control.cancel_flag());
@@ -160,6 +160,13 @@ where
                             .yield_one(IterationLoopEvent::Iteration(IterationEvent::Reasoning(
                                 part,
                             )))
+                            .await;
+                    }
+                    Some(Ok(ChatStreamEvent::ReasoningSignature(signature))) => {
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(
+                                IterationEvent::ReasoningSignature(signature),
+                            ))
                             .await;
                     }
                     Some(Ok(ChatStreamEvent::Output(part))) => {

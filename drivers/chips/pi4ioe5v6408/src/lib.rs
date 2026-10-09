@@ -68,9 +68,12 @@ where
         initial_high: bool,
     ) -> Result<(), Error<I2C::Error>> {
         let mask = pin_mask(pin)?;
+        // DS40583 c.iii/c.iv: the Output State has no effect until the pin is
+        // an output with its high-impedance bit cleared, and then the pin
+        // drives it at once. Latch the level first so it never glitches.
+        self.update(OUTPUT, |value| set_bits(value, mask, initial_high))?;
         self.update(DIRECTION, |value| value | mask)?;
-        self.update(OUTPUT_HIGH_IMPEDANCE, |value| value & !mask)?;
-        self.update(OUTPUT, |value| set_bits(value, mask, initial_high))
+        self.update(OUTPUT_HIGH_IMPEDANCE, |value| value & !mask)
     }
 
     /// Configures one input and its optional pull resistor.

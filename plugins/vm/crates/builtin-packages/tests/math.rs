@@ -86,6 +86,15 @@ fn functions_follow_standard_lua() -> Result<()> {
         )?,
         "3.1415926535898 inf 9223372036854775807 -9223372036854775808 4.0 atan"
     );
+    assert_eq!(
+        eval(
+            &mut lua,
+            "return table.concat({ math.log(1), math.atan(0), select('#', math.max(1, 2)), \
+             select('#', math.fmod(7, 3)), select('#', math.ult(1, 2)) }, ' ')",
+        )?,
+        "0.0 0.0 1 1 1"
+    );
+    assert!(lua.load("return math.log()").exec().is_err());
     assert!(lua.load("return math.fmod(1, 0)").exec().is_err());
     assert!(lua.load("return math.random(3, 1)").exec().is_err());
     assert!(lua.load("return math.random(1.5)").exec().is_err());

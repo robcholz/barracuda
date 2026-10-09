@@ -1,88 +1,68 @@
-# HTTP checks run in order after startup and before the chat
-# (tools/e2e/src/barracuda_e2e/cli.py:214), so the last POST leaves the provider configured.
 name = "Web search provider configuration"
 description = "POST /api/tavily validates its body; once configured, an unreachable provider surfaces as a transport error."
 
 [model]
-mode = "scripted"
-
-# Case 1: configured provider at a closed port -> transport (search.rs:288-292)
-[[model.responses]]
-tool_calls = [{ name = "tool_load", arguments = { group_id = "websearch" } }]
-
-[[model.responses]]
-tool_calls = [{ name = "web_search", arguments = { query = "barracuda", max_results = 3 } }]
-
-[[model.responses]]
-request_contains = ['{\"error\":\"transport\"}']
-text = "Case 1 checked."
+mode = "recorded"
 
 [[steps]]
-send = "Search the web."
-reply_contains = ["Case 1 checked."]
+send = 'Search the web. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "websearch"} 2. web_search {"query": "barracuda", "max_results": 3}. Then reply with only: Case 1 checked.'
+reply_contains = ['Case 1 checked.']
 tool_contains = ['{"error":"transport"}']
+request_contains = ['{\"error\":\"transport\"}']
 tool_errors_allowed = true
 
-# only POST is accepted (lib.rs:125-126)
 [[http]]
-method = "GET"
-path = "/api/tavily"
+method = 'GET'
+path = '/api/tavily'
 status = 405
 body_contains = ['{"error":"method_not_allowed"}']
 
-# malformed JSON (lib.rs:128-129)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "not json"
+method = 'POST'
+path = '/api/tavily'
+body = 'not json'
 status = 400
 body_contains = ['{"error":"invalid_request"}']
 
-# deny_unknown_fields (lib.rs:100)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{\"api_key\":\"k\",\"region\":\"us\"}"
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k","region":"us"}'
 status = 400
 body_contains = ['{"error":"invalid_request"}']
 
-# missing api_key
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{}"
+method = 'POST'
+path = '/api/tavily'
+body = '{}'
 status = 400
 body_contains = ['{"error":"invalid_request"}']
 
-# blank key (lib.rs:150)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{\"api_key\":\"   \"}"
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"   "}'
 status = 422
 body_contains = ['{"error":"invalid_configuration"}']
 
-# key with a space is not printable ASCII (lib.rs:151)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{\"api_key\":\"k k\"}"
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k k"}'
 status = 422
 body_contains = ['{"error":"invalid_configuration"}']
 
-# non-HTTP base (lib.rs:153)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{\"api_key\":\"k\",\"api_base\":\"ftp://10.42.0.1\"}"
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k","api_base":"ftp://10.42.0.1"}'
 status = 422
 body_contains = ['{"error":"invalid_configuration"}']
 
-# accepted; trailing slash trimmed to http://10.42.0.1:9/search (lib.rs:156-157)
 [[http]]
-method = "POST"
-path = "/api/tavily"
-body = "{\"api_key\":\"e2e-key\",\"api_base\":\"http://10.42.0.1:9/\"}"
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"e2e-key","api_base":"http://10.42.0.1:9/"}'
 status = 204
 
 [logs]

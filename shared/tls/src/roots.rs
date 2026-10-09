@@ -3,7 +3,10 @@
 //! mbedTLS gets an empty CA chain, so the top certificate of every server
 //! chain reaches [`verify`] flagged not trusted. The callback looks up that
 //! certificate's issuer in the bundle and, when a root of that name signed it,
-//! clears the flag; mbedTLS checks the rest of the chain itself. Roots stay in
+//! clears the flag; mbedTLS checks the rest of the chain itself. A top
+//! certificate that is itself a bundled root (the same name and key) is
+//! trusted whoever signed it, since servers send roots cross-signed by older
+//! roots the bundle no longer has. Roots stay in
 //! flash and only the matching root's key is parsed, during the handshake.
 #![allow(unsafe_code)]
 
@@ -69,8 +72,8 @@ pub(crate) unsafe extern "C" fn verify(
         return MBEDTLS_ERR_X509_BAD_INPUT_DATA;
     };
     // Act only when "no trusted parent" is the sole complaint. A weak digest
-    // on the certificate's own signature is judged below, once its issuer is
-    // known; anything else (a name mismatch, a bad intermediate) stands.
+    // on the certificate's own signature is judged below; anything else (a
+    // name mismatch, a bad intermediate, an expired certificate) stands.
     if *flags & !MBEDTLS_X509_BADCERT_BAD_MD != MBEDTLS_X509_BADCERT_NOT_TRUSTED {
         return 0;
     }
@@ -82,18 +85,19 @@ pub(crate) unsafe extern "C" fn verify(
             bytes(&certificate.pk_raw),
         )
     };
+    // The server sent a bundled root itself, self-signed or cross-signed by a
+    // root the bundle no longer has. A root is trusted as its name and key,
+    // so who signed this copy, and with which digest, does not matter.
+    if roots().any(|root| root.name == subject && root.key == key) {
+        *flags &= !(MBEDTLS_X509_BADCERT_NOT_TRUSTED | MBEDTLS_X509_BADCERT_BAD_MD);
+        return 0;
+    }
     for root in roots().filter(|root| root.name == issuer) {
         // SAFETY: as above.
-        if !unsafe { signed_by(certificate, root.key) } {
-            continue;
+        if unsafe { signed_by(certificate, root.key) } {
+            *flags &= !MBEDTLS_X509_BADCERT_NOT_TRUSTED;
+            return 0;
         }
-        *flags &= !MBEDTLS_X509_BADCERT_NOT_TRUSTED;
-        if subject == root.name && key == root.key {
-            // The server sent the root itself, which is trusted as it is: the
-            // digest of its self-signature does not matter.
-            *flags &= !MBEDTLS_X509_BADCERT_BAD_MD;
-        }
-        return 0;
     }
     0
 }

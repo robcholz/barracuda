@@ -411,6 +411,14 @@ impl<'a> IterationConsumer<'a> {
         }
     }
 
+    /// Record the provider signature over the reasoning; it is not progress.
+    fn consume_reasoning_signature(&mut self, signature: &str) {
+        debug_assert_eq!(self.phase, ContentPhase::Reasoning);
+        if let Some(assistant) = self.assistant.as_mut() {
+            assistant.append(AssistantFragment::ReasoningSignature(signature));
+        }
+    }
+
     /// Apply one output part to the transcript before returning it.
     fn consume_output(
         &mut self,
@@ -719,6 +727,9 @@ where
                                     ))))
                                     .await;
                             }
+                            IterationLoopEvent::Iteration(IterationEvent::ReasoningSignature(
+                                signature,
+                            )) => consumer.consume_reasoning_signature(&signature),
                             IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
                                 match consumer.consume_output(part) {
                                     Ok(part) => {

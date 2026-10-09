@@ -1,0 +1,19 @@
+name = "Live Anthropic Messages backend"
+description = "The Agent talks to a real model through the Anthropic-compatible Messages wire format across several turns and a tool call. This provider streams reasoning without a signature, so the backend leaves it out of later requests instead of replaying an unsigned thinking block the provider would reject."
+
+[model]
+mode = "recorded"
+backend = "anthropic_compatible"
+
+[[steps]]
+send = "What is two plus two? Reply with one word."
+kinds = ["reply"]
+
+[[steps]]
+send = "Now load the time tools and call time_now, then tell me the current UTC year in one short sentence."
+kinds = ["reply"]
+tool_contains = ["time_now"]
+
+[[steps]]
+send = "And what is three plus three? Reply with one word."
+kinds = ["reply"]

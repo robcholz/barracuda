@@ -1,4 +1,9 @@
-"""Strict sequential replay server with original timing only."""
+"""Strict replay server with original timing only.
+
+Interactions are served in recorded order. When a tape carries conversation
+keys (see `keys`), order is kept per conversation, so concurrent callers each
+receive their own responses.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ from aiohttp import web
 from loguru import logger
 
 from .headers import to_multidict
+from .keys import conversation_key
 from .tape import Interaction, Tape, load_tape
 
 CONTROL_PATH = '/_llm_tape/health'
@@ -18,37 +24,57 @@ CAPTURE_KEY = web.AppKey('capture', Path)
 
 
 class ReplayCursor:
-    """Consume a tape in recorded request order."""
+    """Consume a tape in recorded request order, per conversation if keyed."""
 
     def __init__(self, tape: Tape):
         self._interactions = tape.interactions
-        self._next_index = 0
+        self._consumed = [False] * len(self._interactions)
+        self._keyed = any(i.request.match_key is not None for i in self._interactions)
         self._lock = asyncio.Lock()
 
     @property
     def consumed(self) -> int:
-        return self._next_index
+        return sum(self._consumed)
 
     @property
     def total(self) -> int:
         return len(self._interactions)
 
-    async def match(self, *, method: str, path: str) -> tuple[Interaction | None, str]:
-        """Match without consuming on exhaustion or method/path mismatch."""
+    async def match(
+        self, *, method: str, path: str, key: str | None = None
+    ) -> tuple[Interaction | None, str]:
+        """Match without consuming on exhaustion or mismatch.
+
+        An unkeyed tape is served strictly in order. A keyed tape serves the
+        earliest unconsumed interaction recorded for the request's key.
+        """
 
         async with self._lock:
-            if self._next_index >= len(self._interactions):
+            pending = [i for i, used in enumerate(self._consumed) if not used]
+            if not pending:
                 return None, 'tape exhausted'
-            interaction = self._interactions[self._next_index]
-            expected = interaction.request
+            if self._keyed:
+                index = next(
+                    (
+                        i
+                        for i in pending
+                        if self._interactions[i].request.match_key == key
+                    ),
+                    None,
+                )
+                if index is None:
+                    return None, f'no recorded request left for conversation {key}'
+            else:
+                index = pending[0]
+            expected = self._interactions[index].request
             if method != expected.method or path != expected.path:
                 return (
                     None,
                     'request mismatch: '
                     f'expected {expected.method} {expected.path}, got {method} {path}',
                 )
-            self._next_index += 1
-            return interaction, ''
+            self._consumed[index] = True
+            return self._interactions[index], ''
 
 
 def create_replay_app(
@@ -101,14 +127,15 @@ async def _replay_request(request: web.Request) -> web.StreamResponse:
         cursor.consumed,
         cursor.total,
     )
-    # Drain the request body even though replay matching is deliberately
-    # content-agnostic. This keeps HTTP/1.1 connection reuse correct and makes
-    # the recorded response offsets include the same request-upload phase as
+    # Read the whole body: replay matches on its conversation key only, but
+    # draining it also keeps HTTP/1.1 connection reuse correct and makes the
+    # recorded response offsets include the same request-upload phase as
     # record mode.
     body = await request.read()
     interaction, error = await cursor.match(
         method=request.method,
         path=request.path,
+        key=conversation_key(body),
     )
     if interaction is None:
         logger.warning(

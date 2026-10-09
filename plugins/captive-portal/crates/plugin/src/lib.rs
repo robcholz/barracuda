@@ -15,7 +15,10 @@ use barracuda_webserver_plugin::{HttpProvider, HttpResponse, WebServer};
 
 /// A leaf resource provider; it receives a validated, relative asset path.
 pub use barracuda_webserver_plugin::HttpProvider as AssetsProvider;
-pub use portal::{CaptivePortal, PortalError, WebEntry, WebEntryRegistration};
+pub use portal::{
+    CaptivePortal, EntryState, EntryStatus, EntryStatusSource, PortalError, WebEntry,
+    WebEntryRegistration, WebGroup, WebText,
+};
 pub use resources::ResourceFiles;
 
 /// Plugin owning the portal resource namespace and aggregate web route.

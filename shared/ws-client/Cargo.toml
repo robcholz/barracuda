@@ -1,0 +1,32 @@
+[package]
+name = "ws-client"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Minimal no_std WebSocket client (RFC 6455) over embedded-io-async halves"
+license = "Apache-2.0"
+
+[lib]
+name = "ws_client"
+
+[dependencies]
+base64 = { version = "0.22", default-features = false }
+embedded-io-async = "0.7"
+sha1 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

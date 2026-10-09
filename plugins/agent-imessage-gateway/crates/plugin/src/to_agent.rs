@@ -4,11 +4,13 @@ use barracuda_plugin::manager::PluginStorage;
 use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionSchema, workflow_action_schema,
 };
+use embassy_futures::select::select;
+use embassy_time::{Instant, Timer};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     bridge::{BridgeControl, BridgeShared},
-    state::{BridgeError, ResolveResult, Route, persist_mapping, validate_message_id},
+    state::{BridgeError, Resolution, ResolveResult, Route, persist_mapping, validate_message_id},
 };
 
 #[derive(Deserialize)]
@@ -62,6 +64,64 @@ fn route(request: RouteRequest) -> Result<Route, BridgeError> {
     )
 }
 
+/// Resolves `route`, reserving it when unmapped. While another inbound
+/// message holds the reservation, waits for it to bind (or lapse) so this
+/// message joins that session instead of creating a second one.
+async fn resolve<Storage>(shared: &BridgeShared<Storage>, route: &Route) -> ResolveResult {
+    loop {
+        let mut book = shared.book.lock().await;
+        let until = match book.resolve_or_reserve(route, Instant::now()) {
+            Resolution::Ready(found) => return found,
+            Resolution::Wait { until } => until,
+        };
+        let generation = shared.routes.generation();
+        drop(book);
+        log::info!(
+            "IMessage Bridge waiting for `{}` conversation `{}` to bind its new session",
+            route.channel,
+            route.conversation_id
+        );
+        select(shared.routes.changed_since(generation), Timer::at(until)).await;
+    }
+}
+
+/// Binds `session` to `route` for one inbound message and returns the open
+/// input request it answers. Either way the route's reservation ends and
+/// waiting messages resolve again: to the new mapping, or, after a failure,
+/// one of them reserves the route and creates the session itself.
+async fn bind<Storage>(
+    shared: &BridgeShared<Storage>,
+    route: Route,
+    message_id: &str,
+    session: &str,
+) -> Result<Option<String>, BridgeError>
+where
+    Storage: PluginStorage,
+{
+    let mut book = shared.book.lock().await;
+    let bound = match book.prepare_binding(route.clone(), message_id, session) {
+        Ok((mapping, input_request)) => match persist_mapping(&shared.storage, &mapping).await {
+            Ok(()) => {
+                book.commit_mapping(mapping);
+                Ok(input_request)
+            }
+            Err(error) => {
+                log::warn!(
+                    "IMessage Bridge failed to persist binding for `{session}`: {}",
+                    error.code()
+                );
+                Err(error)
+            }
+        },
+        Err(error) => Err(error),
+    };
+    if bound.is_err() {
+        book.release(&route);
+    }
+    shared.routes.notify();
+    bound
+}
+
 async fn invoke<Storage>(shared: &BridgeShared<Storage>, request: ToAgentRequest) -> ToAgentResponse
 where
     Storage: PluginStorage,
@@ -81,8 +141,7 @@ where
             match route(route_request) {
                 Ok(route) => match validate_message_id(&message_id) {
                     Ok(()) => {
-                        let book = shared.book.lock().await;
-                        let found = book.resolve(&route);
+                        let found = resolve(shared, &route).await;
                         match &found {
                             ResolveResult::Missing => log::info!(
                                 "IMessage Bridge found no Agent session for inbound message `{message_id}`"
@@ -112,35 +171,23 @@ where
                 route_request.conversation_id
             );
             match route(route_request) {
-                Ok(route) => {
-                    let mut book = shared.book.lock().await;
-                    match book.prepare_binding(route, &message_id, &session) {
-                        Ok((mapping, input_request)) => {
-                            if let Err(error) = persist_mapping(&shared.storage, &mapping).await {
-                                log::warn!(
-                                    "IMessage Bridge failed to persist binding for `{session}`: {}",
-                                    error.code()
-                                );
-                                Err(error)
-                            } else {
-                                book.commit_mapping(mapping);
-                                match &input_request {
-                                    Some(request) => log::info!(
-                                        "IMessage Bridge routed `{message_id}` as the answer to `{session}` {request}"
-                                    ),
-                                    None => log::info!(
-                                        "IMessage Bridge queued reply `{message_id}` for `{session}`"
-                                    ),
-                                }
-                                return ToAgentResponse::Bound {
-                                    session,
-                                    input_request,
-                                };
-                            }
+                Ok(route) => match bind(shared, route, &message_id, &session).await {
+                    Ok(input_request) => {
+                        match &input_request {
+                            Some(request) => log::info!(
+                                "IMessage Bridge routed `{message_id}` as the answer to `{session}` {request}"
+                            ),
+                            None => log::info!(
+                                "IMessage Bridge queued reply `{message_id}` for `{session}`"
+                            ),
                         }
-                        Err(error) => Err(error),
+                        return ToAgentResponse::Bound {
+                            session,
+                            input_request,
+                        };
                     }
-                }
+                    Err(error) => Err(error),
+                },
                 Err(error) => Err(error),
             }
         }

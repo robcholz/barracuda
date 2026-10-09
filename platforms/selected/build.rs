@@ -26,12 +26,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let architecture = env::var("CARGO_CFG_TARGET_ARCH")
         .map_err(|error| format!("Cargo did not provide the target architecture: {error}"))?;
 
+    let budget = platform.network().long_lived_connections();
     let generated = format!(
         "/// Name of the independently selected Platform.\n\
          pub const PLATFORM_NAME: &str = {:?};\n\n\
          /// Fixed identity of the independently selected Platform.\n\
          pub const PLATFORM_INFO: ::barracuda_platform::PlatformInfo =\n\
-             ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?});\n\n\
+             ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?})\n\
+                 .with_long_lived_connections(::barracuda_platform::ConnectionBudget::new({}, {}));\n\n\
+         /// Largest number of long-lived connections any Board of this Platform\n\
+         /// holds (the larger of its internal- and external-memory budgets).\n\
+         /// It sizes static storage, such as the receive slots' buffers, so a\n\
+         /// Platform that allows none links none.\n\
+         pub const LONG_LIVED_CONNECTIONS: usize = {};\n\n\
          /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::barracuda_platform_selection::{};\n\n\
          #[doc(hidden)]\n\
@@ -48,6 +55,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         platform.info().family(),
         architecture,
         platform.info().environment(),
+        budget.internal_memory(),
+        budget.external_memory(),
+        budget.internal_memory().max(budget.external_memory()),
         platform.type_name(),
     );
     fs::write(output.join("selected_platform.rs"), generated)?;

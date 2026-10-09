@@ -1,0 +1,42 @@
+name = "Lua GPIO API"
+description = "A real model drives a virtual output and reads inputs whose levels the virtual peripherals manager drives."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character without any change. Then reply with only the word started. Lua source: local gpio = require('gpio') local out = assert(gpio.open_output('vio-0', true, 'push-pull')) out:write(false) out:write(true) local a = assert(gpio.open_input('vio-2', 'none')) local b = assert(gpio.open_input('vio-3', 'up')) local c = assert(gpio.open_input('vio-4', 'up')) assert(out:read() == true and a:read() == true) assert(b:read() == false and c:read() == true) print('gpio ok')'''
+tool_contains = ['"run_id":1']
+
+[virtual_io]
+# vio-3 is driven low against its pull-up; vio-4 is left to its pull-up.
+inputs = { vio-2 = true, vio-3 = false }
+
+# The run ends and closes its handles, so the history is in the events.
+[[virtual_io.expect_events]]
+kind = "gpio"
+pin = "vio-0"
+mode = "output"
+level = false
+source = "system"
+
+[[virtual_io.expect_events]]
+kind = "gpio"
+pin = "vio-4"
+mode = "input"
+level = true
+
+[[virtual_io.expect_pins]]
+pin = "vio-0"
+function = "digital"
+mode = "disabled"
+output = true
+
+[[virtual_io.expect_pins]]
+pin = "vio-3"
+pull = "up"
+level = false
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

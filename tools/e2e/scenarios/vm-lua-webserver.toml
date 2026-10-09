@@ -1,0 +1,248 @@
+name = "Lua WebServer mounts"
+description = "A real model starts Lua runs that serve /vm mounts: buffered and file-streamed responses, every content type and method, handler failures, an occupied mount, and a cancelled run whose mount disappears."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character as one single line without any change. It serves a website and keeps running. Then reply with only the word started. Lua source: local ws = require('webserver') local function fails(fn, ...) local ok, r = pcall(fn, ...) return not ok or r == nil end assert(fails(ws.serve, 5)) assert(fails(ws.serve, {mount = 5})) assert(fails(ws.serve, {mount = 'x'})) assert(fails(ws.serve, {mount = 'Bad!', handler = print})) assert(fails(ws.serve, {mount = 'a--b', handler = print})) assert(fails(ws.file, nil)) local p = assert(io.open('/data/page.html', 'w')) p:write(string.rep('<p>hi</p>', 300)) p:close() local types = {'text/plain', 'text/plain; charset=utf-8', 'text/html', 'text/html; charset=utf-8', 'text/css', 'application/json', 'application/javascript', 'application/octet-stream', 'application/wasm', 'image/svg+xml', 'image/png', 'image/jpeg', 'image/gif', 'image/x-icon', 'font/woff2'} ws.serve({mount = 'site', handler = function(r) if r.path == '/page' then return ws.file(assert(io.open('/data/page.html', 'rb')), 'text/html') end if r.path == '/tmp' then local t = io.tmpfile() t:write('temporary body') t:seek('set', 0) return ws.file(t, 'text/plain', 201) end if r.path == '/partial' then local f = io.open('/data/page.html') f:read(9) return ws.file(f) end if r.path == '/writeonly' then return ws.file(io.open('/data/w.txt', 'w')) end if r.path == '/closed' then local f = io.open('/data/page.html') f:close() return ws.file(f) end if r.path == '/error' then error('boom') end if r.path == '/badtype' then return {content_type = 'text/x-nope'} end if r.path == '/badstatus' then return {status = 999} end if r.path == '/kind' then return {__kind = 'other'} end if r.path:sub(1, 6) == '/type/' then return {content_type = types[tonumber(r.path:sub(7))], body = 'typed'} end return {status = 200, body = r.method .. ' ' .. r.path .. ' ' .. r.body} end})'''
+tool_contains = ['"run_id":1']
+
+[[steps]]
+send = '''Call vm_run with this Lua source, copied exactly: require('webserver').serve({mount = 'second', handler = function(r) return {body = 'second'} end}) After that, call vm_run again with this second Lua source, copied exactly: local ok, e = require('webserver').serve({mount = 'site', handler = print}) assert(ok == nil and e:find('already in use')) print('in use') Reply with only the word started.'''
+tool_contains = ['"run_id":2', '"run_id":3']
+
+[[steps]]
+send = "Cancel the VM run with run_id 2 using vm_cancel, then reply with only the word cancelled."
+tool_contains = ['vm_cancel']
+
+[logs]
+await = ["VM run 3 finished: Success, 1 output line", "VM run 2 finished: Cancelled"]
+forbid = ['\bERROR\b', 'panicked at', 'VM run 1 (finished|failed)']
+
+# The handler of run 1 answers every check after the chat; run 2 was cancelled.
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/page"
+status = 200
+body_contains = ["<p>hi</p><p>hi</p>"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/tmp"
+status = 201
+body_contains = ["temporary body"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/partial"
+status = 200
+body_contains = ["</p>"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/writeonly"
+status = 500
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/closed"
+status = 500
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/error"
+status = 500
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/badtype"
+status = 500
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/badstatus"
+status = 500
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/kind"
+status = 500
+
+[[http]]
+when = "after"
+method = "POST"
+path = "/vm/site/echo"
+status = 200
+body_contains = ["POST /echo payload"]
+body = "payload"
+
+[[http]]
+when = "after"
+method = "PUT"
+path = "/vm/site/echo"
+status = 200
+body_contains = ["PUT /echo payload"]
+body = "payload"
+
+[[http]]
+when = "after"
+method = "DELETE"
+path = "/vm/site/echo"
+status = 200
+body_contains = ["DELETE /echo"]
+
+[[http]]
+when = "after"
+method = "PATCH"
+path = "/vm/site/echo"
+status = 200
+body_contains = ["PATCH /echo payload"]
+body = "payload"
+
+[[http]]
+when = "after"
+method = "OPTIONS"
+path = "/vm/site/echo"
+status = 200
+body_contains = ["OPTIONS /echo"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site"
+status = 200
+body_contains = ["GET /"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/"
+status = 404
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/second/"
+status = 404
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/tmp"
+status = 201
+body_contains = ["temporary body"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/1"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/2"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/3"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/4"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/5"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/6"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/7"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/8"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/9"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/10"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/11"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/12"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/13"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/14"
+status = 200
+body_contains = ["typed"]
+
+[[http]]
+when = "after"
+method = "GET"
+path = "/vm/site/type/15"
+status = 200
+body_contains = ["typed"]

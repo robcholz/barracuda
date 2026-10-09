@@ -10,11 +10,18 @@ license = "Apache-2.0"
 barracuda-bulk-memory.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
+embassy-sync.workspace = true
+embassy-time.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway = { path = "../gateway" }
 http-client.workspace = true
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

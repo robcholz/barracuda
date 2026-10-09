@@ -1,33 +1,10 @@
 name = "Workflow load validation (2)"
 description = "workflow_actions renders the static Action catalog; workflow_load rejects unknown Actions, malformed addresses, rules, topics, references, links, and control flow with stable codes; duplicate IDs, unknown or repeated unloads, and bundled Workflows are rejected; workflow_list tracks load order."
 
-# Every rejected definition uses the never-emitted Event `e2e.never`, and the
-# accepted ones never fire, so no Workflow runs during this scenario.
-
 [model]
-mode = "scripted"
-
-[[model.responses]]
-tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
-
-# Step 0: the Action catalog.
-[[model.responses]]
-tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-branchy", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { script = "print(1)" } }, { if = { source = "$previous.output.outcome", equals = "success" }, then = [], else = [] }] } }]
-
-[[model.responses]]
-tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-typed", match = { event = "e2e.never" }, steps = [{ call = "vm.run", arguments = { source = 42 } }] } }]
-
-[[model.responses]]
-tool_calls = [{ name = "workflow_list", arguments = {} }]
-
-[[model.responses]]
-text = "Both loose definitions loaded."
+mode = "recorded"
 
 [[steps]]
-send = "Load a branching Workflow and a Workflow with a numeric source."
-reply_contains = ["Both loose definitions loaded."]
-tool_contains = [
-    '"if": {"source": "$previous.output.outcome", "equals": "success"}, "then": [], "else": []}]}{}',
-    '"id": "e2e-typed", "match": {"event": "e2e.never"}, "steps": [{"call": "vm.run", "arguments": {"source": 42}}]}{}',
-    'workflow_list{}{"workflows":["imessage-to-agent","agent-to-imessage","e2e-branchy","e2e-typed"]}',
-]
+send = 'Load a branching Workflow and a Workflow with a numeric source. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "workflow"} 2. workflow_load {"id": "e2e-branchy", "match": {"event": "e2e.never"}, "steps": [{"call": "vm.run", "arguments": {"script": "print(1)"}}, {"if": {"source": "$previous.output.outcome", "equals": "success"}, "then": [], "else": []}]} 3. workflow_load {"id": "e2e-typed", "match": {"event": "e2e.never"}, "steps": [{"call": "vm.run", "arguments": {"source": 42}}]} 4. workflow_list {}. Then reply with only: Both loose definitions loaded.'
+reply_contains = ['Both loose definitions loaded.']
+tool_contains = ['"if": {"source": "$previous.output.outcome", "equals": "success"}, "then": [], "else": []}]}{}', '"id": "e2e-typed", "match": {"event": "e2e.never"}, "steps": [{"call": "vm.run", "arguments": {"source": 42}}]}{}', 'workflow_list{}{"workflows":["imessage-to-agent","agent-to-imessage","e2e-branchy","e2e-typed"]}']

@@ -2,6 +2,11 @@ name: linux
 info:
   family: linux
   environment: hosted
+# One long-lived connection for each channel that holds one open.
+network:
+  long-lived-connections:
+    internal-memory: 4
+    external-memory: 4
 package: barracuda-platform-linux
 crate: barracuda_platform_linux
 type: LinuxPlatform
@@ -10,6 +15,13 @@ build:
   missing-toolchain-prompt: |
     Rust 1.98.1 is required. Install it with:
       rustup toolchain install 1.98.1
+hal:
+  # Virtual hardware from platforms/virtual-io: pins GPIO0..GPIO15 and the
+  # I2C controllers below, controlled through BARRACUDA_VIRTUAL_IO_ADDR.
+  bindings: [gpio, i2c-device]
+  runtime-i2c-controllers: [I2C0, I2C1, I2C2]
+  # Every Board-declared peripheral gets its chip's virtual device model.
+  peripheral-models: true
 selection:
   board-chips:
     - linux

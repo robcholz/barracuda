@@ -2,123 +2,54 @@ name = "Edge: plan mode transitions"
 description = "plan_enter is idempotent, mode persists across turns, malformed plan_exit calls leave Plan Mode active, and plan_exit has no guard when Plan Mode is not active."
 
 [model]
-mode = "scripted"
+mode = "recorded"
 
-# --- Step 0: enter twice -----------------------------------------------------
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
-tool_calls = [{ name = "plan_enter", arguments = {} }]
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nplan\n</system-reminder>']
-tool_calls = [{ name = "plan_enter", arguments = {} }]
-
-[[model.responses]]
-tool_calls = [{ name = "plan_enter", arguments = { verbose = true } }]
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nplan\n</system-reminder>']
-text = "Planning."
-
-# --- Step 1: malformed exits keep Plan Mode; a valid execute exits ------------
-
-# The schema requires only `outcome`; serde then rejects execute without plan.
-[[model.responses]]
-request_contains = ['<system-reminder>\nplan\n</system-reminder>']
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "execute" } }]
-
-[[model.responses]]
-request_contains = [
-  '<system-reminder>\nplan\n</system-reminder>',
-  '"content":"invalid arguments: missing field `plan`',
+[[steps]]
+send = '''This is a test of the plan tools. Make these tool calls in order, one per response, with exactly these arguments, even if one fails: 1. plan_enter {} 2. plan_enter {} 3. plan_enter {"verbose": true}. Then reply with only the word Planning.'''
+tool_errors_allowed = true
+tool_contains = [
+  "plan_enter{}Plan Mode entered.\nplan_enter{}Plan Mode entered.",
+  'invalid arguments: JSON schema validation failed at $.verbose: AdditionalProperty',
 ]
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "abort" } }]
+request_contains = [
+  '<system-reminder>\nnormal\n</system-reminder>',
+  '<system-reminder>\nplan\n</system-reminder>',
+]
 
-[[model.responses]]
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "execute", plan = "   " } }]
+[[steps]]
+send = '''The plan is approved. As a test of argument validation, make these plan_exit calls in order, one per response, with exactly these arguments, even when one fails: 1. plan_exit {"outcome": "execute"} 2. plan_exit {"outcome": "abort"} 3. plan_exit {"outcome": "execute", "plan": "   "} 4. plan_exit {"outcome": "execute", "plan": "1. Write the note.", "reason": "approved"} 5. plan_exit {"outcome": "execute", "plan": "1. Write the note."}. Then reply with only the word Executing.'''
+tool_errors_allowed = true
+tool_contains = [
+  'invalid arguments: missing field `plan`',
+  'invalid arguments: JSON schema validation failed at $.outcome: Enum',
+  'invalid arguments: JSON schema validation failed at $.plan: TrimmedEmpty',
+  'invalid arguments: JSON schema validation failed at $.reason: AdditionalProperty',
+  'Plan Mode exited. Begin executing the approved plan.',
+]
+request_contains = [
+  '"content":"invalid arguments: missing field `plan`',
+  '<system-reminder>\nnormal\n</system-reminder>',
+]
 
-[[model.responses]]
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "execute", plan = "1. Write the note.", reason = "approved" } }]
+[[steps]]
+send = '''Call plan_exit {"outcome": "execute", "plan": "Nothing was planned."} even though Plan Mode is not active, then reply with only the words Still normal.'''
+tool_contains = ['Plan Mode exited. Begin executing the approved plan.']
+request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
 
-[[model.responses]]
+[[steps]]
+send = '''Call plan_exit {"outcome": "cancel", "message": "  Nothing to cancel.  "} with the message exactly as written, including the spaces.'''
+tool_contains = ['"message": "Nothing to cancel."}Plan Mode cancelled.']
+reply_matches = ['^Nothing to cancel\.$']
+
+[[steps]]
+send = '''Call plan_enter {}, then in the next response call plan_exit {"outcome": "cancel"} with no message.'''
+tool_contains = ["plan_enter{}Plan Mode entered.", '{"outcome": "cancel"}Plan Mode cancelled.']
+reply_matches = ['^Planning cancelled\.$']
 request_contains = ['<system-reminder>\nplan\n</system-reminder>']
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "execute", plan = "1. Write the note." } }]
 
-# Execution continues in the same turn with the normal reminder.
-[[model.responses]]
-request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
-text = "Executing."
-
-# --- Step 2: execute exit while already normal -------------------------------
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "execute", plan = "Nothing was planned." } }]
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
-text = "Still normal."
-
-# --- Step 3: cancel while already normal yields the trimmed message ----------
-
-[[model.responses]]
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "cancel", message = "  Nothing to cancel.  " } }]
-
-# --- Step 4: enter, then cancel without a message ----------------------------
-
-[[model.responses]]
-tool_calls = [{ name = "plan_enter", arguments = {} }]
-
-[[model.responses]]
-request_contains = ['<system-reminder>\nplan\n</system-reminder>']
-tool_calls = [{ name = "plan_exit", arguments = { outcome = "cancel" } }]
-
-# --- Step 5: cancel restored normal mode -------------------------------------
-
-[[model.responses]]
+[[steps]]
+send = "Which mode are you in now? Answer in one short sentence without calling tools."
 request_contains = [
   '<system-reminder>\nnormal\n</system-reminder>',
   '"content":"Planning cancelled.","role":"assistant"',
 ]
-text = "Back to normal."
-
-[[steps]]
-send = "Plan something for me."
-reply_contains = ["Planning."]
-tool_errors_allowed = true
-tool_contains = [
-  "plan_enter{}Plan Mode entered.\nplan_enter{}Plan Mode entered.",
-  'plan_enter{"verbose": true}invalid arguments: JSON schema validation failed at $.verbose: AdditionalProperty',
-]
-
-[[steps]]
-send = "The plan is approved."
-reply_contains = ["Executing."]
-tool_errors_allowed = true
-tool_contains = [
-  'plan_exit{"outcome": "execute"}invalid arguments: missing field `plan`',
-  'plan_exit{"outcome": "abort"}invalid arguments: JSON schema validation failed at $.outcome: Enum',
-  'plan_exit{"outcome": "execute", "plan": "   "}invalid arguments: JSON schema validation failed at $.plan: TrimmedEmpty',
-  'invalid arguments: JSON schema validation failed at $.reason: AdditionalProperty',
-  'plan_exit{"outcome": "execute", "plan": "1. Write the note."}Plan Mode exited. Begin executing the approved plan.',
-]
-
-[[steps]]
-send = "Exit plan mode again."
-reply_contains = ["Still normal."]
-tool_contains = ['plan_exit{"outcome": "execute", "plan": "Nothing was planned."}Plan Mode exited. Begin executing the approved plan.']
-
-[[steps]]
-send = "Cancel the plan."
-reply_matches = ['^Nothing to cancel\.$']
-tool_contains = ['plan_exit{"outcome": "cancel", "message": "  Nothing to cancel.  "}Plan Mode cancelled.']
-
-[[steps]]
-send = "Plan, then cancel."
-reply_matches = ['^Planning cancelled\.$']
-tool_contains = ["plan_enter{}Plan Mode entered.", 'plan_exit{"outcome": "cancel"}Plan Mode cancelled.']
-
-[[steps]]
-send = "Which mode are you in?"
-reply_contains = ["Back to normal."]

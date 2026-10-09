@@ -13,6 +13,8 @@ mod selected {
 pub use selected::__platform;
 /// Independently selected concrete Platform.
 pub use selected::SelectedPlatform;
+/// Largest long-lived connection budget of the selected Platform.
+pub use selected::LONG_LIVED_CONNECTIONS;
 /// Fixed identity of the independently selected Platform.
 pub use selected::PLATFORM_INFO;
 /// Name of the independently selected Platform.

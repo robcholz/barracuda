@@ -25,11 +25,24 @@ local function raising(native)
         if first == nil and type(second) == "string" then
             error(second, 2)
         end
+        if second == nil then
+            return first
+        end
         return first, second
     end
 end
 for _, name in ipairs({ "fmod", "ult", "max", "min", "random", "randomseed" }) do
     math[name] = raising(math[name])
+end
+
+-- Native optional parameters need an explicit nil, so pass both arguments.
+local native_log = math.log
+local native_atan = math.atan
+function math.log(x, base)
+    return native_log(x, base)
+end
+function math.atan(y, x)
+    return native_atan(y, x)
 end
 
 function math.type(value)
