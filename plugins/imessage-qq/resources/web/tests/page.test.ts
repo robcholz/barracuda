@@ -247,21 +247,3 @@ test("with every receive slot taken it says so and names the limit", async () =>
     }
   }
 });
-
-test("a configured channel shows its stored App ID under the name", async () => {
-  harness.reply = async (call) =>
-    call.url === "/api/gateway/qq/status"
-      ? json(200, {
-          configured: true,
-          mode: "send",
-          owners: { count: 0 },
-          config: { app_id: "102345678" },
-        })
-      : new Response(null, { status: 404 });
-  const page = await harness.render(mount, "zh");
-  await settle();
-  const row = page.root.querySelector<HTMLElement>(".bc-row")!;
-  expect(row.hidden).toBe(false);
-  expect(row.querySelector(".bc-option-title")?.textContent).toBe("QQ");
-  expect(row.querySelector(".bc-mono")?.textContent).toBe("102345678");
-});

@@ -74,8 +74,7 @@ pub trait ChannelControl: 'static {
     fn owners(&self) -> Option<&Owners<Self::Storage>>;
 
     /// Channel-specific fields [`status_response`] adds after the shared
-    /// ones, such as `config`, the stored configuration without its secrets.
-    /// None by default.
+    /// ones, such as BlueBubbles' webhook counters. None by default.
     fn status_details(&self) -> Map<String, Value> {
         Map::new()
     }

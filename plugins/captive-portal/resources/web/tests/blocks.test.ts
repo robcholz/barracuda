@@ -504,11 +504,5 @@ test("readChannel reads the configured flag; configuredRow shows the card once t
     expect(current.element.querySelector(".bc-badge")?.textContent).toBe(
       lang === "zh" ? "已配置" : "Configured",
     );
-    expect(current.element.querySelector(".bc-mono")).toBeNull();
-    // the stored account, when the device reports one, goes under the name
-    current.show(true, "123456789");
-    expect(current.element.querySelector(".bc-mono")?.textContent).toBe(
-      "123456789",
-    );
   }
 });

@@ -185,7 +185,7 @@ pub trait ChannelControl: 'static {
     fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
     fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
-    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `config`
+    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `webhook`
 }
 pub fn sync_receive<C: ChannelControl + ?Sized>(channel: &C) -> Result<(), NoSlot>;
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse;
@@ -304,8 +304,7 @@ allocation.
    state. Keep the runtime for `start`.
 7. **Endpoints.**
    - The configuration endpoint takes `POST` only; `ChannelEndpoint` answers
-     `GET /status`. Report the stored configuration without its secrets from
-     `status_details` as `config`.
+     `GET /status`.
    - After a successful configuration `POST`, it calls `sync_receive` and
      `control.restart()`.
    - Register the configuration endpoint, `/mode`, and `/owners` as one

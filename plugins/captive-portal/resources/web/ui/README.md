@@ -156,23 +156,19 @@ Device calls (`device.ts`), for flows beyond one POST (QR login, signup codes)
 Channel state (`channel.ts`)
 
 - `readChannel<T>(context, endpoint)`: `GET <endpoint>/status` for a channel's config path,
-  which answers `{"configured": bool, …}` with `config`, the stored settings without secrets,
-  while configured; never keys. Resolves the reply (`T` adds page-specific fields, such as
-  `config` or Inkbox's `signup`), or `null` when the device gave none in that shape. It never
-  toasts.
-- `configuredRow(name, lang)` returns `{ element, show(visible, sub?) }`: a 「通道」 row with
-  the result card `name`, the 已配置 badge and `sub` (the stored account, in mono), hidden
-  until `show(true)`. Put it first in the form; show it when `readChannel` says
-  `configured`, and after a save succeeds:
+  which answers `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T`
+  adds page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
+  in that shape. It never toasts.
+- `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
+  the result card `name` and the 已配置 badge, hidden until `show(true)`. Put it first in
+  the form; show it when `readChannel` says `configured`, and after a save succeeds:
 
   ```ts
   const current = configuredRow("Telegram", lang);
   form.element.prepend(current.element);
-  void readChannel<{ config?: { bot_id: string | null } }>(context, "/api/gateway/telegram").then(
-    (state) => {
-      if (state?.configured) current.show(true, state.config?.bot_id ?? undefined);
-    },
-  );
+  void readChannel(context, "/api/gateway/telegram").then((state) => {
+    if (state?.configured) current.show(true);
+  });
   // settingsForm options: onSuccess: () => { current.show(true); void context.refreshStatus(); }
   ```
 

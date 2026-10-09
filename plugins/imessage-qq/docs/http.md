@@ -8,16 +8,15 @@ Returns `200` with the shared channel status (see the
 ```json
 {"configured":true,"mode":"send_receive",
  "receive":{"state":"receiving","slots":{"in_use":1,"capacity":1}},
- "owners":{"count":1},"config":{"app_id":"102000000"}}
+ "owners":{"count":1}}
 ```
 
 `configured` is whether a configuration is stored. `receive` is present only
 in `send_receive`; its `state` is `idle`, `starting`, `receiving`, `no_slot`
 (with `capacity`), or `error` (with `message`, for example
 「QQ 机器人已下架，只能连接沙箱环境 / The QQ bot is delisted and may only use the
-sandbox」 after close code 4914). `config` is present while configured and
-holds the stored App ID. It never returns the App Secret or a token, and makes
-no request to QQ. Other methods answer `405`.
+sandbox」 after close code 4914). It never returns settings, the App Secret,
+or a token, and makes no request to QQ. Other methods answer `405`.
 
 ## `POST /api/gateway/qq/mode`
 

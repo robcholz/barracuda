@@ -16,9 +16,8 @@ The Plugin starts without provider credentials when storage is empty. It require
 and `WebServer` capabilities and follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
 `POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
-answers the shared channel status plus `config` (the stored App ID);
-`/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the shared mode and
-owner endpoints, served with it from one prefix route
+answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
+shared mode and owner endpoints, served with it from one prefix route
 (`ChannelEndpoint`). The allowed accounts are loaded only once the channel is
 configured, and the gateway session by the first receive session. The `qq` channel is registered with the
 Gateway exactly while it is configured and its mode is `send` or
@@ -152,10 +151,10 @@ The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
 「验证并保存」. The device fetches one access token before storing anything, so a 422
 `verification_failed` puts QQ's own `message` and `code` on the App Secret
 field; other errors toast the device's `message`. On mount it reads `GET /api/gateway/qq/status`, of whose channel status it uses
-`configured` and `config`; a configured channel shows as a 「通道」 row with the
-已配置 card, naming the stored App ID, above the form that replaces it. The row also appears after a save
+`configured`; a configured channel shows as a 「通道」 row with the
+已配置 card above the form that replaces it. The row also appears after a save
 succeeds, and the page then calls `context.refreshStatus()` so the portal's
-navigation and overview follow. It never reads the App Secret or a token. Secrets are password inputs, never persisted in browser storage, and
+navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never persisted in browser storage, and
 cleared on success or unmount. Requests are cancelled on unmount and are never
 retried automatically. The existing HTTP API has no authentication or transport
 encryption added here; use only within a trusted provisioning network.

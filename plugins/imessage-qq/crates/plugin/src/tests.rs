@@ -753,7 +753,7 @@ impl Scenario for AcceptedConfiguration {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}, "config": {"app_id": "app"}})
+                   "owners": {"count": 0}})
         );
         let requests = harness.requests();
         assert_eq!(requests.len(), 2, "{requests:?}");
@@ -877,8 +877,7 @@ impl Scenario for LegacyConfiguration {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0},
-                   "config": {"app_id": "app"}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
         );
         assert_eq!(
             harness.stored(MODE_STORAGE_KEY).as_deref(),
@@ -965,8 +964,7 @@ impl Scenario for Modes {
         assert!(harness.registered());
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0},
-                   "config": {"app_id": "app"}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
         );
         assert_eq!(harness.set_mode("disabled").status(), 204);
         assert!(!harness.registered());

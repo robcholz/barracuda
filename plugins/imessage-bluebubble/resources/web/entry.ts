@@ -75,14 +75,11 @@ interface ServerInfo {
 const SAMPLE_URL = "https://bluebubbles.example.com";
 const ENDPOINT = "/api/gateway/bluebubbles";
 
-/** `GET /api/gateway/bluebubbles/status`: `config` holds the stored server URL while configured. */
-type BlueBubblesStatus = ChannelStatus & { config?: { server_url: string } };
-
 /**
  * The BlueBubbles page: the server URL and password, checked in the browser against the server's
  * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`. `GET /status` below
- * that path says whether a channel is configured and with which server, and its mode and allowed
- * accounts (`/mode`, `/owners`) show while it is.
+ * that path says whether a channel is configured, and its mode and allowed accounts (`/mode`, `/owners`) show
+ * while it is.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -93,9 +90,6 @@ export const mount = definePage((context) => {
     onClick: () => void check(),
   });
   const current = configuredRow("BlueBubbles", lang);
-  const showCurrent = (state: BlueBubblesStatus | null) => {
-    if (state?.configured) current.show(true, state.config?.server_url);
-  };
   const inbound = channelInbound(context, {
     endpoint: ENDPOINT,
     channel: "BlueBubbles",
@@ -159,7 +153,7 @@ export const mount = definePage((context) => {
       onError: (error) => ({ body: error.message }),
       onSuccess: () => {
         current.show(true);
-        void inbound.refresh().then(showCurrent);
+        void inbound.refresh();
         void context.refreshStatus();
       },
       success: {
@@ -173,8 +167,8 @@ export const mount = definePage((context) => {
   );
   form.element.prepend(current.element);
   inbound.attach(form);
-  void readChannel<BlueBubblesStatus>(context, ENDPOINT).then((state) => {
-    showCurrent(state);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
+    if (state?.configured) current.show(true);
     inbound.apply(state);
   });
   const field = (name: string) =>

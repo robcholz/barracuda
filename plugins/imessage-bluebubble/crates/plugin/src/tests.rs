@@ -543,7 +543,7 @@ impl Scenario for WebhookDeliveries {
                 );
                 assert_eq!(
                     channel_status(&channel),
-                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"config":{"server_url":"http://blue.test"},"webhook":{"lost":1,"skipped":2}}"#
+                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":1,"skipped":2}}"#
                 );
             })
             .await;
@@ -820,7 +820,7 @@ impl Scenario for ModeSwitches {
                 );
                 assert_eq!(
                     channel_status(&channel),
-                    r#"{"configured":true,"mode":"send","owners":{"count":1},"config":{"server_url":"http://blue.test"}}"#
+                    r#"{"configured":true,"mode":"send","owners":{"count":1}}"#
                 );
 
                 assert_eq!(
@@ -897,7 +897,7 @@ impl Scenario for LegacyAndEndpoints {
             assert!(!channel.receive().is_enabled());
             assert_eq!(
                 channel_status(&channel),
-                r#"{"configured":true,"mode":"send","owners":{"count":0},"config":{"server_url":"http://blue.test"}}"#
+                r#"{"configured":true,"mode":"send","owners":{"count":0}}"#
             );
             assert!(storage
                 .get_bytes(HOOK_STORAGE_KEY)

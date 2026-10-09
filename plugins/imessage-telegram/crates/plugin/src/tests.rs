@@ -412,7 +412,7 @@ impl Scenario for AcceptedConfiguration {
 
         assert_eq!(
             harness
-                .configure(r#"{"token":"123:secret","api_base":"http://api.telegram.test"}"#)
+                .configure(r#"{"token":"secret","api_base":"http://api.telegram.test"}"#)
                 .status(),
             204
         );
@@ -425,9 +425,9 @@ impl Scenario for AcceptedConfiguration {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}, "config": {"bot_id": "123"}})
+                   "owners": {"count": 0}})
         );
-        assert!(harness.polls()[0].starts_with("/bot123:secret/getUpdates?timeout=50&limit=8"));
+        assert!(harness.polls()[0].starts_with("/botsecret/getUpdates?timeout=50&limit=8"));
         // The configuration path takes changes only; its state is under `/status`.
         for method in [HttpMethod::Get, HttpMethod::Delete] {
             let response = block_on(
@@ -489,8 +489,7 @@ impl Scenario for LegacyConfiguration {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0},
-                   "config": {"bot_id": "123"}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
         );
         assert_eq!(
             harness.stored(MODE_STORAGE_KEY).as_deref(),
@@ -550,8 +549,7 @@ impl Scenario for ModeSwitches {
         assert!(!harness.registered());
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "disabled", "owners": {"count": 0},
-                   "config": {"bot_id": "123"}})
+            json!({"configured": true, "mode": "disabled", "owners": {"count": 0}})
         );
 
         assert_eq!(harness.set_mode("send").status(), 204);
@@ -595,7 +593,7 @@ impl Scenario for NoSlotWaits {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "no_slot", "capacity": 1, "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}, "config": {"bot_id": "123"}})
+                   "owners": {"count": 0}})
         );
         let response = harness.set_mode("send_receive");
         assert_eq!(response.status(), 409);

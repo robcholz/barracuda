@@ -402,16 +402,9 @@ where
         self.owners.get()
     }
 
-    /// `config`: the stored server URL (the password is never reported);
     /// `webhook`: the lost and skipped deliveries while receiving.
     fn status_details(&self) -> Map<String, Value> {
         let mut details = Map::new();
-        if let Some(provider) = self.provider() {
-            details.insert(
-                "config".into(),
-                json!({ "server_url": provider.server_url() }),
-            );
-        }
         if self.mode().receives() {
             details.insert(
                 "webhook".into(),

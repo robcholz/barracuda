@@ -5,13 +5,13 @@ Gateway's [`plugin.md`](../../imessage-gateway/docs/plugin.md).
 
 ## `GET /api/gateway/telegram/status`
 
-Returns `200` with the channel status. It never returns the token; other
-methods answer `405`.
+Returns `200` with the channel status. It never returns settings or the token;
+other methods answer `405`.
 
 ```json
 {"configured":true,"mode":"send_receive",
  "receive":{"state":"receiving","slots":{"in_use":1,"capacity":2}},
- "owners":{"count":1},"config":{"bot_id":"123456789"}}
+ "owners":{"count":1}}
 ```
 
 - `mode` is `disabled`, `send`, or `send_receive`. An unconfigured channel
@@ -22,8 +22,6 @@ methods answer `405`.
   `no_slot`. `slots` is the device's receive slots in use across every channel
   and how many it has.
 - `owners.count` is the number of allowed accounts.
-- `config` is present while configured. `bot_id` is the bot's numeric ID, the
-  part of the token before `:` (`null` for a token without one).
 
 ## `POST /api/gateway/telegram`
 

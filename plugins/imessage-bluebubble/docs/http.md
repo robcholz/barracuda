@@ -3,17 +3,17 @@
 ## `GET /api/gateway/bluebubbles/status`
 
 Returns `200` with the shared channel status (see the Gateway's
-`docs/plugin.md`). It never returns the password; other methods answer `405`.
+`docs/plugin.md`). It never returns settings or the password; other methods
+answer `405`.
 
 ```json
-{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"config":{"server_url":"https://bluebubbles.example.com"},"webhook":{"lost":0,"skipped":2}}
+{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":0,"skipped":2}}
 ```
 
 - `mode` is `disabled`, `send`, or `send_receive`.
 - `receive` is present only in `send_receive`. `state` is `idle`, `starting`,
   `receiving`, or `error` (with `message`). The webhook holds no receive slot,
   so `no_slot` never occurs and `slots` is never present.
-- `config` is present while configured and holds the stored server URL.
 - `webhook` is present only in `send_receive`. Both counters start at zero at
   boot:
   - `lost`: deliveries the device could not take. These are bodies over

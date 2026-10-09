@@ -126,11 +126,10 @@ a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
 phone on the device's hotspot) the page notes that the token is unverified;
 verifying never gates saving. The device's error `message` is shown in the
 toast. On mount it reads `GET /api/gateway/telegram/status`, which reports the
-channel status and the bot's numeric ID, never the token; a configured channel
-shows as a 「通道」 row with the 已配置 card, naming the bot ID, above the form
-that replaces it. The row also appears
+channel status and never the settings; a configured channel shows as a 「通道」
+row with the 已配置 card above the form that replaces it. The row also appears
 after a save succeeds, and the page then calls `context.refreshStatus()` so the
-portal's navigation and overview follow. It never reads the token.
+portal's navigation and overview follow. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser storage, and cleared on
 success or unmount. Requests are cancelled on unmount and are never retried
 automatically. The existing HTTP API has no authentication or transport
