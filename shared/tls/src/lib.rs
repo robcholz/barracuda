@@ -153,6 +153,11 @@ mod tests {
     const ISRG_ROOT_X2: &[u8] = include_bytes!("../tests/fixtures/isrg-root-x2.der");
     /// Self-signed, and not in the bundle.
     const UNKNOWN_ROOT: &[u8] = include_bytes!("../tests/fixtures/unknown-root.der");
+    /// Signed by GTS Root R4 (ECDSA); served by openrouter.ai.
+    const WE1: &[u8] = include_bytes!("../tests/fixtures/we1.der");
+    /// GTS Root R4, a bundled root, cross-signed by GlobalSign Root CA, which
+    /// Mozilla no longer trusts for websites.
+    const GTS_ROOT_R4_CROSS: &[u8] = include_bytes!("../tests/fixtures/gts-root-r4-cross.der");
 
     #[derive(Clone)]
     struct CountingEntropy;
@@ -255,6 +260,12 @@ mod tests {
         assert_eq!(verify(&[ISRG_ROOT_X1]), 0);
         assert_eq!(verify(&[R11, ISRG_ROOT_X1]), 0);
         assert_eq!(verify(&[ISRG_ROOT_X2]), 0);
+    }
+
+    #[test]
+    fn a_bundled_root_cross_signed_by_an_unbundled_one_is_trusted() {
+        assert_eq!(verify(&[GTS_ROOT_R4_CROSS]), 0);
+        assert_eq!(verify(&[WE1, GTS_ROOT_R4_CROSS]), 0);
     }
 
     #[test]
