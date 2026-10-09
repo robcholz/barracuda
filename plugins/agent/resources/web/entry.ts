@@ -6,13 +6,16 @@ import {
   MARK_ANTHROPIC,
   MARK_OPENAI,
   definePage,
+  entryStatus,
   header,
+  kv,
   page,
   settingsForm,
 } from "../../../captive-portal/resources/web/ui";
 
 /** The model configuration page: one model per submission, for one Agent purpose (`POST /api/model-api`). */
 export const mount = definePage((context) => {
+  const status = entryStatus(context);
   const form = settingsForm(
     {
       endpoint: "/api/model-api",
@@ -161,7 +164,7 @@ export const mount = definePage((context) => {
       },
       // the endpoint takes a batch; this page registers one model at a time
       body: (values) => [values],
-      onSuccess: () => void context.refreshStatus(),
+      onSuccess: () => void status.refresh(),
       success: {
         action: {
           label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
@@ -179,6 +182,9 @@ export const mount = definePage((context) => {
           zh: "为每种 Agent 用途注册模型。",
           en: "Register a model for each agent purpose.",
         },
+        extra: kv([[{ zh: "状态", en: "Status" }, status.slot]], context.lang, {
+          live: true,
+        }),
         figure: "agent",
         figureWidth: 300,
       },

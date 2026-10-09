@@ -4,6 +4,7 @@ import {
   settle,
 } from "../../../../captive-portal/resources/web/tests/browser";
 import type {
+  EntryStatus,
   Lang,
   PortalContext,
   Toast,
@@ -13,11 +14,14 @@ import { mount } from "../entry";
 let browser: ReturnType<typeof installBrowser>;
 let calls: [string, RequestInit][];
 let respond: () => Promise<Response>;
+/** What `/portal/status` holds for the page, before and after a read. */
+let deviceStatus: { now: EntryStatus | null; next: EntryStatus | null };
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
   browser = installBrowser();
   calls = [];
+  deviceStatus = { now: null, next: null };
   respond = async () => new Response(null, { status: 204 });
   globalThis.fetch = Object.assign(
     async (url: RequestInfo | URL, init: RequestInit = {}) => {
@@ -44,9 +48,10 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
-    status: () => null,
+    status: () => deviceStatus.now,
     refreshStatus: async () => {
       refreshes.count++;
+      deviceStatus.now = deviceStatus.next;
     },
   };
   const root = browser.document.createElement("div");
@@ -167,7 +172,7 @@ test("required connection fields block the request", async () => {
   expect(root.textContent).toContain(
     "请输入以 http:// 或 https:// 开头的地址。",
   );
-  expect(root.textContent).toContain("请填写 模型名称。");
+  expect(root.textContent).toContain("请填写模型名称。");
   expect(root.textContent).toContain("请填写 API Key。");
 });
 
@@ -231,4 +236,24 @@ test("leaving the page clears the key and empties the root", async () => {
   expect(input("api_key").value).toBe("");
   cleanup();
   expect(root.childElementCount).toBe(0);
+});
+
+test("the header shows whether the device holds a model, and updates after a save", async () => {
+  const configured: EntryStatus = {
+    state: "ready",
+    label: { zh: "已配置", en: "Configured" },
+  };
+  deviceStatus = {
+    now: { state: "off", label: { zh: "未配置", en: "Not set up" } },
+    next: configured,
+  };
+  const { root, input, submit } = await render();
+  const status = () =>
+    root.querySelector(".bc-header .bc-kv dd")?.textContent ?? "";
+  expect(status()).toBe("未配置");
+  input("base_url").value = "https://api.example.com/v1";
+  input("model").value = "gpt-model";
+  input("api_key").value = "sk-secret";
+  await submit();
+  expect(status()).toBe("已配置");
 });

@@ -32,7 +32,9 @@ export const KIT_STRINGS: Record<
     hide: "隐藏",
     clear: "清空",
     optional: "可选",
-    required: (label) => `请填写 ${label}。`,
+    // a space separates Chinese from a Latin label (请填写 API Key), not from a Chinese one (请填写密码)
+    required: (label) =>
+      `请填写${/^[\x21-\x7e]/.test(label) ? " " : ""}${label}。`,
     url: "请输入以 http:// 或 https:// 开头的地址。",
     number: (min, max) => `请输入 ${min} 到 ${max} 之间的整数。`,
     accepted: "设备已接受配置",

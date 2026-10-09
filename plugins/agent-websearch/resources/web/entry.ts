@@ -1,12 +1,15 @@
 import {
   definePage,
+  entryStatus,
   header,
+  kv,
   page,
   settingsForm,
 } from "../../../captive-portal/resources/web/ui";
 
 /** The web search page: the Tavily key and API base for the `web_search` Tool (`POST /api/tavily`). */
 export const mount = definePage((context) => {
+  const status = entryStatus(context);
   const form = settingsForm(
     {
       endpoint: "/api/tavily",
@@ -34,7 +37,7 @@ export const mount = definePage((context) => {
           },
         ],
       },
-      onSuccess: () => void context.refreshStatus(),
+      onSuccess: () => void status.refresh(),
       success: {
         action: {
           label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
@@ -52,6 +55,9 @@ export const mount = definePage((context) => {
           zh: "让 Agent 通过 Tavily 搜索网页。",
           en: "Let the agent search the web through Tavily.",
         },
+        extra: kv([[{ zh: "状态", en: "Status" }, status.slot]], context.lang, {
+          live: true,
+        }),
         figure: "agent-websearch",
         figureWidth: 280,
       },

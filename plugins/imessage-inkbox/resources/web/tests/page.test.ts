@@ -99,7 +99,7 @@ test("email → code → claimed, through the device's signup, resend and verify
   const page = await render("zh");
   await page.click("发送验证码");
   expect(harness.calls).toHaveLength(0);
-  expect(page.text()).toContain("请填写 邮箱地址。");
+  expect(page.text()).toContain("请填写邮箱地址。");
 
   await signUp(page);
   expect(

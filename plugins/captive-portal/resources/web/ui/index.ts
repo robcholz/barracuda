@@ -33,6 +33,7 @@ export {
   badge,
   button,
   definePage,
+  entryStatus,
   frame,
   header,
   kv,

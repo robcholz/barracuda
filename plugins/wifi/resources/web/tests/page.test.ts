@@ -281,7 +281,7 @@ test("joins a secured network after validating the password", async () => {
   expect(page.form().textContent).toContain("连接后，在新网络中重新打开门户。");
 
   await page.submit();
-  expect(page.errors()).toEqual(["请填写 密码。"]);
+  expect(page.errors()).toEqual(["请填写密码。"]);
   page.input("password").value = "short";
   await page.submit();
   expect(page.errors()).toEqual(["请输入 8 到 63 个字符的密码。"]);

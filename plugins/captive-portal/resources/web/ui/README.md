@@ -78,6 +78,8 @@ Layout (`layout.ts`)
 - `kv(rows, lang, { live?, mono? })`: a `.bc-kv` table (96px keys); `live` makes it
   a polite status region.
 - `term(label, tip, lang, { start? })`: the dotted-underline aside (`明文`, `名额`).
+- `entryStatus(context)`: the open entry's 「状态」 badge from `/portal/status` (已配置 / 未配置) as
+  `{ slot, refresh }`, for a write-only form's header `kv`; call `refresh` after a save.
 - `badge(label, lang, { signal? })`, `button(label, lang, { variant, size, icon, type, onClick })`,
   `frame(...children)`, `row(title, hint, lang, ...children)` (a label-left row; `backticks` in the
   hint mark machine values, set in mono: 「在 `@BotFather` 发送 `/newbot` 获得 Token」).

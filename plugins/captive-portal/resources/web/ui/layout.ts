@@ -138,6 +138,30 @@ export function badge(
   );
 }
 
+/**
+ * The open entry's 「状态」 from `GET /portal/status` (已配置 / 未配置), for a page whose form only
+ * writes and so cannot show what the device holds. Put `slot` in the header's `kv`; call `refresh`
+ * after a save succeeds.
+ */
+export function entryStatus(context: PortalContext): {
+  slot: HTMLElement;
+  refresh: () => Promise<void>;
+} {
+  const slot = h("span");
+  const show = () => {
+    const label = context.status()?.label;
+    slot.replaceChildren(label ? badge(label, context.lang) : "—");
+  };
+  show();
+  return {
+    slot,
+    refresh: async () => {
+      await context.refreshStatus();
+      if (!context.signal.aborted) show();
+    },
+  };
+}
+
 export interface ButtonOptions {
   variant?: "primary" | "outline" | "ghost" | "danger";
   size?: "md" | "sm";
