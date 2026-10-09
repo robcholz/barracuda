@@ -470,11 +470,22 @@ jobs:
 
       # esp-toolchain selections build only core and alloc; host tests also need std
       # from the same build, as the host-tool aliases in .cargo/config.toml do.
+      # The selection also forces espup's LIBCLANG_PATH, which the Xtensa
+      # bindgen builds need, but Espressif's libclang cannot parse the host's
+      # headers (mbedtls-rs-sys, littlefs2-sys), so host builds use the
+      # runner's own libclang.
       - name: Test Platform on host (esp toolchain)
         if: matrix.toolchain == 'esp'
-        run: >-
-          cargo test --config 'unstable.build-std=["std"]'
-          --target host-tuple --package ${{ matrix.package }}
+        run: |
+          libclang="$(ls -1 /usr/lib/llvm-*/lib/libclang.so* 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$libclang" ]]; then
+            echo "::error::no host libclang under /usr/lib/llvm-*/lib"
+            exit 1
+          fi
+          cargo test --config 'unstable.build-std=["std"]' \
+            --config "env.LIBCLANG_PATH.value=\"$(dirname "$libclang")\"" \
+            --config 'env.LIBCLANG_PATH.force=true' \
+            --target host-tuple --package ${{ matrix.package }}
 
       - name: Build Platform
         if: matrix.toolchain == 'rust'
