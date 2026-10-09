@@ -80,6 +80,11 @@ test("on mount it starts a login and shows the code, the steps and the expiry", 
   expect(page.text()).toContain("用手机微信扫码并确认");
   expect(plate(page).querySelector("svg")?.getAttribute("width")).toBe("168");
   expect(plate(page).textContent).toBe("");
+  // a Card whose body holds the QR plate beside the Steps
+  expect(plate(page).className).toBe("bc-qr");
+  expect(plate(page).parentElement?.className).toBe("bc-card__body");
+  expect(plate(page).parentElement?.parentElement?.className).toBe("bc-card");
+  expect(page.query(".bc-card__body .bc-steps")).not.toBeNull();
   expect(steps(page)).toEqual(["step", null, null]);
   // step numbers are mono and two digits
   expect(page.text()).toContain("01用微信扫描二维码02在手机上确认03绑定完成");
@@ -136,14 +141,19 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   status = { status: "scanned", configured: false };
   await advance(2000);
   expect(plate(page).textContent).toBe("已扫码");
+  expect(plate(page).className).toBe("bc-qr bc-qr--dim");
+  expect(plate(page).querySelector(".bc-qr__overlay")?.textContent).toBe(
+    "已扫码",
+  );
   expect(page.refreshes.count).toBe(0);
   expect(steps(page)).toEqual([null, "step", null]);
   expect(page.query("ol li svg")).not.toBeNull();
+  expect(page.query("ol li")?.className).toBe("bc-step bc-step--done");
   status = { status: "confirmed", configured: true };
   await advance(2000);
   expect(page.query(".bc-row__label .bc-title")?.textContent).toBe("绑定");
   expect(page.text()).toContain("这台设备在微信里的 ClawBot");
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(card.textContent).toContain("微信已绑定");
   expect(
     card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
@@ -373,6 +383,11 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
   const page = await render("zh");
   const alert = page.query(".bc-alert--error[role=status]")!;
   expect(alert.textContent).toBe("微信登录已失效重新绑定");
+  // the Alert card's markup: a bare icon (the error rule colours it) and the body
+  expect(alert.querySelector("svg")?.getAttribute("style")).toBeNull();
+  expect(alert.lastElementChild?.classList.contains("bc-alert__body")).toBe(
+    true,
+  );
   expect(page.text()).not.toContain("微信已绑定");
   // the action is primary: it is the one thing to do
   expect(button(page, "重新绑定")!.className).toBe("bc-button bc-button--sm");

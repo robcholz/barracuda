@@ -499,7 +499,9 @@ export class Portal {
       aside
         ? h(
             "span",
-            { class: "bc-nav-text bc-mono bc-muted portal-nav-aside" },
+            {
+              class: "bc-nav-text bc-mono bc-caption bc-muted portal-nav-aside",
+            },
             aside,
           )
         : null,
@@ -526,9 +528,9 @@ export class Portal {
           { class: "bc-nav-text" },
           h(
             "span",
-            { class: "portal-brand-text" },
-            h("span", { class: "portal-brand-name" }, "Barracuda"),
-            h("span", { class: "bc-muted portal-brand-sub" }, t.portal),
+            { class: "bc-wordmark" },
+            "Barracuda",
+            h("span", { class: "bc-caption bc-muted" }, t.portal),
           ),
         ),
       ),
@@ -567,7 +569,7 @@ export class Portal {
       this.plain
         ? h(
             "p",
-            { class: "bc-muted bc-sidebar__footer portal-sidebar-footer" },
+            { class: "bc-sidebar__footer" },
             h(
               "span",
               { class: "bc-term", tabindex: "0" },
@@ -584,14 +586,14 @@ export class Portal {
   }
 
   /**
-   * 「连接未就绪」 (a neutral badge in `destructive` text) when the manifest can't be read; on the
-   * desktop, otherwise the device's status.
+   * 「连接未就绪」 (`.bc-badge--destructive`) when the manifest can't be read; on the desktop,
+   * otherwise the device's status.
    */
   private statusBadge(desktop: boolean) {
     if (this.manifest === "error")
       return h(
         "span",
-        { class: "bc-badge portal-badge--offline", role: "status" },
+        { class: "bc-badge bc-badge--destructive", role: "status" },
         this.t.offline,
       );
     const device = desktop ? deviceStatus(this.entries, this.statusOf) : null;
@@ -701,7 +703,7 @@ export class Portal {
         },
         icon(ICON_PANEL),
       ),
-      h("span", { class: "portal-divider" }),
+      h("span", { class: "bc-topbar__divider", "aria-hidden": "true" }),
       h("span", { class: "bc-crumb" }, section),
       h("span", { class: "bc-crumb" }, "/"),
       h("span", { class: "bc-crumb--current portal-grow" }, page),
@@ -712,31 +714,27 @@ export class Portal {
     this.phoneBar.replaceChildren();
     append(
       this.phoneBar,
-      ...(this.route === "overview"
-        ? [
+      this.route === "overview"
+        ? h(
+            "a",
+            { class: "bc-brand", href: "#overview" },
             brandMark(),
-            h("span", { class: "portal-grow portal-brand-name" }, "Barracuda"),
-          ]
-        : [
-            h(
-              "a",
-              {
-                class: "bc-button bc-button--ghost portal-back",
-                href: "#overview",
-              },
-              icon(ICON_ARROW_LEFT),
-              t.overview,
-            ),
-            h("span", { class: "portal-grow" }),
-          ]),
+            h("span", { class: "bc-wordmark" }, "Barracuda"),
+          )
+        : h(
+            "a",
+            {
+              class: "bc-button bc-button--ghost bc-button--back",
+              href: "#overview",
+            },
+            icon(ICON_ARROW_LEFT),
+            t.overview,
+          ),
+      h("span", { class: "portal-grow" }),
       this.statusBadge(false),
       // the phone top bar carries the same LanguageMenu and ThemeToggle as the desktop one
       this.languageMenu(),
       this.themeControl(),
-    );
-    this.phoneBar.classList.toggle(
-      "portal-topbar--home",
-      this.route === "overview",
     );
     this.doc.title =
       this.route === "overview" ? "Barracuda" : `${page} · Barracuda`;

@@ -153,8 +153,6 @@ const MAX_TEXT = 65536;
 const MAX_FRAME = 262144;
 const MAX_MEDIA = 8 * 1024 * 1024;
 
-const ROW = "display:flex;flex-direction:column;gap:10px;max-width:86%";
-const MONO12 = "font-size:12px";
 const numbers = new Intl.NumberFormat("en-US");
 const fill = (text: string, map: Record<string, string | number>) =>
   text.replace(/\{(\w+)\}/g, (_, key: string) => String(map[key]));
@@ -175,13 +173,14 @@ function show(node: HTMLElement, on: boolean) {
   }
 }
 
-/** One fold (reasoning or a tool card): a button that shows and hides `panel`. */
+/**
+ * One fold (reasoning or a tool card): a button that shows and hides `panel`. Its trailing chevron
+ * turns with `aria-expanded`, in the design system's CSS.
+ */
 function fold(button: HTMLButtonElement, panel: HTMLElement, open: boolean) {
-  const chevron = button.lastElementChild as SVGElement;
   const set = (value: boolean) => {
     button.setAttribute("aria-expanded", String(value));
     show(panel, value);
-    chevron.style.transform = value ? "rotate(90deg)" : "none";
   };
   button.addEventListener("click", () =>
     set(button.getAttribute("aria-expanded") !== "true"),
@@ -254,19 +253,21 @@ export const mount = definePage((context: PortalContext) => {
   const log = h(
     "div",
     {
-      class: "bc-page",
+      class: "bc-chat-log",
       role: "log",
       "aria-label": t.log,
       "aria-live": "polite",
-      style: "flex:1 1 auto;max-width:none",
+      // a column, so the conversation fills the height and centres the empty state
+      style: "display:flex;flex-direction:column",
     },
     column,
   );
+  // the empty conversation: a frameless EmptyState
   const empty = h(
     "div",
     {
-      style:
-        "flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:96px 0;text-align:center",
+      class: "bc-empty",
+      style: "flex:1 1 auto;justify-content:center;gap:12px",
     },
     h("h2", { class: "bc-title" }, t.emptyTitle),
     h(
@@ -305,22 +306,15 @@ export const mount = definePage((context: PortalContext) => {
     },
     h(
       "span",
-      { style: "display:inline-flex;gap:3px", "aria-hidden": "true" },
-      [0, 1, 2].map(() =>
-        h("span", {
-          style:
-            "width:4px;height:4px;border-radius:2px;background:var(--muted-foreground)",
-        }),
-      ),
+      { class: "bc-typing", "aria-hidden": "true" },
+      h("i"),
+      h("i"),
+      h("i"),
     ),
     t.typing,
   );
   show(typing, false);
-  const caret = h("span", {
-    "aria-hidden": "true",
-    style:
-      "display:inline-block;width:7px;height:15px;margin-left:2px;vertical-align:-2px;background:var(--foreground)",
-  });
+  const caret = h("span", { class: "bc-caret", "aria-hidden": "true" });
 
   const input = h("textarea", {
     id: "imessage-web-message",
@@ -338,19 +332,12 @@ export const mount = definePage((context: PortalContext) => {
     },
     icon(ICON_ARROW_UP),
   );
-  // a hairline row: the icon carries the warning colour, the text stays foreground
+  // a ruled bar: the icon carries the warning colour, the text stays foreground
   const answeringText = h("span");
   const answering = h(
     "div",
-    {
-      style:
-        "display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px",
-    },
-    h(
-      "span",
-      { style: "display:inline-flex;color:var(--warning)" },
-      icon(ICON_SHIELD_ALERT),
-    ),
+    { class: "bc-composer__bar bc-composer__bar--rule" },
+    icon(ICON_SHIELD_ALERT, undefined, "bc-warning"),
     answeringText,
   );
   show(answering, false);
@@ -360,15 +347,8 @@ export const mount = definePage((context: PortalContext) => {
   });
   const replyBar = h(
     "div",
-    {
-      style:
-        "display:flex;align-items:center;gap:8px;padding:8px 8px 0 14px;font-size:12px",
-    },
-    h(
-      "span",
-      { class: "bc-muted", style: "display:inline-flex" },
-      icon(ICON_REPLY),
-    ),
+    { class: "bc-composer__bar" },
+    icon(ICON_REPLY, undefined, "bc-muted"),
     h("span", { class: "bc-muted", style: "flex:none" }, t.replying),
     quote,
     h(
@@ -400,13 +380,10 @@ export const mount = definePage((context: PortalContext) => {
     input,
     h(
       "div",
-      {
-        style:
-          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 8px 8px 14px",
-      },
+      { class: "bc-composer__foot" },
       h(
         "span",
-        { class: "bc-muted", style: MONO12 },
+        { class: "bc-caption bc-muted" },
         term(t.session, t.sessionTip, lang, { start: true }),
         counter,
       ),
@@ -422,20 +399,12 @@ export const mount = definePage((context: PortalContext) => {
   const offlineCount = h("span");
   const offline = h(
     "div",
-    {
-      class: "bc-alert bc-alert--error",
-      role: "alert",
-      style: "align-items:center;padding:10px 12px",
-    },
-    h(
-      "span",
-      { style: "display:inline-flex;color:var(--destructive)" },
-      icon(ICON_WIFI_OFF),
-    ),
+    { class: "bc-alert bc-alert--error bc-alert--compact", role: "alert" },
+    icon(ICON_WIFI_OFF),
     h(
       "span",
       { class: "bc-small", style: "flex:1 1 auto" },
-      h("span", { style: "font-weight:500" }, t.offline),
+      h("span", { class: "bc-alert__title" }, t.offline),
       offlineCount,
     ),
     h(
@@ -450,12 +419,12 @@ export const mount = definePage((context: PortalContext) => {
     ),
   );
   show(offline, false);
+  // the dock stays at the foot of the window over the log it covers
   const form = h(
     "form",
     {
-      class: "bc-page",
-      style:
-        "position:sticky;bottom:0;max-width:none;padding-top:0;background:var(--background)",
+      class: "bc-chat-dock",
+      style: "position:sticky;bottom:0;background:var(--background)",
       onsubmit: (event: Event) => {
         event.preventDefault();
         submit();
@@ -503,16 +472,8 @@ export const mount = definePage((context: PortalContext) => {
   function who() {
     return h(
       "span",
-      {
-        class: "bc-muted",
-        style:
-          "display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500",
-      },
-      h(
-        "span",
-        { style: "display:inline-flex;color:var(--foreground)" },
-        mark(MARK_TILE, 16),
-      ),
+      { class: "bc-meta bc-meta--author" },
+      mark(MARK_TILE, 16),
       "Barracuda",
     );
   }
@@ -527,18 +488,14 @@ export const mount = definePage((context: PortalContext) => {
     const reaction = reactionBadge();
     const node = h(
       "div",
-      {
-        style:
-          "align-self:flex-end;max-width:78%;display:flex;flex-direction:column;align-items:flex-end;gap:6px",
-      },
+      { class: "bc-turn bc-turn--user" },
       quoted === null
         ? null
         : h(
             "span",
             {
-              class: "bc-small bc-muted",
-              style:
-                "display:flex;align-items:center;gap:6px;max-width:100%;padding-left:8px;border-left:1px solid var(--border)",
+              class: "bc-quote",
+              style: "display:flex;align-items:center;gap:8px;max-width:100%",
             },
             icon(ICON_REPLY),
             h(
@@ -551,15 +508,7 @@ export const mount = definePage((context: PortalContext) => {
             ),
           ),
       h("p", { class: "bc-bubble" }, text),
-      h(
-        "span",
-        {
-          class: "bc-muted",
-          style: "display:flex;align-items:center;gap:8px;font-size:12px",
-        },
-        reaction,
-        t.sent,
-      ),
+      h("span", { class: "bc-meta" }, reaction, t.sent),
     );
     const record = { root: node, reaction, confirmed: false };
     const map = sent;
@@ -572,11 +521,12 @@ export const mount = definePage((context: PortalContext) => {
     const known = agents.get(id);
     if (known) return known;
     if (!group) {
-      group = h("div", { style: ROW }, who());
+      group = h("div", { class: "bc-turn" }, who());
       column.append(group);
     }
+    // one message of the turn: its parts on the turn's own 8px rhythm
     const root = h("div", {
-      style: "display:flex;flex-direction:column;gap:10px",
+      style: "display:flex;flex-direction:column;gap:8px",
     });
     const record: Agent = {
       id,
@@ -640,9 +590,8 @@ export const mount = definePage((context: PortalContext) => {
 
   function reasoning(record: Agent) {
     const panel = h("p", {
-      class: "bc-small bc-muted",
-      style:
-        "margin:6px 0 0;padding-left:12px;border-left:1px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere",
+      class: "bc-quote",
+      style: "margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere",
     });
     const button = h(
       "button",
@@ -656,50 +605,35 @@ export const mount = definePage((context: PortalContext) => {
     return panel;
   }
 
+  /**
+   * A tool-call record (Card): the fold names the tool and its arguments in one line; open, a dense
+   * key-value body holds them in full.
+   */
   function tool(record: Agent): Tool {
-    const name = h("span", {
-      class: "bc-mono",
-      style: "font-size:13px;font-weight:500",
-    });
-    const summary = h("span", {
-      class: "bc-mono bc-muted",
-      style:
-        "flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-    });
+    const name = h("span", { class: "bc-tool__name" });
+    const summary = h("span", { class: "bc-tool__args" });
     const status = h("span", {
-      class: "bc-small",
-      style:
-        "display:inline-flex;align-items:center;gap:4px;flex:none;white-space:nowrap",
+      class: "bc-status",
+      style: "flex:none;white-space:nowrap",
     });
     const button = h(
       "button",
       { class: "bc-fold", type: "button" },
-      h(
-        "span",
-        { class: "bc-muted", style: "display:inline-flex" },
-        icon(ICON_WRENCH),
-      ),
+      icon(ICON_WRENCH, undefined, "bc-muted"),
       name,
       summary,
       status,
-      h(
-        "span",
-        { class: "bc-muted", style: "display:inline-flex" },
-        icon(ICON_CHEVRON_RIGHT),
-      ),
+      icon(ICON_CHEVRON_RIGHT, undefined, "bc-muted"),
     );
-    const code = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px";
-    const args = h("code", { class: "bc-mono", style: code });
-    const out = h("code", { class: "bc-mono", style: code });
+    // the values keep the device's line breaks
+    const args = h("dd", { class: "bc-mono", style: "white-space:pre-wrap" });
+    const out = h("dd", { class: "bc-mono", style: "white-space:pre-wrap" });
     const panel = h(
-      "div",
-      {
-        style:
-          "display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 12px;padding:10px 12px 12px;border-top:1px solid var(--border);font-size:12px;line-height:18px",
-      },
-      h("span", { class: "bc-muted" }, t.args),
+      "dl",
+      { class: "bc-card__body bc-kv bc-kv--dense" },
+      h("dt", null, t.args),
       args,
-      h("span", { class: "bc-muted" }, t.output),
+      h("dt", null, t.output),
       out,
     );
     const open = fold(button, panel, false);
@@ -709,20 +643,14 @@ export const mount = definePage((context: PortalContext) => {
     return { card, name, summary, args, out, status, open };
   }
 
+  /** A permission request (Card): head, the tool, arguments and reason, then the answers in the foot. */
   function approval(record: Agent): Request {
-    const tool = h("dd", {
-      class: "bc-mono",
-      style: "margin:0;font-weight:500",
-    });
+    const tool = h("dd", { class: "bc-tool__name" });
     const args = h("code", { class: "bc-code" });
-    const reason = h("dd", { style: "margin:0;overflow-wrap:anywhere" });
+    const reason = h("dd");
     const actions = h(
       "div",
-      {
-        class: "bc-card__foot",
-        style:
-          "display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 14px",
-      },
+      { class: "bc-card__foot" },
       h(
         "button",
         {
@@ -755,38 +683,23 @@ export const mount = definePage((context: PortalContext) => {
       { class: "bc-card", "aria-labelledby": title },
       h(
         "div",
-        {
-          style:
-            "display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)",
-        },
-        h(
-          "span",
-          { style: "display:inline-flex;color:var(--warning)" },
-          icon(ICON_SHIELD_ALERT),
-        ),
-        h(
-          "h3",
-          { id: title, class: "bc-title", style: "margin:0" },
-          t.approvalTitle,
-        ),
+        { class: "bc-card__head" },
+        icon(ICON_SHIELD_ALERT, undefined, "bc-warning"),
+        h("h3", { id: title, class: "bc-title" }, t.approvalTitle),
       ),
       h(
         "dl",
-        {
-          style:
-            "display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px 12px;margin:0;padding:12px 14px;font-size:13px",
-        },
-        h("dt", { class: "bc-muted" }, t.approvalTool),
+        { class: "bc-card__body bc-kv bc-kv--dense" },
+        h("dt", null, t.approvalTool),
         tool,
-        h("dt", { class: "bc-muted" }, t.approvalArgs),
-        h("dd", { style: "margin:0;min-width:0" }, args),
-        h("dt", { class: "bc-muted" }, t.approvalReason),
+        h("dt", null, t.approvalArgs),
+        h("dd", null, args),
+        h("dt", null, t.approvalReason),
         reason,
       ),
       actions,
     );
     show(actions, false);
-    record.root.parentElement!.style.width = "100%";
     put(record, card);
     record.run = null;
     return { card, tool, args, reason, actions, owner: record };
@@ -796,13 +709,10 @@ export const mount = definePage((context: PortalContext) => {
   function showFooter(record: Agent) {
     if (record.kind !== "reply") return;
     if (!record.footer) {
-      const facts = h("span", { class: "bc-muted" });
+      const facts = h("span");
       record.footer = h(
         "div",
-        {
-          style:
-            "display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;font-size:12px",
-        },
+        { class: "bc-meta", style: "gap:4px 12px;flex-wrap:wrap" },
         facts,
         record.reaction,
         // the design's 24px muted inline action
@@ -883,17 +793,10 @@ export const mount = definePage((context: PortalContext) => {
       h(
         "div",
         { class: "bc-alert bc-alert--error", role: "alert" },
+        icon(ICON_CIRCLE_ALERT),
         h(
           "span",
-          {
-            style:
-              "display:inline-flex;color:var(--destructive);margin-top:2px",
-          },
-          icon(ICON_CIRCLE_ALERT),
-        ),
-        h(
-          "span",
-          { style: "display:flex;flex-direction:column;gap:2px" },
+          { class: "bc-alert__body" },
           h("span", { class: "bc-alert__title" }, title),
           text
             ? h(
@@ -908,21 +811,7 @@ export const mount = definePage((context: PortalContext) => {
   }
 
   function separator(text: string) {
-    const line = () =>
-      h("span", { style: "flex:1 1 auto;border-top:1px dashed var(--input)" });
-    add(
-      h(
-        "div",
-        {
-          role: "separator",
-          class: "bc-muted",
-          style: "display:flex;align-items:center;gap:12px;font-size:12px",
-        },
-        line(),
-        text,
-        line(),
-      ),
-    );
+    add(h("div", { role: "separator", class: "bc-separator" }, text));
   }
 
   // ---- semantic Agent events inside one reply message
@@ -970,12 +859,12 @@ export const mount = definePage((context: PortalContext) => {
         const card = record.tool;
         if (!card) return;
         const ok = payload.ok === true;
-        card.status.style.color = ok ? "var(--success)" : "var(--destructive)";
+        card.status.classList.add(ok ? "bc-success" : "bc-destructive");
         card.status.replaceChildren(
-          icon(ok ? ICON_CHECK : ICON_CIRCLE_X, 12),
+          icon(ok ? ICON_CHECK : ICON_CIRCLE_X),
           ok ? t.ok : t.failed,
         );
-        if (!ok) card.out.style.color = "var(--destructive)";
+        if (!ok) card.out.classList.add("bc-destructive");
         card.open(!ok);
         record.tool = null;
         return;
@@ -1088,11 +977,7 @@ export const mount = definePage((context: PortalContext) => {
             known,
             h(
               "span",
-              {
-                class: "bc-small",
-                style:
-                  "display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--destructive)",
-              },
+              { class: "bc-status bc-destructive" },
               icon(ICON_CIRCLE_ALERT),
               t.incomplete,
             ),
@@ -1107,7 +992,7 @@ export const mount = definePage((context: PortalContext) => {
         write(known, "output", str(value.text) || " ");
         caret.remove();
         known.run!.node.append(
-          h("span", { class: "bc-muted", style: MONO12 }, ` · ${t.edited}`),
+          h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
         );
         known.run = null;
         return;
@@ -1151,7 +1036,7 @@ export const mount = definePage((context: PortalContext) => {
       const record = agent(id, "media");
       const filename = str(value.filename);
       const mime = str(value.mime_type);
-      const meta = h("span", { class: "bc-muted", style: MONO12 });
+      const meta = h("span", { class: "bc-caption bc-muted" });
       const slot = h("span", { style: "flex:none;display:inline-flex" });
       record.media = {
         chunks: [],
@@ -1166,25 +1051,26 @@ export const mount = definePage((context: PortalContext) => {
         record,
         h(
           "div",
-          {
-            class: "bc-card",
-            style: "display:flex;align-items:center;gap:12px;padding:10px 12px",
-          },
-          h("span", { class: "bc-option-icon" }, icon(ICON_FILE, 16)),
+          { class: "bc-card" },
           h(
-            "span",
-            {
-              style:
-                "flex:1 1 auto;min-width:0;display:flex;flex-direction:column",
-            },
+            "div",
+            { class: "bc-card__row" },
+            h("span", { class: "bc-option-icon" }, icon(ICON_FILE)),
             h(
               "span",
-              { style: "font-weight:500;overflow-wrap:anywhere" },
-              filename || "—",
+              {
+                style:
+                  "flex:1 1 auto;min-width:0;display:flex;flex-direction:column",
+              },
+              h(
+                "span",
+                { class: "bc-option-title", style: "overflow-wrap:anywhere" },
+                filename || "—",
+              ),
+              meta,
             ),
-            meta,
+            slot,
           ),
-          slot,
         ),
       );
       const caption = str(value.caption);
@@ -1258,7 +1144,7 @@ export const mount = definePage((context: PortalContext) => {
     const bytes = encoder.encode(input.value).byteLength;
     counter.textContent = ` · ${bytes} / ${MAX_BYTES} bytes`;
     const over = bytes > MAX_BYTES;
-    counter.style.color = over ? "var(--destructive)" : "";
+    counter.classList.toggle("bc-destructive", over);
     if (!over) showInvalid("");
   }
   function showInvalid(message: string) {

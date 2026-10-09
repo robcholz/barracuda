@@ -96,15 +96,27 @@ test("qrPlate stays light in either theme and dims the code under a label", () =
     dim: { zh: "已扫码", en: "Scanned" },
   });
   expect(plate.getAttribute("data-theme")).toBe("light");
-  expect(plate.style.background).toBe("var(--background)");
-  // nested in a frame: radius-sm
-  expect(plate.style.borderRadius).toBe("var(--radius-sm)");
-  expect(plate.querySelector("svg")?.getAttribute("width")).toBe("168");
+  // the QRCode card's markup: the plate, the code as its first child, the overlay over it
+  expect(plate.className).toBe("bc-qr bc-qr--dim");
+  expect(plate.getAttribute("style")).toBeNull();
+  const code = plate.firstElementChild!;
+  expect(code.tagName.toLowerCase()).toBe("svg");
+  expect(code.getAttribute("width")).toBe("168");
+  // the plate fills the modules and dims them; the code carries no look of its own
+  expect(code.getAttribute("style")).toBeNull();
+  expect(code.querySelector("path")?.getAttribute("style")).toBeNull();
+  expect(plate.lastElementChild?.className).toBe("bc-qr__overlay");
   expect(plate.textContent).toBe("Scanned");
-  expect((plate.firstElementChild as HTMLElement).style.opacity).toBe("0.08");
+  const live = qrPlate("https://t.me/x", 168, "zh");
+  expect(live.className).toBe("bc-qr");
+  expect(live.querySelector(".bc-qr__overlay")).toBeNull();
+  // while a code loads, an empty code-sized space keeps the plate's size
   const empty = qrPlate(null, 168, "zh");
-  expect(empty.querySelector("svg")).toBeNull();
-  expect((empty.firstElementChild as HTMLElement).style.width).toBe("168px");
+  const space = empty.firstElementChild!;
+  expect(space.tagName.toLowerCase()).toBe("svg");
+  expect(space.getAttribute("width")).toBe("168");
+  expect(space.getAttribute("height")).toBe("168");
+  expect(space.childElementCount).toBe(0);
 });
 
 test("qrLink shows the URL in mono and opens it in a new tab", () => {
@@ -119,11 +131,15 @@ test("qrLink shows the URL in mono and opens it in a new tab", () => {
   expect(open.getAttribute("target")).toBe("_blank");
   expect(open.getAttribute("rel")).toBe("noreferrer");
   expect(open.textContent).toBe("在 Telegram 中打开");
-  expect(card.querySelector("[data-theme=light] svg")).not.toBeNull();
-  // the same 8px plate as WeChat's
-  expect(
-    card.querySelector<HTMLElement>("[data-theme=light]")?.style.padding,
-  ).toBe("8px");
+  // a Card whose one body holds the same plate as WeChat's
+  expect(card.className).toBe("bc-card");
+  expect(card.childElementCount).toBe(1);
+  expect(card.firstElementChild?.className).toBe("bc-card__body");
+  expect(card.querySelector(".bc-card__body > .bc-qr > svg")).not.toBeNull();
+  expect(card.getAttribute("style")).toBeNull();
+  expect(card.querySelector<HTMLElement>(".bc-card__body")?.style.padding).toBe(
+    "",
+  );
 });
 
 test("resultCard: initial or check tile, mono sub, neutral or live badge, rows and one action", () => {
@@ -142,6 +158,12 @@ test("resultCard: initial or check tile, mono sub, neutral or live badge, rows a
     "en",
   );
   expect(card.getAttribute("role")).toBe("status");
+  // a Card with one body; the card itself carries no inline look
+  expect(card.className).toBe("bc-card");
+  expect(card.getAttribute("style")).toBeNull();
+  expect(card.childElementCount).toBe(1);
+  expect(card.firstElementChild?.className).toBe("bc-card__body");
+  expect((card.firstElementChild as HTMLElement).style.padding).toBe("");
   expect(card.querySelector(".bc-option-icon")?.textContent).toBe("B");
   expect(card.querySelector(".bc-option-title")?.textContent).toBe(
     "Barracuda Home",
@@ -149,12 +171,12 @@ test("resultCard: initial or check tile, mono sub, neutral or live badge, rows a
   expect(card.querySelector(".bc-mono.bc-muted")?.textContent).toBe(
     "@barracuda_home_bot",
   );
-  // a verified result is a neutral badge; the initial is set at 500
+  // a verified result is a neutral badge; the tile sets the initial at 500 itself
   expect(card.querySelector(".bc-badge--signal")).toBeNull();
   expect(card.querySelector(".bc-badge")?.textContent).toBe("Verified");
   expect(
-    (card.querySelector(".bc-option-icon") as HTMLElement).style.fontWeight,
-  ).toBe("500");
+    card.querySelector(".bc-option-icon")?.getAttribute("style"),
+  ).toBeNull();
   // the rows are a key-value table; machine values mono, words not
   expect(
     [...card.querySelectorAll(".bc-kv dd")].map((node) => [
@@ -188,16 +210,21 @@ test("stepList marks done, current and later steps", () => {
   expect(items[0].querySelector("svg")).not.toBeNull();
   expect(items[1].textContent).toBe("02二");
   expect(items[2].textContent).toBe("03三");
-  const marks = items.map((item) => item.firstElementChild as HTMLElement);
-  // radius-sm tiles with mono numbers: done is a success check, current a muted fill; never lime
-  for (const mark of marks) {
-    expect(mark.className).toBe("bc-mono");
-    expect(mark.style.borderRadius).toBe("var(--radius-sm)");
-    expect(mark.style.cssText).not.toContain("signal");
+  // the Steps card: done is .bc-step--done (a success check), current takes aria-current (a
+  // muted fill), the marks and labels carry no inline look
+  expect(list.className).toBe("bc-steps");
+  expect(items.map((item) => item.className)).toEqual([
+    "bc-step bc-step--done",
+    "bc-step",
+    "bc-step",
+  ]);
+  for (const item of items) {
+    const mark = item.firstElementChild as HTMLElement;
+    expect(mark.className).toBe("bc-step__mark");
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    for (const node of [item, mark, item.lastElementChild!])
+      expect(node.getAttribute("style")).toBeNull();
   }
-  expect(marks[0].style.color).toBe("var(--success)");
-  expect(marks[1].style.background).toBe("var(--muted)");
-  expect(marks[2].style.background).toBe("");
   const none = stepList(["一", "二"], { current: -1, done: 0 }, "zh");
   expect(none.querySelector("[aria-current]")).toBeNull();
 });
@@ -209,6 +236,10 @@ test("note: text, mono value and a link-styled action", () => {
     action: { label: "Resend", onClick: () => clicked++ },
   });
   expect(line.textContent).toBe("Code sent toyou@example.com·Resend");
+  // the value is mono and stays muted with the line; the action is a bare button.bc-link
+  expect(line.querySelector(".bc-mono")?.getAttribute("style")).toBeNull();
+  expect(line.querySelector("button")?.className).toBe("bc-link");
+  expect(line.querySelector("button")?.getAttribute("style")).toBeNull();
   line.querySelector("button")!.click();
   expect(clicked).toBe(1);
 });
@@ -338,6 +369,8 @@ test("settingsForm extensions: field action, row link and blocks, coded errors, 
     form.element.querySelector<HTMLAnchorElement>(".bc-row__label a")!;
   expect(link.textContent).toBe("打开 @BotFather");
   expect(link.getAttribute("target")).toBe("_blank");
+  // the external-link icon is a plain 16px icon
+  expect(link.querySelector("svg")?.getAttribute("style")).toBeNull();
   expect(form.element.querySelector(".bc-row__body > .result")).toBe(block);
   expect(form.footer.classList.contains("bc-form__footer")).toBe(true);
 

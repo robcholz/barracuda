@@ -98,12 +98,21 @@ export function stepDone(
   ];
 }
 
-/** An empty aside slot; {@link paintStatus} fills it. */
-function slot(entry: WebEntry, show: "detail" | "label", extra = "") {
+/**
+ * An empty aside slot; {@link paintStatus} fills it. A label is `.bc-small`; a detail is mono, at
+ * the size `extra` gives it, or `.bc-small` with `small` (phone rows).
+ */
+function slot(
+  entry: WebEntry,
+  show: "detail" | "label",
+  extra = "",
+  small = false,
+) {
   return h("span", {
     class: `portal-aside portal-aside--${show}${extra ? ` ${extra}` : ""}`,
     "data-status-for": entry.id,
     "data-status-show": show,
+    "data-status-small": small,
   });
 }
 
@@ -123,7 +132,10 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
     );
     node.textContent = aside?.text ?? "";
     node.classList.toggle("bc-mono", !!aside?.mono);
-    node.classList.toggle("bc-small", !!aside && !aside.mono);
+    node.classList.toggle(
+      "bc-small",
+      !!aside && (!aside.mono || node.hasAttribute("data-status-small")),
+    );
     node.style.display = aside ? "" : "none";
     if (found) node.setAttribute("data-state", found.state);
     else node.removeAttribute("data-state");
@@ -221,7 +233,7 @@ function term(label: string, tip: string, start = true) {
 function tile(entry: WebEntry, lang: Lang) {
   const figure = h(
     "span",
-    { class: "portal-tile__figure" },
+    { class: "bc-tile__figure portal-tile__figure" },
     entry.figure ? h("hl-figure", { name: entry.id }) : entryIcon(entry, 40),
   );
   return h(
@@ -235,7 +247,7 @@ function tile(entry: WebEntry, lang: Lang) {
         "span",
         { class: "portal-tile__head" },
         h("span", { class: "bc-title portal-grow" }, entry.title[lang]),
-        slot(entry, "detail", "bc-muted portal-aside--small"),
+        slot(entry, "detail", "bc-caption bc-muted"),
         h("span", { class: "bc-tile__arrow" }, icon(ICON_ARROW_RIGHT)),
       ),
       h("span", { class: "bc-small bc-muted" }, entry.summary[lang]),
@@ -253,7 +265,9 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
     },
     h(
       "span",
-      { class: "portal-channels__figure" },
+      {
+        class: "bc-tile__figure bc-tile__figure--side portal-channels__figure",
+      },
       h("hl-figure", { name: "riffle" }),
     ),
     h(
@@ -261,12 +275,16 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
       { class: "portal-channels__list" },
       h(
         "div",
-        { class: "portal-channels__head" },
-        h("span", { class: "bc-title" }, t.channels),
+        { class: "bc-list-head" },
         h(
           "span",
-          { class: "bc-mono bc-muted portal-count" },
-          twoDigits(rows.length),
+          { class: "portal-section__head" },
+          h("span", { class: "bc-title" }, t.channels),
+          h(
+            "span",
+            { class: "bc-mono bc-caption bc-muted" },
+            twoDigits(rows.length),
+          ),
         ),
       ),
       rows.map((entry, index) =>
@@ -278,7 +296,11 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
             "data-hl-at": CARD_AT[Math.min(index, CARD_AT.length - 1)],
           },
           entryIcon(entry),
-          h("span", { class: "portal-channel-row__name" }, entry.title[lang]),
+          h(
+            "span",
+            { class: "bc-option-title portal-channel-row__name" },
+            entry.title[lang],
+          ),
           h(
             "span",
             { class: "bc-small bc-muted portal-grow" },
@@ -307,7 +329,7 @@ export function renderOverview(view: OverviewView) {
     { class: "bc-page portal-overview" },
     h(
       "section",
-      { class: "bc-header", "aria-labelledby": "hero" },
+      { class: "bc-header bc-header--hero", "aria-labelledby": "hero" },
       h(
         "div",
         { class: "bc-header__text portal-hero__text" },
@@ -350,16 +372,16 @@ export function renderOverview(view: OverviewView) {
             steps.map(({ group, entries: members }, index) =>
               h(
                 "li",
-                { "data-step": group },
+                { class: "bc-grid__cell", "data-step": group },
                 h(
                   "span",
-                  { class: "bc-mono bc-muted portal-count" },
+                  { class: "bc-mono bc-caption bc-muted" },
                   twoDigits(index + 1),
                 ),
                 h("span", { class: "bc-title" }, t.steps[group]),
                 h(
                   "span",
-                  { class: "bc-small portal-step__done" },
+                  { class: "bc-status bc-success portal-step__done" },
                   icon(ICON_CHECK),
                   h("span"),
                 ),
@@ -386,7 +408,7 @@ export function renderOverview(view: OverviewView) {
         h("h2", { id: "modules", class: "bc-section-title" }, t.modules),
         h(
           "span",
-          { class: "bc-mono bc-muted portal-count" },
+          { class: "bc-mono bc-caption bc-muted" },
           twoDigits(entries.length),
         ),
       ),
@@ -411,7 +433,7 @@ export function renderPhoneHome(view: OverviewView) {
     { class: "portal-phone-home" },
     h(
       "section",
-      { class: "portal-phone-hero" },
+      { class: "bc-mobile-header portal-phone-hero" },
       h("hl-figure", { name: "board", "aria-label": t.figAlt }),
       h("h1", { class: "bc-mobile-title" }, t.overview),
       h("p", { class: "bc-lead" }, t.phoneLead),
@@ -420,7 +442,7 @@ export function renderPhoneHome(view: OverviewView) {
       h("h2", { class: "bc-list-label" }, t.groups[group]),
       h(
         "div",
-        { class: "portal-phone-group" },
+        { class: "bc-list" },
         members.map((entry) =>
           h(
             "a",
@@ -430,7 +452,8 @@ export function renderPhoneHome(view: OverviewView) {
             slot(
               entry,
               group === "channel" ? "label" : "detail",
-              "bc-muted portal-aside--phone",
+              "bc-muted",
+              true,
             ),
             icon(ICON_CHEVRON_RIGHT),
           ),
@@ -440,7 +463,7 @@ export function renderPhoneHome(view: OverviewView) {
     plain
       ? h(
           "p",
-          { class: "bc-muted portal-phone-footer" },
+          { class: "bc-list-foot bc-caption bc-muted" },
           term(t.footer, t.footerTip),
         )
       : null,
@@ -511,15 +534,21 @@ export function renderStatus({
     { class: "bc-page" },
     h(
       "section",
-      { class: "bc-frame portal-status", "data-status": kind },
+      { class: "bc-frame bc-empty portal-status", "data-status": kind },
       kind === "loading"
         ? h(
             "div",
             { class: "portal-skeleton", "aria-hidden": "true" },
-            h("span"),
-            h("span"),
-            h("span"),
-            h("span"),
+            h("span", {
+              class: "bc-skeleton bc-skeleton--title",
+              style: { width: "40%" },
+            }),
+            h("span", { class: "bc-skeleton", style: { width: "90%" } }),
+            h("span", { class: "bc-skeleton", style: { width: "70%" } }),
+            h("span", {
+              class: "bc-skeleton bc-skeleton--block",
+              style: { marginTop: "12px" },
+            }),
           )
         : h(
             "span",

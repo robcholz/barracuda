@@ -75,11 +75,19 @@ function svgFrom(markup: string): SVGSVGElement {
   return template.content.firstElementChild as SVGSVGElement;
 }
 
-/** A Lucide icon (`ICON_*` from `./icons`) as `.bc-icon`, 16px unless `size` says otherwise. */
-export function icon(paths: string, size?: number): SVGSVGElement {
+/**
+ * A Lucide icon (`ICON_*` from `./icons`) as `.bc-icon`, 16px unless `size` says otherwise. `className`
+ * adds classes, such as a text colour (`bc-muted`, `bc-warning`) or a component part (`bc-toast__icon`).
+ */
+export function icon(
+  paths: string,
+  size?: number,
+  className?: string,
+): SVGSVGElement {
   const svg = svgFrom(
     `<svg class="bc-icon" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`,
   );
+  if (className) svg.classList.add(...className.split(" "));
   if (size) svg.style.cssText = `width:${size}px;height:${size}px`;
   return svg;
 }

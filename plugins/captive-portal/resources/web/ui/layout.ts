@@ -87,9 +87,9 @@ export function header(options: HeaderOptions, lang: Lang): HTMLElement {
 export function kv(
   rows: readonly (readonly [Text, Children])[],
   lang: Lang,
-  options: { live?: boolean; mono?: boolean; labelWidth?: number } = {},
+  options: { live?: boolean; mono?: boolean } = {},
 ): HTMLDListElement {
-  const list = h(
+  return h(
     "dl",
     {
       class: `bc-kv${options.mono ? " bc-mono" : ""}`,
@@ -101,8 +101,6 @@ export function kv(
       h("dd", null, value),
     ]),
   );
-  list.style.gridTemplateColumns = `${options.labelWidth ?? 112}px minmax(0, 1fr)`;
-  return list;
 }
 
 /** A fact the reader may want but does not act on: a dotted underline with a one-line tooltip. */

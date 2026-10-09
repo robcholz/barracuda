@@ -34,9 +34,10 @@ export class Toaster {
         : toast.kind === "success"
           ? ICON_CIRCLE_CHECK
           : ICON_INFO,
+      undefined,
+      "bc-toast__icon",
     );
-    glyph.classList.add("bc-toast__icon");
-    glyph.style.marginTop = "2px";
+    // the Toast card's markup: the icon, then a body holding the title, the line and the action
     const node: HTMLElement = h(
       "div",
       {
@@ -49,26 +50,18 @@ export class Toaster {
         { class: "bc-toast__body" },
         h(
           "span",
-          { class: "portal-toast__text" },
-          h(
-            "span",
-            { class: "bc-toast__title" },
-            toast.title,
-            toast.code
-              ? [
-                  " ",
-                  h(
-                    "span",
-                    { class: "bc-mono bc-muted portal-toast__code" },
-                    toast.code,
-                  ),
-                ]
-              : null,
-          ),
-          toast.body
-            ? h("span", { class: "bc-small bc-muted" }, toast.body)
+          { class: "bc-toast__title" },
+          toast.title,
+          toast.code
+            ? [
+                " ",
+                h("span", { class: "bc-mono bc-caption bc-muted" }, toast.code),
+              ]
             : null,
         ),
+        toast.body
+          ? h("span", { class: "bc-small bc-muted" }, toast.body)
+          : null,
         toast.action
           ? h(
               "button",

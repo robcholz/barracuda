@@ -51,22 +51,8 @@ body {
   flex: 1 1 auto;
   min-width: 0;
 }
-.portal-count {
-  font-size: 12px;
-}
 
 /* Sidebar */
-.portal-brand-text {
-  display: flex;
-  flex-direction: column;
-}
-.portal-brand-name {
-  font-weight: 600;
-}
-.portal-brand-sub {
-  font-size: 12px;
-  line-height: 16px;
-}
 .bc-nav-group,
 .portal-nav-groups {
   display: flex;
@@ -76,27 +62,10 @@ body {
 .portal-nav-groups {
   gap: 16px;
 }
-.portal-sidebar-footer {
-  margin: auto 0 0;
-  padding: 12px 8px 4px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  line-height: 16px;
-}
 
 /* Top bar */
 .portal-topbar {
   width: 100%;
-}
-.portal-divider {
-  width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--border);
-}
-/* a neutral badge: `destructive` is the one colour it may take */
-.portal-badge--offline {
-  color: var(--destructive);
 }
 .portal-menu-check {
   display: inline-flex;
@@ -104,22 +73,11 @@ body {
 }
 .portal-topbar--phone {
   display: none;
-  gap: 4px;
-  padding: 0 var(--space-2);
-}
-.portal-topbar--home {
-  gap: 8px;
-  padding-left: var(--space-4);
 }
 /* icons are 18px on a phone */
 .portal-topbar--phone .bc-icon {
   width: 18px;
   height: 18px;
-}
-.portal-back {
-  height: var(--control-lg);
-  padding: 0 8px;
-  gap: 4px;
 }
 
 /* Overview */
@@ -127,10 +85,9 @@ body {
   max-width: 1104px;
   gap: var(--space-8);
 }
-.portal-hero__text {
+.portal-hero__text,
+.portal-hero__figure {
   flex: 1 1 380px;
-  padding: var(--space-10);
-  gap: 20px;
 }
 .portal-hero__title {
   display: flex;
@@ -142,11 +99,6 @@ body {
 }
 .portal-hero__kv {
   margin-top: var(--space-2);
-  grid-template-columns: 112px minmax(0, 1fr);
-}
-.portal-hero__figure {
-  flex: 1 1 380px;
-  padding: var(--space-6);
 }
 .portal-hero__figure hl-figure {
   max-width: 480px;
@@ -162,16 +114,7 @@ body {
   gap: 8px;
 }
 .portal-steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-.portal-steps > li {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 20px 24px;
 }
 .portal-step__link {
   display: inline-flex;
@@ -181,14 +124,6 @@ body {
 }
 .portal-modules {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.portal-tile__figure {
-  height: 200px;
-  padding: 16px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .portal-tile__figure hl-figure {
   width: auto;
@@ -209,13 +144,6 @@ body {
 }
 .portal-channels__figure {
   flex: 1 1 220px;
-  min-height: 200px;
-  padding: 16px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-right: 1px solid var(--border);
 }
 .portal-channels__figure hl-figure {
   max-width: 250px;
@@ -226,19 +154,9 @@ body {
   display: flex;
   flex-direction: column;
 }
-.portal-channels__head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 16px 20px 12px;
-}
-.portal-channel-row {
-  padding: 0 20px;
-}
 .portal-channel-row__name {
   width: 104px;
   flex: none;
-  font-weight: 500;
 }
 @media (max-width: 1023px) {
   .portal-modules {
@@ -249,16 +167,8 @@ body {
   }
 }
 
-/* Status pages: no plugin pages, a plugin turned off, loading, failed */
-.portal-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-6);
-  padding: var(--space-10) var(--space-8);
-  text-align: center;
-}
-/* the figure sits directly on the ground: no box */
+/* Status pages (.bc-frame.bc-empty): no plugin pages, a plugin turned off, loading, failed;
+   the figure sits directly on the ground: no box */
 .portal-status__figure {
   display: block;
   width: 280px;
@@ -284,63 +194,22 @@ body {
   width: 100%;
   max-width: 560px;
 }
-.portal-skeleton > span {
-  height: 14px;
-  border-radius: var(--radius-sm);
-  background: var(--muted);
-}
-.portal-skeleton > span:nth-child(1) {
-  height: 28px;
-  width: 40%;
-}
-.portal-skeleton > span:nth-child(2) {
-  width: 90%;
-}
-.portal-skeleton > span:nth-child(3) {
-  width: 70%;
-}
-.portal-skeleton > span:nth-child(4) {
-  height: 160px;
-  margin-top: 12px;
-  border-radius: var(--radius-lg);
-}
-
-/* Toasts */
-.portal-toast__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.portal-toast__code {
-  font-size: 12px;
-  font-weight: 400;
-}
 
 /* Phone: no sidebar; the overview is a full-bleed list, pages get a back link */
 .portal-phone-home {
   display: flex;
   flex-direction: column;
 }
+/* the overview's .bc-mobile-header stacks the figure above the title */
 .portal-phone-hero {
-  display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 4px;
-  padding: 20px var(--space-4) var(--space-4);
-  border-bottom: 1px solid var(--border);
 }
 .portal-phone-hero hl-figure {
   width: 280px;
   max-width: 100%;
   align-self: center;
-}
-.portal-phone-group {
-  border-bottom: 1px solid var(--border);
-}
-.portal-phone-footer {
-  margin: 0;
-  padding: var(--space-4);
-  font-size: 12px;
-  line-height: 16px;
 }
 @media (max-width: 719px) {
   .bc-app {
@@ -353,8 +222,13 @@ body {
   .portal-topbar--phone {
     display: flex;
   }
-  .bc-page {
+  /* pages, and the chat's log and dock, sit on the 16px phone gutter */
+  .bc-page,
+  .bc-chat-log {
     padding: var(--space-4);
+  }
+  .bc-chat-dock {
+    padding: 0 var(--space-4) var(--space-4);
   }
 }
 
@@ -370,23 +244,10 @@ body {
 .portal-aside--label {
   flex: none;
 }
-.portal-aside--small {
-  font-size: 12px;
-}
-.portal-aside--phone.bc-mono {
-  font-size: 13px;
-}
 .portal-nav-item__label {
   flex: 1 1 auto;
 }
 .portal-nav-aside {
   flex: 0 1 auto;
-  font-size: 12px;
   text-overflow: ellipsis;
-}
-.portal-step__done {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--success);
 }

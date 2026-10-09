@@ -232,15 +232,14 @@ function labelText(field: Field, lang: Lang, forId?: string) {
   const label = forId
     ? h("label", { class: "bc-label", for: forId }, pick(field.label, lang))
     : h("span", { class: "bc-label" }, pick(field.label, lang));
-  if (field.optional) {
-    const note = h(
-      "span",
-      { class: "bc-muted" },
-      lang === "zh" ? `（${s.optional}）` : ` (${s.optional})`,
+  if (field.optional)
+    label.append(
+      h(
+        "span",
+        { class: "bc-optional" },
+        lang === "zh" ? `（${s.optional}）` : ` (${s.optional})`,
+      ),
     );
-    note.style.fontWeight = "400";
-    label.append(note);
-  }
   return label;
 }
 
@@ -635,7 +634,7 @@ export function settingsForm(
           rel: "noreferrer",
         },
         pick(section.link.label, lang),
-        icon(ICON_EXTERNAL_LINK, 12),
+        icon(ICON_EXTERNAL_LINK),
       );
       link.style.cssText = "display:inline-flex;align-items:center;gap:4px";
       line.firstElementChild!.append(link);
@@ -650,18 +649,17 @@ export function settingsForm(
     let open = advanced.open ?? false;
     const body = h("div", null, advanced.fields.map(build));
     body.style.cssText = advanced.columns
-      ? `display:grid;grid-template-columns:${fitColumns(advanced.columns, 160, "var(--space-4)")};gap:var(--space-4);padding-top:4px`
-      : "display:flex;flex-direction:column;gap:var(--space-4);padding-top:4px";
-    const chevron = icon(ICON_CHEVRON_RIGHT);
+      ? `display:grid;grid-template-columns:${fitColumns(advanced.columns, 160, "var(--space-4)")};gap:var(--space-4)`
+      : "display:flex;flex-direction:column;gap:var(--space-4)";
+    // the chevron turns with `aria-expanded`, in the design system's CSS
     const disclosure = h(
       "button",
       { class: "bc-disclosure", type: "button" },
-      chevron,
+      icon(ICON_CHEVRON_RIGHT),
       s.advanced,
     );
     const paint = () => {
       disclosure.setAttribute("aria-expanded", String(open));
-      chevron.style.transform = open ? "rotate(90deg)" : "none";
       body.hidden = !open;
       // the inline display (flex or grid) would otherwise override `hidden`
       body.style.display = open ? (advanced.columns ? "grid" : "flex") : "none";
@@ -684,11 +682,10 @@ export function settingsForm(
     );
     fold = h(
       "div",
-      { class: "bc-row" },
+      { class: "bc-row bc-row--compact" },
       label,
       h("div", { class: "bc-row__body" }, body),
     );
-    fold.style.paddingTop = fold.style.paddingBottom = "16px";
     // an invalid default must be visible when submitting
     revealAdvanced = () => {
       if (open) return;

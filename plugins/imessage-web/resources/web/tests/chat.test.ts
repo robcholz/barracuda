@@ -108,6 +108,16 @@ test("renders the empty conversation in Chinese and connects to the bridge", () 
   expect(root.querySelector("[role=log]")!.getAttribute("aria-label")).toBe(
     "聊天记录",
   );
+  // the Chat card's log above its dock; the empty conversation is a frameless EmptyState
+  expect(root.querySelector("[role=log]")!.className).toBe("bc-chat-log");
+  expect(root.querySelector("form")!.className).toBe("bc-chat-dock");
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "还没有消息",
+  );
+  // the composer foot holds the session term and the byte count
+  expect(
+    root.querySelector(".bc-composer__foot .bc-caption")?.textContent,
+  ).toContain("0 / 1024 bytes");
   const send = root.querySelector<HTMLButtonElement>("button[type=submit]")!;
   expect(send.disabled).toBe(true);
   socket().open();
@@ -177,8 +187,13 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   ws.agent("web-1", "output_delta", { text: " 晴" });
   ws.emit("conversation.typing", { typing: true });
   expect(root.textContent).toContain("正在输入");
+  // the Chat card's typing dots and caret
+  expect(root.querySelectorAll(".bc-typing > i")).toHaveLength(3);
   // streaming: a caret, no footer yet
   expect(root.querySelector(".bc-reply [aria-hidden=true]")).not.toBeNull();
+  expect(
+    root.querySelector(".bc-reply .bc-caret")?.getAttribute("style"),
+  ).toBeNull();
   expect(root.textContent).not.toContain("第 1 步");
   ws.agent("web-1", "usage", { input_tokens: 1284, output_tokens: 200 });
   ws.agent("web-1", "usage", { output_tokens: 12 });
@@ -200,8 +215,39 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   expect(tool.textContent).toContain("失败");
   // a failed tool opens itself
   expect(tool.getAttribute("aria-expanded")).toBe("true");
+  // the reasoning is a quote; the turn is a .bc-turn opened by the author meta
+  expect(root.querySelector("p.bc-quote")?.textContent).toBe("先搜索");
+  const turn = tool.closest(".bc-turn")!;
+  expect(turn.firstElementChild?.className).toBe("bc-meta bc-meta--author");
+  expect(root.querySelector(".bc-turn--user > .bc-meta")?.textContent).toBe(
+    "已发送",
+  );
+  // the tool record is a Card: the fold, then a dense key-value body as its sibling
+  const card = tool.parentElement!;
+  expect(card.className).toBe("bc-card");
+  expect(tool.nextElementSibling?.className).toBe(
+    "bc-card__body bc-kv bc-kv--dense",
+  );
+  expect(tool.querySelector(".bc-tool__name")?.textContent).toBe(
+    "weather_forecast",
+  );
+  expect(tool.querySelector(".bc-tool__args")?.textContent).toBe(
+    '{"city":"shenzhen"}',
+  );
+  expect(tool.querySelector(".bc-status")?.className).toBe(
+    "bc-status bc-destructive",
+  );
+  expect(card.querySelector("dd:last-child")?.className).toBe(
+    "bc-mono bc-destructive",
+  );
+  // the chevrons turn in CSS from aria-expanded; nothing transforms them inline
+  for (const svg of root.querySelectorAll("svg"))
+    expect(svg.getAttribute("style") ?? "").not.toContain("transform");
   expect(root.textContent).toContain("HTTP 503");
   expect(root.textContent).toContain("第 1 步 · 输入 1,284 · 输出 212 tokens");
+  expect(button("回复").parentElement?.classList.contains("bc-meta")).toBe(
+    true,
+  );
   // words in sans, the numbers and the unit in mono
   expect(
     [...root.querySelectorAll(".bc-reply ~ div .bc-mono")].map(
@@ -213,6 +259,11 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   expect(button("回复").className).toBe("bc-fold-link");
   button("回复").click();
   expect(root.textContent).toContain("回复 Barracuda");
+  expect(
+    root.querySelector(
+      ".bc-composer > .bc-composer__bar:not(.bc-composer__bar--rule)",
+    )?.textContent,
+  ).toContain("回复 Barracuda");
   expect(
     root.querySelector(".bc-icon-button")?.getAttribute("aria-label"),
   ).toBe("取消回复");
@@ -249,6 +300,25 @@ test("a permission request is answered by the next message", () => {
   expect(root.textContent).toContain('{"count":12}');
   expect(root.textContent).toContain("正在答复 · fs.remove");
   expect(input.placeholder).toBe("回复这次请求…");
+  // the approval Card: head, a dense key-value body, the answers in the foot, all siblings
+  const approval = root.querySelector("section.bc-card")!;
+  expect([...approval.children].map((node) => node.className)).toEqual([
+    "bc-card__head",
+    "bc-card__body bc-kv bc-kv--dense",
+    "bc-card__foot",
+  ]);
+  expect(
+    approval.querySelector(".bc-card__head svg")?.getAttribute("class"),
+  ).toBe("bc-icon bc-warning");
+  expect(approval.querySelector("dd.bc-tool__name")?.textContent).toBe(
+    "fs.remove",
+  );
+  expect(
+    approval.querySelector(".bc-card__foot")?.getAttribute("style"),
+  ).toBeNull();
+  expect(
+    root.querySelector(".bc-composer__bar.bc-composer__bar--rule")?.textContent,
+  ).toBe("正在答复 · fs.remove");
   const allow = button("允许");
   allow.click();
   expect(JSON.parse(sent[0])).toEqual({ text: "允许" });
@@ -264,6 +334,9 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   ws.emit("stream.lagged", { missed: 3 });
   expect(root.querySelector("[role=separator]")!.textContent).toBe(
     "错过 3 个事件",
+  );
+  expect(root.querySelector("[role=separator]")!.className).toBe(
+    "bc-separator",
   );
   ws.emit("message.start", { kind: "reply", message_id: "web-3" });
   ws.agent("web-3", "output_delta", { text: "会议要点：" });
@@ -281,6 +354,13 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   expect(
     root.querySelector("[role=log] .bc-alert--error")?.textContent,
   ).toContain("这一轮出错");
+  expect(
+    root.querySelector("[role=log] .bc-alert--error > .bc-alert__body")
+      ?.firstElementChild?.textContent,
+  ).toBe("这一轮出错");
+  expect(root.querySelector(".bc-status.bc-destructive")?.textContent).toBe(
+    "未完成 · 连接中断",
+  );
 
   ws.emit("message.file", {
     caption: "路线",
@@ -298,6 +378,12 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   });
   ws.emit("message.file", { error: null, message_id: "web-4", phase: "end" });
   expect(root.textContent).toContain("application/gpx+xml · 5 B · 已接收");
+  // an attachment is a single Card row: the file name is the item name
+  const file = root.querySelector(".bc-card > .bc-card__row")!;
+  expect(file.querySelector(".bc-option-title")?.textContent).toBe("ride.gpx");
+  expect(file.querySelector(".bc-caption.bc-muted")?.textContent).toBe(
+    "application/gpx+xml · 5 B · 已接收",
+  );
   const link = root.querySelector<HTMLAnchorElement>("a[download]")!;
   expect(link.getAttribute("download")).toBe("ride.gpx");
   expect(await (await fetch(link.href)).text()).toBe("hello");
@@ -320,6 +406,10 @@ test("a dropped connection counts unconfirmed sends and reconnects on request", 
   );
   expect(input.disabled).toBe(true);
   expect(toasts).toHaveLength(0);
+  // the compact error alert over the dock
+  const banner = root.querySelector(".bc-chat-dock .bc-alert")!;
+  expect(banner.className).toBe("bc-alert bc-alert--error bc-alert--compact");
+  expect(banner.getAttribute("style")).toBeNull();
   button("重新连接").click();
   expect(sockets).toHaveLength(2);
   socket().open();

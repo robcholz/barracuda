@@ -188,6 +188,17 @@ test("a configured channel shows 模式 and 授权账号 before the fold, in the
   expect(accounts.querySelector(".bc-mono")?.textContent).toBe("9:41");
   expect(accounts.textContent).toContain("换一个绑定码");
   expect(accounts.textContent).toContain("QQ 用户c2c:7F3A9B2E41D0移除");
+  // a Card: the pairing body, then one row per account, all siblings so each draws its hairline
+  const card = accounts.querySelector(".bc-card")!;
+  expect([...card.children].map((node) => node.className)).toEqual([
+    "bc-card__body",
+    "bc-card__row",
+  ]);
+  // the parts' padding and hairlines are the Card's; inline style only lays out the pairing body
+  expect(card.getAttribute("style")).toBeNull();
+  expect(card.lastElementChild?.getAttribute("style")).toBeNull();
+  const pairing = card.firstElementChild as HTMLElement;
+  expect([pairing.style.padding, pairing.style.borderTop]).toEqual(["", ""]);
   expect(
     [...accounts.querySelectorAll("button")].map((node) =>
       node.getAttribute("aria-label"),
@@ -309,7 +320,12 @@ test("the receive state badge: connecting, waiting for a slot with the limit, di
   const alert = pageAlert(full);
   expect(alert.style.display).toBe("");
   expect(alert.getAttribute("role")).toBe("status");
-  expect(alert.querySelector("svg")?.style.color).toBe("var(--warning)");
+  // the icon takes .bc-warning and the alert's own offset; the words sit in .bc-alert__body
+  const mark = alert.querySelector("svg")!;
+  expect(mark.getAttribute("class")).toBe("bc-icon bc-warning");
+  expect(mark.getAttribute("style")).toBeNull();
+  expect(alert.lastElementChild?.className).toBe("bc-alert__body");
+  expect(alert.lastElementChild?.getAttribute("style")).toBeNull();
   expect(alert.querySelector(".bc-alert__title")?.textContent).toBe(
     "收发名额已满",
   );
@@ -601,6 +617,10 @@ test("换一个绑定码 and 移除 post at once, without asking, and read the l
     `GET ${ENDPOINT}/owners`,
   ]);
   expect(accountsRow(page).textContent).toContain("还没有授权账号");
+  expect(
+    accountsRow(page).querySelector(".bc-card__row.bc-small.bc-muted")
+      ?.textContent,
+  ).toBe("还没有授权账号");
   expect(page.toasts).toEqual([]);
 
   // no entropy: the device's refusal is toasted
@@ -621,6 +641,10 @@ test("pairing: null (a full list) hides the code box", async () => {
   expect(accounts.querySelector(".bc-code-display")).toBeNull();
   expect(accounts.textContent).not.toContain("换一个绑定码");
   expect(accounts.textContent).toContain("QQ 用户");
-  const first = accounts.querySelector<HTMLElement>(".bc-frame > div")!;
-  expect(first.style.borderTop).toBe("");
+  // the account rows are the card's only parts: the first one draws no hairline above it
+  const card = accounts.querySelector(".bc-card")!;
+  expect([...card.children].map((node) => node.className)).toEqual([
+    "bc-card__row",
+  ]);
+  expect(card.firstElementChild?.getAttribute("style")).toBeNull();
 });

@@ -35,7 +35,6 @@ export function resultCard(
     { class: "bc-option-icon" },
     options.initial ?? icon(ICON_CHECK),
   );
-  tile.style.fontWeight = "500";
   const text = h(
     "span",
     null,
@@ -71,68 +70,52 @@ export function resultCard(
         ]),
       )
     : null;
-  const card = h(
+  const body = h(
     "div",
-    { class: "bc-frame", role: "status" },
+    { class: "bc-card__body" },
     head,
     rows,
     options.action ? h("div", null, options.action) : null,
   );
-  card.style.cssText =
-    "padding:14px 16px;display:flex;flex-direction:column;gap:12px";
-  return card;
+  body.style.cssText = "display:flex;flex-direction:column;gap:12px";
+  return h("div", { class: "bc-card", role: "status" }, body);
 }
 
 /**
- * Numbered steps (`ol`): `radius-sm` tiles with mono numbers (`01`). Steps before `done` show a check
- * in `success`, step `current` (`aria-current="step"`) fills `muted`, the rest keep the hairline.
- * `current: -1` marks none.
+ * Numbered steps (`.bc-steps`): `radius-sm` marks with mono numbers (`01`). Steps before `done`
+ * (`.bc-step--done`) show a check in `success`, step `current` (`aria-current="step"`) fills
+ * `muted`, the rest stay muted. `current: -1` marks none.
  */
 export function stepList(
   steps: readonly Text[],
   state: { current: number; done: number },
   lang: Lang,
 ): HTMLOListElement {
-  const list = h(
+  return h(
     "ol",
-    null,
+    { class: "bc-steps" },
     steps.map((step, index) => {
       const done = index < state.done;
-      const current = index === state.current;
-      const mark = h(
-        "span",
-        { class: "bc-mono", "aria-hidden": "true" },
-        done ? icon(ICON_CHECK) : twoDigits(index + 1),
-      );
-      mark.style.cssText = `flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;${
-        done
-          ? "color:var(--success)"
-          : current
-            ? "background:var(--muted);color:var(--foreground)"
-            : "color:var(--muted-foreground)"
-      }`;
-      const label = h("span", null, pick(step, lang));
-      label.style.cssText = current
-        ? "font-weight:500"
-        : "color:var(--muted-foreground)";
-      const item = h(
+      return h(
         "li",
-        { "aria-current": current ? "step" : undefined },
-        mark,
-        label,
+        {
+          class: `bc-step${done ? " bc-step--done" : ""}`,
+          "aria-current": index === state.current ? "step" : undefined,
+        },
+        h(
+          "span",
+          { class: "bc-step__mark", "aria-hidden": "true" },
+          done ? icon(ICON_CHECK) : twoDigits(index + 1),
+        ),
+        h("span", null, pick(step, lang)),
       );
-      item.style.cssText = "display:flex;align-items:center;gap:var(--space-3)";
-      return item;
     }),
   );
-  list.style.cssText =
-    "list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px";
-  return list;
 }
 
 /**
- * A small muted line: `text`, an optional mono value in ink, and an optional link-styled button after
- * a middle dot (「验证码已发到 you@example.com · 重新发送」).
+ * A small muted line: `text`, an optional mono value (muted like the line: mono, not emphasis), and
+ * an optional link button (`button.bc-link`) after a middle dot (「验证码已发到 you@example.com · 重新发送」).
  */
 export function note(
   text: Text,
@@ -145,21 +128,16 @@ export function note(
   const value = options.mono
     ? h("span", { class: "bc-mono" }, options.mono)
     : null;
-  if (value) value.style.color = "var(--foreground)";
-  let action: HTMLElement[] = [];
-  if (options.action) {
-    const link = h(
-      "button",
-      {
-        class: "bc-link bc-small",
-        type: "button",
-        onclick: options.action.onClick,
-      },
-      pick(options.action.label, lang),
-    );
-    link.style.cssText = "padding:0;border:0;background:none;cursor:pointer";
-    action = [h("span", { "aria-hidden": "true" }, "·"), link];
-  }
+  const action = options.action
+    ? [
+        h("span", { "aria-hidden": "true" }, "·"),
+        h(
+          "button",
+          { class: "bc-link", type: "button", onclick: options.action.onClick },
+          pick(options.action.label, lang),
+        ),
+      ]
+    : null;
   const line = h(
     "p",
     { class: "bc-small bc-muted" },
@@ -173,9 +151,10 @@ export function note(
 }
 
 /**
- * A QR Code of `data` on a plate that stays light in the dark theme (scanners need dark on light).
- * `data: null` draws the empty plate (while a code loads). `dim` fades the code and writes the
- * label over it (「已扫码」, 「二维码已过期」).
+ * A QR Code of `data` on a plate that stays light in the dark theme (`.bc-qr`, `data-theme="light"`:
+ * scanners need dark on light). `data: null` draws the empty plate (while a code loads). `dim`
+ * fades the code (`.bc-qr--dim`) and writes the label over it (`.bc-qr__overlay`: 「已扫码」,
+ * 「二维码已过期」).
  */
 export function qrPlate(
   data: string | null,
@@ -183,20 +162,24 @@ export function qrPlate(
   lang: Lang,
   options: { dim?: Text } = {},
 ): HTMLElement {
-  const code = data === null ? h("div") : h("div", null, qrSvg(data, px));
-  code.style.cssText = `width:${px}px;height:${px}px;opacity:${options.dim === undefined ? 1 : 0.08}`;
-  const plate = h(
+  const dim = options.dim !== undefined;
+  return h(
     "div",
-    { "data-theme": "light" },
-    code,
-    options.dim === undefined ? null : h("div", null, pick(options.dim, lang)),
+    { class: `bc-qr${dim ? " bc-qr--dim" : ""}`, "data-theme": "light" },
+    data === null ? emptyCode(px) : qrSvg(data, px),
+    dim
+      ? h("div", { class: "bc-qr__overlay" }, pick(options.dim!, lang))
+      : null,
   );
-  plate.style.cssText =
-    "position:relative;flex:none;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--background);color:var(--foreground)";
-  if (options.dim !== undefined)
-    (plate.lastElementChild as HTMLElement).style.cssText =
-      "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;font-size:13px;font-weight:500";
-  return plate;
+}
+
+/** The plate's code-sized space while there is no code yet. */
+function emptyCode(px: number): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(px));
+  svg.setAttribute("height", String(px));
+  svg.setAttribute("aria-hidden", "true");
+  return svg;
 }
 
 /** A link a phone opens by scanning: its QR Code, the URL in mono and an outline button that opens it. */
@@ -225,15 +208,15 @@ export function qrLink(
   );
   text.style.cssText =
     "flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:12px;overflow-wrap:anywhere";
-  const card = h(
+  const body = h(
     "div",
-    { class: "bc-frame" },
+    { class: "bc-card__body" },
     qrPlate(url, options.px ?? 120, lang),
     text,
   );
-  card.style.cssText =
-    "display:flex;flex-wrap:wrap;gap:20px;align-items:center;padding:16px";
-  return card;
+  body.style.cssText =
+    "display:flex;flex-wrap:wrap;gap:20px;align-items:center";
+  return h("div", { class: "bc-card" }, body);
 }
 
 /**

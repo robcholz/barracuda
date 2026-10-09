@@ -187,12 +187,49 @@ test("renders the status and the scan in Chinese", async () => {
   // a description is a fragment: the network name in mono, no full stop
   expect(page.text()).toContain("设备会断开 HomeNet，并开启配置热点");
   expect(page.text()).not.toContain("配置热点。");
-  expect(
-    [...page.root.querySelectorAll(".bc-frame .bc-small .bc-mono")].map(
-      (node) => node.textContent,
-    ),
-  ).toEqual(["HomeNet"]);
+  // the forget block is a Card body; the names in it are mono and stay muted with the line
+  const forget = page.root.querySelector("section.bc-card")!;
+  expect(forget.firstElementChild?.className).toBe("bc-card__body");
+  const names = [...forget.querySelectorAll(".bc-small .bc-mono")];
+  expect(names.map((node) => node.textContent)).toEqual(["HomeNet"]);
+  expect(names[0].getAttribute("style")).toBeNull();
   expect(page.button("忘记网络")).toBeTruthy();
+  // the networks frame: the list head, the table head, then the rows as the frame's own
+  // children, closed by the manual row (which the frame's last-row rule rounds)
+  const frame = page.root.querySelector<HTMLElement>("section.bc-frame")!;
+  const parts = [...frame.children];
+  expect(parts[0].className).toBe("bc-list-head");
+  expect(parts[1].className).toBe("bc-thead");
+  expect(parts.at(-1)?.className).toBe("bc-list-row");
+  expect(parts.at(-1)?.getAttribute("style")).toBeNull();
+  expect(
+    parts[0].querySelector(".bc-mono.bc-caption.bc-muted")?.textContent,
+  ).toBe("04");
+  // signal bars are .bc-signal with the lit bars `on`, SSIDs item names, dBm mono captions
+  const bars = page.row("Office-5F").querySelector("svg")!;
+  expect(bars.getAttribute("class")).toBe("bc-signal");
+  expect(
+    [...bars.querySelectorAll("rect")].map((rect) =>
+      rect.getAttribute("class"),
+    ),
+  ).toEqual(["on", "on", "on", null]);
+  expect(bars.querySelector("[style]")).toBeNull();
+  expect(
+    page.row("Office-5F").querySelector(".bc-mono.bc-option-title")
+      ?.textContent,
+  ).toBe("Office-5F");
+  expect(
+    page.row("Office-5F").querySelector(".bc-mono.bc-caption.bc-muted")
+      ?.textContent,
+  ).toBe("-61 dBm");
+  // an opened network sits on the expanded fill with its form as the panel, under the SSID
+  page.row("Office-5F").click();
+  const open = page.row("Office-5F").parentElement!;
+  expect(open.className).toBe("bc-expanded");
+  expect(open.parentElement).toBe(frame);
+  expect(page.form().className).toBe("bc-expanded__panel");
+  expect(page.form().style.marginLeft).toBe("56px");
+  expect(page.form().style.padding).toBe("");
   expect(page.root.querySelector("hl-figure")?.getAttribute("name")).toBe(
     "wifi",
   );
@@ -383,17 +420,44 @@ test("the phone layout is the design's list", async () => {
   ).toBe("Wi-FiConnectedHomeNet");
   expect(page.root.querySelectorAll("ul > li")).toHaveLength(5);
   expect(page.root.querySelector("h1")?.className).toBe("bc-mobile-title");
+  // List: the header block, the list head with its label, the list, the foot
+  const header = page.root.querySelector(
+    "section[aria-label='Current connection']",
+  )!;
+  expect(header.className).toBe("bc-mobile-header");
+  expect(header.nextElementSibling?.className).toBe("bc-list-head");
+  expect(header.nextElementSibling?.firstElementChild?.className).toBe(
+    "bc-list-label",
+  );
+  expect(page.root.querySelector("ul")?.className).toBe("bc-list");
+  expect(page.root.querySelector("ul")?.nextElementSibling?.className).toBe(
+    "bc-list-foot",
+  );
+  // every SSID is an item name, as on desktop
+  expect(
+    [...page.root.querySelectorAll("ul .bc-mono.bc-option-title")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["HomeNet", "Office-5F", "Cafe Guest", "Pixel-7"]);
   page.row("Office-5F").click();
-  // 16px through the design system's phone rule, at control-lg
+  expect(page.row("Office-5F").parentElement?.className).toBe("bc-expanded");
+  expect(page.form().className).toBe("bc-expanded__panel");
+  expect(page.form().getAttribute("style")).toBeNull();
+  // 16px and control-lg through the design system's phone rule: no inline sizes
   const input = page.form().querySelector("input")!;
   expect(input.className).toContain("bc-input");
-  expect(input.style.height).toBe("var(--control-lg)");
+  expect(input.style.height).toBe("");
+  for (const control of page.form().querySelectorAll("button"))
+    expect((control as HTMLElement).style.height).toBe("");
   expect(page.button("Forget network")).toBeTruthy();
   expect(page.text()).toContain(
     "The device leaves HomeNet and turns on the setup hotspot",
   );
   expect(page.text()).not.toContain("setup hotspot.");
-  expect(page.button("Rescan").style.height).toBe("var(--control-lg)");
+  // not --sm, so the phone rule makes it control-lg
+  expect(page.button("Rescan").className).toBe("bc-button bc-button--outline");
+  expect(page.button("Rescan").style.height).toBe("");
+  expect(page.button("Forget network").style.height).toBe("");
 });
 
 test("cleans up with the page", async () => {

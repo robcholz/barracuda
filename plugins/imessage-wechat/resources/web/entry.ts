@@ -304,10 +304,16 @@ export const mount = definePage((context) => {
         renew.disabled = view.kind === "loading";
         side.append(h("div", null, renew));
       }
-      const card = h("div", { class: "bc-frame" }, plate, side);
-      card.style.cssText =
-        "display:flex;flex-wrap:wrap;gap:24px;align-items:center;padding:20px";
-      next = row(t.scan, t.scanHint, lang, card);
+      // a Card whose body holds the QR plate beside its Steps
+      const body = h("div", { class: "bc-card__body" }, plate, side);
+      body.style.cssText =
+        "display:flex;flex-wrap:wrap;gap:24px;align-items:center";
+      next = row(
+        t.scan,
+        t.scanHint,
+        lang,
+        h("div", { class: "bc-card" }, body),
+      );
     }
     slot.replaceWith(next);
     slot = next;
@@ -319,20 +325,18 @@ export const mount = definePage((context) => {
 
   /** The link row while the bot session has expired: what happened, and 「重新绑定」. */
   function relogin(relink: HTMLButtonElement) {
-    const mark = icon(ICON_CIRCLE_ALERT);
-    mark.style.cssText = "flex:none;margin-top:2px";
+    // the error icon takes the alert's own offset and colour
     const text = h(
       "span",
-      null,
+      { class: "bc-alert__body" },
       h("span", { class: "bc-alert__title" }, t.relogin),
       h("span", null, relink),
     );
-    text.style.cssText =
-      "display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-width:0";
+    text.style.cssText = "align-items:flex-start;gap:12px";
     return h(
       "div",
       { class: "bc-alert bc-alert--error", role: "status" },
-      mark,
+      icon(ICON_CIRCLE_ALERT),
       text,
     );
   }

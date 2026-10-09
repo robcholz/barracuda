@@ -222,15 +222,13 @@ async function getJson(
   }
 }
 
-/** The design's four-bar signal glyph. */
+/** The design's four-bar signal glyph (`.bc-signal`): the first `level` bars are `on`. */
 function bars(level: number): SVGSVGElement {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "bc-signal");
   svg.setAttribute("viewBox", "0 0 20 16");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "16");
   svg.setAttribute("aria-hidden", "true");
-  svg.style.flex = "none";
   const shapes = [
     [0, 11, 5],
     [5.5, 8, 8],
@@ -247,7 +245,7 @@ function bars(level: number): SVGSVGElement {
       rx: 0.5,
     }))
       rect.setAttribute(name, String(value));
-    rect.style.fill = `var(--${index < level ? "foreground" : "border"})`;
+    if (index < level) rect.setAttribute("class", "on");
     svg.append(rect);
   });
   return svg;
@@ -282,8 +280,8 @@ export const mount: PortalModule["mount"] = (root, context) => {
     status?.station.state === "connected" &&
     status.station.ssid === network.ssid;
 
-  const mono = (text: string, style = "") =>
-    h("span", { class: "bc-mono", style: style || undefined }, text);
+  const mono = (text: string, size = "") =>
+    h("span", { class: `bc-mono${size ? ` ${size}` : ""}` }, text);
 
   function stateBadge() {
     if (!status) return "—";
@@ -304,18 +302,16 @@ export const mount: PortalModule["mount"] = (root, context) => {
 
   /**
    * 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda Setup`」: a fragment, no full stop; the hotspot's
-   * name only when the device reports it.
+   * name only when the device reports it. The names are mono and stay muted like the line.
    */
   function forgetText(ssid: string) {
     const ap = status?.access_point;
-    const value = (text: string) =>
-      phone ? mono(text) : mono(text, "color: var(--foreground)");
     return [
       t.forgetA,
       " ",
-      value(ssid),
+      mono(ssid),
       t.forgetB,
-      ap?.state === "started" && ap.ssid ? [" ", value(ap.ssid)] : null,
+      ap?.state === "started" && ap.ssid ? [" ", mono(ap.ssid)] : null,
     ];
   }
 
@@ -361,24 +357,19 @@ export const mount: PortalModule["mount"] = (root, context) => {
     if (ssidInput) ssidInput.maxLength = 32;
     const submit = button(t.join, lang, { type: "submit" });
     const hint = h("span", { class: "bc-hint" }, t.joinHint);
+    // the expanded row's panel: stacked on a phone (16px inputs and control-lg come from the
+    // design system's phone rule), one wrapping row under the network column on desktop
     const form = h(
       "form",
-      { novalidate: true, autocomplete: "off" },
+      { class: "bc-expanded__panel", novalidate: true, autocomplete: "off" },
       ssidField?.element,
       passwordField?.element,
       submit,
       hint,
     );
-    if (phone) {
-      // phone inputs are 16px through the design system, so the browser never zooms into them
-      form.style.cssText =
-        "display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px";
-      for (const input of form.querySelectorAll("input"))
-        input.style.height = "var(--control-lg)";
-      for (const control of form.querySelectorAll("button"))
-        control.style.height = "var(--control-lg)";
-    } else {
-      form.style.cssText = `display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); padding: 4px 20px 20px ${network ? 76 : 48}px`;
+    if (!phone) {
+      // under the SSID: past the signal column, or past the manual row's plus icon
+      form.style.marginLeft = network ? "56px" : "28px";
       ssidField?.element.style.setProperty("flex", "1 1 100%");
       passwordField?.element.style.setProperty("flex", "1 1 260px");
       hint.style.flex = "1 1 100%";
@@ -522,21 +513,22 @@ export const mount: PortalModule["mount"] = (root, context) => {
   const statusSlot = h("span");
   const networkSlot = h("span");
   const hotspotSlot = h("span");
-  const count = h("span", {
-    class: "bc-mono bc-muted",
-    style: "font-size: 12px",
-  });
-  const list = h("div");
+  const count = h("span");
+  /**
+   * Where the rows go: on a phone a `ul.bc-list`; on desktop the networks frame itself, after its
+   * table head, so the rows are the frame's own children (its last row rounds the corner).
+   */
+  let list: HTMLElement = h("div");
+  let listAfter: Element | null = null;
   const forgetSlot = h("div");
   const rescanLabel = h("span");
-  /** 「重新扫描」: `--sm` in the desktop card header, `control-lg` with an 18px icon on a phone. */
+  /** 「重新扫描」: `--sm` in the desktop card header, `control-lg` (the phone rule) with an 18px icon on a phone. */
   const rescanButton = () =>
     h(
       "button",
       {
         class: `bc-button bc-button--outline${phone ? "" : " bc-button--sm"}`,
         type: "button",
-        style: phone ? "height: var(--control-lg)" : undefined,
         onclick: () => void scan(),
       },
       icon(ICON_REFRESH, phone ? 18 : undefined),
@@ -566,17 +558,22 @@ export const mount: PortalModule["mount"] = (root, context) => {
     head.setAttribute("aria-label", "Wi-Fi");
     const box = head.querySelector<HTMLElement>(".bc-header__figure");
     if (box) box.style.flexBasis = "340px";
-    count.style.fontSize = "12px";
+    count.className = "bc-mono bc-caption bc-muted";
     const title = h("h2", { id: "wifi-nearby", class: "bc-title" }, t.nearby);
-    const nearby = h(
+    const thead = h(
+      "div",
+      { class: "bc-thead", style: `grid-template-columns: ${COLUMNS}` },
+      h("span", null, t.hSignal),
+      h("span", null, t.hNetwork),
+      h("span", null, t.hSecurity),
+      h("span", { style: "text-align: right" }, t.hStrength),
+    );
+    list = h(
       "section",
       { class: "bc-frame", "aria-labelledby": "wifi-nearby" },
       h(
         "div",
-        {
-          style:
-            "display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px",
-        },
+        { class: "bc-list-head" },
         h(
           "div",
           { style: "display: flex; align-items: baseline; gap: 8px" },
@@ -585,17 +582,10 @@ export const mount: PortalModule["mount"] = (root, context) => {
         ),
         rescan,
       ),
-      h(
-        "div",
-        { class: "bc-thead", style: `grid-template-columns: ${COLUMNS}` },
-        h("span", null, t.hSignal),
-        h("span", null, t.hNetwork),
-        h("span", null, t.hSecurity),
-        h("span", { style: "text-align: right" }, t.hStrength),
-      ),
-      list,
+      thead,
     );
-    return page(head, nearby, forgetSlot);
+    listAfter = thead;
+    return page(head, list, forgetSlot);
   }
 
   function phoneLayout() {
@@ -608,39 +598,28 @@ export const mount: PortalModule["mount"] = (root, context) => {
       {
         role: "status",
         style:
-          "flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0",
+          "flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-width: 0",
       },
       h("h1", { class: "bc-mobile-title" }, "Wi-Fi"),
       statusSlot,
       networkSlot,
     );
-    count.style.fontSize = "";
+    count.className = "bc-mono";
+    list = h("ul", { class: "bc-list" });
+    listAfter = null;
     return h(
       "div",
       { style: "display: flex; flex-direction: column" },
       h(
         "section",
-        {
-          "aria-label": t.phoneCurrent,
-          style:
-            "padding: var(--space-4); display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border)",
-        },
+        { class: "bc-mobile-header", "aria-label": t.phoneCurrent },
         statusBox,
         figure,
       ),
       h(
         "div",
-        {
-          style:
-            "display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 8px",
-        },
-        h(
-          "h2",
-          { class: "bc-list-label", style: "padding: 0" },
-          t.nearby,
-          " ",
-          count,
-        ),
+        { class: "bc-list-head" },
+        h("h2", { class: "bc-list-label" }, t.nearby, " ", count),
         rescan,
       ),
       list,
@@ -690,8 +669,8 @@ export const mount: PortalModule["mount"] = (root, context) => {
         h(
           "span",
           {
-            class: "bc-mono",
-            style: "font-weight: 500; overflow-wrap: anywhere",
+            class: "bc-mono bc-option-title",
+            style: "overflow-wrap: anywhere",
           },
           network.ssid,
         ),
@@ -700,10 +679,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
       security(network),
       h(
         "span",
-        {
-          class: "bc-mono bc-muted",
-          style: "text-align: right; font-size: 12px",
-        },
+        { class: "bc-mono bc-caption bc-muted", style: "text-align: right" },
         network.signal_dbm === null ? "—" : `${network.signal_dbm} dBm`,
       ),
     ];
@@ -728,9 +704,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
           );
     return h(
       "div",
-      {
-        style: `background: var(${open ? "--sidebar" : "--background"})`,
-      },
+      { class: open ? "bc-expanded" : undefined },
       row,
       open ? formFor(network.ssid, network).element : null,
     );
@@ -747,14 +721,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
           style:
             "flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere",
         },
-        h(
-          "span",
-          {
-            class: "bc-mono",
-            style: open || current ? "font-weight: 500" : undefined,
-          },
-          network.ssid,
-        ),
+        h("span", { class: "bc-mono bc-option-title" }, network.ssid),
         current ? badge(t.current, lang) : null,
       ),
       security(network),
@@ -774,7 +741,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
           );
     return h(
       "li",
-      { style: open ? "background: var(--sidebar)" : undefined },
+      { class: open ? "bc-expanded" : undefined },
       row,
       open ? formFor(network.ssid, network).element : null,
     );
@@ -788,27 +755,27 @@ export const mount: PortalModule["mount"] = (root, context) => {
         class: "bc-list-row",
         type: "button",
         "aria-expanded": String(open),
-        style: phone
-          ? "font-weight: 500"
-          : `padding: 0 20px; font-weight: 500; border-bottom: 0${open ? "" : "; border-radius: 0 0 7px 7px"}`,
         onclick: () => toggle(MANUAL),
       },
       icon(ICON_PLUS, phone ? 18 : undefined),
-      h("span", { style: "flex: 1 1 auto" }, t.manual),
+      h(
+        "span",
+        { class: "bc-option-title", style: "flex: 1 1 auto" },
+        t.manual,
+      ),
       icon(open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT),
     );
-    return h(
+    // closed on desktop, the row is the frame's last child, which rounds the frame's corner
+    if (!phone && !open) return row;
+    const item = h(
       phone ? "li" : "div",
-      {
-        style: phone
-          ? `border-bottom: 1px solid var(--border)${open ? "; background: var(--sidebar)" : ""}`
-          : open
-            ? "background: var(--sidebar); border-radius: 0 0 7px 7px"
-            : undefined,
-      },
+      { class: open ? "bc-expanded" : undefined },
       row,
       open ? formFor(MANUAL, null).element : null,
     );
+    // open at the foot of the desktop frame, its fill keeps inside the frame's rounded corner
+    if (!phone) item.style.borderRadius = "0 0 7px 7px";
+    return item;
   }
 
   function renderList() {
@@ -826,10 +793,9 @@ export const mount: PortalModule["mount"] = (root, context) => {
         ),
       );
     if (canJoin()) rows.push(manualRow());
-    const body = phone
-      ? h("ul", { style: "margin: 0; padding: 0; list-style: none" }, rows)
-      : h("div", null, rows);
-    list.replaceChildren(body);
+    while (listAfter?.nextSibling) listAfter.nextSibling.remove();
+    if (listAfter) list.append(...rows);
+    else list.replaceChildren(...rows);
     if (focused instanceof HTMLElement && list.contains(focused))
       focused.focus();
     for (const control of list.querySelectorAll<HTMLButtonElement>(
@@ -840,6 +806,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
 
   function renderForget() {
     forgetSlot.replaceChildren();
+    forgetSlot.className = "";
     if (!canJoin() || status?.station.state !== "connected") return;
     const ssid = status.station.ssid ?? "—";
     const action = button(t.forgetBtn, lang, {
@@ -848,35 +815,35 @@ export const mount: PortalModule["mount"] = (root, context) => {
     });
     (action as HTMLButtonElement).disabled = busy;
     if (phone) {
-      action.style.height = "var(--control-lg)";
-      forgetSlot.style.cssText =
-        "padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: 8px";
+      forgetSlot.className = "bc-list-foot";
       forgetSlot.append(
         action,
         h("span", { class: "bc-hint" }, forgetText(ssid)),
       );
       return;
     }
-    forgetSlot.style.cssText = "";
     forgetSlot.append(
       h(
         "section",
-        {
-          class: "bc-frame",
-          "aria-labelledby": "wifi-forget",
-          style:
-            "display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 20px",
-        },
+        { class: "bc-card", "aria-labelledby": "wifi-forget" },
         h(
           "div",
           {
+            class: "bc-card__body",
             style:
-              "flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px",
+              "display: flex; flex-wrap: wrap; align-items: center; gap: 16px",
           },
-          h("h2", { id: "wifi-forget", class: "bc-title" }, t.forget),
-          h("span", { class: "bc-small bc-muted" }, forgetText(ssid)),
+          h(
+            "div",
+            {
+              style:
+                "flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px",
+            },
+            h("h2", { id: "wifi-forget", class: "bc-title" }, t.forget),
+            h("span", { class: "bc-small bc-muted" }, forgetText(ssid)),
+          ),
+          action,
         ),
-        action,
       ),
     );
   }
@@ -887,7 +854,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     const ssid =
       status?.station.state === "connected" ? status.station.ssid : undefined;
     networkSlot.replaceChildren(
-      ssid ? mono(ssid, phone ? "font-size: 13px" : "") : phone ? "" : "—",
+      ssid ? mono(ssid, phone ? "bc-small" : "") : phone ? "" : "—",
     );
     hotspotSlot.replaceChildren(hotspotValue());
     count.textContent = networks ? twoDigits(networks.length) : "";

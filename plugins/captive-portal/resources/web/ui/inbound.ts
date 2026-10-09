@@ -170,25 +170,20 @@ export function modeRow(
   state.style.cssText =
     "display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0";
   // shown while every receive slot is taken: a standing fact, so a caution alert rather than a toast
-  const alertText = h(
-    "span",
-    null,
-    h("span", { class: "bc-alert__title" }, s.full),
-    h(
-      "span",
-      { class: "bc-small bc-muted" },
-      s.fullBody(pick(options.channel, lang)),
-    ),
-  );
-  alertText.style.cssText =
-    "display:flex;flex-direction:column;gap:2px;min-width:0";
-  const alertMark = icon(ICON_TRIANGLE_ALERT);
-  alertMark.style.cssText = "flex:none;margin-top:2px;color:var(--warning)";
   const alert = h(
     "div",
     { class: "bc-alert", role: "status" },
-    alertMark,
-    alertText,
+    icon(ICON_TRIANGLE_ALERT, undefined, "bc-warning"),
+    h(
+      "span",
+      { class: "bc-alert__body" },
+      h("span", { class: "bc-alert__title" }, s.full),
+      h(
+        "span",
+        { class: "bc-small bc-muted" },
+        s.fullBody(pick(options.channel, lang)),
+      ),
+    ),
   );
   const body = h("div", null, group, state);
   body.style.cssText = "display:flex;flex-direction:column;gap:var(--space-3)";
@@ -316,8 +311,8 @@ export function accountsRow(
 ): AccountsRow {
   const { lang } = context;
   const s = STRINGS[lang];
-  const card = h("div", { class: "bc-frame" });
-  card.style.overflow = "hidden";
+  // a Card: the pairing body, then one row per account; each part after the first draws the hairline
+  const card = h("div", { class: "bc-card" });
   const element = row(s.accounts, s.accountsHint, lang, card);
   show(element, false);
   const endpoint = `${options.endpoint}/owners`;
@@ -342,12 +337,6 @@ export function accountsRow(
     if (result.kind === "ok") return load();
     toastDeviceError(context, result, () => void post(body, control));
   }
-
-  const line = (first: boolean, ...children: (Node | string)[]) => {
-    const node = h("div", null, ...children);
-    node.style.cssText = `display:flex;align-items:center;gap:12px;padding:12px 16px${first ? "" : ";border-top:1px solid var(--border)"}`;
-    return node;
-  };
 
   function draw(reply: OwnersReply) {
     clearInterval(tick);
@@ -379,9 +368,9 @@ export function accountsRow(
         icon: ICON_REFRESH,
         onClick: () => void post({ rotate: true }, rotate),
       });
-      const head = h("div", null, text, rotate);
+      const head = h("div", { class: "bc-card__body" }, text, rotate);
       head.style.cssText =
-        "display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:16px";
+        "display:flex;flex-wrap:wrap;align-items:center;gap:16px";
       parts.push(head);
       if (reply.pairing.expires_in > 0)
         tick = setInterval(() => {
@@ -412,13 +401,12 @@ export function accountsRow(
         onClick: () => void post({ remove: owner.id }, remove),
       });
       remove.setAttribute("aria-label", `${s.remove} ${name}`);
-      parts.push(line(parts.length === 0, text, remove));
+      parts.push(h("div", { class: "bc-card__row" }, text, remove));
     }
-    if (reply.owners.length === 0) {
-      const empty = line(parts.length === 0, s.empty);
-      empty.className = "bc-small bc-muted";
-      parts.push(empty);
-    }
+    if (reply.owners.length === 0)
+      parts.push(
+        h("div", { class: "bc-card__row bc-small bc-muted" }, s.empty),
+      );
     card.replaceChildren(...parts);
   }
 

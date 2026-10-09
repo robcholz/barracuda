@@ -157,13 +157,22 @@ test("the settings form follows the design: rows, secret toggle, fold, footer", 
   const disclosure =
     element.querySelector<HTMLButtonElement>(".bc-disclosure")!;
   expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+  // the 「高级」 row is .bc-row--compact; its chevron turns in CSS from aria-expanded, never inline
+  expect(disclosure.closest(".bc-row")?.className).toBe(
+    "bc-row bc-row--compact",
+  );
+  expect(disclosure.closest(".bc-row")?.getAttribute("style")).toBeNull();
   disclosure.click();
   expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  expect(disclosure.querySelector("svg")?.getAttribute("style")).toBeNull();
   expect(element.querySelector(".bc-addon")?.textContent).toBe("bytes");
   expect(
     element.querySelector(".bc-radio-card--icon .bc-option-icon svg"),
   ).not.toBeNull();
   expect(element.textContent).toContain("（可选）");
+  const optional = element.querySelector(".bc-label .bc-optional")!;
+  expect(optional.textContent).toBe("（可选）");
+  expect(optional.getAttribute("style")).toBeNull();
 });
 
 test("invalid fields block the request, are marked red with a message, and recover on input", async () => {

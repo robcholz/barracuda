@@ -119,6 +119,9 @@ test("email → code → claimed, through the device's signup, resend and verify
   expect(page.text()).toContain("验证码已发到you@example.com·重新发送");
   expect(page.input("code").maxLength).toBe(6);
   expect(page.input("code").inputMode).toBe("numeric");
+  // the code field is the Input card's code variant, spaced by its class
+  expect(page.input("code").classList.contains("bc-input--code")).toBe(true);
+  expect(page.input("code").style.letterSpacing).toBe("");
 
   // resend: accepted, then the cooldown inline next to 重新发送
   harness.reply = async () => new Response(null, { status: 204 });
@@ -164,7 +167,7 @@ test("email → code → claimed, through the device's signup, resend and verify
   await page.click("验证");
   expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox/verify");
   expect(visibleRows(page)).toEqual(["方式", "身份", "高级"]);
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-icon")?.textContent).toBe("@");
   expect(card.querySelector(".bc-option-title")?.textContent).toBe(
     "Inkbox 身份",
@@ -301,7 +304,7 @@ test("a reload resumes a signup at the code step", async () => {
     expect(visibleRows(page)).toEqual(
       zh ? ["方式", "身份", "高级"] : ["Method", "Identity", "Advanced"],
     );
-    expect(page.query(".bc-frame[role=status]")?.textContent).toContain(
+    expect(page.query(".bc-card[role=status]")?.textContent).toContain(
       "barracuda-a1b2c3@inkboxmail.com",
     );
     expect(page.refreshes.count).toBe(1);
@@ -318,7 +321,7 @@ test("a reload of a claimed signup shows the identity", async () => {
     },
   });
   expect(visibleRows(page)).toEqual(["方式", "身份", "高级"]);
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(
     card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
   ).toBe("已认领");
@@ -330,7 +333,7 @@ test("a reload of a claimed signup shows the identity", async () => {
 test("a channel saved with a key shows as configured above the form", async () => {
   const page = await renderWith({ configured: true }, "en");
   expect(visibleRows(page)).toEqual(["Channel", "Method", "Email", "Advanced"]);
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-title")?.textContent).toBe("Inkbox");
   expect(
     card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,

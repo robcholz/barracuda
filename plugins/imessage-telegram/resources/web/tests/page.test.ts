@@ -106,7 +106,7 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
   expect(harness.calls.map((call) => call.url)).toEqual([
     "https://api.telegram.org/bot123:abc/getMe",
   ]);
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-icon")?.textContent).toBe("B");
   expect(card.querySelector(".bc-option-title")?.textContent).toBe(
     "Barracuda Home",
@@ -126,10 +126,14 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
     "https://t.me/barracuda_home_bot",
   ]);
   expect(chat.querySelector("[data-theme=light] svg path")).not.toBeNull();
+  // the link QR is a Card with the plate in its body
+  expect(
+    chat.querySelector(".bc-card > .bc-card__body > .bc-qr > svg"),
+  ).not.toBeNull();
 
   // editing the token drops the stale result
   page.type("token", "123:abd");
-  expect(page.query(".bc-frame[role=status]")).toBeNull();
+  expect(page.query(".bc-card[role=status]")).toBeNull();
   expect(chat.style.display).toBe("none");
 });
 

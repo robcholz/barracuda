@@ -49,9 +49,10 @@ Text and DOM (`dom.ts`)
 - `Text` is `string | { zh, en }`; `pick(text, lang)` returns the string.
 - `h(tag, props, ...children)` builds an element: `class`, `on<event>` listeners,
   boolean attributes; string children are text, never markup.
-- `icon(ICON_*, size?)`: a Lucide icon (`ICON_EYE`, `ICON_REFRESH`, `ICON_PLUS`,
+- `icon(ICON_*, size?, className?)`: a Lucide icon (`ICON_EYE`, `ICON_REFRESH`, `ICON_PLUS`,
   `ICON_WIFI`, `ICON_COPY`, `ICON_EXTERNAL_LINK`, `ICON_MAIL`, `ICON_KEY_ROUND`, … from
-  `icons.ts`), 16px by default, 18px on phone rows.
+  `icons.ts`), 16px by default, 18px on phone rows; `className` adds classes such as a
+  text colour (`bc-muted`, `bc-warning`).
 - `mark(MARK_*, size?)`: a design mark from `marks.ts` — `MARK_BARE`, `MARK_TILE`
   (chat avatar), `MARK_OPENAI`, `MARK_ANTHROPIC`, `MARK_TELEGRAM`, `MARK_WECHAT`,
   `MARK_QQ`, `MARK_BLUEBUBBLES`.
@@ -69,7 +70,7 @@ Layout (`layout.ts`)
   the header frame. `figure` is an `<hl-figure>` name: `riffle` (built in) or the
   page's own entry ID, whose manifest `figure` module the shell loads. `scan`
   starts the router's sweep (also settable later with `setAttribute("scan", "true")`).
-- `kv(rows, lang, { live?, mono?, labelWidth? })`: a `.bc-kv` table; `live` makes it
+- `kv(rows, lang, { live?, mono? })`: a `.bc-kv` table (96px keys); `live` makes it
   a polite status region.
 - `term(label, tip, lang, { start? })`: the dotted-underline aside (`明文`, `名额`).
 - `badge(label, lang, { signal? })`, `button(label, lang, { variant, size, icon, type, onClick })`,
@@ -221,20 +222,21 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 
 - `resultCard({ title, badge, live?, sub?, initial?, rows?, action? }, lang)`: what a check found
-  (`role="status"`): a 40px tile with `initial` (a check mark without one), the title, `sub`
+  (`role="status"`), a `.bc-card` with one `.bc-card__body`: a 40px tile with `initial` (a check mark without one), the title, `sub`
   in mono, the badge (neutral; the signal chip only with `live`, a live connection such as
   BlueBubbles' 「已连接」), a `.bc-kv` of `rows` (values mono unless the row's third item is
   `false`) and one `action` node.
-- `stepList(steps, { current, done }, lang)`: numbered steps on `radius-sm` tiles with mono
-  numbers (`01`); the first `done` show a check in `success`, `current` (`aria-current="step"`, or
-  `-1` for none) fills `muted`.
+- `stepList(steps, { current, done }, lang)`: `.bc-steps`, numbered `radius-sm` marks with mono
+  numbers (`01`); the first `done` (`.bc-step--done`) show a check in `success`, `current`
+  (`aria-current="step"`, or `-1` for none) fills `muted`.
 - `note(text, lang, { mono?, action?: { label, onClick } })`: a small muted line with a
-  mono value and a link-styled button after a dot (「验证码已发到 `you@example.com` · 重新发送」).
-- `qrPlate(data, px, lang, { dim? })`: a QR Code on a `radius-sm` plate that stays light
+  mono value (muted too) and a `button.bc-link` after a dot (「验证码已发到 `you@example.com` · 重新发送」).
+- `qrPlate(data, px, lang, { dim? })`: a QR Code on a `.bc-qr` plate that stays light
   in the dark theme (`data-theme="light"`); `data: null` is the empty plate while a code
-  loads; `dim` fades the code under a label (「已扫码」, 「二维码已过期」).
-- `qrLink(url, label, lang, { px? = 120 })`: a link to open on a phone: its code, the URL
-  in mono and an outline button that opens it in a new tab.
+  loads; `dim` (`.bc-qr--dim`) fades the code under a `.bc-qr__overlay` label (「已扫码」,
+  「二维码已过期」). Put it in a `.bc-card__body`, never on its own.
+- `qrLink(url, label, lang, { px? = 120 })`: a link to open on a phone, as a `.bc-card`: its
+  code, the URL in mono and an outline button that opens it in a new tab.
 - `copyText(text)`: copies to the clipboard, falling back to a selection copy where
   `navigator.clipboard` is missing (plain HTTP); resolves whether it worked.
 
@@ -244,8 +246,8 @@ QR Codes (`qr.ts`)
   fits (throws a `RangeError` past 2331 bytes); returns `{ version, mask, size, modules }`
   with `modules[y * size + x]` 1 for dark. Masks are chosen by the standard's penalty rules.
 - `qrPath(code, quiet? = 2)`: the dark modules as one SVG path (one rectangle per run).
-- `qrSvg(text, px, quiet? = 2)`: an `<svg>` drawing it in `var(--foreground)`; put it on
-  a `qrPlate`, never directly on a dark surface.
+- `qrSvg(text, px, quiet? = 2)`: an `<svg>` of it; put it directly in a `.bc-qr` plate
+  (`qrPlate`), which fills it `foreground` on light, never on a dark surface.
 
 ## Example: a channel settings page
 

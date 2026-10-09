@@ -222,7 +222,7 @@ export const mount = definePage((context) => {
   codeInput.inputMode = "numeric";
   codeInput.maxLength = 6;
   codeInput.autocomplete = "one-time-code";
-  codeInput.style.letterSpacing = "0.3em";
+  codeInput.classList.add("bc-input--code");
   code.element.style.maxWidth = "280px";
   const resendError = h("span", {
     class: "bc-hint bc-hint--error",

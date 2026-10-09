@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { installBrowser, settle } from "./browser";
 import { Portal, routeOf, STORAGE } from "../src/shell";
-import { layoutModules } from "../src/overview";
+import { layoutModules, renderStatus } from "../src/overview";
 import type { PortalContext, WebEntry } from "../src/contract";
 
 const text = (zh: string, en = zh) => ({ zh, en });
@@ -217,9 +217,25 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   );
   expect(h.$(".bc-nav-item")?.getAttribute("aria-current")).toBe("page");
   expect(h.$(".bc-crumb--current")?.textContent).toBe("概览");
+  // the sidebar's Wordmark and footer, and the top bar's divider, are the design system's parts
+  const wordmark = h.$(".bc-sidebar .bc-brand .bc-wordmark")!;
+  expect(wordmark.firstChild?.textContent).toBe("Barracuda");
+  expect(wordmark.lastElementChild?.className).toBe("bc-caption bc-muted");
+  expect(wordmark.lastElementChild?.textContent).toBe("设备门户");
+  const footer = h.$(".bc-sidebar p:last-child")!;
+  expect(footer.className).toBe("bc-sidebar__footer");
+  expect(footer.getAttribute("style")).toBeNull();
+  expect(footer.querySelector(".bc-term")).not.toBeNull();
+  const divider = h.$(".portal-topbar--desktop .bc-topbar__divider")!;
+  expect(divider.previousElementSibling?.className).toContain(
+    "bc-sidebar-trigger",
+  );
+  expect(divider.getAttribute("aria-hidden")).toBe("true");
   expect(
     h.$(".portal-hero__kv dd:not([data-status-device])")?.textContent,
   ).toBe("9");
+  // the hero key-value table takes the default 96px key column
+  expect(h.$(".portal-hero__kv")?.getAttribute("style")).toBeNull();
   expect(
     h.$$(".portal-steps a").map((node) => node.getAttribute("href")),
   ).toEqual(["#wifi", "#agent", "#imessage-web"]);
@@ -250,10 +266,46 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   expect(h.$(".portal-channels hl-figure")?.getAttribute("name")).toBe(
     "riffle",
   );
-  expect(h.$(".portal-section__head .portal-count")?.textContent).toBe("09");
+  expect(
+    h.$(".portal-section__head .bc-mono.bc-caption.bc-muted")?.textContent,
+  ).toBe("09");
   expect(h.$(".portal-hero__figure hl-figure")?.getAttribute("name")).toBe(
     "board",
   );
+  // the design system's components, with no inline look: the hero header, the 「开始使用」 grid
+  // cells, the tile figures, the channels list head and rows (siblings in the list column)
+  expect(h.$(".bc-header")?.className).toBe("bc-header bc-header--hero");
+  expect(h.$$(".portal-steps > li").map((node) => node.className)).toEqual([
+    "bc-grid__cell",
+    "bc-grid__cell",
+    "bc-grid__cell",
+  ]);
+  expect(
+    h
+      .$$(".portal-steps .bc-mono.bc-caption.bc-muted")
+      .map((node) => node.textContent),
+  ).toEqual(["01", "02", "03"]);
+  expect(h.$$(".bc-tile > .bc-tile__figure")).toHaveLength(4);
+  expect(
+    h.$(".portal-channels > .bc-tile__figure.bc-tile__figure--side hl-figure"),
+  ).not.toBeNull();
+  const list = h.$(".portal-channels__list")!;
+  expect([...list.children].map((node) => node.className)).toEqual([
+    "bc-list-head",
+    ...rows.map(() => "bc-list-row portal-channel-row"),
+  ]);
+  expect(list.querySelector(".bc-list-head .bc-caption")?.textContent).toBe(
+    "05",
+  );
+  expect(rows[0].querySelector(".bc-option-title")?.textContent).toBe(
+    "Telegram",
+  );
+  for (const node of [
+    ...h.$$(".portal-overview .bc-grid__cell"),
+    ...h.$$(".portal-overview .bc-tile__figure"),
+    ...rows,
+  ])
+    expect(node.getAttribute("style")).toBeNull();
   // contributor figures load lazily from the manifest, once per URL; built-ins never load
   await settle(20);
   const figureLoads = h.loads.filter((url) => url.endsWith("figure.js"));
@@ -402,6 +454,41 @@ test("a stored language and theme apply at start; the theme control switches and
   expect(h.document.documentElement.getAttribute("data-theme")).toBe("light");
 });
 
+test("loading is the EmptyState's skeleton: four bars, widths set where they are used", async () => {
+  await start();
+  const page = renderStatus({
+    kind: "loading",
+    lang: "zh",
+    refresh() {},
+    back() {},
+    retry() {},
+  });
+  const frame = page.querySelector(".portal-status")!;
+  expect(frame.className).toBe("bc-frame bc-empty portal-status");
+  const bars = [...frame.querySelectorAll<HTMLElement>(".portal-skeleton > *")];
+  expect(bars.map((node) => node.className)).toEqual([
+    "bc-skeleton bc-skeleton--title",
+    "bc-skeleton",
+    "bc-skeleton",
+    "bc-skeleton bc-skeleton--block",
+  ]);
+  expect(bars.map((node) => node.style.width)).toEqual([
+    "40%",
+    "90%",
+    "70%",
+    "",
+  ]);
+  // the bars' height, radius and fill are the skeleton's own
+  for (const node of bars)
+    expect([node.style.height, node.style.background]).toEqual(["", ""]);
+  expect(
+    frame.querySelector(".portal-skeleton")?.getAttribute("aria-hidden"),
+  ).toBe("true");
+  expect(frame.querySelector("[role=status] h1")?.textContent).toBe(
+    "正在加载页面…",
+  );
+});
+
 test("a failed import shows the failed state; retry loads again", async () => {
   const errors = spyOn(console, "error").mockImplementation(() => {});
   try {
@@ -450,9 +537,25 @@ test("module toasts reach the stack: successes time out, errors stay, actions ru
   expect(toasts()[0].classList.contains("bc-toast--success")).toBe(true);
   expect(toasts()[0].getAttribute("role")).toBe("status");
   expect(toasts()[1].getAttribute("role")).toBe("alert");
-  expect(toasts()[1].querySelector(".portal-toast__code")?.textContent).toBe(
-    "422",
+  // the Toast card's markup: an icon part, then the title, line and action flat in the body
+  expect(
+    toasts()[1].querySelector(".bc-toast__title > .bc-mono.bc-caption.bc-muted")
+      ?.textContent,
+  ).toBe("422");
+  expect(toasts()[1].querySelector("svg")?.getAttribute("class")).toBe(
+    "bc-icon bc-toast__icon",
   );
+  expect(toasts()[1].querySelector("svg")?.getAttribute("style")).toBeNull();
+  expect(
+    [...toasts()[2].querySelector(".bc-toast__body")!.children].map(
+      (node) => node.className,
+    ),
+  ).toEqual(["bc-toast__title", "bc-small bc-muted"]);
+  expect(
+    [...toasts()[0].querySelector(".bc-toast__body")!.children].map(
+      (node) => node.className,
+    ),
+  ).toEqual(["bc-toast__title", "bc-button bc-button--outline bc-button--sm"]);
   expect(
     toasts()[1].querySelector(".bc-toast__close")?.getAttribute("aria-label"),
   ).toBe("关闭");
@@ -482,26 +585,30 @@ test("no entries shows the empty state; an unreachable manifest says so and reco
   try {
     const h = await start({ entries: [] });
     expect(h.$(".portal-status")?.getAttribute("data-status")).toBe("empty");
+    // the EmptyState in a frame
+    expect(h.$(".portal-status")?.className).toBe(
+      "bc-frame bc-empty portal-status",
+    );
     expect(h.$(".portal-status__title")?.textContent).toBe("还没有插件页面");
     expect(h.$(".portal-status__actions")?.textContent).toBe("刷新页面列表");
     expect(h.$$(".bc-nav-item")).toHaveLength(1);
-    expect(h.$(".portal-badge--offline")).toBeNull();
+    expect(h.$(".bc-badge--destructive")).toBeNull();
 
     h.records.offline = true;
     await h.portal.refresh();
     expect(h.$(".portal-status")?.getAttribute("data-status")).toBe("manifest");
-    // a neutral badge in destructive text: no icon, no destructive edge
-    expect(h.$(".portal-badge--offline")?.textContent).toBe("连接未就绪");
-    expect(h.$(".portal-badge--offline")?.className).toBe(
-      "bc-badge portal-badge--offline",
-    );
-    expect(h.$(".portal-badge--offline svg")).toBeNull();
+    // the Badge card's destructive text: no icon, no destructive edge, no inline colour
+    const offline = h.$(".bc-badge--destructive")!;
+    expect(offline.textContent).toBe("连接未就绪");
+    expect(offline.className).toBe("bc-badge bc-badge--destructive");
+    expect(offline.getAttribute("style")).toBeNull();
+    expect(offline.querySelector("svg")).toBeNull();
 
     h.records.offline = false;
     h.records.value = NINE;
     (h.$(".portal-status__actions .bc-button") as HTMLButtonElement).click();
     await settle();
-    expect(h.$(".portal-badge--offline")).toBeNull();
+    expect(h.$(".bc-badge--destructive")).toBeNull();
     expect(h.$$(".bc-tile")).toHaveLength(4);
   } finally {
     errors.mockRestore();
@@ -515,7 +622,7 @@ test("a failed refresh keeps the last entries and the mounted module", async () 
     h.records.offline = true;
     h.document.dispatchEvent(new h.window.Event("visibilitychange"));
     await settle();
-    expect(h.$(".portal-badge--offline")).not.toBeNull();
+    expect(h.$(".bc-badge--destructive")).not.toBeNull();
     expect(h.$$(".bc-nav-item")).toHaveLength(10);
     expect(h.$(".module-text")?.textContent).toBe("wifi:zh");
     expect(h.contexts[0].signal.aborted).toBe(false);
@@ -552,10 +659,32 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
     h.$$(".portal-phone-home .bc-list-label").map((node) => node.textContent),
   ).toEqual(["设备", "智能体", "消息通道"]);
   expect(h.$$(".portal-phone-home .bc-list-row")).toHaveLength(9);
-  expect(h.$(".portal-topbar--phone .portal-brand-name")?.textContent).toBe(
-    "Barracuda",
-  );
+  // the phone top bar's brand is the Wordmark link
+  const brand = h.$(".portal-topbar--phone a.bc-brand")!;
+  expect(brand.getAttribute("href")).toBe("#overview");
+  expect(brand.querySelector(".bc-wordmark")?.textContent).toBe("Barracuda");
   expect(h.$(".portal-phone-home h1")?.className).toBe("bc-mobile-title");
+  // the title block is a .bc-mobile-header; each group is a .bc-list after its label; the footer
+  // closes the list (List)
+  const home = h.$(".portal-phone-home")!;
+  expect(home.firstElementChild?.className).toBe(
+    "bc-mobile-header portal-phone-hero",
+  );
+  expect([...home.children].slice(1).map((node) => node.className)).toEqual([
+    "bc-list-label",
+    "bc-list",
+    "bc-list-label",
+    "bc-list",
+    "bc-list-label",
+    "bc-list",
+    "bc-list-foot bc-caption bc-muted",
+  ]);
+  for (const node of home.querySelectorAll("*"))
+    if (
+      !node.closest("hl-figure") &&
+      !node.matches(".portal-aside, .bc-asset-icon, svg")
+    )
+      expect(node.getAttribute("style")).toBeNull();
   // the phone top bar has the design's LanguageMenu and ThemeToggle, as the desktop one
   const lang = h.$(".portal-topbar--phone .portal-lang") as HTMLButtonElement;
   expect(lang.textContent).toBe("简体中文");
@@ -566,8 +695,11 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
   ).click();
   expect(h.$(".portal-phone-home .bc-list-label")?.textContent).toBe("Device");
   await h.go("#wifi");
-  expect(h.$(".portal-back")?.getAttribute("href")).toBe("#overview");
-  expect(h.$(".portal-back")?.textContent).toBe("Overview");
+  const back = h.$(".portal-topbar--phone .bc-button--back")!;
+  expect(back.className).toBe("bc-button bc-button--ghost bc-button--back");
+  expect(back.getAttribute("href")).toBe("#overview");
+  expect(back.textContent).toBe("Overview");
+  expect(back.getAttribute("style")).toBeNull();
   const theme = h.$$(".portal-topbar--phone .bc-segmented button");
   expect(theme.map((node) => node.getAttribute("aria-label"))).toEqual([
     "Light",
@@ -615,6 +747,9 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   expect(h.$(".portal-topbar--phone .bc-badge")).toBeNull();
   const wifi = h.$('.bc-nav-item[href="#wifi"]')!;
   expect(wifi.querySelector(".portal-nav-aside")?.textContent).toBe("HomeNet");
+  expect(wifi.querySelector(".portal-nav-aside")?.className).toBe(
+    "bc-nav-text bc-mono bc-caption bc-muted portal-nav-aside",
+  );
   expect(wifi.getAttribute("aria-label")).toBe("Wi-Fi · HomeNet");
   expect(h.$$(".portal-nav-aside")).toHaveLength(1);
   expect(h.$$(".portal-hero__kv > *").map((node) => node.textContent)).toEqual([
@@ -646,6 +781,10 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   expect(
     steps[0].querySelector(".portal-step__done .bc-mono")?.textContent,
   ).toBe("HomeNet");
+  // the done line is a Text status in success
+  expect(steps[0].querySelector(".portal-step__done")?.className).toBe(
+    "bc-status bc-success portal-step__done",
+  );
   const aside = (selector: string) => {
     const node = h.$(`${selector} .portal-aside`);
     return visible(node) ? node!.textContent : null;
@@ -653,6 +792,12 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   expect(aside('.bc-tile[href="#wifi"]')).toBe("HomeNet");
   expect(
     h.$('.bc-tile[href="#wifi"] .portal-aside')?.classList.contains("bc-mono"),
+  ).toBe(true);
+  // a tile's machine value is a mono caption
+  expect(
+    h
+      .$('.bc-tile[href="#wifi"] .portal-aside')
+      ?.classList.contains("bc-caption"),
   ).toBe(true);
   expect(aside('.bc-tile[href="#agent"]')).toBeNull();
   expect(
@@ -764,6 +909,17 @@ test("on a phone the list shows the detail and the channel labels", async () => 
     "",
     "",
   ]);
+  // phone asides are .bc-small: the network name mono, the labels in words
+  const small = h
+    .$$(".portal-phone-home .portal-aside")
+    .filter((node) => node.style.display !== "none")
+    .map((node) => [
+      node.textContent,
+      node.classList.contains("bc-small"),
+      node.classList.contains("bc-mono"),
+    ]);
+  expect(small[0]).toEqual(["HomeNet", true, true]);
+  expect(small[1]).toEqual(["已配置", true, false]);
 });
 
 test("step 03 depends only on the channels that report a status", async () => {

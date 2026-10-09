@@ -337,8 +337,9 @@ export function qrPath(code: QrCode, quiet = 2): string {
 const SVG = "http://www.w3.org/2000/svg";
 
 /**
- * `text` as a QR Code `<svg>`, `px` square, dark modules in `var(--foreground)`. Put it on a plate
- * that stays light in the dark theme (`qrPlate` in `./blocks`): scanners need dark on light.
+ * `text` as a QR Code `<svg>`, `px` square. Put it directly in a `.bc-qr` plate (`qrPlate` in
+ * `./blocks`), which fills the dark modules `foreground` and stays light in the dark theme: scanners
+ * need dark on light.
  */
 export function qrSvg(text: string, px: number, quiet = 2): SVGSVGElement {
   const code = encodeQr(text);
@@ -349,10 +350,8 @@ export function qrSvg(text: string, px: number, quiet = 2): SVGSVGElement {
   svg.setAttribute("height", String(px));
   svg.setAttribute("shape-rendering", "crispEdges");
   svg.setAttribute("aria-hidden", "true");
-  svg.style.display = "block";
   const path = document.createElementNS(SVG, "path");
   path.setAttribute("d", qrPath(code, quiet));
-  path.style.fill = "var(--foreground)";
   svg.append(path);
   return svg;
 }

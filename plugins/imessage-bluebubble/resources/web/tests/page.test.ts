@@ -103,7 +103,7 @@ test("测试连接 reads the server info and sets the Private API switch to matc
   expect(harness.calls.map((call) => call.url)).toEqual([
     "https://bb.example.com/api/v1/server/info?password=p%26w%20d",
   ]);
-  const card = page.query(".bc-frame[role=status]")!;
+  const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-title")?.textContent).toBe(
     "BlueBubbles Server",
   );
@@ -124,12 +124,12 @@ test("测试连接 reads the server info and sets the Private API switch to matc
   await page.click("测试连接");
   expect(privateApi(page.root).getAttribute("aria-checked")).toBe("true");
   expect(page.text()).toContain("已按服务器设置开启");
-  expect(page.query(".bc-frame[role=status]")?.textContent).toContain(
+  expect(page.query(".bc-card[role=status]")?.textContent).toContain(
     "Private API已启用",
   );
 
   page.type("password", "other");
-  expect(page.query(".bc-frame[role=status]")).toBeNull();
+  expect(page.query(".bc-card[role=status]")).toBeNull();
   expect(page.text()).toContain("需要服务器已启用 Private API");
 });
 
