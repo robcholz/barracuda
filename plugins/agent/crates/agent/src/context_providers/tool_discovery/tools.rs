@@ -142,8 +142,7 @@ mod tests {
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
                 .expect("valid invocation");
 
-        let (joined, detached) = ToolRunner::new(&tools).run(vec![call]);
-        assert!(detached.is_none());
+        let joined = ToolRunner::new(&tools).run(vec![call]);
         let output = block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("load result")
@@ -162,7 +161,7 @@ mod tests {
                 &alloc::format!(r#"{{"group_id":"{group}"}}"#),
             )
             .expect("valid invocation");
-            let (joined, _) = ToolRunner::new(&tools).run(vec![call]);
+            let joined = ToolRunner::new(&tools).run(vec![call]);
             block_on(joined.collect::<Vec<_>>())
                 .pop()
                 .expect("load result")

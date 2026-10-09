@@ -1,5 +1,5 @@
 use barracuda_agent_memory::ChatMessage;
-use barracuda_agent_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
+use barracuda_agent_tool::{BackgroundToolPool, ToolOutput, ToolSetError, ToolSetHandle};
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::{Error as ModelError, ToolCall};
@@ -41,6 +41,8 @@ pub(crate) struct LlmStep<'a> {
     pub(crate) reminders: &'a [ChatMessage],
     /// The tool view for this step. It stays stable for the whole iteration.
     pub(crate) tools: &'a ToolSetHandle<'a>,
+    /// Owns the background Tool calls this step accepts.
+    pub(crate) background: &'a BackgroundToolPool,
 }
 
 /// One event from an iteration.
@@ -65,7 +67,6 @@ pub(crate) enum IterationEvent {
 /// because they carry distinct control semantics for `AgentEngine`.
 pub(crate) enum IterationLoopEvent {
     Iteration(IterationEvent),
-    Detached(ToolDetachHandle),
     ApprovalRequired {
         tool_call_id: ToolCallId,
         tool_call: ToolCall,

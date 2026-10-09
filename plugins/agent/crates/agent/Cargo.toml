@@ -35,6 +35,8 @@ barracuda-runtime-utils.workspace = true
 barracuda-model-api = { path = "../model-api" }
 http-client.workspace = true
 embassy-sync.workspace = true
+# `background_wait` deadlines.
+embassy-time.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
@@ -43,8 +45,6 @@ barracuda-agent-persistence = { path = "../persistence" }
 # `no_std`-friendly for the device.
 futures-core.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-# `SelectAll` fairly merges the per-batch detached-tool completion streams the
-# Agent wrapper tracks, replacing a hand-written round-robin poll queue.
 futures-util = { workspace = true, features = ["alloc"] }
 getset = "0.1.7"
 # The runtime is exposed as an ordinary Future. The application chooses Embassy,

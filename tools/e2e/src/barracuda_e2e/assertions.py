@@ -144,7 +144,7 @@ def check_step_requests(scenario: Scenario, requests: Path) -> list[str]:
 
     A step's requests run from the first request whose body carries the step's
     message to the first one carrying the next step's message, so subagent and
-    detached-turn requests made in between count for the step.
+    background-turn requests made in between count for the step.
     """
 
     if not any(step.request_contains for step in scenario.steps):

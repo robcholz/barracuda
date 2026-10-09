@@ -128,6 +128,11 @@ impl SubagentControl {
             .map_err(|_| MultiagentCommandError::BridgeClosed)?
     }
 
+    /// Deletes `target` and its subtree without waiting for the outcome.
+    pub(crate) fn request_delete(&self, target: AgentId) {
+        drop(self.bridge.delete(self.caller, target));
+    }
+
     pub(crate) async fn followup(
         &self,
         target: AgentId,

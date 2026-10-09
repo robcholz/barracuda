@@ -15,14 +15,14 @@ use alloc::{
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolError,
-        ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
+        BackgroundTool, BackgroundToolControl, BackgroundToolFuture, BackgroundToolHandler, Tool,
+        ToolError, ToolFuture, ToolGroup, ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Vm, VmError, VmInputRequest, VmRunOutcome, VmRunReference, VmRunRequest, VmRunUpdate,
+    Vm, VmError, VmInputRequest, VmRunOutcome, VmRunRequest, VmRunState, VmRunUpdate,
 };
 use serde::Serialize;
 
@@ -54,17 +54,10 @@ impl Plugin for AgentVmPlugin {
     }
 }
 
+/// `vm_run` is the only VM Tool: the Agent's background Tools list, feed, and
+/// cancel its runs.
 fn vm_tool_group(vm: Rc<Vm>) -> ToolGroup {
-    ToolGroup::new(
-        "vm",
-        false,
-        [
-            Tool::from_detached(VmRunTool { vm: Rc::clone(&vm) }),
-            Tool::new(VmListTool { vm: Rc::clone(&vm) }),
-            Tool::new(VmInputTool { vm: Rc::clone(&vm) }),
-            Tool::new(VmCancelTool { vm }),
-        ],
-    )
+    ToolGroup::new("vm", false, [Tool::background(VmRunTool { vm })])
 }
 
 struct VmRunTool {
@@ -75,20 +68,17 @@ impl ToolSpec for VmRunTool {
     barracuda_agent_plugin::tools::tool_metadata!("vm_run");
 }
 
-impl DetachedToolHandler for VmRunTool {
+impl BackgroundToolHandler for VmRunTool {
     type Args = VmRunRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> DetachedToolFuture<'a> {
+    fn invoke<'a>(&'a self, request: Self::Args) -> BackgroundToolFuture<'a> {
         let run = self.vm.run(request);
         Box::pin(async move {
             let run = run.map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
-            let accepted = encode(
-                &RunAccepted {
-                    run_id: run.run_id(),
-                },
-                true,
-            )?;
-            Ok(DetachedTool::with_progress(accepted, |progress| {
+            let run_id = run.run_id();
+            let accepted = encode(&RunAccepted { run_id }, true)?;
+            // The completion future owns the `VmRun`; dropping it cancels the run.
+            let background = BackgroundTool::with_progress(accepted, |progress| {
                 Box::pin(async move {
                     let mut run = run;
                     loop {
@@ -104,6 +94,10 @@ impl DetachedToolHandler for VmRunTool {
                         }
                     }
                 })
+            });
+            Ok(background.with_control(VmRunControl {
+                vm: Rc::clone(&self.vm),
+                run_id,
             }))
         })
     }
@@ -114,52 +108,35 @@ struct RunAccepted {
     run_id: u32,
 }
 
-struct VmInputTool {
+/// Reports one run's state and feeds its `io.read()`.
+struct VmRunControl {
     vm: Rc<Vm>,
+    run_id: u32,
 }
 
-struct VmListTool {
-    vm: Rc<Vm>,
-}
-
-impl ToolSpec for VmListTool {
-    barracuda_agent_plugin::tools::tool_metadata!("vm_list");
-}
-
-impl ToolHandler for VmListTool {
-    type Args = EmptyArgs;
-
-    fn invoke<'a>(&'a self, _request: Self::Args) -> ToolFuture<'a> {
-        let response = self.vm.list();
-        Box::pin(async move { encode(&response, true) })
+impl BackgroundToolControl for VmRunControl {
+    fn status(&self) -> Option<String> {
+        let run = self
+            .vm
+            .list()
+            .runs
+            .into_iter()
+            .find(|run| run.run_id == self.run_id)?;
+        let state = match run.state {
+            VmRunState::Running => "running",
+            VmRunState::InputRequired => "input_required",
+        };
+        Some(state.into())
     }
-}
 
-impl ToolSpec for VmInputTool {
-    barracuda_agent_plugin::tools::tool_metadata!("vm_input");
-}
-
-impl ToolHandler for VmInputTool {
-    type Args = VmInputRequest;
-
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
-        Box::pin(async move { tool_output(self.vm.input(request)) })
-    }
-}
-
-struct VmCancelTool {
-    vm: Rc<Vm>,
-}
-
-impl ToolSpec for VmCancelTool {
-    barracuda_agent_plugin::tools::tool_metadata!("vm_cancel");
-}
-
-impl ToolHandler for VmCancelTool {
-    type Args = VmRunReference;
-
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
-        Box::pin(async move { tool_output(self.vm.cancel(request)) })
+    fn input<'a>(&'a self, input: Option<String>) -> ToolFuture<'a> {
+        let eof = input.is_none().then_some(true);
+        let result = self.vm.input(VmInputRequest {
+            run_id: self.run_id,
+            input,
+            eof,
+        });
+        Box::pin(async move { tool_output(result) })
     }
 }
 
@@ -199,16 +176,28 @@ mod tests {
         string::{String, ToString},
     };
 
-    use barracuda_agent_tool::{ToolDetachUpdate, ToolInvocation, ToolRunner, ToolSet};
-    use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmInputRequest, VmRunRequest};
+    use barracuda_agent_tool::{
+        BackgroundToolEvent, BackgroundToolPool, BackgroundToolUpdate, ToolInvocation, ToolRunner,
+        ToolSet,
+    };
+    use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmRunRequest};
     use embassy_executor::{Executor, Spawner};
     use embassy_time::Timer;
     use futures_lite::StreamExt as _;
+    use futures_lite::future::poll_fn;
 
     use super::vm_tool_group;
 
+    async fn next_update(pool: &BackgroundToolPool) -> BackgroundToolEvent {
+        poll_fn(|context| pool.poll_next(context)).await
+    }
+
+    fn json(content: &str) -> Result<serde_json::Value, String> {
+        serde_json::from_str(content).map_err(|error| format!("{error}: {content}"))
+    }
+
     #[embassy_executor::task]
-    async fn exercise_detached_tool(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
+    async fn exercise_background_tool(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
         let result = async {
             let vm = Rc::new(
                 Vm::new(LuaPackageRegistry::new(), SeedSource::unavailable())
@@ -220,131 +209,99 @@ mod tests {
             tools
                 .add_group(vm_tool_group(Rc::clone(&vm)))
                 .map_err(|error| error.to_string())?;
-            // The VM group is hidden until loaded; enable the Tools this test calls.
-            for name in ["vm_run", "vm_list"] {
-                tools
-                    .enable_tool(name.to_string())
-                    .map_err(|error| error.to_string())?;
-            }
+            // The VM group is hidden until loaded; enable the Tool this test calls.
+            tools
+                .enable_tool("vm_run".to_string())
+                .map_err(|error| error.to_string())?;
             let handle = tools.begin().map_err(|error| error.to_string())?;
-            let invocation = ToolInvocation::try_new(
-                Some("vm-call"),
-                "vm_run",
-                &serde_json::to_string(&VmRunRequest {
-                    source: concat!("local value = io.read(); ", "print('detached', value)").into(),
-                })
-                .map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            let (mut joined, detached) = ToolRunner::new(&handle).run(alloc::vec![invocation]);
-            let mut detached = detached.ok_or("vm_run did not detach")?;
+            let pool = BackgroundToolPool::new();
+            let run = |source: &str| {
+                let invocation = ToolInvocation::try_new(
+                    Some("vm-call"),
+                    "vm_run",
+                    &serde_json::to_string(&VmRunRequest {
+                        source: source.into(),
+                    })
+                    .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?;
+                Ok::<_, String>(
+                    ToolRunner::new(&handle)
+                        .with_background(&pool)
+                        .run(alloc::vec![invocation]),
+                )
+            };
 
-            let accepted = joined
-                .next()
-                .await
-                .ok_or("vm_run did not return an accepted settlement")?
-                .1;
-            let accepted: serde_json::Value =
-                serde_json::from_str(&accepted.content).map_err(|error| error.to_string())?;
-            let accepted_run_id = accepted
-                .get("run_id")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or_else(|| format!("invalid accepted settlement: {accepted}"))?;
+            let accepted = run(concat!(
+                "local value = io.read(); ",
+                "print('background', value)"
+            ))?
+            .next()
+            .await
+            .ok_or("vm_run did not return an accepted output")?
+            .1;
+            let Some(run_json) = accepted
+                .content
+                .strip_prefix("[background:accepted]\nid: 1\n")
+            else {
+                return Err(format!("invalid accepted output: {accepted:?}"));
+            };
+            let accepted_run = json(run_json)?;
 
-            let progress = detached
-                .next()
-                .await
-                .ok_or("vm_run did not report input_required")?
-                .1;
-            let ToolDetachUpdate::Progress(progress) = progress else {
+            let progress = next_update(&pool).await;
+            let BackgroundToolUpdate::Progress(progress) = progress.update else {
                 return Err(format!("expected progress update, got: {progress:?}"));
             };
-            let progress: serde_json::Value =
-                serde_json::from_str(&progress.content).map_err(|error| error.to_string())?;
+            let progress = json(&progress.content)?;
             if progress.get("kind").and_then(serde_json::Value::as_str) != Some("input_required")
-                || progress.get("run_id") != accepted.get("run_id")
+                || progress.get("run_id") != accepted_run.get("run_id")
             {
                 return Err(format!("invalid progress update: {progress}"));
             }
 
-            let list = ToolInvocation::try_new(Some("vm-list-call"), "vm_list", "{}")
-                .map_err(|error| error.to_string())?;
-            let (mut listed, list_detached) = ToolRunner::new(&handle).run(alloc::vec![list]);
-            if list_detached.is_some() {
-                return Err("vm_list unexpectedly detached".into());
-            }
-            let listed = listed
-                .next()
-                .await
-                .ok_or("vm_list did not return a result")?
-                .1;
-            let listed: serde_json::Value =
-                serde_json::from_str(&listed.content).map_err(|error| error.to_string())?;
-            if listed
-                != serde_json::json!({
-                    "runs": [{"run_id": accepted_run_id, "state": "input_required"}]
-                })
+            let listed = pool.list();
+            if listed.len() != 1
+                || listed.first().map(|call| call.status.as_str()) != Some("input_required")
             {
-                return Err(format!("invalid vm_list result: {listed}"));
+                return Err(format!("invalid pool listing: {listed:?}"));
             }
 
-            vm.input(VmInputRequest {
-                run_id: u32::try_from(accepted_run_id)
-                    .ok()
-                    .ok_or("accepted settlement did not contain a valid run_id")?,
-                input: Some("result".into()),
-                eof: None,
-            })
-            .map_err(|error| error.to_string())?;
-
-            let completion = detached
-                .next()
+            let fed = pool
+                .input(1, Some("result".into()))
                 .await
-                .ok_or("vm_run did not return a completion settlement")?
-                .1;
-            let ToolDetachUpdate::Completed(completion) = completion else {
+                .map_err(|error| error.to_string())?;
+            if !fed.ok {
+                return Err(format!("input was rejected: {fed:?}"));
+            }
+
+            let completion = next_update(&pool).await;
+            let BackgroundToolUpdate::Completed(completion) = completion.update else {
                 return Err(format!("expected completion update, got: {completion:?}"));
             };
-            let completion: serde_json::Value =
-                serde_json::from_str(&completion.content).map_err(|error| error.to_string())?;
+            let completion = json(&completion.content)?;
             if completion
                 .get("outcome")
                 .and_then(serde_json::Value::as_str)
                 != Some("success")
-                || completion.get("output") != Some(&serde_json::json!(["detached\tresult"]))
+                || completion.get("output") != Some(&serde_json::json!(["background\tresult"]))
             {
-                return Err(format!("invalid completion settlement: {completion}"));
+                return Err(format!("invalid completion: {completion}"));
             }
 
-            let invocation = ToolInvocation::try_new(
-                Some("abandoned-vm-call"),
-                "vm_run",
-                &serde_json::to_string(&VmRunRequest {
-                    source: "io.read()".into(),
-                })
-                .map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            let (mut joined, abandoned) = ToolRunner::new(&handle).run(alloc::vec![invocation]);
-            let mut abandoned = abandoned.ok_or("second vm_run did not detach")?;
-            let accepted = joined
+            let accepted = run("io.read()")?
                 .next()
                 .await
-                .ok_or("second vm_run did not return an accepted settlement")?
+                .ok_or("second vm_run did not return an accepted output")?
                 .1;
             if !accepted.ok {
                 return Err(format!("second vm_run was not accepted: {accepted:?}"));
             }
-            let update = abandoned
-                .next()
-                .await
-                .ok_or("second vm_run did not report input_required")?
-                .1;
-            if !matches!(update, ToolDetachUpdate::Progress(_)) {
+            let update = next_update(&pool).await;
+            if update.id != 2 || !matches!(update.update, BackgroundToolUpdate::Progress(_)) {
                 return Err(format!("expected progress update, got: {update:?}"));
             }
 
-            drop(abandoned);
+            pool.cancel(2).map_err(|error| error.to_string())?;
             for _attempt in 0..50 {
                 if vm.list().runs.is_empty() {
                     return Ok(());
@@ -352,7 +309,7 @@ mod tests {
                 Timer::after_millis(10).await;
             }
             Err(format!(
-                "VM run remained active after detached handle drop: {:?}",
+                "VM run remained active after its background call was cancelled: {:?}",
                 vm.list()
             ))
         }
@@ -361,21 +318,21 @@ mod tests {
     }
 
     #[test]
-    fn vm_run_is_a_dynamic_detached_tool() {
+    fn vm_run_is_a_background_tool() {
         let (completed, result) = sync_channel(1);
         std::thread::spawn(move || {
             let executor = Box::leak(Box::new(Executor::new()));
             executor.run(|spawner| {
                 spawner.spawn(
-                    exercise_detached_tool(spawner, completed)
-                        .expect("spawn detached VM Tool test"),
+                    exercise_background_tool(spawner, completed)
+                        .expect("spawn background VM Tool test"),
                 );
             });
         });
 
         result
             .recv_timeout(Duration::from_secs(10))
-            .expect("detached VM Tool test timed out")
-            .expect("detached VM Tool test failed");
+            .expect("background VM Tool test timed out")
+            .expect("background VM Tool test failed");
     }
 }

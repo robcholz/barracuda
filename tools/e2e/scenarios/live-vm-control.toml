@@ -1,20 +1,20 @@
 name = "Live VM control"
-description = "A real model starts a Lua run that waits for input, lists it, feeds it input, and cancels a second run."
+description = "A real model starts a Lua run that waits for input, lists it in the background pool, feeds it input, and cancels a second run."
 
 [model]
 mode = "recorded"
 
 [[steps]]
-send = "Use vm_run to run this Lua: local line = io.read('l'); print('got ' .. line). Then call vm_list and tell me the run's state."
+send = "Use vm_run to run this Lua: local line = io.read('l'); print('got ' .. line). Then call background_list and tell me the run's state."
 tool_contains = ['input_required']
 
 [[steps]]
-send = "Use vm_input to send the input hello to that run, and tell me what it printed."
+send = "Use background_input to send the input hello to that run, and tell me what it printed."
 reply_contains = ['got hello']
 
 [[steps]]
-send = "Use vm_run to run this Lua: local line = io.read('l'). Then cancel that run with vm_cancel and confirm it is cancelled."
-tool_contains = ['"run_id"']
+send = "Use vm_run to run this Lua: local line = io.read('l'). Then cancel that run with background_cancel and confirm it is cancelled."
+tool_contains = ['"run_id"', 'Background call 2 cancelled.']
 
 [logs]
 await = ["VM run 1 finished", "VM run 2 finished"]

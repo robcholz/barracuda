@@ -130,7 +130,7 @@ Keep a scripted scenario below eight committed turns and well below the
 compaction threshold (about 24 KB of transcript). After eight turns the Agent
 extracts long-term memory, and a long transcript is summarized; both make a
 non-streaming model call that a scripted tape cannot answer, so the call takes
-the next scripted response and every later step shifts. A detached completion
+the next scripted response and every later step shifts. A background completion
 (a VM run that ends after its turn, for example) starts a turn of its own and
 counts too. Split longer cases into numbered files such as `edge-vm-output-2`.
 
@@ -226,7 +226,7 @@ configuration is what answers.
 A recorded step's `request_contains` is checked against the model requests
 made while the step was active: from the first request whose body carries the
 step's message up to the first one carrying the next step's message, so a
-subagent's or a detached turn's requests in between count for the step.
+subagent's or a background turn's requests in between count for the step.
 
 ### Direct
 

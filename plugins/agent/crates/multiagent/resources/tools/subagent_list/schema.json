@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "subagent_list",
-    "description": "List active subagents plus completed background subagents whose detached results have not yet been accepted by their parent, each with its id, kind, depth, and status.",
+    "description": "List active subagents plus completed background subagents whose background results have not yet been accepted by their parent, each with its id, kind, depth, and status.",
     "parameters": {
       "type": "object",
       "properties": {},
