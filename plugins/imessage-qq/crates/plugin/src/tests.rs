@@ -22,8 +22,8 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus};
 use barracuda_imessage_gateway_channel::{
-    entry_status, ChannelControl, ModeEndpoint, ReceiveChannel, ReceiveError, ReceiveFuture,
-    ReceiveSession, ReceiveSlotSource, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
+    entry_status, ChannelControl, ChannelEndpoint, ModeEndpoint, ReceiveChannel, ReceiveError,
+    ReceiveFuture, ReceiveSession, ReceiveSlotSource, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGatewayPlugin, MessageChannel, Operation,
@@ -554,10 +554,19 @@ impl<Storage: PluginStorage> Harness<Storage> {
     }
 
     fn status(&self) -> Value {
-        let endpoint = ConfigEndpoint {
-            channel: Rc::clone(&self.channel),
-        };
-        let response = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&self.channel),
+            CONFIG_API_PATH,
+            ConfigEndpoint {
+                channel: Rc::clone(&self.channel),
+            },
+        );
+        let request = HttpRequest::with_path(
+            HttpMethod::Get,
+            format!("{CONFIG_API_PATH}/status"),
+            Vec::new(),
+        );
+        let response = block_on(endpoint.handle(request));
         assert_eq!(response.status(), 200);
         serde_json::from_slice(response.body().expect("buffered body")).expect("status JSON")
     }
@@ -744,7 +753,7 @@ impl Scenario for AcceptedConfiguration {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}})
+                   "owners": {"count": 0}, "config": {"app_id": "app"}})
         );
         let requests = harness.requests();
         assert_eq!(requests.len(), 2, "{requests:?}");
@@ -770,13 +779,16 @@ impl Scenario for AcceptedConfiguration {
                 }
             )
         );
-        let response = block_on(
-            ConfigEndpoint {
-                channel: Rc::clone(&harness.channel),
-            }
-            .handle(HttpRequest::new(HttpMethod::Delete, Vec::new())),
-        );
-        assert_eq!(response.status(), 405);
+        // The configuration path takes changes only; its state is under `/status`.
+        for method in [HttpMethod::Get, HttpMethod::Delete] {
+            let response = block_on(
+                ConfigEndpoint {
+                    channel: Rc::clone(&harness.channel),
+                }
+                .handle(HttpRequest::new(method, Vec::new())),
+            );
+            assert_eq!(response.status(), 405);
+        }
         None
     }
 }
@@ -865,7 +877,8 @@ impl Scenario for LegacyConfiguration {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0},
+                   "config": {"app_id": "app"}})
         );
         assert_eq!(
             harness.stored(MODE_STORAGE_KEY).as_deref(),
@@ -952,7 +965,8 @@ impl Scenario for Modes {
         assert!(harness.registered());
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0},
+                   "config": {"app_id": "app"}})
         );
         assert_eq!(harness.set_mode("disabled").status(), 204);
         assert!(!harness.registered());

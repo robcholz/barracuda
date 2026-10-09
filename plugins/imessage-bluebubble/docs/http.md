@@ -1,18 +1,19 @@
 # IMessage BlueBubble HTTP API
 
-## `GET /api/gateway/bluebubbles`
+## `GET /api/gateway/bluebubbles/status`
 
 Returns `200` with the shared channel status (see the Gateway's
-`docs/plugin.md`). It never returns settings or the password.
+`docs/plugin.md`). It never returns the password; other methods answer `405`.
 
 ```json
-{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":0,"skipped":2}}
+{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"config":{"server_url":"https://bluebubbles.example.com"},"webhook":{"lost":0,"skipped":2}}
 ```
 
 - `mode` is `disabled`, `send`, or `send_receive`.
 - `receive` is present only in `send_receive`. `state` is `idle`, `starting`,
   `receiving`, or `error` (with `message`). The webhook holds no receive slot,
   so `no_slot` never occurs and `slots` is never present.
+- `config` is present while configured and holds the stored server URL.
 - `webhook` is present only in `send_receive`. Both counters start at zero at
   boot:
   - `lost`: deliveries the device could not take. These are bodies over
@@ -33,7 +34,7 @@ Responses:
   server URL changed while receiving, the device first deletes its webhook
   from the old server, best effort.
 - `400 Bad Request`: the JSON body was invalid or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `405 Method Not Allowed`: the endpoint only accepts `POST`.
 - `422 Unprocessable Content`, `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored
   and no BlueBubbles channel stays registered.

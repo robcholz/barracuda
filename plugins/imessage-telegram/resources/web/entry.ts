@@ -64,11 +64,14 @@ const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 
 const ENDPOINT = "/api/gateway/telegram";
 
+/** `GET /api/gateway/telegram/status`: `config` holds the bot's numeric ID while configured. */
+type TelegramStatus = ChannelStatus & { config?: { bot_id: string | null } };
+
 /**
  * The Telegram page: the bot token, checked in the browser with Bot API `getMe` (Telegram allows any
- * origin), then saved with `POST /api/gateway/telegram`. `GET` on the same path says whether a
- * channel is configured; the page then shows it above the form that replaces it, with the channel's
- * mode and allowed accounts (`/mode`, `/owners`) before the 「高级」 fold.
+ * origin), then saved with `POST /api/gateway/telegram`. `GET /status` below it says whether a
+ * channel is configured and for which bot; the page then shows it above the form that replaces
+ * it, with the channel's mode and allowed accounts (`/mode`, `/owners`) before the 「高级」 fold.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -79,6 +82,10 @@ export const mount = definePage((context) => {
     onClick: () => void check(),
   });
   const current = configuredRow("Telegram", lang);
+  const showCurrent = (state: TelegramStatus | null) => {
+    if (state?.configured)
+      current.show(true, state.config?.bot_id ?? undefined);
+  };
   const inbound = channelInbound(context, {
     endpoint: ENDPOINT,
     channel: "Telegram",
@@ -126,7 +133,7 @@ export const mount = definePage((context) => {
       onError: (error) => ({ body: error.message }),
       onSuccess: () => {
         current.show(true);
-        void inbound.refresh();
+        void inbound.refresh().then(showCurrent);
         void context.refreshStatus();
       },
       success: {
@@ -140,8 +147,8 @@ export const mount = definePage((context) => {
   );
   form.element.prepend(current.element);
   inbound.attach(form);
-  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
-    if (state?.configured) current.show(true);
+  void readChannel<TelegramStatus>(context, ENDPOINT).then((state) => {
+    showCurrent(state);
     inbound.apply(state);
   });
   const token = form.element.querySelector<HTMLInputElement>('[name="token"]')!;

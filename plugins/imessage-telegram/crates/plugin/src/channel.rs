@@ -3,6 +3,7 @@
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::string::String;
 use core::cell::{Cell, RefCell};
 
 use barracuda_imessage_gateway_channel::{
@@ -17,6 +18,7 @@ use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::{ClientFactory, ReceiveSlots};
+use serde_json::{json, Map, Value};
 use telegram::{Telegram, TelegramConfig};
 
 use crate::receive::{Cursor, TelegramSlots, CURSOR_STORAGE_KEY};
@@ -279,5 +281,16 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> ChannelControl
 
     fn owners(&self) -> Option<&Owners<Storage>> {
         self.owners.get()
+    }
+
+    /// `config`: the bot's numeric ID, the part of the token before `:`; the
+    /// rest of the token is never reported.
+    fn status_details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        if let Some(settings) = self.settings.borrow().as_ref() {
+            let bot_id = settings.config.token.split_once(':').map(|(id, _)| id);
+            details.insert("config".into(), json!({ "bot_id": bot_id }));
+        }
+        details
     }
 }

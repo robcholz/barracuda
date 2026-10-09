@@ -18,7 +18,7 @@ use core::cell::{Cell, RefCell};
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use barracuda_imessage_gateway_channel::{
-    ChannelControl, ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
+    ChannelControl, ChannelEndpoint, ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGatewayPlugin, MessageChannel, Operation,
@@ -225,10 +225,19 @@ impl<Storage: PluginStorage> Harness<Storage> {
     }
 
     fn status(&self) -> Value {
-        let endpoint = ConfigEndpoint {
-            channel: Rc::clone(&self.channel),
-        };
-        let response = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&self.channel),
+            CONFIG_API_PATH,
+            ConfigEndpoint {
+                channel: Rc::clone(&self.channel),
+            },
+        );
+        let request = HttpRequest::with_path(
+            HttpMethod::Get,
+            format!("{CONFIG_API_PATH}/status"),
+            Vec::new(),
+        );
+        let response = block_on(endpoint.handle(request));
         assert_eq!(response.status(), 200);
         serde_json::from_slice(response.body().expect("buffered body")).expect("status JSON")
     }
@@ -403,7 +412,7 @@ impl Scenario for AcceptedConfiguration {
 
         assert_eq!(
             harness
-                .configure(r#"{"token":"secret","api_base":"http://api.telegram.test"}"#)
+                .configure(r#"{"token":"123:secret","api_base":"http://api.telegram.test"}"#)
                 .status(),
             204
         );
@@ -416,16 +425,19 @@ impl Scenario for AcceptedConfiguration {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}})
+                   "owners": {"count": 0}, "config": {"bot_id": "123"}})
         );
-        assert!(harness.polls()[0].starts_with("/botsecret/getUpdates?timeout=50&limit=8"));
-        let response = block_on(
-            ConfigEndpoint {
-                channel: Rc::clone(&harness.channel),
-            }
-            .handle(HttpRequest::new(HttpMethod::Delete, Vec::new())),
-        );
-        assert_eq!(response.status(), 405);
+        assert!(harness.polls()[0].starts_with("/bot123:secret/getUpdates?timeout=50&limit=8"));
+        // The configuration path takes changes only; its state is under `/status`.
+        for method in [HttpMethod::Get, HttpMethod::Delete] {
+            let response = block_on(
+                ConfigEndpoint {
+                    channel: Rc::clone(&harness.channel),
+                }
+                .handle(HttpRequest::new(method, Vec::new())),
+            );
+            assert_eq!(response.status(), 405);
+        }
         None
     }
 }
@@ -477,7 +489,8 @@ impl Scenario for LegacyConfiguration {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "send", "owners": {"count": 0}})
+            json!({"configured": true, "mode": "send", "owners": {"count": 0},
+                   "config": {"bot_id": "123"}})
         );
         assert_eq!(
             harness.stored(MODE_STORAGE_KEY).as_deref(),
@@ -537,7 +550,8 @@ impl Scenario for ModeSwitches {
         assert!(!harness.registered());
         assert_eq!(
             harness.status(),
-            json!({"configured": true, "mode": "disabled", "owners": {"count": 0}})
+            json!({"configured": true, "mode": "disabled", "owners": {"count": 0},
+                   "config": {"bot_id": "123"}})
         );
 
         assert_eq!(harness.set_mode("send").status(), 204);
@@ -581,7 +595,7 @@ impl Scenario for NoSlotWaits {
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
                    "receive": {"state": "no_slot", "capacity": 1, "slots": {"in_use": 1, "capacity": 1}},
-                   "owners": {"count": 0}})
+                   "owners": {"count": 0}, "config": {"bot_id": "123"}})
         );
         let response = harness.set_mode("send_receive");
         assert_eq!(response.status(), 409);

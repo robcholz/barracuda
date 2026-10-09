@@ -13,8 +13,8 @@ use core::cell::RefCell;
 use core::future::Future;
 
 use barracuda_imessage_gateway_channel::{
-    receive_runtime, sync_receive, ChannelControl, ChannelMode, ModeEndpoint, OwnersEndpoint,
-    ReceiveState, ReceiveTiming, MODE_STORAGE_KEY, PAIRED_REPLY,
+    receive_runtime, status_response, sync_receive, ChannelControl, ChannelMode, ModeEndpoint,
+    OwnersEndpoint, ReceiveState, ReceiveTiming, MODE_STORAGE_KEY, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, GatewayInboundMessage, GatewayIngressError, IMessageGateway,
@@ -329,6 +329,13 @@ async fn post_hook<S: PluginStorage>(channel: &Rc<Channel<S>>, path: &str, body:
         .status()
 }
 
+/// `GET /api/gateway/bluebubbles/status`.
+fn channel_status<S: PluginStorage>(channel: &Channel<S>) -> String {
+    let response = status_response(channel);
+    assert_eq!(response.status(), 200);
+    String::from_utf8(response.body().expect("buffered").to_vec()).expect("UTF-8")
+}
+
 async fn call(endpoint: &dyn HttpEndpoint, method: HttpMethod, body: &str) -> (u16, String) {
     let response = endpoint
         .handle(HttpRequest::new(method, body.as_bytes().to_vec()))
@@ -534,16 +541,9 @@ impl Scenario for WebhookDeliveries {
                     Delivery::Duplicate,
                     "a handled GUID stays a duplicate"
                 );
-                let (status, body) = call(
-                    &ConfigEndpoint(Rc::clone(&channel)),
-                    HttpMethod::Get,
-                    "",
-                )
-                .await;
-                assert_eq!(status, 200);
                 assert_eq!(
-                    body,
-                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":1,"skipped":2}}"#
+                    channel_status(&channel),
+                    r#"{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"config":{"server_url":"http://blue.test"},"webhook":{"lost":1,"skipped":2}}"#
                 );
             })
             .await;
@@ -818,11 +818,9 @@ impl Scenario for ModeSwitches {
                     post_hook(&channel, &path, event("new-message", "{}")).await,
                     404
                 );
-                let (_, status) =
-                    call(&ConfigEndpoint(Rc::clone(&channel)), HttpMethod::Get, "").await;
                 assert_eq!(
-                    status,
-                    r#"{"configured":true,"mode":"send","owners":{"count":1}}"#
+                    channel_status(&channel),
+                    r#"{"configured":true,"mode":"send","owners":{"count":1},"config":{"server_url":"http://blue.test"}}"#
                 );
 
                 assert_eq!(
@@ -864,13 +862,11 @@ impl Scenario for LegacyAndEndpoints {
             let channel = load(&gateway, &storage, idle, &recorder, Some(ADDRESS)).await;
             let config = ConfigEndpoint(Rc::clone(&channel));
             assert_eq!(
-                call(&config, HttpMethod::Get, "").await,
-                (
-                    200,
-                    r#"{"configured":false,"mode":"send_receive","receive":{"state":"idle"},"owners":{"count":0},"webhook":{"lost":0,"skipped":0}}"#
-                        .into()
-                )
+                channel_status(&channel),
+                r#"{"configured":false,"mode":"send_receive","receive":{"state":"idle"},"owners":{"count":0},"webhook":{"lost":0,"skipped":0}}"#
             );
+            // The configuration path takes changes only; its state is under `/status`.
+            assert_eq!(call(&config, HttpMethod::Get, "").await.0, 405);
             assert_eq!(call(&config, HttpMethod::Put, "").await.0, 405);
             assert_eq!(call(&config, HttpMethod::Post, "{}").await.0, 400);
             // An unconfigured channel holds no owner book.
@@ -900,10 +896,8 @@ impl Scenario for LegacyAndEndpoints {
             assert!(is_registered(&gateway));
             assert!(!channel.receive().is_enabled());
             assert_eq!(
-                call(&ConfigEndpoint(Rc::clone(&channel)), HttpMethod::Get, "")
-                    .await
-                    .1,
-                r#"{"configured":true,"mode":"send","owners":{"count":0}}"#
+                channel_status(&channel),
+                r#"{"configured":true,"mode":"send","owners":{"count":0},"config":{"server_url":"http://blue.test"}}"#
             );
             assert!(storage
                 .get_bytes(HOOK_STORAGE_KEY)

@@ -11,7 +11,7 @@ mod tests;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_channel::{
-    entry_status, status_response, ChannelEndpoint, ReceiveRuntime, ReceiveTiming,
+    entry_status, ChannelEndpoint, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin::api::{PluginContext, SharedEntropy};
@@ -211,8 +211,8 @@ struct ErrorBody<'a> {
     code: Option<&'a str>,
 }
 
-/// `GET` reports the channel status; `POST` verifies and stores a
-/// configuration.
+/// `POST` verifies and stores a configuration; the channel status is under
+/// `/status`.
 struct ConfigEndpoint<
     Storage,
     Slots: barracuda_imessage_gateway_channel::ReceiveSlotSource,
@@ -271,7 +271,6 @@ where
         Box::pin(async move {
             match request.method() {
                 HttpMethod::Post => {}
-                HttpMethod::Get => return status_response(&*self.channel),
                 _ => return response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {

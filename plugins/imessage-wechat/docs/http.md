@@ -1,8 +1,9 @@
 # IMessage WeChat HTTP API
 
-## `GET /api/gateway/wechat`
+## `GET /api/gateway/wechat/status`
 
-Returns `200` with the shared channel status (`status_response`):
+Returns `200` with the shared channel status (`status_response`); other methods
+answer `405`:
 
 ```json
 {"configured":true,"mode":"send_receive",
@@ -19,7 +20,8 @@ Returns `200` with the shared channel status (`status_response`):
   new QR login is confirmed.
 - `owners.count`: allowed accounts.
 
-It never returns settings or the token.
+It never returns settings or the token; `POST /api/gateway/wechat` takes
+changes only.
 
 ## `POST /api/gateway/wechat/mode`
 
@@ -58,7 +60,7 @@ Responses:
 - `400 Bad Request` `{"error":"invalid_request"}`: the JSON body was invalid or
   required fields were absent.
 - `405 Method Not Allowed` `{"error":"method_not_allowed"}`: the endpoint only
-  accepts `GET` and `POST`.
+  accepts `POST`.
 - `422 Unprocessable Content` `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored.
 - `500 Internal Server Error` `{"error":"storage"}`: the configuration could not

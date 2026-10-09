@@ -3,6 +3,7 @@
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::string::String;
 use core::cell::{Cell, RefCell};
 
 use barracuda_imessage_gateway_channel::{
@@ -19,6 +20,7 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
 use qq::QQ;
+use serde_json::{json, Map, Value};
 
 use crate::receive::{GatewayState, SESSION_STORAGE_KEY};
 use crate::{load_configuration, ConfigRequest, CONFIGURATION_STORAGE_KEY};
@@ -281,5 +283,14 @@ where
 
     fn owners(&self) -> Option<&Owners<Storage>> {
         self.owners.get()
+    }
+
+    /// `config`: the stored App ID; the App Secret is never reported.
+    fn status_details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        if let Some(settings) = self.settings.borrow().as_ref() {
+            details.insert("config".into(), json!({ "app_id": settings.config.app_id }));
+        }
+        details
     }
 }

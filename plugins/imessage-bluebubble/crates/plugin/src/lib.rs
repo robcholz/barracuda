@@ -22,8 +22,8 @@ use alloc::vec::Vec;
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_channel::{
-    entry_status, receive_runtime, status_response, sync_receive, ChannelControl, ChannelEndpoint,
-    ReceiveRuntime, ReceiveTiming, JSON_CONTENT_TYPE,
+    entry_status, receive_runtime, sync_receive, ChannelControl, ChannelEndpoint, ReceiveRuntime,
+    ReceiveTiming, JSON_CONTENT_TYPE,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin::api::{PluginContext, SharedEntropy};
@@ -211,7 +211,7 @@ async fn bluebubbles_receive_task(runtime: ReceiveRuntime, cancellation: PluginT
 #[error("BlueBubbles receive runtime was not prepared during Plugin registration")]
 struct ReceiveRuntimeUnavailable;
 
-/// `GET` and `POST` on [`CONFIG_API_PATH`].
+/// `POST` on [`CONFIG_API_PATH`]; the channel status is under `/status`.
 struct ConfigEndpoint<Storage, T: 'static, D: 'static>(Rc<BlueBubblesChannel<Storage, T, D>>);
 
 impl<Storage, T, D> ConfigEndpoint<Storage, T, D>
@@ -222,30 +222,6 @@ where
 {
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
-    }
-
-    /// The shared channel status plus the webhook counters while receiving:
-    /// `"webhook":{"lost":n,"skipped":n}`.
-    fn status(&self) -> HttpResponse {
-        let channel = &*self.0;
-        let response = status_response(channel);
-        let Some(shared) = response
-            .body()
-            .filter(|_| channel.mode().receives())
-            .and_then(|body| body.strip_suffix(b"}"))
-        else {
-            return response;
-        };
-        let mut body = Vec::from(shared);
-        body.extend_from_slice(
-            format!(
-                r#","webhook":{{"lost":{},"skipped":{}}}}}"#,
-                channel.book.lost(),
-                channel.book.skipped()
-            )
-            .as_bytes(),
-        );
-        HttpResponse::new(200, JSON_CONTENT_TYPE, body)
     }
 
     async fn configure(&self, body: &[u8]) -> HttpResponse {
@@ -277,7 +253,6 @@ where
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
-                HttpMethod::Get => self.status(),
                 HttpMethod::Post => self.configure(request.body()).await,
                 _ => Self::response(405, br#"{"error":"method_not_allowed"}"#),
             }

@@ -3,14 +3,15 @@
 The shared shapes come from `barracuda-imessage-gateway-channel`; see the
 Gateway's [`plugin.md`](../../imessage-gateway/docs/plugin.md).
 
-## `GET /api/gateway/telegram`
+## `GET /api/gateway/telegram/status`
 
-Returns `200` with the channel status. It never returns settings or the token.
+Returns `200` with the channel status. It never returns the token; other
+methods answer `405`.
 
 ```json
 {"configured":true,"mode":"send_receive",
  "receive":{"state":"receiving","slots":{"in_use":1,"capacity":2}},
- "owners":{"count":1}}
+ "owners":{"count":1},"config":{"bot_id":"123456789"}}
 ```
 
 - `mode` is `disabled`, `send`, or `send_receive`. An unconfigured channel
@@ -21,6 +22,8 @@ Returns `200` with the channel status. It never returns settings or the token.
   `no_slot`. `slots` is the device's receive slots in use across every channel
   and how many it has.
 - `owners.count` is the number of allowed accounts.
+- `config` is present while configured. `bot_id` is the bot's numeric ID, the
+  part of the token before `:` (`null` for a token without one).
 
 ## `POST /api/gateway/telegram`
 
@@ -35,7 +38,7 @@ Responses:
   Gateway unless the mode is `disabled`.
 - `400 Bad Request`, `{"error":"invalid_request"}`: the JSON body was invalid
   or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `405 Method Not Allowed`: the endpoint only accepts `POST`.
 - `422 Unprocessable Content`, `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored
   and no Telegram channel stays registered.

@@ -29,7 +29,10 @@ use embassy_futures::select::select;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::Timer;
-use endpoint::{ScanEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WifiEndpoint};
+use endpoint::{
+    ScanEndpoint, StatusEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WIFI_STATUS_API_PATH,
+    WifiEndpoint,
+};
 
 pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatus};
 
@@ -112,14 +115,10 @@ impl Plugin for WifiPlugin {
             module: "entry.js",
         };
         let files = ResourceFiles::from(context.filesystem()?.clone());
-        // A Platform-managed network has no station state to report.
-        let entry = if control.capabilities().station_configuration {
-            let status = Rc::clone(&control);
-            portal.register_with_status(entry, files, move || entry_status(&status.status()))
-        } else {
-            portal.register(entry, files)
-        }
-        .map_err(PluginError::registration)?;
+        let status = Rc::clone(&control);
+        let entry = portal
+            .register_with_status(entry, files, move || entry_status(&status.status()))
+            .map_err(PluginError::registration)?;
         context.retain(entry);
         for path in CAPTIVE_DETECTION_PATHS {
             context.retain(
@@ -144,6 +143,14 @@ impl Plugin for WifiPlugin {
         context.retain(
             webserver
                 .serve_http(WIFI_SCAN_API_PATH, ScanEndpoint::new(Rc::clone(&control)))
+                .map_err(PluginError::registration)?,
+        );
+        context.retain(
+            webserver
+                .serve_http(
+                    WIFI_STATUS_API_PATH,
+                    StatusEndpoint::new(Rc::clone(&control)),
+                )
                 .map_err(PluginError::registration)?,
         );
         context.provide(Rc::clone(&control))?;

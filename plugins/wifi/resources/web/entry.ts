@@ -19,7 +19,7 @@ import {
   type PortalModule,
 } from "../../../captive-portal/resources/web/ui";
 
-/** `GET /api/wifi` (plugins/wifi/crates/plugin/src/endpoint.rs `StatusResponse`). */
+/** `GET /api/wifi/status` (plugins/wifi/crates/plugin/src/endpoint.rs `StatusResponse`). */
 export interface WifiStatus {
   capabilities: {
     access_point: boolean;
@@ -40,7 +40,9 @@ export interface VisibleNetwork {
   secured: boolean;
 }
 
-const STATUS_URL = "/api/wifi";
+/** `PUT` joins a network, `DELETE` forgets it. */
+const CONFIG_URL = "/api/wifi";
+const STATUS_URL = "/api/wifi/status";
 const SCAN_URL = "/api/wifi/scan";
 /** The phone layout, as the shell switches it (`PHONE_QUERY`). */
 const PHONE_QUERY = "(max-width: 719px)";
@@ -473,7 +475,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     busy = true;
     update();
     const outcome = await submitJson(context, {
-      endpoint: STATUS_URL,
+      endpoint: CONFIG_URL,
       method: "PUT",
       body,
       timeoutMs: JOIN_TIMEOUT_MS,
@@ -496,7 +498,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     busy = true;
     update();
     const outcome = await submitJson(context, {
-      endpoint: STATUS_URL,
+      endpoint: CONFIG_URL,
       method: "DELETE",
       body: undefined,
       success: { title: t.forgot(ssid) },

@@ -35,16 +35,22 @@ const T = {
 
 const ENDPOINT = "/api/gateway/qq";
 
+/** `GET /api/gateway/qq/status`: `config` holds the stored App ID while configured. */
+type QQStatus = ChannelStatus & { config?: { app_id: string } };
+
 /**
  * The QQ page: App ID and App Secret, posted to `POST /api/gateway/qq`. The device fetches one access
  * token before it stores anything; QQ's own rejection (422 `verification_failed`) is shown on the
- * secret field. `GET` on the same path says whether a channel is configured, and its mode and allowed
- * accounts (`/mode`, `/owners`) show while it is.
+ * secret field. `GET /status` below it says whether a channel is configured and with which App
+ * ID, and its mode and allowed accounts (`/mode`, `/owners`) show while it is.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
   const t = T[lang];
   const current = configuredRow("QQ", lang);
+  const showCurrent = (state: QQStatus | null) => {
+    if (state?.configured) current.show(true, state.config?.app_id);
+  };
   const inbound = channelInbound(context, {
     endpoint: ENDPOINT,
     channel: "QQ",
@@ -90,7 +96,7 @@ export const mount = definePage((context) => {
       },
       onSuccess: () => {
         current.show(true);
-        void inbound.refresh();
+        void inbound.refresh().then(showCurrent);
         void context.refreshStatus();
       },
       success: {
@@ -104,8 +110,8 @@ export const mount = definePage((context) => {
   );
   form.element.prepend(current.element);
   inbound.attach(form);
-  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
-    if (state?.configured) current.show(true);
+  void readChannel<QQStatus>(context, ENDPOINT).then((state) => {
+    showCurrent(state);
     inbound.apply(state);
   });
   return page(

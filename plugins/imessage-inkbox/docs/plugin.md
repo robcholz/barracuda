@@ -18,7 +18,7 @@ registers the configured channel `inkbox` for its lifetime, so it can be active
 beside the BlueBubbles `bluebubbles` channel. Inkbox cannot quote a message, so
 `reply_to` on text and media is ignored instead of failing. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
-stored data fails registration. `GET /api/gateway/inkbox` reports whether a
+stored data fails registration. `GET /api/gateway/inkbox/status` reports whether a
 channel is configured and, for a signup, the person's address, the agent
 mailbox and the claim status. See
 [`http.md`](http.md).
@@ -138,7 +138,7 @@ step. A signup error with `"retry": true` (the device kept the signup) offers
 「重试」, which posts the same email again and resumes it without a second email.
 「已有 API Key」 posts `{api_key, identity_id, api_base}` to `POST
 /api/gateway/inkbox`; the form footer shows only in this mode. On mount the page
-reads `GET /api/gateway/inkbox` (the channel status plus `signup`): a stored signup resumes at the code step
+reads `GET /api/gateway/inkbox/status` (the channel status plus `signup`): a stored signup resumes at the code step
 (`claim_status` other than `agent_claimed`; the note names `human_email` and
 prefills the email field, or says the code went to the person's inbox when
 `human_email` is absent) or at the claimed

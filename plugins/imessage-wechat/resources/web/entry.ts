@@ -107,8 +107,8 @@ const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 /**
  * The WeChat page. The device runs one iLink QR login (`POST/GET/DELETE /api/gateway/wechat/login`):
  * the page starts it, shows the code, polls every 2 s and cancels it when it goes away. A token
- * entered by hand under 「高级」 posts to `POST /api/gateway/wechat`. Once linked, `GET` on that path
- * shows the channel's mode (no 「仅发送」) and allowed accounts.
+ * entered by hand under 「高级」 posts to `POST /api/gateway/wechat`. Once linked,
+ * `GET /api/gateway/wechat/status` shows the channel's mode (no 「仅发送」) and allowed accounts.
  */
 export const mount = definePage((context) => {
   const { lang } = context;

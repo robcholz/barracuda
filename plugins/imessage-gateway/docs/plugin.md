@@ -185,6 +185,7 @@ pub trait ChannelControl: 'static {
     fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
     fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
+    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `config`
 }
 pub fn sync_receive<C: ChannelControl + ?Sized>(channel: &C) -> Result<(), NoSlot>;
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse;
@@ -195,17 +196,19 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
 
 A channel registers one prefix route for its configuration path,
 `serve_http_prefix(base, ChannelEndpoint::new(channel, base, config))`:
-`base` goes to the Plugin's own `config` endpoint, `base/mode` to
-`ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any other path below
+`base` goes to the Plugin's own `config` endpoint, which takes changes only;
+`GET base/status` answers `status_response` (405 for other methods);
+`base/mode` goes to `ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any
+other path below
 `base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
 `/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
 (BlueBubbles' `/webhook`) still take their own requests. One route per channel
-instead of three keeps the webserver's route table within its first
+instead of four keeps the webserver's route table within its first
 allocation.
 
 | Request | Response |
 | --- | --- |
-| `GET /api/gateway/<channel>` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}` |
+| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`, then the channel's `status_details` |
 | `POST /api/gateway/<channel>/mode` `{"mode":"send"}` | 204 |
 | the same with `send_receive` and no free slot | 409 `{"error":"no_slot","capacity":2}` |
 | `GET /api/gateway/<channel>/owners` | 200 `{"owners":[{"id":"42","label":"Ann"}],"pairing":{"code":"012345","expires_in":600},"ignored":3}` |
@@ -300,7 +303,9 @@ allocation.
    call `sync_receive(&*state)`; a `NoSlot` there is already reported as
    state. Keep the runtime for `start`.
 7. **Endpoints.**
-   - The configuration endpoint's `GET` returns `status_response(&*state)`.
+   - The configuration endpoint takes `POST` only; `ChannelEndpoint` answers
+     `GET /status`. Report the stored configuration without its secrets from
+     `status_details` as `config`.
    - After a successful configuration `POST`, it calls `sync_receive` and
      `control.restart()`.
    - Register the configuration endpoint, `/mode`, and `/owners` as one
