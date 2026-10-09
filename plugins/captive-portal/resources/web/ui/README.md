@@ -30,11 +30,16 @@ and a `PortalContext`:
 | `navigate(id)`    | go to another entry ID, or `"overview"`                                                    |
 | `status(id?)`     | the entry's latest `GET /portal/status` record (this page's own by default), or `null`     |
 | `refreshStatus()` | reads the status again and redraws the sidebar and overview; call it after a save succeeds |
+| `badge?(badge)`   | shows the page's live state in the top bar (`{ label, tone: "live" \| "lost" }`), or clears it with `null`; Web chat's connection |
 
 `mount` may return a cleanup function (or a promise of one). After the signal
-aborts, `toast`, `navigate` and `refreshStatus` do nothing. Types: `PortalModule`,
-`PortalContext`, `Toast`, `Lang`, `PortalText`, `EntryStatus`, `EntryState` (all
+aborts, `toast`, `navigate`, `refreshStatus` and `badge` do nothing. Types: `PortalModule`,
+`PortalContext`, `PageBadge`, `Toast`, `Lang`, `PortalText`, `EntryStatus`, `EntryState` (all
 exported by the kit).
+
+The device serves only four connections at once and refuses the rest, so the shell routes the
+window's `fetch` through one queue (two requests in flight) and retries a refused `GET`. Pages
+use plain `fetch`; `assetIcon` fetches its file through the same queue.
 
 An `EntryStatus` is `{ state, label?, detail? }`: `state` is `"ready"`, `"attention"`
 or `"off"`, `label` a `{ zh, en }` phrase (「已配置」), `detail` a machine value the

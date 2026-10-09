@@ -238,7 +238,7 @@ export function mount(root: HTMLElement, context: PortalContext) {
 }
 ```
 
-The context is `{ signal, lang, toast, navigate, status, refreshStatus }`:
+The context is `{ signal, lang, toast, navigate, status, refreshStatus, badge? }`:
 
 - `signal` is aborted on navigation, language change, unload, or page exit;
 - `lang` (`"zh"` or `"en"`) is the language the module renders its own strings in;
@@ -251,9 +251,17 @@ The context is `{ signal, lang, toast, navigate, status, refreshStatus }`:
   (`{ state, label?, detail? }`) of the page's own entry, or of `id`, or `null`;
 - `refreshStatus()` reads the status again and redraws what shows it; a page
   calls it after a save succeeds. It resolves when done and never rejects; a
-  call during a read reads once more after it.
+  call during a read reads once more after it;
+- `badge?({ label, tone: "live" | "lost" } | null)` shows the page's live state in
+  the top bar in place of the device badge (Web chat: 已连接 / 已断开), or clears
+  it; the shell clears it when the page closes.
 
-`toast`, `navigate` and `refreshStatus` do nothing once the signal is aborted. `mount` may return
+The device's web server holds four connections and refuses any beyond them, so
+the shell sends every request through one queue (two in flight), retries a
+refused `GET` with backoff, and retries a failed module load with `?r=<n>` (the
+server ignores the query). Pages call plain `fetch`; it is the queued one.
+
+`toast`, `navigate`, `refreshStatus` and `badge` do nothing once the signal is aborted. `mount` may return
 a promise of its cleanup function, or no cleanup function. The shell aborts the
 signal and runs cleanup before removing the module's root. Every mount gets its
 own DOM root; stale imports cannot mount into a new screen. Modules must handle
