@@ -37,14 +37,31 @@ WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`, plus
 SSE-formatted frames the bridge returns: message start, delta, edit, delete,
 reaction and end (an end error marks the message incomplete), the Agent's
 semantic events inside `message.event` (reasoning, tool results, output and
-effect output, steps and token usage, turn and session errors), permission
-requests (Allow and Deny send a text answer; any message answers the pending
-request), typing, `stream.lagged`, and attachments, which become downloads
-once complete (at most 8 MiB is kept per attachment). Messages are capped at
-1,024 UTF-8 bytes. It receives live events only, retains at most 100 log items
-with 65,536 UTF-16 code units per text part, and closes the socket when
-unmounted. Sends have no server receipt; a send counts as confirmed only when
-an Agent message replies to it or the turn it answered goes on, and the
-disconnected notice counts the rest; reconnection never resends. The overview
-tile shows the `laptop` figure (`resources/web/figure.js`); the sidebar icon
+effect output, turn and session errors; steps and token usage stay off the
+page), permission requests (Allow and Deny send a text answer; any message
+answers the pending request), typing, `stream.lagged`, and attachments, which
+become downloads once complete (at most 8 MiB is kept per attachment). It
+receives live events only, retains at most 100 log items with 65,536 UTF-16
+code units per text part, and closes the socket when unmounted.
+
+The page follows the design system's Chat card. A fresh temporary session
+holds the composer mid-page under the `laptop` figure, with suggestions below;
+once it has messages, a pinned head says 「临时会话」. The composer is one row:
+the textarea fits its text up to 200px beside its send button. Messages are
+capped at 1,024 UTF-8 bytes; past the cap send is disabled and one sentence
+says so, with no counter. The device runs one turn at a time, so a message
+written while a turn runs (or before the device starts the last one) waits in
+the page's queue, where it can be edited or removed, and goes out when the turn
+ends; a permission answer goes out at once. While a turn runs its author mark
+spins (`resources/web/mark.ts`: WebGL, which plain HTTP allows; the static mark
+and typing dots where WebGL is missing, the mark at rest under reduced motion)
+and 「思考中」 shimmers until text streams. Replies stream in smoothly behind a
+blinking caret; reasoning folds itself away as 「思考了 N 秒」; a running tool
+spins; each finished reply ends with Copy and Reply icon buttons. The page's
+own rules (`resources/web/style.ts`) are added on mount and removed on unmount.
+Sends have no server receipt; a send counts as confirmed only when an Agent
+message replies to it or the turn it answered goes on, and the disconnected
+notice counts the rest; reconnection never resends, though queued messages that
+never went out leave once the socket is back. The overview tile shows the
+`laptop` figure (`resources/web/figure.js`); the sidebar icon
 is `resources/web/icon.svg` (Lucide `message-square`).

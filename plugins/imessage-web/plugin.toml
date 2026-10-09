@@ -5,5 +5,5 @@ description = "Adds a WebSocket conversation channel to the iMessage Gateway."
 [tasks.build]
 cwd = "."
 command = ["bun", "../../tools/web/build.ts"]
-inputs = ["resources/web/entry.ts", "resources/web/figure.js", "resources/web/icon.svg", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "resources/web/mark.ts", "resources/web/style.ts", "resources/web/figure.js", "resources/web/icon.svg", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
 outputs = ["filesystem/resources/entry.js", "filesystem/resources/figure.js", "filesystem/resources/icon.svg"]
