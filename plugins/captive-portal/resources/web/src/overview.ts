@@ -140,21 +140,36 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
     if (found) node.setAttribute("data-state", found.state);
     else node.removeAttribute("data-state");
   }
+  // the device's two k/v rows: 「状态」 with its label, then its title with its detail (the
+  // network name) in mono, or 「—」 when the device does not know it
   const device = deviceStatus(entries, status);
   for (const node of root.querySelectorAll<HTMLElement>(
     "[data-status-device]",
   )) {
-    const value =
-      device &&
-      (node.tagName === "DT"
-        ? device.entry.title[lang]
-        : (device.status.detail ?? device.status.label?.[lang]));
-    node.textContent = value || "";
-    node.style.display = value ? "" : "none";
-    // a detail (the network name) is a machine value; a label is words
+    node.style.display = device ? "" : "none";
+    if (!device) continue;
+    const state = node.getAttribute("data-status-device") === "state";
+    const { label, detail } = device.status;
+    node.replaceChildren(
+      node.tagName === "DT"
+        ? state
+          ? STRINGS[lang].kvStatus
+          : device.entry.title[lang]
+        : state
+          ? label
+            ? h(
+                "span",
+                {
+                  class: `bc-badge${device.status.state === "ready" ? " bc-badge--signal" : ""}`,
+                },
+                label[lang],
+              )
+            : "—"
+          : (detail ?? "—"),
+    );
     node.classList.toggle(
       "bc-mono",
-      node.tagName === "DD" && !!device?.status.detail,
+      !state && node.tagName === "DD" && !!detail,
     );
   }
   for (const item of root.querySelectorAll<HTMLElement>("[data-step]")) {
@@ -364,8 +379,10 @@ export function renderOverview(view: OverviewView) {
         h(
           "dl",
           { class: "bc-kv portal-hero__kv" },
-          h("dt", { "data-status-device": "" }),
-          h("dd", { "data-status-device": "" }),
+          h("dt", { "data-status-device": "state" }),
+          h("dd", { "data-status-device": "state" }),
+          h("dt", { "data-status-device": "name" }),
+          h("dd", { "data-status-device": "name" }),
           h("dt", null, term(t.kvPages, t.pagesTip)),
           h("dd", { class: "bc-mono" }, String(entries.length)),
           h("dt", null, t.kvConn),
