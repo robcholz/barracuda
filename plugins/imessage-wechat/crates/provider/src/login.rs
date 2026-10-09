@@ -176,8 +176,15 @@ where
         parse_login_response(response)
     }
 
+    /// Sends a bodiless GET.
+    ///
+    /// The body is an empty slice, not `()`: reqwless frames a `()` body as
+    /// `Transfer-Encoding: chunked`, and iLink rejects such a GET with
+    /// `412 Precondition Failed`. An empty slice sends `Content-Length: 0`.
     async fn fetch(&self, url: &str) -> Result<Response, Error> {
-        barracuda_imessage_gateway_plugin::send(&self.http_clients, Method::GET, url, &[], ()).await
+        let body: &[u8] = &[];
+        barracuda_imessage_gateway_plugin::send(&self.http_clients, Method::GET, url, &[], body)
+            .await
     }
 }
 

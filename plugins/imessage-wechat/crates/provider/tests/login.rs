@@ -50,6 +50,9 @@ fn qrcode_returns_the_id_and_scan_url() {
         request_line(network, 0),
         "GET /ilink/bot/get_bot_qrcode?bot_type=3 HTTP/1.1"
     );
+    // iLink answers a chunked GET with HTTP 412.
+    let request = network.requests()[0].to_ascii_lowercase();
+    assert!(!request.contains("transfer-encoding"), "{request}");
 }
 
 #[test]
