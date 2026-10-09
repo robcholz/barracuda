@@ -40,7 +40,7 @@ export function configuredRow(name: Text, lang: Lang): ConfiguredRow {
   const body = element.querySelector(".bc-row__body")!;
   // the card exists only while shown, so a hidden row holds no status region
   const show = (visible: boolean) => {
-    element.style.display = visible ? "" : "none";
+    element.hidden = !visible;
     body.replaceChildren(
       ...(visible
         ? [resultCard({ title: name, badge: s.configured }, lang)]

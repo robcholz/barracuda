@@ -49,7 +49,7 @@ test("renders the design in Chinese: brand title, riffle, Bot row with link, ver
   expect(root.querySelector("hl-figure")?.getAttribute("name")).toBe("riffle");
   expect(
     [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
-      .filter((row) => row.style.display !== "none")
+      .filter((row) => !row.hidden)
       .map((row) => row.querySelector(".bc-title")?.textContent),
   ).toEqual(["机器人", undefined]);
   expect(root.querySelector(".bc-row__label .bc-muted")?.textContent).toBe(
@@ -118,7 +118,7 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
   const chat = [...page.root.querySelectorAll<HTMLElement>(".bc-row")].find(
     (row) => row.textContent?.startsWith("开始对话"),
   )!;
-  expect(chat.style.display).toBe("");
+  expect(chat.hidden).toBe(false);
   expect(chat.textContent).toContain("用手机扫码，打开和 Bot 的对话");
   const open = chat.querySelector("a")!;
   expect([open.textContent, open.getAttribute("href")]).toEqual([
@@ -134,7 +134,7 @@ test("验证 calls getMe from the browser and shows the bot and a chat link", as
   // editing the token drops the stale result
   page.type("token", "123:abd");
   expect(page.query(".bc-card[role=status]")).toBeNull();
-  expect(chat.style.display).toBe("none");
+  expect(chat.hidden).toBe(true);
 });
 
 test("Telegram's refusal is shown on the token field; the 高级 API base is used", async () => {
@@ -212,7 +212,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const shown = await harness.render(mount, "en");
   await settle();
   const current = shown.query(".bc-form > .bc-row")!;
-  expect(current.style.display).toBe("");
+  expect(current.hidden).toBe(false);
   expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
   expect(current.querySelector(".bc-option-title")?.textContent).toBe(
     "Telegram",
@@ -226,16 +226,16 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const page = await harness.render(mount, "zh");
   await settle();
   const row = page.query(".bc-form > .bc-row")!;
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   page.type("token", "123:abc");
   harness.reply = async () => json(422, { error: "registration_failed" });
   await page.submit();
   expect(page.refreshes.count).toBe(0);
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   harness.reply = async () => new Response(null, { status: 204 });
   await page.submit();
   expect(page.refreshes.count).toBe(1);
-  expect(row.style.display).toBe("");
+  expect(row.hidden).toBe(false);
   expect(
     row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
   ).toBe("已配置");
@@ -273,7 +273,7 @@ test("a configured channel shows its mode, the /start code and the allowed accou
     ]);
     expect(
       [...page.root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
-        .filter((row) => row.style.display !== "none")
+        .filter((row) => !row.hidden)
         .map((row) => row.querySelector(".bc-title")?.textContent),
     ).toEqual(["通道", "机器人", "模式", "授权账号", undefined]);
     expect(

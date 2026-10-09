@@ -101,8 +101,7 @@ interface InkboxState {
 /** Upstream signups and claims can take a TLS handshake or two on the device. */
 const FLOW_TIMEOUT = 30_000;
 
-const show = (node: HTMLElement, visible: boolean) =>
-  (node.style.display = visible ? "" : "none");
+const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 
 /**
  * The Inkbox page. 「用邮箱新建」 signs an agent up on the device (`POST /api/gateway/inkbox/signup`,

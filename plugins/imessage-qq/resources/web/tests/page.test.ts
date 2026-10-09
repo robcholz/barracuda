@@ -44,13 +44,11 @@ test("renders the design in Chinese: App ID and App Secret, token URL under 高�
   // 模式 and 授权账号 wait for a configured channel too
   expect(
     [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
-      .filter((row) => row.style.display !== "none")
+      .filter((row) => !row.hidden)
       .map((row) => row.querySelector(".bc-title")?.textContent),
   ).toEqual(["机器人", undefined]);
   // the 通道 row waits for the device to say a channel is configured
-  expect(root.querySelector<HTMLElement>(".bc-row")?.style.display).toBe(
-    "none",
-  );
+  expect(root.querySelector<HTMLElement>(".bc-row")?.hidden).toBe(true);
   expect(page.text()).toContain("在 QQ 开放平台创建机器人，从「开发设置」复制");
   expect(root.querySelector(".bc-row__label a")?.getAttribute("href")).toBe(
     "https://q.qq.com",
@@ -135,7 +133,7 @@ test("QQ's rejection lands on the secret field with its code", async () => {
   expect(error.textContent).toBe("");
 });
 
-test("an unreachable token service toasts the device's message, in English", async () => {
+test("an unreachable token service says to check the network, in English", async () => {
   const page = await render("en");
   harness.reply = async () =>
     json(502, { error: "upstream_unavailable", message: "dns failure" });
@@ -144,8 +142,8 @@ test("an unreachable token service toasts the device's message, in English", asy
   await page.submit();
   expect(page.toasts.at(-1)).toEqual({
     kind: "error",
-    title: "Submission failed",
-    body: "dns failure",
+    title: "The device can't reach the service",
+    body: "Check the device's network, then try again.",
     code: "502",
   });
   expect(
@@ -161,7 +159,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const shown = await harness.render(mount, "en");
   await settle();
   const current = shown.query(".bc-form > .bc-row")!;
-  expect(current.style.display).toBe("");
+  expect(current.hidden).toBe(false);
   expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
   expect(current.querySelector(".bc-option-title")?.textContent).toBe("QQ");
   expect(
@@ -173,17 +171,17 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const page = await harness.render(mount, "zh");
   await settle();
   const row = page.query(".bc-form > .bc-row")!;
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   page.type("app_id", "102345678");
   page.type("app_secret", "s3cret");
   harness.reply = async () => json(422, { error: "registration_failed" });
   await page.submit();
   expect(page.refreshes.count).toBe(0);
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   harness.reply = async () => new Response(null, { status: 204 });
   await page.submit();
   expect(page.refreshes.count).toBe(1);
-  expect(row.style.display).toBe("");
+  expect(row.hidden).toBe(false);
   expect(
     row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
   ).toBe("已配置");
@@ -236,7 +234,7 @@ test("with every receive slot taken it says so and names the limit", async () =>
       const alert = page.query<HTMLElement>(
         ".bc-header + .bc-alert[role=status]",
       );
-      expect(alert?.style.display).toBe("");
+      expect(alert?.hidden).toBe(false);
       expect(alert?.nextElementSibling?.classList.contains("bc-form")).toBe(
         true,
       );

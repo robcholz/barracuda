@@ -17,6 +17,8 @@ export const KIT_STRINGS: Record<
     rejected: string;
     missing: string;
     failed: string;
+    unreachable: string;
+    unreachableHint: string;
     noReply: string;
     retry: string;
     channel: string;
@@ -37,6 +39,8 @@ export const KIT_STRINGS: Record<
     rejected: "配置被拒绝",
     missing: "接口不可用",
     failed: "提交失败",
+    unreachable: "设备连不上服务",
+    unreachableHint: "检查设备的网络后重试。",
     noReply: "未收到设备确认",
     retry: "重试",
     channel: "通道",
@@ -56,6 +60,8 @@ export const KIT_STRINGS: Record<
     rejected: "Configuration rejected",
     missing: "Endpoint not available",
     failed: "Submission failed",
+    unreachable: "The device can't reach the service",
+    unreachableHint: "Check the device's network, then try again.",
     noReply: "No confirmation from the device",
     retry: "Retry",
     channel: "Channel",

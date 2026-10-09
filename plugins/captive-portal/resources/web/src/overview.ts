@@ -176,6 +176,24 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
       );
     }
   }
+  const next = root.querySelector<HTMLElement>("[data-next-step]");
+  if (next) {
+    const steps = groupsOf(entries);
+    const index = steps.findIndex(
+      ({ entries: members }) => !stepDone(members, status, lang),
+    );
+    next.hidden = index < 0;
+    if (index >= 0) {
+      const t = STRINGS[lang];
+      const { group, entries: members } = steps[index];
+      const row = next.firstElementChild as HTMLAnchorElement;
+      row.href = `#${members[0].id}`;
+      const [count, text] = row.children;
+      count.textContent = `${twoDigits(index + 1)}/${twoDigits(steps.length)}`;
+      text.firstElementChild!.textContent = t.next(t.steps[group]);
+      text.lastElementChild!.textContent = t.stepHints[group];
+    }
+  }
 }
 
 export interface ModuleLayout {
@@ -303,7 +321,11 @@ function channelCard(rows: WebEntry[], span: number, lang: Lang) {
           ),
           h(
             "span",
-            { class: "bc-small bc-muted portal-grow" },
+            {
+              class:
+                "bc-small bc-muted portal-grow portal-channel-row__summary",
+              title: entry.summary[lang],
+            },
             entry.summary[lang],
           ),
           slot(entry, "label", "bc-muted"),
@@ -437,6 +459,23 @@ export function renderPhoneHome(view: OverviewView) {
       h("hl-figure", { name: "board", "aria-label": t.figAlt }),
       h("h1", { class: "bc-mobile-title" }, t.overview),
       h("p", { class: "bc-lead" }, t.phoneLead),
+    ),
+    // the first step not done; filled and shown by paintStatus
+    h(
+      "div",
+      { class: "bc-list", "data-next-step": "", hidden: true },
+      h(
+        "a",
+        { class: "bc-list-row" },
+        h("span", { class: "bc-mono bc-caption bc-muted" }),
+        h(
+          "span",
+          { class: "portal-grow portal-stack" },
+          h("span", { class: "bc-option-title" }),
+          h("span", { class: "bc-small bc-muted" }),
+        ),
+        icon(ICON_CHEVRON_RIGHT),
+      ),
     ),
     groupsOf(entries).map(({ group, entries: members }) => [
       h("h2", { class: "bc-list-label" }, t.groups[group]),

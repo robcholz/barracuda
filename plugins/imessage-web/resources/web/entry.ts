@@ -66,6 +66,8 @@ const STRINGS = {
     lagged: "错过 {n} 个事件",
     turnError: "这一轮出错",
     offline: "连接已中断",
+    live: "已连接",
+    lost: "已断开",
     /** After the count in mono: 「`1` 条消息未确认，重新连接后再发送」. */
     unconfirmed: (_n: number) => " 条消息未确认，重新连接后再发送",
     reconnect: "重新连接",
@@ -122,6 +124,8 @@ const STRINGS = {
     lagged: "Missed {n} events",
     turnError: "This turn failed",
     offline: "Disconnected",
+    live: "Connected",
+    lost: "Disconnected",
     unconfirmed: (n: number) =>
       ` ${n === 1 ? "message" : "messages"} unconfirmed; send again after reconnecting`,
     reconnect: "Reconnect",
@@ -1223,6 +1227,15 @@ export const mount = definePage((context: PortalContext) => {
     sendButton.disabled = !online;
   }
 
+  // the top bar carries the connection state, as the design's chat boards show it
+  function setLink(state: "connecting" | "live" | "lost") {
+    context.badge?.(
+      state === "connecting"
+        ? null
+        : { label: state === "live" ? t.live : t.lost, tone: state },
+    );
+  }
+
   function nearBottom() {
     const page = doc.scrollingElement;
     return (
@@ -1256,6 +1269,7 @@ export const mount = definePage((context: PortalContext) => {
     connection.addEventListener("open", () => {
       if (!active()) return;
       setOnline(true);
+      setLink("live");
       if (byUser) context.toast({ kind: "success", title: t.reconnected });
     });
     connection.addEventListener("message", (event) => {
@@ -1279,6 +1293,7 @@ export const mount = definePage((context: PortalContext) => {
   function disconnected() {
     socket = undefined;
     setOnline(false);
+    setLink("lost");
     input.disabled = true;
     show(typing, false);
     caret.remove();

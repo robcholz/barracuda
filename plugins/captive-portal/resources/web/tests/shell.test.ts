@@ -658,19 +658,27 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
   expect(
     h.$$(".portal-phone-home .bc-list-label").map((node) => node.textContent),
   ).toEqual(["设备", "智能体", "消息通道"]);
-  expect(h.$$(".portal-phone-home .bc-list-row")).toHaveLength(9);
+  expect(
+    h.$$(".portal-phone-home .bc-list:not([data-next-step]) .bc-list-row"),
+  ).toHaveLength(9);
+  // the design's 「下一步」 row leads to the first step not done
+  const next = h.$("[data-next-step]")!;
+  expect(next.hidden).toBe(false);
+  expect(next.textContent).toBe("01/03下一步：连接 Wi-Fi让设备连上你的网络");
+  expect(next.querySelector("a")?.getAttribute("href")).toBe("#wifi");
   // the phone top bar's brand is the Wordmark link
   const brand = h.$(".portal-topbar--phone a.bc-brand")!;
   expect(brand.getAttribute("href")).toBe("#overview");
   expect(brand.querySelector(".bc-wordmark")?.textContent).toBe("Barracuda");
   expect(h.$(".portal-phone-home h1")?.className).toBe("bc-mobile-title");
-  // the title block is a .bc-mobile-header; each group is a .bc-list after its label; the footer
-  // closes the list (List)
+  // the title block is a .bc-mobile-header, then the 「下一步」 list; each group is a .bc-list
+  // after its label; the footer closes the list (List)
   const home = h.$(".portal-phone-home")!;
   expect(home.firstElementChild?.className).toBe(
     "bc-mobile-header portal-phone-hero",
   );
   expect([...home.children].slice(1).map((node) => node.className)).toEqual([
+    "bc-list",
     "bc-list-label",
     "bc-list",
     "bc-list-label",
@@ -894,10 +902,14 @@ test("the status is read with the manifest, on navigation, on focus and when a p
 
 test("on a phone the list shows the detail and the channel labels", async () => {
   const h = await start({ width: 390, status: STATUS });
-  const asides = h.$$(".portal-phone-home .bc-list-row").map((row) => {
-    const node = row.querySelector<HTMLElement>(".portal-aside");
-    return node && node.style.display !== "none" ? node.textContent : "";
-  });
+  // every step is done, so there is no 「下一步」
+  expect(h.$("[data-next-step]")?.hidden).toBe(true);
+  const asides = h
+    .$$(".portal-phone-home .bc-list:not([data-next-step]) .bc-list-row")
+    .map((row) => {
+      const node = row.querySelector<HTMLElement>(".portal-aside");
+      return node && node.style.display !== "none" ? node.textContent : "";
+    });
   expect(asides).toEqual([
     "HomeNet",
     "",

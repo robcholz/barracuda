@@ -101,9 +101,11 @@ export async function callDevice<T = unknown>(
 }
 
 /**
- * Toasts a failed device call in the kit's words: 「配置被拒绝」 for 4xx (「接口不可用」 for 404),
- * 「提交失败」 otherwise, with the status (and upstream code) in mono and the device's `message`
- * as the body; 「未收到设备确认」 when nothing came back. `retry` becomes a 「重试」 action when
+ * Toasts a failed device call in the kit's words: 「配置被拒绝」 for 4xx (「接口不可用」 for 404) with
+ * the device's `message` as the body, 「设备连不上服务」 when the device could not reach the
+ * service, 「提交失败」 for any other 5xx, with the status (and upstream code) in mono. A 5xx
+ * `message` describes the device's internals (a TLS error, say), so it is never shown. When
+ * nothing came back, 「未收到设备确认」. `retry` becomes a 「重试」 action when
  * nothing came back, or when the device's error says it can be retried (`"retry": true`).
  */
 export function toastDeviceError(
@@ -120,16 +122,20 @@ export function toastDeviceError(
     });
     return;
   }
-  const { status, message, code } = result.error;
+  const { status, message, code, error } = result.error;
+  const client = status >= 400 && status < 500;
+  const unreachable = !client && error === "upstream_unavailable";
   context.toast({
     kind: "error",
     title:
       status === 404
         ? s.missing
-        : status >= 400 && status < 500
+        : client
           ? s.rejected
-          : s.failed,
-    body: message,
+          : unreachable
+            ? s.unreachable
+            : s.failed,
+    body: client ? message : unreachable ? s.unreachableHint : undefined,
     code: code ? `${status} · ${code}` : String(status),
     action:
       result.error.retry && retry ? { label: s.retry, run: retry } : undefined,

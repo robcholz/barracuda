@@ -103,6 +103,7 @@ async function render(lang: Lang = "zh") {
     refreshStatus: async () => {
       refreshes.count++;
     },
+    badge: () => {},
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);

@@ -1,3 +1,5 @@
+import { installQueuedFetch, queuedImport } from "./net";
 import { startPortal } from "./shell";
 
-startPortal();
+installQueuedFetch(window);
+startPortal({ load: queuedImport() });

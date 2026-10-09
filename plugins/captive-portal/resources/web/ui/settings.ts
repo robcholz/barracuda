@@ -152,7 +152,8 @@ export interface SubmitOptions {
   retry?: () => void;
   /**
    * Runs on a non-2xx reply with the device's `{error, message, code}` body, before the toast; return
-   * a `title` or `body` to replace the toast's (for example `{ body: error.message }`).
+   * a `title` or `body` to replace the toast's (for example `{ body: error.message }`). A `body` is
+   * shown for a 4xx only: a 5xx message describes the device's internals.
    */
   onError?: (error: DeviceError) => { title?: Text; body?: Text } | void;
 }
@@ -195,19 +196,29 @@ export async function submitJson(
       });
       return "accepted";
     }
-    const error = options.onError ? await deviceError(response) : null;
+    const error = await deviceError(response);
     if (context.signal.aborted) return "aborted";
-    const custom = (error && options.onError?.(error)) || {};
+    const custom = options.onError?.(error) || {};
+    const client = response.status >= 400 && response.status < 500;
+    // a 5xx message describes the device's internals, so only a 4xx one reaches the reader
+    const unreachable = !client && error.error === "upstream_unavailable";
     context.toast({
       kind: "error",
       title: custom.title
         ? pick(custom.title, lang)
         : response.status === 404
           ? s.missing
-          : response.status >= 400 && response.status < 500
+          : client
             ? s.rejected
-            : s.failed,
-      body: custom.body ? pick(custom.body, lang) : undefined,
+            : unreachable
+              ? s.unreachable
+              : s.failed,
+      body:
+        client && custom.body
+          ? pick(custom.body, lang)
+          : unreachable
+            ? s.unreachableHint
+            : undefined,
       code: String(response.status),
     });
     return response.status >= 400 && response.status < 500
@@ -333,9 +344,10 @@ export function fieldControl(
         paint();
       }
       if (secret || field.action) {
-        input.style.cssText = "flex:1 1 auto;min-width:0";
+        // on a narrow screen the buttons wrap under a full-width input
+        input.style.cssText = "flex:1 1 280px;min-width:0";
         const line2 = h("div", null, input, reveal, field.action);
-        line2.style.cssText = "display:flex;gap:var(--space-2)";
+        line2.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2)";
         element = h(
           "div",
           { class: "bc-field" },
@@ -409,9 +421,10 @@ export function fieldControl(
       );
       const line = errorLine();
       line.id = `${id}-error`;
+      // a number needs no more than a short box, as the design draws it
       const element = h(
         "label",
-        { class: "bc-field" },
+        { class: "bc-field", style: "max-width: 280px" },
         labelText(field, lang),
         group,
         hintLine(field, lang),

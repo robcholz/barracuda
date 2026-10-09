@@ -377,11 +377,11 @@ test("settingsForm extensions: field action, row link and blocks, coded errors, 
   const foldBody =
     form.element.querySelector<HTMLInputElement>('[name="api_base"]')!
       .parentElement!.parentElement!;
-  expect(foldBody.style.display).toBe("none");
+  expect(foldBody.hidden).toBe(true);
   form.element.querySelector<HTMLButtonElement>(".bc-disclosure")!.click();
   expect(foldBody.style.display).toBe("flex");
   form.element.querySelector<HTMLButtonElement>(".bc-disclosure")!.click();
-  expect(foldBody.style.display).toBe("none");
+  expect(foldBody.hidden).toBe(true);
   expect(toggles).toEqual([true, false]);
   // an invalid field in the closed fold opens it, and says so
   token.value = "s";
@@ -490,9 +490,9 @@ test("readChannel reads the configured flag; configuredRow shows the card once t
 
   for (const lang of ["zh", "en"] as const) {
     const current = configuredRow("Telegram", lang);
-    expect(current.element.style.display).toBe("none");
+    expect(current.element.hidden).toBe(true);
     current.show(true);
-    expect(current.element.style.display).toBe("");
+    expect(current.element.hidden).toBe(false);
     expect(current.element.querySelector(".bc-row__label")?.textContent).toBe(
       lang === "zh" ? "通道" : "Channel",
     );

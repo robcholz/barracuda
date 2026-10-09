@@ -109,7 +109,7 @@ const requests = () =>
 const rows = (page: Page) =>
   [...page.root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")].map(
     (row) =>
-      `${row.querySelector(".bc-title, .bc-disclosure")?.textContent}${row.style.display === "none" ? " (hidden)" : ""}`,
+      `${row.querySelector(".bc-title, .bc-disclosure")?.textContent}${row.hidden ? " (hidden)" : ""}`,
   );
 const modeRow = (page: Page) =>
   [...page.root.querySelectorAll<HTMLElement>(".bc-row")].find((row) =>
@@ -170,7 +170,7 @@ test("a configured channel shows 模式 and 授权账号 before the fold, in the
     "收发中",
   );
   expect(mode.querySelector(".bc-alert")).toBeNull();
-  expect(pageAlert(page).style.display).toBe("none");
+  expect(pageAlert(page).hidden).toBe(true);
   expect(pageAlert(page).nextElementSibling).toBe(
     page.root.querySelector("form"),
   );
@@ -318,7 +318,7 @@ test("the receive state badge: connecting, waiting for a slot with the limit, di
   );
   // a caution alert under the header frame: triangle-alert in the warning colour, no full stop
   const alert = pageAlert(full);
-  expect(alert.style.display).toBe("");
+  expect(alert.hidden).toBe(false);
   expect(alert.getAttribute("role")).toBe("status");
   // the icon takes .bc-warning and the alert's own offset; the words sit in .bc-alert__body
   const mark = alert.querySelector("svg")!;
@@ -379,7 +379,7 @@ test("the slots in use follow the receive badge whenever the device reports them
   expect(slots.querySelector(".bc-tooltip")?.textContent).toBe(
     "每个收发通道保持一条连接，名额由设备内存决定",
   );
-  expect(pageAlert(receiving).style.display).toBe("none");
+  expect(pageAlert(receiving).hidden).toBe(true);
   receiving.unmount();
 
   status = {
@@ -427,7 +427,7 @@ test("the slots in use follow the receive badge whenever the device reports them
   expect(stateLine(full).querySelectorAll(".bc-term")).toHaveLength(1);
   expect(slotText(full)).toBe("名额 2/2");
   const alert = pageAlert(full);
-  expect(alert.style.display).toBe("");
+  expect(alert.hidden).toBe(false);
   expect(alert.querySelector(".bc-alert__title")?.textContent).toBe(
     "收发名额已满",
   );
@@ -484,7 +484,7 @@ test("a full receive pool (409 no_slot) still saves the mode and shows the limit
   ]);
   expect(page.toasts).toEqual([]);
   expect(radio(page, "send_receive").checked).toBe(true);
-  expect(pageAlert(page).style.display).toBe("");
+  expect(pageAlert(page).hidden).toBe(false);
   expect(pageAlert(page).querySelector(".bc-alert__title")?.textContent).toBe(
     "收发名额已满",
   );

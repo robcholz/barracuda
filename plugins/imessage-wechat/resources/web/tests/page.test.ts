@@ -99,9 +99,9 @@ test("on mount it starts a login and shows the code, the steps and the expiry", 
 test("the manual token sits under 高级, and the footer shows only while it is open", async () => {
   const page = await render("zh");
   expect(page.text()).toContain("手动填写 Token");
-  expect(footer(page).style.display).toBe("none");
+  expect(footer(page).hidden).toBe(true);
   page.query<HTMLButtonElement>(".bc-disclosure")!.click();
-  expect(footer(page).style.display).toBe("");
+  expect(footer(page).hidden).toBe(false);
   expect(footer(page).textContent).toBe("清空用 Token 保存");
   expect(button(page, "用 Token 保存")).toBeDefined();
   page.type("token", "tok");
@@ -130,7 +130,7 @@ test("the manual token sits under 高级, and the footer shows only while it is 
   ]);
   expect(page.text()).toContain("微信已绑定");
   page.query<HTMLButtonElement>(".bc-disclosure")!.click();
-  expect(footer(page).style.display).toBe("none");
+  expect(footer(page).hidden).toBe(true);
 });
 
 test("polls every 2 s: scanned, then linked with a toast, then stops", async () => {
@@ -199,7 +199,7 @@ test("the countdown runs out on its own", async () => {
   expect(plate(page).textContent).toBe("二维码已过期");
 });
 
-test("a failed session or start is reported with the device's words", async () => {
+test("a failed session or start says what to do, never the device's internals", async () => {
   status = { status: "idle", configured: false };
   post = () =>
     json(502, {
@@ -210,9 +210,10 @@ test("a failed session or start is reported with the device's words", async () =
   const page = await render("zh");
   expect(page.toasts.at(-1)).toEqual({
     kind: "error",
-    title: "提交失败",
-    body: "iLink timeout",
+    title: "设备连不上服务",
+    body: "检查设备的网络后重试。",
     code: "502 · -1",
+    action: undefined,
   });
   expect(plate(page).textContent).toBe("绑定失败");
 
@@ -224,7 +225,7 @@ test("a failed session or start is reported with the device's words", async () =
   expect(page.toasts.at(-1)).toEqual({
     kind: "error",
     title: "绑定失败",
-    body: "store failed",
+    body: "检查设备的网络后，换一张二维码再试。",
   });
   expect(plate(page).textContent).toBe("绑定失败");
 });
@@ -359,9 +360,9 @@ test("relinking hides the mode and accounts until the channel is linked again", 
   const page = await render("zh");
   const modeRow = () =>
     page.query('[aria-label="模式"]')!.closest<HTMLElement>(".bc-row")!;
-  expect(modeRow().style.display).toBe("");
+  expect(modeRow().hidden).toBe(false);
   await press(page, "重新绑定");
-  expect(modeRow().style.display).toBe("none");
+  expect(modeRow().hidden).toBe(true);
 });
 
 test("an expired bot session offers 重新绑定, which starts a QR login", async () => {

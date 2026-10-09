@@ -57,13 +57,11 @@ test("renders the design in Chinese: server row with 测试连接, Private API s
   // 模式 and 授权账号 wait for a configured channel too
   expect(
     [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
-      .filter((row) => row.style.display !== "none")
+      .filter((row) => !row.hidden)
       .map((row) => row.querySelector(".bc-title")?.textContent),
   ).toEqual(["服务器", "选项", undefined]);
   // the 通道 row waits for the device to say a channel is configured
-  expect(root.querySelector<HTMLElement>(".bc-row")?.style.display).toBe(
-    "none",
-  );
+  expect(root.querySelector<HTMLElement>(".bc-row")?.hidden).toBe(true);
   expect(page.text()).toContain(
     "BlueBubbles Server 的「设置 → API」里有地址和密码",
   );
@@ -207,7 +205,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const shown = await harness.render(mount, "en");
   await settle();
   const current = shown.query(".bc-form > .bc-row")!;
-  expect(current.style.display).toBe("");
+  expect(current.hidden).toBe(false);
   expect(current.querySelector(".bc-row__label")?.textContent).toBe("Channel");
   expect(current.querySelector(".bc-option-title")?.textContent).toBe(
     "BlueBubbles",
@@ -221,17 +219,17 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   const page = await harness.render(mount, "zh");
   await settle();
   const row = page.query(".bc-form > .bc-row")!;
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   page.type("server_url", "https://bluebubbles.example.com");
   page.type("password", "s3cret");
   harness.reply = async () => json(422, { error: "registration_failed" });
   await page.submit();
   expect(page.refreshes.count).toBe(0);
-  expect(row.style.display).toBe("none");
+  expect(row.hidden).toBe(true);
   harness.reply = async () => new Response(null, { status: 204 });
   await page.submit();
   expect(page.refreshes.count).toBe(1);
-  expect(row.style.display).toBe("");
+  expect(row.hidden).toBe(false);
   expect(
     row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
   ).toBe("已配置");

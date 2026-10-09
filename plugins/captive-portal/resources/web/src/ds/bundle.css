@@ -12,6 +12,10 @@
   color: var(--foreground);
   background: var(--background);
 }
+/* hidden means hidden, whatever display a component sets */
+[hidden] {
+  display: none !important;
+}
 .bc *,
 .bc *::before,
 .bc *::after {
@@ -786,6 +790,7 @@ button.bc-link {
 .bc-page {
   width: 100%;
   max-width: var(--content-max);
+  margin-inline: auto;
   padding: var(--space-8);
   display: flex;
   flex-direction: column;
@@ -837,7 +842,7 @@ button.bc-link {
   gap: 16px 32px;
   padding: var(--space-6);
 }
-.bc-row + .bc-row {
+.bc-row:not([hidden]) ~ .bc-row {
   border-top: 1px solid var(--border);
 }
 .bc-row__label {
@@ -1617,6 +1622,47 @@ button.bc-link {
   }
   .bc-topbar {
     padding: 0 var(--space-2);
+  }
+  /* a settings page goes full-bleed: the header frame becomes the mobile header, the form a hairline list */
+  .bc-page {
+    padding: 0;
+    gap: 0;
+  }
+  .bc-page > .bc-alert {
+    margin: var(--space-4) var(--space-4) 0;
+  }
+  .bc-header,
+  .bc-form {
+    border-width: 0 0 1px;
+    border-radius: 0;
+  }
+  .bc-header {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 12px;
+    padding: var(--space-4);
+  }
+  .bc-header__text {
+    flex: 1 1 auto;
+    padding: 0;
+    gap: 8px;
+  }
+  .bc-header__figure {
+    flex: none;
+    width: 120px;
+    padding: 0;
+    border-left: 0;
+  }
+  .bc-page-title {
+    font-size: 26px;
+    line-height: 32px;
+  }
+  .bc-row {
+    padding: var(--space-4);
+  }
+  .bc-form__footer {
+    padding: var(--space-4);
+    border-radius: 0;
   }
 }
 .bc-toast__close {

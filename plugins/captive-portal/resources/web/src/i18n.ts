@@ -32,6 +32,13 @@ const zh = {
     agent: "注册模型",
     channel: "接入消息通道",
   },
+  /** The phone overview's 「下一步」 row: the first step not done, with what it asks for. */
+  next: (step: string) => `下一步：${step}`,
+  stepHints: {
+    device: "让设备连上你的网络",
+    agent: "至少为主 Agent 注册一个",
+    channel: "选一个通道和设备对话",
+  },
   /** A done 「连接 Wi-Fi」 step, before the device's detail in mono (「已连接 `HomeNet`」). */
   connectedTo: "已连接",
   open: (title: string) => joinZh("前往", title),
@@ -88,6 +95,13 @@ const en: Strings = {
     device: "Connect Wi-Fi",
     agent: "Register a model",
     channel: "Connect a channel",
+  },
+  next: (step: string) =>
+    `Next: ${step.charAt(0).toLowerCase()}${step.slice(1)}`,
+  stepHints: {
+    device: "Put the device on your network",
+    agent: "At least one for the main agent",
+    channel: "Pick a channel to talk to the device",
   },
   connectedTo: "Connected to",
   open: (title: string) => `Open ${title}`,

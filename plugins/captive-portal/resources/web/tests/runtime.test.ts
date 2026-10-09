@@ -110,6 +110,7 @@ function host(lang: "zh" | "en" = "zh") {
       refreshStatus: async () => {
         refreshes.count++;
       },
+      badge: () => {},
     },
   };
 }

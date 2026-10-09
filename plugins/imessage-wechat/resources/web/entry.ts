@@ -34,6 +34,7 @@ const T = {
     scanned: "已扫码",
     expired: "二维码已过期",
     failed: "绑定失败",
+    failedHint: "检查设备的网络后，换一张二维码再试。",
     link: "绑定",
     linkHint: "这台设备在微信里的 ClawBot",
     linked: "微信已绑定",
@@ -62,6 +63,7 @@ const T = {
     scanned: "Scanned",
     expired: "Code expired",
     failed: "Linking failed",
+    failedHint: "Check the device's network, then get a new QR code.",
     link: "Link",
     linkHint: "This device as a ClawBot in WeChat",
     linked: "WeChat linked",
@@ -100,8 +102,7 @@ type View =
   | { kind: "linked" }
   | { kind: "phone" };
 
-const show = (node: HTMLElement, visible: boolean) =>
-  (node.style.display = visible ? "" : "none");
+const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 
 /**
  * The WeChat page. The device runs one iLink QR login (`POST/GET/DELETE /api/gateway/wechat/login`):
@@ -409,8 +410,8 @@ export const mount = definePage((context) => {
       case "failed": {
         session = false;
         finish({ kind: "ended", url, label: t.failed });
-        const message = result.kind === "ok" ? result.data?.message : undefined;
-        context.toast({ kind: "error", title: t.failed, body: message });
+        // the device's message names its internals (a TLS error, say), so the toast says what to do
+        context.toast({ kind: "error", title: t.failed, body: t.failedHint });
         return;
       }
       // no reply or an unexpected one: keep asking until the code expires

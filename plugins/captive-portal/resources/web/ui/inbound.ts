@@ -113,8 +113,7 @@ const STRINGS = {
 const isMode = (value: unknown): value is ChannelMode =>
   CHANNEL_MODES.includes(value as ChannelMode);
 
-const show = (node: HTMLElement, visible: boolean) =>
-  (node.style.display = visible ? "" : "none");
+const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 
 export interface ModeRowOptions {
   /** The channel's config path; the mode goes to `POST <endpoint>/mode`. */

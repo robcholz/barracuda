@@ -51,6 +51,12 @@ body {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* a title over its hint, as the phone overview's 「下一步」 row stacks them */
+.portal-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 
 /* Sidebar */
 .bc-nav-group,
@@ -158,6 +164,13 @@ body {
   width: 104px;
   flex: none;
 }
+/* the summary stays one line, as the design draws it; a status label beside it truncates it */
+.portal-channel-row__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width: 1023px) {
   .portal-modules {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -222,8 +235,7 @@ body {
   .portal-topbar--phone {
     display: flex;
   }
-  /* pages, and the chat's log and dock, sit on the 16px phone gutter */
-  .bc-page,
+  /* the chat's log and dock sit on the 16px phone gutter (a settings page is full-bleed: bundle.css) */
   .bc-chat-log {
     padding: var(--space-4);
   }
@@ -240,7 +252,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* a label is a short word or two: it keeps its width and the summary wraps instead */
+/* a label is a short word or two: it keeps its width and the summary gives way instead */
 .portal-aside--label {
   flex: none;
 }

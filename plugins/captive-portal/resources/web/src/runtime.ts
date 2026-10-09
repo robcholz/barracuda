@@ -3,6 +3,7 @@ import type {
   EntryState,
   EntryStatus,
   Lang,
+  PageBadge,
   PortalContext,
   PortalModule,
   PortalText,
@@ -155,6 +156,7 @@ export interface SessionHost {
   navigate(id: string): void;
   status(id: string): EntryStatus | null;
   refreshStatus(): Promise<void>;
+  badge(badge: PageBadge | null): void;
 }
 
 export interface OpenOptions {
@@ -207,6 +209,9 @@ export class ModuleSession {
       status: (id: string = entry.id) => host.status(id),
       refreshStatus: () =>
         signal.aborted ? Promise.resolve() : host.refreshStatus(),
+      badge: (badge: PageBadge | null) => {
+        if (!signal.aborted) host.badge(badge);
+      },
     });
     const module = (await load(entry.module)) as Partial<PortalModule> | null;
     if (signal.aborted) return false;

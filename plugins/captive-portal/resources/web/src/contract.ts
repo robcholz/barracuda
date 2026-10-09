@@ -41,6 +41,13 @@ export interface EntryStatus {
   detail?: string;
 }
 
+/** A live state of the open page, shown in the top bar: Web chat's 已连接 or 已断开. */
+export interface PageBadge {
+  label: string;
+  /** `live` is the signal chip; `lost` the destructive badge. */
+  tone: "live" | "lost";
+}
+
 export interface Toast {
   kind: "success" | "error" | "info";
   title: string;
@@ -69,6 +76,12 @@ export interface PortalContext {
    * succeeds; it resolves once the new status is shown (or the read failed), and never rejects.
    */
   refreshStatus(): Promise<void>;
+  /**
+   * Shows this page's live state in the top bar, or clears it with `null`. It replaces the device
+   * badge while the page is open and goes away when the page closes. Absent in a shell that
+   * predates it.
+   */
+  badge?(badge: PageBadge | null): void;
 }
 
 export type Cleanup = () => void;

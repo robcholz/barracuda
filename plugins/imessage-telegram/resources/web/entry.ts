@@ -60,8 +60,7 @@ interface GetMe {
   description?: string;
 }
 
-const show = (node: HTMLElement, visible: boolean) =>
-  (node.style.display = visible ? "" : "none");
+const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
 
 const ENDPOINT = "/api/gateway/telegram";
 

@@ -103,21 +103,49 @@ export function mark(markup: string, size = 16): SVGSVGElement {
   return svg;
 }
 
+const loaded = new Map<string, Promise<string>>();
+
+/** Fetches an asset once (through the window's `fetch`, which the shell queues) as an object URL. */
+function objectUrl(url: string): Promise<string> {
+  let pending = loaded.get(url);
+  if (!pending) {
+    pending = fetch(url).then(async (response) => {
+      if (!response.ok) throw new Error(`${url}: ${response.status}`);
+      return URL.createObjectURL(await response.blob());
+    });
+    pending.catch(() => loaded.delete(url));
+    loaded.set(url, pending);
+  }
+  return pending;
+}
+
 /**
  * An icon from a URL: an `.svg` is drawn as a monochrome mask in `currentColor` (so a brand mark
- * follows the theme), anything else as an image. A missing file leaves an empty box of the same size.
+ * follows the theme), anything else as an image. The file is fetched rather than referenced, so
+ * it waits its turn for one of the device's few connections; until it arrives, or if it is
+ * missing, the icon is an empty box of the same size.
  */
 export function assetIcon(url: string, size = 16): HTMLElement {
   const box = `width:${size}px;height:${size}px;flex:none`;
-  if (/\.svg(?:$|[?#])/i.test(url)) {
-    const span = h("span", { class: "bc-asset-icon", "aria-hidden": "true" });
-    const escaped = url.replace(/["\\]/g, "\\$&");
-    span.style.cssText = `${box};display:inline-block;background:currentColor;-webkit-mask:url("${escaped}") center/contain no-repeat;mask:url("${escaped}") center/contain no-repeat`;
-    return span;
-  }
-  const image = h("img", { src: url, alt: "", width: size, height: size });
-  image.style.cssText = `${box};display:block;object-fit:contain`;
-  return image;
+  const svg = /\.svg(?:$|[?#])/i.test(url);
+  const element = svg
+    ? h("span", { class: "bc-asset-icon", "aria-hidden": "true" })
+    : h("img", { alt: "", width: size, height: size });
+  element.style.cssText = svg
+    ? `${box};display:inline-block;background:currentColor`
+    : `${box};display:block;object-fit:contain`;
+  objectUrl(url).then(
+    (source) => {
+      if (!svg) (element as HTMLImageElement).src = source;
+      else {
+        const mask = `url("${source}") center/contain no-repeat`;
+        element.style.setProperty("-webkit-mask", mask);
+        element.style.setProperty("mask", mask);
+      }
+    },
+    () => {},
+  );
+  return element;
 }
 
 /** Two digits, as the design numbers counts and steps (`09`, `01`). */

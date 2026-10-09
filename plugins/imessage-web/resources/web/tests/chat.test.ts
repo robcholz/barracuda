@@ -4,6 +4,7 @@ import {
   settle,
 } from "../../../../captive-portal/resources/web/tests/browser";
 import type {
+  PageBadge,
   PortalContext,
   Toast,
 } from "../../../../captive-portal/resources/web/ui";
@@ -69,6 +70,7 @@ afterEach(async () => {
 function open(lang: "zh" | "en" = "zh") {
   const controller = new AbortController();
   const toasts: Toast[] = [];
+  const badges: (PageBadge | null)[] = [];
   const context: PortalContext = {
     signal: controller.signal,
     lang,
@@ -78,6 +80,7 @@ function open(lang: "zh" | "en" = "zh") {
     navigate: () => {},
     status: () => null,
     refreshStatus: async () => {},
+    badge: (badge) => badges.push(badge),
   };
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
@@ -95,7 +98,17 @@ function open(lang: "zh" | "en" = "zh") {
     [...root.querySelectorAll("button")].find(
       (node) => node.textContent?.trim() === label,
     )!;
-  return { root, controller, toasts, socket, input, submit, button, cleanup };
+  return {
+    root,
+    controller,
+    toasts,
+    badges,
+    socket,
+    input,
+    submit,
+    button,
+    cleanup,
+  };
 }
 
 test("renders the empty conversation in Chinese and connects to the bridge", () => {
@@ -394,8 +407,10 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
 });
 
 test("a dropped connection counts unconfirmed sends and reconnects on request", () => {
-  const { root, socket, submit, input, button, toasts } = open();
+  const { root, socket, submit, input, button, toasts, badges } = open();
   socket().open();
+  // the top bar shows the connection, as the design's chat boards do
+  expect(badges.at(-1)).toEqual({ label: "已连接", tone: "live" });
   submit("一");
   submit("二");
   socket().emit("message.start", {
@@ -404,6 +419,7 @@ test("a dropped connection counts unconfirmed sends and reconnects on request", 
     reply_to: "web-in-1",
   });
   socket().dispatchEvent(new NativeEvent("close"));
+  expect(badges.at(-1)).toEqual({ label: "已断开", tone: "lost" });
   expect(root.textContent).toContain(
     "连接已中断 · 1 条消息未确认，重新连接后再发送",
   );

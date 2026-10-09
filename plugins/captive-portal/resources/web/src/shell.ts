@@ -1,4 +1,4 @@
-import type { EntryStatus, Lang, Toast, WebEntry } from "./contract";
+import type { EntryStatus, Lang, PageBadge, Toast, WebEntry } from "./contract";
 import {
   ModuleSession,
   parseEntries,
@@ -108,6 +108,8 @@ export class Portal {
   private langOpen = false;
   private mountedKey: string | null = null;
   private navigation = 0;
+  /** The open page's live state for the top bar (Web chat's connection), if it reports one. */
+  private pageBadge: PageBadge | null = null;
   private refreshing: Promise<void> | null = null;
   private request?: AbortController;
   private statusing: Promise<void> | null = null;
@@ -585,9 +587,16 @@ export class Portal {
     );
   }
 
+  private setPageBadge(badge: PageBadge | null) {
+    const shown = this.pageBadge;
+    if (badge?.label === shown?.label && badge?.tone === shown?.tone) return;
+    this.pageBadge = badge;
+    this.renderTopbar();
+  }
+
   /**
-   * 「连接未就绪」 (`.bc-badge--destructive`) when the manifest can't be read; on the desktop,
-   * otherwise the device's status.
+   * 「连接未就绪」 (`.bc-badge--destructive`) when the manifest can't be read; otherwise the open
+   * page's live state (Web chat: 已连接 / 已断开); on the desktop overview, the device's status.
    */
   private statusBadge(desktop: boolean) {
     if (this.manifest === "error")
@@ -596,7 +605,20 @@ export class Portal {
         { class: "bc-badge bc-badge--destructive", role: "status" },
         this.t.offline,
       );
-    const device = desktop ? deviceStatus(this.entries, this.statusOf) : null;
+    const page = this.pageBadge;
+    if (page)
+      return h(
+        "span",
+        {
+          class: `bc-badge ${page.tone === "live" ? "bc-badge--signal" : "bc-badge--destructive"}`,
+          role: "status",
+        },
+        page.label,
+      );
+    const device =
+      desktop && this.route === "overview"
+        ? deviceStatus(this.entries, this.statusOf)
+        : null;
     const label = device?.status.label?.[this.lang];
     if (!device || !label) return null;
     return h(
@@ -758,6 +780,7 @@ export class Portal {
 
   private leaveModule() {
     this.navigation++;
+    this.setPageBadge(null);
     this.session.close();
     this.mountedKey = null;
     this.content.removeAttribute("aria-busy");
@@ -802,6 +825,7 @@ export class Portal {
     this.status("loading");
     this.content.setAttribute("aria-busy", "true");
     const root = h("div", { class: "portal-module", "data-entry": entry.id });
+    this.setPageBadge(null);
     try {
       await this.session.open(
         entry,
@@ -812,6 +836,9 @@ export class Portal {
           navigate: (id) => this.go(id),
           status: this.statusOf,
           refreshStatus: () => this.refreshStatus(),
+          badge: (badge) => {
+            if (current()) this.setPageBadge(badge);
+          },
         },
         {
           load: this.load,

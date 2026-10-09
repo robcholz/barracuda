@@ -10,6 +10,7 @@ export type {
   FigureHandle,
   FigureTarget,
   Lang,
+  PageBadge,
   PortalContext,
   PortalModule,
   PortalText,

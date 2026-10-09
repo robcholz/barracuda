@@ -104,6 +104,9 @@ export function pageHarness() {
   };
   globalThis.fetch = Object.assign(
     async (url: RequestInfo | URL, init: RequestInit = {}) => {
+      // the kit fetches its page's icon itself; that is no call the page makes
+      if (/\.(svg|png)$/.test(String(url)))
+        return new Response(null, { status: 404 });
       const raw = init.body;
       let body: unknown = raw;
       if (typeof raw === "string")

@@ -32,14 +32,14 @@ type Page = Awaited<ReturnType<typeof harness.render>>;
 /** Titles of the rows a person sees. */
 const visibleRows = (page: Page) =>
   [...page.root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
-    .filter((row) => row.style.display !== "none")
+    .filter((row) => !row.hidden)
     .map(
       (row) =>
         row.querySelector(".bc-title")?.textContent ??
         row.querySelector(".bc-disclosure")?.textContent,
     );
 const footer = (page: Page) => page.query(".bc-form__footer")!;
-const visible = (node: HTMLElement) => node.style.display !== "none";
+const visible = (node: HTMLElement) => !node.hidden;
 const button = (page: Page, label: string) =>
   [...page.root.querySelectorAll<HTMLElement>("button")].find(
     (node) => node.textContent === label,
@@ -58,9 +58,8 @@ async function signUp(page: Page) {
 test("renders the email method in Chinese: radio, email row, open fold, no footer", async () => {
   const page = await render("zh");
   expect(page.query(".bc-header h1")?.textContent).toBe("Inkbox");
-  expect(page.query(".bc-header h1 img")?.getAttribute("src")).toEndWith(
-    "icon.png",
-  );
+  // the icon is fetched through the shell's queue; the image is there before it arrives
+  expect(page.query(".bc-header h1 img")).not.toBeNull();
   expect(page.query(".bc-lead")?.textContent).toBe(
     "接入 Inkbox 身份与邮件服务。",
   );
