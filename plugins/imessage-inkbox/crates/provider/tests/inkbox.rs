@@ -97,7 +97,7 @@ fn response(body: &str) -> Response {
 }
 
 fn target() -> MessageTarget {
-    MessageTarget::new("imessage", "conversation-uuid")
+    MessageTarget::new("inkbox", "conversation-uuid")
 }
 
 fn text_chunk(text: &str) -> TextChunk {
@@ -115,7 +115,7 @@ fn body_json(request: &RecordedRequest) -> serde_json::Value {
 }
 
 #[test]
-fn registers_as_imessage_and_sends_text_for_the_configured_identity() {
+fn registers_as_inkbox_and_sends_text_for_the_configured_identity() {
     block_on(async {
         let http = Rc::new(MockHttp::responding([response(
             r#"{"message":{"id":"message-uuid"}}"#,
@@ -126,7 +126,7 @@ fn registers_as_imessage_and_sends_text_for_the_configured_identity() {
             .await
             .expect("send succeeds");
 
-        assert_eq!(channel.channel(), "imessage");
+        assert_eq!(channel.channel(), "inkbox");
         assert_eq!(receipt.message_id, "message-uuid");
         let requests = http.requests();
         let request = requests.first().expect("request");
@@ -214,6 +214,44 @@ fn uploads_media_then_sends_the_returned_url() {
             "https://media.example/photo.jpg"
         );
         assert_eq!(body_json(&requests[1])["text"], "caption");
+    });
+}
+
+#[test]
+fn ignores_reply_to_for_text_and_media() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding([
+            response(r#"{"message":{"id":"reply-id"}}"#),
+            response(r#"{"media_url":"https://media.example/photo.jpg"}"#),
+            response(r#"{"message":{"id":"media-id"}}"#),
+        ]));
+        let channel = provider(&http);
+        let mut text = SendMessageRequest::text(target(), "hello");
+        text.reply_to = Some("inbound-id".to_owned());
+        let media = SendMediaRequest {
+            target: target(),
+            body: BinaryBody::Bytes(vec![1, 2, 3]),
+            filename: None,
+            mime_type: None,
+            caption: None,
+            reply_to: Some("inbound-id".to_owned()),
+        };
+
+        let receipt = channel.send_message(text).await.expect("reply succeeds");
+        let media_receipt = channel
+            .send_media(MediaKind::Image, media)
+            .await
+            .expect("media reply succeeds");
+
+        assert_eq!(receipt.message_id, "reply-id");
+        assert_eq!(media_receipt.message_id, "media-id");
+        let requests = http.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            body_json(&requests[0]),
+            serde_json::json!({"conversation_id": "conversation-uuid", "text": "hello"})
+        );
+        assert!(body_json(&requests[2]).get("reply_to").is_none());
     });
 }
 

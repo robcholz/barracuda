@@ -36,6 +36,16 @@ pub struct GatewayIngress {
 }
 
 impl GatewayIngress {
+    /// Waits until Workflow can take another `gateway.message.received`.
+    ///
+    /// Resolves once fewer than the Workflow Runtime's backlog limit of
+    /// executions started by that Event are queued or running. Receive loops
+    /// await it before fetching the next batch so a burst of inbound messages
+    /// waits upstream instead of in RAM.
+    pub async fn ready(&self) {
+        self.workflow.ready_for::<GatewayMessageReceived>().await;
+    }
+
     /// Publishes one normalized inbound message as a Workflow Event.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         if !valid_inbound(&message) {

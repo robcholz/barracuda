@@ -1,5 +1,6 @@
 import {
   button,
+  channelInbound,
   configuredRow,
   definePage,
   h,
@@ -11,6 +12,7 @@ import {
   resultCard,
   row,
   settingsForm,
+  type ChannelStatus,
 } from "../../../captive-portal/resources/web/ui";
 
 const T = {
@@ -28,6 +30,7 @@ const T = {
     open: "在 Telegram 中打开",
     draft: "草稿最小增量",
     tryChat: "去 Web 聊天试试",
+    how: "在 Telegram 里给 Bot 发送",
   },
   en: {
     lead: "Send and receive messages through a Telegram bot.",
@@ -43,6 +46,7 @@ const T = {
     open: "Open in Telegram",
     draft: "Draft minimum delta",
     tryChat: "Try it in Web chat",
+    how: "In Telegram, send the bot",
   },
 };
 
@@ -62,7 +66,8 @@ const ENDPOINT = "/api/gateway/telegram";
 /**
  * The Telegram page: the bot token, checked in the browser with Bot API `getMe` (Telegram allows any
  * origin), then saved with `POST /api/gateway/telegram`. `GET` on the same path says whether a
- * channel is configured; the page then shows it above the form that replaces it.
+ * channel is configured; the page then shows it above the form that replaces it, with the channel's
+ * mode and allowed accounts (`/mode`, `/owners`) before the 「高级」 fold.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -73,6 +78,12 @@ export const mount = definePage((context) => {
     onClick: () => void check(),
   });
   const current = configuredRow("Telegram", lang);
+  const inbound = channelInbound(context, {
+    endpoint: ENDPOINT,
+    channel: "Telegram",
+    how: t.how,
+    command: (code) => `/start ${code}`,
+  });
   const form = settingsForm(
     {
       endpoint: ENDPOINT,
@@ -114,6 +125,7 @@ export const mount = definePage((context) => {
       onError: (error) => ({ body: error.message }),
       onSuccess: () => {
         current.show(true);
+        void inbound.refresh();
         void context.refreshStatus();
       },
       success: {
@@ -126,8 +138,10 @@ export const mount = definePage((context) => {
     context,
   );
   form.element.prepend(current.element);
-  void readChannel(context, ENDPOINT).then((state) => {
+  inbound.attach(form);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
     if (state?.configured) current.show(true);
+    inbound.apply(state);
   });
   const token = form.element.querySelector<HTMLInputElement>('[name="token"]')!;
   const chat = row(t.chat, t.chatHint, lang);

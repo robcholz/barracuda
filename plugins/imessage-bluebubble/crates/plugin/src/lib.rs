@@ -281,11 +281,11 @@ mod tests {
 
     use super::*;
 
-    struct OccupiedImessageChannel;
+    struct OccupiedBlueBubblesChannel;
 
-    impl MessageChannel for OccupiedImessageChannel {
+    impl MessageChannel for OccupiedBlueBubblesChannel {
         fn channel(&self) -> &str {
-            "imessage"
+            bluebubbles::CHANNEL
         }
 
         fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
@@ -294,7 +294,7 @@ mod tests {
     }
 
     /// Exercises the configuration endpoint against the real Gateway, with the
-    /// `imessage` channel already taken by another provider when `occupied`.
+    /// `bluebubbles` channel already taken by another provider when `occupied`.
     struct ConfigurationProbe {
         http_clients: ClientFactory<'static>,
         occupied: bool,
@@ -316,7 +316,7 @@ mod tests {
         {
             let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
             if self.occupied {
-                let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedImessageChannel);
+                let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedBlueBubblesChannel);
                 context.retain(
                     gateway
                         .register(occupied)

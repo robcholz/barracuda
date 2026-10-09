@@ -7,8 +7,9 @@ During Plugin registration it adds the awaited `gateway_send` and
 `WorkflowActionRegistry`.
 
 The bridge uses this Plugin's scoped key-value storage for the durable Gateway
-route to Agent session mapping. Pending inbound replies and the active turn
-reply remain runtime-only FIFO state. Action registration guards are retained
+route to Agent session mapping. Pending inbound replies, the active turn
+reply, and route reservations for sessions being created remain runtime-only
+state. Action registration guards are retained
 for the Plugin lifetime. The Action request and response contracts are in
 `schemas/action`.
 

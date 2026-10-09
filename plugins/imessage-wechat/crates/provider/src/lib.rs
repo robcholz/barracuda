@@ -82,16 +82,10 @@ where
         &self,
         target: MessageTarget,
         text: String,
-        reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         if text.is_empty() {
             return Err(ChannelError::InvalidRequest {
                 message: "message text is empty".into(),
-            });
-        }
-        if reply_to.is_some() {
-            return Err(ChannelError::InvalidRequest {
-                message: "WeChat iLink does not support reply_to message IDs".into(),
             });
         }
 
@@ -178,13 +172,12 @@ where
         &self,
         target: MessageTarget,
         mut stream: barracuda_imessage_gateway_plugin::TextStream,
-        reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         let mut text = String::new();
         while let Some(chunk) = stream.next().await {
             text.push_str(&chunk?);
         }
-        self.send_text(target, text, reply_to).await
+        self.send_text(target, text).await
     }
 }
 
@@ -197,16 +190,16 @@ where
         "wechat"
     }
 
+    /// Sends text to the target user.
+    ///
+    /// iLink cannot quote a specific message, so `reply_to` is accepted and
+    /// ignored; inbound replies thread through the `context_token` carried by
+    /// the target instead.
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             match request.body {
-                TextBody::Complete(text) => {
-                    self.send_text(request.target, text, request.reply_to).await
-                }
-                TextBody::Stream(stream) => {
-                    self.send_stream(request.target, stream, request.reply_to)
-                        .await
-                }
+                TextBody::Complete(text) => self.send_text(request.target, text).await,
+                TextBody::Stream(stream) => self.send_stream(request.target, stream).await,
             }
         })
     }

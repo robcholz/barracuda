@@ -800,8 +800,12 @@ the top certificate of a server chain arrives untrusted, and the callback
 trusts it only when a bundled root of its issuer's name verifies its
 signature. mbedTLS verifies the rest of the chain. The roots stay in flash and
 only the matching root's key is parsed, so no Platform keeps parsed roots in
-RAM. Each connection's two 16 KiB record buffers come from bulk memory (see
-"Bulk memory"), which is external RAM on Boards that have it. mbedTLS checks no certificate dates, so expired roots are left out of the
+RAM. Each connection's record buffers, 16 KiB for incoming records (servers
+send full-size records) and 4 KiB for outgoing ones, come from bulk memory (see
+"Bulk memory"), which is external RAM on Boards that have it. That outgoing
+size is not the prebuilt device libraries' configuration, so every device
+Platform compiles mbedTLS and selects the C compiler for its chip through a
+`barracuda-tls` feature. mbedTLS checks no certificate dates, so expired roots are left out of the
 bundle when it is generated. `mbedtls-rs` is vendored in
 `shared/tls/mbedtls-rs` with the verify callback and a fallible random source
 added.
@@ -849,6 +853,28 @@ Each `ClientFactory::create()` result independently owns connection reuse and
 request serialization while all results share the Platform network pool. Thus
 “one shared HTTP client” means one facade, implementation, and construction
 policy, not one mandatory TCP connection for unrelated concurrent protocols.
+
+Long-lived receive loops (a channel's long poll or push connection) never take
+a connection from that request pool. System also builds
+`http_client::ReceiveSlots` over the same IP stack, DNS resolver, and TLS
+engine and places it in `PluginContext::receive_slots`. Each slot owns one
+statically allocated socket; a channel holds a `ReceiveLease` while it
+receives, and the lease gives either HTTP clients over its single connection
+or a raw byte stream whose read half is cancel-safe, for protocols such as
+WebSocket. The static pool has `http_client::RECEIVE_SLOTS` slots, the largest
+any Target uses. The runtime capacity is a memory budget the selected Platform
+declares in its manifest, because the Platform owns the heap and decides
+whether Board-declared external memory becomes bulk memory:
+
+~~~yaml
+network:
+  long-lived-connections:
+    internal-memory: 1   # TLS record buffers in internal RAM
+    external-memory: 3   # Board external memory installed as bulk memory
+~~~
+
+`TargetIdentity::long_lived_connections` picks the figure for the selected
+Board, and System never creates more slots than that.
 
 Embassy is the common task, timer, and lifecycle model used by Barracuda on
 embedded, macOS, and Linux Platforms. The operating-system Platforms may use

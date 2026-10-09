@@ -15,9 +15,14 @@ mbedtls = ["dep:barracuda-tls", "reqwless/mbedtls-rs"]
 [dependencies]
 barracuda-tls = { workspace = true, optional = true }
 embassy-net.workspace = true
+embassy-time.workspace = true
+embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
 static_cell.workspace = true
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
+
+[dev-dependencies]
+embedded-io-async = "0.7"
 
 [lints.rust]
 unsafe_code = "forbid"

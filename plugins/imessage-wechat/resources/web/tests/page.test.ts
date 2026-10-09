@@ -117,8 +117,11 @@ test("the manual token sits under 高级, and the footer shows only while it is 
   });
   expect(page.toasts.at(-1)?.title).toBe("设备已接受配置");
   expect(page.refreshes.count).toBe(1);
-  // the hand-entered token replaced the QR session: cancel it and show the link
-  expect(requests().at(-1)).toBe(`DELETE ${LOGIN}`);
+  // the hand-entered token replaced the QR session: cancel it, show the link and read the channel
+  expect(requests().slice(-2)).toEqual([
+    `DELETE ${LOGIN}`,
+    `GET /api/gateway/wechat`,
+  ]);
   expect(page.text()).toContain("微信已绑定");
   page.query<HTMLButtonElement>(".bc-disclosure")!.click();
   expect(footer(page).style.display).toBe("none");
@@ -216,12 +219,12 @@ test("a failed session or start is reported with the device's words", async () =
 test("a channel already linked shows 重新绑定 without starting a login", async () => {
   status = { status: "idle", configured: true };
   const page = await render("en");
-  expect(requests()).toEqual([`GET ${LOGIN}`]);
+  expect(requests()).toEqual([`GET ${LOGIN}`, `GET /api/gateway/wechat`]);
   expect(page.query(".bc-row__label .bc-title")?.textContent).toBe("Link");
   expect(page.text()).toContain("WeChat linked");
   expect(button(page, "Link again")).toBeDefined();
   page.unmount();
-  expect(requests()).toEqual([`GET ${LOGIN}`]);
+  expect(requests()).toEqual([`GET ${LOGIN}`, `GET /api/gateway/wechat`]);
 });
 
 test("a running session on mount is restarted for this page", async () => {
@@ -281,4 +284,69 @@ test("on a phone it shows the steps and a link to copy instead of the code", asy
     if (before) Object.defineProperty(navigator, "clipboard", before);
     else delete (navigator as { clipboard?: unknown }).clipboard;
   }
+});
+
+test("linked: 模式 offers 停用 and 收发 only, and 授权账号 shows the bare code", async () => {
+  status = { status: "idle", configured: true };
+  const reply = harness.reply;
+  harness.reply = async (call: FetchCall) => {
+    if (call.url === "/api/gateway/wechat")
+      return json(200, {
+        configured: true,
+        mode: "send_receive",
+        receive: { state: "receiving" },
+        owners: { count: 0 },
+      });
+    if (call.url === "/api/gateway/wechat/owners")
+      return json(200, {
+        owners: [],
+        pairing: { code: "482913", expires_in: 600 },
+        ignored: 0,
+      });
+    return reply(call);
+  };
+  const page = await render("zh");
+  expect(requests()).toEqual([
+    `GET ${LOGIN}`,
+    "GET /api/gateway/wechat",
+    "GET /api/gateway/wechat/owners",
+  ]);
+  expect(
+    [...page.root.querySelectorAll('[aria-label="模式"] .bc-option-title')].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["停用", "收发"]);
+  expect(
+    page.query("[role=radiogroup] + [role=status] .bc-badge--signal")
+      ?.textContent,
+  ).toBe("收发中");
+  expect(page.text()).toContain("用微信给 ClawBot 发送482913");
+  expect(page.text()).toContain("还没有授权账号");
+  // the badge stays live while receiving
+  await advance(5_000);
+  expect(requests().at(-1)).toBe("GET /api/gateway/wechat");
+
+  page.unmount();
+  const en = await render("en");
+  expect(en.text()).toContain("In WeChat, send ClawBot482913");
+  expect(en.text()).toContain("No allowed accounts yet");
+});
+
+test("relinking hides the mode and accounts until the channel is linked again", async () => {
+  status = { status: "idle", configured: true };
+  const reply = harness.reply;
+  harness.reply = async (call: FetchCall) =>
+    call.url === "/api/gateway/wechat"
+      ? json(200, {
+          configured: true,
+          mode: "send_receive",
+          owners: { count: 0 },
+        })
+      : reply(call);
+  const page = await render("zh");
+  const modeRow = () =>
+    page.query('[aria-label="模式"]')!.closest<HTMLElement>(".bc-row")!;
+  expect(modeRow().style.display).toBe("");
+  await press(page, "重新绑定");
+  expect(modeRow().style.display).toBe("none");
 });

@@ -477,6 +477,7 @@ pub struct PlatformDefinition {
     system_image: SystemImageConfig,
     application: ApplicationConfig,
     hal: HalConfig,
+    network: NetworkConfig,
 }
 
 impl PlatformDefinition {
@@ -490,6 +491,12 @@ impl PlatformDefinition {
     #[must_use]
     pub const fn info(&self) -> &PlatformInfoDefinition {
         &self.info
+    }
+
+    /// Returns the network capacity declared by the Platform.
+    #[must_use]
+    pub const fn network(&self) -> &NetworkConfig {
+        &self.network
     }
 
     /// Returns the host build policy required by this Platform.
@@ -665,6 +672,49 @@ impl PlatformInfoDefinition {
     }
 }
 
+/// Network capacity a Platform's memory supports.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct NetworkConfig {
+    #[serde(default)]
+    long_lived_connections: ConnectionBudgetDefinition,
+}
+
+impl NetworkConfig {
+    /// Returns how many long-lived client connections (a TCP socket and TLS
+    /// session held open by a receive loop) the Platform holds beside the
+    /// shared request pool.
+    #[must_use]
+    pub const fn long_lived_connections(&self) -> &ConnectionBudgetDefinition {
+        &self.long_lived_connections
+    }
+}
+
+/// Long-lived connections by where bulk memory lives.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ConnectionBudgetDefinition {
+    #[serde(default)]
+    internal_memory: u8,
+    #[serde(default)]
+    external_memory: u8,
+}
+
+impl ConnectionBudgetDefinition {
+    /// Returns the connections held when bulk memory is internal RAM.
+    #[must_use]
+    pub const fn internal_memory(&self) -> u8 {
+        self.internal_memory
+    }
+
+    /// Returns the connections held when the Board declares external memory
+    /// that the Platform installs as bulk memory.
+    #[must_use]
+    pub const fn external_memory(&self) -> u8 {
+        self.external_memory
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SelectionConfig {
@@ -703,6 +753,8 @@ struct PlatformDocument {
     application: ApplicationConfig,
     #[serde(default)]
     hal: HalConfig,
+    #[serde(default)]
+    network: NetworkConfig,
 }
 
 /// Failure while discovering or resolving a Platform.
@@ -995,6 +1047,7 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
         system_image: document.system_image,
         application: document.application,
         hal: document.hal,
+        network: document.network,
     })
 }
 

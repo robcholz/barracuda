@@ -10,6 +10,14 @@ every accepted inbound message immediately before `session.append`. Restored
 mappings explicitly report `open_required: true` because Agent session
 ownership is not persisted.
 
+Resolving an unmapped route reserves it for that message, whose Workflow
+receives `{}` and creates the session. A later message on the same route
+resolves only after the reservation ends: once the session is bound it gets
+that session (`open_required: false`), so quick messages on a new route share
+one session. A failed bind ends the reservation at once, and a reservation
+whose Workflow never binds lapses after 30 s; the waiting message then
+reserves the route and creates the session itself.
+
 `imessage_bridge.to_gateway` consumes one complete bounded `session.event`
 document. A user `turn_started` consumes the oldest queued inbound message and
 pins it as the active `reply_to` until `turn_ended`; later inbound messages do

@@ -30,6 +30,15 @@ impl TargetIdentity {
     pub const fn board(&self) -> &BoardInfo {
         &self.board
     }
+
+    /// Returns how many long-lived connections this Target holds: the
+    /// Platform's budget for a Board with or without external memory.
+    #[must_use]
+    pub const fn long_lived_connections(&self) -> u8 {
+        self.platform
+            .long_lived_connections()
+            .for_board(self.board.hardware().external_memory().is_some())
+    }
 }
 
 /// Move-only resources acquired once and split between the selected axes.
@@ -63,4 +72,35 @@ pub struct TargetResources<Platform, BoardHal> {
     pub platform: Platform,
     /// Capabilities owned and produced by the selected Board HAL.
     pub board_hal: BoardHal,
+}
+
+#[cfg(test)]
+mod tests {
+    use barracuda_board::{
+        ExternalMemory, ExternalMemoryInterface, ExternalMemoryTechnology, Hardware,
+    };
+    use barracuda_platform::ConnectionBudget;
+
+    use super::{BoardInfo, PlatformInfo, TargetIdentity};
+
+    #[test]
+    fn long_lived_connections_follow_the_board_external_memory() {
+        let platform = PlatformInfo::new("chip", "family", "arch", "bare-metal")
+            .with_long_lived_connections(ConnectionBudget::new(1, 3));
+        let plain = Hardware::new("chip");
+        let psram = plain.with_external_memory(ExternalMemory::new(
+            ExternalMemoryTechnology::Psram,
+            ExternalMemoryInterface::OctalSpi,
+            8 << 20,
+        ));
+
+        let without = TargetIdentity::new(platform, BoardInfo::new("plain", plain));
+        let with = TargetIdentity::new(platform, BoardInfo::new("psram", psram));
+        assert_eq!(without.long_lived_connections(), 1);
+        assert_eq!(with.long_lived_connections(), 3);
+
+        let undeclared = PlatformInfo::new("chip", "family", "arch", "bare-metal");
+        let none = TargetIdentity::new(undeclared, BoardInfo::new("psram", psram));
+        assert_eq!(none.long_lived_connections(), 0);
+    }
 }

@@ -128,6 +128,34 @@ fn registers_and_maps_text_to_the_ilink_api() {
 }
 
 #[test]
+fn ignores_reply_to_and_keeps_the_context_token() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding(2));
+        let channel = Wechat::new(http.factory(), config("token"));
+        let mut text = SendMessageRequest::text(target(), "hello");
+        text.reply_to = Some("inbound-message".to_owned());
+        let chunks = stream::iter([Ok(TextChunk::from("hel")), Ok(TextChunk::from("lo"))]);
+        let mut streamed = SendMessageRequest::stream(target(), Box::pin(chunks));
+        streamed.reply_to = Some("inbound-message".to_owned());
+
+        channel.send_message(text).await.expect("reply succeeds");
+        channel
+            .send_message(streamed)
+            .await
+            .expect("streamed reply succeeds");
+
+        let requests = http.requests();
+        assert_eq!(requests.len(), 2);
+        for request in &requests {
+            let json = body_json(request);
+            assert_eq!(json["msg"]["context_token"], "context-token");
+            assert_eq!(json["msg"]["item_list"][0]["text_item"]["text"], "hello");
+            assert!(!String::from_utf8_lossy(&request.body).contains("inbound-message"));
+        }
+    });
+}
+
+#[test]
 fn buffers_an_async_text_stream_into_one_wechat_message() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(1));

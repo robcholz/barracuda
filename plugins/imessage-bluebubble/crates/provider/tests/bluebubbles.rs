@@ -125,7 +125,7 @@ fn response(guid: &str) -> Response {
 }
 
 fn target() -> MessageTarget {
-    MessageTarget::new("imessage", "iMessage;-;+15551234567")
+    MessageTarget::new("bluebubbles", "iMessage;-;+15551234567")
 }
 
 fn text_chunk(text: &str) -> TextChunk {
@@ -152,7 +152,7 @@ fn provider(http: &Rc<MockHttp>) -> BlueBubbles<'static, ScriptedStack, Scripted
 }
 
 #[test]
-fn registers_as_imessage_and_sends_replies_with_encoded_auth() {
+fn registers_as_bluebubbles_and_sends_replies_with_encoded_auth() {
     block_on(async {
         let http = Rc::new(MockHttp::responding([response("message-guid")]));
         let channel = provider(&http);
@@ -161,7 +161,7 @@ fn registers_as_imessage_and_sends_replies_with_encoded_auth() {
 
         let receipt = channel.send_message(request).await.expect("send succeeds");
 
-        assert_eq!(channel.channel(), "imessage");
+        assert_eq!(channel.channel(), "bluebubbles");
         assert_eq!(receipt.message_id, "message-guid");
         let requests = http.requests();
         let request = requests.first().expect("one request");
@@ -324,6 +324,61 @@ fn without_private_api_streaming_falls_back_and_mutations_are_unsupported() {
         assert_eq!(requests.len(), 1);
         assert_eq!(body_json(&requests[0])["message"], "hello");
         assert_eq!(body_json(&requests[0])["method"], "apple-script");
+    });
+}
+
+#[test]
+fn without_private_api_replies_are_sent_unthreaded() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding([
+            response("text-guid"),
+            response("stream-guid"),
+            response("attachment-guid"),
+        ]));
+        let mut config = BlueBubblesConfig::new("http://mac.local", "password");
+        config.use_private_api = false;
+        let channel = BlueBubbles::new(http.factory(), config);
+        let mut text = SendMessageRequest::text(target(), "hello");
+        text.reply_to = Some("parent-guid".to_owned());
+        let chunks = stream::iter([Ok(text_chunk("hel")), Ok(text_chunk("lo"))]);
+        let mut streamed = SendMessageRequest::stream(target(), Box::pin(chunks));
+        streamed.reply_to = Some("parent-guid".to_owned());
+        let attachment = SendMediaRequest {
+            target: target(),
+            body: BinaryBody::Bytes(vec![1, 2, 3]),
+            filename: Some("photo.jpg".to_owned()),
+            mime_type: None,
+            caption: None,
+            reply_to: Some("parent-guid".to_owned()),
+        };
+
+        let text = channel
+            .send_message(text)
+            .await
+            .expect("text reply succeeds");
+        let streamed = channel
+            .send_message(streamed)
+            .await
+            .expect("streamed reply succeeds");
+        let attachment = channel
+            .send_media(MediaKind::Image, attachment)
+            .await
+            .expect("attachment reply succeeds");
+
+        assert_eq!(text.message_id, "text-guid");
+        assert_eq!(streamed.message_id, "stream-guid");
+        assert_eq!(attachment.message_id, "attachment-guid");
+        let requests = http.requests();
+        assert_eq!(requests.len(), 3);
+        for request in &requests[..2] {
+            let json = body_json(request);
+            assert_eq!(json["method"], "apple-script");
+            assert!(json.get("selectedMessageGuid").is_none());
+        }
+        assert_eq!(body_json(&requests[1])["message"], "hello");
+        let multipart = String::from_utf8_lossy(&requests[2].body);
+        assert!(multipart.contains("apple-script"));
+        assert!(!multipart.contains("selectedMessageGuid"));
     });
 }
 

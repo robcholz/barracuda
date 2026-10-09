@@ -12,7 +12,9 @@
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/wechat` for runtime configuration, and
-registers the configured channel for its lifetime. Accepted configuration is
+registers the configured channel `wechat` for its lifetime. iLink cannot quote a
+message, so `reply_to` is ignored instead of failing; the target's `thread_id`
+is sent as the iLink `context_token`. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
 stored data fails registration. `GET` on the same path reports only whether a
 channel is configured. See [`http.md`](http.md).

@@ -34,6 +34,7 @@ pub struct PlatformInfo {
     family: &'static str,
     architecture: &'static str,
     environment: &'static str,
+    long_lived_connections: ConnectionBudget,
 }
 
 impl PlatformInfo {
@@ -50,7 +51,15 @@ impl PlatformInfo {
             family,
             architecture,
             environment,
+            long_lived_connections: ConnectionBudget::NONE,
         }
+    }
+
+    /// Declares how many long-lived connections this Platform's memory holds.
+    #[must_use]
+    pub const fn with_long_lived_connections(mut self, budget: ConnectionBudget) -> Self {
+        self.long_lived_connections = budget;
+        self
     }
 
     /// Returns the stable Platform bundle name.
@@ -75,6 +84,62 @@ impl PlatformInfo {
     #[must_use]
     pub const fn environment(&self) -> &'static str {
         self.environment
+    }
+
+    /// Returns how many long-lived connections this Platform's memory holds.
+    #[must_use]
+    pub const fn long_lived_connections(&self) -> ConnectionBudget {
+        self.long_lived_connections
+    }
+}
+
+/// How many long-lived client connections (TCP socket plus TLS session, held
+/// open by a receive loop) a Platform holds beside the shared request pool.
+///
+/// The figure depends on where TLS record buffers live: in internal RAM, or
+/// in the external memory a Board declares when the Platform installs it as
+/// bulk memory. A Platform without external-memory support declares the same
+/// figure for both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConnectionBudget {
+    internal_memory: u8,
+    external_memory: u8,
+}
+
+impl ConnectionBudget {
+    /// No long-lived connections.
+    pub const NONE: Self = Self::new(0, 0);
+
+    /// Creates a budget for Boards without and with external memory.
+    #[must_use]
+    pub const fn new(internal_memory: u8, external_memory: u8) -> Self {
+        Self {
+            internal_memory,
+            external_memory,
+        }
+    }
+
+    /// Returns the connections held when bulk memory is internal RAM.
+    #[must_use]
+    pub const fn internal_memory(&self) -> u8 {
+        self.internal_memory
+    }
+
+    /// Returns the connections held when the Board declares external memory.
+    #[must_use]
+    pub const fn external_memory(&self) -> u8 {
+        self.external_memory
+    }
+
+    /// Returns the connections held on a Board with or without external
+    /// memory.
+    #[must_use]
+    pub const fn for_board(&self, external_memory: bool) -> u8 {
+        if external_memory {
+            self.external_memory
+        } else {
+            self.internal_memory
+        }
     }
 }
 

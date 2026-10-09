@@ -273,3 +273,50 @@ fn every_repository_platform_declares_its_rustup_toolchain() {
         );
     }
 }
+
+#[test]
+fn long_lived_connections_default_to_none() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme1", "acme-none-elf");
+    let platforms = discover_platforms(root.path()).expect("Platform catalog");
+    let budget = platforms
+        .first()
+        .expect("the added Platform")
+        .network()
+        .long_lived_connections();
+    assert_eq!((budget.internal_memory(), budget.external_memory()), (0, 0));
+}
+
+#[test]
+fn repository_platforms_budget_long_lived_connections_by_memory() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let platforms = discover_platforms(&root).expect("workspace Platform catalog");
+    let budget = |name: &str| {
+        let budget = platforms
+            .iter()
+            .find(|platform| platform.name() == name)
+            .expect("repository Platform")
+            .network()
+            .long_lived_connections();
+        (budget.internal_memory(), budget.external_memory())
+    };
+
+    // Platforms without a network link hold none.
+    assert_eq!(budget("esp32p4"), (0, 0));
+    assert_eq!(budget("stm32"), (0, 0));
+    // Only the ESP32-S3 Platform installs Board external memory as bulk memory.
+    for name in ["esp32", "esp32c3", "esp32c6"] {
+        let (internal, external) = budget(name);
+        assert_eq!(internal, external, "{name}");
+    }
+    let (internal, external) = budget("esp32s3");
+    assert!(external > internal);
+    for platform in &platforms {
+        let budget = platform.network().long_lived_connections();
+        assert!(
+            usize::from(budget.internal_memory().max(budget.external_memory())) <= 4,
+            "Platform `{}` exceeds the static receive pool",
+            platform.name()
+        );
+    }
+}

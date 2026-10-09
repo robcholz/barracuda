@@ -2,6 +2,7 @@ use alloc::{collections::VecDeque, string::String, vec::Vec};
 use core::mem::size_of;
 
 use barracuda_plugin::manager::PluginStorage;
+use embassy_time::{Duration, Instant};
 use serde::Serialize;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
@@ -11,6 +12,9 @@ pub(crate) const THREAD_MAX: usize = 64;
 pub(crate) const MESSAGE_ID_MAX: usize = 96;
 pub(crate) const SESSION_MAX: usize = 32;
 const RECORD_VERSION: u32 = 1;
+/// How long a route stays reserved for the inbound message that found it
+/// unmapped, while that message's Workflow creates and binds a session.
+pub(crate) const RESERVATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct Route {
@@ -65,6 +69,24 @@ pub(crate) enum ResolveResult {
     },
 }
 
+/// Outcome of [`BridgeBook::resolve_or_reserve`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum Resolution {
+    /// The route is mapped, or was unmapped and is now reserved for the
+    /// caller ([`ResolveResult::Missing`]), which must create and bind a session.
+    Ready(ResolveResult),
+    /// Another inbound message reserved the unmapped route; resolve again
+    /// once the book changes or at `until`, when the reservation lapses.
+    Wait { until: Instant },
+}
+
+/// An unmapped route whose first inbound message is creating its session.
+#[derive(Clone, Debug)]
+struct Reservation {
+    route: Route,
+    expires: Instant,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GatewayTarget {
     pub(crate) route: Route,
@@ -102,14 +124,20 @@ impl BridgeError {
 ///
 /// Each session has at most one route and each route at most one session, so
 /// one list of mappings serves lookups from either side; a device holds few.
+///
+/// An unmapped route is reserved by the first inbound message that resolves
+/// it, so messages arriving while that message's Workflow creates the session
+/// wait and then bind to the same session instead of creating another.
 pub(crate) struct BridgeBook {
     mappings: Vec<Mapping>,
+    reservations: Vec<Reservation>,
 }
 
 impl BridgeBook {
     pub(crate) const fn new() -> Self {
         Self {
             mappings: Vec::new(),
+            reservations: Vec::new(),
         }
     }
 
@@ -155,9 +183,48 @@ impl BridgeBook {
         }
     }
 
+    /// Resolves `route`, reserving it for the caller when it is unmapped and
+    /// not already reserved by another inbound message.
+    ///
+    /// A reservation lasts until [`commit_mapping`](Self::commit_mapping) or
+    /// [`release`](Self::release) for the route, or until it lapses after
+    /// [`RESERVATION_TIMEOUT`] because the reserving Workflow never bound a
+    /// session; the next caller then takes it over.
+    pub(crate) fn resolve_or_reserve(&mut self, route: &Route, now: Instant) -> Resolution {
+        let found = self.resolve(route);
+        if found != ResolveResult::Missing {
+            return Resolution::Ready(found);
+        }
+        self.reservations
+            .retain(|reservation| reservation.expires > now);
+        if let Some(reservation) = self
+            .reservations
+            .iter()
+            .find(|reservation| reservation.route == *route)
+        {
+            return Resolution::Wait {
+                until: reservation.expires,
+            };
+        }
+        self.reservations.reserve_exact(1);
+        self.reservations.push(Reservation {
+            route: route.clone(),
+            expires: now.saturating_add(RESERVATION_TIMEOUT),
+        });
+        Resolution::Ready(ResolveResult::Missing)
+    }
+
+    /// Drops the reservation of `route`, letting a waiting message take it.
+    pub(crate) fn release(&mut self, route: &Route) {
+        self.reservations
+            .retain(|reservation| reservation.route != *route);
+    }
+
     /// Stores a mapping from [`prepare_binding`](Self::prepare_binding),
-    /// replacing the session's previous state.
+    /// replacing the session's previous state and ending the route's
+    /// reservation.
     pub(crate) fn commit_mapping(&mut self, mapping: Mapping) {
+        self.release(&mapping.route);
         match self
             .mappings
             .iter_mut()
@@ -395,10 +462,80 @@ mod tests {
 
     use alloc::string::String;
 
-    use super::{BridgeBook, GatewayEvent, PersistedRoute, ResolveResult, Route};
+    use embassy_time::{Duration, Instant};
+
+    use super::{
+        BridgeBook, GatewayEvent, PersistedRoute, RESERVATION_TIMEOUT, Resolution, ResolveResult,
+        Route,
+    };
 
     fn route() -> Route {
         Route::new("imessage", "chat-7", Some("thread-2")).expect("valid route")
+    }
+
+    #[test]
+    fn an_unmapped_route_is_reserved_for_its_first_message_until_bound() {
+        let mut book = BridgeBook::new();
+        let now = Instant::from_secs(100);
+        let expires = now.saturating_add(RESERVATION_TIMEOUT);
+
+        assert_eq!(
+            book.resolve_or_reserve(&route(), now),
+            Resolution::Ready(ResolveResult::Missing)
+        );
+        assert_eq!(
+            book.resolve_or_reserve(&route(), now.saturating_add(Duration::from_secs(1))),
+            Resolution::Wait { until: expires }
+        );
+        let other = Route::new("inkbox", "chat-7", None).expect("valid route");
+        assert_eq!(
+            book.resolve_or_reserve(&other, now),
+            Resolution::Ready(ResolveResult::Missing),
+            "reservations are per route"
+        );
+
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding")
+            .0;
+        book.commit_mapping(mapping);
+        assert_eq!(
+            book.resolve_or_reserve(&route(), now),
+            Resolution::Ready(ResolveResult::Found {
+                session: String::from("session-4"),
+                open_required: false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_released_or_lapsed_reservation_passes_to_the_next_message() {
+        let mut book = BridgeBook::new();
+        let now = Instant::from_secs(100);
+        let _first = book.resolve_or_reserve(&route(), now);
+
+        book.release(&route());
+        assert_eq!(
+            book.resolve_or_reserve(&route(), now),
+            Resolution::Ready(ResolveResult::Missing),
+            "a failed bind hands the route to a waiting message"
+        );
+        assert!(matches!(
+            book.resolve_or_reserve(&route(), now),
+            Resolution::Wait { .. }
+        ));
+        let lapsed = now.saturating_add(RESERVATION_TIMEOUT);
+        assert_eq!(
+            book.resolve_or_reserve(&route(), lapsed),
+            Resolution::Ready(ResolveResult::Missing),
+            "a Workflow that never binds cannot hold the route"
+        );
+        assert_eq!(
+            book.resolve_or_reserve(&route(), lapsed),
+            Resolution::Wait {
+                until: lapsed.saturating_add(RESERVATION_TIMEOUT)
+            }
+        );
     }
 
     #[test]

@@ -2,6 +2,14 @@ name: esp32c6
 info:
   family: esp
   environment: bare-metal
+# Long-lived connections (receive loops) beside the shared request pool. An
+# idle TLS client session holds about 35 KiB of the 128 KiB heap (39 KiB at
+# the handshake; shared/tls/tests/session_memory.rs), so one fits beside the
+# model connection. The chip has no external memory.
+network:
+  long-lived-connections:
+    internal-memory: 1
+    external-memory: 1
 package: barracuda-platform-esp32c6
 crate: barracuda_platform_esp32c6
 type: Esp32c6Platform

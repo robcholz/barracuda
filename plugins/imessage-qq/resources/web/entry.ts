@@ -1,11 +1,13 @@
 import {
   KIT_STRINGS,
+  channelInbound,
   configuredRow,
   definePage,
   header,
   page,
   readChannel,
   settingsForm,
+  type ChannelStatus,
 } from "../../../captive-portal/resources/web/ui";
 
 const T = {
@@ -17,6 +19,7 @@ const T = {
     botLink: "打开 QQ 开放平台",
     platform: "QQ 开放平台：",
     tryChat: "去 Web 聊天试试",
+    how: "在 QQ 里给机器人发送",
   },
   en: {
     lead: "Send and receive messages through a QQ bot.",
@@ -27,6 +30,7 @@ const T = {
     botLink: "Open the QQ Open Platform",
     platform: "QQ Open Platform: ",
     tryChat: "Try it in Web chat",
+    how: "In QQ, send the bot",
   },
 };
 
@@ -35,12 +39,18 @@ const ENDPOINT = "/api/gateway/qq";
 /**
  * The QQ page: App ID and App Secret, posted to `POST /api/gateway/qq`. The device fetches one access
  * token before it stores anything; QQ's own rejection (422 `verification_failed`) is shown on the
- * secret field. `GET` on the same path says whether a channel is configured.
+ * secret field. `GET` on the same path says whether a channel is configured, and its mode and allowed
+ * accounts (`/mode`, `/owners`) show while it is.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
   const t = T[lang];
   const current = configuredRow("QQ", lang);
+  const inbound = channelInbound(context, {
+    endpoint: ENDPOINT,
+    channel: "QQ",
+    how: t.how,
+  });
   const form = settingsForm(
     {
       endpoint: ENDPOINT,
@@ -84,6 +94,7 @@ export const mount = definePage((context) => {
       },
       onSuccess: () => {
         current.show(true);
+        void inbound.refresh();
         void context.refreshStatus();
       },
       success: {
@@ -96,8 +107,10 @@ export const mount = definePage((context) => {
     context,
   );
   form.element.prepend(current.element);
-  void readChannel(context, ENDPOINT).then((state) => {
+  inbound.attach(form);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
     if (state?.configured) current.show(true);
+    inbound.apply(state);
   });
   return page(
     header(

@@ -8,7 +8,9 @@
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/inkbox` for runtime configuration, and
-registers the configured channel for its lifetime. Accepted configuration is
+registers the configured channel `inkbox` for its lifetime, so it can be active
+beside the BlueBubbles `bluebubbles` channel. Inkbox cannot quote a message, so
+`reply_to` on text and media is ignored instead of failing. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
 stored data fails registration. `GET /api/gateway/inkbox` reports whether a
 channel is configured and, for a signup, the person's address, the agent

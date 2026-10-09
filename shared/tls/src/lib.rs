@@ -15,11 +15,15 @@ mod memory;
 mod roots;
 
 use alloc::{boxed::Box, format, string::String};
+use core::ffi::CStr;
 
 use barracuda_platform::{Entropy, EntropyUnavailable};
-use mbedtls_rs::{RngFailure, TlsRng};
+use mbedtls_rs::{
+    io::{Read, Write},
+    AuthMode, ClientSessionConfig, RngFailure, SessionConfig, TlsRng,
+};
 
-pub use mbedtls_rs::{Certificate, TlsReference, TlsVersion};
+pub use mbedtls_rs::{Certificate, Session, SessionError, Split, TlsReference, TlsVersion};
 
 /// The process-wide TLS engine and the roots it trusts.
 ///
@@ -73,6 +77,31 @@ impl Tls {
     #[must_use]
     pub fn reference(&self) -> TlsReference<'static> {
         self.tls_reference
+    }
+
+    /// Starts a client session over `stream` that verifies the server
+    /// against the bundled roots and `server_name`, with the settings every
+    /// HTTP client uses. [`Session::connect`] runs the handshake.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when mbedTLS cannot allocate or configure the session.
+    pub fn client_session<T: Read + Write>(
+        &self,
+        stream: T,
+        server_name: &CStr,
+    ) -> Result<Session<'static, T>, SessionError> {
+        let config = SessionConfig::Client(ClientSessionConfig {
+            ca_chain: Some(self.certificates()),
+            creds: None,
+            server_name: None,
+            auth_mode: AuthMode::Required,
+            min_version: self.version(),
+            alpn_protocols: None,
+        });
+        let mut session = Session::new(self.tls_reference, stream, &config)?;
+        session.set_server_name(server_name)?;
+        Ok(session)
     }
 }
 

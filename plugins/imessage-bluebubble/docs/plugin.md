@@ -8,7 +8,11 @@
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities, exposes `/api/gateway/bluebubbles` for runtime configuration, and
-registers the configured channel for its lifetime. Accepted configuration is
+registers the configured channel `bluebubbles` for its lifetime, so it can be
+active beside the Inkbox `inkbox` channel. With the Private API enabled,
+`reply_to` is sent as `selectedMessageGuid`; with it disabled, AppleScript sends
+cannot quote a message, so `reply_to` is ignored and the text or attachment is
+sent unthreaded instead of failing. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
 stored data fails registration. `GET` on the same path reports only whether a
 channel is configured. The portal entry is registered with

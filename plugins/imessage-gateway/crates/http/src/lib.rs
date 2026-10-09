@@ -10,9 +10,11 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 
 use barracuda_bulk_memory::BulkBox;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use embassy_time::{Duration, Instant, Timer};
 use futures_lite::StreamExt as _;
 use gateway::BinaryBody;
 use reqwless::request::RequestBuilder as _;
@@ -22,10 +24,17 @@ pub use reqwless::request::{Method, RequestBody};
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
+/// Deadline of one [`send`] exchange, matching the `plugins/http` request
+/// deadline.
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("HTTPS requested without a TLS configuration")]
     TlsNotConfigured,
+    /// The exchange missed its [`SEND_TIMEOUT`] deadline.
+    #[error("HTTP request timed out")]
+    Timeout,
     #[error(transparent)]
     Reqwless(#[from] reqwless::Error),
 }
@@ -35,7 +44,55 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
+/// Sends one request on a fresh connection and buffers the whole response.
+///
+/// The exchange (DNS, connect, TLS handshake, request, and response) must
+/// finish within [`SEND_TIMEOUT`], otherwise it is dropped with
+/// [`Error::Timeout`], which providers report as a transport error. A body of
+/// unknown length is a caller-fed stream: time spent waiting for its next
+/// chunk does not count, but connecting, each write, and the response after
+/// the last chunk are each bounded by [`SEND_TIMEOUT`].
 pub async fn send<T, D, B>(
+    http_clients: &http_client::ClientFactory<'_, T, D>,
+    method: Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: B,
+) -> Result<Response, Error>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+    B: RequestBody,
+{
+    send_within(SEND_TIMEOUT, http_clients, method, url, headers, body).await
+}
+
+async fn send_within<T, D, B>(
+    timeout: Duration,
+    http_clients: &http_client::ClientFactory<'_, T, D>,
+    method: Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: B,
+) -> Result<Response, Error>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+    B: RequestBody,
+{
+    let deadline = Deadline::new(timeout, body.len().is_none());
+    let body = PacedBody {
+        body,
+        deadline: &deadline,
+    };
+    futures_lite::future::or(exchange(http_clients, method, url, headers, body), async {
+        deadline.expired().await;
+        Err(Error::Timeout)
+    })
+    .await
+}
+
+async fn exchange<T, D, B>(
     http_clients: &http_client::ClientFactory<'_, T, D>,
     method: Method,
     url: &str,
@@ -73,6 +130,107 @@ where
         status,
         body: bytes,
     })
+}
+
+/// Expiry instant of one [`send`] exchange, paused while a streamed body waits
+/// for its caller.
+struct Deadline {
+    /// Instant the exchange expires at, or `None` while paused.
+    at: Cell<Option<Instant>>,
+    timeout: Duration,
+    /// Whether the clock pauses between writes of a streamed body.
+    streamed: bool,
+    changed: Signal<NoopRawMutex, ()>,
+}
+
+impl Deadline {
+    fn new(timeout: Duration, streamed: bool) -> Self {
+        Self {
+            at: Cell::new(Some(Instant::now().saturating_add(timeout))),
+            timeout,
+            streamed,
+            changed: Signal::new(),
+        }
+    }
+
+    /// Restarts the clock from now for a streamed body.
+    fn resume(&self) {
+        if self.streamed {
+            self.set(Some(Instant::now().saturating_add(self.timeout)));
+        }
+    }
+
+    /// Stops the clock while a streamed body waits for its next chunk.
+    fn pause(&self) {
+        if self.streamed {
+            self.set(None);
+        }
+    }
+
+    fn set(&self, at: Option<Instant>) {
+        self.at.set(at);
+        self.changed.signal(());
+    }
+
+    /// Completes once the current expiry instant passes without a change.
+    async fn expired(&self) {
+        loop {
+            match self.at.get() {
+                Some(at) if Instant::now() >= at => return,
+                Some(at) => futures_lite::future::or(Timer::at(at), self.changed.wait()).await,
+                None => self.changed.wait().await,
+            }
+        }
+    }
+}
+
+/// Request body that drives the [`Deadline`] around the writes of `body`.
+struct PacedBody<'a, B> {
+    body: B,
+    deadline: &'a Deadline,
+}
+
+impl<B: RequestBody> RequestBody for PacedBody<'_, B> {
+    fn len(&self) -> Option<usize> {
+        self.body.len()
+    }
+
+    async fn write<W: embedded_io_async::Write>(&self, writer: &mut W) -> Result<(), W::Error> {
+        self.deadline.pause();
+        let mut writer = PacedWriter {
+            writer,
+            deadline: self.deadline,
+        };
+        let written = self.body.write(&mut writer).await;
+        self.deadline.resume();
+        written
+    }
+}
+
+/// Writer that runs the [`Deadline`] only while a write is in flight.
+struct PacedWriter<'a, W> {
+    writer: &'a mut W,
+    deadline: &'a Deadline,
+}
+
+impl<W: embedded_io_async::ErrorType> embedded_io_async::ErrorType for PacedWriter<'_, W> {
+    type Error = W::Error;
+}
+
+impl<W: embedded_io_async::Write> embedded_io_async::Write for PacedWriter<'_, W> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.deadline.resume();
+        let written = self.writer.write(buf).await;
+        self.deadline.pause();
+        written
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.deadline.resume();
+        let flushed = self.writer.flush().await;
+        self.deadline.pause();
+        flushed
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -301,3 +459,6 @@ fn validate_header_value(value: &str) -> Result<(), MultipartError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

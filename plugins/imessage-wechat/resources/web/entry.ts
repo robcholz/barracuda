@@ -3,6 +3,7 @@ import {
   ICON_REFRESH,
   button,
   callDevice,
+  channelInbound,
   copyText,
   definePage,
   h,
@@ -43,6 +44,7 @@ const T = {
     clientVersion: "客户端版本",
     routeTag: "路由标签",
     tryChat: "去 Web 聊天试试",
+    how: "用微信给 ClawBot 发送",
   },
   en: {
     title: "WeChat",
@@ -69,6 +71,7 @@ const T = {
     clientVersion: "Client version",
     routeTag: "Route tag",
     tryChat: "Try it in Web chat",
+    how: "In WeChat, send ClawBot",
   },
 };
 
@@ -97,7 +100,8 @@ const show = (node: HTMLElement, visible: boolean) =>
 /**
  * The WeChat page. The device runs one iLink QR login (`POST/GET/DELETE /api/gateway/wechat/login`):
  * the page starts it, shows the code, polls every 2 s and cancels it when it goes away. A token
- * entered by hand under 「高级」 posts to `POST /api/gateway/wechat`.
+ * entered by hand under 「高级」 posts to `POST /api/gateway/wechat`. Once linked, `GET` on that path
+ * shows the channel's mode (no 「仅发送」) and allowed accounts.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -158,6 +162,16 @@ export const mount = definePage((context) => {
     context,
   );
   show(form.footer, false);
+  // iLink needs the inbound context token to keep sending, so WeChat has no 「仅发送」
+  const inbound = channelInbound(context, {
+    endpoint: "/api/gateway/wechat",
+    channel: t.title,
+    modes: ["disabled", "send_receive"],
+    how: t.how,
+  });
+  inbound.attach(form);
+  /** The mode and accounts rows show the device's channel while the page shows it linked. */
+  let linkedShown = false;
 
   let view: View = { kind: "loading" };
   let slot: HTMLElement = h("div");
@@ -280,6 +294,10 @@ export const mount = definePage((context) => {
     }
     slot.replaceWith(next);
     slot = next;
+    if ((view.kind === "linked") === linkedShown) return;
+    linkedShown = view.kind === "linked";
+    if (linkedShown) void inbound.refresh();
+    else inbound.apply(null);
   }
 
   const finish = (next: View) => {

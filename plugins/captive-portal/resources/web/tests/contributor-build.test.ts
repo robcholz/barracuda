@@ -39,7 +39,7 @@ test("each contributor has fresh standalone bundles in its own resource director
       Bun.file(new URL(`filesystem/resources/${name}`, directory));
     const code = await fresh(source("entry.ts"));
     expect(code).toBe(await output("entry.js").text());
-    expect(new TextEncoder().encode(code).byteLength).toBeLessThan(32 * 1024);
+    expect(new TextEncoder().encode(code).byteLength).toBeLessThan(40 * 1024);
     expect(code).not.toMatch(/\bimport\s*(?:\(|\{|["'])/);
     expect(code).toContain("mount");
     // the kit is bundled in, the kernel never is

@@ -721,7 +721,7 @@ mod tests {
         resend: Box<dyn HttpEndpoint>,
         stored: Box<dyn Fn() -> Option<Vec<u8>>>,
         entry_status: Box<dyn Fn() -> EntryStatus>,
-        /// Another `imessage` channel holding the name while present.
+        /// Another `inkbox` channel holding the name while present.
         occupant: RefCell<Option<MessageChannelRegistration>>,
     }
 
@@ -729,7 +729,7 @@ mod tests {
 
     impl MessageChannel for OccupyingChannel {
         fn channel(&self) -> &str {
-            "imessage"
+            inkbox::CHANNEL
         }
 
         fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
@@ -783,7 +783,7 @@ mod tests {
 
         fn send_text(&self) -> bool {
             block_on(self.gateway.send(GatewaySendRequest {
-                channel: "imessage".into(),
+                channel: inkbox::CHANNEL.into(),
                 conversation_id: "conversation-uuid".into(),
                 thread_id: None,
                 reply_to: None,
@@ -875,7 +875,7 @@ mod tests {
         with_gateway(steps, false, scenario);
     }
 
-    /// As [`with_harness`], with the `imessage` channel taken while `occupied`.
+    /// As [`with_harness`], with the `inkbox` channel taken while `occupied`.
     fn with_gateway(
         steps: impl IntoIterator<Item = ScriptStep>,
         occupied: bool,

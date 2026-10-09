@@ -21,6 +21,9 @@ use http_client::ClientFactory;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
 
+/// Gateway channel name this provider registers.
+pub const CHANNEL: &str = "bluebubbles";
+
 const URL_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
     .remove(b'.')
@@ -118,6 +121,14 @@ where
         .await
     }
 
+    /// Keeps `reply_to` only when the Private API can thread it.
+    ///
+    /// AppleScript sends cannot quote a message, so replies to inbound
+    /// messages degrade to plain sends instead of failing.
+    fn thread_reply(&self, reply_to: Option<String>) -> Option<String> {
+        reply_to.filter(|_| self.config.use_private_api)
+    }
+
     fn require_private_api(&self, operation: Operation) -> Result<(), ChannelError> {
         if self.config.use_private_api {
             Ok(())
@@ -137,9 +148,6 @@ where
                 message: "message text is empty".into(),
             });
         }
-        if reply_to.is_some() && !self.config.use_private_api {
-            return Err(ChannelError::unsupported(Operation::SendMessage));
-        }
         let temp_guid = self.temp_guid();
         let mut payload = json!({
             "chatGuid": target.conversation_id,
@@ -147,7 +155,7 @@ where
             "message": text,
             "method": self.send_method(),
         });
-        if let Some(reply_to) = reply_to {
+        if let Some(reply_to) = self.thread_reply(reply_to) {
             insert_json_field(&mut payload, "selectedMessageGuid", Value::String(reply_to))?;
         }
         let root = self.call_json("message/text", payload).await?;
@@ -224,9 +232,6 @@ where
         kind: MediaKind,
         request: SendMediaRequest,
     ) -> Result<SendReceipt, ChannelError> {
-        if request.reply_to.is_some() && !self.config.use_private_api {
-            return Err(ChannelError::unsupported(kind.operation()));
-        }
         if request.caption.is_some() && !self.config.use_private_api {
             return Err(ChannelError::InvalidRequest {
                 message: "BlueBubbles attachment captions require the Private API".into(),
@@ -258,7 +263,7 @@ where
         if let Some(caption) = request.caption {
             multipart = multipart.text("subject", caption);
         }
-        if let Some(reply_to) = request.reply_to {
+        if let Some(reply_to) = self.thread_reply(request.reply_to) {
             multipart = multipart.text("selectedMessageGuid", reply_to);
         }
         multipart = multipart.file("attachment", filename, mime_type, request.body);
@@ -298,7 +303,7 @@ where
     D: http_client::embedded_nal_async::Dns + 'static,
 {
     fn channel(&self) -> &str {
-        "imessage"
+        CHANNEL
     }
 
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {

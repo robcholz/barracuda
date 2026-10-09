@@ -53,7 +53,13 @@ test("renders the design in Chinese: server row with 测试连接, Private API s
     [...root.querySelectorAll(".bc-row__label .bc-title")].map(
       (node) => node.textContent,
     ),
-  ).toEqual(["通道", "服务器", "选项"]);
+  ).toEqual(["通道", "服务器", "选项", "模式", "授权账号"]);
+  // 模式 and 授权账号 wait for a configured channel too
+  expect(
+    [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
+      .filter((row) => row.style.display !== "none")
+      .map((row) => row.querySelector(".bc-title")?.textContent),
+  ).toEqual(["服务器", "选项", undefined]);
   // the 通道 row waits for the device to say a channel is configured
   expect(root.querySelector<HTMLElement>(".bc-row")?.style.display).toBe(
     "none",
@@ -153,7 +159,12 @@ test("an unreachable server shows a note, and saving still posts the settings", 
   await page.click("测试连接");
   expect(page.text()).toContain("连不上这台服务器，连接未测试");
   await page.submit();
-  const save = harness.calls.at(-1)!;
+  // the accepted save reads the channel again for its mode and accounts
+  expect(harness.calls.slice(-2).map((call) => call.method)).toEqual([
+    "POST",
+    "GET",
+  ]);
+  const save = harness.calls.at(-2)!;
   expect([save.url, save.method]).toEqual(["/api/gateway/bluebubbles", "POST"]);
   expect(save.body).toEqual({
     server_url: "https://bb.example.com",
@@ -212,4 +223,47 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
   expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+});
+
+test("a configured channel shows its mode and the code to send from iMessage", async () => {
+  harness.reply = async (call) => {
+    if (call.url === "/api/gateway/bluebubbles")
+      return json(200, {
+        configured: true,
+        mode: "send",
+        owners: { count: 2 },
+      });
+    if (call.url === "/api/gateway/bluebubbles/owners")
+      return json(200, {
+        owners: [
+          { id: "+14155550134", label: "Me" },
+          { id: "me@icloud.com", label: null },
+        ],
+        pairing: { code: "482913", expires_in: 600 },
+        ignored: 0,
+      });
+    return new Response(null, { status: 404 });
+  };
+  const page = await harness.render(mount, "zh");
+  await settle();
+  try {
+    expect(page.query<HTMLInputElement>('input[value="send"]')?.checked).toBe(
+      true,
+    );
+    expect(
+      page.query("[role=radiogroup] + [role=status] .bc-badge")?.textContent,
+    ).toBe("仅发送");
+    expect(page.text()).toContain("用 iMessage 给这台 Mac 发送482913");
+    expect(page.text()).toContain("Me+14155550134移除me@icloud.com移除");
+  } finally {
+    page.unmount();
+  }
+  const en = await harness.render(mount, "en");
+  await settle();
+  try {
+    expect(en.text()).toContain("From iMessage, send this Mac482913");
+    expect(en.text()).toContain("Send only");
+  } finally {
+    en.unmount();
+  }
 });

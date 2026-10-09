@@ -1,11 +1,19 @@
 use alloc::{rc::Rc, vec::Vec};
+use core::{
+    cell::{Cell, RefCell},
+    future::poll_fn,
+    task::Poll,
+};
+
 use barracuda_plugin::manager::{
     PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
 };
 use barracuda_workflow_plugin::{
     WorkflowActionRegistration, WorkflowActionRegistry, WorkflowActionRegistryError,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::NoopRawMutex, mutex::Mutex, waitqueue::MultiWakerRegistration,
+};
 
 use crate::{
     state::{BridgeBook, PersistedRoute},
@@ -16,6 +24,49 @@ use crate::{
 pub(crate) struct BridgeShared<Storage> {
     pub(crate) book: Mutex<NoopRawMutex, BridgeBook>,
     pub(crate) storage: Storage,
+    /// Wakes inbound messages waiting on a route reservation.
+    pub(crate) routes: RouteChanges,
+}
+
+/// Broadcast of route mapping and reservation changes in the [`BridgeBook`].
+///
+/// Read [`generation`](Self::generation) and call [`notify`](Self::notify)
+/// while holding the book lock, so a waiter cannot miss a change made between
+/// its resolve and its wait.
+pub(crate) struct RouteChanges {
+    generation: Cell<u32>,
+    waiters: RefCell<MultiWakerRegistration<4>>,
+}
+
+impl RouteChanges {
+    const fn new() -> Self {
+        Self {
+            generation: Cell::new(0),
+            waiters: RefCell::new(MultiWakerRegistration::new()),
+        }
+    }
+
+    pub(crate) fn generation(&self) -> u32 {
+        self.generation.get()
+    }
+
+    pub(crate) fn notify(&self) {
+        self.generation.set(self.generation.get().wrapping_add(1));
+        self.waiters.borrow_mut().wake();
+    }
+
+    /// Completes once the book changed after `generation` was read.
+    pub(crate) async fn changed_since(&self, generation: u32) {
+        poll_fn(|context| {
+            if self.generation.get() == generation {
+                self.waiters.borrow_mut().register(context.waker());
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+    }
 }
 
 #[derive(Clone)]
@@ -60,6 +111,7 @@ where
                 shared: Rc::new(BridgeShared {
                     book: Mutex::new(book),
                     storage,
+                    routes: RouteChanges::new(),
                 }),
             },
         })
@@ -76,3 +128,6 @@ where
         ])
     }
 }
+
+#[cfg(test)]
+mod tests;

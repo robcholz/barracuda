@@ -2,6 +2,11 @@ name: macos
 info:
   family: macos
   environment: hosted
+# One long-lived connection for each channel that holds one open.
+network:
+  long-lived-connections:
+    internal-memory: 4
+    external-memory: 4
 package: barracuda-platform-macos
 crate: barracuda_platform_macos
 type: MacosPlatform

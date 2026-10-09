@@ -31,7 +31,8 @@ fn main() -> Result<(), Box<dyn Error>> {
          pub const PLATFORM_NAME: &str = {:?};\n\n\
          /// Fixed identity of the independently selected Platform.\n\
          pub const PLATFORM_INFO: ::barracuda_platform::PlatformInfo =\n\
-             ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?});\n\n\
+             ::barracuda_platform::PlatformInfo::new({:?}, {:?}, {:?}, {:?})\n\
+                 .with_long_lived_connections(::barracuda_platform::ConnectionBudget::new({}, {}));\n\n\
          /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::barracuda_platform_selection::{};\n\n\
          #[doc(hidden)]\n\
@@ -48,6 +49,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         platform.info().family(),
         architecture,
         platform.info().environment(),
+        platform.network().long_lived_connections().internal_memory(),
+        platform.network().long_lived_connections().external_memory(),
         platform.type_name(),
     );
     fs::write(output.join("selected_platform.rs"), generated)?;

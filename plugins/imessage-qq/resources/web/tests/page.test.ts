@@ -40,7 +40,13 @@ test("renders the design in Chinese: App ID and App Secret, token URL under 高�
     [...root.querySelectorAll(".bc-row__label .bc-title")].map(
       (node) => node.textContent,
     ),
-  ).toEqual(["通道", "机器人"]);
+  ).toEqual(["通道", "机器人", "模式", "授权账号"]);
+  // 模式 and 授权账号 wait for a configured channel too
+  expect(
+    [...root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
+      .filter((row) => row.style.display !== "none")
+      .map((row) => row.querySelector(".bc-title")?.textContent),
+  ).toEqual(["机器人", undefined]);
   // the 通道 row waits for the device to say a channel is configured
   expect(root.querySelector<HTMLElement>(".bc-row")?.style.display).toBe(
     "none",
@@ -83,7 +89,11 @@ test("validates, then posts App ID and App Secret and clears the secret", async 
   page.type("app_id", "102345678");
   page.type("app_secret", "s3cret");
   await page.submit();
-  expect(harness.calls).toHaveLength(1);
+  // the accepted save reads the channel again for its mode and accounts
+  expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
+    ["POST", "/api/gateway/qq"],
+    ["GET", "/api/gateway/qq"],
+  ]);
   const [call] = harness.calls;
   expect([call.url, call.method]).toEqual(["/api/gateway/qq", "POST"]);
   expect(call.body).toEqual({
@@ -174,4 +184,54 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
   expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+});
+
+test("with every receive slot taken it says so and names the limit", async () => {
+  harness.reply = async (call) => {
+    if (call.url === "/api/gateway/qq")
+      return json(200, {
+        configured: true,
+        mode: "send_receive",
+        receive: { state: "no_slot", capacity: 2 },
+        owners: { count: 1 },
+      });
+    if (call.url === "/api/gateway/qq/owners")
+      return json(200, {
+        owners: [{ id: "c2c:7F3A9B2E41D0", label: "QQ 用户" }],
+        pairing: { code: "482913", expires_in: 581 },
+        ignored: 0,
+      });
+    return new Response(null, { status: 404 });
+  };
+  for (const [lang, phrases] of [
+    [
+      "zh",
+      [
+        "等待名额名额 2/2",
+        "收发通道已达上限（2）",
+        "把其他通道改为仅发送或停用后，QQ 会自动开始接收。",
+        "在 QQ 里给机器人发送482913",
+        "QQ 用户c2c:7F3A9B2E41D0移除",
+      ],
+    ],
+    [
+      "en",
+      [
+        "Waiting for a slotSlots 2 of 2",
+        "Receive slots are full (2)",
+        "Set another channel to Send only or Disabled and QQ starts receiving on its own.",
+        "In QQ, send the bot482913",
+      ],
+    ],
+  ] as const) {
+    const page = await harness.render(mount, lang);
+    await settle();
+    try {
+      for (const phrase of phrases) expect(page.text()).toContain(phrase);
+      expect(page.query(".bc-alert[role=status]")).not.toBeNull();
+      expect(page.query("[role=status] .bc-term.bc-mono")).not.toBeNull();
+    } finally {
+      page.unmount();
+    }
+  }
 });

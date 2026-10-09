@@ -4,10 +4,14 @@
 
 extern crate alloc;
 
+mod entropy;
+
 use barracuda_board_hal::{BoardResources, NoExposedIo, NoPeripherals};
+pub use barracuda_platform::{Entropy, EntropyUnavailable};
 pub use barracuda_target_api::{BoardInfo, Hardware, PlatformInfo, TargetIdentity};
 pub use embassy_net::Stack;
-pub use http_client::ClientFactory;
+pub use entropy::SharedEntropy;
+pub use http_client::{ClientFactory, ReceiveLease, ReceiveSlots};
 use portable_atomic_util::Arc;
 
 /// Fixed System resources available while constructing a Plugin.
@@ -22,6 +26,12 @@ pub struct PluginContext<Peripherals = NoPeripherals, ExposedIo = NoExposedIo> {
     /// Factory for constructing HTTP clients over the Platform network and TLS
     /// capabilities.
     pub http_clients: ClientFactory<'static>,
+    /// Dedicated connection slots for long-lived receive loops, sized for the
+    /// selected Target. Empty unless System assigns them.
+    pub receive_slots: ReceiveSlots,
+    /// The Platform's entropy source, fit for cryptographic use. Unavailable
+    /// unless System assigns it.
+    pub entropy: SharedEntropy,
     /// Complete HAL produced by the selected Board composition.
     pub hal: BoardResources<Peripherals, Arc<ExposedIo>>,
 }
@@ -43,6 +53,8 @@ impl<Peripherals, ExposedIo> PluginContext<Peripherals, ExposedIo> {
             target_identity,
             ip_stack,
             http_clients,
+            receive_slots: ReceiveSlots::unavailable(),
+            entropy: SharedEntropy::unavailable(),
             hal: BoardResources::new(peripherals, Arc::new(exposed_io)),
         }
     }

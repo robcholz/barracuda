@@ -1,5 +1,6 @@
 import {
   button,
+  channelInbound,
   configuredRow,
   definePage,
   h,
@@ -9,6 +10,7 @@ import {
   readChannel,
   resultCard,
   settingsForm,
+  type ChannelStatus,
 } from "../../../captive-portal/resources/web/ui";
 
 const T = {
@@ -33,6 +35,7 @@ const T = {
     editDelta: "流式编辑最小增量",
     maxEdits: "最大流式编辑次数",
     tryChat: "去 Web 聊天试试",
+    how: "用 iMessage 给这台 Mac 发送",
   },
   en: {
     lead: "Connect a BlueBubbles server to reach iMessage.",
@@ -55,6 +58,7 @@ const T = {
     editDelta: "Streaming edit minimum delta",
     maxEdits: "Max streaming edits",
     tryChat: "Try it in Web chat",
+    how: "From iMessage, send this Mac",
   },
 };
 
@@ -74,7 +78,8 @@ const ENDPOINT = "/api/gateway/bluebubbles";
 /**
  * The BlueBubbles page: the server URL and password, checked in the browser against the server's
  * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`. `GET` on that path
- * says whether a channel is configured.
+ * says whether a channel is configured, and its mode and allowed accounts (`/mode`, `/owners`) show
+ * while it is.
  */
 export const mount = definePage((context) => {
   const { lang } = context;
@@ -85,6 +90,11 @@ export const mount = definePage((context) => {
     onClick: () => void check(),
   });
   const current = configuredRow("BlueBubbles", lang);
+  const inbound = channelInbound(context, {
+    endpoint: ENDPOINT,
+    channel: "BlueBubbles",
+    how: t.how,
+  });
   const form = settingsForm(
     {
       endpoint: ENDPOINT,
@@ -143,6 +153,7 @@ export const mount = definePage((context) => {
       onError: (error) => ({ body: error.message }),
       onSuccess: () => {
         current.show(true);
+        void inbound.refresh();
         void context.refreshStatus();
       },
       success: {
@@ -155,8 +166,10 @@ export const mount = definePage((context) => {
     context,
   );
   form.element.prepend(current.element);
-  void readChannel(context, ENDPOINT).then((state) => {
+  inbound.attach(form);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then((state) => {
     if (state?.configured) current.show(true);
+    inbound.apply(state);
   });
   const field = (name: string) =>
     form.element.querySelector<HTMLElement>(`[name="${name}"]`)!;

@@ -163,6 +163,54 @@ Channel state (`channel.ts`)
   // settingsForm options: onSuccess: () => { current.show(true); void context.refreshStatus(); }
   ```
 
+Channel mode and allowed accounts (`inbound.ts`), for the external channel pages
+
+Every channel serves the same JSON under its config path: `GET <endpoint>` answers
+`ChannelStatus` (`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`),
+`POST <endpoint>/mode` takes `{mode}`, and `GET`/`POST <endpoint>/owners` answer `OwnersReply`
+(`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take
+`{"remove": id}` or `{"rotate": true}`.
+
+- `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000 })` returns
+  `{ rows, attach(form), apply(status), refresh() }`: the two rows below, wired to the device.
+  - `attach(form)` puts them before the form's 「高级」 fold (or its footer).
+  - `apply(status)` shows the state the page's own `readChannel` read; `refresh()` reads it again
+    (call it after a save succeeds). Both rows show only while `configured`.
+  - A mode change reads the channel again, then calls `context.refreshStatus()`. In `send_receive`
+    the channel is read every `pollMs` until the page goes away, so the badge stays live; a
+    change of receive state there refreshes the shell's status too, and a change of `owners.count`
+    reads the list again. A missed read keeps what is shown.
+
+  ```ts
+  const inbound = channelInbound(context, {
+    endpoint: "/api/gateway/telegram",
+    channel: "Telegram",
+    how: { zh: "在 Telegram 里给 Bot 发送", en: "In Telegram, send the bot" },
+    command: (code) => `/start ${code}`,
+  });
+  inbound.attach(form);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then(inbound.apply);
+  // settingsForm options: onSuccess: () => void inbound.refresh()
+  ```
+
+- `modeRow({ endpoint, channel, modes?, onChange? }, context)` returns `{ element, update(status) }`:
+  the 「模式」 row, one radio card per mode in `modes` (default `CHANNEL_MODES`: 停用 / 仅发送 /
+  收发; WeChat passes `["disabled", "send_receive"]`). Under the cards, the state badge: 收发中
+  (signal) for `receiving`, 连接中 for `starting` and `idle`, 等待名额 with the slot count
+  (`名额 N/N`, mono, a `.bc-term` saying what sets it) and the alert 「收发通道已达上限（N）」 for
+  `no_slot`, 连接中断 with the device's `message` in mono for `error`; 仅发送 and 已停用 for the
+  other modes. Choosing posts `{mode}` at once; a 204 or a 409 `no_slot` (the mode is saved) runs
+  `onChange`, any other answer is toasted and the choice goes back.
+- `accountsRow({ endpoint, how, command? }, context)` returns `{ element, load(), hide(), count() }`:
+  the 「授权账号」 row. A card holds the binding code (`.bc-page-title bc-mono`, `command(code)` when
+  given) under `how`, its countdown (「有效期还剩 m:ss」, counted locally; the list is read again when
+  it ends) and 「换一个绑定码」 (`{"rotate": true}`); `pairing: null` drops that box. Then each account,
+  `label` over its `id` in mono (the `id` alone, in mono, without a label), with 「移除」
+  (`{"remove": id}`, no confirmation), or 「还没有授权账号」. Refusals are toasted; a success reads
+  the list again.
+- Types: `ChannelMode`, `ReceiveState`, `ChannelStatus`, `Owner`, `OwnersReply`, and the options
+  and handles above.
+
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 
 - `resultCard({ title, badge, sub?, initial?, rows?, action? }, lang)`: what a check found

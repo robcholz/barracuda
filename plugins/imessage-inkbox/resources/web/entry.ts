@@ -4,6 +4,7 @@ import {
   KIT_STRINGS,
   button,
   callDevice,
+  channelInbound,
   configuredRow,
   definePage,
   fieldControl,
@@ -16,6 +17,7 @@ import {
   row,
   settingsForm,
   toastDeviceError,
+  type ChannelStatus,
   type DeviceResult,
 } from "../../../captive-portal/resources/web/ui";
 
@@ -48,6 +50,7 @@ const T = {
     accountHint: "Inkbox 控制台中的 API Key 与身份",
     console: "打开 Inkbox 控制台",
     tryChat: "去 Web 聊天试试",
+    how: "从你的邮箱给这个地址发送",
   },
   en: {
     lead: "Connect Inkbox identity and mail.",
@@ -77,6 +80,7 @@ const T = {
     accountHint: "The API key and identity from the Inkbox console",
     console: "Open the Inkbox console",
     tryChat: "Try it in Web chat",
+    how: "From your inbox, email this address",
   },
 };
 
@@ -112,6 +116,11 @@ export const mount = definePage((context) => {
   const s = KIT_STRINGS[lang];
 
   const current = configuredRow("Inkbox", lang);
+  const inbound = channelInbound(context, {
+    endpoint: ENDPOINT,
+    channel: "Inkbox",
+    how: t.how,
+  });
   const form = settingsForm(
     {
       endpoint: ENDPOINT,
@@ -141,6 +150,7 @@ export const mount = definePage((context) => {
       onError: (error) => ({ body: error.message }),
       onSuccess: () => {
         current.show(true);
+        void inbound.refresh();
         void context.refreshStatus();
       },
       success: {
@@ -229,6 +239,7 @@ export const mount = definePage((context) => {
     codeRow,
     identityRow,
   );
+  inbound.attach(form);
 
   let mode: "email" | "key" = "email";
   let step: "email" | "code" | "claimed" = "email";
@@ -296,6 +307,7 @@ export const mount = definePage((context) => {
     awaitCode(result.data?.email_address, address);
     context.toast({ kind: "success", title: `${t.sentTo} ${address}` });
     // the device stored and registered the channel before replying
+    void inbound.refresh();
     void context.refreshStatus();
     code.control.focus();
   }
@@ -407,23 +419,26 @@ export const mount = definePage((context) => {
     onEnter(() => void claim()),
   );
   paint();
-  void readChannel<InkboxState>(context, ENDPOINT).then((state) => {
-    // the person may have started on the page already
-    if (!state?.configured || busy || step !== "email") return;
-    const signup = state.signup;
-    if (!signup) return current.show(true);
-    if (signup.claim_status === "agent_claimed") {
-      showIdentity(signup.email_address);
-      go("claimed");
-    } else {
-      const address = signup.human_email?.trim() || undefined;
-      if (address) {
-        human = address;
-        emailInput.value = address;
+  void readChannel<InkboxState & ChannelStatus>(context, ENDPOINT).then(
+    (state) => {
+      inbound.apply(state);
+      // the person may have started on the page already
+      if (!state?.configured || busy || step !== "email") return;
+      const signup = state.signup;
+      if (!signup) return current.show(true);
+      if (signup.claim_status === "agent_claimed") {
+        showIdentity(signup.email_address);
+        go("claimed");
+      } else {
+        const address = signup.human_email?.trim() || undefined;
+        if (address) {
+          human = address;
+          emailInput.value = address;
+        }
+        awaitCode(signup.email_address, address);
       }
-      awaitCode(signup.email_address, address);
-    }
-  });
+    },
+  );
 
   return page(
     header(

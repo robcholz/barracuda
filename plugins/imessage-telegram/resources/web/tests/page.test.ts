@@ -158,7 +158,12 @@ test("no route to Telegram shows a note and saving still works", async () => {
     "Couldn't reach Telegram; the token is not verified",
   );
   await page.submit();
-  const save = harness.calls.at(-1)!;
+  // the accepted save reads the channel again for its mode and accounts
+  expect(harness.calls.slice(-2).map((call) => call.method)).toEqual([
+    "POST",
+    "GET",
+  ]);
+  const save = harness.calls.at(-2)!;
   expect([save.url, save.method]).toEqual(["/api/gateway/telegram", "POST"]);
   expect(save.body).toEqual({
     token: "123:abc",
@@ -220,4 +225,96 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(page.refreshes.count).toBe(1);
   expect(row.style.display).toBe("");
   expect(row.querySelector(".bc-badge--signal")?.textContent).toBe("已配置");
+});
+
+/** The device's channel state and allowed accounts, as a receiving Telegram channel answers them. */
+function receiving(mode = "send_receive") {
+  harness.reply = async (call) => {
+    if (call.method === "POST") return new Response(null, { status: 204 });
+    if (call.url === "/api/gateway/telegram")
+      return json(200, {
+        configured: true,
+        mode,
+        receive: mode === "send_receive" ? { state: "receiving" } : undefined,
+        owners: { count: 1 },
+      });
+    if (call.url === "/api/gateway/telegram/owners")
+      return json(200, {
+        owners: [{ id: "51234890", label: "Zhang San" }],
+        pairing: { code: "482913", expires_in: 581 },
+        ignored: 0,
+      });
+    return new Response(null, { status: 404 });
+  };
+}
+
+test("a configured channel shows its mode, the /start code and the allowed accounts", async () => {
+  receiving();
+  const page = await harness.render(mount, "zh");
+  await settle();
+  try {
+    expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
+      ["GET", "/api/gateway/telegram"],
+      ["GET", "/api/gateway/telegram/owners"],
+    ]);
+    expect(
+      [...page.root.querySelectorAll<HTMLElement>(".bc-form > .bc-row")]
+        .filter((row) => row.style.display !== "none")
+        .map((row) => row.querySelector(".bc-title")?.textContent),
+    ).toEqual(["通道", "Bot", "模式", "授权账号", undefined]);
+    expect(
+      page.query<HTMLInputElement>('input[value="send_receive"]')?.checked,
+    ).toBe(true);
+    expect(
+      page.query("[role=radiogroup] + [role=status] .bc-badge--signal")
+        ?.textContent,
+    ).toBe("收发中");
+    const code = page.query(".bc-form .bc-page-title.bc-mono")!;
+    expect(code.textContent).toBe("/start 482913");
+    expect(code.previousElementSibling?.textContent).toBe(
+      "在 Telegram 里给 Bot 发送",
+    );
+    expect(page.text()).toContain("有效期还剩 9:41");
+    expect(page.text()).toContain("Zhang San51234890移除");
+
+    harness.calls.length = 0;
+    receiving("send");
+    page.query<HTMLInputElement>('input[value="send"]')!.click();
+    await settle();
+    expect(
+      harness.calls.map((call) => [call.method, call.url, call.body]),
+    ).toEqual([
+      ["POST", "/api/gateway/telegram/mode", { mode: "send" }],
+      ["GET", "/api/gateway/telegram", undefined],
+    ]);
+    expect(page.refreshes.count).toBe(1);
+    expect(
+      page.query("[role=radiogroup] + [role=status] .bc-badge")?.textContent,
+    ).toBe("仅发送");
+  } finally {
+    page.unmount();
+  }
+});
+
+test("the mode and accounts rows in English", async () => {
+  receiving();
+  const page = await harness.render(mount, "en");
+  await settle();
+  try {
+    for (const phrase of [
+      "Mode",
+      "Choose how the device uses this channel",
+      "Send and receive",
+      "Receiving",
+      "Allowed accounts",
+      "Accounts that can command the device",
+      "In Telegram, send the bot",
+      "Expires in 9:41",
+      "New code",
+      "Remove",
+    ])
+      expect(page.text()).toContain(phrase);
+  } finally {
+    page.unmount();
+  }
 });

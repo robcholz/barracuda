@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::fmt;
 
-use barracuda_imessage_gateway_plugin::{Method, Response};
+use barracuda_imessage_gateway_plugin::{Error, Method, Response};
 use http_client::ClientFactory;
 use serde_json::Value;
 
@@ -135,13 +135,20 @@ where
     }
 
     /// Long-polls the status of `qrcode`; iLink holds the request about 31 s.
+    ///
+    /// A poll that outlives the Gateway's send deadline reports
+    /// [`LoginStatus::Wait`], as an unanswered long poll means nothing changed.
     pub async fn status(&self, qrcode: &str) -> Result<LoginStatus, LoginError> {
         let url = format!(
             "{}/ilink/bot/get_qrcode_status?qrcode={}",
             self.api_base.trim_end_matches('/'),
             QueryValue(qrcode)
         );
-        let root = self.get(&url).await?;
+        let response = match self.fetch(&url).await {
+            Err(Error::Timeout) => return Ok(LoginStatus::Wait),
+            response => response.map_err(|error| LoginError::transport(error.to_string()))?,
+        };
+        let root = parse_login_response(response)?;
         let status = root
             .get("status")
             .and_then(Value::as_str)
@@ -162,11 +169,15 @@ where
     }
 
     async fn get(&self, url: &str) -> Result<Value, LoginError> {
-        let response =
-            barracuda_imessage_gateway_plugin::send(&self.http_clients, Method::GET, url, &[], ())
-                .await
-                .map_err(|error| LoginError::transport(error.to_string()))?;
+        let response = self
+            .fetch(url)
+            .await
+            .map_err(|error| LoginError::transport(error.to_string()))?;
         parse_login_response(response)
+    }
+
+    async fn fetch(&self, url: &str) -> Result<Response, Error> {
+        barracuda_imessage_gateway_plugin::send(&self.http_clients, Method::GET, url, &[], ()).await
     }
 }
 

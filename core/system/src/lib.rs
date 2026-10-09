@@ -31,7 +31,7 @@ use barracuda_board_hal::{
     PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources, WifiDevice};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
@@ -283,7 +283,7 @@ where
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send>(
+    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send + Sync>(
         resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
         spawner: Spawner,
@@ -333,12 +333,23 @@ where
             }
         };
         let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
+        let receive_limit = usize::from(target_identity.long_lived_connections());
+        let receive_slots =
+            http_client::ReceiveSlots::new(prepared.ip_stack, &http_clients, receive_limit);
+        log::info!(
+            "receive connections: {} of {} allowed by the Target ({} static)",
+            receive_slots.capacity(),
+            receive_limit,
+            http_client::RECEIVE_SLOTS
+        );
         let mut plugin_context = PluginContext::from_hal(
             target_identity,
             prepared.ip_stack,
             http_clients,
             prepared.board_hal,
         );
+        plugin_context.receive_slots = receive_slots;
+        plugin_context.entropy = SharedEntropy::new(prepared.entropy.clone());
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins;

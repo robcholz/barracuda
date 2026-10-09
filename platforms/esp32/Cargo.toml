@@ -10,6 +10,8 @@ runtime-i2s = []
 runtime-pwm = []
 
 [dependencies]
+# System links TLS; this only makes mbedTLS compile with the chip's Xtensa GCC.
+barracuda-tls = { workspace = true, features = ["use-gcc"] }
 barracuda-board.workspace = true
 barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true

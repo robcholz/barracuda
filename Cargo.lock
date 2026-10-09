@@ -371,10 +371,14 @@ version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-vfs",
  "barracuda-workflow-plugin",
  "embassy-futures",
  "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
  "json-validator",
  "log",
  "serde",
@@ -1190,16 +1194,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imessage-gateway-channel"
+version = "0.1.0"
+dependencies = [
+ "barracuda-captive-portal-plugin",
+ "barracuda-imessage-gateway-owners",
+ "barracuda-platform",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-imessage-gateway-owners"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-runtime",
+ "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-vfs",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
+ "futures-lite",
  "gateway",
  "gateway-http",
+ "http-client",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1535,6 +1579,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
+ "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1569,6 +1614,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
+ "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1603,6 +1649,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
+ "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1671,6 +1718,7 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-peripheral",
  "barracuda-platform",
+ "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1909,6 +1957,7 @@ name = "barracuda-plugin-api"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-target-api",
  "embassy-net",
@@ -2284,10 +2333,12 @@ dependencies = [
 name = "barracuda-tls"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "barracuda-bulk-memory",
  "barracuda-platform",
  "cc",
  "critical-section",
+ "embedded-io-async 0.7.0",
  "log",
  "mbedtls-rs",
  "thiserror 2.0.18",
@@ -5147,6 +5198,9 @@ name = "gateway-http"
 version = "0.1.0"
 dependencies = [
  "barracuda-bulk-memory",
+ "barracuda-platform-test",
+ "embassy-sync 0.7.2",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",
@@ -5483,6 +5537,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-tls",
  "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "reqwless",
  "static_cell",

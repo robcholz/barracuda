@@ -25,6 +25,8 @@ async function render(lang: "zh" | "en") {
   return page;
 }
 
+const ENDPOINT = "/api/gateway/inkbox";
+
 type Page = Awaited<ReturnType<typeof harness.render>>;
 
 /** Titles of the rows a person sees. */
@@ -63,7 +65,9 @@ test("renders the email method in Chinese: radio, email row, open fold, no foote
     "接入 Inkbox 身份与邮件服务。",
   );
   expect(visibleRows(page)).toEqual(["方式", "邮箱", "高级"]);
-  const cards = [...page.root.querySelectorAll(".bc-radio-card")];
+  const cards = [
+    ...page.root.querySelectorAll('[aria-label="方式"] .bc-radio-card'),
+  ];
   expect(cards.map((card) => card.textContent)).toEqual([
     "用邮箱新建验证码发到你的邮箱",
     "已有 API Key从 Inkbox 控制台复制",
@@ -103,6 +107,8 @@ test("email → code → claimed, through the device's signup, resend and verify
     harness.calls.map((call) => [call.url, call.method, call.body]),
   ).toEqual([
     ["/api/gateway/inkbox/signup", "POST", { email: "you@example.com" }],
+    // the signup stored the channel: read it again for its mode and accounts
+    ["/api/gateway/inkbox", "GET", undefined],
   ]);
   expect(page.toasts.at(-1)).toEqual({
     kind: "success",
@@ -220,6 +226,7 @@ test("Enter in the email field sends the code instead of submitting the form", a
   await settle();
   expect(harness.calls.map((call) => call.url)).toEqual([
     "/api/gateway/inkbox/signup",
+    "/api/gateway/inkbox",
   ]);
 });
 
@@ -238,7 +245,8 @@ test("已有 API Key posts the key, identity and API base with the footer", asyn
   page.type("api_key", "ApiKey_1");
   page.type("identity_id", "6f1c");
   await page.submit();
-  const save = harness.calls.at(-1)!;
+  expect(harness.calls.at(-1)?.method).toBe("GET");
+  const save = harness.calls.at(-2)!;
   expect([save.url, save.method, save.body]).toEqual([
     "/api/gateway/inkbox",
     "POST",
@@ -354,6 +362,7 @@ test("a signup the device kept offers 重试, which resumes it with the same ema
   expect(harness.calls.map((call) => [call.url, call.body])).toEqual([
     ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
     ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
+    ["/api/gateway/inkbox", undefined],
   ]);
   expect(visibleRows(page)).toEqual(["方式", "邮箱", "验证码", "高级"]);
   expect(page.refreshes.count).toBe(1);
@@ -404,4 +413,53 @@ test("a reload with the person's address names it and prefills the email", async
   expect(visible(button(page, "发送验证码"))).toBe(false);
   page.type("email", "other@example.com");
   expect(visible(button(page, "发送验证码"))).toBe(true);
+});
+
+test("a claimed identity shows its mode and the code to email from your inbox", async () => {
+  harness.reply = async (call) => {
+    if (call.url === ENDPOINT)
+      return json(200, {
+        configured: true,
+        mode: "disabled",
+        owners: { count: 1 },
+        signup: {
+          email_address: "barracuda-a1b2c3@inkboxmail.com",
+          claim_status: "agent_claimed",
+        },
+      });
+    if (call.url === `${ENDPOINT}/owners`)
+      return json(200, {
+        owners: [{ id: "you@example.com", label: "you@example.com" }],
+        pairing: { code: "482913", expires_in: 600 },
+        ignored: 0,
+      });
+    return new Response(null, { status: 404 });
+  };
+  const page = await harness.render(mount, "zh");
+  await settle();
+  try {
+    expect(visibleRows(page)).toEqual([
+      "方式",
+      "身份",
+      "模式",
+      "授权账号",
+      "高级",
+    ]);
+    expect(
+      page.query<HTMLInputElement>('input[value="disabled"]')?.checked,
+    ).toBe(true);
+    expect(
+      page.query("[role=radiogroup] + [role=status] .bc-badge")?.textContent,
+    ).toBe("已停用");
+    expect(page.text()).toContain("从你的邮箱给这个地址发送482913");
+  } finally {
+    page.unmount();
+  }
+  const en = await harness.render(mount, "en");
+  await settle();
+  try {
+    expect(en.text()).toContain("From your inbox, email this address482913");
+  } finally {
+    en.unmount();
+  }
 });
