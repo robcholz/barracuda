@@ -872,6 +872,7 @@ test("a status change repaints in place: figures stay, and a failed read empties
   };
   await h.portal.refreshStatus();
   expect(kv()).toEqual(["状态", "已连接", "Wi-Fi", "—"]);
+  expect(h.$(".portal-step__done")?.textContent).toBe("已连接");
   expect(
     h
       .$('.portal-hero__kv dd[data-status-device="name"]')

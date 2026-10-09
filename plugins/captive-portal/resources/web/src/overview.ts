@@ -71,8 +71,8 @@ export function titledLabel(entry: WebEntry, label: string, lang: Lang) {
 
 /**
  * A group's 「开始使用」 step is done when one of its entries is `ready`. The line names it: the
- * device step with its detail in mono (「已连接 `HomeNet`」), others by title and label. Entries
- * with a label are preferred, so the line names what the entry reports. Returns the words and the
+ * device step with its detail in mono (「已连接 `HomeNet`」) or, without one, its label, others by
+ * title and label. Entries with a label are preferred, so the line names what the entry reports. Returns the words and the
  * machine value, if any.
  */
 export function stepDone(
@@ -89,8 +89,11 @@ export function stepDone(
   const pick = ready.find((item) => item.status.label) ?? ready[0];
   if (!pick) return null;
   const { entry, status: found } = pick;
-  if (entry.group === "device" && found.detail)
-    return [STRINGS[lang].connectedTo, found.detail];
+  // a network the host manages has no name: just its label (「已连接」)
+  if (entry.group === "device")
+    return found.detail
+      ? [STRINGS[lang].connectedTo, found.detail]
+      : [found.label?.[lang] ?? ""];
   return [
     [entry.title[lang], found.label?.[lang], found.detail]
       .filter(Boolean)
@@ -148,7 +151,7 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
   )) {
     node.style.display = device ? "" : "none";
     if (!device) continue;
-    const state = node.getAttribute("data-status-device") === "state";
+    const state = node.dataset.statusDevice === "state";
     const { label, detail } = device.status;
     node.replaceChildren(
       node.tagName === "DT"
@@ -156,15 +159,13 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
           ? STRINGS[lang].kvStatus
           : device.entry.title[lang]
         : state
-          ? label
-            ? h(
-                "span",
-                {
-                  class: `bc-badge${device.status.state === "ready" ? " bc-badge--signal" : ""}`,
-                },
-                label[lang],
-              )
-            : "—"
+          ? h(
+              "span",
+              {
+                class: `bc-badge${device.status.state === "ready" ? " bc-badge--signal" : ""}`,
+              },
+              label?.[lang] ?? "—",
+            )
           : (detail ?? "—"),
     );
     node.classList.toggle(
