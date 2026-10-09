@@ -1,14 +1,14 @@
 /**
  * The Agent's mark while a turn runs: the logo as an upright slab of iridescent metal that turns once
  * and holds (1.2 s, then 0.8 s), raymarched with WebGL into one offscreen canvas and copied into each
- * running turn's 16px tile. The portal is plain HTTP, which WebGL accepts (WebGPU would not). Where
+ * running turn's author line, bare, without the icon's ink tile. The portal is plain HTTP, which WebGL accepts (WebGPU would not). Where
  * WebGL is missing, {@link spinningMark} returns null and the page keeps the static mark.
  */
 
 const SPIN = 1.2;
 const HOLD = 0.8;
-/** The tile's mark is 13 CSS px. */
-const SIZE = 13;
+/** The spinning mark fills the author line's 16 CSS px. */
+const SIZE = 16;
 
 const VERT = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
 // The mark is an L-shaped slab (arms 1 long, 0.33 wide, 0.136 thick: the logo's proportions) turned
@@ -188,7 +188,7 @@ function paint(now: number) {
 }
 
 /**
- * A spinning mark for a running turn's tile (`.bc-mark-spin`, inside `.bc-mark-tile`), or null where
+ * A spinning mark for a running turn's author line (`.bc-mark-spin`, inside `.bc-mark-tile`), or null where
  * WebGL is missing. `stop` releases it; the loop runs only while some mark spins.
  */
 export function spinningMark(): {

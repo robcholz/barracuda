@@ -1,6 +1,6 @@
 /**
  * Web chat's own rules, from the design system's Chat card: the one-row composer, the fresh
- * conversation, the pinned head, jump to the latest, the spinning mark's tile and the live-state
+ * conversation, the pinned head, jump to the latest, the spinning mark's box and the live-state
  * motion. They serve this page alone, so the page adds them on mount and removes them on unmount
  * rather than growing the shell's stylesheet; reduced motion stills every animation.
  */
@@ -17,8 +17,8 @@ export const CHAT_CSS = `
 .bc-chat-head .bc-badge:hover>.bc-tooltip,.bc-chat-head .bc-badge:focus-visible>.bc-tooltip{display:block}
 .bc-chat-head .bc-badge:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .bc-chat-jump{position:absolute;left:50%;top:-52px;transform:translateX(-50%)}
-.bc-mark-tile{display:grid;place-items:center;flex:none;width:16px;height:16px;border-radius:4px;background:var(--signal-foreground)}
-.bc-mark-spin{width:13px;height:13px}
+.bc-mark-tile{display:grid;place-items:center;flex:none;width:16px;height:16px}
+.bc-mark-spin{width:16px;height:16px}
 @keyframes bc-blink{50%{opacity:0}}
 @keyframes bc-dot{0%,80%,100%{opacity:.3;transform:none}40%{opacity:1;transform:translateY(-2px)}}
 @keyframes bc-sweep{from{background-position:100% 0}to{background-position:0 0}}
