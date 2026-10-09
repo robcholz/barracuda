@@ -4,7 +4,8 @@
 - Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Provided typed capabilities: none
 - Gateway channel: `qq`
-- Owned task: `qq_receive_task`, one receive loop (see below)
+- Owned tasks: `qq_receive_task`, one receive loop (see below), and
+  `qq_login_task`, the scan-to-bind session (see "Scan-to-bind")
 - Receive slots: one, while the channel is configured and in `send_receive`
 - Storage (Plugin-scoped KV):
   - `configuration`: the provider configuration;
@@ -23,7 +24,8 @@ configured, and the gateway session by the first receive session. The `qq` chann
 Gateway exactly while it is configured and its mode is `send` or
 `send_receive`. A configuration stored before modes existed loads as `send`;
 a new configuration starts in `send_receive`. The portal entry's
-`GET /portal/status` record is `entry_status` of the channel (未配置, 已停用,
+`GET /portal/status` record is 等待扫码 (`attention`) while a scan-to-bind
+session waits, otherwise `entry_status` of the channel (未配置, 已停用,
 仅发送, 收发中, 连接中, 名额已满, or 连接中断). See [`http.md`](http.md).
 
 The stored configuration is `{"app_id","app_secret","api_base","token_url"}`.
@@ -126,14 +128,26 @@ A stored configuration in the former `access_token` shape does not block boot:
 registration logs a warning and leaves the channel unconfigured until a new
 configuration is saved. Other malformed stored data fails registration.
 
+## Scan-to-bind
+
+`/api/gateway/qq/login` (an exact route) starts, reports, and cancels one
+session of QQ's scan-to-bind flow (`qq::bind`), described in
+[`http.md`](http.md#apigatewayqqlogin). `qq_login_task` owns the runtime: it is
+parked on a command signal and holds no connection while no session runs, and
+each session is boxed so the parked task reserves no room for a request. A
+completed binding opens the App Secret with `barracuda_tls::aes_256_gcm_open`,
+then goes through the same verification and `configure` path as a typed
+configuration, and adds the scanner's `user_openid` to the owner book with
+`Owners::add`. Neither the key nor the App Secret is logged or returned.
+
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-qq`, group `WebGroup::Channel`, order 40, title `QQ`, a bilingual
 summary, icon `icon.svg`, no figure, module `entry.js`, and a `ResourceFiles`
-provider. Unload removes the navigation entry and resource provider; no extra
-HTTP route is registered.
+provider. Unload removes the navigation entry and resource provider; the page
+uses the HTTP routes above.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-qq`
@@ -146,15 +160,27 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit) binds
+by QR code, as the WeChat page does. On mount it reads `GET /api/gateway/qq/login`:
+a configured channel with no session waiting shows the 「绑定」 row with the
+「QQ 已绑定」 card (its App ID in mono) and 「重新绑定」; otherwise the page posts
+to start a session and shows the code on a light plate beside three steps
+(用 QQ 扫描二维码, 在手机上选好机器人, 绑定完成), with 「换一张二维码」. QQ reports no
+scan and no lifetime, so there is no 已扫码 state and no countdown. It polls
+`GET` every 2 s until `confirmed` (the linked card, a success toast and
+`context.refreshStatus()`), `expired` (the code dims, 「换一张二维码」 turns primary)
+or `failed` (a toast says what to do); leaving the page sends a keepalive
+`DELETE`. On a phone it shows the steps and 「复制链接」 instead of a code, since
+the phone is the one that scans. While linked, the mode (停用, 仅发送, 收发) and
+allowed accounts rows show.
+
+Under the closed 「高级」 fold (「手动填写 App ID 和 App Secret」) the page posts
 `{app_id, app_secret, api_base, token_url}` to `POST /api/gateway/qq` with
-「验证并保存」. The device fetches one access token before storing anything, so a 422
-`verification_failed` puts QQ's own `message` and `code` on the App Secret
-field; other errors toast the device's `message`. On mount it reads `GET /api/gateway/qq`, of whose channel status it uses
-`configured`; a configured channel shows as a 「通道」 row with the
-已配置 card above the form that replaces it. The row also appears after a save
-succeeds, and the page then calls `context.refreshStatus()` so the portal's
-navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never persisted in browser storage, and
+「验证并保存」; the footer shows only while the fold is open. The device fetches one
+access token before storing anything, so a 422 `verification_failed` puts QQ's
+own `message` and `code` on the App Secret field; other errors toast the
+device's `message`. A save ends the QR session and shows the linked card. The
+page never reads the App Secret back. Secrets are password inputs, never persisted in browser storage, and
 cleared on success or unmount. Requests are cancelled on unmount and are never
 retried automatically. The existing HTTP API has no authentication or transport
 encryption added here; use only within a trusted provisioning network.

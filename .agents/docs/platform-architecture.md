@@ -816,6 +816,9 @@ test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
 a test network that intercepts TLS); device firmware refuses it. It also owns the few
 C library functions mbedTLS calls on bare-metal targets. A Plugin must not
 load certificates, initialize a TLS backend, or select a TLS implementation.
+`shared/tls` also exposes `aes_256_gcm_open` on the same mbedTLS build, so a
+provider that must open a value a service sealed for the device (QQ's
+scan-to-bind App Secret) carries no second AES implementation.
 
 HTTP is a shared software service above the Platform boundary:
 

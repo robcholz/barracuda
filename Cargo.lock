@@ -6557,6 +6557,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-tls",
+ "base64 0.22.1",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io 0.7.1",

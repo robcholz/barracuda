@@ -1455,3 +1455,270 @@ fn owners_publish_codes_pair_strangers_are_ignored_and_redeliveries_dropped() {
         panic!("{message}");
     }
 }
+
+// --- QR binding --------------------------------------------------------------
+
+const PORTAL: &str = "http://portal.test";
+/// `bound-secret` sealed to the first bind key the test entropy makes.
+const SEALED_SECRET: &str = "BwcHBwcHBwcHBwcHfZEIFfZC1bTS4qY8MD2oy9+GDTnvVXKHf+S6Ow==";
+const LOGIN_TIMING: LoginTiming = LoginTiming {
+    session: Duration::from_secs(60),
+    poll_interval: Duration::from_ticks(0),
+};
+
+fn bind_task() -> ScriptStep {
+    ScriptStep::json(
+        200,
+        r#"{"retcode":0,"msg":"success","data":{"task_id":"task-1"}}"#,
+    )
+}
+
+fn bind_status(status: u8) -> ScriptStep {
+    ScriptStep::json(
+        200,
+        &json!({"retcode": 0, "data": {"status": status, "bot_appid": "0",
+                "bot_encrypt_secret": "", "user_openid": ""}})
+        .to_string(),
+    )
+}
+
+fn bound() -> ScriptStep {
+    ScriptStep::json(
+        200,
+        &json!({"retcode": 0, "data": {"status": 2, "bot_appid": "102345678",
+                "bot_encrypt_secret": SEALED_SECRET, "user_openid": "SCANNER"}})
+        .to_string(),
+    )
+}
+
+/// The login endpoint and runtime over the harness channel, run side by side.
+fn with_login<Storage: PluginStorage>(
+    harness: &Harness<Storage>,
+    test: impl AsyncFnOnce(&LoginEndpoint<Storage, TestSlots, Scripted, Scripted>, &LoginWatch),
+) {
+    let (endpoint, runtime) =
+        LoginEndpoint::new(Rc::clone(&harness.channel), PORTAL.into(), LOGIN_TIMING);
+    let watch = endpoint.watch();
+    block_on(async {
+        match select(runtime, test(&endpoint, &watch)).await {
+            Either::First(()) => panic!("login runtime ended"),
+            Either::Second(()) => {}
+        }
+    });
+}
+
+async fn login_call<Storage: PluginStorage>(
+    endpoint: &LoginEndpoint<Storage, TestSlots, Scripted, Scripted>,
+    method: HttpMethod,
+) -> (u16, Value) {
+    let response = endpoint.handle(HttpRequest::new(method, Vec::new())).await;
+    let body = response.body().expect("buffered body");
+    let json = if body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(body).expect("JSON body")
+    };
+    (response.status(), json)
+}
+
+/// Lets the runtime run until GET reports `expected`.
+async fn login_status<Storage: PluginStorage>(
+    endpoint: &LoginEndpoint<Storage, TestSlots, Scripted, Scripted>,
+    expected: &str,
+) -> Value {
+    for _ in 0..10_000 {
+        let (code, status) = login_call(endpoint, HttpMethod::Get).await;
+        assert_eq!(code, 200);
+        if status["status"] == expected {
+            return status;
+        }
+        Timer::after_millis(1).await;
+    }
+    panic!("the bind session never reported {expected}");
+}
+
+fn first_lines(requests: &[String]) -> Vec<&str> {
+    requests
+        .iter()
+        .map(|request| request.lines().next().unwrap_or_default())
+        .collect()
+}
+
+struct BoundByQr;
+
+impl Scenario for BoundByQr {
+    fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
+        with_login(&harness, async |login, watch| {
+            assert_eq!(
+                login_call(login, HttpMethod::Get).await,
+                (
+                    200,
+                    json!({"status": "idle", "configured": true, "app_id": "app"})
+                )
+            );
+            let (code, body) = login_call(login, HttpMethod::Post).await;
+            assert_eq!(code, 200);
+            assert_eq!(
+                body,
+                json!({"url": "https://q.qq.com/qqbot/openclaw/connect.html?task_id=task-1&source=barracuda&_wv=2"})
+            );
+            let status = login_status(login, "confirmed").await;
+            assert_eq!(
+                status,
+                json!({"status": "confirmed", "configured": true, "app_id": "102345678"})
+            );
+            assert!(!watch.waiting_for_scan());
+        });
+        let stored: Value =
+            serde_json::from_slice(&harness.stored(CONFIGURATION_STORAGE_KEY).expect("stored"))
+                .expect("configuration JSON");
+        // The opened secret replaces the old bot; the endpoints stay.
+        assert_eq!(
+            stored,
+            json!({"app_id": "102345678", "app_secret": "bound-secret",
+                   "api_base": "http://qq.test",
+                   "token_url": "http://qq.test/app/getAppAccessToken"})
+        );
+        assert!(harness.registered());
+        assert_eq!(harness.status()["owners"], json!({"count": 1}));
+        assert_eq!(
+            harness.stored("owners"),
+            Some(br#"[{"id":"SCANNER","label":null}]"#.to_vec())
+        );
+        let requests = harness.requests();
+        assert_eq!(
+            first_lines(&requests),
+            [
+                "POST /lite/create_bind_task HTTP/1.1",
+                "POST /lite/poll_bind_result HTTP/1.1",
+                "POST /lite/poll_bind_result HTTP/1.1",
+                "POST /app/getAppAccessToken HTTP/1.1",
+            ]
+        );
+        assert!(requests[0].ends_with(r#"{"key":"QOIBAEDiAQBA4gEAQOIBAEDiAQBA4gEAQOIBAEDiAQA="}"#));
+        assert!(requests[3].contains(r#""appId":"102345678""#));
+        assert!(requests[3].contains(r#""clientSecret":"bound-secret""#));
+        None
+    }
+}
+
+#[test]
+fn a_qr_binding_verifies_stores_the_bot_and_makes_the_scanner_an_owner() {
+    run(
+        Setup {
+            send: vec![
+                bind_task(),
+                bind_status(1),
+                bound(),
+                ScriptStep::json(200, TOKEN),
+            ],
+            ..Setup::configured("send")
+        },
+        BoundByQr,
+    );
+}
+
+struct BindingRefused;
+
+impl Scenario for BindingRefused {
+    fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
+        with_login(&harness, async |login, _watch| {
+            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            let status = login_status(login, "failed").await;
+            assert_eq!(status["configured"], true);
+            assert!(status["message"]
+                .as_str()
+                .expect("message")
+                .contains("10004"));
+            // The QR code expires; a new one replaces it.
+            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            login_status(login, "expired").await;
+            // The portal refuses a task: its words come back.
+            let (code, body) = login_call(login, HttpMethod::Post).await;
+            assert_eq!(code, 502);
+            assert_eq!(
+                body,
+                json!({"error": "upstream_unavailable", "message": "rate limited", "code": "429"})
+            );
+        });
+        // The refused bot stored nothing; the old configuration stays.
+        assert_eq!(
+            harness.stored(CONFIGURATION_STORAGE_KEY),
+            Some(CONFIG.as_bytes().to_vec())
+        );
+        assert_eq!(harness.status()["owners"], json!({"count": 0}));
+        None
+    }
+}
+
+#[test]
+fn a_refused_binding_stores_nothing_and_expired_or_refused_tasks_end_the_session() {
+    run(
+        Setup {
+            send: vec![
+                bind_task(),
+                bound(),
+                ScriptStep::json(200, REJECTED),
+                bind_task(),
+                bind_status(1),
+                ScriptStep::response(502, "text/html", b"<html>bad gateway</html>", usize::MAX),
+                bind_status(3),
+                ScriptStep::json(200, r#"{"retcode":429,"msg":"rate limited"}"#),
+            ],
+            ..Setup::configured("send")
+        },
+        BindingRefused,
+    );
+}
+
+struct BindingCancelled;
+
+impl Scenario for BindingCancelled {
+    fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
+        with_login(&harness, async |login, watch| {
+            let response = login
+                .handle(HttpRequest::new(HttpMethod::Post, br#"{"x":1}"#.to_vec()))
+                .await;
+            assert_eq!(response.status(), 400);
+            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            assert_eq!(
+                login_call(login, HttpMethod::Get).await,
+                (200, json!({"status": "wait", "configured": false}))
+            );
+            assert!(watch.waiting_for_scan());
+            assert_eq!(
+                crate::entry_status(&*harness.channel, watch),
+                EntryStatus::new(
+                    EntryState::Attention,
+                    barracuda_captive_portal_plugin::WebText {
+                        zh: "等待扫码",
+                        en: "Waiting for scan"
+                    }
+                )
+            );
+            assert_eq!(login_call(login, HttpMethod::Delete).await.0, 204);
+            assert_eq!(
+                login_call(login, HttpMethod::Get).await,
+                (200, json!({"status": "idle", "configured": false}))
+            );
+            assert!(!watch.waiting_for_scan());
+            assert_eq!(login_call(login, HttpMethod::Put).await.0, 405);
+        });
+        assert!(harness.stored(CONFIGURATION_STORAGE_KEY).is_none());
+        None
+    }
+}
+
+#[test]
+fn a_cancelled_binding_returns_to_idle() {
+    run(
+        Setup {
+            send: vec![
+                bind_task(),
+                ScriptStep::pending_after_headers(200, "application/json"),
+            ],
+            ..Setup::unconfigured()
+        },
+        BindingCancelled,
+    );
+}
