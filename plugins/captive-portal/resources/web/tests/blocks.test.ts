@@ -142,7 +142,7 @@ test("qrLink shows the URL in mono and opens it in a new tab", () => {
   );
 });
 
-test("resultCard: initial or check tile, mono sub, neutral or live badge, rows and one action", () => {
+test("resultCard: initial tile or bare check, mono sub, neutral or live badge, rows and one action", () => {
   const card = resultCard(
     {
       title: "Barracuda Home",
@@ -195,8 +195,20 @@ test("resultCard: initial or check tile, mono sub, neutral or live badge, rows a
   );
   expect(live.querySelector(".bc-badge--signal")?.textContent).toBe("已连接");
   expect(card.querySelector("button")?.textContent).toBe("重新绑定");
-  const bare = resultCard({ title: "微信已绑定", badge: "已绑定" }, "zh");
-  expect(bare.querySelector(".bc-option-icon svg")).not.toBeNull();
+  // no initial: a bare success check on the title's line, no tile; no badge unless given
+  const bare = resultCard({ title: "微信已绑定" }, "zh");
+  expect(bare.querySelector(".bc-option-icon")).toBeNull();
+  const check = bare.querySelector(".bc-card__body > div > svg")!;
+  expect(check.getAttribute("class")).toBe("bc-icon bc-success");
+  expect(bare.querySelector(".bc-badge")).toBeNull();
+  expect(
+    (bare.querySelector(".bc-card__body > div") as HTMLElement).style.gap,
+  ).toBe("8px");
+  expect(
+    (card.querySelector(".bc-card__body > div") as HTMLElement).style.gap,
+  ).toBe("12px");
+  expect(live.querySelector(".bc-option-icon")).toBeNull();
+  expect(live.querySelector("svg.bc-success")).not.toBeNull();
 });
 
 test("stepList marks done, current and later steps", () => {
@@ -499,10 +511,9 @@ test("readChannel reads the configured flag; configuredRow shows the card once t
     expect(current.element.querySelector(".bc-option-title")?.textContent).toBe(
       "Telegram",
     );
-    // a stored configuration is not a live connection: a neutral badge
-    expect(current.element.querySelector(".bc-badge--signal")).toBeNull();
-    expect(current.element.querySelector(".bc-badge")?.textContent).toBe(
-      lang === "zh" ? "已配置" : "Configured",
-    );
+    // a stored configuration is a plain state: the bare check, no tile and no badge
+    expect(current.element.querySelector("svg.bc-success")).not.toBeNull();
+    expect(current.element.querySelector(".bc-option-icon")).toBeNull();
+    expect(current.element.querySelector(".bc-badge")).toBeNull();
   }
 });

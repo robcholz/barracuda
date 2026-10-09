@@ -31,8 +31,8 @@ export interface ConfiguredRow {
 }
 
 /**
- * The configured state of a channel page: a 「通道」 row holding the result card 「<name>」 with the
- * 已配置 badge, placed above the form that replaces it. Hidden until `show(true)`.
+ * The configured state of a channel page: a 「通道」 row holding the result card 「<name>」 led by
+ * the bare `success` check, placed above the form that replaces it. Hidden until `show(true)`.
  */
 export function configuredRow(name: Text, lang: Lang): ConfiguredRow {
   const s = KIT_STRINGS[lang];
@@ -42,9 +42,7 @@ export function configuredRow(name: Text, lang: Lang): ConfiguredRow {
   const show = (visible: boolean) => {
     element.hidden = !visible;
     body.replaceChildren(
-      ...(visible
-        ? [resultCard({ title: name, badge: s.configured }, lang)]
-        : []),
+      ...(visible ? [resultCard({ title: name }, lang)] : []),
     );
   };
   show(false);
