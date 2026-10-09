@@ -1150,7 +1150,6 @@ export const mount = definePage((context: PortalContext) => {
   function showInvalid(message: string) {
     invalid.textContent = message;
     show(invalid, !!message);
-    composer.style.borderColor = message ? "var(--destructive)" : "";
     if (message) {
       input.setAttribute("aria-invalid", "true");
       input.setAttribute("aria-describedby", invalid.id);

@@ -140,6 +140,9 @@ test("sends WebClientFrame JSON and validates the byte limit", () => {
   submit("字".repeat(400));
   expect(sent).toHaveLength(0);
   expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(
+    root.querySelector<HTMLElement>(".bc-composer")!.style.borderColor,
+  ).toBe("");
   expect(root.textContent).toContain("消息超过 1024 字节");
   submit("hello");
   expect(JSON.parse(sent[0])).toEqual({ text: "hello" });

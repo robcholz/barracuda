@@ -267,7 +267,6 @@ export function fieldControl(
     line: HTMLElement,
     inputs: HTMLElement[],
     message: string | null,
-    group?: HTMLElement,
     code?: string,
   ) => {
     line.replaceChildren(
@@ -282,7 +281,6 @@ export function fieldControl(
       if (message) input.setAttribute("aria-describedby", `${id}-error`);
       else input.removeAttribute("aria-describedby");
     }
-    if (group) group.style.borderColor = message ? "var(--destructive)" : "";
   };
 
   switch (field.kind) {
@@ -375,8 +373,7 @@ export function fieldControl(
               return s.url;
             return null;
           },
-          setError: (message, code) =>
-            showError(line, [input], message, undefined, code),
+          setError: (message, code) => showError(line, [input], message, code),
           reset: () => {
             input.value = input.defaultValue;
             if (reveal && input.type !== "password") reveal.click();
@@ -420,9 +417,7 @@ export function fieldControl(
         hintLine(field, lang),
         line,
       );
-      input.addEventListener("input", () =>
-        showError(line, [input], null, group),
-      );
+      input.addEventListener("input", () => showError(line, [input], null));
       const parse = () => Number(input.value.trim());
       return {
         element,
@@ -438,11 +433,10 @@ export function fieldControl(
               ? null
               : s.number(min, max);
           },
-          setError: (message, code) =>
-            showError(line, [input], message, group, code),
+          setError: (message, code) => showError(line, [input], message, code),
           reset: () => {
             input.value = input.defaultValue;
-            showError(line, [input], null, group);
+            showError(line, [input], null);
           },
           focus: () => input.focus(),
           clearSecret: () => {},
@@ -477,8 +471,7 @@ export function fieldControl(
           field,
           read: () => select.value,
           validate: () => (select.value || field.optional ? null : required()),
-          setError: (message, code) =>
-            showError(line, [select], message, undefined, code),
+          setError: (message, code) => showError(line, [select], message, code),
           reset: () => {
             select.value = field.value ?? field.options[0]?.value ?? "";
             showError(line, [select], null);

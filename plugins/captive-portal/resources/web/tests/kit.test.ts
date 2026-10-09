@@ -316,6 +316,10 @@ test("clear restores defaults; English strings follow the context language", () 
   expect(root.textContent).not.toContain("write-only");
   form.setError("route_tag", "Taken");
   expect(input(root, "route_tag").getAttribute("aria-invalid")).toBe("true");
+  // an invalid group turns red through the stylesheet, not an inline border
+  expect(
+    root.querySelector<HTMLElement>(".bc-input-group")?.style.borderColor ?? "",
+  ).toBe("");
 });
 
 test("header, kv and definePage build the page frame and clean up", async () => {

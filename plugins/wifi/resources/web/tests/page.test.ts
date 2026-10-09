@@ -404,7 +404,9 @@ test("a platform-managed network offers nothing to change", async () => {
   expect(page.root.querySelector("dl")?.textContent).toBe(
     "状态已连接网络—配置热点—",
   );
-  expect(page.text()).toContain("网络由当前平台管理");
+  const note = page.root.querySelector(".bc-list-note")!;
+  expect(note.textContent).toBe("网络由当前平台管理");
+  expect(note.hasAttribute("style")).toBe(false);
   expect(page.text()).not.toContain("手动输入网络名称");
   expect(page.text()).not.toContain("忘记此网络");
   expect(page.button("重新扫描").disabled).toBe(true);

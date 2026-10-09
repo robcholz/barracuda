@@ -644,16 +644,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
   // ---- updates
 
   function message(text: string) {
-    return h(
-      phone ? "li" : "div",
-      {
-        class: "bc-small bc-muted",
-        style: phone
-          ? "padding: 14px 16px; border-top: 1px solid var(--border)"
-          : "padding: 16px 20px; border-top: 1px solid var(--border)",
-      },
-      text,
-    );
+    return h(phone ? "li" : "p", { class: "bc-list-note" }, text);
   }
 
   function desktopRow(network: VisibleNetwork) {
@@ -773,8 +764,6 @@ export const mount: PortalModule["mount"] = (root, context) => {
       row,
       open ? formFor(MANUAL, null).element : null,
     );
-    // open at the foot of the desktop frame, its fill keeps inside the frame's rounded corner
-    if (!phone) item.style.borderRadius = "0 0 7px 7px";
     return item;
   }
 

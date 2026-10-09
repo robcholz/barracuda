@@ -212,6 +212,9 @@
 .bc-input-group:focus-within {
   border-color: var(--ring);
 }
+.bc-input-group:has([aria-invalid="true"]) {
+  border-color: var(--destructive);
+}
 .bc-addon {
   display: flex;
   align-items: center;
@@ -1041,8 +1044,21 @@ button.bc-link {
 .bc-frame > .bc-list-row:first-child {
   border-top: 0;
 }
-.bc-frame > .bc-list-row:last-child {
+.bc-frame > .bc-list-row:last-child,
+.bc-frame > .bc-expanded:last-child {
   border-radius: 0 0 7px 7px;
+}
+/* a list note: a row of plain text (scanning, none found), not pressable */
+.bc-list-note {
+  margin: 0;
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+.bc-frame .bc-list-note {
+  padding: var(--space-4) var(--space-5);
 }
 .bc-expanded {
   background: var(--sidebar);
@@ -1347,6 +1363,9 @@ button.bc-link {
 }
 .bc-composer:focus-within {
   border-color: var(--ring);
+}
+.bc-composer:has([aria-invalid="true"]) {
+  border-color: var(--destructive);
 }
 .bc-composer:has(textarea:disabled) {
   border-color: var(--border);
