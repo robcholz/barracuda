@@ -194,6 +194,16 @@
 .bc-input[aria-invalid="true"]:focus {
   border-color: var(--destructive);
 }
+/* a number is typed, never stepped: no browser spin buttons */
+.bc-input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.bc-input::-webkit-inner-spin-button,
+.bc-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 .bc-input:disabled {
   background: var(--muted);
   color: var(--disabled-foreground);
@@ -288,10 +298,32 @@
   background: var(--background);
 }
 .bc-radio-card input {
+  flex: none;
+  appearance: none;
+  -webkit-appearance: none;
   margin: 2px 0 0;
   width: 16px;
   height: 16px;
-  accent-color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: 50%;
+  background: var(--background);
+  cursor: inherit;
+  transition: border-color 0.1s;
+}
+/* the radio is drawn, never the browser's: a 1px `input` ring; checked, a 5px `foreground` ring around a `background` dot (the switch's on colours) */
+.bc-radio-card:hover input:not(:checked):not(:disabled) {
+  border-color: var(--input-hover);
+}
+.bc-radio-card input:checked {
+  border: 5px solid var(--foreground);
+}
+.bc-radio-card input:disabled {
+  border-color: var(--border);
+  background: var(--muted);
+}
+.bc-radio-card input:checked:disabled {
+  border-color: var(--disabled-foreground);
+  background: var(--background);
 }
 .bc-radio-card input:focus-visible {
   outline: none;
@@ -623,6 +655,11 @@
   background: var(--muted);
   color: var(--foreground);
   font-weight: 500;
+}
+.bc-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .bc-nav-label {
   display: flex;
@@ -1202,8 +1239,12 @@ button.bc-link {
   overflow-y: auto;
   padding: var(--space-8);
 }
+/* the dock stays at the foot of the window over the log it covers */
 .bc-chat-dock {
+  position: sticky;
+  bottom: 0;
   padding: 0 var(--space-8) var(--space-6);
+  background: var(--background);
 }
 .bc-turn {
   display: flex;

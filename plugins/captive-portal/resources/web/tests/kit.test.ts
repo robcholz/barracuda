@@ -82,16 +82,6 @@ const OPTIONS: SettingsFormOptions = {
             { value: "anthropic_compatible", label: "Anthropic" },
           ],
         },
-        {
-          kind: "select",
-          name: "purpose",
-          label: "Purpose",
-          options: [
-            { value: "root_agent", label: "Main" },
-            { value: "memory", label: "Memory" },
-          ],
-          value: "memory",
-        },
       ],
     },
   ],
@@ -235,7 +225,6 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
     token: " secret ",
     use_private_api: true,
     backend: "openai_compatible",
-    purpose: "memory",
     api_base: "https://api.telegram.org",
     draft_min_delta_bytes: 24,
   });

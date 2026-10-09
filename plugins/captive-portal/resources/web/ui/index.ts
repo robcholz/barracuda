@@ -51,7 +51,6 @@ export {
   type NumberField,
   type RadioField,
   type SecretField,
-  type SelectField,
   type SettingsForm,
   type SettingsFormOptions,
   type SettingsRow,

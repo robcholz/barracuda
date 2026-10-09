@@ -59,13 +59,9 @@ body {
 }
 
 /* Sidebar */
-.bc-nav-group,
 .portal-nav-groups {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-.portal-nav-groups {
   gap: 16px;
 }
 

@@ -423,12 +423,10 @@ export const mount = definePage((context: PortalContext) => {
     ),
   );
   show(offline, false);
-  // the dock stays at the foot of the window over the log it covers
   const form = h(
     "form",
     {
       class: "bc-chat-dock",
-      style: "position:sticky;bottom:0;background:var(--background)",
       onsubmit: (event: Event) => {
         event.preventDefault();
         submit();

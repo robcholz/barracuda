@@ -43,11 +43,6 @@ export interface NumberField extends FieldBase {
   min?: number;
   max?: number;
 }
-export interface SelectField extends FieldBase {
-  kind: "select";
-  options: readonly { value: string; label: Text }[];
-  value?: string;
-}
 export interface SwitchField extends FieldBase {
   kind: "switch";
   value?: boolean;
@@ -66,12 +61,7 @@ export interface RadioField extends FieldBase {
   columns?: number;
 }
 export type Field =
-  | TextField
-  | SecretField
-  | NumberField
-  | SelectField
-  | SwitchField
-  | RadioField;
+  TextField | SecretField | NumberField | SwitchField | RadioField;
 
 export interface SettingsRow {
   title: Text;
@@ -452,44 +442,6 @@ export function fieldControl(
             showError(line, [input], null);
           },
           focus: () => input.focus(),
-          clearSecret: () => {},
-        },
-      };
-    }
-    case "select": {
-      const select = h(
-        "select",
-        { id, class: "bc-input", name: field.name },
-        field.options.map((option) =>
-          h(
-            "option",
-            { value: option.value, selected: option.value === field.value },
-            pick(option.label, lang),
-          ),
-        ),
-      );
-      const line = errorLine();
-      line.id = `${id}-error`;
-      const element = h(
-        "label",
-        { class: "bc-field" },
-        labelText(field, lang),
-        select,
-        hintLine(field, lang),
-        line,
-      );
-      return {
-        element,
-        control: {
-          field,
-          read: () => select.value,
-          validate: () => (select.value || field.optional ? null : required()),
-          setError: (message, code) => showError(line, [select], message, code),
-          reset: () => {
-            select.value = field.value ?? field.options[0]?.value ?? "";
-            showError(line, [select], null);
-          },
-          focus: () => select.focus(),
           clearSecret: () => {},
         },
       };

@@ -113,7 +113,6 @@ Settings form (`settings.ts`)
   - `{ kind: "secret", placeholder? }` — password input with 显示/隐藏, never prefilled,
     cleared after the device accepts it and when the page goes away;
   - `{ kind: "number", value?, unit?, min? = 0, max? = 4294967295 }` — integer, unit in an addon;
-  - `{ kind: "select", options: { value, label }[], value? }`;
   - `{ kind: "switch", value? }` — a switch row, sent as a boolean;
   - `{ kind: "radio", options: { value, label, hint?, icon? }[], value?, columns? = 2 }` —
     radio cards; `icon` is an `ICON_*` or `MARK_*` string for the 40px tile.
