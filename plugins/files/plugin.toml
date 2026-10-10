@@ -1,0 +1,9 @@
+id = "files"
+depends-on = ["webserver", "captive-portal"]
+description = "Browses Workspace files and shows every Plugin's private files read-only."
+
+[tasks.build]
+cwd = "."
+command = ["bun", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "resources/web/style.ts", "resources/web/figure.js", "resources/web/icon.svg", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
+outputs = ["filesystem/resources/entry.js", "filesystem/resources/figure.js", "filesystem/resources/icon.svg"]

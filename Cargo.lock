@@ -1105,6 +1105,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-files-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-captive-portal-plugin",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-webserver-plugin",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "log",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-gdeh0154d67-display"
 version = "0.1.0"
 dependencies = [
@@ -2186,6 +2208,7 @@ dependencies = [
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
+ "barracuda-files-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
