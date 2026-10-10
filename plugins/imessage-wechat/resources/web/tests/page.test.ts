@@ -155,9 +155,10 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   expect(page.text()).toContain("这台设备在微信里的 ClawBot");
   const card = page.query(".bc-card[role=status]")!;
   expect(card.textContent).toContain("微信已绑定");
-  expect(
-    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("已绑定");
+  // the bare success check says it: no tile, no badge
+  expect(card.querySelector("svg.bc-success")).not.toBeNull();
+  expect(card.querySelector(".bc-option-icon")).toBeNull();
+  expect(card.querySelector(".bc-badge")).toBeNull();
   expect(page.toasts).toEqual([{ kind: "success", title: "微信已绑定" }]);
   // linked: the portal reads the channel's status again
   expect(page.refreshes.count).toBe(1);

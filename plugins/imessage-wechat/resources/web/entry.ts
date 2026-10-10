@@ -38,7 +38,6 @@ const T = {
     link: "绑定",
     linkHint: "这台设备在微信里的 ClawBot",
     linked: "微信已绑定",
-    linkedBadge: "已绑定",
     relink: "重新绑定",
     relogin: "微信登录已失效",
     elsewhere: "在电脑或另一台设备上打开此页扫码",
@@ -67,7 +66,6 @@ const T = {
     link: "Link",
     linkHint: "This device as a ClawBot in WeChat",
     linked: "WeChat linked",
-    linkedBadge: "Linked",
     relink: "Link again",
     relogin: "WeChat login expired",
     elsewhere: "Open this page on another device to scan",
@@ -243,10 +241,7 @@ export const mount = definePage((context) => {
         lang,
         expired
           ? relogin(relink)
-          : resultCard(
-              { title: t.linked, badge: t.linkedBadge, action: relink },
-              lang,
-            ),
+          : resultCard({ title: t.linked, action: relink }, lang),
       );
     } else {
       const steps = stepList(

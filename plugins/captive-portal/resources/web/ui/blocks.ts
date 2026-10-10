@@ -11,13 +11,16 @@ import { qrSvg } from "./qr";
 export interface ResultCardOptions {
   /** What was found: a bot's name, 「微信已绑定」. */
   title: Text;
-  /** The state badge: 「已验证」, 「已配置」; the signal chip only when {@link ResultCardOptions.live}. */
-  badge: Text;
+  /**
+   * The state badge beside an {@link ResultCardOptions.initial} (「已验证」) or for a live connection
+   * (「已连接」). Leave it out for a plain state (「微信已绑定」): the check and the title say it.
+   */
+  badge?: Text;
   /** The badge marks a live connection (「已连接」): the green signal chip instead of a neutral badge. */
   live?: boolean;
   /** A machine value under the title, in mono (`@barracuda_home_bot`, a URL). */
   sub?: string;
-  /** One or two characters in the 40px tile (a name's initial); a check mark when absent. */
+  /** One or two characters in the 40px tile (a name's initial); a bare `success` check when absent. */
   initial?: string;
   /** Key-value rows under the head; values are mono unless the row's third item is `false` (「已启用」). */
   rows?: readonly (readonly [Text, Children, boolean?])[];
@@ -25,16 +28,20 @@ export interface ResultCardOptions {
   action?: Node;
 }
 
-/** A result the device or a service reported: a tile, a name, a mono value, a badge, rows and one action. */
+/**
+ * A result the device or a service reported: an initial's tile or a bare `success` check, a name, a
+ * mono value, a badge, rows and one action. The tile holds only an initial, never a status.
+ */
 export function resultCard(
   options: ResultCardOptions,
   lang: Lang,
 ): HTMLElement {
-  const tile = h(
-    "span",
-    { class: "bc-option-icon" },
-    options.initial ?? icon(ICON_CHECK),
-  );
+  const bare = options.initial === undefined;
+  const lead = bare
+    ? icon(ICON_CHECK, undefined, "bc-success")
+    : h("span", { class: "bc-option-icon" }, options.initial);
+  // the bare check sits on the title's line, never in a tile
+  if (bare) lead.style.cssText = "align-self:flex-start;margin-top:2px";
   const text = h(
     "span",
     null,
@@ -48,18 +55,20 @@ export function resultCard(
   const head = h(
     "div",
     null,
-    tile,
+    lead,
     text,
-    h(
-      "span",
-      {
-        class: `bc-badge${options.live ? " bc-badge--signal" : ""}`,
-        style: { flex: "none", whiteSpace: "nowrap" },
-      },
-      pick(options.badge, lang),
-    ),
+    options.badge === undefined
+      ? null
+      : h(
+          "span",
+          {
+            class: `bc-badge${options.live ? " bc-badge--signal" : ""}`,
+            style: { flex: "none", whiteSpace: "nowrap" },
+          },
+          pick(options.badge, lang),
+        ),
   );
-  head.style.cssText = "display:flex;align-items:center;gap:12px";
+  head.style.cssText = `display:flex;align-items:center;gap:${bare ? 8 : 12}px`;
   const rows = options.rows?.length
     ? h(
         "dl",

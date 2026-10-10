@@ -4,14 +4,17 @@
 extern crate alloc;
 
 mod channel;
+mod login;
 mod receive;
 #[cfg(test)]
 mod tests;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_imessage_gateway_channel::{
-    entry_status, ChannelEndpoint, ReceiveRuntime, ReceiveTiming,
+    ChannelEndpoint, ReceiveRuntime, ReceiveSlotSource, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin::api::{PluginContext, SharedEntropy};
@@ -29,6 +32,7 @@ use qq::{QQConfig, TokenError, QQ};
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 
 use crate::channel::{build_channel, ConfigureError, QQChannel};
+use crate::login::{LoginEndpoint, LoginRuntime, LoginTiming, LoginWatch};
 use crate::receive::QQSlots;
 
 /// HTTP path accepting QQ configuration and reporting channel status.
@@ -37,6 +41,8 @@ pub const CONFIG_API_PATH: &str = "/api/gateway/qq";
 pub const MODE_API_PATH: &str = "/api/gateway/qq/mode";
 /// HTTP path listing owners and the pairing code.
 pub const OWNERS_API_PATH: &str = "/api/gateway/qq/owners";
+/// HTTP path starting, observing, and cancelling a QR-code binding.
+pub const LOGIN_API_PATH: &str = "/api/gateway/qq/login";
 
 /// Gateway channel name.
 const CHANNEL: &str = "qq";
@@ -51,6 +57,7 @@ pub struct IMessageQQPlugin {
     receive_slots: ReceiveSlots,
     entropy: SharedEntropy,
     runtime: Option<ReceiveRuntime>,
+    login: Option<LoginRuntime>,
 }
 
 impl IMessageQQPlugin {
@@ -63,6 +70,7 @@ impl IMessageQQPlugin {
             receive_slots: context.receive_slots.clone(),
             entropy: context.entropy.clone(),
             runtime: None,
+            login: None,
         }
     }
 }
@@ -94,6 +102,12 @@ impl Plugin for IMessageQQPlugin {
             self.entropy.clone(),
             ReceiveTiming::DEVICE,
         )?;
+        let (login_endpoint, login_runtime) = LoginEndpoint::new(
+            Rc::clone(&channel),
+            qq::bind::DEFAULT_PORTAL_BASE.into(),
+            LoginTiming::DEVICE,
+        );
+        let login_watch = login_endpoint.watch();
         let status = Rc::clone(&channel);
         context.retain(
             portal
@@ -112,11 +126,12 @@ impl Plugin for IMessageQQPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
-                    move || entry_status(&*status),
+                    move || entry_status(&*status, &login_watch),
                 )
                 .map_err(PluginError::registration)?,
         );
-        // One route serves the configuration path and its `/mode` and `/owners`.
+        // One route serves the configuration path and its `/mode` and
+        // `/owners`; the exact login route takes its own requests.
         let endpoint = ChannelEndpoint::new(
             Rc::clone(&channel),
             CONFIG_API_PATH,
@@ -127,7 +142,13 @@ impl Plugin for IMessageQQPlugin {
                 .serve_http_prefix(CONFIG_API_PATH, endpoint)
                 .map_err(PluginError::registration)?,
         );
+        context.retain(
+            webserver
+                .serve_http(LOGIN_API_PATH, login_endpoint)
+                .map_err(PluginError::registration)?,
+        );
         self.runtime = Some(runtime);
+        self.login = Some(login_runtime);
         Ok(())
     }
 
@@ -138,12 +159,52 @@ impl Plugin for IMessageQQPlugin {
         let runtime = self
             .runtime
             .take()
-            .ok_or_else(|| PluginError::registration(ReceiveRuntimeUnavailable))?;
-        let task =
+            .ok_or_else(|| PluginError::registration(RuntimeUnavailable))?;
+        let login = self
+            .login
+            .take()
+            .ok_or_else(|| PluginError::registration(RuntimeUnavailable))?;
+        let receive =
             qq_receive_task(runtime, context.task_token()).map_err(PluginError::registration)?;
-        context.task_spawner()?.spawn(task);
+        let login =
+            qq_login_task(login, context.task_token()).map_err(PluginError::registration)?;
+        let spawner = context.task_spawner()?;
+        spawner.spawn(receive);
+        spawner.spawn(login);
         Ok(())
     }
+}
+
+/// Portal status: `attention` while a QR binding waits for its scan,
+/// otherwise the shared channel mapping.
+fn entry_status<Storage, Slots, T, D>(
+    channel: &QQChannel<Storage, Slots, T, D>,
+    login: &LoginWatch,
+) -> EntryStatus
+where
+    Storage: PluginStorage,
+    Slots: ReceiveSlotSource,
+    T: TcpConnect + 'static,
+    D: Dns + 'static,
+{
+    if login.waiting_for_scan() {
+        return EntryStatus::new(
+            EntryState::Attention,
+            WebText {
+                zh: "等待扫码",
+                en: "Waiting for scan",
+            },
+        );
+    }
+    barracuda_imessage_gateway_channel::entry_status(channel)
+}
+
+/// Owns the QR binding session; parked on its command signal while no
+/// session runs.
+#[embassy_executor::task]
+async fn qq_login_task(runtime: LoginRuntime, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime).await;
+    log::info!("stopped QQ login task");
 }
 
 /// Owns the receive loop; parked without a slot unless the channel is
@@ -155,15 +216,15 @@ async fn qq_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken)
 }
 
 #[derive(Debug)]
-struct ReceiveRuntimeUnavailable;
+struct RuntimeUnavailable;
 
-impl core::fmt::Display for ReceiveRuntimeUnavailable {
+impl core::fmt::Display for RuntimeUnavailable {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("QQ receive runtime was not prepared during Plugin registration")
+        formatter.write_str("QQ runtimes were not prepared during Plugin registration")
     }
 }
 
-impl core::error::Error for ReceiveRuntimeUnavailable {}
+impl core::error::Error for RuntimeUnavailable {}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

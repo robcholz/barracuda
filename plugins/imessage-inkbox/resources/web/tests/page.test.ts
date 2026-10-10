@@ -334,9 +334,8 @@ test("a channel saved with a key shows as configured above the form", async () =
   expect(visibleRows(page)).toEqual(["Channel", "Method", "Email", "Advanced"]);
   const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-title")?.textContent).toBe("Inkbox");
-  expect(
-    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("Configured");
+  expect(card.querySelector("svg.bc-success")).not.toBeNull();
+  expect(card.querySelector(".bc-badge")).toBeNull();
   // not configured: nothing to show
   page.unmount();
   const empty = await renderWith({ configured: false });

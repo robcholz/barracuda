@@ -116,6 +116,25 @@ impl<Storage: PluginStorage> Owners<Storage> {
         self.book.borrow_mut().rotate(Instant::now())
     }
 
+    /// Adds and stores owner `id`, labelled with `label`, without a pairing
+    /// code. Returns whether it was added: an existing owner, a full list, or
+    /// an `id` that is empty or too long adds nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OwnersError`] when the longer list cannot be stored; the
+    /// owner is added until reboot.
+    pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError> {
+        let Some(owner) = Owner::new(id, label) else {
+            return Ok(false);
+        };
+        if !self.book.borrow_mut().add(owner) {
+            return Ok(false);
+        }
+        self.persist().await?;
+        Ok(true)
+    }
+
     /// Removes and stores the removal of owner `id`. Returns whether it was
     /// an owner.
     ///

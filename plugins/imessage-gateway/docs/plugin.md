@@ -59,6 +59,7 @@ impl<Storage: PluginStorage> Owners<Storage> {
     pub fn owners(&self) -> Vec<Owner>;
     pub fn pairing(&self) -> Option<PairingView>;   // mints when none is valid
     pub fn rotate(&self) -> Result<(), EntropyUnavailable>;
+    pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
     pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
 }
 pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You can start chatting."
@@ -71,6 +72,9 @@ pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You
 - Pairing adds the sender as an owner and retires the code; the next
   `pairing()` mints a new one. `rotate()` mints a new one on request.
 - `MAX_PAIRING_ATTEMPTS` (5) wrong code-shaped guesses also retire the code.
+- `add` names an owner without a code, for a channel whose own setup knows who
+  set it up (QQ's scan-to-bind reports the scanner's openid). It adds nothing
+  for an existing owner or a full list.
 - No code is offered while the list is full or the Platform has no entropy.
 - The list is stored as a JSON array; the code and the ignored counter are RAM
   only.

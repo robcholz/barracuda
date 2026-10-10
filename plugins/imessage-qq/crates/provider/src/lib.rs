@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+pub mod bind;
 pub mod gateway;
 
 use alloc::{
