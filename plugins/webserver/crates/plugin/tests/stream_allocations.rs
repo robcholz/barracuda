@@ -7,7 +7,9 @@
 use core::future::Future;
 use core::task::{Context, Poll, Waker};
 
-use barracuda_webserver_plugin::{HttpProvider, HttpResponse, WebServer};
+use barracuda_webserver_plugin::{
+    HttpFuture, HttpMethod, HttpProvider, HttpResponse, HttpUpload, HttpUploadEndpoint, WebServer,
+};
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use picoserve::io::Socket;
 use picoserve::time::{Duration, TimeoutError, Timer};
@@ -321,4 +323,105 @@ fn cancelling_pending_response_drops_its_resource() {
         assert!(!dropped.get());
     }
     assert!(dropped.get());
+}
+
+/// Reads the whole body and answers with how many bytes arrived, refusing any byte out of pattern.
+struct Counter;
+
+impl HttpUploadEndpoint for Counter {
+    fn handle<'a>(&'a self, mut upload: HttpUpload<'a>) -> HttpFuture<'a> {
+        Box::pin(async move {
+            assert_eq!(upload.method(), HttpMethod::Put);
+            assert_eq!(upload.path(), "/upload/a%20b.bin");
+            let mut seen = 0;
+            let mut chunk = [0; 700];
+            loop {
+                let count = upload.read(&mut chunk).await.expect("read body");
+                if count == 0 {
+                    break;
+                }
+                assert!(chunk[..count]
+                    .iter()
+                    .enumerate()
+                    .all(|(index, byte)| *byte == pattern(seen + index)));
+                seen += count;
+            }
+            assert_eq!(seen, upload.content_length());
+            HttpResponse::new(201, "text/plain", seen.to_string().into_bytes())
+        })
+    }
+}
+
+/// Answers without reading the body.
+struct Refuser;
+
+impl HttpUploadEndpoint for Refuser {
+    fn handle<'a>(&'a self, upload: HttpUpload<'a>) -> HttpFuture<'a> {
+        Box::pin(async move {
+            assert_eq!(upload.content_length(), 20_000);
+            HttpResponse::new(409, "text/plain", Vec::new())
+        })
+    }
+}
+
+fn pattern(index: usize) -> u8 {
+    b'a' + u8::try_from(index % 26).expect("letter")
+}
+
+fn upload_request(path: &str) -> &'static [u8] {
+    let mut request = format!(
+        "PUT {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 20000\r\nConnection: close\r\n\r\n"
+    )
+    .into_bytes();
+    request.extend((0..20_000).map(pattern));
+    Box::leak(request.into_boxed_slice())
+}
+
+#[test]
+fn an_upload_body_larger_than_the_request_buffer_streams_to_the_endpoint() {
+    let server = WebServer::new();
+    let _route = server.serve_upload("/upload", Counter).expect("register");
+    let mut output = Output {
+        bytes: [0; 41_000],
+        length: 0,
+        fail_after: usize::MAX,
+    };
+    drive(server.serve_connection(
+        TestTimer,
+        &mut [0; 4096],
+        TestSocket {
+            input: Input(upload_request("/upload/a%20b.bin")),
+            output: &mut output,
+        },
+    ))
+    .expect("serve upload");
+    let bytes = &output.bytes[..output.length];
+    assert!(
+        bytes.starts_with(b"HTTP/1.1 201"),
+        "{}",
+        String::from_utf8_lossy(bytes)
+    );
+    assert!(bytes.ends_with(b"\r\n\r\n20000"));
+}
+
+#[test]
+fn an_upload_endpoint_may_answer_without_reading_the_body() {
+    let server = WebServer::new();
+    let _route = server.serve_upload("/upload", Refuser).expect("register");
+    assert!(server.serve_upload("/upload", Refuser).is_err());
+    let mut output = Output {
+        bytes: [0; 41_000],
+        length: 0,
+        fail_after: usize::MAX,
+    };
+    drive(server.serve_connection(
+        TestTimer,
+        &mut [0; 4096],
+        TestSocket {
+            input: Input(upload_request("/upload/a.bin")),
+            output: &mut output,
+        },
+    ))
+    .expect("serve refusal");
+    assert!(output.bytes[..output.length].starts_with(b"HTTP/1.1 409"));
 }
