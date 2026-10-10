@@ -160,6 +160,18 @@ mod tests {
     /// GTS Root R4, a bundled root, cross-signed by GlobalSign Root CA, which
     /// Mozilla no longer trusts for websites.
     const GTS_ROOT_R4_CROSS: &[u8] = include_bytes!("../tests/fixtures/gts-root-r4-cross.der");
+    /// bots.qq.com's chain as Tencent serves it (seen 2026-10-10): the leaf,
+    /// its intermediate, GlobalSign Root CA - R3 (a bundled root)
+    /// cross-signed by GlobalSign Root CA, and that older root itself, which
+    /// Mozilla no longer trusts for websites.
+    const BOTS_QQ_COM: &[u8] = include_bytes!("../tests/fixtures/bots-qq-com.der");
+    const GLOBALSIGN_ATLAS_R3_OV: &[u8] =
+        include_bytes!("../tests/fixtures/globalsign-atlas-r3-ov.der");
+    const GLOBALSIGN_R3_CROSS: &[u8] = include_bytes!("../tests/fixtures/globalsign-r3-cross.der");
+    const GLOBALSIGN_ROOT_CA: &[u8] = include_bytes!("../tests/fixtures/globalsign-root-ca.der");
+    /// `localhost`, signed by a test intermediate whose root is in no bundle.
+    const TEST_LOCALHOST: &[u8] = include_bytes!("../tests/fixtures/test-localhost.der");
+    const TEST_INTERMEDIATE: &[u8] = include_bytes!("../tests/fixtures/test-intermediate.der");
 
     #[derive(Clone)]
     struct CountingEntropy;
@@ -201,6 +213,8 @@ mod tests {
                 );
             }
             let mut flags = 0;
+            // a session's scratch, as a handshake passes it
+            let scratch = mbedtls_rs::VerifyScratch::default();
             let _ = mbedtls_x509_crt_verify(
                 &mut certificates,
                 &mut trusted,
@@ -208,8 +222,9 @@ mod tests {
                 null(),
                 &mut flags,
                 Some(roots::verify),
-                null_mut(),
+                core::ptr::from_ref(&scratch).cast_mut().cast(),
             );
+            assert_eq!(scratch.0.get(), 0, "every pass leaves the scratch settled");
             mbedtls_x509_crt_free(&mut certificates);
             mbedtls_x509_crt_free(&mut trusted);
             flags
@@ -268,6 +283,44 @@ mod tests {
     fn a_bundled_root_cross_signed_by_an_unbundled_one_is_trusted() {
         assert_eq!(verify(&[GTS_ROOT_R4_CROSS]), 0);
         assert_eq!(verify(&[WE1, GTS_ROOT_R4_CROSS]), 0);
+    }
+
+    #[test]
+    fn a_chain_reaching_a_bundled_root_is_trusted_whatever_the_server_sends_above_it() {
+        let chain = [
+            BOTS_QQ_COM,
+            GLOBALSIGN_ATLAS_R3_OV,
+            GLOBALSIGN_R3_CROSS,
+            GLOBALSIGN_ROOT_CA,
+        ];
+        assert_eq!(verify(&chain), 0);
+        assert_eq!(verify(&chain[1..]), 0);
+        // the unbundled root alone, or above a chain that never reaches a
+        // bundled root, is still not trusted
+        assert_eq!(
+            verify(&[GLOBALSIGN_ROOT_CA]) & MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+            MBEDTLS_X509_BADCERT_NOT_TRUSTED
+        );
+    }
+
+    #[test]
+    fn a_bundled_root_off_the_verified_path_vouches_for_nothing() {
+        // The intermediate's root is not sent; the bundled root beside it is
+        // not its parent, so mbedTLS never puts it on the path.
+        assert_eq!(
+            verify(&[TEST_LOCALHOST, TEST_INTERMEDIATE, ISRG_ROOT_X1])
+                & MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+            MBEDTLS_X509_BADCERT_NOT_TRUSTED
+        );
+        assert_eq!(
+            verify(&[
+                TEST_LOCALHOST,
+                TEST_INTERMEDIATE,
+                GLOBALSIGN_R3_CROSS,
+                GLOBALSIGN_ROOT_CA
+            ]) & MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+            MBEDTLS_X509_BADCERT_NOT_TRUSTED
+        );
     }
 
     #[test]
