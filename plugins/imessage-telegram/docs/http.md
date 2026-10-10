@@ -3,9 +3,10 @@
 The shared shapes come from `barracuda-imessage-gateway-channel`; see the
 Gateway's [`plugin.md`](../../imessage-gateway/docs/plugin.md).
 
-## `GET /api/gateway/telegram`
+## `GET /api/gateway/telegram/status`
 
-Returns `200` with the channel status. It never returns settings or the token.
+Returns `200` with the channel status. It never returns settings or the token;
+other methods answer `405`.
 
 ```json
 {"configured":true,"mode":"send_receive",
@@ -35,7 +36,7 @@ Responses:
   Gateway unless the mode is `disabled`.
 - `400 Bad Request`, `{"error":"invalid_request"}`: the JSON body was invalid
   or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `405 Method Not Allowed`: the endpoint only accepts `POST`.
 - `422 Unprocessable Content`, `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored
   and no Telegram channel stays registered.

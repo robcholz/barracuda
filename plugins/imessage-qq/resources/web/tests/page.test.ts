@@ -132,7 +132,7 @@ test("polls every 2 s until the binding is done, then shows the bot with a toast
   expect(page.toasts).toEqual([{ kind: "success", title: "QQ 已绑定" }]);
   expect(page.refreshes.count).toBe(1);
   // linked: the page reads the channel's mode and accounts
-  expect(requests().at(-1)).toBe(`GET ${ENDPOINT}`);
+  expect(requests().at(-1)).toBe(`GET ${ENDPOINT}/status`);
   const count = harness.calls.length;
   await advance(10_000);
   expect(harness.calls).toHaveLength(count);
@@ -195,14 +195,14 @@ test("a failed binding or start says what to do, never the device's internals", 
 test("a channel already linked shows its bot and 重新绑定 without starting a binding", async () => {
   status = { status: "idle", configured: true, app_id: "102345678" };
   const page = await render("en");
-  expect(requests()).toEqual([`GET ${LOGIN}`, `GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${LOGIN}`, `GET ${ENDPOINT}/status`]);
   expect(page.query(".bc-row__label .bc-title")?.textContent).toBe("Link");
   expect(page.text()).toContain("This device as a bot in QQ");
   expect(page.text()).toContain("QQ linked");
   expect(page.text()).toContain("App ID102345678");
   expect(button(page, "Link again")).toBeDefined();
   page.unmount();
-  expect(requests()).toEqual([`GET ${LOGIN}`, `GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${LOGIN}`, `GET ${ENDPOINT}/status`]);
 });
 
 test("a running session on mount is restarted for this page; leaving cancels it", async () => {
@@ -249,7 +249,10 @@ test("App ID and App Secret sit under 高级; a save cancels the binding and sho
   expect(page.input("app_secret").value).toBe("");
   expect(page.refreshes.count).toBe(1);
   // the typed bot replaced the QR session: cancel it, show the bot and read the channel
-  expect(requests().slice(-2)).toEqual([`DELETE ${LOGIN}`, `GET ${ENDPOINT}`]);
+  expect(requests().slice(-2)).toEqual([
+    `DELETE ${LOGIN}`,
+    `GET ${ENDPOINT}/status`,
+  ]);
   expect(page.text()).toContain("QQ 已绑定");
   expect(page.text()).toContain("App ID102345678");
 });
@@ -313,7 +316,7 @@ test("linked: 模式 offers all three modes and 授权账号 lists the person wh
   status = { status: "idle", configured: true, app_id: "102345678" };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) => {
-    if (call.url === ENDPOINT)
+    if (call.url === `${ENDPOINT}/status`)
       return json(200, {
         configured: true,
         mode: "send_receive",
@@ -348,7 +351,7 @@ test("with every receive slot taken it says so and names the limit", async () =>
   status = { status: "idle", configured: true, app_id: "102345678" };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) => {
-    if (call.url === ENDPOINT)
+    if (call.url === `${ENDPOINT}/status`)
       return json(200, {
         configured: true,
         mode: "send_receive",

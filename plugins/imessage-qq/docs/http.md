@@ -1,6 +1,6 @@
 # IMessage QQ HTTP API
 
-## `GET /api/gateway/qq`
+## `GET /api/gateway/qq/status`
 
 Returns `200` with the shared channel status (see the
 [Gateway's channel HTTP surface](../../imessage-gateway/docs/plugin.md)):
@@ -16,7 +16,7 @@ in `send_receive`; its `state` is `idle`, `starting`, `receiving`, `no_slot`
 (with `capacity`), or `error` (with `message`, for example
 「QQ 机器人已下架，只能连接沙箱环境 / The QQ bot is delisted and may only use the
 sandbox」 after close code 4914). It never returns settings, the App Secret,
-or a token, and makes no request to QQ.
+or a token, and makes no request to QQ. Other methods answer `405`.
 
 ## `POST /api/gateway/qq/mode`
 
@@ -118,7 +118,7 @@ Responses:
   required fields were absent, or an unknown field was present. Nothing is
   requested from QQ.
 - `405 Method Not Allowed` `{"error":"method_not_allowed"}`: the endpoint only
-  accepts `GET` and `POST`.
+  accepts `POST`.
 - `422 Unprocessable Content`
   `{"error":"verification_failed","message":"<QQ message>","code":"<QQ code>"}`:
   QQ refused to issue a token. `message` and `code` are QQ's own, passed through

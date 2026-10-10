@@ -8,10 +8,12 @@ use barracuda_plugin::manager::{
 };
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// HTTP path accepting Agent model API configurations.
 pub const SET_API_PATH: &str = "/api/model-api";
+/// HTTP path reporting the active model API configuration without keys.
+pub const STATUS_API_PATH: &str = "/api/model-api/status";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_STORAGE_KEY: &str = "default";
@@ -22,7 +24,7 @@ const SUB_AGENT_STORAGE_KEY: &str = "purpose.sub_agent";
 
 pub(crate) struct SetApiEndpoint {
     set_api: Box<SetApiHandler>,
-    configuration: Mutex<NoopRawMutex, ModelApiManager>,
+    configuration: Rc<Mutex<NoopRawMutex, ModelApiManager>>,
     persistence: Box<dyn ConfigurationPersistence>,
     /// Whether the active configuration has at least one model, for the portal status.
     configured: Rc<Cell<bool>>,
@@ -52,7 +54,7 @@ impl SetApiEndpoint {
         configured.set(has_model(&configuration));
         Self {
             set_api: Box::new(move |api, purpose, default| runtime.set_api(api, purpose, default)),
-            configuration: Mutex::new(configuration),
+            configuration: Rc::new(Mutex::new(configuration)),
             persistence: Box::new(PluginConfigurationPersistence(storage)),
             configured,
         }
@@ -77,7 +79,7 @@ impl SetApiEndpoint {
     ) -> Self {
         Self {
             set_api: Box::new(handler),
-            configuration: Mutex::new(configuration),
+            configuration: Rc::new(Mutex::new(configuration)),
             persistence: Box::new(persistence),
             configured: Rc::new(Cell::new(false)),
         }
@@ -85,6 +87,89 @@ impl SetApiEndpoint {
 
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+    }
+
+    /// The [`STATUS_API_PATH`] endpoint over this endpoint's configuration.
+    pub(crate) fn status_endpoint(&self) -> StatusEndpoint {
+        StatusEndpoint(Rc::clone(&self.configuration))
+    }
+}
+
+/// `GET` [`STATUS_API_PATH`]:
+/// `{"configured":bool,"default":Model|null,"purposes":{"root_agent":Model|null,"sub_agent":…,"memory":…,"compaction":…}}`
+/// with `Model` = `{"backend":"openai_compatible"|"anthropic_compatible","model":"…","base_url":"…"}`.
+/// A purpose is `null` when it has no model of its own and uses the default.
+/// API keys are never reported.
+pub(crate) struct StatusEndpoint(Rc<Mutex<NoopRawMutex, ModelApiManager>>);
+
+#[derive(Serialize)]
+struct StatusBody {
+    configured: bool,
+    default: Option<StatusModel>,
+    purposes: StatusPurposes,
+}
+
+#[derive(Serialize)]
+struct StatusPurposes {
+    root_agent: Option<StatusModel>,
+    sub_agent: Option<StatusModel>,
+    memory: Option<StatusModel>,
+    compaction: Option<StatusModel>,
+}
+
+#[derive(Serialize)]
+struct StatusModel {
+    backend: BackendKind,
+    model: alloc::string::String,
+    base_url: alloc::string::String,
+}
+
+impl StatusModel {
+    /// The reported fields of `api`; its key and limits are left out.
+    fn from_api(api: ModelApiConfig) -> Self {
+        Self {
+            backend: api.backend,
+            model: api.model,
+            base_url: api.base_url,
+        }
+    }
+}
+
+impl StatusBody {
+    fn from_configuration(configuration: &ModelApiManager) -> Self {
+        let explicit = |purpose| {
+            configuration
+                .get_explicit_api(purpose)
+                .map(StatusModel::from_api)
+        };
+        Self {
+            configured: has_model(configuration),
+            default: configuration.get_default_api().map(StatusModel::from_api),
+            purposes: StatusPurposes {
+                root_agent: explicit(ApiPurpose::RootAgent),
+                sub_agent: explicit(ApiPurpose::SubAgent),
+                memory: explicit(ApiPurpose::Memory),
+                compaction: explicit(ApiPurpose::Compaction),
+            },
+        }
+    }
+}
+
+impl HttpEndpoint for StatusEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if request.method() != HttpMethod::Get {
+                return SetApiEndpoint::response(405, br#"{"error":"method_not_allowed"}"#);
+            }
+            let body = StatusBody::from_configuration(&*self.0.lock().await);
+            match serde_json::to_vec(&body) {
+                Ok(body) => HttpResponse::new(200, JSON_CONTENT_TYPE, body),
+                Err(error) => {
+                    log::error!("failed to encode the model API status: {error}");
+                    SetApiEndpoint::response(500, br#"{"error":"encoding"}"#)
+                }
+            }
+        })
     }
 }
 
@@ -638,6 +723,44 @@ mod tests {
             assert_eq!(response.status(), 422, "{base_url}");
         }
         assert!(!*called.borrow());
+    }
+
+    #[test]
+    fn status_reports_the_models_without_keys() {
+        let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
+        let status = endpoint.status_endpoint();
+        let get = || {
+            let response = futures_lite::future::block_on(
+                status.handle(HttpRequest::new(HttpMethod::Get, Vec::new())),
+            );
+            assert_eq!(response.status(), 200);
+            alloc::string::String::from_utf8(response.body().expect("buffered").to_vec())
+                .expect("UTF-8")
+        };
+        assert_eq!(
+            get(),
+            r#"{"configured":false,"default":null,"purposes":{"root_agent":null,"sub_agent":null,"memory":null,"compaction":null}}"#
+        );
+
+        let response = futures_lite::future::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, VALID_JSON.to_vec())),
+        );
+        assert_eq!(response.status(), 204);
+        let root = r#"{"backend":"openai_compatible","model":"root-model","base_url":"https://example.invalid/v1"}"#;
+        let memory = r#"{"backend":"anthropic_compatible","model":"memory-model","base_url":"https://example.invalid/v1"}"#;
+        let reported = get();
+        assert_eq!(
+            reported,
+            alloc::format!(
+                r#"{{"configured":true,"default":{root},"purposes":{{"root_agent":{root},"sub_agent":null,"memory":{memory},"compaction":null}}}}"#
+            )
+        );
+        assert!(!reported.contains("secret"));
+
+        let response = futures_lite::future::block_on(
+            status.handle(HttpRequest::new(HttpMethod::Post, Vec::new())),
+        );
+        assert_eq!(response.status(), 405);
     }
 
     #[test]

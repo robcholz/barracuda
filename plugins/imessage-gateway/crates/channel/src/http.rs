@@ -1,11 +1,11 @@
 //! Shared HTTP surface every channel exposes under its configuration path.
 //!
-//! A channel Plugin serves `/api/gateway/<channel>` and the `/mode` and
-//! `/owners` below it from one prefix registration, [`ChannelEndpoint`], which
-//! hands the configuration path itself to the Plugin's own endpoint (whose
-//! `GET` answers [`status_response`]) and the other two to [`ModeEndpoint`]
-//! and [`OwnersEndpoint`]. One route per channel instead of three keeps the
-//! webserver's route table small.
+//! A channel Plugin serves `/api/gateway/<channel>` and the `/status`, `/mode`
+//! and `/owners` below it from one prefix registration, [`ChannelEndpoint`],
+//! which hands the configuration path itself to the Plugin's own endpoint,
+//! answers `/status` with [`status_response`], and hands the other two to
+//! [`ModeEndpoint`] and [`OwnersEndpoint`]. One route per channel instead of
+//! four keeps the webserver's route table small.
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -18,6 +18,7 @@ use barracuda_imessage_gateway_owners::{Owner, Owners};
 use barracuda_plugin::manager::PluginStorage;
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::mode::ChannelMode;
 use crate::receive::{NoSlot, ReceiveControl, ReceiveSlotSource, ReceiveState};
@@ -71,6 +72,12 @@ pub trait ChannelControl: 'static {
     /// (an [`crate::OnDemand`] keeps it); `None` before, so an unconfigured
     /// channel holds and reads none.
     fn owners(&self) -> Option<&Owners<Self::Storage>>;
+
+    /// Channel-specific fields [`status_response`] adds after the shared
+    /// ones, such as BlueBubbles' webhook counters. None by default.
+    fn status_details(&self) -> Map<String, Value> {
+        Map::new()
+    }
 }
 
 /// Enables receiving exactly when `channel` is configured and in
@@ -93,6 +100,8 @@ struct StatusBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     receive: Option<ReceiveBody<'a>>,
     owners: OwnerCount,
+    #[serde(flatten)]
+    details: Map<String, Value>,
 }
 
 #[derive(Serialize)]
@@ -129,8 +138,9 @@ struct OwnerCount {
     count: usize,
 }
 
-/// `GET /api/gateway/<channel>`:
-/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"capacity"?,"slots"?:{"in_use":n,"capacity":n}},"owners":{"count":n}}`.
+/// `GET /api/gateway/<channel>/status`:
+/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"capacity"?,"slots"?:{"in_use":n,"capacity":n}},"owners":{"count":n}}`,
+/// then the channel's [`ChannelControl::status_details`].
 ///
 /// `receive` is present only in `send_receive`; `message` only with `error`;
 /// `capacity` only with `no_slot`; `slots` whenever the channel draws from a
@@ -153,6 +163,7 @@ pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse 
             owners: OwnerCount {
                 count: channel.owners().map_or(0, Owners::count),
             },
+            details: channel.status_details(),
         },
     )
 }
@@ -319,8 +330,9 @@ impl<C: ChannelControl> HttpEndpoint for OwnersEndpoint<C> {
 /// Every route of a channel under its configuration path `base`, for one
 /// prefix registration (`WebServer::serve_http_prefix(base, …)`):
 ///
-/// - `base` itself goes to the channel Plugin's own `config` endpoint, whose
-///   `GET` answers [`status_response`];
+/// - `base` itself goes to the channel Plugin's own `config` endpoint, which
+///   takes changes only;
+/// - `GET base/status` answers [`status_response`] (405 for other methods);
 /// - `base/mode` is [`ModeEndpoint`];
 /// - `base/owners` is [`OwnersEndpoint`];
 /// - any other path below `base` answers 404 `not_found`.
@@ -350,6 +362,12 @@ impl<C: ChannelControl, Config: HttpEndpoint> HttpEndpoint for ChannelEndpoint<C
         let channel = self.channel.as_ref();
         match request.path().strip_prefix(self.base) {
             Some("") => self.config.handle(request),
+            Some("/status") => Box::pin(async move {
+                match request.method() {
+                    HttpMethod::Get => status_response(channel),
+                    _ => error(405, "method_not_allowed"),
+                }
+            }),
             Some("/mode") => Box::pin(async move { mode_request(channel, &request).await }),
             Some("/owners") => Box::pin(async move { owners_request(channel, &request).await }),
             _ => Box::pin(async { error(404, "not_found") }),

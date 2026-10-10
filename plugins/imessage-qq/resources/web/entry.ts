@@ -95,8 +95,8 @@ const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
  * the page starts it, shows the code, polls every 2 s and cancels it when it goes away. QQ reports
  * no scan, only the finished binding or an expired code. An App ID and App Secret entered by hand
  * under 「高级」 post to `POST /api/gateway/qq`, which checks them with QQ first; QQ's rejection
- * (422 `verification_failed`) is shown on the secret field. Once linked, `GET` on that path shows the
- * channel's mode and allowed accounts.
+ * (422 `verification_failed`) is shown on the secret field. Once linked, `GET /status` below it shows
+ * the channel's mode and allowed accounts.
  */
 export const mount = definePage((context) => {
   const { lang } = context;

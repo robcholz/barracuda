@@ -31,7 +31,7 @@ pub use barracuda_agent_runtime::{
     stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
     SessionEvent, SessionPersistence, TurnEvent,
 };
-pub use model_api_http::SET_API_PATH;
+pub use model_api_http::{SET_API_PATH, STATUS_API_PATH};
 
 const PERSISTENCE_ROOT: &str = "/data";
 /// Skills a user or another Plugin installs. The shared durable Workspace
@@ -132,16 +132,18 @@ impl Plugin for AgentPlugin {
         context.retain(action_registrations);
         context.provide(Rc::clone(&runtime))?;
         context.provide(Rc::new(runtime.tool_registry()))?;
+        let set_api = model_api_http::SetApiEndpoint::new(
+            Rc::clone(&runtime),
+            context.storage().clone(),
+            api_configuration,
+            configured,
+        );
+        let status_registration = webserver
+            .serve_http(STATUS_API_PATH, set_api.status_endpoint())
+            .map_err(PluginError::registration)?;
+        context.retain(status_registration);
         let route_registration = webserver
-            .serve_http(
-                SET_API_PATH,
-                model_api_http::SetApiEndpoint::new(
-                    Rc::clone(&runtime),
-                    context.storage().clone(),
-                    api_configuration,
-                    configured,
-                ),
-            )
+            .serve_http(SET_API_PATH, set_api)
             .map_err(PluginError::registration)?;
         context.retain(route_registration);
 

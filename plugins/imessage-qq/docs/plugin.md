@@ -16,8 +16,8 @@
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities and follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
-`/api/gateway/qq` configures the channel and `GET` on it answers the shared
-channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
+`POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
+answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
 shared mode and owner endpoints, served with it from one prefix route
 (`ChannelEndpoint`). The allowed accounts are loaded only once the channel is
 configured, and the gateway session by the first receive session. The `qq` channel is registered with the

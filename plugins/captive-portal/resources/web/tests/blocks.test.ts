@@ -494,7 +494,7 @@ test("readChannel reads the configured flag; configuredRow shows the card once t
     signup: { email_address: "a@inkboxmail.com" },
   });
   expect(harness.calls.at(-1)?.method).toBe("GET");
-  expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox");
+  expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox/status");
   harness.reply = async () => json(200, { configured: "yes" });
   expect(await readChannel(ctx, "/api/gateway/qq")).toBeNull();
   harness.reply = async () => new Response(null, { status: 405 });

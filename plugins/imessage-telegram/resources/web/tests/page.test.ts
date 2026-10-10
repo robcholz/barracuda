@@ -18,7 +18,7 @@ afterEach(async () => {
 async function render(lang: "zh" | "en") {
   const page = await harness.render(mount, lang);
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-    ["GET", "/api/gateway/telegram"],
+    ["GET", "/api/gateway/telegram/status"],
   ]);
   harness.calls.length = 0;
   await settle();
@@ -243,7 +243,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
 function receiving(mode = "send_receive") {
   harness.reply = async (call) => {
     if (call.method === "POST") return new Response(null, { status: 204 });
-    if (call.url === "/api/gateway/telegram")
+    if (call.url === "/api/gateway/telegram/status")
       return json(200, {
         configured: true,
         mode,
@@ -266,7 +266,7 @@ test("a configured channel shows its mode, the /start code and the allowed accou
   await settle();
   try {
     expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-      ["GET", "/api/gateway/telegram"],
+      ["GET", "/api/gateway/telegram/status"],
       ["GET", "/api/gateway/telegram/owners"],
     ]);
     expect(
@@ -297,7 +297,7 @@ test("a configured channel shows its mode, the /start code and the allowed accou
       harness.calls.map((call) => [call.method, call.url, call.body]),
     ).toEqual([
       ["POST", "/api/gateway/telegram/mode", { mode: "send" }],
-      ["GET", "/api/gateway/telegram", undefined],
+      ["GET", "/api/gateway/telegram/status", undefined],
     ]);
     expect(page.refreshes.count).toBe(1);
     expect(
