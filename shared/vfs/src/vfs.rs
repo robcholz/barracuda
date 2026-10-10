@@ -53,6 +53,7 @@ impl Vfs {
             alloc::vec![crate::scoped::ScopedMount::new(
                 Cow::Borrowed("/"),
                 Cow::Owned(root),
+                MountOptions::read_write(),
             )],
         ))
     }
@@ -73,9 +74,34 @@ impl Vfs {
         Point: Into<Cow<'static, str>>,
         Source: Into<Cow<'static, str>>,
     {
+        self.scoped_mounts_with(
+            mounts
+                .into_iter()
+                .map(|(point, source)| (point, source, MountOptions::read_write())),
+        )
+    }
+
+    /// Creates a mount-management-free view whose logical roots each carry
+    /// their own access policy.
+    ///
+    /// A read-only mount refuses every change through the view with
+    /// [`FsError::ReadOnly`], even when its source is writable.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::scoped_mounts`].
+    pub fn scoped_mounts_with<I, Point, Source>(
+        &self,
+        mounts: I,
+    ) -> Result<crate::ScopedVfs, FsError>
+    where
+        I: IntoIterator<Item = (Point, Source, MountOptions)>,
+        Point: Into<Cow<'static, str>>,
+        Source: Into<Cow<'static, str>>,
+    {
         let mounts = mounts.into_iter();
         let mut scoped_mounts = Vec::with_capacity(mounts.size_hint().0);
-        for (point, source_root) in mounts {
+        for (point, source_root, options) in mounts {
             let point = normalize_retained(point.into())?;
             if scoped_mounts
                 .iter()
@@ -84,7 +110,7 @@ impl Vfs {
                 return Err(FsError::MountConflict);
             }
             let source_root = normalize_retained(source_root.into())?;
-            scoped_mounts.push(crate::scoped::ScopedMount::new(point, source_root));
+            scoped_mounts.push(crate::scoped::ScopedMount::new(point, source_root, options));
         }
         Ok(crate::ScopedVfs::with_mounts(self.clone(), scoped_mounts))
     }
