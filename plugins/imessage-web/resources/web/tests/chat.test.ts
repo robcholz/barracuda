@@ -380,13 +380,19 @@ test("a reply streams in as Markdown; its code blocks carry Copy and replies quo
   ws.agent("web-1", "output_delta", {
     text: "## 用法\n\n运行 `make`：\n\n```sh\nmake ",
   });
-  // streaming: the fence is open, and the caret ends its last line
+  // streaming: the fence is open, so the block is incomplete and the caret hides, as Streamdown's does
   const reply = root.querySelector(".bc-reply.bc-md")!;
   expect(reply.querySelector("h2")!.textContent).toBe("用法");
   expect(reply.querySelector("p code")!.textContent).toBe("make");
-  expect(reply.querySelector("pre code")!.textContent).toBe("make ");
-  expect(reply.lastElementChild!.className).toBe("bc-caret");
+  // healing drops the trailing space, as remend does
+  expect(reply.querySelector("pre code")!.textContent).toBe("make");
+  const block = reply.querySelector(".bc-md-code")!;
+  expect(block.hasAttribute("data-incomplete")).toBe(true);
+  expect(reply.querySelector(".bc-caret")).toBeNull();
   ws.agent("web-1", "output_delta", { text: "all\n```\n完成 **了**" });
+  // the fence closed: the same block, complete, and the caret ends the last line
+  expect(reply.querySelector(".bc-md-code")).toBe(block);
+  expect(block.hasAttribute("data-incomplete")).toBe(false);
   expect(reply.querySelector("pre code")!.textContent).toBe("make all");
   expect(reply.querySelector("p:last-of-type > .bc-caret")).not.toBeNull();
   expect(reply.querySelector("p:last-of-type strong")!.textContent).toBe("了");

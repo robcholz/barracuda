@@ -30,7 +30,12 @@ import {
   type PortalContext,
 } from "../../../captive-portal/resources/web/ui";
 import { spinningMark } from "./mark";
-import { markdownSource, renderMarkdown, trailing } from "./markdown";
+import {
+  MARKDOWN_CSS,
+  markdownSource,
+  renderMarkdown,
+  trailing,
+} from "./markdown";
 import {
   sessionRail,
   type SessionCommand,
@@ -319,6 +324,8 @@ interface Run {
   source: string;
   node: HTMLElement;
   pending: string;
+  /** The reply is still streaming here: the caret follows its last line. */
+  caret?: boolean;
   done?: () => void;
 }
 
@@ -411,7 +418,7 @@ export const mount = definePage((context: PortalContext) => {
   const t = STRINGS[lang];
   const doc = document;
   // the page's own rules, for as long as it is mounted
-  const style = h("style", null, CHAT_CSS);
+  const style = h("style", null, CHAT_CSS + MARKDOWN_CSS);
   doc.head.append(style);
 
   // ---- layout
@@ -932,15 +939,20 @@ export const mount = definePage((context: PortalContext) => {
 
   /** Paints a Markdown run: provisionally while it streams, as written once it is whole. */
   function paint(run: Run, streaming: boolean) {
-    const tail = run.node.contains(caret);
     renderMarkdown(run.node, run.source, { ...markdown, streaming });
-    if (tail) placeCaret(run.node);
+    if (streaming && run.caret) placeCaret(run.node);
   }
 
-  /** Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move restarts its blink). */
+  /**
+   * Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move
+   * restarts its blink). After a code block or a table, which have no last line, it hides, as
+   * Streamdown's does.
+   */
   function placeCaret(node: HTMLElement) {
     const end = trailing(node, caret);
-    if (end.lastChild !== caret) end.append(caret);
+    const ended = [...node.children].some((child) => child !== caret);
+    if (end === node && ended) caret.remove();
+    else if (end.lastChild !== caret) end.append(caret);
   }
 
   /** Lands a run's text in full; a Markdown run is painted as written, its provisional tail gone. */
@@ -988,7 +1000,10 @@ export const mount = definePage((context: PortalContext) => {
     }
     const run = record.run!;
     flow(run, text);
-    if (stream === "output" && !record.ended) placeCaret(run.node);
+    if (stream === "output" && !record.ended) {
+      run.caret = true;
+      placeCaret(run.node);
+    }
   }
 
   /** Adds a part to a message, above its footer. */

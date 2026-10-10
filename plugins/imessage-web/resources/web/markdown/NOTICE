@@ -1,0 +1,14 @@
+Barracuda Web chat Markdown
+
+This directory contains code derived from Streamdown
+(https://github.com/vercel/streamdown), Copyright 2023 Vercel, Inc.,
+licensed under the Apache License, Version 2.0 (APACHE-2.0.txt).
+
+- heal.ts is a modified port of remend 1.4.0 (packages/remend/src). Its
+  header lists the changes.
+- ../tests/heal/ holds remend 1.4.0's tests (packages/remend/__tests__),
+  modified as ../tests/heal/README.md describes.
+
+The other files in this directory are not derived from Streamdown's code; they
+follow its design (block memoization, the incomplete code block, the hidden
+caret, and streamdown-cjk's autolink boundaries), as README.md describes.

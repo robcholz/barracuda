@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { installBrowser } from "../../../../captive-portal/resources/web/tests/browser";
-import { highlight } from "../highlight";
-import { markdownSource, renderMarkdown, trailing } from "../markdown";
+import { highlight } from "../markdown/highlight";
+import { heal, markdownSource, renderMarkdown, trailing } from "../markdown";
 
 let browser: ReturnType<typeof installBrowser>;
 
@@ -93,7 +93,7 @@ test("inline marks, links and raw HTML", () => {
   expect(root.querySelector("img, b")).toBeNull();
 });
 
-test("an unclosed mark stays literal; an unclosed fence runs to the end", () => {
+test("a mark left open in an earlier paragraph stays literal; an open fence runs to the end", () => {
   const root = paint("先 **加粗\n\n```rust\nfn main() {");
   expect(root.querySelector("p")!.textContent).toBe("先 **加粗");
   expect(root.querySelector("strong")).toBeNull();
@@ -241,10 +241,15 @@ test("a streaming tail is shown provisionally", () => {
   expect(shown("运行 `mak").querySelector("code")!.textContent).toBe("mak");
   expect(shown("先 **").textContent).toBe("先");
   expect(shown("见 [文档](https://exa").textContent).toBe("见 文档");
-  expect(shown("见 [文档](https://exa").querySelector("a")!.href).toBe(
-    "https://exa/",
+  // a link on its way is drawn as one, without a target until its URL is whole
+  const coming = shown("见 [文档](https://exa").querySelector("a")!;
+  expect(coming.hasAttribute("href")).toBe(false);
+  expect(coming.hasAttribute("data-incomplete")).toBe(true);
+  expect(shown("见 [文").querySelector("a[data-incomplete]")!.textContent).toBe(
+    "文",
   );
-  expect(shown("见 [文").textContent).toBe("见 文");
+  expect(shown("见 [文档]").querySelector("a[data-incomplete]")).not.toBeNull();
+  expect(shown("见 ![图").textContent).toBe("见 图");
   // a line that is only a marker waits; so does a fence's line and a table's header
   for (const tail of [
     "#",
@@ -263,10 +268,38 @@ test("a streaming tail is shown provisionally", () => {
   expect(table.querySelectorAll("th")).toHaveLength(2);
   // inside a fence, the closing backticks wait
   expect(shown("```js\nx\n``").querySelector("code")!.textContent).toBe("x");
-  // as written, the same text is literal
+  // a finished reply is healed the same way, so nothing changes the moment it ends
   const written = document.createElement("div");
   renderMarkdown(written, "先 **加");
-  expect(written.textContent).toBe("先 **加");
+  expect(written.querySelector("strong")!.textContent).toBe("加");
+  // but its last line is drawn whole: what waited while streaming shows
+  renderMarkdown(written, "段落\n\n1");
+  expect(written.textContent).toBe("段落1");
+});
+
+test("healing closes only the last paragraph, never into code", () => {
+  // remend 1.4.0 appends `**` to the end in both
+  expect(heal("先 **加粗\n\n新段落")).toBe("先 **加粗\n\n新段落");
+  expect(heal("先 **加粗\n\n```rust\nfn main() {")).toBe(
+    "先 **加粗\n\n```rust\nfn main() {",
+  );
+  expect(heal("新段落 **加粗\n\n")).toBe("新段落 **加粗**\n\n");
+  // a blank line inside a fence does not end the paragraph after it
+  expect(heal("```\na\n\nb\n```\n然后 **加")).toBe(
+    "```\na\n\nb\n```\n然后 **加**",
+  );
+});
+
+test("a bare URL ends at CJK punctuation", () => {
+  const root = paint(
+    "请访问 https://example.com/a。谢谢，或 https://b.cn（备用）",
+  );
+  expect(
+    [...root.querySelectorAll("a")].map((a) => a.getAttribute("href")),
+  ).toEqual(["https://example.com/a", "https://b.cn"]);
+  expect(root.textContent).toBe(
+    "请访问 https://example.com/a。谢谢，或 https://b.cn（备用）",
+  );
 });
 
 test("the trailing element is the last line's block", () => {
