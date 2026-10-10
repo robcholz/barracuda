@@ -79,7 +79,23 @@ ends; a permission answer goes out at once. While a turn runs its author mark
 spins (`resources/web/mark.ts`: WebGL, which plain HTTP allows; the static mark
 and typing dots where WebGL is missing, the mark at rest under reduced motion)
 and 「思考中」 shimmers until text streams. Replies stream in smoothly behind a
-blinking caret; reasoning folds itself away as 「思考了 N 秒」; a running tool
+blinking caret, rendered as Markdown by the page's own package
+(`resources/web/markdown/`, see its README): the rendering logic of Vercel's
+Streamdown without React, with remend's healing ported (Apache-2.0; see its
+`NOTICE`). It draws headings, lists and task lists, quotes, rules, GFM tables,
+fenced code, inline code, emphasis, strikethrough and links. It builds DOM nodes
+and never parses markup, so HTML in a reply stays text, and links open only
+`http(s):` and `mailto:` targets in a new tab. It streams without flashing:
+- what a paragraph leaves open is healed, a link on its way drawn as one;
+- a last line whose block is not yet known waits;
+- each paint patches the DOM in place, so a selection, a hovered button and a
+  code block's scroll survive.
+
+A code block shows its language and its own Copy button, which rests while its
+fence is still open, and the caret hides after it. Code is coloured by a
+dependency-free scanner for Rust, C/C++, JavaScript/TypeScript, JSON, Python,
+shell, Go, Java/Kotlin/Swift/C#, TOML/YAML/INI, SQL, Lua and diffs. Copy and Reply
+take a reply's Markdown source. Reasoning folds itself away as 「思考了 N 秒」; a running tool
 spins; each finished reply ends with Copy and Reply icon buttons. While a turn
 runs, Stop (`circle-stop`) replaces send as the primary (outline once the
 reader types, beside 「加入队列」); the turn's `turn_ended` outcome

@@ -1,7 +1,8 @@
 /**
  * Web chat's own rules, from the design system's Chat card: the one-row composer, the fresh
- * conversation, the pinned head, jump to the latest, the session rail, icon-button tooltips, the spinning mark's box and
- * the live-state motion. They serve this page alone, so the page adds them on mount and removes them on unmount
+ * conversation, the pinned head, jump to the latest, the session rail, icon-button tooltips, the spinning mark's box,
+ * and the live-state motion (a reply's Markdown brings its own, `MARKDOWN_CSS`).
+ * They serve this page alone, so the page adds them on mount and removes them on unmount
  * rather than growing the shell's stylesheet; reduced motion stills every animation.
  */
 export const CHAT_CSS = `

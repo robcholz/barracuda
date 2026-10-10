@@ -31,6 +31,12 @@ import {
 } from "../../../captive-portal/resources/web/ui";
 import { spinningMark } from "./mark";
 import {
+  MARKDOWN_CSS,
+  markdownSource,
+  renderMarkdown,
+  trailing,
+} from "./markdown";
+import {
   sessionRail,
   type SessionCommand,
   type SessionsState,
@@ -307,15 +313,19 @@ interface Request {
 }
 
 /**
- * One open text run. Text the device sends lands in `pending` and flows into `text` a few
+ * One open text run. Text the device sends lands in `pending` and flows into the run a few
  * characters a frame, so a reply streams in smoothly rather than in bursts; `done` runs when the
- * run closes.
+ * run closes. A reply's output is Markdown: it gathers in `source` and is painted into `node` again
+ * as it grows; any other run is plain `text`.
  */
 interface Run {
   stream: string;
-  text: Text;
+  text: Text | null;
+  source: string;
   node: HTMLElement;
   pending: string;
+  /** The reply is still streaming here: the caret follows its last line. */
+  caret?: boolean;
   done?: () => void;
 }
 
@@ -408,7 +418,7 @@ export const mount = definePage((context: PortalContext) => {
   const t = STRINGS[lang];
   const doc = document;
   // the page's own rules, for as long as it is mounted
-  const style = h("style", null, CHAT_CSS);
+  const style = h("style", null, CHAT_CSS + MARKDOWN_CSS);
   doc.head.append(style);
 
   // ---- layout
@@ -873,6 +883,8 @@ export const mount = definePage((context: PortalContext) => {
 
   // ---- smooth streaming
   const flowing = new Set<Run>();
+  /** A reply's code blocks carry their own Copy button. */
+  const markdown = { codeActions: copyButton, keep: caret };
   let frame = 0;
 
   /** Whether text should land at once: reduced motion, or a hidden tab whose frames pause. */
@@ -901,7 +913,7 @@ export const mount = definePage((context: PortalContext) => {
       // never split a surrogate pair across frames
       const code = run.pending.charCodeAt(n - 1);
       if (code >= 0xd800 && code <= 0xdbff) n += 1;
-      run.text.data = clip(run.text.data + run.pending.slice(0, n));
+      grow(run, run.pending.slice(0, n));
       run.pending = run.pending.slice(n);
       if (!run.pending) flowing.delete(run);
     }
@@ -910,16 +922,50 @@ export const mount = definePage((context: PortalContext) => {
   }
 
   function settle(run: Run) {
-    if (run.pending) run.text.data = clip(run.text.data + run.pending);
+    if (run.pending) grow(run, run.pending);
     run.pending = "";
     flowing.delete(run);
+  }
+
+  /** Adds text to a run: plain text lands as it is, Markdown is painted again with the caret kept at its end. */
+  function grow(run: Run, text: string) {
+    if (run.text) {
+      run.text.data = clip(run.text.data + text);
+      return;
+    }
+    run.source = clip(run.source + text);
+    paint(run, true);
+  }
+
+  /** Paints a Markdown run: provisionally while it streams, as written once it is whole. */
+  function paint(run: Run, streaming: boolean) {
+    renderMarkdown(run.node, run.source, { ...markdown, streaming });
+    if (streaming && run.caret) placeCaret(run.node);
+  }
+
+  /**
+   * Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move
+   * restarts its blink). After a code block or a table, which have no last line, it hides, as
+   * Streamdown's does.
+   */
+  function placeCaret(node: HTMLElement) {
+    const end = trailing(node, caret);
+    const ended = [...node.children].some((child) => child !== caret);
+    if (end === node && ended) caret.remove();
+    else if (end.lastChild !== caret) end.append(caret);
+  }
+
+  /** Lands a run's text in full; a Markdown run is painted as written, its provisional tail gone. */
+  function finish(run: Run) {
+    settle(run);
+    if (!run.text) paint(run, false);
   }
 
   /** Closes the message's open run: its text lands in full and its `done` runs. */
   function close(record: Agent) {
     const run = record.run;
     if (!run) return;
-    settle(run);
+    finish(run);
     record.run = null;
     run.done?.();
   }
@@ -931,25 +977,33 @@ export const mount = definePage((context: PortalContext) => {
       close(record);
       let done: (() => void) | undefined;
       let node: HTMLElement;
-      if (stream === "reasoning") ({ node, done } = reasoning(record));
+      let content: Text | null = null;
+      if (stream === "output") node = h("div", { class: "bc-reply bc-md" });
       else {
-        node = h("p", {
-          class:
-            stream === "notice" || stream === "tool"
-              ? "bc-small bc-muted"
-              : "bc-reply",
-          style: stream === "notice" || stream === "tool" ? "margin:0" : null,
-        });
-        if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+        if (stream === "reasoning") ({ node, done } = reasoning(record));
+        else {
+          node = h("p", { class: "bc-small bc-muted", style: "margin:0" });
+          if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+        }
+        content = doc.createTextNode("");
+        node.append(content);
       }
-      const content = doc.createTextNode("");
-      node.append(content);
       if (stream !== "reasoning") put(record, node);
-      record.run = { stream, text: content, node, pending: "", done };
+      record.run = {
+        stream,
+        text: content,
+        source: "",
+        node,
+        pending: "",
+        done,
+      };
     }
     const run = record.run!;
     flow(run, text);
-    if (stream === "output" && !record.ended) run.node.append(caret);
+    if (stream === "output" && !record.ended) {
+      run.caret = true;
+      placeCaret(run.node);
+    }
   }
 
   /** Adds a part to a message, above its footer. */
@@ -1105,18 +1159,11 @@ export const mount = definePage((context: PortalContext) => {
   function showFooter(record: Agent) {
     if (record.kind !== "reply") return;
     if (!record.footer) {
-      let reset: ReturnType<typeof setTimeout> | undefined;
-      const copy = iconButton(t.copy, ICON_COPY, async () => {
-        if (!(await copyText(textOf(record))) || signal.aborted) return;
-        copy.set(t.copied, ICON_CHECK);
-        clearTimeout(reset);
-        reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
-      });
       record.footer = h(
         "div",
         { class: "bc-meta", style: "gap:4px" },
         record.reaction,
-        copy.button,
+        copyButton(() => textOf(record)),
         iconButton(t.reply, ICON_REPLY, () =>
           setReply({ id: record.id, text: textOf(record) }),
         ).button,
@@ -1125,10 +1172,22 @@ export const mount = definePage((context: PortalContext) => {
     record.root.append(record.footer);
   }
 
-  /** The message's reply text, as Copy and Reply take it. */
+  /** A Copy icon button for what `read` returns; it says 「已复制」 for a moment once it copied. */
+  function copyButton(read: () => string) {
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    const copy = iconButton(t.copy, ICON_COPY, async () => {
+      if (!(await copyText(read())) || signal.aborted) return;
+      copy.set(t.copied, ICON_CHECK);
+      clearTimeout(reset);
+      reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
+    });
+    return copy.button;
+  }
+
+  /** The message's reply text (its Markdown source), as Copy and Reply take it. */
   function textOf(record: Agent) {
-    return [...record.root.querySelectorAll("p.bc-reply")]
-      .map((node) => node.firstChild?.textContent ?? "")
+    return [...record.root.querySelectorAll(".bc-reply")]
+      .map((node) => markdownSource(node) ?? node.firstChild?.textContent ?? "")
       .join("\n")
       .trim();
   }
@@ -1394,13 +1453,13 @@ export const mount = definePage((context: PortalContext) => {
       case "message.edit": {
         if (!known) return;
         close(known);
-        for (const node of known.root.querySelectorAll("p.bc-reply"))
+        for (const node of known.root.querySelectorAll(".bc-reply"))
           node.remove();
         write(known, "output", str(value.text) || " ");
         caret.remove();
         const run = known.run!;
-        settle(run);
-        run.node.append(
+        finish(run);
+        trailing(run.node).append(
           h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
         );
         known.run = null;
