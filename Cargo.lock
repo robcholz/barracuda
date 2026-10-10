@@ -640,6 +640,7 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-agent-tool",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-executor",

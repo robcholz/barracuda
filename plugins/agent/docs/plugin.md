@@ -7,6 +7,7 @@
   `WorkflowActionRegistry` and `WorkflowService` from `workflow`,
   `CaptivePortal` from `captive-portal`, and `UtcClock` from `time`
 - Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
+  `background_list`, `background_wait`, `background_input`, `background_cancel`,
   plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
 - Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
   skills from `/workspace/media/skills`, and shared bundled skills from
@@ -45,6 +46,41 @@ it does not own or run either the Agent runtime or the Workflow runtime.
 Dependent Plugins may still register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
+
+## Tools and background Tools
+
+A Tool is either an ordinary Tool (`Tool::new` with a `ToolHandler`), whose call
+settles inside the model turn, or a background Tool (`Tool::background` with a
+`BackgroundToolHandler`), whose call returns an accepted output and keeps
+running. Being a background Tool is part of the Tool's definition, not a choice
+made per call.
+
+Every Agent owns one `BackgroundToolPool`. The pool is a lower layer than
+Tools: it is the generic `barracuda_runtime_utils::background::BackgroundPool`,
+which stores tasks under pool-assigned ids beside metadata it never inspects,
+delivers their progress and completion, and lets holders wait for or remove a
+task by id. The Tool layer instantiates it with `BackgroundToolCall` metadata
+(the invocation, the Tool's control hooks, and the `toolcall` span) and owns
+every Tool-level behavior.
+
+The runner moves an accepted background call into the pool, and its accepted
+output becomes `[background:accepted]` with the pool `id`. The Agent drives the
+pool and delivers the call's progress and terminal result automatically as
+`[background:progress]`, `[background:completed]`, or `[background:failed]`
+updates; an idle Agent opens a new turn for them. The always-visible
+`background` Tool group manipulates the pool by `id`:
+
+- `background_list` snapshots every running call with its Tool and status;
+- `background_wait` blocks until one call finishes and returns its result,
+  which is then not delivered again, or times out and leaves it running;
+- `background_input` sends input or end of input to a running call;
+- `background_cancel` drops a running call; its result is never delivered.
+
+A handler attaches `BackgroundToolControl` to supply the status, accept input,
+and stop work its dropped completion future does not own. Dropping a call
+always drops its completion future, so cancelling, cancelling the Agent, or
+dropping the Agent stops every call whose work that future owns. The pool is
+runtime-only state and does not survive an Agent restart.
 
 The runtime scans `/workspace/media/skills` and `/workspace/resources/skills`
 into one catalog. Skills belong to the Agent application rather than the

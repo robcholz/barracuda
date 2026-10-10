@@ -7,7 +7,7 @@ use alloc::{
 };
 
 use barracuda_agent_tool::{
-    ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
+    BackgroundToolPool, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
 };
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
@@ -60,8 +60,8 @@ enum ToolBatchUpdate {
 
 struct ToolPhase<'a> {
     tools: &'a ToolSetHandle<'a>,
+    background: &'a BackgroundToolPool,
     joined: Option<ToolJoinHandle>,
-    detached: VecDeque<ToolDetachHandle>,
     pending: VecDeque<PendingApproval<'a>>,
     active_permission: Option<PendingApproval<'a>>,
     ready_results: VecDeque<(ToolCall, ToolOutput)>,
@@ -225,7 +225,8 @@ where
                 ))
                 .await;
 
-            let mut tools = ToolPhase::new(tool_calls, step.tools, loop_.permission)?;
+            let mut tools =
+                ToolPhase::new(tool_calls, step.tools, step.background, loop_.permission)?;
             while let Some(event) = tools.next(loop_.control).await? {
                 let terminal = matches!(
                     event,
@@ -245,6 +246,7 @@ impl<'a> ToolPhase<'a> {
     fn new<P>(
         tool_calls: Vec<ToolCall>,
         tools: &'a ToolSetHandle<'a>,
+        background: &'a BackgroundToolPool,
         permission: &'a P,
     ) -> Result<Self, IterationLoopError>
     where
@@ -338,12 +340,12 @@ impl<'a> ToolPhase<'a> {
                 }),
             }
         }
-        let (joined, detached) = dispatch_scheduled_calls(tools, allowed);
+        let joined = dispatch_scheduled_calls(tools, background, allowed);
 
         Ok(Self {
             tools,
+            background,
             joined,
-            detached: detached.into_iter().collect(),
             pending,
             active_permission: None,
             ready_results,
@@ -357,9 +359,6 @@ impl<'a> ToolPhase<'a> {
         control: &super::super::stream::RunControl,
     ) -> Result<Option<IterationLoopEvent>, IterationLoopError> {
         loop {
-            if let Some(detached) = self.detached.pop_front() {
-                return Ok(Some(IterationLoopEvent::Detached(detached)));
-            }
             if let Some((call, output)) = self.ready_results.pop_front() {
                 return self.tool_result(call, output).map(Some);
             }
@@ -450,10 +449,12 @@ impl<'a> ToolPhase<'a> {
                         .ok_or(IterationLoopError::IncompleteToolBatch)?;
                     match decision {
                         ToolPermission::Allow => {
-                            let (joined, detached) =
-                                dispatch_scheduled_calls(self.tools, vec![waiting.call]);
+                            let joined = dispatch_scheduled_calls(
+                                self.tools,
+                                self.background,
+                                vec![waiting.call],
+                            );
                             self.merge_joined(joined);
-                            self.detached.extend(detached);
                         }
                         ToolPermission::Deny(reason) => {
                             let tool_call = waiting.call.tool_call();
@@ -509,17 +510,21 @@ impl<'a> ToolPhase<'a> {
 
 fn dispatch_scheduled_calls(
     tools: &ToolSetHandle<'_>,
+    background: &BackgroundToolPool,
     calls: Vec<ScheduledCall>,
-) -> (Option<ToolJoinHandle>, Option<ToolDetachHandle>) {
+) -> Option<ToolJoinHandle> {
     if calls.is_empty() {
-        return (None, None);
+        return None;
     }
     let calls = calls
         .into_iter()
         .map(|call| call.invocation)
         .collect::<Vec<_>>();
-    let (joined, detached) = ToolRunner::new(tools).run(calls);
-    (Some(joined), detached)
+    Some(
+        ToolRunner::new(tools)
+            .with_background(background)
+            .run(calls),
+    )
 }
 
 fn tool_result_parts((invocation, output): (ToolInvocation, ToolOutput)) -> (ToolCall, ToolOutput) {
@@ -685,7 +690,9 @@ mod tests {
             checks: Cell::new(0),
             ids: RefCell::new(Vec::new()),
         };
-        let mut phase = ToolPhase::new(tool_calls, &tools, &permission).expect("phase prepares");
+        let background = BackgroundToolPool::new();
+        let mut phase =
+            ToolPhase::new(tool_calls, &tools, &background, &permission).expect("phase prepares");
 
         let events = block_on(async {
             let mut events = Vec::new();
@@ -761,7 +768,7 @@ mod tests {
             },
         ];
 
-        let error = ToolPhase::new(tool_calls, &tools, &AllowAll)
+        let error = ToolPhase::new(tool_calls, &tools, &BackgroundToolPool::new(), &AllowAll)
             .err()
             .expect("duplicate ids fail the iteration");
         assert!(matches!(

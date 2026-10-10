@@ -1,0 +1,26 @@
+{
+  "type": "function",
+  "function": {
+    "name": "background_wait",
+    "description": "Block until one background tool call finishes and return its result, or until timeout_ms elapses. A timeout leaves the call running. A result returned here is not delivered again.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "Background call id from its accepted result."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000,
+          "description": "Longest time to wait in milliseconds."
+        }
+      },
+      "required": ["id", "timeout_ms"],
+      "additionalProperties": false
+    }
+  }
+}

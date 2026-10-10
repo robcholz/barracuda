@@ -54,7 +54,7 @@ impl ActiveTurn {
     fn new(id: TurnId, origin: &TurnOrigin) -> Self {
         let cause = match origin {
             TurnOrigin::User => "user",
-            TurnOrigin::ToolCall { .. } => "detached_tool",
+            TurnOrigin::ToolCall { .. } => "background_tool",
         };
         Self {
             id,

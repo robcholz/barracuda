@@ -3,14 +3,15 @@ use core::num::NonZeroU32;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, DetachedTool, DetachedToolFuture, DetachedToolHandler, Tool, ToolError,
-    ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, BackgroundTool, BackgroundToolControl, BackgroundToolFuture,
+    BackgroundToolHandler, Tool, ToolError, ToolFuture, ToolInvocation, ToolInvokeError,
+    ToolOutput, ToolSpec,
 };
 use portable_atomic_util::Arc;
 use serde::Deserialize;
 
-use barracuda_agent::AgentKind;
 use barracuda_agent::Message;
+use barracuda_agent::{AgentId, AgentKind};
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -18,7 +19,7 @@ use super::super::tool_port::SubagentControl;
 use super::helper::trace_subagent_bound;
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
-    Tool::from_detached(SpawnSubagentTool { control, policy })
+    Tool::background(SpawnSubagentTool { control, policy })
 }
 
 struct SpawnSubagentTool {
@@ -34,16 +35,16 @@ impl ToolSpec for SpawnSubagentTool {
     }
 }
 
-impl DetachedToolHandler for SpawnSubagentTool {
+impl BackgroundToolHandler for SpawnSubagentTool {
     type Args = SpawnArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> BackgroundToolFuture<'a> {
         Box::pin(async move { self.invoke_inner(args).await })
     }
 }
 
 impl SpawnSubagentTool {
-    async fn invoke_inner(&self, args: SpawnArgs) -> Result<DetachedTool, ToolInvokeError> {
+    async fn invoke_inner(&self, args: SpawnArgs) -> Result<BackgroundTool, ToolInvokeError> {
         let request = SpawnRequest::from_args(args, &self.policy, "subagent_spawn")?;
         let SpawnRequest {
             kind,
@@ -75,7 +76,53 @@ impl SpawnSubagentTool {
                 ok: result.ok(),
             })
         });
-        Ok(DetachedTool::new(accepted, completion))
+        Ok(
+            BackgroundTool::new(accepted, completion).with_control(SpawnedSubagent {
+                control: Arc::clone(&self.control),
+                child,
+            }),
+        )
+    }
+}
+
+/// Background-pool control over one spawned child: input interrupts it with a
+/// new task, and cancelling deletes it with its subtree.
+struct SpawnedSubagent {
+    control: Arc<SubagentControl>,
+    child: AgentId,
+}
+
+impl BackgroundToolControl for SpawnedSubagent {
+    fn status(&self) -> Option<String> {
+        let snapshot = self.control.get(self.child)?;
+        serde_json::to_string(&snapshot).ok()
+    }
+
+    fn input<'a>(&'a self, input: Option<String>) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let Some(input) = input else {
+                return Err(ToolError::InvokeRejected(
+                    "a subagent takes a message as input, not end of input".to_owned(),
+                )
+                .into());
+            };
+            let child = self.child;
+            let message = Message::text(input.trim().to_owned());
+            Ok(match self.control.followup(child, message).await {
+                Ok(()) => ToolOutput {
+                    content: format!("Subagent {child} interrupted and sent the new input."),
+                    ok: true,
+                },
+                Err(error) => ToolOutput {
+                    content: format!("Cannot interrupt {child}: {error}."),
+                    ok: false,
+                },
+            })
+        })
+    }
+
+    fn cancel(&self) {
+        self.control.request_delete(self.child);
     }
 }
 
