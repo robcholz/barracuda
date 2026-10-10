@@ -86,7 +86,6 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                                     message_id: message_id.clone(),
                                     thread_id: None,
                                     text: frame.text,
-                                    reply_to: frame.reply_to,
                                 };
                                 if let Err(error) = self.sink.receive_message(message).await {
                                     log::warn!(

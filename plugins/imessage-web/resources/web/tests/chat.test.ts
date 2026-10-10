@@ -337,7 +337,13 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and an icon fo
   expect(root.textContent).toContain("回复 Barracuda");
   expect(button("取消回复").className).toBe("bc-icon-button");
   submit("后天呢？");
-  expect(JSON.parse(sent[1])).toEqual({ text: "后天呢？", reply_to: "web-1" });
+  // the frame stays `{ text }`: the quote rides inside it as escaped XML
+  expect(JSON.parse(sent[1])).toEqual({
+    text: "<quote>&lt;img src=x&gt; 晴</quote>\n后天呢？",
+  });
+  expect(
+    root.querySelectorAll(".bc-turn--user .bc-quote")[0]?.textContent,
+  ).toBe("<img src=x> 晴");
   expect(root.querySelectorAll(".bc-bubble")).toHaveLength(2);
 
   // edit, reaction, delete
@@ -349,6 +355,19 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and an icon fo
   ws.emit("message.delete", { message_id: "web-1" });
   expect(root.textContent).not.toContain("多云");
   expect(root.textContent).not.toContain("weather_forecast");
+});
+
+test("a long quote is cut to 512 bytes, whole characters, ending in an ellipsis", () => {
+  const { socket, submit, button } = open();
+  const ws = socket();
+  ws.open();
+  submit("讲个故事");
+  // 171 three-byte characters are 513 bytes: one too many
+  reply(ws, "web-1", "web-in-1", "长".repeat(171));
+  button("回复").click();
+  submit("然后呢？");
+  const { text } = JSON.parse(sent[1]) as { text: string };
+  expect(text).toBe(`<quote>${"长".repeat(169)}…</quote>\n然后呢？`);
 });
 
 test("a message written while a turn runs waits in the queue, editable, then goes out", () => {

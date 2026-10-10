@@ -18,7 +18,6 @@ pub struct InboundMessage {
     pub message_id: String,
     pub thread_id: Option<String>,
     pub text: String,
-    pub reply_to: Option<String>,
 }
 
 /// Binary body received through the REST-facing Web service.
@@ -36,7 +35,6 @@ pub struct InboundMedia {
     pub body: MessageBody,
     pub filename: Option<String>,
     pub mime_type: Option<String>,
-    pub reply_to: Option<String>,
 }
 
 /// Acknowledgement returned after an inbound REST command is accepted.
@@ -119,7 +117,6 @@ impl WebService {
                 message_id: dto.message_id,
                 thread_id: dto.thread_id,
                 text: dto.text,
-                reply_to: dto.reply_to,
             })
             .await
         {
@@ -144,7 +141,6 @@ impl WebService {
         filename: Option<&str>,
         mime_type: Option<&str>,
         thread_id: Option<&str>,
-        reply_to: Option<&str>,
     ) -> Result<InboundReceipt, InboundError> {
         if let Err(error) = validate_required("conversation_id", conversation_id)
             .and_then(|()| validate_required("message_id", message_id))
@@ -164,7 +160,6 @@ impl WebService {
                 body,
                 filename: filename.map(String::from),
                 mime_type: mime_type.map(String::from),
-                reply_to: reply_to.map(String::from),
             })
             .await
         {
@@ -187,7 +182,6 @@ struct InboundMessageDto {
     message_id: String,
     thread_id: Option<String>,
     text: String,
-    reply_to: Option<String>,
 }
 
 fn validate_required(name: &str, value: &str) -> Result<(), InboundError> {

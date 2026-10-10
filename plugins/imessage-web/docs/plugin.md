@@ -32,8 +32,10 @@ page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
 The page (`resources/web/entry.ts`, built on the portal UI kit) connects to
-WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`, plus
-`reply_to` when the user replies to an Agent message) and renders the
+WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`; replies
+exist only in the page, so a reply to an Agent message puts the quoted message
+ahead of the user's words as `<quote>…</quote>` XML, escaped and cut to 512
+UTF-8 bytes, inside `text`) and renders the
 SSE-formatted frames the bridge returns: message start, delta, edit, delete,
 reaction and end (an end error marks the message incomplete), the Agent's
 semantic events inside `message.event` (reasoning, tool results, output and

@@ -32,7 +32,7 @@ import { CHAT_CSS } from "./style";
 
 /**
  * Web chat over the bridge's WebSocket `/ws/message`. The page sends `WebClientFrame` JSON
- * (`{ text, reply_to? }`) and renders the SSE-formatted frames the bridge pushes: message
+ * (`{ text }`; a reply carries its quote inside the text, see {@link withQuote}) and renders the SSE-formatted frames the bridge pushes: message
  * lifecycle (`message.start`/`delta`/`end`/`edit`/`delete`/`reaction`), the Agent's semantic
  * events inside `message.event`, attachments, typing and `stream.lagged`. Live events only.
  *
@@ -176,6 +176,8 @@ const STRINGS = {
 
 /** The bridge's limits as the previous page enforced them. */
 const MAX_BYTES = 1024;
+/** A reply carries at most this many UTF-8 bytes of the message it quotes, on top of its own text. */
+const MAX_QUOTE = 512;
 const MAX_ITEMS = 100;
 const MAX_TEXT = 65536;
 const MAX_FRAME = 262144;
@@ -326,6 +328,41 @@ interface Sent {
 interface Queued {
   text: string;
   replyTo: { id: string; text: string } | null;
+}
+
+/**
+ * The text a reply sends: the quoted message as XML ahead of the user's own words, so the device
+ * needs no notion of replies. The quote is escaped so it cannot close its element early, and cut
+ * to {@link MAX_QUOTE} bytes.
+ */
+function withQuote(text: string, quoted: string) {
+  let body = "";
+  let kept = "";
+  let size = 0;
+  for (const char of quoted) {
+    const part =
+      char === "&"
+        ? "&amp;"
+        : char === "<"
+          ? "&lt;"
+          : char === ">"
+            ? "&gt;"
+            : char;
+    const point = char.codePointAt(0)!;
+    size +=
+      part.length > 1 || point < 0x80
+        ? part.length
+        : point < 0x800
+          ? 2
+          : point < 0x10000
+            ? 3
+            : 4;
+    // a cut quote ends in an ellipsis, so it keeps what fits beside one
+    if (size > MAX_QUOTE) return `<quote>${kept}…</quote>\n${text}`;
+    body += part;
+    if (size <= MAX_QUOTE - 3) kept = body;
+  }
+  return `<quote>${body}</quote>\n${text}`;
 }
 
 export const mount = definePage((context: PortalContext) => {
@@ -963,14 +1000,14 @@ export const mount = definePage((context: PortalContext) => {
         record.reaction,
         copy.button,
         iconButton(t.reply, ICON_REPLY, () =>
-          setReply({ id: record.id, text: textOf(record).split("\n")[0] }),
+          setReply({ id: record.id, text: textOf(record) }),
         ).button,
       );
     }
     record.root.append(record.footer);
   }
 
-  /** The message's reply text, as Copy takes it; Reply quotes its first line. */
+  /** The message's reply text, as Copy and Reply take it. */
   function textOf(record: Agent) {
     return [...record.root.querySelectorAll("p.bc-reply")]
       .map((node) => node.firstChild?.textContent ?? "")
@@ -1535,7 +1572,7 @@ export const mount = definePage((context: PortalContext) => {
     }
     try {
       connection.send(
-        JSON.stringify(target ? { text, reply_to: target.id } : { text }),
+        JSON.stringify({ text: target ? withQuote(text, target.text) : text }),
       );
     } catch {
       context.toast({ kind: "error", title: t.notSent });
