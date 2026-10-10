@@ -7,7 +7,7 @@ use embedded_io::{Error, ErrorKind};
 use super::sys::*;
 use super::{
     mbedtls_calloc, mbedtls_free, mbedtls_rng, Certificate, MBox, PrivateKey, Tls, TlsReference,
-    TlsVersion,
+    TlsVersion, VerifyScratch,
 };
 
 pub use asynch::*;
@@ -328,6 +328,11 @@ struct SessionState<'a> {
     /// While not explicitly used, we need to keep a reference to it as it is used
     /// by the SSL context via a raw pointer
     _ca_chain: Option<Certificate<'a>>,
+    /// The verify callback's per-session word, if the CA chain has a callback
+    ///
+    /// While not explicitly used, we need to keep a reference to it as it is used
+    /// by the SSL configuration via a raw pointer
+    _verify_scratch: Option<MBox<VerifyScratch>>,
     /// The credentials
     ///
     /// While not explicitly used, we need to keep a reference to it as it is used
@@ -376,6 +381,7 @@ impl<'a> SessionState<'a> {
             })?;
         }
 
+        let mut verify_scratch: Option<MBox<VerifyScratch>> = None;
         if let Some(ca_chain) = conf.ca_chain() {
             unsafe {
                 mbedtls_ssl_conf_ca_chain(
@@ -385,8 +391,14 @@ impl<'a> SessionState<'a> {
                 );
             }
             if let Some(verify) = ca_chain.verify {
+                let scratch = verify_scratch
+                    .insert(MBox::new().ok_or(MbedtlsError::new(MBEDTLS_ERR_SSL_ALLOC_FAILED))?);
                 unsafe {
-                    mbedtls_ssl_conf_verify(&mut *ssl_config, Some(verify), core::ptr::null_mut());
+                    mbedtls_ssl_conf_verify(
+                        &mut *ssl_config,
+                        Some(verify),
+                        &**scratch as *const VerifyScratch as *mut c_void,
+                    );
                 }
             }
         }
@@ -427,6 +439,7 @@ impl<'a> SessionState<'a> {
             _drbg: drbg_context,
             _ssl_config: ssl_config,
             _ca_chain: conf.ca_chain().cloned(),
+            _verify_scratch: verify_scratch,
             _creds: conf.creds().cloned(),
             _alpn_ptrs: alpn,
         })

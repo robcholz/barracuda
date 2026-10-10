@@ -5,7 +5,7 @@
 - Provided capability: `IMessageGateway`
 - Required capabilities: `WorkflowService`, `WorkflowActionRegistry`
 - Workflow Actions: `gateway.send`, `gateway.send_stream`, `gateway.send_media`
-- Workflow Events: `gateway.message.received`,
+- Workflow Events: `gateway.message.received`, `gateway.control.received`,
   `gateway.send_stream.finished`, `gateway.send_media.finished`
 - Agent Tools: none
 - Owned tasks: four text stream workers and four media workers
@@ -14,6 +14,34 @@
 `IMessageGateway` is the shared typed API. Provider Plugins register channels
 and publish inbound messages through it; Workflow Actions and the separate
 `agent-imessage-gateway` adapter call the same send methods.
+
+`IMessageGateway::publish_control` publishes `gateway.control.received`
+(`GatewayInboundControl`: `{ route, control, temporary?, session?, index?,
+title?, confirm? }`). A control is `interrupt` or `cancel` for the turn
+running in the conversation, or a session command: `sessions` (list), `new`
+(`temporary` for a chat that is never saved), `switch`, `rename` (`title`),
+`delete` (`confirm`), or `help` for a malformed command. Commands name a
+session by `session` id (rich channels) or by `index`, its 1-based place in
+the conversation's newest-first list. Controls do not wait on `ready`, so
+they never queue behind messages. Which sessions a route owns is the
+consumer's business; the Gateway only names the route.
+
+## Session commands for every channel
+
+`IMessageGateway::publish` turns a session text command into a control
+instead of a message (`parse_command`), so every channel manages its
+sessions as text: `/sessions`, `/new`, `/new temp`, `/switch N`,
+`/rename N title`, `/delete N` and `/delete N confirm`. Other text,
+including other slash commands, stays a message; a known command with bad
+arguments becomes `help`.
+
+The answer comes back through `IMessageGateway::send_sessions`
+(`SendSessionsRequest`: the conversation's current session, whether it is
+temporary, its saved sessions newest first with title, last use and whether a
+turn runs, what the command did, and the device's clock).
+`MessageChannel::send_sessions` defaults to one plain English message
+(`sessions_text`); the Web channel overrides it to push the list to every
+open page.
 
 ## Ingress backpressure
 
@@ -59,6 +87,7 @@ impl<Storage: PluginStorage> Owners<Storage> {
     pub fn owners(&self) -> Vec<Owner>;
     pub fn pairing(&self) -> Option<PairingView>;   // mints when none is valid
     pub fn rotate(&self) -> Result<(), EntropyUnavailable>;
+    pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
     pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
 }
 pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You can start chatting."
@@ -71,6 +100,9 @@ pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You
 - Pairing adds the sender as an owner and retires the code; the next
   `pairing()` mints a new one. `rotate()` mints a new one on request.
 - `MAX_PAIRING_ATTEMPTS` (5) wrong code-shaped guesses also retire the code.
+- `add` names an owner without a code, for a channel whose own setup knows who
+  set it up (QQ's scan-to-bind reports the scanner's openid). It adds nothing
+  for an existing owner or a full list.
 - No code is offered while the list is full or the Platform has no entropy.
 - The list is stored as a JSON array; the code and the ignored counter are RAM
   only.
@@ -185,6 +217,7 @@ pub trait ChannelControl: 'static {
     fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
     fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
+    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `webhook`
 }
 pub fn sync_receive<C: ChannelControl + ?Sized>(channel: &C) -> Result<(), NoSlot>;
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse;
@@ -195,17 +228,19 @@ pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
 
 A channel registers one prefix route for its configuration path,
 `serve_http_prefix(base, ChannelEndpoint::new(channel, base, config))`:
-`base` goes to the Plugin's own `config` endpoint, `base/mode` to
-`ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any other path below
+`base` goes to the Plugin's own `config` endpoint, which takes changes only;
+`GET base/status` answers `status_response` (405 for other methods);
+`base/mode` goes to `ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any
+other path below
 `base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
 `/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
 (BlueBubbles' `/webhook`) still take their own requests. One route per channel
-instead of three keeps the webserver's route table within its first
+instead of four keeps the webserver's route table within its first
 allocation.
 
 | Request | Response |
 | --- | --- |
-| `GET /api/gateway/<channel>` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}` |
+| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`, then the channel's `status_details` |
 | `POST /api/gateway/<channel>/mode` `{"mode":"send"}` | 204 |
 | the same with `send_receive` and no free slot | 409 `{"error":"no_slot","capacity":2}` |
 | `GET /api/gateway/<channel>/owners` | 200 `{"owners":[{"id":"42","label":"Ann"}],"pairing":{"code":"012345","expires_in":600},"ignored":3}` |
@@ -300,7 +335,8 @@ allocation.
    call `sync_receive(&*state)`; a `NoSlot` there is already reported as
    state. Keep the runtime for `start`.
 7. **Endpoints.**
-   - The configuration endpoint's `GET` returns `status_response(&*state)`.
+   - The configuration endpoint takes `POST` only; `ChannelEndpoint` answers
+     `GET /status`.
    - After a successful configuration `POST`, it calls `sync_receive` and
      `control.restart()`.
    - Register the configuration endpoint, `/mode`, and `/owners` as one

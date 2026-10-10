@@ -64,7 +64,7 @@ beforeEach(() => {
   browser = installBrowser();
   calls = [];
   routes = {
-    "GET /api/wifi": () => json(CONNECTED),
+    "GET /api/wifi/status": () => json(CONNECTED),
     "GET /api/wifi/scan": () => json(SCAN),
     "PUT /api/wifi": () => new Response(null, { status: 204 }),
     "DELETE /api/wifi": () => new Response(null, { status: 204 }),
@@ -162,7 +162,7 @@ test("signal bars and the nearby list follow the design", () => {
 test("renders the status and the scan in Chinese", async () => {
   const page = await render("zh");
   expect(calls.map((call) => call.url)).toEqual([
-    "/api/wifi",
+    "/api/wifi/status",
     "/api/wifi/scan",
   ]);
   const status = page.root.querySelector("dl[role=status]")!;
@@ -237,7 +237,7 @@ test("renders the status and the scan in Chinese", async () => {
 });
 
 test("renders in English", async () => {
-  routes["GET /api/wifi"] = () => json(SETUP);
+  routes["GET /api/wifi/status"] = () => json(SETUP);
   const page = await render("en");
   const status = page.root.querySelector("dl[role=status]")!;
   expect(status.textContent).toBe(
@@ -306,7 +306,9 @@ test("joins a secured network after validating the password", async () => {
   ]);
   // the form closes, the password is gone and the status is read again
   expect(page.root.querySelector("form")).toBeNull();
-  expect(calls.filter((call) => call.url === "/api/wifi")).toHaveLength(3);
+  expect(calls.filter((call) => call.url === "/api/wifi/status")).toHaveLength(
+    2,
+  );
   // and the portal's: the sidebar and the overview follow
   expect(page.refreshes.count).toBe(1);
 });
@@ -356,7 +358,7 @@ test("joins a network entered by name", async () => {
 
 test("forgets the current network", async () => {
   const page = await render();
-  routes["GET /api/wifi"] = () => json(SETUP);
+  routes["GET /api/wifi/status"] = () => json(SETUP);
   page.button("忘记网络").click();
   await settle();
   expect(writes()).toEqual([
@@ -388,7 +390,7 @@ test("reports failed reads and writes", async () => {
     code: "500",
   });
 
-  routes["GET /api/wifi"] = () => new Response(null, { status: 503 });
+  routes["GET /api/wifi/status"] = () => new Response(null, { status: 503 });
   const other = await render("zh");
   expect(other.toasts).toEqual([
     { kind: "error", title: "无法读取 Wi-Fi 状态", code: "503" },
@@ -399,9 +401,9 @@ test("reports failed reads and writes", async () => {
 });
 
 test("a platform-managed network offers nothing to change", async () => {
-  routes["GET /api/wifi"] = () => json(HOST);
+  routes["GET /api/wifi/status"] = () => json(HOST);
   const page = await render();
-  expect(calls.map((call) => call.url)).toEqual(["/api/wifi"]);
+  expect(calls.map((call) => call.url)).toEqual(["/api/wifi/status"]);
   expect(page.root.querySelector("dl")?.textContent).toBe(
     "状态已连接网络—配置热点—",
   );

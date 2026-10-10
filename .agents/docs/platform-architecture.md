@@ -813,7 +813,12 @@ root to its subject name and public key and compiles the result in (about
 54 KiB for 121 roots). mbedTLS gets an empty CA chain and a verify callback:
 the top certificate of a server chain arrives untrusted, and the callback
 trusts it only when a bundled root of its issuer's name verifies its
-signature. mbedTLS verifies the rest of the chain. The roots stay in flash and
+signature, or it is itself a bundled root (name and key). mbedTLS verifies the
+rest of the chain. A server may also send an older root above a bundled one
+(bots.qq.com sends GlobalSign Root CA above GlobalSign Root CA - R3); the
+callback then sets the untrusted top aside in a per-session word and trusts
+the chain only if a bundled root appears further down the verified path, as a
+browser stops at the first root it trusts. The roots stay in flash and
 only the matching root's key is parsed, so no Platform keeps parsed roots in
 RAM. Each connection's record buffers, 16 KiB for incoming records (servers
 send full-size records) and 4 KiB for outgoing ones, come from bulk memory (see
@@ -831,6 +836,9 @@ test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
 a test network that intercepts TLS); device firmware refuses it. It also owns the few
 C library functions mbedTLS calls on bare-metal targets. A Plugin must not
 load certificates, initialize a TLS backend, or select a TLS implementation.
+`shared/tls` also exposes `aes_256_gcm_open` on the same mbedTLS build, so a
+provider that must open a value a service sealed for the device (QQ's
+scan-to-bind App Secret) carries no second AES implementation.
 
 HTTP is a shared software service above the Platform boundary:
 

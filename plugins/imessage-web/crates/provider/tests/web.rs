@@ -316,7 +316,7 @@ fn web_service_maps_rest_json_and_binary_body_to_the_inbound_sink() {
         let response = service
             .receive_message_json(
                 "chat-42",
-                br#"{"message_id":"client-1","thread_id":null,"text":"hello","reply_to":"parent"}"#,
+                br#"{"message_id":"client-1","thread_id":null,"text":"hello"}"#,
             )
             .await
             .expect("valid request");
@@ -333,7 +333,6 @@ fn web_service_maps_rest_json_and_binary_body_to_the_inbound_sink() {
                 Some("voice.ogg"),
                 Some("audio/ogg"),
                 None,
-                None,
             )
             .await
             .is_ok());
@@ -349,10 +348,7 @@ fn web_service_rejects_invalid_or_empty_rest_messages_before_the_sink() {
 
         let invalid_json = service.receive_message_json("chat", b"{").await;
         let empty = service
-            .receive_message_json(
-                "chat",
-                br#"{"message_id":"client-1","text":"","reply_to":null}"#,
-            )
+            .receive_message_json("chat", br#"{"message_id":"client-1","text":""}"#)
             .await;
 
         assert!(matches!(

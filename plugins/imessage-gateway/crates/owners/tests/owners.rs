@@ -109,6 +109,10 @@ impl Scenario for PairPersistsAcrossReload {
 
             assert!(reloaded.remove("42").await.expect("remove"));
             assert!(!reloaded.remove("42").await.expect("remove twice"));
+            assert!(reloaded.add("7", None).await.expect("add"));
+            assert!(!reloaded.add("7", Some("Bo")).await.expect("add twice"));
+            assert!(!reloaded.add("", None).await.expect("add an empty id"));
+            assert!(reloaded.remove("7").await.expect("remove the added owner"));
             let stored = storage
                 .get_bytes(OWNERS_STORAGE_KEY)
                 .await

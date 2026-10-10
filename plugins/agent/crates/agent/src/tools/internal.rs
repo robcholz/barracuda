@@ -74,8 +74,7 @@ mod tests {
             .add_group(internal_tools(effects))
             .expect("internal tools register");
         let tools = tools.begin().expect("tool set begins");
-        let (joined, detached) = ToolRunner::new(&tools).run(vec![call]);
-        assert!(detached.is_none());
+        let joined = ToolRunner::new(&tools).run(vec![call]);
         let output = block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("tool result")

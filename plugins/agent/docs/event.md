@@ -36,7 +36,9 @@ Turn and iteration lifecycle records are:
   turn, followed by `turn_origin_ended` with `{}`.
 - `iteration_started`: `{ "iteration" }`.
 - `iteration_ended`: `{}`.
-- `turn_ended`: `{ "turn" }`.
+- `turn_ended`: `{ "turn", "outcome" }`, where outcome is `completed`,
+  `interrupted` (`session.interrupt`), `cancelled` (`session.cancel`, or the
+  session stopped while the turn ran) or `failed` (a `turn_error` came first).
 
 Model and effect output records are:
 

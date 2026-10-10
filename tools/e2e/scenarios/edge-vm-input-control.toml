@@ -1,10 +1,8 @@
 name = "VM input control errors and loop cancel"
-description = "A CPU-bound run without io.read rejects a second queued input (input_backpressure), rejects input after EOF (input_closed), accepts a repeated EOF, is cancelled out of its infinite loop with its earlier output, and then reports run_not_found; malformed control arguments fail schema validation."
+description = "A CPU-bound run without io.read rejects a second queued input (input_backpressure), rejects input after EOF (input_closed), accepts a repeated EOF, is cancelled out of its infinite loop through background_cancel without delivering a result, and then leaves the pool; malformed control arguments fail schema validation."
 
-# Cancelling the infinite loop completes within one 100 ms instruction-hook
-# sleep. The reply after vm_cancel streams for roughly 300 ms before its
-# vm_list call, so the cancelled completion always joins the following model
-# request instead of arriving during the final reply.
+# Cancelling drops the call from the background pool, so no completion reaches
+# the model; the VM still logs the cancelled run.
 
 [model]
 mode = "scripted"
@@ -17,54 +15,52 @@ tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
 tool_calls = [{ name = "vm_run", arguments = { source = "print('looping') while true do end" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "a" } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "a" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "b" } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "b" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
 text = "The second input was refused."
 
 # Step 1: EOF closes input; later input fails; a second EOF is accepted.
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, eof = true } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, eof = true } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "c" } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "c" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, eof = true } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, eof = true } }]
 
 [[model.responses]]
 text = "Input is closed."
 
 # Step 2: cancel the infinite loop.
 [[model.responses]]
-tool_calls = [{ name = "vm_cancel", arguments = { run_id = 1 } }]
+tool_calls = [{ name = "background_cancel", arguments = { id = 1 } }]
 
 [[model.responses]]
-text = "Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing. Checking the run state before continuing."
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
-request_contains = ['[detached:failed]', '{\"run_id\":1,\"outcome\":\"cancelled\",\"output\":[\"looping\"]}']
 text = "The loop was cancelled."
 
-# Step 3: the cancelled run is gone; malformed arguments never reach the VM.
+# Step 3: the cancelled call is gone; malformed arguments never reach the pool.
 [[model.responses]]
-tool_calls = [{ name = "vm_cancel", arguments = { run_id = 1 } }]
+tool_calls = [{ name = "background_cancel", arguments = { id = 1 } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "x", eof = true } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "x", eof = true } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_cancel", arguments = { run_id = 0 } }]
+tool_calls = [{ name = "background_cancel", arguments = { id = 0 } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
 text = "Nothing is running."
@@ -74,9 +70,9 @@ send = "Start a busy loop and queue two inputs."
 reply_contains = ["The second input was refused."]
 tool_contains = [
     '{"run_id":1}',
-    'vm_input{"run_id": 1, "input": "a"}{}',
-    'vm_input{"run_id": 1, "input": "b"}{"error":"input_backpressure"}',
-    'vm_list{}{"runs":[{"run_id":1,"state":"running"}]}',
+    'background_input{"id": 1, "input": "a"}{}',
+    'background_input{"id": 1, "input": "b"}{"error":"input_backpressure"}',
+    'background_list{}{"calls":[{"id":1,"status":"running","tool":"vm_run"}]}',
 ]
 tool_errors_allowed = true
 
@@ -84,24 +80,27 @@ tool_errors_allowed = true
 send = "Close its input and try again."
 reply_contains = ["Input is closed."]
 tool_contains = [
-    'vm_input{"run_id": 1, "eof": true}{}',
-    'vm_input{"run_id": 1, "input": "c"}{"error":"input_closed"}',
+    'background_input{"id": 1, "eof": true}{}',
+    'background_input{"id": 1, "input": "c"}{"error":"input_closed"}',
 ]
 tool_errors_allowed = true
 
 [[steps]]
 send = "Cancel the loop."
 reply_contains = ["The loop was cancelled."]
-tool_contains = ['vm_cancel{"run_id": 1}{}']
+tool_contains = [
+    'background_cancel{"id": 1}Background call 1 cancelled.',
+    'background_list{}{"calls":[]}',
+]
 
 [[steps]]
 send = "Try to control it again with bad arguments."
 reply_contains = ["Nothing is running."]
 tool_contains = [
-    'vm_cancel{"run_id": 1}{"error":"run_not_found"}',
-    'vm_input{"run_id": 1, "input": "x", "eof": true}invalid arguments: JSON schema validation failed at $: OneOf',
-    'vm_cancel{"run_id": 0}invalid arguments: JSON schema validation failed at $.run_id: Minimum',
-    'vm_list{}{"runs":[]}',
+    'background_cancel{"id": 1}tool invocation rejected: no running background call 1',
+    'background_input{"id": 1, "input": "x", "eof": true}invalid arguments: JSON schema validation failed at $: OneOf',
+    'background_cancel{"id": 0}invalid arguments: JSON schema validation failed at $.id: Minimum',
+    'background_list{}{"calls":[]}',
 ]
 tool_errors_allowed = true
 

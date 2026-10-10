@@ -13,6 +13,8 @@ import { mount } from "../entry";
 let browser: ReturnType<typeof installBrowser>;
 let sockets: Socket[];
 let sent: string[];
+/** Session list requests, kept apart so `sent` holds what the reader sends. */
+let listings: number;
 let failSend: boolean;
 const previous = globalThis.WebSocket;
 /** Bun's own Event: the fake socket is a Bun EventTarget, while happy-dom replaces the global. */
@@ -28,7 +30,8 @@ class Socket extends EventTarget {
   }
   send(text: string) {
     if (failSend) throw new Error("closed");
-    sent.push(text);
+    if (text === '{"control":"sessions"}') listings += 1;
+    else sent.push(text);
   }
   close() {
     this.readyState = 3;
@@ -59,6 +62,7 @@ beforeEach(() => {
   browser = installBrowser();
   sockets = [];
   sent = [];
+  listings = 0;
   failSend = false;
   Object.assign(globalThis, { WebSocket: Socket });
 });
@@ -87,17 +91,24 @@ function open(lang: "zh" | "en" = "zh") {
   const cleanup = mount(root, context) as (() => void) | undefined;
   const socket = () => sockets.at(-1)!;
   const input = root.querySelector("textarea")!;
-  const submit = (text: string) => {
+  const type = (text: string) => {
     input.value = text;
     input.dispatchEvent(new browser.window.Event("input"));
+  };
+  const submit = (text: string) => {
+    type(text);
     root
       .querySelector("form")!
       .dispatchEvent(new browser.window.Event("submit", { cancelable: true }));
   };
   const button = (label: string) =>
     [...root.querySelectorAll("button")].find(
-      (node) => node.textContent?.trim() === label,
+      (node) =>
+        node.getAttribute("aria-label") === label ||
+        node.textContent?.trim() === label,
     )!;
+  const send = () =>
+    root.querySelector<HTMLButtonElement>("button[type=submit]")!;
   return {
     root,
     controller,
@@ -105,71 +116,112 @@ function open(lang: "zh" | "en" = "zh") {
     badges,
     socket,
     input,
+    type,
     submit,
     button,
+    send,
     cleanup,
   };
 }
 
-test("renders the empty conversation in Chinese and connects to the bridge", () => {
-  const { root, socket } = open();
+/** One finished Agent turn answering `reply_to`, streaming `text`. */
+function reply(ws: Socket, id: string, replyTo: string, text: string) {
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: id,
+    reply_to: replyTo,
+  });
+  ws.agent(id, "output_delta", { text });
+  ws.agent(id, "output_ended");
+  ws.emit("message.end", { error: null, message_id: id });
+}
+
+test("opens on a fresh temporary session with the composer mid-page", () => {
+  const { root, socket, send, type } = open();
   expect(String(socket().url)).toBe("ws://localhost/ws/message");
-  expect(root.textContent).toContain("还没有消息");
-  expect(root.textContent).toContain("今天适合骑车吗？");
-  expect(root.textContent).toContain("临时会话");
-  expect(root.textContent).toContain("0 / 1024 bytes");
+  const page = root.firstElementChild as HTMLElement;
+  expect(page.classList.contains("bc-chat--fresh")).toBe(true);
+  expect(root.querySelector("[role=log]")!.className).toBe("bc-chat-log");
   expect(root.querySelector("[role=log]")!.getAttribute("aria-label")).toBe(
     "聊天记录",
   );
-  // the Chat card's log above its dock; the empty conversation is a frameless EmptyState
-  expect(root.querySelector("[role=log]")!.className).toBe("bc-chat-log");
   expect(root.querySelector("form")!.className).toBe("bc-chat-dock");
-  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
-    "还没有消息",
+  // the EmptyState: the page's laptop figure, the session's name and one lead sentence
+  const empty = root.querySelector(".bc-empty")!;
+  expect(empty.querySelector("hl-figure")?.getAttribute("name")).toBe(
+    "imessage-web",
   );
-  // the composer foot holds the session term and the byte count
+  expect(empty.querySelector(".bc-title")?.textContent).toBe("新会话");
+  expect(empty.textContent).toContain("会话保存在设备上");
+  // suggestions sit under the composer; no temporary badge, and no rail until the device lists sessions
+  expect(root.querySelector(".bc-chat-dock")!.textContent).toContain(
+    "今天适合骑车吗？",
+  );
   expect(
-    root.querySelector(".bc-composer__foot .bc-caption")?.textContent,
-  ).toContain("0 / 1024 bytes");
-  const send = root.querySelector<HTMLButtonElement>("button[type=submit]")!;
-  expect(send.disabled).toBe(true);
+    root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!.hidden,
+  ).toBe(true);
+  expect(root.querySelector<HTMLElement>(".bc-chat-rail")!.hidden).toBe(true);
+  // one row: the textarea and its actions; no counter, no term in the composer
+  const row = root.querySelector(".bc-composer__row")!;
+  expect(row.firstElementChild?.tagName).toBe("TEXTAREA");
+  expect(row.querySelector("textarea")!.getAttribute("rows")).toBe("1");
+  expect(row.lastElementChild?.className).toBe("bc-composer__actions");
+  expect(root.querySelector(".bc-composer")!.textContent).not.toContain(
+    "bytes",
+  );
+  expect(root.querySelector(".bc-composer .bc-term")).toBeNull();
+  // send is an icon button named by its tooltip, grey until the socket is open and there is text
+  expect(send().getAttribute("aria-label")).toBe("发送");
+  expect(send().querySelector(".bc-tooltip")?.textContent).toBe("发送");
+  expect(send().disabled).toBe(true);
   socket().open();
-  expect(send.disabled).toBe(false);
+  // connected, the page asks the device for the conversation's sessions
+  expect(listings).toBe(1);
+  expect(send().disabled).toBe(true);
+  type("你好");
+  expect(send().disabled).toBe(false);
 });
 
 test("renders in English", () => {
   const { root, input } = open("en");
-  expect(root.textContent).toContain("No messages yet");
-  expect(root.textContent).toContain("Temporary session");
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "New session",
+  );
+  expect(root.textContent).toContain(
+    "come back to one from the left any time.",
+  );
   expect(input.placeholder).toBe("Message the device");
-  expect(root.textContent).not.toContain("还没有消息");
+  expect(root.textContent).not.toContain("临时会话");
 });
 
-test("sends WebClientFrame JSON and validates the byte limit", () => {
-  const { root, socket, submit, input } = open();
+test("sends WebClientFrame JSON; past the limit send turns grey and one sentence says why", () => {
+  const { root, socket, submit, type, input, send } = open();
   socket().open();
   submit("   ");
   expect(sent).toHaveLength(0);
+  type("字".repeat(400));
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(send().disabled).toBe(true);
+  expect(root.querySelector(".bc-hint--error")?.textContent).toBe(
+    "消息太长，请缩短后发送。",
+  );
+  // nothing counts: no bytes, no ring
+  expect(root.textContent).not.toContain("1024");
   submit("字".repeat(400));
   expect(sent).toHaveLength(0);
-  expect(input.getAttribute("aria-invalid")).toBe("true");
-  expect(
-    root.querySelector<HTMLElement>(".bc-composer")!.style.borderColor,
-  ).toBe("");
-  expect(root.textContent).toContain("消息超过 1024 字节");
   submit("hello");
   expect(JSON.parse(sent[0])).toEqual({ text: "hello" });
   expect(input.value).toBe("");
   expect(input.hasAttribute("aria-invalid")).toBe(false);
   expect(root.querySelector(".bc-bubble")!.textContent).toBe("hello");
   expect(root.textContent).toContain("已发送");
-  // 已发送 is plain status text: the composer's 临时会话 is this screen's term
+  // the conversation began: the composer docks; a saved session needs no badge
+  const page = root.firstElementChild as HTMLElement;
+  expect(page.classList.contains("bc-chat--fresh")).toBe(false);
   expect(
-    [...root.querySelectorAll(".bc-term")].map(
-      (node) => node.firstChild?.textContent,
-    ),
-  ).toEqual(["临时会话"]);
-  expect(root.textContent).not.toContain("还没有消息");
+    root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!.hidden,
+  ).toBe(true);
+  expect(root.querySelector(".bc-empty")).toBeNull();
 });
 
 test("a suggestion sends itself", () => {
@@ -179,7 +231,39 @@ test("a suggestion sends itself", () => {
   expect(JSON.parse(sent[0])).toEqual({ text: "提醒我 6 点下班" });
 });
 
-test("renders an Agent turn: reasoning, tool card, streamed reply and footer", () => {
+test("while the device works, 「思考中」 follows a turn of its own, then the running turn", () => {
+  const { root, socket, submit } = open();
+  const ws = socket();
+  ws.open();
+  submit("天气？");
+  // asked and not begun: an author line over 「思考中」 (the dots stand in for the mark without WebGL)
+  const shimmer = () => root.querySelector(".bc-shimmer");
+  expect(shimmer()?.textContent).toBe("思考中");
+  const pending = shimmer()!.closest(".bc-turn")!;
+  expect(pending.querySelector(".bc-meta--author")?.textContent).toBe(
+    "Barracuda",
+  );
+  expect(pending.querySelectorAll(".bc-typing > i")).toHaveLength(3);
+  // begun: 「思考中」 moves under the running turn's own author line
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  expect(root.querySelectorAll(".bc-meta--author")).toHaveLength(1);
+  expect(shimmer()?.closest(".bc-turn")).toBe(
+    root.querySelector(".bc-meta--author")!.closest(".bc-turn"),
+  );
+  // streaming text speaks for itself
+  ws.agent("web-1", "output_delta", { text: "晴" });
+  expect(shimmer()).toBeNull();
+  ws.agent("web-1", "output_ended");
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(shimmer()).toBeNull();
+  expect(root.querySelector(".bc-typing")).toBeNull();
+});
+
+test("renders an Agent turn: reasoning, tool card, streamed reply and an icon footer", () => {
   const { root, socket, submit, button } = open();
   const ws = socket();
   ws.open();
@@ -192,99 +276,80 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   ws.agent("web-1", "turn_started", { turn: "turn-1", origin: "user" });
   ws.agent("web-1", "iteration_started", { iteration: "1" });
   ws.agent("web-1", "reasoning_delta", { text: "先搜索" });
+  // reasoning opens under a shimmering 「思考中」 while it streams
+  const fold = root.querySelector<HTMLButtonElement>(".bc-fold-link")!;
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(fold.querySelector(".bc-shimmer")?.textContent).toBe("思考中");
   ws.agent("web-1", "reasoning_ended");
+  // then folds itself away, named for what it was
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(fold.textContent?.trim()).toBe("思考过程");
+  expect(fold.querySelector(".bc-shimmer")).toBeNull();
   ws.agent("web-1", "tool_result_started");
   ws.agent("web-1", "tool_call_id_delta", { text: "c1" });
   ws.agent("web-1", "tool_name_delta", { text: "weather_forecast" });
   ws.agent("web-1", "tool_arguments_delta", { text: '{"city":"shenzhen"}' });
+  // a running tool spins 「运行中」
+  const tool = root.querySelector(".bc-fold")!;
+  expect(tool.querySelector(".bc-status")?.textContent).toBe("运行中");
+  expect(tool.querySelector(".bc-status .bc-spinner")).not.toBeNull();
   ws.agent("web-1", "tool_output_delta", { text: "HTTP 503" });
   ws.agent("web-1", "tool_result_ended", { ok: false });
   ws.agent("web-1", "output_delta", { text: "<img src=x>" });
   ws.agent("web-1", "output_delta", { text: " 晴" });
-  ws.emit("conversation.typing", { typing: true });
-  expect(root.textContent).toContain("正在输入");
-  // the Chat card's typing dots and caret
-  expect(root.querySelectorAll(".bc-typing > i")).toHaveLength(3);
   // streaming: a caret, no footer yet
-  expect(root.querySelector(".bc-reply [aria-hidden=true]")).not.toBeNull();
-  expect(
-    root.querySelector(".bc-reply .bc-caret")?.getAttribute("style"),
-  ).toBeNull();
-  expect(root.textContent).not.toContain("第 1 步");
+  expect(root.querySelector(".bc-reply .bc-caret")).not.toBeNull();
+  expect(button("复制")).toBeUndefined();
   ws.agent("web-1", "usage", { input_tokens: 1284, output_tokens: 200 });
-  ws.agent("web-1", "usage", { output_tokens: 12 });
   ws.agent("web-1", "output_ended");
   ws.agent("web-1", "turn_ended", { turn: "turn-1" });
   ws.emit("message.end", { error: null, message_id: "web-1" });
-  ws.emit("conversation.typing", { typing: false });
 
   expect(root.querySelector("img")).toBeNull();
   expect(root.querySelector(".bc-reply")!.textContent).toBe("<img src=x> 晴");
-  expect(root.querySelector(".bc-reply [aria-hidden=true]")).toBeNull();
-  const reasoning = button("思考过程");
-  expect(reasoning.getAttribute("aria-expanded")).toBe("false");
-  reasoning.click();
-  expect(reasoning.getAttribute("aria-expanded")).toBe("true");
+  expect(root.querySelector(".bc-reply .bc-caret")).toBeNull();
+  fold.click();
   expect(root.textContent).toContain("先搜索");
-  const tool = root.querySelector(".bc-fold")!;
+  expect(root.querySelector("p.bc-quote")?.textContent).toBe("先搜索");
   expect(tool.textContent).toContain("weather_forecast");
-  expect(tool.textContent).toContain("失败");
+  expect(tool.querySelector(".bc-status")?.className).toBe(
+    "bc-status bc-destructive",
+  );
   // a failed tool opens itself
   expect(tool.getAttribute("aria-expanded")).toBe("true");
-  // the reasoning is a quote; the turn is a .bc-turn opened by the author meta
-  expect(root.querySelector("p.bc-quote")?.textContent).toBe("先搜索");
-  const turn = tool.closest(".bc-turn")!;
-  expect(turn.firstElementChild?.className).toBe("bc-meta bc-meta--author");
-  expect(root.querySelector(".bc-turn--user > .bc-meta")?.textContent).toBe(
-    "已发送",
-  );
-  // the tool record is a Card: the fold, then a dense key-value body as its sibling
-  const card = tool.parentElement!;
-  expect(card.className).toBe("bc-card");
   expect(tool.nextElementSibling?.className).toBe(
     "bc-card__body bc-kv bc-kv--dense",
-  );
-  expect(tool.querySelector(".bc-tool__name")?.textContent).toBe(
-    "weather_forecast",
   );
   expect(tool.querySelector(".bc-tool__args")?.textContent).toBe(
     '{"city":"shenzhen"}',
   );
-  expect(tool.querySelector(".bc-status")?.className).toBe(
-    "bc-status bc-destructive",
-  );
-  expect(card.querySelector("dd:last-child")?.className).toBe(
-    "bc-mono bc-destructive",
-  );
+  expect(root.textContent).toContain("HTTP 503");
+  // the footer holds only its actions, icon buttons named by tooltips; no run statistics
+  const copy = button("复制");
+  const respond = button("回复");
+  expect(copy.className).toBe("bc-icon-button");
+  expect(copy.querySelector(".bc-tooltip")?.textContent).toBe("复制");
+  expect(respond.className).toBe("bc-icon-button");
+  expect(copy.parentElement).toBe(respond.parentElement);
+  expect(copy.parentElement?.classList.contains("bc-meta")).toBe(true);
+  expect(root.textContent).not.toContain("tokens");
+  expect(root.textContent).not.toContain("第 1 步");
   // the chevrons turn in CSS from aria-expanded; nothing transforms them inline
   for (const svg of root.querySelectorAll("svg"))
     expect(svg.getAttribute("style") ?? "").not.toContain("transform");
-  expect(root.textContent).toContain("HTTP 503");
-  expect(root.textContent).toContain("第 1 步 · 输入 1,284 · 输出 212 tokens");
-  expect(button("回复").parentElement?.classList.contains("bc-meta")).toBe(
-    true,
-  );
-  // words in sans, the numbers and the unit in mono
-  expect(
-    [...root.querySelectorAll(".bc-reply ~ div .bc-mono")].map(
-      (node) => node.textContent,
-    ),
-  ).toEqual(["1", "1,284", "212 tokens"]);
 
-  // reply to the turn: the design's inline action, cancelled with the small icon button
-  expect(button("回复").className).toBe("bc-fold-link");
-  button("回复").click();
+  // reply to the turn: the quoted bar, cancelled with its icon button
+  respond.click();
   expect(root.textContent).toContain("回复 Barracuda");
-  expect(
-    root.querySelector(
-      ".bc-composer > .bc-composer__bar:not(.bc-composer__bar--rule)",
-    )?.textContent,
-  ).toContain("回复 Barracuda");
-  expect(
-    root.querySelector(".bc-icon-button")?.getAttribute("aria-label"),
-  ).toBe("取消回复");
+  expect(button("取消回复").className).toBe("bc-icon-button");
   submit("后天呢？");
-  expect(JSON.parse(sent[1])).toEqual({ text: "后天呢？", reply_to: "web-1" });
+  // the frame stays `{ text }`: the quote rides inside it as escaped XML
+  expect(JSON.parse(sent[1])).toEqual({
+    text: "<quote>&lt;img src=x&gt; 晴</quote>\n后天呢？",
+  });
+  expect(
+    root.querySelectorAll(".bc-turn--user .bc-quote")[0]?.textContent,
+  ).toBe("<img src=x> 晴");
   expect(root.querySelectorAll(".bc-bubble")).toHaveLength(2);
 
   // edit, reaction, delete
@@ -296,6 +361,372 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and footer", (
   ws.emit("message.delete", { message_id: "web-1" });
   expect(root.textContent).not.toContain("多云");
   expect(root.textContent).not.toContain("weather_forecast");
+});
+
+test("a long quote is cut to 512 bytes, whole characters, ending in an ellipsis", () => {
+  const { socket, submit, button } = open();
+  const ws = socket();
+  ws.open();
+  submit("讲个故事");
+  // 171 three-byte characters are 513 bytes: one too many
+  reply(ws, "web-1", "web-in-1", "长".repeat(171));
+  button("回复").click();
+  submit("然后呢？");
+  const { text } = JSON.parse(sent[1]) as { text: string };
+  expect(text).toBe(`<quote>${"长".repeat(169)}…</quote>\n然后呢？`);
+});
+
+test("a message written while a turn runs waits in the queue, editable, then goes out", () => {
+  const { root, socket, submit, button, input, send } = open();
+  const ws = socket();
+  ws.open();
+  submit("一");
+  expect(sent).toHaveLength(1);
+  // the device has not begun: the next message queues instead of going out
+  submit("二");
+  submit("三");
+  expect(sent).toHaveLength(1);
+  const queue = root.querySelector("[role=list]")!;
+  expect(queue.textContent).toContain("排队中 · 02");
+  expect(
+    [...queue.querySelectorAll("[role=listitem] .bc-composer__text")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["二", "三"]);
+  input.value = "x";
+  input.dispatchEvent(new browser.window.Event("input"));
+  expect(send().getAttribute("aria-label")).toBe("加入队列");
+  input.value = "";
+  input.dispatchEvent(new browser.window.Event("input"));
+  // edit takes a queued message back into the composer; remove drops it
+  button("编辑").click();
+  expect(input.value).toBe("二");
+  button("移除").click();
+  expect(queue.textContent).not.toContain("三");
+  expect((queue as HTMLElement).hidden).toBe(true);
+  submit("二");
+  expect(sent).toHaveLength(1);
+  // the turn ends: the oldest queued message goes out by itself
+  reply(ws, "web-1", "web-in-1", "好");
+  expect(sent.map((frame) => JSON.parse(frame).text)).toEqual(["一", "二"]);
+  expect(send().getAttribute("aria-label")).toBe("加入队列");
+  reply(ws, "web-2", "web-in-2", "好");
+  expect(send().getAttribute("aria-label")).toBe("发送");
+});
+
+test("stop interrupts the running turn, which ends 「已停止」 and keeps its text", () => {
+  const { root, socket, submit, button, type, send } = open();
+  const ws = socket();
+  ws.open();
+  const stop = () => button("停止");
+  // idle: send, no stop
+  expect(stop().hidden).toBe(true);
+  submit("写一份清单");
+  // a turn runs: stop is the primary, send steps aside until the reader types
+  expect(stop().hidden).toBe(false);
+  expect(stop().className).toBe("bc-button bc-button--icon");
+  expect(send().hidden).toBe(true);
+  type("只要 5 条");
+  expect(stop().className).toBe("bc-button bc-button--icon bc-button--outline");
+  expect(send().hidden).toBe(false);
+  expect(send().getAttribute("aria-label")).toBe("加入队列");
+  type("");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "1. 断电恢复" });
+  stop().click();
+  // a control, not a message: it takes no id and draws nothing
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "interrupt" });
+  expect(root.querySelectorAll(".bc-bubble")).toHaveLength(1);
+  expect(stop().disabled).toBe(true);
+  ws.agent("web-1", "output_ended");
+  ws.agent("web-1", "turn_ended", { turn: "turn-1", outcome: "interrupted" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  const status = root.querySelector(".bc-status.bc-muted")!;
+  expect(status.textContent).toBe("已停止");
+  expect(root.querySelector(".bc-reply")!.textContent).toBe("1. 断电恢复");
+  // its footer follows the status line
+  expect(
+    status.nextElementSibling?.querySelector('[aria-label="复制"]'),
+  ).not.toBeNull();
+  expect(stop().hidden).toBe(true);
+  expect(send().hidden).toBe(false);
+  // a completed turn says nothing
+  submit("再来");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  ws.agent("web-2", "turn_ended", { turn: "turn-2", outcome: "completed" });
+  ws.emit("message.end", { error: null, message_id: "web-2" });
+  expect(root.querySelectorAll(".bc-status.bc-muted")).toHaveLength(1);
+});
+
+test("stop asked before the turn begins is asked again once it does", () => {
+  const { socket, submit, button } = open();
+  const ws = socket();
+  ws.open();
+  submit("一");
+  button("停止").click();
+  expect(sent.slice(1).map((frame) => JSON.parse(frame))).toEqual([
+    { control: "interrupt" },
+  ]);
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  expect(sent.slice(1).map((frame) => JSON.parse(frame))).toEqual([
+    { control: "interrupt" },
+    { control: "interrupt" },
+  ]);
+});
+
+test("rewind cancels the running turn and puts the message back in the composer", () => {
+  const { root, socket, submit, input, type } = open();
+  const ws = socket();
+  ws.open();
+  const rewind = () =>
+    [
+      ...root.querySelectorAll<HTMLButtonElement>('button[aria-label="撤回"]'),
+    ].filter((node) => !node.hidden);
+  submit("写一份清单");
+  reply(ws, "web-1", "web-in-1", "好的");
+  // a finished turn cannot be rewound
+  expect(rewind()).toHaveLength(0);
+  submit("只要最重要的 5 条");
+  // waiting on the device, and then running: the message carries 「撤回」
+  expect(rewind()).toHaveLength(1);
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  ws.agent("web-2", "output_delta", { text: "1. 断电" });
+  expect(rewind()).toHaveLength(1);
+  expect(rewind()[0].closest(".bc-turn--user")?.textContent).toContain(
+    "只要最重要的 5 条",
+  );
+  // typed text stays, after the withdrawn message
+  type("按风险排序");
+  submit("按风险排序");
+  expect(root.querySelector("[role=list]")!.textContent).toContain(
+    "排队中 · 01",
+  );
+  rewind()[0].click();
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  // the message and its turn leave the log; what came before stays
+  expect(
+    [...root.querySelectorAll(".bc-bubble")].map((node) => node.textContent),
+  ).toEqual(["写一份清单"]);
+  expect(root.textContent).not.toContain("1. 断电");
+  expect(root.querySelectorAll(".bc-meta--author")).toHaveLength(1);
+  expect(input.value).toBe("只要最重要的 5 条");
+  // the cancelled turn's last events draw nothing
+  ws.agent("web-2", "output_delta", { text: "2. 校验" });
+  ws.agent("web-2", "turn_ended", { turn: "turn-2", outcome: "cancelled" });
+  ws.emit("message.end", { error: null, message_id: "web-2" });
+  expect(root.textContent).not.toContain("校验");
+  expect(root.textContent).not.toContain("已停止");
+  // the queue waits for the withdrawn text, which goes first
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  submit("只要最重要的 3 条");
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ text: "只要最重要的 3 条" });
+  reply(ws, "web-3", "web-in-3", "好");
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ text: "按风险排序" });
+});
+
+test("rewinding the only message returns to a fresh conversation; a late start is cancelled again", () => {
+  const { root, socket, submit, input } = open();
+  const ws = socket();
+  ws.open();
+  submit("天气？");
+  root.querySelector<HTMLButtonElement>('button[aria-label="撤回"]')!.click();
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  expect(root.querySelector(".bc-bubble")).toBeNull();
+  expect(
+    (root.firstElementChild as HTMLElement).classList.contains(
+      "bc-chat--fresh",
+    ),
+  ).toBe(true);
+  expect(input.value).toBe("天气？");
+  // the device had not begun when the cancel came: its turn starts anyway, and is cancelled again
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  ws.agent("web-1", "output_delta", { text: "晴" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.querySelector(".bc-meta--author")).toBeNull();
+  expect(root.textContent).not.toContain("晴");
+});
+
+const DAY = 86_400_000;
+
+/** The device's answer to a session command. */
+function listed(ws: Socket, state: Record<string, unknown>) {
+  ws.emit("conversation.sessions", {
+    current: "session-3",
+    temporary: false,
+    sessions: [
+      {
+        session: "session-3",
+        title: "骑行路线",
+        updated_at: Date.now(),
+        running: false,
+      },
+      {
+        session: "session-2",
+        title: "未读邮件",
+        updated_at: Date.now() - DAY,
+        running: true,
+      },
+      { session: "session-1", title: null, updated_at: null, running: false },
+    ],
+    notice: null,
+    now: null,
+    ...state,
+  });
+}
+
+test("the device's sessions fill a rail grouped by day; every change is a command", () => {
+  const { root, socket, button } = open();
+  const ws = socket();
+  ws.open();
+  listed(ws, {});
+  const rail = root.querySelector<HTMLElement>(".bc-chat-rail")!;
+  expect(rail.hidden).toBe(false);
+  expect(
+    [...rail.querySelectorAll(".bc-nav-label")].map((node) => node.textContent),
+  ).toEqual(["今天", "昨天", "更早"]);
+  const links = [...rail.querySelectorAll<HTMLElement>("a.bc-nav-item")];
+  expect(links.map((node) => node.textContent)).toEqual([
+    "骑行路线",
+    "未读邮件生成中",
+    "新会话",
+  ]);
+  expect(links[0].getAttribute("aria-current")).toBe("page");
+  expect(links[1].querySelector(".bc-spinner")).not.toBeNull();
+  expect(rail.querySelector(".bc-chat-rail__foot")?.textContent).toBe(
+    "保存在设备上会话记录存放在设备闪存里 · 03 个会话",
+  );
+  // the fresh view names the session it continues
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "骑行路线",
+  );
+  expect(root.querySelector(".bc-empty")?.textContent).toContain(
+    "从这里接着聊",
+  );
+  const commands = () => sent.map((frame) => JSON.parse(frame));
+  links[1].click();
+  button("新会话").click();
+  button("新临时会话").click();
+  expect(commands()).toEqual([
+    { control: "switch", session: "session-2" },
+    { control: "new" },
+    { control: "new", temporary: true },
+  ]);
+  // rename in place: Enter sends the new title
+  const more = () => [
+    ...rail.querySelectorAll<HTMLElement>(".bc-session__more"),
+  ];
+  more()[0].click();
+  expect(more()[0].getAttribute("aria-expanded")).toBe("true");
+  button("重命名").click();
+  const field = rail.querySelector<HTMLInputElement>(".bc-session__rename")!;
+  expect(field.value).toBe("骑行路线");
+  field.value = "周末骑行";
+  field.dispatchEvent(
+    new browser.window.KeyboardEvent("keydown", { key: "Enter" }),
+  );
+  expect(commands().at(-1)).toEqual({
+    control: "rename",
+    session: "session-3",
+    title: "周末骑行",
+  });
+  // delete asks first, in red, naming what goes
+  more()[1].click();
+  const destructive = rail.querySelector<HTMLElement>(
+    ".bc-menu-item--destructive",
+  )!;
+  expect(destructive.textContent).toBe("删除会话");
+  destructive.click();
+  const confirm = rail.querySelector<HTMLElement>("[role=alertdialog]")!;
+  expect(confirm.textContent).toContain("「未读邮件」的记录会从设备上移除。");
+  confirm.querySelector<HTMLElement>(".bc-button--danger")!.click();
+  expect(commands().at(-1)).toEqual({
+    control: "delete",
+    session: "session-2",
+    confirm: true,
+  });
+  expect(rail.querySelector("[role=alertdialog]")).toBeNull();
+});
+
+test("a switch starts the view over and drops what the left session still sends", () => {
+  const { root, socket, submit, toasts } = open();
+  const ws = socket();
+  ws.open();
+  listed(ws, {});
+  submit("一");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "好的" });
+  listed(ws, {
+    current: "session-2",
+    notice: { kind: "switched", title: "未读邮件" },
+  });
+  expect(root.querySelector(".bc-bubble")).toBeNull();
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "未读邮件",
+  );
+  // the left session's reply finishes elsewhere
+  ws.agent("web-1", "output_delta", { text: "迟到" });
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-2", "output_delta", { text: "也迟到" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.textContent).not.toContain("迟到");
+  expect(root.querySelector(".bc-meta--author")).toBeNull();
+  // a temporary chat says so, in the fresh view and then pinned at the head
+  listed(ws, {
+    current: null,
+    temporary: true,
+    notice: { kind: "created", temporary: true },
+  });
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "临时会话",
+  );
+  expect(root.querySelector(".bc-empty")?.textContent).toContain(
+    "离开这个会话后删除",
+  );
+  expect(
+    root
+      .querySelector('button[aria-label="新临时会话"]')
+      ?.getAttribute("aria-pressed"),
+  ).toBe("true");
+  submit("二");
+  const badge = root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!;
+  expect(badge.hidden).toBe(false);
+  expect(badge.textContent).toContain("临时会话");
+  // a finished turn may have named a session: the page asks again
+  const before = listings;
+  reply(ws, "web-3", "web-in-2", "嗯");
+  expect(listings).toBe(before + 1);
+  // a command that failed says so
+  listed(ws, { notice: { kind: "unknown_session" } });
+  expect(toasts.at(-1)?.title).toBe("找不到这个会话");
 });
 
 test("a permission request is answered by the next message", () => {
@@ -314,29 +745,24 @@ test("a permission request is answered by the next message", () => {
   ws.agent("web-2", "input_requested", { request: "request-1" });
   expect(root.textContent).toContain("需要你的允许");
   expect(root.textContent).toContain('{"count":12}');
-  expect(root.textContent).toContain("正在答复 · fs.remove");
   expect(input.placeholder).toBe("回复这次请求…");
-  // the approval Card: head, a dense key-value body, the answers in the foot, all siblings
+  // a question waiting on the reader is not 「思考中」
+  expect(root.querySelector(".bc-shimmer")).toBeNull();
   const approval = root.querySelector("section.bc-card")!;
   expect([...approval.children].map((node) => node.className)).toEqual([
     "bc-card__head",
     "bc-card__body bc-kv bc-kv--dense",
     "bc-card__foot",
   ]);
-  expect(
-    approval.querySelector(".bc-card__head svg")?.getAttribute("class"),
-  ).toBe("bc-icon bc-warning");
   expect(approval.querySelector("dd.bc-tool__name")?.textContent).toBe(
     "fs.remove",
   );
-  expect(
-    approval.querySelector(".bc-card__foot")?.getAttribute("style"),
-  ).toBeNull();
   expect(
     root.querySelector(".bc-composer__bar.bc-composer__bar--rule")?.textContent,
   ).toBe("正在答复 · fs.remove");
   const allow = button("允许");
   allow.click();
+  // the answer goes out at once, even though the turn still runs
   expect(JSON.parse(sent[0])).toEqual({ text: "允许" });
   expect(allow.disabled).toBe(true);
   expect(root.textContent).not.toContain("正在答复");
@@ -351,9 +777,6 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   expect(root.querySelector("[role=separator]")!.textContent).toBe(
     "错过 3 个事件",
   );
-  expect(root.querySelector("[role=separator]")!.className).toBe(
-    "bc-separator",
-  );
   ws.emit("message.start", { kind: "reply", message_id: "web-3" });
   ws.agent("web-3", "output_delta", { text: "会议要点：" });
   ws.agent("web-3", "turn_error", {
@@ -366,17 +789,10 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   expect(root.textContent).toContain("未完成 · 连接中断");
   // the device's internal reason stays off the page
   expect(root.textContent).not.toContain("worker_stopped");
-  // the failed turn is a record in the log
-  expect(
-    root.querySelector("[role=log] .bc-alert--error")?.textContent,
-  ).toContain("这一轮出错");
   expect(
     root.querySelector("[role=log] .bc-alert--error > .bc-alert__body")
       ?.firstElementChild?.textContent,
   ).toBe("这一轮出错");
-  expect(root.querySelector(".bc-status.bc-destructive")?.textContent).toBe(
-    "未完成 · 连接中断",
-  );
 
   ws.emit("message.file", {
     caption: "路线",
@@ -393,8 +809,6 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
     phase: "delta",
   });
   ws.emit("message.file", { error: null, message_id: "web-4", phase: "end" });
-  expect(root.textContent).toContain("application/gpx+xml · 5 B · 已接收");
-  // an attachment is a single Card row: the file name is the item name
   const file = root.querySelector(".bc-card > .bc-card__row")!;
   expect(file.querySelector(".bc-option-title")?.textContent).toBe("ride.gpx");
   expect(file.querySelector(".bc-caption.bc-muted")?.textContent).toBe(
@@ -406,18 +820,15 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
   expect(root.textContent).toContain("路线");
 });
 
-test("a dropped connection counts unconfirmed sends and reconnects on request", () => {
+test("a dropped connection counts unconfirmed sends, keeps the queue and reconnects on request", () => {
   const { root, socket, submit, input, button, toasts, badges } = open();
   socket().open();
   // the top bar shows the connection, as the design's chat boards do
   expect(badges.at(-1)).toEqual({ label: "已连接", tone: "live" });
   submit("一");
   submit("二");
-  socket().emit("message.start", {
-    kind: "reply",
-    message_id: "web-1",
-    reply_to: "web-in-1",
-  });
+  // 「二」 waits in the page's queue; only 「一」 went out, and its turn never started
+  expect(sent).toHaveLength(1);
   socket().dispatchEvent(new NativeEvent("close"));
   expect(badges.at(-1)).toEqual({ label: "已断开", tone: "lost" });
   expect(root.textContent).toContain(
@@ -425,19 +836,15 @@ test("a dropped connection counts unconfirmed sends and reconnects on request", 
   );
   expect(input.disabled).toBe(true);
   expect(toasts).toHaveLength(0);
-  // the compact error alert over the dock
   const banner = root.querySelector(".bc-chat-dock .bc-alert")!;
   expect(banner.className).toBe("bc-alert bc-alert--error bc-alert--compact");
-  expect(banner.getAttribute("style")).toBeNull();
   button("重新连接").click();
   expect(sockets).toHaveLength(2);
   socket().open();
   expect(input.disabled).toBe(false);
-  const offline = [...root.querySelectorAll<HTMLElement>(".bc-alert")].find(
-    (node) => node.textContent?.includes("连接已中断"),
-  )!;
-  expect(offline.hidden).toBe(true);
   expect(toasts).toEqual([{ kind: "success", title: "已重新连接" }]);
+  // the queued message goes out once the device is reachable again
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ text: "二" });
 });
 
 test("toasts send failures and unreadable frames", () => {

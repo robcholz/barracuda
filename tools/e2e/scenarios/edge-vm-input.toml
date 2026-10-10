@@ -1,10 +1,10 @@
 name = "VM input lifecycle"
-description = "A run that reads twice reports input_required progress for each read, lists as input_required, consumes one value and EOF, completes, and then rejects further control as run_not_found."
+description = "A run that reads twice reports input_required progress for each read, lists as input_required in the background pool, consumes one value and EOF through background_input, completes, and then leaves the pool so further control is rejected."
 
 # The script spends about 500 ms in an empty loop (instruction-hook yields of
 # 100 ms each) before every progress or completion update, so each update
 # arrives after the reply that ends the turn and costs exactly one
-# detached-turn model call.
+# background-turn model call.
 
 [model]
 mode = "scripted"
@@ -20,50 +20,50 @@ tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end
 text = "The reader started."
 
 [[model.responses]]
-request_contains = ['[detached:progress]', '{\"kind\":\"input_required\",\"run_id\":1}']
+request_contains = ['[background:progress]', '{\"kind\":\"input_required\",\"run_id\":1}']
 text = "It is waiting for input."
 
 # Step 1: the waiting run lists as input_required.
 [[model.responses]]
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
 text = "It needs input."
 
 # Step 2: one value is consumed and the second read reports progress again.
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "hello" } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "hello" } }]
 
 [[model.responses]]
 text = "Sent hello."
 
 [[model.responses]]
-request_contains = ['[detached:progress]']
+request_contains = ['[background:progress]']
 text = "It wants another line."
 
 # Step 3: EOF makes the second read return nil and the run completes.
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, eof = true } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, eof = true } }]
 
 [[model.responses]]
 text = "Closed the input."
 
 [[model.responses]]
-request_contains = ['[detached:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"first=hello\",\"second=nil\"]}']
+request_contains = ['[background:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"first=hello\",\"second=nil\"]}']
 text = "It printed both values."
 
-# Step 4: a finished or unknown run no longer accepts control.
+# Step 4: a finished or unknown call is no longer in the pool.
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 1, input = "late" } }]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "late" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_cancel", arguments = { run_id = 1 } }]
+tool_calls = [{ name = "background_cancel", arguments = { id = 1 } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_input", arguments = { run_id = 99, eof = true } }]
+tool_calls = [{ name = "background_input", arguments = { id = 99, eof = true } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
 text = "The finished run is gone."
@@ -71,31 +71,31 @@ text = "The finished run is gone."
 [[steps]]
 send = "Start a script that reads two lines."
 reply_contains = ["It is waiting for input."]
-tool_contains = ['{"run_id":1}']
+tool_contains = ["[background:accepted]\nid: 1\n{\"run_id\":1}"]
 
 [[steps]]
 send = "What state is it in?"
 reply_contains = ["It needs input."]
-tool_contains = ['vm_list{}{"runs":[{"run_id":1,"state":"input_required"}]}']
+tool_contains = ['background_list{}{"calls":[{"id":1,"status":"input_required","tool":"vm_run"}]}']
 
 [[steps]]
 send = "Send it hello."
 reply_contains = ["It wants another line."]
-tool_contains = ['vm_input{"run_id": 1, "input": "hello"}{}']
+tool_contains = ['background_input{"id": 1, "input": "hello"}{}']
 
 [[steps]]
 send = "Close its input."
 reply_contains = ["It printed both values."]
-tool_contains = ['vm_input{"run_id": 1, "eof": true}{}']
+tool_contains = ['background_input{"id": 1, "eof": true}{}']
 
 [[steps]]
 send = "Try to control it again."
 reply_contains = ["The finished run is gone."]
 tool_contains = [
-    'vm_input{"run_id": 1, "input": "late"}{"error":"run_not_found"}',
-    'vm_cancel{"run_id": 1}{"error":"run_not_found"}',
-    'vm_input{"run_id": 99, "eof": true}{"error":"run_not_found"}',
-    'vm_list{}{"runs":[]}',
+    'background_input{"id": 1, "input": "late"}tool invocation rejected: no running background call 1',
+    'background_cancel{"id": 1}tool invocation rejected: no running background call 1',
+    'background_input{"id": 99, "eof": true}tool invocation rejected: no running background call 99',
+    'background_list{}{"calls":[]}',
 ]
 tool_errors_allowed = true
 

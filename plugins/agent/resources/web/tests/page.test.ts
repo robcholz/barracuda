@@ -57,6 +57,12 @@ async function render(lang: Lang = "zh") {
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
   const cleanup = await mount(root, context);
+  // the mount reads what the device holds; set that read aside
+  await settle();
+  expect(calls.map(([url, init]) => [url, init.method])).toEqual([
+    ["/api/model-api/status", "GET"],
+  ]);
+  calls.length = 0;
   const form = root.querySelector("form")!;
   return {
     root,
@@ -188,8 +194,11 @@ test("posts one model as a batch with every field the endpoint requires", async 
   input("api_key").value = "sk-secret";
   input("max_tokens").value = "4096";
   await submit();
-  expect(calls).toHaveLength(1);
-  expect(calls[0][0]).toBe("/api/model-api");
+  // the accepted save reads the device's models again
+  expect(calls.map(([url]) => url)).toEqual([
+    "/api/model-api",
+    "/api/model-api/status",
+  ]);
   expect(calls[0][1].method).toBe("POST");
   expect(JSON.parse(String(calls[0][1].body))).toEqual([
     {
@@ -256,4 +265,33 @@ test("the header shows whether the device holds a model, and updates after a sav
   input("api_key").value = "sk-secret";
   await submit();
   expect(status()).toBe("已配置");
+});
+
+test("the header shows the model each purpose uses, the default where it has none", async () => {
+  const model = (name: string) => ({
+    backend: "openai_compatible",
+    model: name,
+    base_url: "https://api.example.com/v1",
+  });
+  respond = async () =>
+    Response.json({
+      configured: true,
+      default: model("gpt-model"),
+      purposes: {
+        root_agent: null,
+        sub_agent: null,
+        memory: model("small-model"),
+        compaction: null,
+      },
+    });
+  const { root } = await render("en");
+  const rows = [...root.querySelectorAll(".bc-header .bc-kv dt")].map(
+    (term) => [term.textContent, term.nextElementSibling?.textContent],
+  );
+  expect(rows.slice(1)).toEqual([
+    ["Main agent", "gpt-model"],
+    ["Sub-agent", "gpt-model"],
+    ["Memory", "small-model"],
+    ["Compaction", "gpt-model"],
+  ]);
 });

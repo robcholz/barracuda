@@ -30,9 +30,9 @@ use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
-    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
-    SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
-    TurnEventError, TurnId, TurnOrigin,
+    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId, SessionInfo,
+    SessionInputError, SessionPersistence, SessionRenameError, SessionStream, SessionTurnError,
+    TurnEvent, TurnEventError, TurnId, TurnOrigin, TurnOutcome, WallClock,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
 use barracuda_model_api::InitError;
@@ -46,9 +46,10 @@ pub use service::{RuntimeBuildError, RuntimeService};
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs,
-        Resource, RiskClass, Tool, ToolConfig, ToolError, ToolFuture, ToolGroup, ToolHandler,
-        ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
+        tool_metadata, Action, BackgroundTool, BackgroundToolControl, BackgroundToolFuture,
+        BackgroundToolHandler, EmptyArgs, Resource, RiskClass, Tool, ToolError, ToolFuture,
+        ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput, ToolProgressSender,
+        ToolResult, ToolSpec,
     };
 }
 
@@ -159,7 +160,7 @@ impl ToolLifecycle {
 ///
 /// Groups registered before the runtime service loads durable state are installed
 /// into the same [`ToolRegistry`] that backs every Agent as soon as it is ready.
-/// The capability preserves each [`tools::Tool`]'s native awaited or detached
+/// The capability preserves each [`tools::Tool`]'s native ordinary or background
 /// execution semantics because it accepts the original [`ToolGroup`] directly.
 #[derive(Clone)]
 pub struct AgentToolRegistry {
@@ -357,6 +358,39 @@ impl AgentRuntime {
         self.control.list_sessions().await
     }
 
+    /// Describe the live conversation sessions, sorted by id.
+    ///
+    /// Returns an empty list once the runtime has stopped.
+    pub async fn describe_sessions(&self) -> Vec<SessionInfo> {
+        self.control.describe_sessions().await
+    }
+
+    /// Replace a live conversation session's title.
+    ///
+    /// The title keeps its first non-empty line, trimmed and capped at 64
+    /// characters with a trailing ellipsis when cut.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionRenameError`] when the session is missing, the title
+    /// has no visible text, or the runtime has stopped.
+    pub async fn rename_session(
+        &self,
+        session: SessionId,
+        title: &str,
+    ) -> Result<(), SessionRenameError> {
+        self.control.rename_session(session, title.into()).await
+    }
+
+    /// Install the wall clock that stamps each session's last-used time.
+    ///
+    /// The clock returns Unix milliseconds, or `None` while unsynchronized.
+    /// It may be installed before or after the runtime service starts, and
+    /// it reaches sessions that are already running.
+    pub fn set_wall_clock(&self, clock: WallClock) {
+        self.control.set_wall_clock(clock);
+    }
+
     /// Delete a live conversation session.
     ///
     /// If the session is currently open, its event stream receives
@@ -382,10 +416,12 @@ mod tool_registry_capability_tests {
     use barracuda_agent_persistence::Persistence;
     use barracuda_agent_tool::ToolSetSource;
     use barracuda_agent_tool::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolDetachUpdate,
-        ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
+        BackgroundTool, BackgroundToolFuture, BackgroundToolHandler, BackgroundToolPool, EmptyArgs,
+        Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner,
+        ToolSpec,
     };
     use barracuda_platform_test::memory_vfs;
+    use barracuda_runtime_utils::background::BackgroundUpdate;
     use futures_lite::{future::block_on, StreamExt as _};
     use portable_atomic_util::Arc;
 
@@ -430,9 +466,9 @@ mod tool_registry_capability_tests {
         }
     }
 
-    struct BackgroundTool;
+    struct EchoBackgroundTool;
 
-    impl ToolSpec for BackgroundTool {
+    impl ToolSpec for EchoBackgroundTool {
         fn name(&self) -> &str {
             "background"
         }
@@ -446,12 +482,12 @@ mod tool_registry_capability_tests {
         }
     }
 
-    impl DetachedToolHandler for BackgroundTool {
+    impl BackgroundToolHandler for EchoBackgroundTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> DetachedToolFuture<'a> {
+        fn invoke<'a>(&'a self, _args: Self::Args) -> BackgroundToolFuture<'a> {
             Box::pin(async {
-                Ok(DetachedTool::new(
+                Ok(BackgroundTool::new(
                     ToolOutput {
                         content: "accepted".into(),
                         ok: true,
@@ -476,7 +512,7 @@ mod tool_registry_capability_tests {
                 .register_group(ToolGroup::new(
                     "dependent-plugin",
                     true,
-                    [Tool::new(JoinedTool), Tool::from_detached(BackgroundTool)],
+                    [Tool::new(JoinedTool), Tool::background(EchoBackgroundTool)],
                 ))
                 .expect("startup Tool group registers");
             lifecycle.start_all().expect("Tool Registry starts");
@@ -501,18 +537,21 @@ mod tool_registry_capability_tests {
                 ToolInvocation::try_new(None, "joined", "{}").expect("joined invocation"),
                 ToolInvocation::try_new(None, "background", "{}").expect("background invocation"),
             ];
-            let (mut joined, detached) = ToolRunner::new(&handle).run(calls);
-            let mut detached = detached.expect("detached Tool keeps detached execution");
+            let pool = BackgroundToolPool::new();
+            let mut joined = ToolRunner::new(&handle).with_background(&pool).run(calls);
 
             let first = joined.next().await.expect("first acceptance").1;
             let second = joined.next().await.expect("second acceptance").1;
             assert!(first.ok);
             assert!(second.ok);
-            let update = detached.next().await.expect("detached completion").1;
-            let ToolDetachUpdate::Completed(output) = update else {
-                return;
-            };
-            assert_eq!(output.content, "completed");
+            let event = futures_lite::future::poll_fn(|context| pool.poll_next(context)).await;
+            assert_eq!(
+                event.update,
+                BackgroundUpdate::Completed(ToolOutput {
+                    content: "completed".into(),
+                    ok: true,
+                })
+            );
         });
     }
 }

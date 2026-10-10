@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "background_list",
+    "description": "List your running background tool calls, each with the id from its accepted result, its tool, and its current status. Results are delivered automatically; this is a status snapshot, not a polling tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

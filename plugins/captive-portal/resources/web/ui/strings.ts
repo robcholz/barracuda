@@ -22,7 +22,6 @@ export const KIT_STRINGS: Record<
     noReply: string;
     retry: string;
     channel: string;
-    configured: string;
   }
 > = {
   zh: {
@@ -46,7 +45,6 @@ export const KIT_STRINGS: Record<
     noReply: "未收到设备确认",
     retry: "重试",
     channel: "通道",
-    configured: "已配置",
   },
   en: {
     advanced: "Advanced",
@@ -67,6 +65,5 @@ export const KIT_STRINGS: Record<
     noReply: "No confirmation from the device",
     retry: "Retry",
     channel: "Channel",
-    configured: "Configured",
   },
 };

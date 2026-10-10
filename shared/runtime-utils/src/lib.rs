@@ -3,7 +3,8 @@
 //! Shared helpers for the barracuda Rust crates: cooperative cancellation, a
 //! portable [`oneshot`] channel, a single-executor [`local_channel`],
 //! logical [`stream`] parts, single-task [`yield_stream`] generators,
-//! [`unordered`] futures and merged streams for one task, the
+//! [`unordered`] futures and merged streams for one task, an id-addressed
+//! [`background`] task pool, the
 //! prefixed-id newtype macro ([`define_prefixed_id`]), and the id-allocator macro.
 //!
 //! This crate does not own an async executor or runner. Use vetted
@@ -12,6 +13,7 @@
 
 extern crate alloc;
 
+pub mod background;
 mod cancel;
 pub mod local_channel;
 pub mod oneshot;

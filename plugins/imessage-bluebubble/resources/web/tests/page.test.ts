@@ -18,7 +18,7 @@ afterEach(async () => {
 async function render(lang: "zh" | "en") {
   const page = await harness.render(mount, lang);
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-    ["GET", "/api/gateway/bluebubbles"],
+    ["GET", "/api/gateway/bluebubbles/status"],
   ]);
   harness.calls.length = 0;
   await settle();
@@ -210,9 +210,8 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   expect(current.querySelector(".bc-option-title")?.textContent).toBe(
     "BlueBubbles",
   );
-  expect(
-    current.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("Configured");
+  expect(current.querySelector("svg.bc-success")).not.toBeNull();
+  expect(current.querySelector(".bc-badge")).toBeNull();
   shown.unmount();
 
   harness.reply = async () => json(200, { configured: false });
@@ -230,14 +229,13 @@ test("a configured channel shows above the form; a save shows it and refreshes t
   await page.submit();
   expect(page.refreshes.count).toBe(1);
   expect(row.hidden).toBe(false);
-  expect(
-    row.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("已配置");
+  expect(row.querySelector("svg.bc-success")).not.toBeNull();
+  expect(row.querySelector(".bc-badge")).toBeNull();
 });
 
 test("a configured channel shows its mode and the code to send from iMessage", async () => {
   harness.reply = async (call) => {
-    if (call.url === "/api/gateway/bluebubbles")
+    if (call.url === "/api/gateway/bluebubbles/status")
       return json(200, {
         configured: true,
         mode: "send",

@@ -20,6 +20,14 @@
       },
       "required": ["route", "message_id", "session"],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "route": { "$ref": "#/$defs/route" }
+      },
+      "required": ["route"],
+      "additionalProperties": false
     }
   ],
   "$defs": {

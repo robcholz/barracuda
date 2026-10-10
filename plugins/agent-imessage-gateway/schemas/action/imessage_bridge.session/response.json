@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "maxProperties": 0,
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": { "enum": ["invalid_request", "conflict", "storage"] }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

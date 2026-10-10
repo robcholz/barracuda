@@ -5,17 +5,60 @@ import {
   ICON_NETWORK,
   MARK_ANTHROPIC,
   MARK_OPENAI,
+  callDevice,
   definePage,
   entryStatus,
+  h,
   header,
   kv,
   page,
   settingsForm,
+  type Text,
 } from "../../../captive-portal/resources/web/ui";
 
-/** The model configuration page: one model per submission, for one Agent purpose (`POST /api/model-api`). */
+type Purpose = "root_agent" | "sub_agent" | "memory" | "compaction";
+
+/** One model in `GET /api/model-api/status`; the key is never reported. */
+interface Model {
+  backend: string;
+  model: string;
+  base_url: string;
+}
+
+/** `GET /api/model-api/status`: a purpose is `null` when it uses the default model. */
+interface ModelsStatus {
+  configured: boolean;
+  default: Model | null;
+  purposes: Record<Purpose, Model | null>;
+}
+
+const PURPOSES: readonly (readonly [Purpose, Text])[] = [
+  ["root_agent", { zh: "主 Agent", en: "Main agent" }],
+  ["sub_agent", { zh: "子 Agent", en: "Sub-agent" }],
+  ["memory", { zh: "记忆", en: "Memory" }],
+  ["compaction", { zh: "压缩", en: "Compaction" }],
+];
+
+/**
+ * The model configuration page: one model per submission, for one Agent purpose
+ * (`POST /api/model-api`). The header shows the model each purpose uses (`GET /api/model-api/status`).
+ */
 export const mount = definePage((context) => {
   const status = entryStatus(context);
+  const models = PURPOSES.map(() => h("span", { class: "bc-mono" }, "—"));
+  const load = async () => {
+    const result = await callDevice<ModelsStatus>(
+      context,
+      "/api/model-api/status",
+    );
+    const data = result.kind === "ok" ? result.data : null;
+    if (!data?.purposes) return;
+    PURPOSES.forEach(([purpose], index) => {
+      const model = data.purposes[purpose] ?? data.default;
+      models[index]!.textContent = model?.model ?? "—";
+    });
+  };
+  void load();
   const form = settingsForm(
     {
       endpoint: "/api/model-api",
@@ -164,7 +207,10 @@ export const mount = definePage((context) => {
       },
       // the endpoint takes a batch; this page registers one model at a time
       body: (values) => [values],
-      onSuccess: () => void status.refresh(),
+      onSuccess: () => {
+        void status.refresh();
+        void load();
+      },
       success: {
         action: {
           label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
@@ -182,9 +228,16 @@ export const mount = definePage((context) => {
           zh: "为每种 Agent 用途注册模型。",
           en: "Register a model for each agent purpose.",
         },
-        extra: kv([[{ zh: "状态", en: "Status" }, status.slot]], context.lang, {
-          live: true,
-        }),
+        extra: kv(
+          [
+            [{ zh: "状态", en: "Status" }, status.slot],
+            ...PURPOSES.map(
+              ([, label], index) => [label, models[index]!] as const,
+            ),
+          ],
+          context.lang,
+          { live: true },
+        ),
         figure: "agent",
         figureWidth: 300,
       },

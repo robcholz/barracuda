@@ -33,7 +33,9 @@ thiserror = { version = "2", default-features = false }
 tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["attributes"] }
 
 [dev-dependencies]
+barracuda-platform-test.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
 
 [lints.rust]
 unreachable_pub = "deny"

@@ -65,5 +65,10 @@ path = '/api/tavily'
 body = '{"api_key":"e2e-key","api_base":"http://10.42.0.1:9/"}'
 status = 204
 
+[[http]]
+method = 'GET'
+path = '/api/tavily/status'
+body_contains = ['{"configured":true,"config":{"api_base":"http://10.42.0.1:9"}}']
+
 [logs]
 expect = ['configured Tavily provider for web search']

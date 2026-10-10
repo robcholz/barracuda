@@ -81,3 +81,12 @@ export const ICON_KEY_ROUND =
   '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle>';
 export const ICON_MAIL =
   '<rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>';
+export const ICON_ARROW_DOWN =
+  '<path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path>';
+export const ICON_CLOCK =
+  '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>';
+export const ICON_LOADER = '<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>';
+export const ICON_MESSAGE_SQUARE_DASHED =
+  '<path d="M10 17H7l-4 4v-7"></path><path d="M14 17h1"></path><path d="M14 3h1"></path><path d="M19 3a2 2 0 0 1 2 2"></path><path d="M21 14v1a2 2 0 0 1-2 2"></path><path d="M21 9v1"></path><path d="M3 9v1"></path><path d="M5 3a2 2 0 0 0-2 2"></path><path d="M9 3h1"></path>';
+export const ICON_PENCIL =
+  '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path>';

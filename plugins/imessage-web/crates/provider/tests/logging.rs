@@ -63,7 +63,7 @@ fn web_service_logs_application_outcomes_without_message_content() {
         accepting
             .receive_message_json(
                 "chat-42",
-                br#"{"message_id":"client-1","thread_id":null,"text":"private body","reply_to":null}"#,
+                br#"{"message_id":"client-1","thread_id":null,"text":"private body"}"#,
             )
             .await
             .expect("accept inbound message");
@@ -75,7 +75,7 @@ fn web_service_logs_application_outcomes_without_message_content() {
         let rejected = rejecting
             .receive_message_json(
                 "chat-42",
-                br#"{"message_id":"client-2","thread_id":null,"text":"another secret","reply_to":null}"#,
+                br#"{"message_id":"client-2","thread_id":null,"text":"another secret"}"#,
             )
             .await;
         assert!(matches!(rejected, Err(InboundError::Rejected { .. })));

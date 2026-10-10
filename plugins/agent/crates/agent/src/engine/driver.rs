@@ -6,7 +6,7 @@ use barracuda_agent_memory::{
 };
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolSet;
+use barracuda_agent_tool::{BackgroundToolPool, ToolSet};
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
@@ -41,6 +41,7 @@ pub(crate) struct AgentEngineConfig {
     pub(crate) api_manager: SharedApiManager,
     pub(crate) api_purpose: ApiPurpose,
     pub(crate) tools: ToolSet,
+    pub(crate) background: BackgroundToolPool,
     pub(crate) effect_inbox: AgentEffectInbox,
     pub(crate) permission_policy: Arc<dyn PermissionPolicy>,
     pub(crate) retry_policy: RetryPolicy,
@@ -98,6 +99,7 @@ where
     transcript: Box<dyn Transcript>,
     active_turn: Option<TurnHandle>,
     tools: ToolSet,
+    background: BackgroundToolPool,
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
     #[getset(get = "pub(crate)")]
@@ -149,6 +151,7 @@ where
             transcript: config.transcript,
             active_turn: None,
             tools,
+            background: config.background,
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
             context,
@@ -669,6 +672,7 @@ where
                         messages: context.history(),
                         reminders: context.reminders(),
                         tools: &tools,
+                        background: &self.agent.background,
                     };
                     drop(render_span);
                     drop(prepare_span);
@@ -824,11 +828,6 @@ where
                                             .await;
                                     }
                                 }
-                            }
-                            IterationLoopEvent::Detached(handle) => {
-                                yielder
-                                    .yield_one(Ok(AgentEngineEvent::Detached(handle)))
-                                    .await;
                             }
                             IterationLoopEvent::ApprovalRequired {
                                 tool_call_id,

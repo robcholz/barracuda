@@ -1,12 +1,20 @@
 import {
+  ICON_ARROW_DOWN,
   ICON_ARROW_UP,
   ICON_CHECK,
   ICON_CHEVRON_RIGHT,
   ICON_CIRCLE_ALERT,
+  ICON_CIRCLE_STOP,
   ICON_CIRCLE_X,
+  ICON_CLOCK,
+  ICON_COPY,
   ICON_DOWNLOAD,
   ICON_FILE,
   ICON_LIGHTBULB,
+  ICON_LOADER,
+  ICON_MESSAGE_SQUARE_DASHED,
+  ICON_PANEL,
+  ICON_PENCIL,
   ICON_REFRESH,
   ICON_REPLY,
   ICON_SHIELD_ALERT,
@@ -14,19 +22,32 @@ import {
   ICON_WRENCH,
   ICON_X,
   MARK_TILE,
+  copyText,
   definePage,
   h,
   icon,
   mark,
-  term,
   type PortalContext,
 } from "../../../captive-portal/resources/web/ui";
+import { spinningMark } from "./mark";
+import {
+  sessionRail,
+  type SessionCommand,
+  type SessionsState,
+} from "./sessions";
+import { CHAT_CSS } from "./style";
 
 /**
  * Web chat over the bridge's WebSocket `/ws/message`. The page sends `WebClientFrame` JSON
- * (`{ text, reply_to? }`) and renders the SSE-formatted frames the bridge pushes: message
+ * (`{ text }`; a reply carries its quote inside the text, see {@link withQuote}) and renders the SSE-formatted frames the bridge pushes: message
  * lifecycle (`message.start`/`delta`/`end`/`edit`/`delete`/`reaction`), the Agent's semantic
  * events inside `message.event`, attachments, typing and `stream.lagged`. Live events only.
+ *
+ * The device runs one turn at a time. A message written while a turn runs waits in the page's
+ * queue, where it can still be edited or removed, and goes out when the turn ends. Stop sends
+ * `{ control: "interrupt" }`, and the turn ends 「已停止」; rewind on the running message sends
+ * `{ control: "cancel" }`, takes the message and its turn out of the log and puts the text back in
+ * the composer. Neither control is a message: the bridge gives it no id.
  */
 
 const STRINGS = {
@@ -34,18 +55,19 @@ const STRINGS = {
     log: "聊天记录",
     sent: "已发送",
     reasoning: "思考过程",
+    thinking: "思考中",
+    /** 「思考了 `3` 秒」: the number is mono. */
+    thoughtA: "思考了 ",
+    thoughtB: " 秒",
     ok: "成功",
     failed: "失败",
+    running: "运行中",
     args: "参数",
     output: "输出",
-    /** The turn footer's words; the numbers between them are mono: 「第 `1` 步 · 输入 `1,284` · 输出 `212 tokens`」. */
-    stepA: "第 ",
-    stepB: " 步",
-    in: "输入 ",
-    out: "输出 ",
     reply: "回复",
+    copy: "复制",
+    copied: "已复制",
     edited: "已编辑",
-    typing: "正在输入",
     approvalTitle: "需要你的允许",
     approvalTool: "工具",
     approvalArgs: "参数",
@@ -55,8 +77,15 @@ const STRINGS = {
     approvalHint: "或直接回复",
     answering: "正在答复",
     answerPh: "回复这次请求…",
-    emptyTitle: "还没有消息",
-    emptyBody: "发一条消息，或从这里开始：",
+    newTitle: "新会话",
+    newLead: "会话保存在设备上，随时可以从左侧回来。",
+    tempTitle: "临时会话",
+    tempLead: "不会保存在设备上；离开这个会话后删除。",
+    continueLead: "之前的消息保存在设备上；从这里接着聊。",
+    showSessions: "会话",
+    sessionGone: "找不到这个会话",
+    badTitle: "会话名称不能为空",
+    sessionFailed: "设备没能完成这个操作",
     suggestions: [
       "今天适合骑车吗？",
       "总结一下我今天的日程",
@@ -75,16 +104,24 @@ const STRINGS = {
     label: "消息",
     placeholder: "给设备发一条消息",
     send: "发送",
+    enqueue: "加入队列",
+    stop: "停止",
+    stopped: "已停止",
+    rewind: "撤回",
+    queued: "排队中",
+    editQueued: "编辑",
+    removeQueued: "移除",
+    jump: "回到最新",
     replying: "回复 Barracuda",
     cancelReply: "取消回复",
     session: "临时会话",
-    sessionTip: "只显示连接后的消息，刷新页面后清空",
+    sessionTip: "不会保存；离开这个会话后删除",
     download: "下载",
     receiving: "接收中",
     received: "已接收",
     mediaFailed: "接收失败",
     reaction: "回应",
-    tooLong: "消息超过 1024 字节，请缩短后发送。",
+    tooLong: "消息太长，请缩短后发送。",
     notSent: "消息未发出",
     busy: "发送队列繁忙，请稍后再试。",
     unreadable: "收到无法识别的消息",
@@ -93,17 +130,18 @@ const STRINGS = {
     log: "Conversation",
     sent: "Sent",
     reasoning: "Reasoning",
+    thinking: "Thinking",
+    thoughtA: "Thought for ",
+    thoughtB: "s",
     ok: "Succeeded",
     failed: "Failed",
+    running: "Running",
     args: "Arguments",
     output: "Output",
-    stepA: "Step ",
-    stepB: "",
-    in: "In ",
-    out: "Out ",
     reply: "Reply",
+    copy: "Copy",
+    copied: "Copied",
     edited: "Edited",
-    typing: "Typing",
     approvalTitle: "Needs your permission",
     approvalTool: "Tool",
     approvalArgs: "Arguments",
@@ -113,8 +151,16 @@ const STRINGS = {
     approvalHint: "Or reply in your own words",
     answering: "Answering",
     answerPh: "Reply to this request…",
-    emptyTitle: "No messages yet",
-    emptyBody: "Send a message, or start here:",
+    newTitle: "New session",
+    newLead:
+      "Sessions are saved on the device; come back to one from the left any time.",
+    tempTitle: "Temporary chat",
+    tempLead: "Not saved on the device; deleted when you leave it.",
+    continueLead: "Earlier messages stay on the device; carry on from here.",
+    showSessions: "Sessions",
+    sessionGone: "That session is gone",
+    badTitle: "A session needs a name",
+    sessionFailed: "The device couldn't do that",
     suggestions: [
       "Is it a good day for a ride?",
       "Summarize today's schedule",
@@ -133,17 +179,24 @@ const STRINGS = {
     label: "Message",
     placeholder: "Message the device",
     send: "Send",
+    enqueue: "Add to queue",
+    stop: "Stop",
+    stopped: "Stopped",
+    rewind: "Rewind",
+    queued: "Queued",
+    editQueued: "Edit",
+    removeQueued: "Remove",
+    jump: "Jump to latest",
     replying: "Replying to Barracuda",
     cancelReply: "Cancel reply",
-    session: "Temporary session",
-    sessionTip:
-      "Only messages since you connected; cleared when the page reloads",
+    session: "Temporary chat",
+    sessionTip: "Not saved; deleted when you leave it",
     download: "Download",
     receiving: "receiving",
     received: "received",
     mediaFailed: "failed",
     reaction: "Reaction",
-    tooLong: "Messages are limited to 1024 bytes; shorten it to send.",
+    tooLong: "This message is too long; shorten it to send.",
     notSent: "Message not sent",
     busy: "The send queue is full; try again shortly.",
     unreadable: "Received a message this page can't read",
@@ -152,16 +205,28 @@ const STRINGS = {
 
 /** The bridge's limits as the previous page enforced them. */
 const MAX_BYTES = 1024;
+/** A reply carries at most this many UTF-8 bytes of the message it quotes, on top of its own text. */
+const MAX_QUOTE = 512;
 const MAX_ITEMS = 100;
 const MAX_TEXT = 65536;
 const MAX_FRAME = 262144;
 const MAX_MEDIA = 8 * 1024 * 1024;
+/** The composer grows with its text up to this height, then scrolls. */
+const MAX_INPUT = 200;
+/**
+ * A sent message whose turn has not started after this long, with nothing else heard, no longer
+ * holds the queue: the device queues it anyway, so the page stops waiting on a turn it may miss.
+ */
+const STALL_MS = 30000;
+/** Lucide `undo-2`: rewind. The chat alone uses it, so it stays out of the shell's icon set. */
+const ICON_UNDO =
+  '<path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path>';
 
-const numbers = new Intl.NumberFormat("en-US");
 const fill = (text: string, map: Record<string, string | number>) =>
   text.replace(/\{(\w+)\}/g, (_, key: string) => String(map[key]));
 const clip = (text: string) =>
   text.length > MAX_TEXT ? text.slice(-MAX_TEXT) : text;
+const pad = (n: number) => String(n).padStart(2, "0");
 
 type Data = Record<string, unknown>;
 const str = (value: unknown) => (typeof value === "string" ? value : "");
@@ -169,8 +234,11 @@ const str = (value: unknown) => (typeof value === "string" ? value : "");
 /** Shows or hides a node, whatever display its inline style or class gives it. */
 function show(node: HTMLElement, on: boolean) {
   node.hidden = !on;
-  if (on) node.style.display = node.dataset.display ?? "";
-  else {
+  // showing undoes only what hiding did, so a node's own inline display survives
+  if (on) {
+    if (node.style.display === "none")
+      node.style.display = node.dataset.display ?? "";
+  } else {
     if (node.style.display !== "none")
       node.dataset.display = node.style.display;
     node.style.display = "none";
@@ -193,6 +261,32 @@ function fold(button: HTMLButtonElement, panel: HTMLElement, open: boolean) {
   return set;
 }
 
+/** An icon-only button named by its tooltip, as the design system's Button card asks. */
+function iconButton(
+  label: string,
+  paths: string,
+  onclick: () => void,
+  className = "bc-icon-button",
+  type: "button" | "submit" = "button",
+) {
+  const tip = h("span", { class: "bc-tooltip", "aria-hidden": "true" }, label);
+  const button = h(
+    "button",
+    { class: className, type, "aria-label": label, onclick },
+    icon(paths),
+    tip,
+  );
+  return {
+    button,
+    /** Renames the button (its label and tooltip) and swaps its icon. */
+    set(next: string, nextPaths = paths) {
+      button.setAttribute("aria-label", next);
+      tip.textContent = next;
+      button.firstElementChild!.replaceWith(icon(nextPaths));
+    },
+  };
+}
+
 interface Tool {
   card: HTMLElement;
   name: HTMLElement;
@@ -212,19 +306,39 @@ interface Request {
   owner: Agent;
 }
 
+/**
+ * One open text run. Text the device sends lands in `pending` and flows into `text` a few
+ * characters a frame, so a reply streams in smoothly rather than in bursts; `done` runs when the
+ * run closes.
+ */
+interface Run {
+  stream: string;
+  text: Text;
+  node: HTMLElement;
+  pending: string;
+  done?: () => void;
+}
+
+/** A turn of Agent messages under one author line, whose mark spins while any of them runs. */
+interface Group {
+  node: HTMLElement;
+  author: HTMLElement;
+  spin: { canvas: HTMLCanvasElement; stop(): void } | null;
+}
+
 interface Agent {
   id: string;
   kind: string;
   root: HTMLElement;
-  /** The open text run and which stream it belongs to. */
-  run: { stream: string; text: Text; node: HTMLElement } | null;
+  group: Group;
+  run: Run | null;
   tool: Tool | null;
   request: Request | null;
-  steps: number;
-  usage: { i?: number; o?: number };
   footer: HTMLElement | null;
   reaction: HTMLElement;
   ended: boolean;
+  /** The sent message this one answers, from its start. */
+  replyTo: string;
   media?: Media;
 }
 
@@ -242,12 +356,60 @@ interface Sent {
   root: HTMLElement;
   reaction: HTMLElement;
   confirmed: boolean;
+  text: string;
+  quoted: { id: string; text: string } | null;
+  /** 「撤回」, shown while the message's turn has not ended. */
+  rewind: HTMLElement;
+}
+
+/** A message waiting in the page for the running turn to end. */
+interface Queued {
+  text: string;
+  replyTo: { id: string; text: string } | null;
+}
+
+/**
+ * The text a reply sends: the quoted message as XML ahead of the user's own words, so the device
+ * needs no notion of replies. The quote is escaped so it cannot close its element early, and cut
+ * to {@link MAX_QUOTE} bytes.
+ */
+function withQuote(text: string, quoted: string) {
+  let body = "";
+  let kept = "";
+  let size = 0;
+  for (const char of quoted) {
+    const part =
+      char === "&"
+        ? "&amp;"
+        : char === "<"
+          ? "&lt;"
+          : char === ">"
+            ? "&gt;"
+            : char;
+    const point = char.codePointAt(0)!;
+    size +=
+      part.length > 1 || point < 0x80
+        ? part.length
+        : point < 0x800
+          ? 2
+          : point < 0x10000
+            ? 3
+            : 4;
+    // a cut quote ends in an ellipsis, so it keeps what fits beside one
+    if (size > MAX_QUOTE) return `<quote>${kept}…</quote>\n${text}`;
+    body += part;
+    if (size <= MAX_QUOTE - 3) kept = body;
+  }
+  return `<quote>${body}</quote>\n${text}`;
 }
 
 export const mount = definePage((context: PortalContext) => {
   const { lang, signal } = context;
   const t = STRINGS[lang];
   const doc = document;
+  // the page's own rules, for as long as it is mounted
+  const style = h("style", null, CHAT_CSS);
+  doc.head.append(style);
 
   // ---- layout
   const column = h("div", {
@@ -266,76 +428,116 @@ export const mount = definePage((context: PortalContext) => {
     },
     column,
   );
-  // the empty conversation: a frameless EmptyState
+  // the device's sessions, at the page's left once the device lists them
+  const rail = sessionRail(lang, (command) => control(command), signal);
+  show(rail.node, false);
+  // a temporary chat says so at the conversation's head, pinned while the history scrolls
+  const tempBadge = h(
+    "span",
+    {
+      class: "bc-badge",
+      tabindex: 0,
+      "aria-describedby": "imessage-web-session-tip",
+    },
+    icon(ICON_MESSAGE_SQUARE_DASHED),
+    t.session,
+    h(
+      "span",
+      {
+        class: "bc-tooltip",
+        role: "tooltip",
+        id: "imessage-web-session-tip",
+      },
+      t.sessionTip,
+    ),
+  );
+  show(tempBadge, false);
+  // on a phone the rail is a sheet, opened from the head
+  const railToggle = iconButton(
+    t.showSessions,
+    ICON_PANEL,
+    () => rail.toggle(),
+    "bc-icon-button bc-chat-rail-toggle",
+  ).button;
+  railToggle.style.cssText = "position:absolute;left:var(--space-4)";
+  show(railToggle, false);
+  const head = h("div", { class: "bc-chat-head" }, railToggle, tempBadge);
+  // the fresh conversation: the EmptyState with the page's laptop figure, over a mid-page composer
   const empty = h(
     "div",
+    { class: "bc-empty", style: "gap:12px" },
+    h("hl-figure", {
+      name: "imessage-web",
+      "aria-hidden": "true",
+      style: "width:200px;max-width:100%",
+    }),
+    h("h2", { class: "bc-title" }),
+    h("p", {
+      class: "bc-small bc-muted",
+      style: "margin:0;max-width:420px",
+    }),
+  );
+  const suggestions = h(
+    "div",
     {
-      class: "bc-empty",
-      style: "flex:1 1 auto;justify-content:center;gap:12px",
+      style:
+        "display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding-top:8px",
     },
-    h("h2", { class: "bc-title" }, t.emptyTitle),
-    h(
-      "p",
-      { class: "bc-small bc-muted", style: "margin:0;max-width:360px" },
-      t.emptyBody,
-    ),
-    h(
-      "div",
-      {
-        style:
-          "display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px",
-      },
-      t.suggestions.map((text) =>
-        h(
-          "button",
-          {
-            class: "bc-button bc-button--outline bc-button--sm",
-            type: "button",
-            onclick: () => {
-              input.value = text;
-              changed();
-              submit();
-            },
+    t.suggestions.map((text) =>
+      h(
+        "button",
+        {
+          class: "bc-button bc-button--outline bc-button--sm",
+          type: "button",
+          onclick: () => {
+            input.value = text;
+            changed();
+            submit();
           },
-          text,
-        ),
+        },
+        text,
       ),
     ),
   );
-  const typing = h(
+  // what the device is doing while nothing streams: 「思考中」, after a spinning author line
+  const thinking = h(
     "span",
     {
       class: "bc-small bc-muted",
       style: "display:flex;align-items:center;gap:8px",
     },
-    h(
-      "span",
-      { class: "bc-typing", "aria-hidden": "true" },
-      h("i"),
-      h("i"),
-      h("i"),
-    ),
-    t.typing,
+    h("span", { class: "bc-shimmer" }, t.thinking),
   );
-  show(typing, false);
+  const dots = h(
+    "span",
+    { class: "bc-typing", "aria-hidden": "true" },
+    h("i"),
+    h("i"),
+    h("i"),
+  );
   const caret = h("span", { class: "bc-caret", "aria-hidden": "true" });
 
   const input = h("textarea", {
     id: "imessage-web-message",
-    rows: 3,
+    rows: 1,
     placeholder: t.placeholder,
   });
-  const counter = h("span", { class: "bc-mono" });
-  const sendButton = h(
-    "button",
-    {
-      class: "bc-button bc-button--icon",
-      type: "submit",
-      "aria-label": t.send,
-      disabled: true,
-    },
-    icon(ICON_ARROW_UP),
+  const sendButton = iconButton(
+    t.send,
+    ICON_ARROW_UP,
+    () => {},
+    "bc-button bc-button--icon",
+    "submit",
   );
+  sendButton.button.disabled = true;
+  // while a turn runs, stop is the primary; once the reader types, it steps back to outline
+  const stopButton = iconButton(
+    t.stop,
+    ICON_CIRCLE_STOP,
+    () => stop(),
+    "bc-button bc-button--icon",
+  );
+  show(stopButton.button, false);
   // a ruled bar: the icon carries the warning colour, the text stays foreground
   const answeringText = h("span");
   const answering = h(
@@ -345,32 +547,24 @@ export const mount = definePage((context: PortalContext) => {
     answeringText,
   );
   show(answering, false);
-  const quote = h("span", {
-    style:
-      "flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-  });
+  // the queue: a counting bar, then one bar per waiting message with its edit and remove actions
+  const queueList = h("div", { role: "list", "aria-label": t.queued });
+  show(queueList, false);
+  const quote = h("span", { class: "bc-composer__text" });
   const replyBar = h(
     "div",
     { class: "bc-composer__bar" },
     icon(ICON_REPLY, undefined, "bc-muted"),
     h("span", { class: "bc-muted", style: "flex:none" }, t.replying),
     quote,
-    h(
-      "button",
-      {
-        class: "bc-icon-button",
-        type: "button",
-        "aria-label": t.cancelReply,
-        onclick: () => setReply(null),
-      },
-      icon(ICON_X),
-    ),
+    iconButton(t.cancelReply, ICON_X, () => setReply(null)).button,
   );
   show(replyBar, false);
   const composer = h(
     "div",
     { class: "bc-composer" },
     answering,
+    queueList,
     replyBar,
     h(
       "label",
@@ -381,17 +575,16 @@ export const mount = definePage((context: PortalContext) => {
       },
       t.label,
     ),
-    input,
     h(
       "div",
-      { class: "bc-composer__foot" },
+      { class: "bc-composer__row" },
+      input,
       h(
-        "span",
-        { class: "bc-caption bc-muted" },
-        term(t.session, t.sessionTip, lang, { start: true }),
-        counter,
+        "div",
+        { class: "bc-composer__actions" },
+        stopButton.button,
+        sendButton.button,
       ),
-      sendButton,
     ),
   );
   const invalid = h("span", {
@@ -423,6 +616,16 @@ export const mount = definePage((context: PortalContext) => {
     ),
   );
   show(offline, false);
+  const jump = iconButton(
+    t.jump,
+    ICON_ARROW_DOWN,
+    () => {
+      stuck = true;
+      follow();
+    },
+    "bc-button bc-button--outline bc-button--icon bc-chat-jump",
+  ).button;
+  show(jump, false);
   const form = h(
     "form",
     {
@@ -436,24 +639,94 @@ export const mount = definePage((context: PortalContext) => {
       "div",
       {
         style:
-          "width:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px",
+          "position:relative;width:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px",
       },
+      jump,
       offline,
       composer,
       invalid,
+      suggestions,
     ),
   );
+  const page = h(
+    "div",
+    { style: "flex:1 1 auto;display:flex;min-width:0" },
+    rail.node,
+    h(
+      "div",
+      {
+        style: "flex:1 1 auto;display:flex;flex-direction:column;min-width:0",
+      },
+      head,
+      log,
+      form,
+    ),
+  );
+
+  /** The device's latest session list; `null` until it answers. */
+  let sessions: SessionsState | null = null;
+
+  /** The fresh conversation holds the composer mid-page; once it has messages, the head says what it is. */
+  function setFresh(on: boolean) {
+    page.classList.toggle("bc-chat--fresh", on);
+    column.style.flex = on ? "0 0 auto" : "1 1 auto";
+    show(suggestions, on);
+    label();
+  }
+
+  /** What the fresh conversation and the head say: a new session, a temporary chat, or the session continued. */
+  function label() {
+    const temporary = !!sessions?.temporary;
+    const continued = sessions?.sessions.find(
+      (item) => item.session === sessions?.current,
+    );
+    const [title, lead] = empty.querySelectorAll<HTMLElement>("h2, p");
+    title.textContent = temporary
+      ? t.tempTitle
+      : (continued?.title ?? t.newTitle);
+    lead.textContent = temporary
+      ? t.tempLead
+      : continued
+        ? t.continueLead
+        : t.newLead;
+    show(tempBadge, temporary && !page.classList.contains("bc-chat--fresh"));
+  }
 
   // ---- conversation state
   const items: { node: HTMLElement; forget(): void }[] = [];
   const agents = new Map<string, Agent>();
   let sent = new Map<string, Sent>();
   const urls = new Set<string>();
-  let group: HTMLElement | null = null;
+  const groups = new Set<Group>();
+  let group: Group | null = null;
   let request: Request | null = null;
   /** The message that answered a permission request, until the asking turn goes on. */
   let answered: { owner: Agent; entry: Sent } | null = null;
   let replyTo: { id: string; text: string } | null = null;
+  /** Messages the device is running or streaming (started, not ended). */
+  const active = new Set<Agent>();
+  /** Sent messages whose turn has not started yet. */
+  const awaiting = new Set<string>();
+  const queue: Queued[] = [];
+  /** Rewound messages: their turns' messages are dropped as they arrive. */
+  const withdrawn = new Set<string>();
+  /** Agent messages of a rewound turn, or of a session left, ignored until they end. */
+  const dropped = new Set<string>();
+  /** Sent messages of a conversation cleared for another session. */
+  const stale = new Set<string>();
+  /** A rewound message waits in the composer: the queue holds until it is sent. */
+  let held = false;
+  /** Stop was asked for; the turn has not ended yet. */
+  let stopping = false;
+  let typingOn = false;
+  let stall: ReturnType<typeof setTimeout> | undefined;
+  /** The turn the device has been asked for and not yet begun: an author line over 「思考中」. */
+  const pending: Group = {
+    node: h("div", { class: "bc-turn bc-turn--new" }),
+    author: author(),
+    spin: null,
+  };
+  pending.node.append(pending.author);
 
   function add(node: HTMLElement, forget = () => {}, into?: HTMLElement) {
     (into ?? column).append(node);
@@ -467,11 +740,13 @@ export const mount = definePage((context: PortalContext) => {
       if (parent && parent !== column && parent.childElementCount <= 1)
         parent.remove();
     }
-    empty.remove();
-    column.append(typing);
+    if (empty.isConnected) {
+      empty.remove();
+      setFresh(false);
+    }
   }
 
-  function who() {
+  function author() {
     return h(
       "span",
       { class: "bc-meta bc-meta--author" },
@@ -480,17 +755,40 @@ export const mount = definePage((context: PortalContext) => {
     );
   }
 
+  /** Spins a turn's mark while it runs, and rests it when it ends; without WebGL it stays still. */
+  function spin(target: Group, on: boolean) {
+    if (on === !!target.spin) return;
+    if (on) {
+      const spinning = spinningMark();
+      if (!spinning) return;
+      target.spin = spinning;
+      target.author.firstElementChild!.replaceWith(
+        h("span", { class: "bc-mark-tile" }, spinning.canvas),
+      );
+    } else {
+      target.spin!.stop();
+      target.spin = null;
+      target.author.firstElementChild!.replaceWith(mark(MARK_TILE, 16));
+    }
+  }
+
   function reactionBadge() {
     const badge = h("span", { class: "bc-badge", "aria-label": t.reaction });
     show(badge, false);
     return badge;
   }
 
-  function addUser(text: string, id: string, quoted: string | null) {
+  function addUser(
+    text: string,
+    id: string,
+    quoted: { id: string; text: string } | null,
+  ) {
     const reaction = reactionBadge();
+    const rewind = iconButton(t.rewind, ICON_UNDO, () => rewindTo(id)).button;
+    show(rewind, false);
     const node = h(
       "div",
-      { class: "bc-turn bc-turn--user" },
+      { class: "bc-turn bc-turn--user bc-turn--new" },
       quoted === null
         ? null
         : h(
@@ -500,19 +798,25 @@ export const mount = definePage((context: PortalContext) => {
               style: "display:flex;align-items:center;gap:8px;max-width:100%",
             },
             icon(ICON_REPLY),
-            h(
-              "span",
-              {
-                style:
-                  "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-              },
-              quoted,
-            ),
+            h("span", { class: "bc-composer__text" }, quoted.text),
           ),
       h("p", { class: "bc-bubble" }, text),
-      h("span", { class: "bc-meta" }, reaction, t.sent),
+      h(
+        "span",
+        { class: "bc-meta", style: "gap:4px" },
+        rewind,
+        reaction,
+        t.sent,
+      ),
     );
-    const record = { root: node, reaction, confirmed: false };
+    const record: Sent = {
+      root: node,
+      reaction,
+      confirmed: false,
+      text,
+      quoted,
+      rewind,
+    };
     const map = sent;
     map.set(id, record);
     add(node, () => map.delete(id));
@@ -522,9 +826,16 @@ export const mount = definePage((context: PortalContext) => {
   function agent(id: string, kind = "reply"): Agent {
     const known = agents.get(id);
     if (known) return known;
-    if (!group) {
-      group = h("div", { class: "bc-turn" }, who());
-      column.append(group);
+    if (!group || !group.node.isConnected) {
+      const opened: Group = {
+        node: h("div", { class: "bc-turn bc-turn--new" }),
+        author: author(),
+        spin: null,
+      };
+      opened.node.append(opened.author);
+      groups.add(opened);
+      column.append(opened.node);
+      group = opened;
     }
     // one message of the turn: its parts on the turn's own 8px rhythm
     const root = h("div", {
@@ -534,51 +845,110 @@ export const mount = definePage((context: PortalContext) => {
       id,
       kind,
       root,
+      group,
       run: null,
       tool: null,
       request: null,
-      steps: 0,
-      usage: {},
       footer: null,
       reaction: reactionBadge(),
       ended: false,
+      replyTo: "",
     };
     agents.set(id, record);
+    // a message first heard mid-stream is running too, until its end
+    if (kind !== "media") active.add(record);
     const owner = group;
-    add(root, () => forget(record), owner);
+    add(root, () => forget(record), owner.node);
     group = owner;
     return record;
   }
 
   function forget(record: Agent) {
     agents.delete(record.id);
+    active.delete(record);
+    if (record.run) close(record);
     if (request?.owner === record) setRequest(null);
     if (replyTo?.id === record.id) setReply(null);
+  }
+
+  // ---- smooth streaming
+  const flowing = new Set<Run>();
+  let frame = 0;
+
+  /** Whether text should land at once: reduced motion, or a hidden tab whose frames pause. */
+  function instant() {
+    return (
+      !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+      doc.hidden
+    );
+  }
+
+  function flow(run: Run, text: string) {
+    run.pending += text;
+    if (instant() || run.pending.length > MAX_TEXT) return settle(run);
+    flowing.add(run);
+    if (!frame) frame = requestAnimationFrame(tick);
+  }
+
+  /** Reveals a share of each run's backlog: steady when it is short, catching up when it is long. */
+  function tick() {
+    frame = 0;
+    for (const run of flowing) {
+      let n = Math.min(
+        run.pending.length,
+        Math.max(2, Math.ceil(run.pending.length / 10)),
+      );
+      // never split a surrogate pair across frames
+      const code = run.pending.charCodeAt(n - 1);
+      if (code >= 0xd800 && code <= 0xdbff) n += 1;
+      run.text.data = clip(run.text.data + run.pending.slice(0, n));
+      run.pending = run.pending.slice(n);
+      if (!run.pending) flowing.delete(run);
+    }
+    if (flowing.size) frame = requestAnimationFrame(tick);
+    follow();
+  }
+
+  function settle(run: Run) {
+    if (run.pending) run.text.data = clip(run.text.data + run.pending);
+    run.pending = "";
+    flowing.delete(run);
+  }
+
+  /** Closes the message's open run: its text lands in full and its `done` runs. */
+  function close(record: Agent) {
+    const run = record.run;
+    if (!run) return;
+    settle(run);
+    record.run = null;
+    run.done?.();
   }
 
   /** Appends text to the message's run for `stream`, opening a new run when the stream changes. */
   function write(record: Agent, stream: string, text: string) {
     if (!text) return;
     if (record.run?.stream !== stream) {
-      const node =
-        stream === "reasoning"
-          ? reasoning(record)
-          : h("p", {
-              class:
-                stream === "notice" || stream === "tool"
-                  ? "bc-small bc-muted"
-                  : "bc-reply",
-              style:
-                stream === "notice" || stream === "tool" ? "margin:0" : null,
-            });
-      if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+      close(record);
+      let done: (() => void) | undefined;
+      let node: HTMLElement;
+      if (stream === "reasoning") ({ node, done } = reasoning(record));
+      else {
+        node = h("p", {
+          class:
+            stream === "notice" || stream === "tool"
+              ? "bc-small bc-muted"
+              : "bc-reply",
+          style: stream === "notice" || stream === "tool" ? "margin:0" : null,
+        });
+        if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+      }
       const content = doc.createTextNode("");
       node.append(content);
       if (stream !== "reasoning") put(record, node);
-      record.run = { stream, text: content, node };
+      record.run = { stream, text: content, node, pending: "", done };
     }
     const run = record.run!;
-    run.text.data = clip(run.text.data + text);
+    flow(run, text);
     if (stream === "output" && !record.ended) run.node.append(caret);
   }
 
@@ -590,34 +960,58 @@ export const mount = definePage((context: PortalContext) => {
     );
   }
 
+  /**
+   * Reasoning: open under a shimmering 「思考中」 while it streams, then folded away under
+   * 「思考了 N 秒」 unless the reader opened or closed it meanwhile.
+   */
   function reasoning(record: Agent) {
     const panel = h("p", {
       class: "bc-quote",
       style: "margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere",
     });
+    const label = h("span", { class: "bc-shimmer" }, t.thinking);
     const button = h(
       "button",
       { class: "bc-fold-link", type: "button" },
       icon(ICON_LIGHTBULB),
-      t.reasoning,
+      label,
       icon(ICON_CHEVRON_RIGHT),
     );
-    fold(button, panel, false);
+    const set = fold(button, panel, true);
+    let touched = false;
+    button.addEventListener("click", () => (touched = true));
+    const started = Date.now();
     put(record, h("div", null, button, panel));
-    return panel;
+    const done = () => {
+      const seconds = Math.round((Date.now() - started) / 1000);
+      label.removeAttribute("class");
+      label.replaceChildren(
+        ...(seconds >= 1
+          ? [
+              t.thoughtA,
+              h("span", { class: "bc-mono" }, String(seconds)),
+              t.thoughtB,
+            ]
+          : [t.reasoning]),
+      );
+      if (!touched) set(false);
+    };
+    return { node: panel, done };
   }
 
   /**
    * A tool-call record (Card): the fold names the tool and its arguments in one line; open, a dense
-   * key-value body holds them in full.
+   * key-value body holds them in full. It spins 「运行中」 until its result ends.
    */
   function tool(record: Agent): Tool {
     const name = h("span", { class: "bc-tool__name" });
     const summary = h("span", { class: "bc-tool__args" });
-    const status = h("span", {
-      class: "bc-status",
-      style: "flex:none;white-space:nowrap",
-    });
+    const status = h(
+      "span",
+      { class: "bc-status bc-muted", style: "flex:none;white-space:nowrap" },
+      icon(ICON_LOADER, undefined, "bc-spinner"),
+      t.running,
+    );
     const button = h(
       "button",
       { class: "bc-fold", type: "button" },
@@ -640,8 +1034,8 @@ export const mount = definePage((context: PortalContext) => {
     );
     const open = fold(button, panel, false);
     const card = h("div", { class: "bc-card" }, button, panel);
+    close(record);
     put(record, card);
-    record.run = null;
     return { card, name, summary, args, out, status, open };
   }
 
@@ -702,64 +1096,41 @@ export const mount = definePage((context: PortalContext) => {
       actions,
     );
     show(actions, false);
+    close(record);
     put(record, card);
-    record.run = null;
     return { card, tool, args, reason, actions, owner: record };
   }
 
-  /** Shows the message's footer (steps, usage, reaction, Reply): at its end or while it asks. */
+  /** Shows the message's footer (its reaction, then Copy and Reply as icon buttons): at its end or while it asks. */
   function showFooter(record: Agent) {
     if (record.kind !== "reply") return;
     if (!record.footer) {
-      const facts = h("span");
+      let reset: ReturnType<typeof setTimeout> | undefined;
+      const copy = iconButton(t.copy, ICON_COPY, async () => {
+        if (!(await copyText(textOf(record))) || signal.aborted) return;
+        copy.set(t.copied, ICON_CHECK);
+        clearTimeout(reset);
+        reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
+      });
       record.footer = h(
         "div",
-        { class: "bc-meta", style: "gap:4px 12px;flex-wrap:wrap" },
-        facts,
+        { class: "bc-meta", style: "gap:4px" },
         record.reaction,
-        // the design's 24px muted inline action
-        h(
-          "button",
-          {
-            class: "bc-fold-link",
-            type: "button",
-            style: "margin:0",
-            onclick: () => setReply({ id: record.id, text: textOf(record) }),
-          },
-          icon(ICON_REPLY),
-          t.reply,
-        ),
+        copy.button,
+        iconButton(t.reply, ICON_REPLY, () =>
+          setReply({ id: record.id, text: textOf(record) }),
+        ).button,
       );
     }
     record.root.append(record.footer);
-    footer(record);
   }
 
-  /** Refreshes the footer's facts, if it is shown: words in sans, numbers and `tokens` in mono. */
-  function footer(record: Agent) {
-    if (!record.footer) return;
-    const mono = (text: string) => h("span", { class: "bc-mono" }, text);
-    const count = (value: number | undefined) =>
-      value === undefined ? "—" : numbers.format(value);
-    const parts: (string | HTMLElement)[][] = [];
-    if (record.steps)
-      parts.push([t.stepA, mono(String(record.steps)), t.stepB]);
-    const { i, o } = record.usage;
-    if (i !== undefined || o !== undefined)
-      parts.push([t.in, mono(count(i))], [t.out, mono(`${count(o)} tokens`)]);
-    const facts = record.footer.firstElementChild as HTMLElement;
-    facts.replaceChildren(
-      ...parts.flatMap((part, index) => (index ? [" · ", ...part] : part)),
-    );
-    show(facts, parts.length > 0);
-  }
-
+  /** The message's reply text, as Copy and Reply take it. */
   function textOf(record: Agent) {
     return [...record.root.querySelectorAll("p.bc-reply")]
       .map((node) => node.firstChild?.textContent ?? "")
       .join("\n")
-      .trim()
-      .split("\n")[0];
+      .trim();
   }
 
   function setReply(target: { id: string; text: string } | null) {
@@ -794,7 +1165,7 @@ export const mount = definePage((context: PortalContext) => {
     add(
       h(
         "div",
-        { class: "bc-alert bc-alert--error", role: "alert" },
+        { class: "bc-alert bc-alert--error bc-turn--new", role: "alert" },
         icon(ICON_CIRCLE_ALERT),
         h(
           "span",
@@ -825,9 +1196,6 @@ export const mount = definePage((context: PortalContext) => {
       answered = null;
     }
     switch (type) {
-      case "iteration_started":
-        record.steps += 1;
-        return footer(record);
       case "reasoning_delta":
         return write(record, "reasoning", text);
       case "output_delta":
@@ -837,8 +1205,7 @@ export const mount = definePage((context: PortalContext) => {
       case "output_ended":
       case "effect_output_ended":
         caret.remove();
-        record.run = null;
-        return;
+        return close(record);
       case "tool_result_started":
         record.tool = tool(record);
         return;
@@ -861,7 +1228,7 @@ export const mount = definePage((context: PortalContext) => {
         const card = record.tool;
         if (!card) return;
         const ok = payload.ok === true;
-        card.status.classList.add(ok ? "bc-success" : "bc-destructive");
+        card.status.className = `bc-status ${ok ? "bc-success" : "bc-destructive"}`;
         card.status.replaceChildren(
           icon(ok ? ICON_CHECK : ICON_CIRCLE_X),
           ok ? t.ok : t.failed,
@@ -871,16 +1238,6 @@ export const mount = definePage((context: PortalContext) => {
         record.tool = null;
         return;
       }
-      case "usage":
-        for (const [key, name] of [
-          ["i", "input_tokens"],
-          ["o", "output_tokens"],
-        ] as const) {
-          const value = payload[name];
-          if (typeof value === "number")
-            record.usage[key] = (record.usage[key] ?? 0) + value;
-        }
-        return footer(record);
       case "input_request_started":
         record.request = approval(record);
         return;
@@ -906,7 +1263,28 @@ export const mount = definePage((context: PortalContext) => {
       case "turn_error":
       case "session_error":
         caret.remove();
+        close(record);
         return errorRecord(t.turnError, str(payload.message));
+      case "turn_ended":
+        stopping = false;
+        // a turn cut short keeps what it wrote and says so; a completed one needs no word
+        if (
+          payload.outcome === "interrupted" ||
+          payload.outcome === "cancelled"
+        ) {
+          caret.remove();
+          close(record);
+          put(
+            record,
+            h(
+              "span",
+              { class: "bc-status bc-muted" },
+              icon(ICON_CIRCLE_STOP),
+              t.stopped,
+            ),
+          );
+        }
+        return;
     }
   }
 
@@ -936,16 +1314,40 @@ export const mount = definePage((context: PortalContext) => {
     if (event === "stream.lagged")
       return separator(fill(t.lagged, { n: Number(value.missed) || 0 }));
     if (event === "conversation.typing") {
-      show(typing, value.typing === true);
-      return column.append(typing);
+      typingOn = value.typing === true;
+      return;
     }
+    if (event === "conversation.sessions")
+      return applySessions(value as unknown as SessionsState);
     const id = str(value.message_id);
     if (!id) return;
+    if (event === "message.start" && stale.has(str(value.reply_to))) {
+      // the reply a left session still owes this page: it belongs to the conversation cleared
+      dropped.add(id);
+      return;
+    }
+    if (event === "message.start" && withdrawn.has(str(value.reply_to))) {
+      // the rewound message's turn began after all: cancel it again and keep it off the page
+      dropped.add(id);
+      awaiting.delete(str(value.reply_to));
+      control({ control: "cancel" });
+      return;
+    }
+    if (dropped.has(id)) {
+      if (event === "message.end") dropped.delete(id);
+      return;
+    }
     const known = agents.get(id);
     switch (event) {
       case "message.start": {
-        agent(id, str(value.kind) || "reply");
-        const target = sent.get(str(value.reply_to));
+        const started = agent(id, str(value.kind) || "reply");
+        const replied = str(value.reply_to);
+        started.replyTo = replied;
+        // stop asked before the turn began reached no turn: ask again now that one runs
+        if (stopping) control({ control: "interrupt" });
+        // the oldest waiting message's turn has started
+        awaiting.delete(replied);
+        const target = sent.get(replied);
         if (target) target.confirmed = true;
         return;
       }
@@ -970,8 +1372,11 @@ export const mount = definePage((context: PortalContext) => {
       case "message.end": {
         if (!known) return;
         known.ended = true;
-        known.run = null;
+        active.delete(known);
+        // a finished turn may have named or started a session: ask for the list again
+        if (sessions && !active.size) control({ control: "sessions" });
         caret.remove();
+        close(known);
         if (request?.owner === known) setRequest(null);
         // the device's reason is internal (no plumbing on screen): the line says what happened
         if (str(value.error))
@@ -988,12 +1393,14 @@ export const mount = definePage((context: PortalContext) => {
       }
       case "message.edit": {
         if (!known) return;
+        close(known);
         for (const node of known.root.querySelectorAll("p.bc-reply"))
           node.remove();
-        known.run = null;
         write(known, "output", str(value.text) || " ");
         caret.remove();
-        known.run!.node.append(
+        const run = known.run!;
+        settle(run);
+        run.node.append(
           h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
         );
         known.run = null;
@@ -1009,10 +1416,13 @@ export const mount = definePage((context: PortalContext) => {
         item.node.remove();
         item.forget();
         if (parent && parent !== column && parent.childElementCount <= 1) {
-          if (parent === group) group = null;
+          if (parent === group?.node) group = null;
           parent.remove();
         }
-        if (!items.length) column.prepend(empty);
+        if (!items.length) {
+          column.prepend(empty);
+          setFresh(true);
+        }
         return;
       }
       case "message.reaction": {
@@ -1140,14 +1550,162 @@ export const mount = definePage((context: PortalContext) => {
     );
   }
 
+  // ---- turn state: the spinning marks, 「思考中」, the send button, and when the queue moves
+  function busy() {
+    return active.size > 0 || awaiting.size > 0;
+  }
+
+  function refresh() {
+    const working = busy() || typingOn;
+    // something visibly moving already speaks for the device: streaming text, a running tool,
+    // or a question waiting on the reader
+    const moving =
+      !!request || [...active].some((record) => record.run || record.tool);
+    for (const each of groups) {
+      if (!each.node.isConnected) {
+        spin(each, false);
+        groups.delete(each);
+        continue;
+      }
+      spin(
+        each,
+        [...active].some((record) => record.group === each),
+      );
+    }
+    // 「思考中」 follows the running turn, or a turn of its own while the device has not begun
+    thinking.remove();
+    pending.node.remove();
+    const last = group?.node.isConnected ? group : null;
+    const running =
+      !!last && [...active].some((record) => record.group === last);
+    let host: Group | null = null;
+    if (working && !moving) {
+      if (running && column.lastElementChild === last!.node) host = last;
+      else if (!running) {
+        host = pending;
+        column.append(pending.node);
+      }
+    }
+    dots.remove();
+    if (host) {
+      if (host === pending) spin(pending, true);
+      // without a spinning mark, the dots show the device is at work
+      if (!host.spin) thinking.prepend(dots);
+      host.node.append(thinking);
+    }
+    if (host !== pending) spin(pending, false);
+    const queueing = busy() && !request;
+    const label = queueing ? t.enqueue : t.send;
+    if (sendButton.button.getAttribute("aria-label") !== label)
+      sendButton.set(label);
+    sendButton.button.disabled = !canSend();
+    // stop stands in for send while a turn runs; typed text brings send back as the primary
+    const typed = !!input.value.trim();
+    show(stopButton.button, busy() && online());
+    stopButton.button.disabled = stopping;
+    stopButton.button.classList.toggle("bc-button--outline", typed);
+    show(sendButton.button, !busy() || typed || !online());
+    // rewind sits on the message whose turn has not ended
+    for (const [id, entry] of sent)
+      show(
+        entry.rewind,
+        online() &&
+          (awaiting.has(id) ||
+            [...active].some((record) => record.replyTo === id)),
+      );
+    pump();
+  }
+
+  function canSend() {
+    return online() && !!input.value.trim() && !over();
+  }
+
+  /** Sends the oldest queued message once the device is free. */
+  function pump() {
+    if (!queue.length || held || busy() || !online()) return;
+    const next = queue.shift()!;
+    if (!send(next.text, next.replyTo)) queue.unshift(next);
+    renderQueue();
+  }
+
+  /** Stops waiting on sent messages once nothing has been heard for `STALL_MS`. */
+  function arm() {
+    clearTimeout(stall);
+    stall = awaiting.size
+      ? setTimeout(() => {
+          awaiting.clear();
+          refresh();
+        }, STALL_MS)
+      : undefined;
+  }
+
+  function renderQueue() {
+    const bars = queue.map((item, index) =>
+      h(
+        "div",
+        {
+          class: `bc-composer__bar${index === queue.length - 1 ? " bc-composer__bar--rule" : ""}`,
+          role: "listitem",
+        },
+        h(
+          "span",
+          { class: "bc-mono bc-muted", style: "flex:none" },
+          pad(index + 1),
+        ),
+        h("span", { class: "bc-composer__text" }, item.text),
+        iconButton(t.editQueued, ICON_PENCIL, () => {
+          const [taken] = queue.splice(queue.indexOf(item), 1);
+          input.value = input.value
+            ? `${taken.text}\n${input.value}`
+            : taken.text;
+          if (taken.replyTo) setReply(taken.replyTo);
+          renderQueue();
+          changed();
+          input.focus();
+        }).button,
+        iconButton(t.removeQueued, ICON_X, () => {
+          queue.splice(queue.indexOf(item), 1);
+          renderQueue();
+        }).button,
+      ),
+    );
+    queueList.replaceChildren(
+      ...(queue.length
+        ? [
+            h(
+              "div",
+              { class: "bc-composer__bar" },
+              icon(ICON_CLOCK, undefined, "bc-muted"),
+              h(
+                "span",
+                { class: "bc-muted" },
+                `${t.queued} · `,
+                h("span", { class: "bc-mono" }, pad(queue.length)),
+              ),
+            ),
+            ...bars,
+          ]
+        : []),
+    );
+    show(queueList, queue.length > 0);
+  }
+
   // ---- composer
   const encoder = new TextEncoder();
+  // where the browser cannot size the textarea to its text, the page does
+  const fits = !!globalThis.CSS?.supports?.("field-sizing", "content");
+  function over() {
+    return encoder.encode(input.value).byteLength > MAX_BYTES;
+  }
   function changed() {
-    const bytes = encoder.encode(input.value).byteLength;
-    counter.textContent = ` · ${bytes} / ${MAX_BYTES} bytes`;
-    const over = bytes > MAX_BYTES;
-    counter.classList.toggle("bc-destructive", over);
-    if (!over) showInvalid("");
+    // past the limit nothing counts: send turns grey and one sentence says why
+    showInvalid(over() ? t.tooLong : "");
+    if (!fits) {
+      input.style.height = "auto";
+      if (input.scrollHeight)
+        input.style.height = `${Math.min(input.scrollHeight, MAX_INPUT)}px`;
+    }
+    refresh();
   }
   function showInvalid(message: string) {
     invalid.textContent = message;
@@ -1167,16 +1725,20 @@ export const mount = definePage((context: PortalContext) => {
 
   function submit() {
     const text = input.value;
-    if (!text.trim()) return input.focus();
-    if (encoder.encode(text).byteLength > MAX_BYTES) {
-      showInvalid(t.tooLong);
-      return input.focus();
-    }
-    if (send(text, replyTo)) {
-      input.value = "";
-      setReply(null);
-      changed();
-    }
+    if (!text.trim() || over()) return input.focus();
+    // a rewound message goes ahead of the queue it held
+    const first = held;
+    held = false;
+    // a pending question takes the message as its answer at once; otherwise a running turn
+    // queues it
+    if (!request && (busy() || (queue.length && !first))) {
+      queue.push({ text, replyTo });
+      renderQueue();
+    } else if (!send(text, replyTo)) return;
+    input.value = "";
+    setReply(null);
+    changed();
+    refresh();
   }
 
   function send(text: string, target: { id: string; text: string } | null) {
@@ -1188,24 +1750,142 @@ export const mount = definePage((context: PortalContext) => {
     }
     try {
       connection.send(
-        JSON.stringify(target ? { text, reply_to: target.id } : { text }),
+        JSON.stringify({ text: target ? withQuote(text, target.text) : text }),
       );
     } catch {
       context.toast({ kind: "error", title: t.notSent });
       return false;
     }
     // the bridge numbers each accepted frame on this connection: web-in-1, web-in-2, …
-    const entry = addUser(
-      text,
-      `web-in-${++inbound}`,
-      target ? target.text : null,
-    );
+    const id = `web-in-${++inbound}`;
+    const entry = addUser(text, id, target);
     if (request) {
+      // an answer goes on the asking turn; no turn of its own starts
       answered = { owner: request.owner, entry };
       setRequest(null);
+    } else {
+      awaiting.add(id);
+      arm();
     }
-    scroll(true);
+    stuck = true;
+    follow();
+    refresh();
     return true;
+  }
+
+  /**
+   * Sends a control frame: `interrupt` (stop) or `cancel` (rewind) for the running turn, or a
+   * session command, which the device answers with `conversation.sessions`.
+   */
+  function control(
+    frame: SessionCommand | { control: "interrupt" | "cancel" },
+  ) {
+    try {
+      if (online()) socket!.send(JSON.stringify(frame));
+    } catch {
+      // the socket is going away; its close says so
+    }
+  }
+
+  function stop() {
+    if (!busy() || stopping) return;
+    stopping = true;
+    control({ control: "interrupt" });
+    refresh();
+  }
+
+  /**
+   * Takes the device's session list. A switch or a new session (from this page, another tab, or
+   * a deletion of the current one) starts the conversation view over: the device keeps the
+   * history, the page shows only what comes next.
+   */
+  function applySessions(next: SessionsState) {
+    const before = sessions;
+    sessions = next;
+    show(rail.node, true);
+    show(railToggle, true);
+    rail.update(next);
+    const kind = next.notice?.kind;
+    if (
+      kind === "switched" ||
+      kind === "created" ||
+      (!!before?.current && next.current !== before.current)
+    )
+      startOver();
+    const problem =
+      kind === "unknown_session"
+        ? t.sessionGone
+        : kind === "invalid_title"
+          ? t.badTitle
+          : kind === "failed"
+            ? t.sessionFailed
+            : "";
+    if (problem) context.toast({ kind: "error", title: problem });
+    label();
+  }
+
+  /** Clears the conversation view for another session; what the left one still sends is dropped. */
+  function startOver() {
+    for (const id of agents.keys()) dropped.add(id);
+    for (const id of sent.keys()) stale.add(id);
+    for (const item of items.splice(0)) item.forget();
+    column.replaceChildren();
+    group = null;
+    caret.remove();
+    active.clear();
+    awaiting.clear();
+    clearTimeout(stall);
+    withdrawn.clear();
+    held = false;
+    stopping = false;
+    answered = null;
+    setRequest(null);
+    setReply(null);
+    queue.length = 0;
+    renderQueue();
+    column.prepend(empty);
+    setFresh(true);
+    refresh();
+  }
+
+  /**
+   * Withdraws `id` while its turn runs: the turn is cancelled, the message and everything after it
+   * leave the log, and its text goes back into the composer ahead of anything typed. The device
+   * keeps the message in its history; the page only stops showing it. The queue waits for the
+   * withdrawn text to be sent again.
+   */
+  function rewindTo(id: string) {
+    const entry = sent.get(id);
+    if (!entry) return;
+    withdrawn.add(id);
+    awaiting.delete(id);
+    arm();
+    control({ control: "cancel" });
+    for (const record of active)
+      if (record.replyTo === id) dropped.add(record.id);
+    const from = items.findIndex((item) => item.node === entry.root);
+    for (const item of from < 0 ? [] : items.splice(from)) {
+      const parent = item.node.parentElement;
+      item.node.remove();
+      item.forget();
+      if (parent && parent !== column && !parent.querySelector("div")) {
+        if (parent === group?.node) group = null;
+        parent.remove();
+      }
+    }
+    caret.remove();
+    stopping = false;
+    if (!items.length) {
+      column.prepend(empty);
+      setFresh(true);
+    }
+    held = queue.length > 0;
+    input.value = input.value.trim()
+      ? `${entry.text}\n${input.value}`
+      : entry.text;
+    if (entry.quoted) setReply(entry.quoted);
+    changed();
+    input.focus();
   }
 
   input.addEventListener("input", changed);
@@ -1216,13 +1896,45 @@ export const mount = definePage((context: PortalContext) => {
     }
   });
 
+  // ---- scrolling: follow the conversation while the reader is at its foot
+  let stuck = true;
+
+  function nearBottom() {
+    const scroller = doc.scrollingElement;
+    return (
+      !scroller ||
+      scroller.scrollHeight - scroller.scrollTop - window.innerHeight < 120
+    );
+  }
+  function follow() {
+    const scroller = doc.scrollingElement;
+    if (scroller && stuck) scroller.scrollTop = scroller.scrollHeight;
+    show(jump, !stuck && items.length > 0);
+  }
+  window.addEventListener(
+    "scroll",
+    () => {
+      stuck = nearBottom();
+      show(jump, !stuck && items.length > 0);
+    },
+    { signal, passive: true },
+  );
+  // a hidden tab pauses frames: what is still flowing lands at once
+  doc.addEventListener(
+    "visibilitychange",
+    () => {
+      for (const run of [...flowing]) settle(run);
+    },
+    { signal },
+  );
+
   // ---- connection
   let socket: WebSocket | undefined;
   let inbound = 0;
   let warned = false;
 
-  function setOnline(online: boolean) {
-    sendButton.disabled = !online;
+  function online() {
+    return socket?.readyState === WebSocket.OPEN;
   }
 
   // the top bar carries the connection state, as the design's chat boards show it
@@ -1234,26 +1946,19 @@ export const mount = definePage((context: PortalContext) => {
     );
   }
 
-  function nearBottom() {
-    const page = doc.scrollingElement;
-    return (
-      !page || page.scrollHeight - page.scrollTop - window.innerHeight < 120
-    );
-  }
-  function scroll(force: boolean) {
-    const page = doc.scrollingElement;
-    if (page && force) page.scrollTop = page.scrollHeight;
-  }
-
   function connect(byUser: boolean) {
     socket?.close();
     socket = undefined;
-    setOnline(false);
     input.disabled = false;
     show(offline, false);
     sent = new Map();
     inbound = 0;
+    // message ids restart with the connection, so old rewinds name nothing now
+    withdrawn.clear();
+    dropped.clear();
+    stale.clear();
     warned = false;
+    refresh();
     const url = new URL("/ws/message", document.baseURI);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     let connection: WebSocket;
@@ -1263,26 +1968,30 @@ export const mount = definePage((context: PortalContext) => {
       return disconnected();
     }
     socket = connection;
-    const active = () => socket === connection && !signal.aborted;
+    const live = () => socket === connection && !signal.aborted;
     connection.addEventListener("open", () => {
-      if (!active()) return;
-      setOnline(true);
+      if (!live()) return;
       setLink("live");
       if (byUser) context.toast({ kind: "success", title: t.reconnected });
+      control({ control: "sessions" });
+      refresh();
     });
     connection.addEventListener("message", (event) => {
-      if (!active()) return;
-      const stick = nearBottom();
+      if (!live()) return;
+      if (stuck) stuck = nearBottom();
       try {
         receive(event.data);
       } catch {
         if (!warned) context.toast({ kind: "error", title: t.unreadable });
         warned = true;
       }
-      scroll(stick);
+      // anything heard means the device is alive: keep waiting on its queue
+      if (awaiting.size) arm();
+      refresh();
+      follow();
     });
     const lost = () => {
-      if (active()) disconnected();
+      if (live()) disconnected();
     };
     connection.addEventListener("error", lost);
     connection.addEventListener("close", lost);
@@ -1290,11 +1999,18 @@ export const mount = definePage((context: PortalContext) => {
 
   function disconnected() {
     socket = undefined;
-    setOnline(false);
     setLink("lost");
     input.disabled = true;
-    show(typing, false);
+    typingOn = false;
     caret.remove();
+    for (const record of agents.values()) close(record);
+    // live events only: a turn cut off here is not heard ending, so the page stops waiting on it;
+    // queued messages stay and go out after reconnecting
+    active.clear();
+    awaiting.clear();
+    dropped.clear();
+    stopping = false;
+    clearTimeout(stall);
     const count = [...sent.values()].filter((entry) => !entry.confirmed).length;
     // what to do with them is the reader's action, so it is said, not hidden behind a term
     offlineCount.replaceChildren(
@@ -1309,6 +2025,7 @@ export const mount = definePage((context: PortalContext) => {
         : "",
     );
     show(offline, true);
+    refresh();
   }
 
   signal.addEventListener(
@@ -1317,22 +2034,24 @@ export const mount = definePage((context: PortalContext) => {
       const connection = socket;
       socket = undefined;
       connection?.close();
+      cancelAnimationFrame(frame);
+      clearTimeout(stall);
+      flowing.clear();
+      for (const each of [...groups, pending]) each.spin?.stop();
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
       agents.clear();
       sent.clear();
+      queue.length = 0;
       input.value = "";
+      style.remove();
     },
     { once: true },
   );
 
-  column.append(empty, typing);
+  column.append(empty);
+  setFresh(true);
   changed();
   connect(false);
-  return h(
-    "div",
-    { style: "flex:1 1 auto;display:flex;flex-direction:column;min-width:0" },
-    log,
-    form,
-  );
+  return page;
 });

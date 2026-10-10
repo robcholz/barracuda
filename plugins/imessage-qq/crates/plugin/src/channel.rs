@@ -140,6 +140,12 @@ where
             .await
     }
 
+    /// Makes `id` an owner without a pairing code: the person who bound the
+    /// bot by QR code. Returns whether it was added.
+    pub(crate) async fn add_owner(&self, id: &str) -> Result<bool, OwnersError> {
+        self.load_owners().await?.add(id, None).await
+    }
+
     /// Sixteen bytes from the Platform entropy, or zeros without one.
     pub(crate) fn random_key(&self) -> [u8; 16] {
         let mut key = [0_u8; 16];

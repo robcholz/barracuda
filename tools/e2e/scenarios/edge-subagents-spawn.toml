@@ -1,5 +1,5 @@
 name = "Edge: background subagent delivery"
-description = "subagent_spawn returns its acceptance at once; the detached result is delivered back to the root, after which the child is gone from list, watch, interrupt, and delete (twice)."
+description = "subagent_spawn returns its acceptance at once; the background result is delivered back to the root, after which the child is gone from list, watch, interrupt, and delete (twice)."
 
 [model]
 mode = "scripted"
@@ -10,7 +10,7 @@ mode = "scripted"
 # same reply. The text is long (~1799 chars, one SSE frame per 16 chars,
 # 2 ms apart) so the child cannot finish and deliver before the root has begun
 # its continuation iteration. The completion then forces exactly one more root
-# model call, either as a continuation (driver.rs:205-207) or as a detached
+# model call, either as a continuation (driver.rs:205-207) or as a background
 # turn (instance.rs:452-463): call 3.
 
 # call 0 (root)
@@ -24,12 +24,10 @@ text = "done done done done done done done done done done done done done done do
 [[model.responses]]
 text = "done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done done"
 
-# call 3 (root): instance.rs:466-484 notification + model.rs:77-83 result.
+# call 3 (root): instance.rs render_notifications + model.rs:77-83 result.
 [[model.responses]]
 request_contains = [
-  "[detached:completed]",
-  "tool: subagent_spawn",
-  "call_id: call_0",
+  '[background:completed]\nid: 1\ntool: subagent_spawn',
   "[subagent] id: agent-2, result: true, message: done done done",
 ]
 text = "Background job delivered."

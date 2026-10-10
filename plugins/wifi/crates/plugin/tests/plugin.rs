@@ -133,14 +133,22 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
             .any(|bytes| bytes == b"\"id\":\"wifi\"")
     );
 
-    // A Platform-managed network has no station state, so no status is listed.
+    // A Platform-managed network reports the connection the host made.
     let network = loopback_network();
     let response = request(Rc::clone(&server), network, "GET", "/portal/status", b"").await;
     assert!(response.starts_with(b"HTTP/1.1 200"));
-    assert_eq!(body(&response), br#"{"entries":{}}"#);
+    assert_eq!(
+        body(&response),
+        r#"{"entries":{"wifi":{"state":"ready","label":{"zh":"已连接","en":"Connected"}}}}"#
+            .as_bytes()
+    );
 
     let network = loopback_network();
     let response = request(Rc::clone(&server), network, "GET", "/api/wifi", b"").await;
+    assert!(response.starts_with(b"HTTP/1.1 405"));
+
+    let network = loopback_network();
+    let response = request(Rc::clone(&server), network, "GET", "/api/wifi/status", b"").await;
     assert!(response.starts_with(b"HTTP/1.1 200"));
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(body(&response)).expect("status JSON"),

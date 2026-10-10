@@ -125,7 +125,7 @@ a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
 `description` are shown on the token field. When the browser has no route out (a
 phone on the device's hotspot) the page notes that the token is unverified;
 verifying never gates saving. The device's error `message` is shown in the
-toast. On mount it reads `GET /api/gateway/telegram`, which reports the
+toast. On mount it reads `GET /api/gateway/telegram/status`, which reports the
 channel status and never the settings; a configured channel shows as a 「通道」
 row with the 已配置 card above the form that replaces it. The row also appears
 after a save succeeds, and the page then calls `context.refreshStatus()` so the
