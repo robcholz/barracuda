@@ -1,0 +1,76 @@
+# Plugins as the primitive
+
+Everything a Barracuda device can do comes from a Plugin. The runtime itself is
+small: a portable System that registers Plugins in dependency order and starts
+them together. Customizing a device, building on it, and extending it all come
+down to choosing, configuring, trimming, or writing Plugins.
+
+## What a Plugin is
+
+A Plugin is a self-contained unit with a stable identity and a declared
+contract.
+
+- **Identity and dependencies.** A `plugin.toml` gives the Plugin its ID, the
+  Plugins it depends on, and its build tasks.
+- **Typed capabilities.** A Plugin can provide domain APIs to other Plugins and
+  require theirs. This is how Plugins collaborate directly.
+- **Workflow Actions and Events.** A Plugin can expose operations and facts to
+  Workflow automations with stable, schema-checked contracts.
+- **Agent Tools.** A Plugin can give the on-board agent new abilities through
+  model-facing tools designed for agents.
+- **VM packages.** A Plugin can expose hardware or services to scripts, so the
+  on-board agent's in-time code can use them.
+- **A portal page.** A Plugin can contribute its own page, icon, and status to
+  the Device Portal, so every capability arrives with its own settings.
+- **Resources and storage.** A Plugin owns its files, its settings, and its
+  long-running tasks, and releases them when it stops.
+- **Documentation.** Every Plugin documents its capabilities, tools, actions,
+  events, errors, and lifecycle in its own `docs/plugin.md`, written for people
+  and for agents.
+
+## Why a primitive
+
+- **One way to add anything.** A sensor driver, a message channel, a web search
+  provider, and the agent itself are all Plugins. There is no second extension
+  mechanism to learn.
+- **Composable.** Plugins depend on each other's capabilities, not on each
+  other's internals, so they can be combined freely.
+- **Removable.** A Plugin that is not enabled is not bundled. Removing a Plugin
+  frees its memory, flash, and tasks.
+- **Portable.** Plugins depend on portable services, never on a particular
+  chip, so the same Plugin runs on every Platform.
+- **Agent-friendly.** The contract is explicit enough for an agent to read,
+  use, and write. The on-board agent calls Plugin tools; coding agents create
+  Plugins with the `create-plugin` skill.
+
+## The Plugin catalog
+
+| Family | Examples |
+| --- | --- |
+| Device | Wi-Fi provisioning and setup hotspot, web server, Device Portal, HTTP client, time, scheduler |
+| Agent | The on-board agent, web search, files, HTTP for agents, schedules, Workflow access, VM access |
+| Channels | WeChat, Telegram, QQ, iMessage, Inkbox, web chat, terminal |
+| Automation | Workflow, scheduler |
+| Scripting | The VM and its packages |
+| Peripherals | GPIO, analog, I2C, I2S, SPI, UART, PWM, display, camera, audio, IMU, LED strip, power monitor, filesystem, message queue, system info |
+| Apps | App Manager and the app runtime |
+
+## Customizing with Plugins
+
+| Who | How they customize |
+| --- | --- |
+| Users and makers | Enable and disable Plugins in the Device Portal |
+| App developers | Use Plugins from their apps through the Live Editor |
+| Plugin developers | Create new Plugins with `create-plugin` |
+| Builders | Choose the exact Plugin set for a product and trim each Plugin to the target's budget with `fully-customize` |
+
+## Fitting the resources
+
+Barracuda runs on microcontrollers with a few hundred kilobytes of RAM, on
+boards with external memory, and on desktop hosts. The Plugin set is the main
+lever for fitting a target:
+
+- small targets carry the essentials: networking, the portal, the agent, the VM,
+  one channel;
+- larger targets add peripherals, more channels, apps, and concurrent scripts;
+- product firmware carries exactly what the product needs and nothing else.
