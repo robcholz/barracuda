@@ -14,7 +14,8 @@ use barracuda_webserver_plugin::{
 };
 use futures_lite::future;
 
-use crate::{InboundMessage, InboundMessageSink, Web, WebClientFrame, WebDelivery};
+use crate::client_frame::ClientFrame;
+use crate::{InboundControl, InboundMessage, InboundMessageSink, Web, WebDelivery};
 
 #[allow(clippy::large_enum_variant)] // Keeps the lane-bounded outgoing event inline.
 enum NextMessage {
@@ -73,8 +74,28 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                 .await;
                 match next {
                     NextMessage::Incoming(Ok(WebSocketMessage::Text(text))) => {
-                        match serde_json::from_str::<WebClientFrame>(&text) {
-                            Ok(frame) => {
+                        match serde_json::from_str::<ClientFrame>(&text) {
+                            Ok(ClientFrame::Control(frame)) => {
+                                log::info!(
+                                    "IMessage Web received {:?} control for conversation `{}`",
+                                    frame.control,
+                                    self.conversation_id
+                                );
+                                let control = InboundControl {
+                                    conversation_id: self.conversation_id.clone(),
+                                    thread_id: None,
+                                    control: frame.control,
+                                };
+                                // a rejected control leaves the socket open: the turn just runs on
+                                if let Err(error) = self.sink.receive_control(control).await {
+                                    log::warn!(
+                                        "IMessage Web failed to deliver {:?} control for conversation `{}`: {error}",
+                                        frame.control,
+                                        self.conversation_id
+                                    );
+                                }
+                            }
+                            Ok(ClientFrame::Message(frame)) => {
                                 let message_id = format!("web-in-{next_message}");
                                 next_message = next_message.saturating_add(1);
                                 log::info!(

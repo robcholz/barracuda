@@ -38,5 +38,5 @@ pub use manager::{SessionManager, SessionManagerInitError};
 pub use stream::{
     ContextProviderError, InputRequestId, InputRequestKind, IterationEvent, SessionCloseReason,
     SessionError, SessionEvent, SessionEventError, SessionInputError, SessionStream,
-    SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin,
+    SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin, TurnOutcome,
 };

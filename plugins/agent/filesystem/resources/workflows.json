@@ -125,6 +125,54 @@
     ]
   },
   {
+    "id": "imessage-control-to-agent",
+    "match": {
+      "event": "gateway.control.received"
+    },
+    "steps": [
+      {
+        "call": "imessage_bridge.to_agent",
+        "arguments": {
+          "route": "$event.input.route"
+        }
+      },
+      {
+        "if": {
+          "source": "$previous.output.open_required",
+          "equals": false
+        },
+        "then": [
+          {
+            "if": {
+              "source": "$event.input.control",
+              "equals": "interrupt"
+            },
+            "then": [
+              {
+                "call": "session.interrupt",
+                "arguments": {
+                  "session": "$previous.output.session"
+                }
+              }
+            ],
+            "else": [
+              {
+                "call": "session.cancel",
+                "arguments": {
+                  "session": "$previous.output.session"
+                }
+              }
+            ]
+          }
+        ],
+        "else": []
+      },
+      {
+        "return": {}
+      }
+    ]
+  },
+  {
     "id": "agent-to-imessage",
     "match": {
       "event": "session.event"

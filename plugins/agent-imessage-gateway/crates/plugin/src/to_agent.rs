@@ -35,6 +35,10 @@ pub(crate) enum ToAgentRequest {
         message_id: String,
         session: String,
     },
+    /// Finds the session a control request (stop, rewind) acts on. Unlike
+    /// `Resolve`, an unmapped route stays unreserved: a control never
+    /// creates a session.
+    Lookup { route: RouteRequest },
 }
 
 #[derive(Serialize)]
@@ -191,6 +195,12 @@ where
                 Err(error) => Err(error),
             }
         }
+        ToAgentRequest::Lookup {
+            route: route_request,
+        } => match route(route_request) {
+            Ok(route) => Ok(shared.book.lock().await.resolve(&route)),
+            Err(error) => Err(error),
+        },
     };
     match result {
         Ok(ResolveResult::Missing) => ToAgentResponse::Missing {},
@@ -239,6 +249,18 @@ mod tests {
     use barracuda_workflow_plugin::{WorkflowActionSchema, workflow_action_schema};
 
     const TO_AGENT: WorkflowActionSchema = workflow_action_schema!("imessage_bridge.to_agent");
+
+    #[test]
+    fn control_route_matches_the_to_agent_lookup_schema() {
+        let route = GatewayRoute::new("web", "conversation");
+
+        assert!(serde_json::to_value(route).is_ok_and(|route| {
+            TO_AGENT
+                .request()
+                .validate(&serde_json::json!({ "route": route }))
+                .is_ok()
+        }));
+    }
 
     #[test]
     fn threadless_gateway_event_matches_the_to_agent_resolve_schema() {

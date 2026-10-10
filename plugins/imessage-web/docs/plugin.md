@@ -35,7 +35,12 @@ The page (`resources/web/entry.ts`, built on the portal UI kit) connects to
 WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`; replies
 exist only in the page, so a reply to an Agent message puts the quoted message
 ahead of the user's words as `<quote>…</quote>` XML, escaped and cut to 512
-UTF-8 bytes, inside `text`) and renders the
+UTF-8 bytes, inside `text`), or a control frame for the running turn:
+`{ "control": "interrupt" }` (stop) or `{ "control": "cancel" }` (rewind). A
+control takes no message id; the bridge passes it to
+`IMessageGateway::publish_control`, and the Agent Plugin's
+`imessage-control-to-agent` Workflow calls `session.interrupt` or
+`session.cancel` on the conversation's session. The page renders the
 SSE-formatted frames the bridge returns: message start, delta, edit, delete,
 reaction and end (an end error marks the message incomplete), the Agent's
 semantic events inside `message.event` (reasoning, tool results, output and
@@ -59,7 +64,15 @@ spins (`resources/web/mark.ts`: WebGL, which plain HTTP allows; the static mark
 and typing dots where WebGL is missing, the mark at rest under reduced motion)
 and 「思考中」 shimmers until text streams. Replies stream in smoothly behind a
 blinking caret; reasoning folds itself away as 「思考了 N 秒」; a running tool
-spins; each finished reply ends with Copy and Reply icon buttons. The page's
+spins; each finished reply ends with Copy and Reply icon buttons. While a turn
+runs, Stop (`circle-stop`) replaces send as the primary (outline once the
+reader types, beside 「加入队列」); the turn's `turn_ended` outcome
+`interrupted` or `cancelled` ends it with 「已停止」. The message whose turn has
+not ended carries 「撤回」 (`undo-2`): it sends `cancel`, removes the message
+and everything after it, drops the cancelled turn's remaining events (and
+cancels again if that turn starts late), and puts the text back in the
+composer ahead of anything typed; the queue holds until that text is sent,
+first. The device keeps the withdrawn message in the session's history. The page's
 own rules (`resources/web/style.ts`) are added on mount and removed on unmount.
 Sends have no server receipt; a send counts as confirmed only when an Agent
 message replies to it or the turn it answered goes on, and the disconnected

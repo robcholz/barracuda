@@ -408,6 +408,159 @@ test("a message written while a turn runs waits in the queue, editable, then goe
   expect(send().getAttribute("aria-label")).toBe("发送");
 });
 
+test("stop interrupts the running turn, which ends 「已停止」 and keeps its text", () => {
+  const { root, socket, submit, button, type, send } = open();
+  const ws = socket();
+  ws.open();
+  const stop = () => button("停止");
+  // idle: send, no stop
+  expect(stop().hidden).toBe(true);
+  submit("写一份清单");
+  // a turn runs: stop is the primary, send steps aside until the reader types
+  expect(stop().hidden).toBe(false);
+  expect(stop().className).toBe("bc-button bc-button--icon");
+  expect(send().hidden).toBe(true);
+  type("只要 5 条");
+  expect(stop().className).toBe("bc-button bc-button--icon bc-button--outline");
+  expect(send().hidden).toBe(false);
+  expect(send().getAttribute("aria-label")).toBe("加入队列");
+  type("");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "1. 断电恢复" });
+  stop().click();
+  // a control, not a message: it takes no id and draws nothing
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "interrupt" });
+  expect(root.querySelectorAll(".bc-bubble")).toHaveLength(1);
+  expect(stop().disabled).toBe(true);
+  ws.agent("web-1", "output_ended");
+  ws.agent("web-1", "turn_ended", { turn: "turn-1", outcome: "interrupted" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  const status = root.querySelector(".bc-status.bc-muted")!;
+  expect(status.textContent).toBe("已停止");
+  expect(root.querySelector(".bc-reply")!.textContent).toBe("1. 断电恢复");
+  // its footer follows the status line
+  expect(
+    status.nextElementSibling?.querySelector('[aria-label="复制"]'),
+  ).not.toBeNull();
+  expect(stop().hidden).toBe(true);
+  expect(send().hidden).toBe(false);
+  // a completed turn says nothing
+  submit("再来");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  ws.agent("web-2", "turn_ended", { turn: "turn-2", outcome: "completed" });
+  ws.emit("message.end", { error: null, message_id: "web-2" });
+  expect(root.querySelectorAll(".bc-status.bc-muted")).toHaveLength(1);
+});
+
+test("stop asked before the turn begins is asked again once it does", () => {
+  const { socket, submit, button } = open();
+  const ws = socket();
+  ws.open();
+  submit("一");
+  button("停止").click();
+  expect(sent.slice(1).map((frame) => JSON.parse(frame))).toEqual([
+    { control: "interrupt" },
+  ]);
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  expect(sent.slice(1).map((frame) => JSON.parse(frame))).toEqual([
+    { control: "interrupt" },
+    { control: "interrupt" },
+  ]);
+});
+
+test("rewind cancels the running turn and puts the message back in the composer", () => {
+  const { root, socket, submit, input, type } = open();
+  const ws = socket();
+  ws.open();
+  const rewind = () =>
+    [
+      ...root.querySelectorAll<HTMLButtonElement>('button[aria-label="撤回"]'),
+    ].filter((node) => !node.hidden);
+  submit("写一份清单");
+  reply(ws, "web-1", "web-in-1", "好的");
+  // a finished turn cannot be rewound
+  expect(rewind()).toHaveLength(0);
+  submit("只要最重要的 5 条");
+  // waiting on the device, and then running: the message carries 「撤回」
+  expect(rewind()).toHaveLength(1);
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  ws.agent("web-2", "output_delta", { text: "1. 断电" });
+  expect(rewind()).toHaveLength(1);
+  expect(rewind()[0].closest(".bc-turn--user")?.textContent).toContain(
+    "只要最重要的 5 条",
+  );
+  // typed text stays, after the withdrawn message
+  type("按风险排序");
+  submit("按风险排序");
+  expect(root.querySelector("[role=list]")!.textContent).toContain(
+    "排队中 · 01",
+  );
+  rewind()[0].click();
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  // the message and its turn leave the log; what came before stays
+  expect(
+    [...root.querySelectorAll(".bc-bubble")].map((node) => node.textContent),
+  ).toEqual(["写一份清单"]);
+  expect(root.textContent).not.toContain("1. 断电");
+  expect(root.querySelectorAll(".bc-meta--author")).toHaveLength(1);
+  expect(input.value).toBe("只要最重要的 5 条");
+  // the cancelled turn's last events draw nothing
+  ws.agent("web-2", "output_delta", { text: "2. 校验" });
+  ws.agent("web-2", "turn_ended", { turn: "turn-2", outcome: "cancelled" });
+  ws.emit("message.end", { error: null, message_id: "web-2" });
+  expect(root.textContent).not.toContain("校验");
+  expect(root.textContent).not.toContain("已停止");
+  // the queue waits for the withdrawn text, which goes first
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  submit("只要最重要的 3 条");
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ text: "只要最重要的 3 条" });
+  reply(ws, "web-3", "web-in-3", "好");
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ text: "按风险排序" });
+});
+
+test("rewinding the only message returns to a fresh conversation; a late start is cancelled again", () => {
+  const { root, socket, submit, input } = open();
+  const ws = socket();
+  ws.open();
+  submit("天气？");
+  root.querySelector<HTMLButtonElement>('button[aria-label="撤回"]')!.click();
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  expect(root.querySelector(".bc-bubble")).toBeNull();
+  expect(
+    (root.firstElementChild as HTMLElement).classList.contains(
+      "bc-chat--fresh",
+    ),
+  ).toBe(true);
+  expect(input.value).toBe("天气？");
+  // the device had not begun when the cancel came: its turn starts anyway, and is cancelled again
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  expect(JSON.parse(sent.at(-1)!)).toEqual({ control: "cancel" });
+  ws.agent("web-1", "output_delta", { text: "晴" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.querySelector(".bc-meta--author")).toBeNull();
+  expect(root.textContent).not.toContain("晴");
+});
+
 test("a permission request is answered by the next message", () => {
   const { root, socket, button, input } = open();
   const ws = socket();

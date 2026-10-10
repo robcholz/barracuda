@@ -17,10 +17,10 @@ use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
 
 pub use barracuda_imessage_gateway_runtime::{
-    GatewayAccepted, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
-    GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
-    GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
-    GatewaySendStreamRequest,
+    GatewayAccepted, GatewayControlKind, GatewayControlReceived, GatewayInboundControl,
+    GatewayInboundMessage, GatewayIngressError, GatewayMediaKind, GatewayMessageReceived,
+    GatewayOperationError, GatewayRoute, GatewaySendMediaFinished, GatewaySendMediaRequest,
+    GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished, GatewaySendStreamRequest,
 };
 pub use gateway::*;
 pub use gateway_http::*;
@@ -57,6 +57,15 @@ impl IMessageGateway {
     /// Publishes one normalized inbound message into Workflow matching.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         self.ingress.publish(message).await
+    }
+
+    /// Publishes one normalized control request (stop or rewind the running
+    /// turn) into Workflow matching. It does not wait for message backlog.
+    pub fn publish_control(
+        &self,
+        control: GatewayInboundControl,
+    ) -> Result<(), GatewayIngressError> {
+        self.ingress.publish_control(control)
     }
 
     /// Sends one complete text message.

@@ -1080,8 +1080,12 @@ impl SessionEmitter<'_> {
                 "turn_error",
                 json!({ "message": error.to_string(), "message_truncated": false }),
             )?,
-            TurnEvent::Ended { turn } => {
-                self.emit("turn_ended", json!({ "turn": format!("{turn}") }))?;
+            TurnEvent::Ended { turn, outcome } => {
+                let outcome: &'static str = outcome.into();
+                self.emit(
+                    "turn_ended",
+                    json!({ "turn": format!("{turn}"), "outcome": outcome }),
+                )?;
             }
         }
         Ok(())

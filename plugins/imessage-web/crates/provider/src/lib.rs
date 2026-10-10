@@ -13,10 +13,10 @@ mod server;
 mod sse;
 
 pub use channel::{SubscribeError, Web, WebSubscription};
-pub use client_frame::WebClientFrame;
+pub use client_frame::{WebClientControl, WebClientFrame, WebControl};
 pub use inbound::{
-    InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, InboundReceipt,
-    MessageBody, WebService,
+    InboundControl, InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink,
+    InboundReceipt, MessageBody, WebService,
 };
 pub use model::{MediaPhase, WebDelivery, WebEvent, WebEventData};
 #[cfg(feature = "server")]

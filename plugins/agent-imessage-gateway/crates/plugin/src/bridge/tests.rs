@@ -1,4 +1,5 @@
-//! Drives the builtin `imessage-to-agent` Workflow against the bridge Actions.
+//! Drives the builtin `imessage-to-agent` and `imessage-control-to-agent`
+//! Workflows against the bridge Actions.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -16,7 +17,7 @@ use core::{
     task::Poll,
 };
 
-use barracuda_imessage_gateway_plugin::GatewayMessageReceived;
+use barracuda_imessage_gateway_plugin::{GatewayControlReceived, GatewayMessageReceived};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
@@ -41,6 +42,7 @@ const SESSION_NEW_POLLS: usize = 3;
 struct Trace {
     created: Cell<u32>,
     appended: RefCell<Vec<(String, String)>>,
+    controls: RefCell<Vec<(&'static str, String)>>,
 }
 
 async fn yield_now(times: usize) {
@@ -116,6 +118,33 @@ impl WorkflowActionHandler for SessionAppend {
     }
 }
 
+/// Declares a stub session control Action that records the session it acts on.
+macro_rules! control_action {
+    ($name:ident, $address:literal) => {
+        struct $name(Rc<Trace>);
+
+        impl WorkflowActionHandler for $name {
+            type Request = Value;
+            type Response = Value;
+
+            const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
+                $address,
+                r#"{"type":"object"}"#,
+                r#"{"type":"object"}"#
+            );
+
+            fn invoke(&self, request: Value) -> WorkflowActionFuture<'_, Value> {
+                let session = request["session"].as_str().unwrap_or_default().to_owned();
+                self.0.controls.borrow_mut().push(($address, session));
+                Box::pin(async { Ok(json!({})) })
+            }
+        }
+    };
+}
+
+control_action!(SessionInterrupt, "session.interrupt");
+control_action!(SessionCancel, "session.cancel");
+
 /// Declares a stub Action that fails the test when the Workflow takes a branch
 /// the race must not reach.
 macro_rules! unexpected_action {
@@ -182,18 +211,22 @@ fn two_quick_messages_on_a_new_route_share_one_session<Storage: PluginStorage>(
         actions.add_action(SessionAppend(Rc::clone(&trace))),
         actions.add_action(SessionRespond),
         actions.add_action(GatewaySendStream),
+        actions.add_action(SessionInterrupt(Rc::clone(&trace))),
+        actions.add_action(SessionCancel(Rc::clone(&trace))),
     ]
     .map(|registration| registration.expect("register stub Action"));
     let mut runtime = WorkflowRuntime::new(actions);
     let control = runtime.control();
     let workflows: Vec<Value> = serde_json::from_str(WORKFLOWS).expect("Workflow file");
-    let inbound = workflows
-        .iter()
-        .find(|workflow| workflow["id"] == "imessage-to-agent")
-        .expect("imessage-to-agent Workflow");
-    control
-        .load(parse_definition(&inbound.to_string()).expect("parse imessage-to-agent"))
-        .expect("load imessage-to-agent");
+    for id in ["imessage-to-agent", "imessage-control-to-agent"] {
+        let workflow = workflows
+            .iter()
+            .find(|workflow| workflow["id"] == id)
+            .expect("bundled Workflow");
+        control
+            .load(parse_definition(&workflow.to_string()).expect("parse Workflow"))
+            .expect("load Workflow");
+    }
 
     for (message_id, text) in [("message-1", "first"), ("message-2", "second")] {
         control
@@ -224,6 +257,40 @@ fn two_quick_messages_on_a_new_route_share_one_session<Storage: PluginStorage>(
             ("session-1".to_owned(), "second".to_owned()),
         ]
     );
+
+    // stop and rewind reach the route's session; a route with none is left alone
+    for (conversation, kind) in [
+        ("chat-7", "interrupt"),
+        ("chat-7", "cancel"),
+        ("chat-8", "cancel"),
+    ] {
+        control
+            .emit::<GatewayControlReceived>(json!({
+                "route": { "channel": "bluebubbles", "conversation_id": conversation },
+                "control": kind,
+            }))
+            .expect("emit control");
+    }
+    block_on(async {
+        for _poll in 0..64 {
+            let _pending = poll_once(&mut runtime).await;
+            if runtime.view().info().completed_count == 5 {
+                break;
+            }
+        }
+    });
+
+    let info = runtime.view().info();
+    assert_eq!(info.failed_count, 0, "{:?}", info.last_failure);
+    assert_eq!(info.completed_count, 5);
+    assert_eq!(
+        *trace.controls.borrow(),
+        [
+            ("session.interrupt", "session-1".to_owned()),
+            ("session.cancel", "session-1".to_owned()),
+        ]
+    );
+    assert_eq!(trace.created.get(), 1, "a control never creates a session");
 }
 
 #[test]

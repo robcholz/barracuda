@@ -5,7 +5,7 @@
 - Provided capability: `IMessageGateway`
 - Required capabilities: `WorkflowService`, `WorkflowActionRegistry`
 - Workflow Actions: `gateway.send`, `gateway.send_stream`, `gateway.send_media`
-- Workflow Events: `gateway.message.received`,
+- Workflow Events: `gateway.message.received`, `gateway.control.received`,
   `gateway.send_stream.finished`, `gateway.send_media.finished`
 - Agent Tools: none
 - Owned tasks: four text stream workers and four media workers
@@ -14,6 +14,12 @@
 `IMessageGateway` is the shared typed API. Provider Plugins register channels
 and publish inbound messages through it; Workflow Actions and the separate
 `agent-imessage-gateway` adapter call the same send methods.
+
+`IMessageGateway::publish_control` publishes `gateway.control.received`
+(`{ route, control }`, control `interrupt` or `cancel`): a user asking to stop
+or withdraw the turn running for their conversation. It does not wait on
+`ready`, so a control never queues behind messages. Which session the route
+maps to is the consumer's business; the Gateway only names the route.
 
 ## Ingress backpressure
 

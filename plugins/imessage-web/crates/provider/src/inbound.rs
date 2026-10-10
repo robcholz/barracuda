@@ -8,6 +8,8 @@ use core::{future::Future, pin::Pin};
 use barracuda_imessage_gateway_plugin::{BinaryStream, MediaKind};
 use serde::Deserialize;
 
+use crate::WebControl;
+
 /// Runtime-neutral future returned by an inbound Web message sink.
 pub type InboundFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, InboundError>> + 'a>>;
 
@@ -18,6 +20,14 @@ pub struct InboundMessage {
     pub message_id: String,
     pub thread_id: Option<String>,
     pub text: String,
+}
+
+/// Control request received from a Web client for its conversation's turn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InboundControl {
+    pub conversation_id: String,
+    pub thread_id: Option<String>,
+    pub control: WebControl,
 }
 
 /// Binary body received through the REST-facing Web service.
@@ -51,6 +61,14 @@ pub trait InboundMessageSink: 'static {
         Box::pin(async {
             Err(InboundError::Unsupported {
                 operation: "receive_media",
+            })
+        })
+    }
+
+    fn receive_control(&self, _request: InboundControl) -> InboundFuture<'_, ()> {
+        Box::pin(async {
+            Err(InboundError::Unsupported {
+                operation: "receive_control",
             })
         })
     }

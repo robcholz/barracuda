@@ -32,7 +32,7 @@ pub use barracuda_agent_session::{
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
     SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
     SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
-    TurnEventError, TurnId, TurnOrigin,
+    TurnEventError, TurnId, TurnOrigin, TurnOutcome,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
 use barracuda_model_api::InitError;

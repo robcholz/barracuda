@@ -4,6 +4,9 @@ use async_channel::{Receiver, Sender};
 use barracuda_workflow_plugin::WorkflowService;
 use gateway::MessageGateway;
 
+use crate::gateway_control_received::{
+    valid_control, GatewayControlReceived, GatewayInboundControl,
+};
 use crate::gateway_message_received::{
     valid_inbound, GatewayInboundMessage, GatewayMessageReceived,
 };
@@ -55,6 +58,24 @@ impl GatewayIngress {
             serde_json::to_value(message).map_err(|_error| GatewayIngressError::Delivery)?;
         self.workflow
             .emit::<GatewayMessageReceived>(input)
+            .map_err(|_error| GatewayIngressError::Delivery)
+    }
+
+    /// Publishes one normalized control request as a Workflow Event.
+    ///
+    /// Controls skip [`Self::ready`]: one stands for a user's click on the
+    /// running turn and must not wait behind queued messages.
+    pub fn publish_control(
+        &self,
+        control: GatewayInboundControl,
+    ) -> Result<(), GatewayIngressError> {
+        if !valid_control(&control) {
+            return Err(GatewayIngressError::InvalidMessage);
+        }
+        let input =
+            serde_json::to_value(control).map_err(|_error| GatewayIngressError::Delivery)?;
+        self.workflow
+            .emit::<GatewayControlReceived>(input)
             .map_err(|_error| GatewayIngressError::Delivery)
     }
 }

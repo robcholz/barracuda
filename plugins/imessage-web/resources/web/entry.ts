@@ -4,6 +4,7 @@ import {
   ICON_CHECK,
   ICON_CHEVRON_RIGHT,
   ICON_CIRCLE_ALERT,
+  ICON_CIRCLE_STOP,
   ICON_CIRCLE_X,
   ICON_CLOCK,
   ICON_COPY,
@@ -37,7 +38,10 @@ import { CHAT_CSS } from "./style";
  * events inside `message.event`, attachments, typing and `stream.lagged`. Live events only.
  *
  * The device runs one turn at a time. A message written while a turn runs waits in the page's
- * queue, where it can still be edited or removed, and goes out when the turn ends.
+ * queue, where it can still be edited or removed, and goes out when the turn ends. Stop sends
+ * `{ control: "interrupt" }`, and the turn ends 「已停止」; rewind on the running message sends
+ * `{ control: "cancel" }`, takes the message and its turn out of the log and puts the text back in
+ * the composer. Neither control is a message: the bridge gives it no id.
  */
 
 const STRINGS = {
@@ -88,6 +92,9 @@ const STRINGS = {
     placeholder: "给设备发一条消息",
     send: "发送",
     enqueue: "加入队列",
+    stop: "停止",
+    stopped: "已停止",
+    rewind: "撤回",
     queued: "排队中",
     editQueued: "编辑",
     removeQueued: "移除",
@@ -153,6 +160,9 @@ const STRINGS = {
     placeholder: "Message the device",
     send: "Send",
     enqueue: "Add to queue",
+    stop: "Stop",
+    stopped: "Stopped",
+    rewind: "Rewind",
     queued: "Queued",
     editQueued: "Edit",
     removeQueued: "Remove",
@@ -189,6 +199,9 @@ const MAX_INPUT = 200;
  * holds the queue: the device queues it anyway, so the page stops waiting on a turn it may miss.
  */
 const STALL_MS = 30000;
+/** Lucide `undo-2`: rewind. The chat alone uses it, so it stays out of the shell's icon set. */
+const ICON_UNDO =
+  '<path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path>';
 
 const fill = (text: string, map: Record<string, string | number>) =>
   text.replace(/\{(\w+)\}/g, (_, key: string) => String(map[key]));
@@ -305,6 +318,8 @@ interface Agent {
   footer: HTMLElement | null;
   reaction: HTMLElement;
   ended: boolean;
+  /** The sent message this one answers, from its start. */
+  replyTo: string;
   media?: Media;
 }
 
@@ -322,6 +337,10 @@ interface Sent {
   root: HTMLElement;
   reaction: HTMLElement;
   confirmed: boolean;
+  text: string;
+  quoted: { id: string; text: string } | null;
+  /** 「撤回」, shown while the message's turn has not ended. */
+  rewind: HTMLElement;
 }
 
 /** A message waiting in the page for the running turn to end. */
@@ -483,6 +502,14 @@ export const mount = definePage((context: PortalContext) => {
     "submit",
   );
   sendButton.button.disabled = true;
+  // while a turn runs, stop is the primary; once the reader types, it steps back to outline
+  const stopButton = iconButton(
+    t.stop,
+    ICON_CIRCLE_STOP,
+    () => stop(),
+    "bc-button bc-button--icon",
+  );
+  show(stopButton.button, false);
   // a ruled bar: the icon carries the warning colour, the text stays foreground
   const answeringText = h("span");
   const answering = h(
@@ -524,7 +551,12 @@ export const mount = definePage((context: PortalContext) => {
       "div",
       { class: "bc-composer__row" },
       input,
-      h("div", { class: "bc-composer__actions" }, sendButton.button),
+      h(
+        "div",
+        { class: "bc-composer__actions" },
+        stopButton.button,
+        sendButton.button,
+      ),
     ),
   );
   const invalid = h("span", {
@@ -620,6 +652,14 @@ export const mount = definePage((context: PortalContext) => {
   /** Sent messages whose turn has not started yet. */
   const awaiting = new Set<string>();
   const queue: Queued[] = [];
+  /** Rewound messages: their turns' messages are dropped as they arrive. */
+  const withdrawn = new Set<string>();
+  /** Agent messages of a rewound turn, ignored until they end. */
+  const dropped = new Set<string>();
+  /** A rewound message waits in the composer: the queue holds until it is sent. */
+  let held = false;
+  /** Stop was asked for; the turn has not ended yet. */
+  let stopping = false;
   let typingOn = false;
   let stall: ReturnType<typeof setTimeout> | undefined;
   /** The turn the device has been asked for and not yet begun: an author line over 「思考中」. */
@@ -680,8 +720,14 @@ export const mount = definePage((context: PortalContext) => {
     return badge;
   }
 
-  function addUser(text: string, id: string, quoted: string | null) {
+  function addUser(
+    text: string,
+    id: string,
+    quoted: { id: string; text: string } | null,
+  ) {
     const reaction = reactionBadge();
+    const rewind = iconButton(t.rewind, ICON_UNDO, () => rewindTo(id)).button;
+    show(rewind, false);
     const node = h(
       "div",
       { class: "bc-turn bc-turn--user bc-turn--new" },
@@ -694,12 +740,25 @@ export const mount = definePage((context: PortalContext) => {
               style: "display:flex;align-items:center;gap:8px;max-width:100%",
             },
             icon(ICON_REPLY),
-            h("span", { class: "bc-composer__text" }, quoted),
+            h("span", { class: "bc-composer__text" }, quoted.text),
           ),
       h("p", { class: "bc-bubble" }, text),
-      h("span", { class: "bc-meta" }, reaction, t.sent),
+      h(
+        "span",
+        { class: "bc-meta", style: "gap:4px" },
+        rewind,
+        reaction,
+        t.sent,
+      ),
     );
-    const record = { root: node, reaction, confirmed: false };
+    const record: Sent = {
+      root: node,
+      reaction,
+      confirmed: false,
+      text,
+      quoted,
+      rewind,
+    };
     const map = sent;
     map.set(id, record);
     add(node, () => map.delete(id));
@@ -735,6 +794,7 @@ export const mount = definePage((context: PortalContext) => {
       footer: null,
       reaction: reactionBadge(),
       ended: false,
+      replyTo: "",
     };
     agents.set(id, record);
     // a message first heard mid-stream is running too, until its end
@@ -1147,6 +1207,26 @@ export const mount = definePage((context: PortalContext) => {
         caret.remove();
         close(record);
         return errorRecord(t.turnError, str(payload.message));
+      case "turn_ended":
+        stopping = false;
+        // a turn cut short keeps what it wrote and says so; a completed one needs no word
+        if (
+          payload.outcome === "interrupted" ||
+          payload.outcome === "cancelled"
+        ) {
+          caret.remove();
+          close(record);
+          put(
+            record,
+            h(
+              "span",
+              { class: "bc-status bc-muted" },
+              icon(ICON_CIRCLE_STOP),
+              t.stopped,
+            ),
+          );
+        }
+        return;
     }
   }
 
@@ -1181,11 +1261,25 @@ export const mount = definePage((context: PortalContext) => {
     }
     const id = str(value.message_id);
     if (!id) return;
+    if (event === "message.start" && withdrawn.has(str(value.reply_to))) {
+      // the rewound message's turn began after all: cancel it again and keep it off the page
+      dropped.add(id);
+      awaiting.delete(str(value.reply_to));
+      control("cancel");
+      return;
+    }
+    if (dropped.has(id)) {
+      if (event === "message.end") dropped.delete(id);
+      return;
+    }
     const known = agents.get(id);
     switch (event) {
       case "message.start": {
-        agent(id, str(value.kind) || "reply");
+        const started = agent(id, str(value.kind) || "reply");
         const replied = str(value.reply_to);
+        started.replyTo = replied;
+        // stop asked before the turn began reached no turn: ask again now that one runs
+        if (stopping) control("interrupt");
         // the oldest waiting message's turn has started
         awaiting.delete(replied);
         const target = sent.get(replied);
@@ -1438,6 +1532,20 @@ export const mount = definePage((context: PortalContext) => {
     if (sendButton.button.getAttribute("aria-label") !== label)
       sendButton.set(label);
     sendButton.button.disabled = !canSend();
+    // stop stands in for send while a turn runs; typed text brings send back as the primary
+    const typed = !!input.value.trim();
+    show(stopButton.button, busy() && online());
+    stopButton.button.disabled = stopping;
+    stopButton.button.classList.toggle("bc-button--outline", typed);
+    show(sendButton.button, !busy() || typed || !online());
+    // rewind sits on the message whose turn has not ended
+    for (const [id, entry] of sent)
+      show(
+        entry.rewind,
+        online() &&
+          (awaiting.has(id) ||
+            [...active].some((record) => record.replyTo === id)),
+      );
     pump();
   }
 
@@ -1447,7 +1555,7 @@ export const mount = definePage((context: PortalContext) => {
 
   /** Sends the oldest queued message once the device is free. */
   function pump() {
-    if (!queue.length || busy() || !online()) return;
+    if (!queue.length || held || busy() || !online()) return;
     const next = queue.shift()!;
     if (!send(next.text, next.replyTo)) queue.unshift(next);
     renderQueue();
@@ -1530,7 +1638,7 @@ export const mount = definePage((context: PortalContext) => {
       if (input.scrollHeight)
         input.style.height = `${Math.min(input.scrollHeight, MAX_INPUT)}px`;
     }
-    sendButton.button.disabled = !canSend();
+    refresh();
   }
   function showInvalid(message: string) {
     invalid.textContent = message;
@@ -1551,9 +1659,12 @@ export const mount = definePage((context: PortalContext) => {
   function submit() {
     const text = input.value;
     if (!text.trim() || over()) return input.focus();
+    // a rewound message goes ahead of the queue it held
+    const first = held;
+    held = false;
     // a pending question takes the message as its answer at once; otherwise a running turn
     // queues it
-    if (!request && (busy() || queue.length)) {
+    if (!request && (busy() || (queue.length && !first))) {
       queue.push({ text, replyTo });
       renderQueue();
     } else if (!send(text, replyTo)) return;
@@ -1580,7 +1691,7 @@ export const mount = definePage((context: PortalContext) => {
     }
     // the bridge numbers each accepted frame on this connection: web-in-1, web-in-2, …
     const id = `web-in-${++inbound}`;
-    const entry = addUser(text, id, target ? target.text : null);
+    const entry = addUser(text, id, target);
     if (request) {
       // an answer goes on the asking turn; no turn of its own starts
       answered = { owner: request.owner, entry };
@@ -1593,6 +1704,62 @@ export const mount = definePage((context: PortalContext) => {
     follow();
     refresh();
     return true;
+  }
+
+  /** Sends a control for the running turn: `interrupt` (stop) or `cancel` (rewind). */
+  function control(kind: "interrupt" | "cancel") {
+    try {
+      if (online()) socket!.send(JSON.stringify({ control: kind }));
+    } catch {
+      // the socket is going away; its close says so
+    }
+  }
+
+  function stop() {
+    if (!busy() || stopping) return;
+    stopping = true;
+    control("interrupt");
+    refresh();
+  }
+
+  /**
+   * Withdraws `id` while its turn runs: the turn is cancelled, the message and everything after it
+   * leave the log, and its text goes back into the composer ahead of anything typed. The device
+   * keeps the message in its history; the page only stops showing it. The queue waits for the
+   * withdrawn text to be sent again.
+   */
+  function rewindTo(id: string) {
+    const entry = sent.get(id);
+    if (!entry) return;
+    withdrawn.add(id);
+    awaiting.delete(id);
+    arm();
+    control("cancel");
+    for (const record of active)
+      if (record.replyTo === id) dropped.add(record.id);
+    const from = items.findIndex((item) => item.node === entry.root);
+    for (const item of from < 0 ? [] : items.splice(from)) {
+      const parent = item.node.parentElement;
+      item.node.remove();
+      item.forget();
+      if (parent && parent !== column && !parent.querySelector("div")) {
+        if (parent === group?.node) group = null;
+        parent.remove();
+      }
+    }
+    caret.remove();
+    stopping = false;
+    if (!items.length) {
+      column.prepend(empty);
+      setFresh(true);
+    }
+    held = queue.length > 0;
+    input.value = input.value.trim()
+      ? `${entry.text}\n${input.value}`
+      : entry.text;
+    if (entry.quoted) setReply(entry.quoted);
+    changed();
+    input.focus();
   }
 
   input.addEventListener("input", changed);
@@ -1660,6 +1827,9 @@ export const mount = definePage((context: PortalContext) => {
     show(offline, false);
     sent = new Map();
     inbound = 0;
+    // message ids restart with the connection, so old rewinds name nothing now
+    withdrawn.clear();
+    dropped.clear();
     warned = false;
     refresh();
     const url = new URL("/ws/message", document.baseURI);
@@ -1710,6 +1880,8 @@ export const mount = definePage((context: PortalContext) => {
     // queued messages stay and go out after reconnecting
     active.clear();
     awaiting.clear();
+    dropped.clear();
+    stopping = false;
     clearTimeout(stall);
     const count = [...sent.values()].filter((entry) => !entry.confirmed).length;
     // what to do with them is the reader's action, so it is said, not hidden behind a term
