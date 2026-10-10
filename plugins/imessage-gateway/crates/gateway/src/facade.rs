@@ -3,8 +3,8 @@ use core::cell::RefCell;
 
 use crate::{
     DeleteMessageRequest, EditMessageRequest, GatewayError, MediaKind, MessageChannel,
-    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamRequest,
-    SetTypingRequest,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SendSessionsRequest,
+    SendStreamRequest, SetTypingRequest,
 };
 
 /// Registry-backed outbound messaging facade.
@@ -103,6 +103,15 @@ impl MessageGateway {
         let channel = request.target.channel.clone();
         self.provider(&channel)?
             .react(request)
+            .await
+            .map_err(|source| GatewayError::Channel { channel, source })
+    }
+
+    /// Shows a conversation's sessions after a session command.
+    pub async fn send_sessions(&self, request: SendSessionsRequest) -> Result<(), GatewayError> {
+        let channel = request.target.channel.clone();
+        self.provider(&channel)?
+            .send_sessions(request)
             .await
             .map_err(|source| GatewayError::Channel { channel, source })
     }

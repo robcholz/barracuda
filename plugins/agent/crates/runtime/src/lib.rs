@@ -30,9 +30,9 @@ use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
-    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
-    SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
-    TurnEventError, TurnId, TurnOrigin,
+    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId, SessionInfo,
+    SessionInputError, SessionPersistence, SessionRenameError, SessionStream, SessionTurnError,
+    TurnEvent, TurnEventError, TurnId, TurnOrigin, TurnOutcome, WallClock,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
 use barracuda_model_api::InitError;
@@ -355,6 +355,39 @@ impl AgentRuntime {
     /// Return the live conversation sessions.
     pub async fn list_sessions(&self) -> Vec<SessionId> {
         self.control.list_sessions().await
+    }
+
+    /// Describe the live conversation sessions, sorted by id.
+    ///
+    /// Returns an empty list once the runtime has stopped.
+    pub async fn describe_sessions(&self) -> Vec<SessionInfo> {
+        self.control.describe_sessions().await
+    }
+
+    /// Replace a live conversation session's title.
+    ///
+    /// The title keeps its first non-empty line, trimmed and capped at 64
+    /// characters with a trailing ellipsis when cut.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionRenameError`] when the session is missing, the title
+    /// has no visible text, or the runtime has stopped.
+    pub async fn rename_session(
+        &self,
+        session: SessionId,
+        title: &str,
+    ) -> Result<(), SessionRenameError> {
+        self.control.rename_session(session, title.into()).await
+    }
+
+    /// Install the wall clock that stamps each session's last-used time.
+    ///
+    /// The clock returns Unix milliseconds, or `None` while unsynchronized.
+    /// It may be installed before or after the runtime service starts, and
+    /// it reaches sessions that are already running.
+    pub fn set_wall_clock(&self, clock: WallClock) {
+        self.control.set_wall_clock(clock);
     }
 
     /// Delete a live conversation session.

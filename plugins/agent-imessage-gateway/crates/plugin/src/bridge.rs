@@ -16,6 +16,7 @@ use embassy_sync::{
 };
 
 use crate::{
+    sessions::{SessionAction, SessionReplies, SessionStore},
     state::{BridgeBook, PersistedRoute},
     to_agent::ToAgentAction,
     to_gateway::ToGatewayAction,
@@ -117,14 +118,19 @@ where
         })
     }
 
-    /// Registers both stable Workflow Action addresses until the returned guards are dropped.
+    /// Registers the bridge's stable Workflow Action addresses until the
+    /// returned guards are dropped. Session commands reach the Agent's
+    /// sessions through `store` and answer through `replies`.
     pub(crate) fn register_actions(
         &self,
         actions: &WorkflowActionRegistry,
+        store: Rc<dyn SessionStore>,
+        replies: Rc<dyn SessionReplies>,
     ) -> Result<Vec<WorkflowActionRegistration>, WorkflowActionRegistryError> {
         Ok(alloc::vec![
             actions.add_action(ToAgentAction::new(self.control.clone()))?,
             actions.add_action(ToGatewayAction::new(self.control.clone()))?,
+            actions.add_action(SessionAction::new(self.control.clone(), store, replies))?,
         ])
     }
 }

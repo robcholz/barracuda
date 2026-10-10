@@ -53,6 +53,12 @@ pub enum WebEventData {
     ConversationTyping {
         typing: bool,
     },
+    /// The conversation's sessions after a session command, as the compact
+    /// JSON of a `SendSessionsRequest`. Every open page of the conversation
+    /// gets it, so a switch made in one tab reaches the others.
+    ConversationSessions {
+        json: String,
+    },
 }
 
 /// Lifecycle of a streamed binary message.
@@ -99,6 +105,7 @@ impl WebEventData {
             Self::MessageDelete { .. } => "message.delete",
             Self::MessageReaction { .. } => "message.reaction",
             Self::ConversationTyping { .. } => "conversation.typing",
+            Self::ConversationSessions { .. } => "conversation.sessions",
         }
     }
 }

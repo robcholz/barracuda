@@ -23,11 +23,12 @@ use barracuda_agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
+use super::clock::SessionClock;
 use super::control::{SessionCommand, SessionControl};
 use super::persistence::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
-    allocate_session_id, ensure_next_agent_id, ensure_next_session_id, AgentIdAllocatorHandle,
-    SessionManagerState, SessionPersistentState,
+    allocate_session_id, ensure_next_agent_id, ensure_next_session_id, normalize_title,
+    AgentIdAllocatorHandle, SessionManagerState, SessionPersistentState,
 };
 use super::{SessionEvent, SessionStream};
 
@@ -83,6 +84,31 @@ pub enum SessionDeleteError {
     InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
+/// Human-facing description of one live Session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionInfo {
+    /// Session identity.
+    pub session: SessionId,
+    /// Whether the Session survives a runtime restart.
+    pub persistence: SessionPersistence,
+    /// Title derived from the first user message, or set by a rename.
+    pub title: Option<String>,
+    /// Unix milliseconds of the last appended user message, when the wall
+    /// clock was synchronized at that time.
+    pub updated_at: Option<u64>,
+}
+
+/// Failure renaming one Session.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SessionRenameError {
+    #[error("session not found: {0}")]
+    SessionNotFound(SessionId),
+    #[error("session title has no visible text")]
+    InvalidTitle,
+    #[error("agent runtime is not running")]
+    WorkerStopped,
+}
+
 struct LiveActor<Tcp, Resolver>
 where
     Tcp: TcpConnect + 'static,
@@ -135,6 +161,7 @@ where
     /// inline entries.
     sessions: BTreeMap<SessionId, Box<SessionEntry<Tcp, Resolver>>>,
     actor_poll_queue: VecDeque<SessionId>,
+    clock: SessionClock,
 }
 
 impl<Tcp, Resolver> SessionManager<Tcp, Resolver>
@@ -203,9 +230,20 @@ where
             approval_resolver,
             sessions,
             actor_poll_queue: VecDeque::new(),
+            clock: SessionClock::default(),
         };
         manager.purge_dead()?;
         Ok(manager)
+    }
+
+    /// Shares `clock` with this manager and every Session actor it starts.
+    ///
+    /// The clock is a shared slot, so installing a [`WallClock`](crate::WallClock)
+    /// into it later still reaches running Sessions.
+    #[must_use]
+    pub fn with_clock(mut self, clock: SessionClock) -> Self {
+        self.clock = clock;
+        self
     }
 
     pub fn create(
@@ -234,6 +272,43 @@ where
 
     pub fn list(&self) -> Vec<SessionId> {
         self.sessions.keys().copied().collect()
+    }
+
+    /// Describes every live Session, sorted by id.
+    pub fn describe(&self) -> Vec<SessionInfo> {
+        self.sessions
+            .iter()
+            .map(|(session, entry)| {
+                let state = entry.state.get();
+                SessionInfo {
+                    session: *session,
+                    persistence: entry.persistence,
+                    title: state.title.clone(),
+                    updated_at: state.updated_at,
+                }
+            })
+            .collect()
+    }
+
+    /// Replaces one Session's title.
+    ///
+    /// The title is normalized like a derived one: its first non-empty line,
+    /// trimmed and capped at 64 characters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionRenameError::SessionNotFound`] for an unknown Session
+    /// and [`SessionRenameError::InvalidTitle`] when no visible text remains.
+    pub fn rename(&mut self, session: SessionId, title: &str) -> Result<(), SessionRenameError> {
+        let entry = self
+            .sessions
+            .get(&session)
+            .ok_or(SessionRenameError::SessionNotFound(session))?;
+        let title = normalize_title(title).ok_or(SessionRenameError::InvalidTitle)?;
+        if entry.state.get().title.as_deref() != Some(title.as_str()) {
+            entry.state.get_mut().title = Some(title);
+        }
+        Ok(())
     }
 
     pub fn open(
@@ -382,6 +457,7 @@ where
             Rc::clone(&self.agent_manager),
             AgentIdAllocatorHandle::new(&self.state),
             state,
+            self.clock.clone(),
             Rc::clone(&self.approval_resolver),
         );
         let span = tracing::info_span!(

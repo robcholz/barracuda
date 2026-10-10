@@ -69,6 +69,9 @@ impl Scalars {
 }
 
 fn write_payload(sink: &mut dyn Sink, data: &WebEventData, scalars: &Scalars) {
+    if let WebEventData::ConversationSessions { json } = data {
+        return write_compact(sink, json);
+    }
     let mut object = Object::begin(sink);
     match data {
         WebEventData::MessageStart {
@@ -137,6 +140,7 @@ fn write_payload(sink: &mut dyn Sink, data: &WebEventData, scalars: &Scalars) {
         WebEventData::ConversationTyping { typing } => {
             object.value("typing", &Value::Bool(*typing));
         }
+        WebEventData::ConversationSessions { .. } => {}
     }
     object.end();
 }
@@ -212,6 +216,7 @@ mod tests {
                 reaction,
             } => json!({ "message_id": message_id, "reaction": reaction }),
             WebEventData::ConversationTyping { typing } => json!({ "typing": typing }),
+            WebEventData::ConversationSessions { json } => serde_json::from_str(json).unwrap(),
         };
         format!(
             "id: {}\nevent: {}\ndata: {}\n\n",
@@ -296,6 +301,9 @@ mod tests {
                 reaction: "👍".into(),
             },
             WebEventData::ConversationTyping { typing: true },
+            WebEventData::ConversationSessions {
+                json: r#"{"current":"session-2","now":null,"sessions":[]}"#.into(),
+            },
         ];
         for (id, data) in events.into_iter().enumerate() {
             let event = event(id as u64, data);

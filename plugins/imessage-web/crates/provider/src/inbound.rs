@@ -8,6 +8,8 @@ use core::{future::Future, pin::Pin};
 use barracuda_imessage_gateway_plugin::{BinaryStream, MediaKind};
 use serde::Deserialize;
 
+use crate::WebControl;
+
 /// Runtime-neutral future returned by an inbound Web message sink.
 pub type InboundFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, InboundError>> + 'a>>;
 
@@ -18,7 +20,18 @@ pub struct InboundMessage {
     pub message_id: String,
     pub thread_id: Option<String>,
     pub text: String,
-    pub reply_to: Option<String>,
+}
+
+/// Control request received from a Web client for its conversation's turn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InboundControl {
+    pub conversation_id: String,
+    pub thread_id: Option<String>,
+    pub control: WebControl,
+    pub temporary: bool,
+    pub session: Option<String>,
+    pub title: Option<String>,
+    pub confirm: bool,
 }
 
 /// Binary body received through the REST-facing Web service.
@@ -36,7 +49,6 @@ pub struct InboundMedia {
     pub body: MessageBody,
     pub filename: Option<String>,
     pub mime_type: Option<String>,
-    pub reply_to: Option<String>,
 }
 
 /// Acknowledgement returned after an inbound REST command is accepted.
@@ -53,6 +65,14 @@ pub trait InboundMessageSink: 'static {
         Box::pin(async {
             Err(InboundError::Unsupported {
                 operation: "receive_media",
+            })
+        })
+    }
+
+    fn receive_control(&self, _request: InboundControl) -> InboundFuture<'_, ()> {
+        Box::pin(async {
+            Err(InboundError::Unsupported {
+                operation: "receive_control",
             })
         })
     }
@@ -119,7 +139,6 @@ impl WebService {
                 message_id: dto.message_id,
                 thread_id: dto.thread_id,
                 text: dto.text,
-                reply_to: dto.reply_to,
             })
             .await
         {
@@ -144,7 +163,6 @@ impl WebService {
         filename: Option<&str>,
         mime_type: Option<&str>,
         thread_id: Option<&str>,
-        reply_to: Option<&str>,
     ) -> Result<InboundReceipt, InboundError> {
         if let Err(error) = validate_required("conversation_id", conversation_id)
             .and_then(|()| validate_required("message_id", message_id))
@@ -164,7 +182,6 @@ impl WebService {
                 body,
                 filename: filename.map(String::from),
                 mime_type: mime_type.map(String::from),
-                reply_to: reply_to.map(String::from),
             })
             .await
         {
@@ -187,7 +204,6 @@ struct InboundMessageDto {
     message_id: String,
     thread_id: Option<String>,
     text: String,
-    reply_to: Option<String>,
 }
 
 fn validate_required(name: &str, value: &str) -> Result<(), InboundError> {

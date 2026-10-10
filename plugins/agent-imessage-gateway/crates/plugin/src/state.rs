@@ -11,7 +11,10 @@ pub(crate) const CONVERSATION_MAX: usize = 96;
 pub(crate) const THREAD_MAX: usize = 64;
 pub(crate) const MESSAGE_ID_MAX: usize = 96;
 pub(crate) const SESSION_MAX: usize = 32;
-const RECORD_VERSION: u32 = 1;
+/// Version 2 adds the `current` flag; version 1 records had one session per
+/// route, which is current.
+const RECORD_VERSION: u32 = 2;
+const FLAG_CURRENT: u16 = 1;
 /// How long a route stays reserved for the inbound message that found it
 /// unmapped, while that message's Workflow creates and binds a session.
 pub(crate) const RESERVATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -43,13 +46,35 @@ impl Route {
     }
 }
 
+/// One session a route has used. A route may own several sessions; at most
+/// one is current, and only the current one receives the route's messages
+/// and reaches it with output.
 #[derive(Clone, Debug)]
 pub(crate) struct Mapping {
     session: String,
     route: Route,
     opened: bool,
+    /// The route's messages go to this session.
+    current: bool,
+    /// Never saved; deleted when the route leaves it.
+    temporary: bool,
     pending_replies: VecDeque<String>,
     active_turn: Option<ActiveTurn>,
+}
+
+impl Mapping {
+    pub(crate) fn session(&self) -> &str {
+        &self.session
+    }
+
+    pub(crate) const fn temporary(&self) -> bool {
+        self.temporary
+    }
+
+    /// Whether a turn is running in the session, as its events last said.
+    pub(crate) const fn running(&self) -> bool {
+        self.active_turn.is_some()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +83,9 @@ struct ActiveTurn {
     /// The Agent's open input request (`input-N`), answered by the next
     /// inbound message instead of that message starting a turn.
     input_request: Option<String>,
+    /// The turn started while the session was its route's current one, so it
+    /// streams to the route until it ends, even after the route leaves it.
+    delivered: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -122,8 +150,9 @@ impl BridgeError {
 
 /// Bindings between conversation routes and agent sessions.
 ///
-/// Each session has at most one route and each route at most one session, so
-/// one list of mappings serves lookups from either side; a device holds few.
+/// Each session has at most one route; a route owns the sessions it started
+/// and has at most one current session. One list of mappings serves lookups
+/// from either side; a device holds few.
 ///
 /// An unmapped route is reserved by the first inbound message that resolves
 /// it, so messages arriving while that message's Workflow creates the session
@@ -131,6 +160,8 @@ impl BridgeError {
 pub(crate) struct BridgeBook {
     mappings: Vec<Mapping>,
     reservations: Vec<Reservation>,
+    /// Routes whose next session is temporary.
+    temporary_next: Vec<Route>,
 }
 
 impl BridgeBook {
@@ -138,6 +169,7 @@ impl BridgeBook {
         Self {
             mappings: Vec::new(),
             reservations: Vec::new(),
+            temporary_next: Vec::new(),
         }
     }
 
@@ -147,8 +179,80 @@ impl BridgeBook {
             .find(|mapping| mapping.session == session)
     }
 
-    fn by_route(&self, route: &Route) -> Option<&Mapping> {
-        self.mappings.iter().find(|mapping| mapping.route == *route)
+    /// The route's current session.
+    pub(crate) fn current_of(&self, route: &Route) -> Option<&Mapping> {
+        self.mappings
+            .iter()
+            .find(|mapping| mapping.current && mapping.route == *route)
+    }
+
+    /// Every session the route owns, current or not.
+    pub(crate) fn sessions_of<'a>(&'a self, route: &'a Route) -> impl Iterator<Item = &'a Mapping> {
+        self.mappings
+            .iter()
+            .filter(move |mapping| mapping.route == *route)
+    }
+
+    /// Whether the route's next session is temporary.
+    pub(crate) fn temporary_next(&self, route: &Route) -> bool {
+        self.temporary_next.contains(route)
+    }
+
+    /// Leaves the route's current session, if any: the route's next message
+    /// starts a session, temporary when `temporary`. Returns the session left;
+    /// a temporary one is forgotten, for the caller to delete.
+    pub(crate) fn leave(&mut self, route: &Route, temporary: bool) -> Option<Mapping> {
+        self.temporary_next.retain(|next| next != route);
+        if temporary {
+            self.temporary_next.push(route.clone());
+        }
+        let index = self
+            .mappings
+            .iter()
+            .position(|mapping| mapping.current && mapping.route == *route)?;
+        if self
+            .mappings
+            .get(index)
+            .is_some_and(|mapping| mapping.temporary)
+        {
+            return Some(self.mappings.swap_remove(index));
+        }
+        let mapping = self.mappings.get_mut(index)?;
+        mapping.current = false;
+        Some(mapping.clone())
+    }
+
+    /// Makes `session`, one of the route's sessions, its current one. The
+    /// caller leaves the previous current session first.
+    pub(crate) fn make_current(
+        &mut self,
+        route: &Route,
+        session: &str,
+    ) -> Result<Mapping, BridgeError> {
+        if self
+            .current_of(route)
+            .is_some_and(|mapping| mapping.session != session)
+        {
+            return Err(BridgeError::Conflict);
+        }
+        let mapping = self
+            .mappings
+            .iter_mut()
+            .find(|mapping| mapping.session == session && mapping.route == *route)
+            .ok_or(BridgeError::InvalidRequest)?;
+        mapping.current = true;
+        self.temporary_next.retain(|next| next != route);
+        Ok(mapping.clone())
+    }
+
+    /// Forgets a deleted session. Its route, if it was current there, starts
+    /// a new session with its next message.
+    pub(crate) fn remove(&mut self, session: &str) -> Option<Mapping> {
+        let index = self
+            .mappings
+            .iter()
+            .position(|mapping| mapping.session == session)?;
+        Some(self.mappings.swap_remove(index))
     }
 
     fn insert(&mut self, mapping: Mapping) {
@@ -166,15 +270,14 @@ impl BridgeBook {
         }
         let mut mapping = persisted.into_mapping(session)?;
         mapping.opened = false;
-        if self.by_route(&mapping.route).is_some() {
-            return Err(BridgeError::Conflict);
-        }
+        // a route has one current session; a second record claiming it yields
+        mapping.current = mapping.current && self.current_of(&mapping.route).is_none();
         self.insert(mapping);
         Ok(())
     }
 
     pub(crate) fn resolve(&self, route: &Route) -> ResolveResult {
-        let Some(mapping) = self.by_route(route) else {
+        let Some(mapping) = self.current_of(route) else {
             return ResolveResult::Missing;
         };
         ResolveResult::Found {
@@ -225,6 +328,9 @@ impl BridgeBook {
     /// reservation.
     pub(crate) fn commit_mapping(&mut self, mapping: Mapping) {
         self.release(&mapping.route);
+        if mapping.current {
+            self.temporary_next.retain(|next| *next != mapping.route);
+        }
         match self
             .mappings
             .iter_mut()
@@ -248,7 +354,7 @@ impl BridgeBook {
             return Err(BridgeError::InvalidRequest);
         }
         if self
-            .by_route(&route)
+            .current_of(&route)
             .is_some_and(|existing| existing.session != session)
             || self
                 .by_session(session)
@@ -256,14 +362,18 @@ impl BridgeBook {
         {
             return Err(BridgeError::Conflict);
         }
+        let temporary = self.temporary_next(&route);
         let mut mapping = self.by_session(session).cloned().unwrap_or(Mapping {
             session: String::from(session),
             route,
             opened: true,
+            current: true,
+            temporary,
             pending_replies: VecDeque::new(),
             active_turn: None,
         });
         mapping.opened = true;
+        mapping.current = true;
         let input_request = mapping
             .active_turn
             .as_mut()
@@ -319,6 +429,7 @@ impl BridgeBook {
                 mapping.active_turn = Some(ActiveTurn {
                     reply_to: Some(reply_to),
                     input_request: None,
+                    delivered: mapping.current,
                 });
             }
             GatewayEvent::OtherTurnStarted => {
@@ -328,14 +439,20 @@ impl BridgeBook {
                 mapping.active_turn = Some(ActiveTurn {
                     reply_to: None,
                     input_request: None,
+                    delivered: mapping.current,
                 });
             }
             GatewayEvent::TurnEnded | GatewayEvent::Continuing => {}
         }
-        let target = mapping.active_turn.as_ref().map(|active| GatewayTarget {
-            route: mapping.route.clone(),
-            reply_to: active.reply_to.clone(),
-        });
+        // a turn the route started finishes there; a later one in a left session reaches no one
+        let target = mapping
+            .active_turn
+            .as_ref()
+            .filter(|active| active.delivered)
+            .map(|active| GatewayTarget {
+                route: mapping.route.clone(),
+                reply_to: active.reply_to.clone(),
+            });
         if event == GatewayEvent::TurnEnded {
             mapping.active_turn = None;
         }
@@ -369,9 +486,9 @@ pub(crate) struct PersistedRoute {
     channel_len: u16,
     conversation_len: u16,
     thread_len: u16,
-    // Version 1 stored reply data here. Preserve the bytes so existing records
-    // remain readable while reply state becomes runtime-only.
-    reserved_len: u16,
+    /// [`FLAG_CURRENT`]. Version 1 kept a zero length here for reply data
+    /// that became runtime-only.
+    flags: u16,
     channel: [u8; CHANNEL_MAX],
     conversation_id: [u8; CONVERSATION_MAX],
     thread_id: [u8; THREAD_MAX],
@@ -388,7 +505,7 @@ impl PersistedRoute {
                 .map_err(|_error| BridgeError::InvalidRequest)?,
             thread_len: u16::try_from(mapping.route.thread_id.as_deref().map_or(0, str::len))
                 .map_err(|_error| BridgeError::InvalidRequest)?,
-            reserved_len: 0,
+            flags: if mapping.current { FLAG_CURRENT } else { 0 },
             channel: [0; CHANNEL_MAX],
             conversation_id: [0; CONVERSATION_MAX],
             thread_id: [0; THREAD_MAX],
@@ -403,9 +520,11 @@ impl PersistedRoute {
     }
 
     fn into_mapping(self, session: &str) -> Result<Mapping, BridgeError> {
-        if self.version != RECORD_VERSION {
-            return Err(BridgeError::InvalidRequest);
-        }
+        let current = match self.version {
+            1 => true,
+            RECORD_VERSION => self.flags & FLAG_CURRENT != 0,
+            _ => return Err(BridgeError::InvalidRequest),
+        };
         let channel = read_text(&self.channel, self.channel_len)?;
         let conversation_id = read_text(&self.conversation_id, self.conversation_len)?;
         let thread_id = if self.thread_len == 0 {
@@ -418,6 +537,8 @@ impl PersistedRoute {
             session: String::from(session),
             route,
             opened: false,
+            current,
+            temporary: false,
             pending_replies: VecDeque::new(),
             active_turn: None,
         })
@@ -445,13 +566,28 @@ fn read_text(source: &[u8], length: u16) -> Result<String, BridgeError> {
     Ok(String::from(value))
 }
 
+/// Saves a mapping; a temporary session's mapping is never saved.
 pub(crate) async fn persist_mapping<Storage: PluginStorage>(
     storage: &Storage,
     mapping: &Mapping,
 ) -> Result<(), BridgeError> {
+    if mapping.temporary {
+        return Ok(());
+    }
     let record = PersistedRoute::from_mapping(mapping)?;
     storage
         .put(&mapping.session, &record)
+        .await
+        .map_err(|_error| BridgeError::Storage)
+}
+
+/// Forgets a saved mapping.
+pub(crate) async fn forget_mapping<Storage: PluginStorage>(
+    storage: &Storage,
+    session: &str,
+) -> Result<(), BridgeError> {
+    storage
+        .delete(session)
         .await
         .map_err(|_error| BridgeError::Storage)
 }
@@ -465,8 +601,8 @@ mod tests {
     use embassy_time::{Duration, Instant};
 
     use super::{
-        BridgeBook, GatewayEvent, PersistedRoute, RESERVATION_TIMEOUT, Resolution, ResolveResult,
-        Route,
+        BridgeBook, GatewayEvent, Mapping, PersistedRoute, RESERVATION_TIMEOUT, Resolution,
+        ResolveResult, Route,
     };
 
     fn route() -> Route {
@@ -671,5 +807,93 @@ mod tests {
             .prepare_binding(route(), "message-11", "session-4")
             .expect("prepare next message");
         assert_eq!(request, None, "the request is answered once");
+    }
+
+    #[test]
+    fn a_left_session_finishes_its_turn_then_reaches_no_one() {
+        let mut book = BridgeBook::new();
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding")
+            .0;
+        book.commit_mapping(mapping);
+        let _started = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start turn");
+
+        let left = book
+            .leave(&route(), false)
+            .expect("leave the current session");
+        assert!(left.running(), "its turn still runs on the device");
+        assert_eq!(book.resolve(&route()), ResolveResult::Missing);
+        assert!(
+            book.gateway_target("session-4", GatewayEvent::TurnEnded)
+                .expect("end")
+                .is_some(),
+            "the turn the route asked for still finishes there"
+        );
+        assert_eq!(
+            book.gateway_target("session-4", GatewayEvent::OtherTurnStarted)
+                .expect("start a tool turn"),
+            None,
+            "a later turn of a left session reaches no one"
+        );
+        let _ended = book.gateway_target("session-4", GatewayEvent::TurnEnded);
+
+        // switching back makes it current again; a new route session would conflict
+        book.make_current(&route(), "session-4")
+            .expect("switch back");
+        assert!(
+            book.gateway_target("session-4", GatewayEvent::OtherTurnStarted)
+                .expect("start")
+                .is_some()
+        );
+        assert!(book.make_current(&route(), "session-5").is_err());
+    }
+
+    #[test]
+    fn a_temporary_session_is_unsaved_and_forgotten_when_left() {
+        let mut book = BridgeBook::new();
+        let _left = book.leave(&route(), true);
+        assert!(book.temporary_next(&route()));
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-6")
+            .expect("prepare binding")
+            .0;
+        assert!(mapping.temporary());
+        book.commit_mapping(mapping);
+        assert!(!book.temporary_next(&route()), "only the next session");
+
+        let left = book.leave(&route(), false).expect("leave");
+        assert_eq!(left.session(), "session-6");
+        assert!(left.temporary());
+        assert_eq!(
+            book.sessions_of(&route()).count(),
+            0,
+            "forgotten on the way out"
+        );
+    }
+
+    #[test]
+    fn version_one_records_restore_as_the_current_session() {
+        let book = BridgeBook::new();
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding")
+            .0;
+        let mut record = PersistedRoute::from_mapping(&mapping).expect("encode");
+        record.version = 1;
+        record.flags = 0;
+        let second = PersistedRoute::from_mapping(&mapping).expect("encode");
+
+        let mut restored = BridgeBook::new();
+        restored.restore("session-4", record).expect("restore v1");
+        restored.restore("session-5", second).expect("restore v2");
+        assert_eq!(
+            restored.current_of(&route()).map(Mapping::session),
+            Some("session-4"),
+            "a route keeps one current session"
+        );
+        assert_eq!(restored.sessions_of(&route()).count(), 2);
     }
 }

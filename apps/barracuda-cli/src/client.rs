@@ -57,7 +57,6 @@ async fn run_connected(
                     if !trimmed.is_empty() {
                         let frame = serde_json::to_string(&WebClientFrame {
                             text: trimmed.to_string(),
-                            reply_to: None,
                         })?;
                         sink.send(Message::text(frame)).await?;
                         editor.start_waiting()?;

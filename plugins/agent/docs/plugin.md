@@ -1,11 +1,11 @@
 # Agent Plugin
 
 - Plugin ID: `agent`
-- Direct Plugin dependencies: `webserver`, `workflow`, `captive-portal`
+- Direct Plugin dependencies: `webserver`, `workflow`, `captive-portal`, `time`
 - Provided typed capabilities: `AgentRuntime`, `AgentToolRegistry`
 - Required typed capabilities: `WebServer` from `webserver`,
-  `WorkflowActionRegistry` and `WorkflowService` from `workflow`, and
-  `CaptivePortal` from `captive-portal`
+  `WorkflowActionRegistry` and `WorkflowService` from `workflow`,
+  `CaptivePortal` from `captive-portal`, and `UtcClock` from `time`
 - Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
   plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
 - Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
@@ -24,6 +24,19 @@ capability consumer.
 Direct dependent Plugins use `AgentRuntime` for typed session collaboration.
 Transport- or environment-specific request shaping stays in those adapter
 Plugins rather than in the Agent runtime.
+
+Each session carries human-facing metadata: a title and a last-used time.
+`AgentRuntime::describe_sessions` returns a `SessionInfo` (id, persistence,
+title, `updated_at`) for every live session, and
+`AgentRuntime::rename_session` replaces a title. An untitled session takes its
+title from the first appended user message with visible text: the first
+non-empty line, trimmed, capped at 64 characters with a trailing `…` when
+cut. Renames are normalized the same way and rejected when nothing visible
+remains. Each appended user message stamps `updated_at` in Unix milliseconds
+from `UtcClock`, which registration installs through
+`AgentRuntime::set_wall_clock`; while the clock is unsynchronized, the previous
+value is kept. Persistent sessions store both fields with the rest of their
+session state; ephemeral sessions keep them in memory.
 
 The Plugin owns and drives `RuntimeService` directly. Alongside it, the
 Agent-to-Workflow adapter only forwards open-session output as `session.event`;

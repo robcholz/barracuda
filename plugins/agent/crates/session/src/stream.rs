@@ -16,6 +16,7 @@ use barracuda_runtime_utils::local_channel::{Receiver, Sender};
 use barracuda_runtime_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 use super::approval::ApprovalResolverError;
 use super::control::SessionCommand;
@@ -36,6 +37,22 @@ pub enum TurnOrigin {
         /// The original model-requested call whose completion opened the turn.
         call: ToolCall,
     },
+}
+
+/// How a root-visible turn ended.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize, IntoStaticStr)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum TurnOutcome {
+    /// The Agent finished the turn.
+    #[default]
+    Completed,
+    /// A caller interrupted the turn at an iteration boundary.
+    Interrupted,
+    /// A caller cancelled the turn, or the session stopped while it ran.
+    Cancelled,
+    /// The turn ended with an error, reported before it ended.
+    Failed,
 }
 
 /// Semantic input the active turn needs from its caller.
@@ -93,6 +110,8 @@ pub enum TurnEvent {
     Ended {
         /// The session-local turn this bracket closes.
         turn: TurnId,
+        /// How the turn ended.
+        outcome: TurnOutcome,
     },
 }
 

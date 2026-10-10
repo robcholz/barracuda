@@ -1,5 +1,5 @@
 id = "agent"
-depends-on = ["webserver", "workflow", "captive-portal"]
+depends-on = ["webserver", "workflow", "captive-portal", "time"]
 description = "Runs conversational agents and exposes model configuration over HTTP."
 
 [tasks.build]

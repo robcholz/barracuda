@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "route": { "$ref": "#/$defs/route" },
+    "control": {
+      "enum": [
+        "interrupt",
+        "cancel",
+        "sessions",
+        "new",
+        "switch",
+        "rename",
+        "delete",
+        "help"
+      ]
+    },
+    "temporary": { "type": "boolean" },
+    "session": { "type": "string", "pattern": "^session-[0-9]+$", "maxLength": 32 },
+    "index": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "confirm": { "type": "boolean" }
+  },
+  "required": ["route", "control"],
+  "additionalProperties": false,
+  "$defs": {
+    "route": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" }
+      },
+      "required": ["channel", "conversation_id"],
+      "additionalProperties": false
+    }
+  }
+}

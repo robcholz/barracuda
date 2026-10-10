@@ -35,12 +35,20 @@ pub(crate) enum ToAgentRequest {
         message_id: String,
         session: String,
     },
+    /// Finds the session a control request (stop, rewind) acts on. Unlike
+    /// `Resolve`, an unmapped route stays unreserved: a control never
+    /// creates a session.
+    Lookup { route: RouteRequest },
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum ToAgentResponse {
-    Missing {},
+    /// No current session: the Workflow creates one with this persistence
+    /// (`ephemeral` for a temporary chat) and binds it.
+    Missing {
+        persistence: &'static str,
+    },
     Resolved {
         open_required: bool,
         session: String,
@@ -142,6 +150,7 @@ where
                 Ok(route) => match validate_message_id(&message_id) {
                     Ok(()) => {
                         let found = resolve(shared, &route).await;
+                        let temporary = shared.book.lock().await.temporary_next(&route);
                         match &found {
                             ResolveResult::Missing => log::info!(
                                 "IMessage Bridge found no Agent session for inbound message `{message_id}`"
@@ -153,7 +162,7 @@ where
                                 "IMessage Bridge resolved inbound message `{message_id}` to `{session}` (open_required={open_required})"
                             ),
                         }
-                        Ok(found)
+                        Ok((found, temporary))
                     }
                     Err(error) => Err(error),
                 },
@@ -191,13 +200,27 @@ where
                 Err(error) => Err(error),
             }
         }
+        ToAgentRequest::Lookup {
+            route: route_request,
+        } => match route(route_request) {
+            Ok(route) => {
+                let book = shared.book.lock().await;
+                Ok((book.resolve(&route), book.temporary_next(&route)))
+            }
+            Err(error) => Err(error),
+        },
     };
     match result {
-        Ok(ResolveResult::Missing) => ToAgentResponse::Missing {},
-        Ok(ResolveResult::Found {
-            session,
-            open_required,
-        }) => ToAgentResponse::Resolved {
+        Ok((ResolveResult::Missing, temporary)) => ToAgentResponse::Missing {
+            persistence: if temporary { "ephemeral" } else { "persistent" },
+        },
+        Ok((
+            ResolveResult::Found {
+                session,
+                open_required,
+            },
+            _,
+        )) => ToAgentResponse::Resolved {
             open_required,
             session,
         },
@@ -239,6 +262,18 @@ mod tests {
     use barracuda_workflow_plugin::{WorkflowActionSchema, workflow_action_schema};
 
     const TO_AGENT: WorkflowActionSchema = workflow_action_schema!("imessage_bridge.to_agent");
+
+    #[test]
+    fn control_route_matches_the_to_agent_lookup_schema() {
+        let route = GatewayRoute::new("web", "conversation");
+
+        assert!(serde_json::to_value(route).is_ok_and(|route| {
+            TO_AGENT
+                .request()
+                .validate(&serde_json::json!({ "route": route }))
+                .is_ok()
+        }));
+    }
 
     #[test]
     fn threadless_gateway_event_matches_the_to_agent_resolve_schema() {

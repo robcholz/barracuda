@@ -54,7 +54,6 @@ pub async fn run(url: &str, timing: ScriptTiming) -> Result<()> {
     {
         let frame = serde_json::to_string(&WebClientFrame {
             text: line.to_string(),
-            reply_to: None,
         })?;
         sink.send(Message::text(frame)).await?;
         // A turn that stopped to ask for input continues in this one.

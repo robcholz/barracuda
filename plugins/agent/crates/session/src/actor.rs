@@ -19,6 +19,7 @@ use super::approval::{
     ApprovalCompletion, ApprovalDisplay, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
 };
+use super::clock::SessionClock;
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SessionDeleteError, SharedAgentManager};
 use super::orchestration::{
@@ -26,11 +27,11 @@ use super::orchestration::{
     OrchestrationPhysicalError, ReapStatus, RemovalOutcome, SessionOrchestration,
 };
 use super::permission::SessionPermission;
-use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
+use super::state::{record_user_message, AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
     InputRequestId, IterationEvent, SessionCloseReason, SessionEvent, SessionEventError, SessionId,
     SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError, TurnId,
-    TurnOrigin,
+    TurnOrigin, TurnOutcome,
 };
 use barracuda_agent::Message;
 use barracuda_agent::{
@@ -199,6 +200,7 @@ where
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
+    clock: SessionClock,
     agent_manager: SharedAgentManager<Tcp, Resolver>,
     agent_id_allocator: AgentIdAllocatorHandle,
 
@@ -230,6 +232,7 @@ where
         agent_manager: SharedAgentManager<Tcp, Resolver>,
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
+        clock: SessionClock,
         approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = local_channel::channel();
@@ -238,6 +241,7 @@ where
                 session,
                 persistence,
                 state,
+                clock,
                 agent_manager,
                 agent_id_allocator,
                 agents: AgentSlots::new(),
@@ -384,6 +388,7 @@ where
             self.reject_closed(ack);
             return;
         }
+        record_user_message(&self.state, message.as_str(), self.clock.now());
         self.inbox.push_back(message);
         let _ = ack.send(Ok(()));
     }
@@ -493,7 +498,7 @@ where
         if reason != StopReason::Delete && self.orchestration.has_live_children() {
             return None;
         }
-        self.finish_turn();
+        self.finish_turn(TurnOutcome::Cancelled);
 
         let lifecycle = core::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
         let ActorLifecycle::Stopping(stopping) = lifecycle else {
@@ -581,13 +586,13 @@ where
         };
         if message.as_str().trim().is_empty() {
             self.begin_turn(TurnOrigin::User);
-            self.finish_turn();
+            self.finish_turn(TurnOutcome::Completed);
             return true;
         }
         if let Err(error) = self.ensure_root() {
             self.begin_turn(TurnOrigin::User);
             self.emit_turn_error(error.into());
-            self.finish_turn();
+            self.finish_turn(TurnOutcome::Failed);
             return true;
         }
         match self.dispatch_root(message) {
@@ -599,7 +604,7 @@ where
             Err(RootDispatchError::Invariant) => {
                 self.begin_turn(TurnOrigin::User);
                 self.emit_turn_error(SessionTurnError::Agent(AgentError::StateInvariant));
-                self.finish_turn();
+                self.finish_turn(TurnOutcome::Failed);
                 true
             }
         }
@@ -767,7 +772,7 @@ where
             AgentSlotUpdate::Event(Err(error)) => {
                 if is_root {
                     self.emit_turn_error(SessionTurnError::from_agent(error));
-                    self.finish_turn();
+                    self.finish_turn(TurnOutcome::Failed);
                     self.orchestration.observe(agent, AgentNotice::Idle);
                 } else {
                     self.orchestration.observe(
@@ -843,20 +848,28 @@ where
                 if let Some(slot) = self.agents.get_mut(&agent) {
                     slot.finish_trace_turn();
                 }
-                let (text, completed, cancelled) = match outcome {
+                let (text, completed, cancelled, turn_outcome) = match outcome {
                     AgentOutcome::Completed(AgentCompletion::EffectOutput(message)) => {
                         if is_root {
                             self.emit_effect_output(message.clone());
                         }
-                        (message, true, false)
+                        (message, true, false, TurnOutcome::Completed)
                     }
                     AgentOutcome::Completed(AgentCompletion::Streamed(message)) => {
-                        (message, true, false)
+                        (message, true, false, TurnOutcome::Completed)
                     }
-                    AgentOutcome::Interrupted => {
-                        ("subagent was interrupted".to_owned(), false, false)
-                    }
-                    AgentOutcome::Cancelled => ("subagent was cancelled".to_owned(), false, true),
+                    AgentOutcome::Interrupted => (
+                        "subagent was interrupted".to_owned(),
+                        false,
+                        false,
+                        TurnOutcome::Interrupted,
+                    ),
+                    AgentOutcome::Cancelled => (
+                        "subagent was cancelled".to_owned(),
+                        false,
+                        true,
+                        TurnOutcome::Cancelled,
+                    ),
                 };
                 if cancelled {
                     self.orchestration.observe(agent, AgentNotice::Cancelled);
@@ -873,7 +886,7 @@ where
                     self.emit_approval_display(display);
                 }
                 if is_root {
-                    self.finish_turn();
+                    self.finish_turn(turn_outcome);
                 }
             }
         }
@@ -963,11 +976,14 @@ where
         self.emit_turn(TurnEvent::Started { turn: id, origin });
     }
 
-    fn finish_turn(&mut self) {
+    fn finish_turn(&mut self, outcome: TurnOutcome) {
         let Some(turn) = self.active_turn.take() else {
             return;
         };
-        self.emit_turn(TurnEvent::Ended { turn: turn.id });
+        self.emit_turn(TurnEvent::Ended {
+            turn: turn.id,
+            outcome,
+        });
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {

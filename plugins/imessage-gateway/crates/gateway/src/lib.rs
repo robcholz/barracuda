@@ -7,6 +7,7 @@ mod channel;
 mod error;
 mod facade;
 mod model;
+mod sessions;
 
 pub use channel::{ChannelFuture, MessageChannel};
 pub use error::{ChannelError, GatewayError, StreamError};
@@ -16,4 +17,7 @@ pub use model::{
     MediaKind, MessageKind, MessageTarget, Operation, ReactRequest, SendMediaRequest,
     SendMessageRequest, SendReceipt, SendStream, SendStreamEvent, SendStreamRequest,
     SetTypingRequest, TextBody, TextChunk, TextStream,
+};
+pub use sessions::{
+    sessions_text, SendSessionsRequest, SessionEntry, SessionNotice, SESSION_COMMANDS,
 };

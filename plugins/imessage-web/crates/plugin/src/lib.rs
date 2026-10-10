@@ -9,12 +9,17 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
-use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
+use barracuda_imessage_gateway_plugin::{
+    GatewayControlKind, GatewayInboundControl, GatewayInboundMessage, GatewayRoute, IMessageGateway,
+};
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::WebServer;
-use web::{InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web, WebBridge};
+use web::{
+    InboundControl, InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web,
+    WebBridge, WebControl,
+};
 
 pub use web::WebClientFrame;
 
@@ -132,6 +137,39 @@ struct GatewayInboundSink {
 }
 
 impl InboundMessageSink for GatewayInboundSink {
+    fn receive_control(&self, request: InboundControl) -> InboundFuture<'_, ()> {
+        Box::pin(async move {
+            let control = GatewayInboundControl {
+                temporary: request.temporary,
+                session: request.session,
+                index: None,
+                title: request.title,
+                confirm: request.confirm,
+                ..GatewayInboundControl::new(
+                    GatewayRoute {
+                        channel: self.channel.clone(),
+                        conversation_id: request.conversation_id,
+                        thread_id: request.thread_id,
+                    },
+                    match request.control {
+                        WebControl::Interrupt => GatewayControlKind::Interrupt,
+                        WebControl::Cancel => GatewayControlKind::Cancel,
+                        WebControl::Sessions => GatewayControlKind::Sessions,
+                        WebControl::New => GatewayControlKind::New,
+                        WebControl::Switch => GatewayControlKind::Switch,
+                        WebControl::Rename => GatewayControlKind::Rename,
+                        WebControl::Delete => GatewayControlKind::Delete,
+                    },
+                )
+            };
+            self.gateway
+                .publish_control(control)
+                .map_err(|error| InboundError::Rejected {
+                    message: error.to_string(),
+                })
+        })
+    }
+
     fn receive_message(&self, request: InboundMessage) -> InboundFuture<'_, ()> {
         Box::pin(async move {
             let message = GatewayInboundMessage {

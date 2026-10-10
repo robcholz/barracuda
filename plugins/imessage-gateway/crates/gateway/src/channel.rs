@@ -2,9 +2,9 @@ use alloc::boxed::Box;
 use core::{future::Future, pin::Pin};
 
 use crate::{
-    ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation, ReactRequest,
-    SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamRequest, SetTypingRequest,
-    StreamError, TextChunk,
+    sessions_text, ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SendSessionsRequest,
+    SendStreamRequest, SetTypingRequest, StreamError, TextChunk,
 };
 use futures_lite::{stream, StreamExt};
 use serde::Deserialize;
@@ -72,6 +72,19 @@ pub trait MessageChannel: 'static {
         _request: SendMediaRequest,
     ) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move { Err(ChannelError::unsupported(kind.operation())) })
+    }
+
+    /// Shows a conversation's sessions after a session command.
+    ///
+    /// The default sends [`sessions_text`] as one ordinary message, which is
+    /// all a text channel can show. Channels with a richer surface override it.
+    fn send_sessions(&self, request: SendSessionsRequest) -> ChannelFuture<'_, ()> {
+        Box::pin(async move {
+            let text = sessions_text(&request);
+            self.send_message(SendMessageRequest::text(request.target, text))
+                .await
+                .map(|_receipt| ())
+        })
     }
 
     fn edit_message(&self, _request: EditMessageRequest) -> ChannelFuture<'_, SendReceipt> {

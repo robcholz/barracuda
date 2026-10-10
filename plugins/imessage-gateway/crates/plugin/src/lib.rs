@@ -17,7 +17,8 @@ use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
 
 pub use barracuda_imessage_gateway_runtime::{
-    GatewayAccepted, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
+    parse_command, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
+    GatewayInboundControl, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
     GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
     GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
     GatewaySendStreamRequest,
@@ -59,12 +60,28 @@ impl IMessageGateway {
         self.ingress.publish(message).await
     }
 
+    /// Publishes one normalized control request (stop or rewind the running
+    /// turn) into Workflow matching. It does not wait for message backlog.
+    pub fn publish_control(
+        &self,
+        control: GatewayInboundControl,
+    ) -> Result<(), GatewayIngressError> {
+        self.ingress.publish_control(control)
+    }
+
     /// Sends one complete text message.
     pub async fn send(
         &self,
         request: GatewaySendRequest,
     ) -> Result<GatewaySendResponse, GatewayOperationError> {
         self.runtime.send(request).await
+    }
+
+    /// Shows a conversation's sessions after a session command: as text by
+    /// default, or however the conversation's channel overrides
+    /// [`MessageChannel::send_sessions`].
+    pub async fn send_sessions(&self, request: SendSessionsRequest) -> Result<(), GatewayError> {
+        self.gateway.send_sessions(request).await
     }
 
     /// Accepts one semantic event for an outbound text stream.
