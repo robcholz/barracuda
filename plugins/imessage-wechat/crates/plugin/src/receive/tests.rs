@@ -14,8 +14,8 @@ use core::cell::RefCell;
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
 use barracuda_imessage_gateway_channel::{
-    receive_runtime, ChannelControl, ChannelMode, ModeEndpoint, OwnersEndpoint, ReceiveState,
-    ReceiveTiming, PAIRED_REPLY,
+    receive_runtime, ChannelControl, ChannelEndpoint, ChannelMode, ModeEndpoint, OwnersEndpoint,
+    ReceiveState, ReceiveTiming, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGateway, IMessageGatewayPlugin, MessageChannel,
@@ -45,7 +45,7 @@ use super::{
 };
 use crate::{
     entry_status, login::LoginWatch, ChannelConfiguration, ConfigEndpoint, ConfigRequest,
-    CONFIGURATION_STORAGE_KEY,
+    CONFIGURATION_STORAGE_KEY, CONFIG_API_PATH,
 };
 
 const API_BASE: &str = "http://wechat.test";
@@ -332,9 +332,23 @@ impl<S: PluginStorage> Harness<S> {
         method: HttpMethod,
         body: &[u8],
     ) -> (u16, Value) {
-        let response = endpoint
-            .handle(HttpRequest::new(method, body.to_vec()))
-            .await;
+        self.request(endpoint, HttpRequest::new(method, body.to_vec()))
+            .await
+    }
+
+    /// `GET /api/gateway/wechat/status`.
+    async fn status(&self) -> (u16, Value) {
+        let routes = ChannelEndpoint::new(Rc::clone(&self.channel), CONFIG_API_PATH, self.config());
+        let path = format!("{CONFIG_API_PATH}/status");
+        self.request(
+            &routes,
+            HttpRequest::with_path(HttpMethod::Get, path, Vec::new()),
+        )
+        .await
+    }
+
+    async fn request(&self, endpoint: &dyn HttpEndpoint, request: HttpRequest) -> (u16, Value) {
+        let response = endpoint.handle(request).await;
         let body = response.body().expect("buffered response");
         let json = if body.is_empty() {
             Value::Null
@@ -798,7 +812,7 @@ fn an_expired_session_halts_until_a_new_login() {
             ReceiveState::Error(SESSION_EXPIRED_MESSAGE.into())
         );
         assert_eq!(harness.receive.requests().len(), 2, "no retry while halted");
-        let (code, body) = harness.call(&harness.config(), HttpMethod::Get, b"").await;
+        let (code, body) = harness.status().await;
         assert_eq!(code, 200);
         assert_eq!(
             body["receive"],
@@ -967,7 +981,7 @@ fn without_a_free_slot_it_waits_and_starts_when_one_frees() {
         harness.settle().await;
         assert_eq!(harness.state(), ReceiveState::NoSlot);
         assert!(harness.receive.requests().is_empty());
-        let (_code, body) = harness.call(&harness.config(), HttpMethod::Get, b"").await;
+        let (_code, body) = harness.status().await;
         assert_eq!(
             body["receive"],
             json!({ "state": "no_slot", "capacity": 1, "slots": { "in_use": 1, "capacity": 1 } })
@@ -1003,7 +1017,7 @@ fn endpoints_report_status_and_owners() {
             })
             .await;
 
-        let (code, body) = harness.call(&harness.config(), HttpMethod::Get, b"").await;
+        let (code, body) = harness.status().await;
         assert_eq!(code, 200);
         assert_eq!(
             body,
@@ -1053,7 +1067,7 @@ fn unconfigured_channel_does_not_receive() {
         assert_eq!(harness.state(), ReceiveState::Idle);
         assert_eq!(harness.slots.in_use(), 0);
         assert!(!harness.registered());
-        let (_code, body) = harness.call(&harness.config(), HttpMethod::Get, b"").await;
+        let (_code, body) = harness.status().await;
         assert_eq!(body["configured"], false);
         assert_eq!(
             entry_status(&harness.channel, &LoginWatch::idle()),

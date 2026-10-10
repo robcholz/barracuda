@@ -18,7 +18,7 @@ use core::cell::{Cell, RefCell};
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use barracuda_imessage_gateway_channel::{
-    ChannelControl, ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
+    ChannelControl, ChannelEndpoint, ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGatewayPlugin, MessageChannel, Operation,
@@ -225,10 +225,19 @@ impl<Storage: PluginStorage> Harness<Storage> {
     }
 
     fn status(&self) -> Value {
-        let endpoint = ConfigEndpoint {
-            channel: Rc::clone(&self.channel),
-        };
-        let response = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+        let endpoint = ChannelEndpoint::new(
+            Rc::clone(&self.channel),
+            CONFIG_API_PATH,
+            ConfigEndpoint {
+                channel: Rc::clone(&self.channel),
+            },
+        );
+        let request = HttpRequest::with_path(
+            HttpMethod::Get,
+            format!("{CONFIG_API_PATH}/status"),
+            Vec::new(),
+        );
+        let response = block_on(endpoint.handle(request));
         assert_eq!(response.status(), 200);
         serde_json::from_slice(response.body().expect("buffered body")).expect("status JSON")
     }
@@ -419,13 +428,16 @@ impl Scenario for AcceptedConfiguration {
                    "owners": {"count": 0}})
         );
         assert!(harness.polls()[0].starts_with("/botsecret/getUpdates?timeout=50&limit=8"));
-        let response = block_on(
-            ConfigEndpoint {
-                channel: Rc::clone(&harness.channel),
-            }
-            .handle(HttpRequest::new(HttpMethod::Delete, Vec::new())),
-        );
-        assert_eq!(response.status(), 405);
+        // The configuration path takes changes only; its state is under `/status`.
+        for method in [HttpMethod::Get, HttpMethod::Delete] {
+            let response = block_on(
+                ConfigEndpoint {
+                    channel: Rc::clone(&harness.channel),
+                }
+                .handle(HttpRequest::new(method, Vec::new())),
+            );
+            assert_eq!(response.status(), 405);
+        }
         None
     }
 }

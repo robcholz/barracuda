@@ -152,11 +152,14 @@ sidebar and top bar and repaints the overview in place, so figures keep
 running. The first device entry with a status and a label is the top bar badge
 「<title> <label>」 (「Wi-Fi 已连接」; the signal badge when `ready`, the plain badge
 otherwise; desktop only). An entry's `detail` is shown in mono after its
-sidebar label, on its overview tile and on its phone row, and the device's
-`detail` (or label) is the header's first k/v row (Wi-Fi · HomeNet). A step is
+sidebar label, on its overview tile and on its phone row. The header's first
+two k/v rows are the device's: 状态 with its label as a badge (the signal badge
+when `ready`), then its title with its `detail` in mono (Wi-Fi · HomeNet), or
+「—」 when it has none (a network the host manages). A step is
 done when any entry of its group is `ready`: it shows a check and 「已连接
-HomeNet」 for the device group, or the ready entry's title and label (an entry
-with a label is preferred), instead of its link. Channel rows in the 消息通道
+HomeNet」 for the device group (just its label, 「已连接」, when it has no
+`detail`), or the ready entry's title and label (an entry with a label is
+preferred), instead of its link. Channel rows in the 消息通道
 card and on the phone list show the label (「已配置」). A failed or malformed
 read leaves every status slot empty; the shell shows no state it did not read.
 

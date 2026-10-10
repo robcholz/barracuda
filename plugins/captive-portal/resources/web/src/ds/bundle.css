@@ -1606,7 +1606,6 @@ button.bc-link {
   font-weight: 500;
 }
 .bc-icon-button {
-  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1823,16 +1822,6 @@ button.bc-link {
 }
 .bc-sidebar-trigger {
   margin-left: -8px;
-}
-/* an icon-only button names itself in a tooltip (aria-hidden; the button keeps its aria-label) */
-.bc-button--icon {
-  position: relative;
-}
-.bc-icon-button:hover > .bc-tooltip,
-.bc-icon-button:focus-visible > .bc-tooltip,
-.bc-button--icon:hover > .bc-tooltip,
-.bc-button--icon:focus-visible > .bc-tooltip {
-  display: block;
 }
 @media (prefers-reduced-motion: reduce) {
   .bc-app,

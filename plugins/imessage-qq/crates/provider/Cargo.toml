@@ -9,6 +9,8 @@ license = "Apache-2.0"
 [dependencies]
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
+barracuda-tls.workspace = true
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 embassy-sync.workspace = true
 embassy-time.workspace = true
 http-client.workspace = true

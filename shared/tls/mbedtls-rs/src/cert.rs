@@ -24,15 +24,24 @@ pub enum X509<'a> {
 }
 
 /// Decides trust for one certificate of a peer's chain, as
-/// `mbedtls_ssl_conf_verify` calls it: the context pointer (always null here),
-/// the certificate, its depth in the chain, and the verification flags it may
-/// clear or set. Returns 0, or an MbedTLS error that aborts the handshake.
+/// `mbedtls_ssl_conf_verify` calls it: the context pointer (the session's
+/// [`VerifyScratch`]), the certificate, its depth in the chain, and the
+/// verification flags it may clear or set. MbedTLS calls it once per
+/// certificate of the verified path, from the top down to the peer's own.
+/// Returns 0, or an MbedTLS error that aborts the handshake.
 pub type VerifyCallback = unsafe extern "C" fn(
     *mut core::ffi::c_void,
     *mut mbedtls_x509_crt,
     core::ffi::c_int,
     *mut u32,
 ) -> core::ffi::c_int;
+
+/// One word a [`VerifyCallback`] may keep between its calls for one chain,
+/// one per session and zero when the session starts.
+#[derive(Debug, Default)]
+pub struct VerifyScratch(pub core::cell::Cell<core::ffi::c_int>);
+
+impl crate::MInit for VerifyScratch {}
 
 /// A parsed X509 certificate or certificate chain.
 #[derive(Debug, Clone)]

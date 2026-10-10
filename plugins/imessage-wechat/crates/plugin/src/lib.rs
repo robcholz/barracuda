@@ -17,9 +17,9 @@ use barracuda_captive_portal_plugin::{
     CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
 use barracuda_imessage_gateway_channel::{
-    load_mode, receive_runtime, status_response, store_mode, sync_receive, ChannelControl,
-    ChannelEndpoint, ChannelMode, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
-    PairingEntropy, ReceiveControl, ReceiveRuntime, ReceiveTiming,
+    load_mode, receive_runtime, store_mode, sync_receive, ChannelControl, ChannelEndpoint,
+    ChannelMode, ModeError, ModeFuture, OnDemand, Owners, OwnersError, PairingEntropy,
+    ReceiveControl, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
@@ -621,7 +621,6 @@ where
         Box::pin(async move {
             match request.method() {
                 HttpMethod::Post => {}
-                HttpMethod::Get => return status_response(&*self.configuration),
                 _ => return json_response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {

@@ -37,3 +37,24 @@ The array must not be empty and unknown fields are rejected. `backend` is
 
 Error responses are JSON objects with one stable `error` string. API keys are
 never included in responses or logs.
+
+## `GET /api/model-api/status`
+
+Reports the active model configuration without API keys:
+
+```json
+{
+  "configured": true,
+  "default": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+  "purposes": {
+    "root_agent": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+    "sub_agent": null,
+    "memory": null,
+    "compaction": null
+  }
+}
+```
+
+`configured` is whether any purpose resolves a model. `default` is the model
+used by a purpose with no model of its own; a purpose is `null` in that case.
+Other methods answer `405 Method Not Allowed`.

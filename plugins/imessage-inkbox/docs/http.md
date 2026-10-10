@@ -1,10 +1,10 @@
 # IMessage Inkbox HTTP API
 
-Every route is an exact path that accepts `POST`; `/api/gateway/inkbox` and
-`/api/gateway/inkbox/owners` also accept `GET`. Any other method returns `405
-Method Not Allowed` with `{"error":"method_not_allowed"}`.
+Every route accepts `POST` except `/api/gateway/inkbox/status`, which accepts
+only `GET`; `/api/gateway/inkbox/owners` accepts both. Any other method returns
+`405 Method Not Allowed` with `{"error":"method_not_allowed"}`.
 
-## `GET /api/gateway/inkbox`
+## `GET /api/gateway/inkbox/status`
 
 Returns `200` with the shared channel status (see the
 [Gateway's channel HTTP surface](../../imessage-gateway/docs/plugin.md)) plus,
@@ -53,7 +53,7 @@ Responses:
   different API key, identity, or origin starts from that identity's newest
   message.
 - `400 Bad Request`: the JSON body was invalid or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `405 Method Not Allowed`: the endpoint only accepts `POST`.
 - `422 Unprocessable Content` `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored
   and no Inkbox channel stays registered.

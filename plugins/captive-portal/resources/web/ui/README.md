@@ -155,12 +155,12 @@ Device calls (`device.ts`), for flows beyond one POST (QR login, signup codes)
 
 Channel state (`channel.ts`)
 
-- `readChannel<T>(context, endpoint)`: `GET` a channel's config path, which answers
-  `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T` adds
-  page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
+- `readChannel<T>(context, endpoint)`: `GET <endpoint>/status` for a channel's config path,
+  which answers `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T`
+  adds page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
   in that shape. It never toasts.
 - `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
-  the result card `name` and the 已配置 badge, hidden until `show(true)`. Put it first in
+  the result card `name` led by the bare check, hidden until `show(true)`. Put it first in
   the form; show it when `readChannel` says `configured`, and after a save succeeds:
 
   ```ts
@@ -174,7 +174,7 @@ Channel state (`channel.ts`)
 
 Channel mode and allowed accounts (`inbound.ts`), for the external channel pages
 
-Every channel serves the same JSON under its config path: `GET <endpoint>` answers
+Every channel serves the same JSON under its config path: `GET <endpoint>/status` answers
 `ChannelStatus` (`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`),
 `POST <endpoint>/mode` takes `{mode}`, and `GET`/`POST <endpoint>/owners` answer `OwnersReply`
 (`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take
@@ -227,11 +227,13 @@ Every channel serves the same JSON under its config path: `GET <endpoint>` answe
 
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 
-- `resultCard({ title, badge, live?, sub?, initial?, rows?, action? }, lang)`: what a check found
-  (`role="status"`), a `.bc-card` with one `.bc-card__body`: a 40px tile with `initial` (a check mark without one), the title, `sub`
-  in mono, the badge (neutral; the signal chip only with `live`, a live connection such as
-  BlueBubbles' 「已连接」), a `.bc-kv` of `rows` (values mono unless the row's third item is
-  `false`) and one `action` node.
+- `resultCard({ title, badge?, live?, sub?, initial?, rows?, action? }, lang)`: what a check found
+  (`role="status"`), a `.bc-card` with one `.bc-card__body`: a 40px tile with `initial`, or without
+  one a bare `check` in `success` on the title's line (never boxed: the tile holds only an initial),
+  the title, `sub` in mono, the badge (neutral, beside an initial: 「已验证」; the signal chip only
+  with `live`, a live connection such as BlueBubbles' 「已连接」; leave it out for a plain state such
+  as 「微信已绑定」, which the check and the title already say), a `.bc-kv` of `rows` (values mono
+  unless the row's third item is `false`) and one `action` node.
 - `stepList(steps, { current, done }, lang)`: `.bc-steps`, numbered `radius-sm` marks with mono
   numbers (`01`); the first `done` (`.bc-step--done`) show a check in `success`, `current`
   (`aria-current="step"`, or `-1` for none) fills `muted`.

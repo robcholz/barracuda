@@ -38,6 +38,15 @@ path = "/api/wifi"
 body = "{}"
 status = 405
 
+# the configuration paths take changes only; their state is under `/status`
+[[http]]
+path = "/api/wifi"
+status = 405
+
+[[http]]
+path = "/api/gateway/telegram"
+status = 405
+
 [[http]]
 path = "/api/wifi/scan"
 status = 409

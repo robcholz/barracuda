@@ -31,16 +31,17 @@ credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`.
 The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
 the shared route table on AP port 80 with one connection worker.
 
-`GET /api/wifi` returns capabilities plus current station and access-point
-state. `GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
+`GET /api/wifi/status` returns capabilities plus current station and
+access-point state. `GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
 connects, and only then persists `{ "ssid", "password" }`; after the response,
 the setup AP stops. A failed connection keeps or restores the setup AP so the
 caller can retry. `DELETE /api/wifi` removes persisted credentials,
-disconnects station mode, and starts the setup AP.
+disconnects station mode, and starts the setup AP. `/api/wifi` takes changes
+only (`PUT`, `DELETE`); other methods, including `GET`, answer `405`, as do
+methods other than `GET` on `/status` and `/scan`.
 
 The Portal registers a Wi-Fi module and exact captive-detection paths used by
-common Android, Apple, and Windows clients. When the Platform supports station
-configuration, the entry is registered with
+common Android, Apple, and Windows clients. The entry is registered with
 `CaptivePortal::register_with_status`; its `GET /portal/status` record maps the
 last state `WifiControl::status` observed, without a radio query:
 
@@ -52,8 +53,8 @@ last state `WifiControl::status` observed, without a radio query:
 | Disconnected, AP starting | `attention` | 配置热点 / Setup hotspot | none |
 | Disconnected, AP stopped | `off` | 未连接 / Not connected | none |
 
-A Platform-managed network (no station configuration) registers no status
-source, so `wifi` is absent from `/portal/status`. Credentials are never returned by
+A Platform-managed network reports the host's connection: `ready` 已连接 /
+Connected, without a network name. Credentials are never returned by
 the status API or logged. The provisioning API currently has no authentication
 or transport encryption; the setup access point is intentionally open, so
 provision only in a trusted physical environment.
@@ -72,7 +73,7 @@ Platform to place those POD buffers in PSRAM safely.
 
 Portal page: the `wifi` entry (group Device, order 10) is built on the
 portal UI kit from `resources/web/entry.ts`. Its header shows the station
-state, network and setup-hotspot state from `GET /api/wifi`, beside the
+state, network and setup-hotspot state from `GET /api/wifi/status`, beside the
 `router` figure (`resources/web/figure.js`), whose antennas sweep while
 `GET /api/wifi/scan` runs. The page scans on open and on 重新扫描, lists
 nearby networks strongest first with signal bars and a lock for secured

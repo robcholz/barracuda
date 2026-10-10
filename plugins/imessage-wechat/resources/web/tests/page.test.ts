@@ -126,7 +126,7 @@ test("the manual token sits under 高级, and the footer shows only while it is 
   // the hand-entered token replaced the QR session: cancel it, show the link and read the channel
   expect(requests().slice(-2)).toEqual([
     `DELETE ${LOGIN}`,
-    `GET /api/gateway/wechat`,
+    `GET /api/gateway/wechat/status`,
   ]);
   expect(page.text()).toContain("微信已绑定");
   page.query<HTMLButtonElement>(".bc-disclosure")!.click();
@@ -155,9 +155,10 @@ test("polls every 2 s: scanned, then linked with a toast, then stops", async () 
   expect(page.text()).toContain("这台设备在微信里的 ClawBot");
   const card = page.query(".bc-card[role=status]")!;
   expect(card.textContent).toContain("微信已绑定");
-  expect(
-    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("已绑定");
+  // the bare success check says it: no tile, no badge
+  expect(card.querySelector("svg.bc-success")).not.toBeNull();
+  expect(card.querySelector(".bc-option-icon")).toBeNull();
+  expect(card.querySelector(".bc-badge")).toBeNull();
   expect(page.toasts).toEqual([{ kind: "success", title: "微信已绑定" }]);
   // linked: the portal reads the channel's status again
   expect(page.refreshes.count).toBe(1);
@@ -233,12 +234,18 @@ test("a failed session or start says what to do, never the device's internals", 
 test("a channel already linked shows 重新绑定 without starting a login", async () => {
   status = { status: "idle", configured: true };
   const page = await render("en");
-  expect(requests()).toEqual([`GET ${LOGIN}`, `GET /api/gateway/wechat`]);
+  expect(requests()).toEqual([
+    `GET ${LOGIN}`,
+    `GET /api/gateway/wechat/status`,
+  ]);
   expect(page.query(".bc-row__label .bc-title")?.textContent).toBe("Link");
   expect(page.text()).toContain("WeChat linked");
   expect(button(page, "Link again")).toBeDefined();
   page.unmount();
-  expect(requests()).toEqual([`GET ${LOGIN}`, `GET /api/gateway/wechat`]);
+  expect(requests()).toEqual([
+    `GET ${LOGIN}`,
+    `GET /api/gateway/wechat/status`,
+  ]);
 });
 
 test("a running session on mount is restarted for this page", async () => {
@@ -304,7 +311,7 @@ test("linked: 模式 offers 停用 and 收发 only, and 授权账号 shows the b
   status = { status: "idle", configured: true };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) => {
-    if (call.url === "/api/gateway/wechat")
+    if (call.url === "/api/gateway/wechat/status")
       return json(200, {
         configured: true,
         mode: "send_receive",
@@ -322,7 +329,7 @@ test("linked: 模式 offers 停用 and 收发 only, and 授权账号 shows the b
   const page = await render("zh");
   expect(requests()).toEqual([
     `GET ${LOGIN}`,
-    "GET /api/gateway/wechat",
+    "GET /api/gateway/wechat/status",
     "GET /api/gateway/wechat/owners",
   ]);
   expect(
@@ -338,7 +345,7 @@ test("linked: 模式 offers 停用 and 收发 only, and 授权账号 shows the b
   expect(page.text()).toContain("还没有授权账号");
   // the badge stays live while receiving
   await advance(5_000);
-  expect(requests().at(-1)).toBe("GET /api/gateway/wechat");
+  expect(requests().at(-1)).toBe("GET /api/gateway/wechat/status");
 
   page.unmount();
   const en = await render("en");
@@ -350,7 +357,7 @@ test("relinking hides the mode and accounts until the channel is linked again", 
   status = { status: "idle", configured: true };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) =>
-    call.url === "/api/gateway/wechat"
+    call.url === "/api/gateway/wechat/status"
       ? json(200, {
           configured: true,
           mode: "send_receive",
@@ -373,7 +380,7 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
   };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) =>
-    call.url === "/api/gateway/wechat" && call.method === "GET"
+    call.url === "/api/gateway/wechat/status" && call.method === "GET"
       ? json(200, {
           configured: true,
           mode: "send_receive",
@@ -412,7 +419,7 @@ test("another receive error keeps the linked card", async () => {
   status = { status: "idle", configured: true };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) =>
-    call.url === "/api/gateway/wechat"
+    call.url === "/api/gateway/wechat/status"
       ? json(200, {
           configured: true,
           mode: "send_receive",
@@ -430,7 +437,7 @@ test("renders the expired session in English", async () => {
   status = { status: "idle", configured: true };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) =>
-    call.url === "/api/gateway/wechat"
+    call.url === "/api/gateway/wechat/status"
       ? json(200, {
           configured: true,
           mode: "send_receive",

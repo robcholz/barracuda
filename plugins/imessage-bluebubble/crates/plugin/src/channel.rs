@@ -25,6 +25,7 @@ use embassy_time::{with_timeout, Duration};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use http_client::ClientFactory;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 
 use crate::state::{ReceiveBook, HOOK_PATH};
 
@@ -399,5 +400,17 @@ where
 
     fn owners(&self) -> Option<&Owners<Storage>> {
         self.owners.get()
+    }
+
+    /// `webhook`: the lost and skipped deliveries while receiving.
+    fn status_details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        if self.mode().receives() {
+            details.insert(
+                "webhook".into(),
+                json!({ "lost": self.book.lost(), "skipped": self.book.skipped() }),
+            );
+        }
+        details
     }
 }

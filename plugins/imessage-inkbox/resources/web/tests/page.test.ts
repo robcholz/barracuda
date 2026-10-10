@@ -18,7 +18,7 @@ afterEach(async () => {
 async function render(lang: "zh" | "en") {
   const page = await harness.render(mount, lang);
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-    ["GET", "/api/gateway/inkbox"],
+    ["GET", "/api/gateway/inkbox/status"],
   ]);
   harness.calls.length = 0;
   await settle();
@@ -107,7 +107,7 @@ test("email → code → claimed, through the device's signup, resend and verify
   ).toEqual([
     ["/api/gateway/inkbox/signup", "POST", { email: "you@example.com" }],
     // the signup stored the channel: read it again for its mode and accounts
-    ["/api/gateway/inkbox", "GET", undefined],
+    ["/api/gateway/inkbox/status", "GET", undefined],
   ]);
   expect(page.toasts.at(-1)).toEqual({
     kind: "success",
@@ -234,7 +234,7 @@ test("Enter in the email field sends the code instead of submitting the form", a
   await settle();
   expect(harness.calls.map((call) => call.url)).toEqual([
     "/api/gateway/inkbox/signup",
-    "/api/gateway/inkbox",
+    "/api/gateway/inkbox/status",
   ]);
 });
 
@@ -264,7 +264,7 @@ test("已有 API Key posts the key, identity and API base with the footer", asyn
   expect(page.input("api_key").value).toBe("");
 });
 
-/** Renders with the device's `GET /api/gateway/inkbox` answering `state`. */
+/** Renders with the device's `GET /api/gateway/inkbox/status` answering `state`. */
 async function renderWith(state: unknown, lang: "zh" | "en" = "zh") {
   harness.reply = async () => json(200, state);
   const page = await harness.render(mount, lang);
@@ -334,9 +334,8 @@ test("a channel saved with a key shows as configured above the form", async () =
   expect(visibleRows(page)).toEqual(["Channel", "Method", "Email", "Advanced"]);
   const card = page.query(".bc-card[role=status]")!;
   expect(card.querySelector(".bc-option-title")?.textContent).toBe("Inkbox");
-  expect(
-    card.querySelector(".bc-badge:not(.bc-badge--signal)")?.textContent,
-  ).toBe("Configured");
+  expect(card.querySelector("svg.bc-success")).not.toBeNull();
+  expect(card.querySelector(".bc-badge")).toBeNull();
   // not configured: nothing to show
   page.unmount();
   const empty = await renderWith({ configured: false });
@@ -372,7 +371,7 @@ test("a signup the device kept offers 重试, which resumes it with the same ema
   expect(harness.calls.map((call) => [call.url, call.body])).toEqual([
     ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
     ["/api/gateway/inkbox/signup", { email: "you@example.com" }],
-    ["/api/gateway/inkbox", undefined],
+    ["/api/gateway/inkbox/status", undefined],
   ]);
   expect(visibleRows(page)).toEqual(["方式", "邮箱", "验证码", "高级"]);
   expect(page.refreshes.count).toBe(1);
@@ -427,7 +426,7 @@ test("a reload with the person's address names it and prefills the email", async
 
 test("a claimed identity shows its mode and the code to email from your inbox", async () => {
   harness.reply = async (call) => {
-    if (call.url === ENDPOINT)
+    if (call.url === `${ENDPOINT}/status`)
       return json(200, {
         configured: true,
         mode: "disabled",

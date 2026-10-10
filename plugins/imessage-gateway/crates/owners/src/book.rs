@@ -244,6 +244,17 @@ impl OwnerBook {
         true
     }
 
+    /// Adds `owner` without a pairing code, as when a channel's own setup
+    /// names the account that set it up. Returns whether it was added: an
+    /// existing owner or a full book adds nothing.
+    pub fn add(&mut self, owner: Owner) -> bool {
+        if self.is_full() || self.is_owner(owner.id()) {
+            return false;
+        }
+        self.owners.push(owner);
+        true
+    }
+
     /// Removes the owner `id`. Returns whether it was an owner.
     pub fn remove(&mut self, id: &str) -> bool {
         let before = self.owners.len();
@@ -435,6 +446,22 @@ mod tests {
             book.classify("ann", None, "hi", at(0)),
             Classification::Ignored
         );
+    }
+
+    #[test]
+    fn add_names_an_owner_without_a_code_once_and_never_past_the_limit() {
+        let mut book = book();
+        assert!(book.add(Owner::new("ann", None).expect("owner")));
+        assert!(!book.add(Owner::new("ann", Some("Ann")).expect("owner")));
+        assert_eq!(
+            book.classify("ann", None, "hi", at(0)),
+            Classification::Owner
+        );
+        for index in 1..MAX_OWNERS {
+            assert!(book.add(Owner::new(&format!("owner-{index}"), None).expect("owner")));
+        }
+        assert!(!book.add(Owner::new("late", None).expect("owner")));
+        assert_eq!(book.owners().len(), MAX_OWNERS);
     }
 
     #[test]

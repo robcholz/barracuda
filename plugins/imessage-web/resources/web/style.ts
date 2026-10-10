@@ -1,10 +1,12 @@
 /**
  * Web chat's own rules, from the design system's Chat card: the one-row composer, the fresh
- * conversation, the pinned head, jump to the latest, the session rail, the spinning mark's box and
+ * conversation, the pinned head, jump to the latest, the session rail, icon-button tooltips, the spinning mark's box and
  * the live-state motion. They serve this page alone, so the page adds them on mount and removes them on unmount
  * rather than growing the shell's stylesheet; reduced motion stills every animation.
  */
 export const CHAT_CSS = `
+.bc-icon-button,.bc-button--icon{position:relative}
+.bc-icon-button:hover>.bc-tooltip,.bc-icon-button:focus-visible>.bc-tooltip,.bc-button--icon:hover>.bc-tooltip,.bc-button--icon:focus-visible>.bc-tooltip{display:block}
 .bc-composer__row{display:flex;align-items:flex-end;gap:8px}
 .bc-composer__row>textarea{flex:1 1 auto;min-width:0;min-height:44px;max-height:200px;padding:11px 12px;overflow-y:auto;field-sizing:content}
 .bc-composer__actions{flex:none;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 0}

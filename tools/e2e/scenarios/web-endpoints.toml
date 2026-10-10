@@ -1,5 +1,5 @@
 name = "WebServer, portal, and configuration endpoints"
-description = "Direct HTTP checks against the System WebServer: the portal shell and manifest, Plugin assets, Wi-Fi status on a host-managed network, model API request validation, and an unconfigured channel's routes."
+description = "Direct HTTP checks against the System WebServer: the portal shell and manifest, Plugin assets, Wi-Fi status on a host-managed network, model API request validation and status, and an unconfigured channel's routes."
 
 [model]
 mode = "none"
@@ -21,7 +21,7 @@ path = "/portal/assets/missing/entry.js"
 status = 404
 
 [[http]]
-path = "/api/wifi"
+path = "/api/wifi/status"
 body_contains = ['"station_configuration":false', '"station":{"state":"connected"}']
 
 [[http]]
@@ -42,7 +42,11 @@ body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"a
 status = 204
 
 [[http]]
-path = "/api/gateway/telegram"
+path = "/api/model-api/status"
+body_contains = ['"configured":true', '"root_agent":{"backend":"openai_compatible","model":"m","base_url":"http://10.42.0.1:9/v1"}']
+
+[[http]]
+path = "/api/gateway/telegram/status"
 body_contains = ['"configured":false', '"mode":"send_receive"', '"owners":{"count":0}']
 
 [[http]]

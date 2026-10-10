@@ -761,6 +761,8 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   expect(wifi.getAttribute("aria-label")).toBe("Wi-Fi · HomeNet");
   expect(h.$$(".portal-nav-aside")).toHaveLength(1);
   expect(h.$$(".portal-hero__kv > *").map((node) => node.textContent)).toEqual([
+    "状态",
+    "已连接",
     "Wi-Fi",
     "HomeNet",
     "插件页面每个页面由一个插件提供，停用插件后页面随之消失",
@@ -851,10 +853,31 @@ test("a status change repaints in place: figures stay, and a failed read empties
   expect(tile?.querySelector(".portal-aside")?.textContent).toBe(
     "Barracuda-1A2B",
   );
+  const kv = () =>
+    h
+      .$$(".portal-hero__kv [data-status-device]")
+      .map((node) => node.textContent);
+  expect(kv()).toEqual(["状态", "配置热点", "Wi-Fi", "Barracuda-1A2B"]);
+  expect(
+    h.$('.portal-hero__kv dd[data-status-device="state"] .bc-badge--signal'),
+  ).toBeNull();
   // no ready entry: every step links again
   expect(
     h.$$(".portal-step__link").filter((node) => node.style.display !== "none"),
   ).toHaveLength(3);
+
+  // a host-managed network has no name to report: 「—」, not mono
+  h.records.status = {
+    entries: { wifi: { state: "ready", label: label("已连接", "Connected") } },
+  };
+  await h.portal.refreshStatus();
+  expect(kv()).toEqual(["状态", "已连接", "Wi-Fi", "—"]);
+  expect(h.$(".portal-step__done")?.textContent).toBe("已连接");
+  expect(
+    h
+      .$('.portal-hero__kv dd[data-status-device="name"]')
+      ?.classList.contains("bc-mono"),
+  ).toBe(false);
 
   h.records.status = undefined;
   await h.portal.refreshStatus();
