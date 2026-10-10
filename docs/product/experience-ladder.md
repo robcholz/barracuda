@@ -19,6 +19,7 @@ the heavy lifting.
 **Goal:** a working, talking, acting device in minutes, with no toolchain.
 
 1. Open the Web Installer, choose a board and a version, plug in USB, install.
+   Each board gets a default firmware with a default Plugin set.
 2. Join Wi-Fi from the same page; the installer hands off to the Device Portal.
 3. Register a model and bind a channel (WeChat, Telegram, QQ, iMessage, web chat,
    or the terminal).
@@ -41,7 +42,14 @@ writing code.
 Plugins are compiled into the firmware, so the Plugin set is chosen on the
 developer's machine. Select the Board, choose the Plugins the project needs —
 camera, display, LED strip, sensors, web search, a messaging channel — leave out
-the rest, then build and flash. A Plugin that is left out costs no memory, flash,
+the rest, then build and flash. There are three ways to choose:
+
+- an interactive command that lists the Plugins to pick from;
+- a configuration file that lists the enabled Plugins, for projects kept in
+  version control;
+- the developer's coding agent, which picks the Plugins for a stated need and
+  builds the firmware.
+ A Plugin that is left out costs no memory, flash,
 or tasks. On the device, every Plugin brings its own page in the Device Portal,
 so each capability arrives with its own settings.
 

@@ -25,7 +25,8 @@ the docs, partner as a board vendor, or bring Barracuda to a classroom.
 
 **Job:** take a board from blank to online in minutes, from a browser.
 
-1. Choose a board and a version.
+1. Choose a board and a version. Each board has a default firmware with a
+   default Plugin set.
 2. Connect over USB; the installer identifies the chip and any existing install.
 3. Install, with clear progress and recovery.
 4. Join Wi-Fi over the same USB connection.
