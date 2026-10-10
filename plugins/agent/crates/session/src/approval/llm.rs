@@ -212,11 +212,8 @@ async fn resolve_permission_reply(
         &tool_call.arguments_json,
     )
     .map_err(|_| ApprovalResolverError::MalformedToolCall)?;
-    let (mut join, detached) = runner.run(vec![call]);
+    let mut join = runner.run(vec![call]);
     while join.next().await.is_some() {}
-    if let Some(mut detached) = detached {
-        while detached.next().await.is_some() {}
-    }
     let resolved = resolution.borrow().clone();
     resolved.ok_or(ApprovalResolverError::MalformedToolCall)
 }

@@ -1,34 +1,34 @@
 {
   "type": "function",
   "function": {
-    "name": "vm_input",
-    "description": "Supply one input value or EOF to an active VM execution.",
+    "name": "background_input",
+    "description": "Send one input value, or the end of input, to a running background tool call that accepts input.",
     "parameters": {
       "oneOf": [
         {
           "type": "object",
           "properties": {
-            "run_id": {
+            "id": {
               "type": "integer",
               "minimum": 1,
               "maximum": 4294967295
             },
             "input": { "type": "string" }
           },
-          "required": ["run_id", "input"],
+          "required": ["id", "input"],
           "additionalProperties": false
         },
         {
           "type": "object",
           "properties": {
-            "run_id": {
+            "id": {
               "type": "integer",
               "minimum": 1,
               "maximum": 4294967295
             },
             "eof": { "const": true }
           },
-          "required": ["run_id", "eof"],
+          "required": ["id", "eof"],
           "additionalProperties": false
         }
       ]

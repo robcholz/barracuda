@@ -79,13 +79,8 @@ impl ExtractionTools {
             let tools = self.tools.begin().map_err(extraction_runtime_error)?;
             let runner = ToolRunner::new(&tools);
             for invocation in invocations {
-                let (mut joined, detached) = runner.run(vec![invocation]);
-                if detached.is_some() {
-                    return Err(ToolError::InvokeRejected(
-                        "memory extraction tools must complete inline".into(),
-                    )
-                    .into());
-                }
+                // Without a background pool, background tools fail inline.
+                let mut joined = runner.run(vec![invocation]);
                 let Some((_, output)) = joined.next().await else {
                     return Err(ToolError::InvokeRejected(
                         "memory extraction tool returned no result".into(),
@@ -401,7 +396,7 @@ mod tests {
                 r#"{"content":"likes tea"}"#,
             )
             .expect("store invocation parses");
-            let (mut result, _) = runner.run(vec![store]);
+            let mut result = runner.run(vec![store]);
             assert!(result.next().await.expect("store result").1.ok);
 
             let id = stores
@@ -417,7 +412,7 @@ mod tests {
                 &format!(r#"{{"id":"{id}","content":"likes coffee"}}"#),
             )
             .expect("update invocation parses");
-            let (mut result, _) = runner.run(vec![update]);
+            let mut result = runner.run(vec![update]);
             assert!(result.next().await.expect("update result").1.ok);
             assert_eq!(
                 stores
@@ -435,7 +430,7 @@ mod tests {
                 &format!(r#"{{"id":"{id}"}}"#),
             )
             .expect("forget invocation parses");
-            let (mut result, _) = runner.run(vec![forget]);
+            let mut result = runner.run(vec![forget]);
             assert!(result.next().await.expect("forget result").1.ok);
             assert!(stores.agent.list().is_empty());
         });

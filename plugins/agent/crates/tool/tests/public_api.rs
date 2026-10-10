@@ -495,10 +495,7 @@ fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolIn
 fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<ToolOutput> {
     let call = ToolInvocation::try_new(call.id(), call.name(), call.arguments_json())
         .map_err(|error| anyhow!("{error:?}"))?;
-    let (mut join, detached) = ToolRunner::new(handle).run(vec![call]);
-    if detached.is_some() {
-        return Err(anyhow!("test helper does not accept detached tools"));
-    }
+    let mut join = ToolRunner::new(handle).run(vec![call]);
     poll_ready(async move {
         join.next()
             .await

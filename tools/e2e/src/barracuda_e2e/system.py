@@ -235,7 +235,7 @@ class TapeServer:
     def wait_consumed(self, total: int, timeout: float) -> None:
         """Wait until replay has served `total` interactions, or give up.
 
-        A detached turn can start its model call after the last awaited log
+        A background turn can start its model call after the last awaited log
         line; stopping the System then would cut that call short.
         """
 

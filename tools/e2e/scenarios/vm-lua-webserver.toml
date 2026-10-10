@@ -13,8 +13,8 @@ send = '''Call vm_run with this Lua source, copied exactly: require('webserver')
 tool_contains = ['"run_id":2', '"run_id":3']
 
 [[steps]]
-send = "Cancel the VM run with run_id 2 using vm_cancel, then reply with only the word cancelled."
-tool_contains = ['vm_cancel']
+send = "Cancel the VM run with run_id 2 using background_cancel with its background id, then reply with only the word cancelled."
+tool_contains = ['background_cancel{"id": 2}Background call 2 cancelled.']
 
 [logs]
 await = ["VM run 3 finished: Success, 1 output line", "VM run 2 finished: Cancelled"]

@@ -5,7 +5,7 @@ use barracuda_agent_memory::{Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_skill::SkillSetSource;
-use barracuda_agent_tool::{ToolGroup, ToolSetSource};
+use barracuda_agent_tool::{BackgroundToolPool, ToolGroup, ToolSetSource};
 use barracuda_model_api::RetryPolicy;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use portable_atomic_util::Arc;
@@ -20,7 +20,7 @@ use crate::context_providers::{
 use crate::engine::{
     agent_effect_channel, AgentEngine, AgentEngineBuildError, AgentEngineConfig, ContextProvider,
 };
-use crate::tools::internal_tools;
+use crate::tools::{background_tools, internal_tools};
 use crate::{Agent, AgentEngineState, AgentKind, ReasoningEffort, ReasoningEffortHandle};
 
 use super::error::AgentCreateError;
@@ -180,6 +180,8 @@ where
             .tool_set_with_blacklist(runtime.tool_blacklist());
         let (effect_emitter, effect_inbox) = agent_effect_channel();
         tools.add_group(internal_tools(effect_emitter.clone()))?;
+        let background = BackgroundToolPool::new();
+        tools.add_group(background_tools(&background))?;
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
@@ -239,6 +241,7 @@ where
             api_manager: Arc::clone(&self.api_manager),
             api_purpose,
             tools,
+            background: background.clone(),
             effect_inbox,
             permission_policy,
             agent_instruction: Block::new(
@@ -261,7 +264,7 @@ where
                     AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
                 }
             })?;
-        let agent = Agent::new(engine);
+        let agent = Agent::new(engine, background);
 
         log::info!("Agent {id} ({}) created", kind.as_str());
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
