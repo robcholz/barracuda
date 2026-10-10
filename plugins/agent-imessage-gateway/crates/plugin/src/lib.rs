@@ -5,27 +5,31 @@
 extern crate alloc;
 
 mod bridge;
+mod sessions;
 mod state;
 mod to_agent;
 mod to_gateway;
 
-use alloc::{boxed::Box, rc::Rc, string::String};
+use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 
 use barracuda_agent_plugin::{
-    AgentToolRegistry,
+    AgentRuntime, AgentToolRegistry, SessionDeleteError, SessionId, SessionRenameError,
     tools::{
         Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
 use barracuda_imessage_gateway_plugin::{
     GatewayOperationError, GatewaySendMediaRequest, GatewaySendRequest, IMessageGateway,
+    SendSessionsRequest,
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_time_plugin::UtcClock;
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 use serde::Serialize;
 
 use crate::bridge::ImessageBridge;
+use crate::sessions::{LocalFuture, RenameFailure, SessionMeta, SessionReplies, SessionStore};
 
 /// Plugin registering IMessage Gateway operations with the Agent runtime.
 #[barracuda_plugin::macros::plugin]
@@ -48,12 +52,18 @@ impl Plugin for AgentIMessageGatewayPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let tools = context.require::<AgentToolRegistry>("agent")?;
+        let runtime = context.require::<AgentRuntime>("agent")?;
         let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+        let clock = context.require::<UtcClock>("time")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let bridge = embassy_futures::block_on(ImessageBridge::load(context.storage().clone()))
             .map_err(PluginError::registration)?;
+        let replies = Rc::new(GatewaySessionReplies {
+            gateway: Rc::clone(&gateway),
+            clock,
+        });
         for registration in bridge
-            .register_actions(&actions)
+            .register_actions(&actions, Rc::new(AgentSessions(runtime)), replies)
             .map_err(PluginError::registration)?
         {
             context.retain(registration);
@@ -70,6 +80,80 @@ impl Plugin for AgentIMessageGatewayPlugin {
                 ],
             ))
             .map_err(PluginError::registration)
+    }
+}
+
+/// The Agent's sessions, as session commands list, rename and delete them.
+struct AgentSessions(Rc<AgentRuntime>);
+
+impl SessionStore for AgentSessions {
+    fn describe(&self) -> LocalFuture<'_, Vec<SessionMeta>> {
+        Box::pin(async move {
+            self.0
+                .describe_sessions()
+                .await
+                .into_iter()
+                .map(|info| SessionMeta {
+                    session: format!("{}", info.session),
+                    title: info.title,
+                    updated_at: info.updated_at,
+                })
+                .collect()
+        })
+    }
+
+    fn rename<'a>(
+        &'a self,
+        session: &'a str,
+        title: &'a str,
+    ) -> LocalFuture<'a, Result<(), RenameFailure>> {
+        Box::pin(async move {
+            let session =
+                SessionId::from_wire(session).map_err(|_error| RenameFailure::NotFound)?;
+            self.0
+                .rename_session(session, title)
+                .await
+                .map_err(|error| match error {
+                    SessionRenameError::InvalidTitle => RenameFailure::InvalidTitle,
+                    SessionRenameError::SessionNotFound(_) => RenameFailure::NotFound,
+                    SessionRenameError::WorkerStopped => RenameFailure::Failed,
+                })
+        })
+    }
+
+    fn delete<'a>(&'a self, session: &'a str) -> LocalFuture<'a, Result<(), ()>> {
+        Box::pin(async move {
+            let Ok(session) = SessionId::from_wire(session) else {
+                return Ok(());
+            };
+            match self.0.delete_session(session).await {
+                Ok(()) | Err(SessionDeleteError::SessionNotFound(_)) => Ok(()),
+                Err(error) => {
+                    log::warn!("IMessage Bridge failed to delete `{session}`: {error}");
+                    Err(())
+                }
+            }
+        })
+    }
+}
+
+/// Answers session commands through the Gateway, with the device's clock.
+struct GatewaySessionReplies {
+    gateway: Rc<IMessageGateway>,
+    clock: Rc<UtcClock>,
+}
+
+impl SessionReplies for GatewaySessionReplies {
+    fn send(&self, request: SendSessionsRequest) -> LocalFuture<'_, ()> {
+        Box::pin(async move {
+            if let Err(error) = self.gateway.send_sessions(request).await {
+                log::warn!("IMessage Bridge could not answer a session command: {error}");
+            }
+        })
+    }
+
+    fn now(&self) -> Option<u64> {
+        self.clock.now().ok().map(u64::from)
     }
 }
 

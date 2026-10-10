@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, collections::VecDeque, format, rc::Rc, string::String};
+use alloc::{
+    boxed::Box,
+    collections::VecDeque,
+    format,
+    rc::Rc,
+    string::{String, ToString},
+};
 use core::{
     cell::Cell,
     future::Future,
@@ -9,7 +15,7 @@ use core::{
 use barracuda_imessage_gateway_plugin::{
     BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody, TextChunk,
+    SendReceipt, SendSessionsRequest, SendStreamRequest, SetTypingRequest, TextBody, TextChunk,
 };
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
@@ -384,6 +390,17 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                     reaction: request.reaction,
                 },
             )?;
+            Ok(())
+        })
+    }
+
+    fn send_sessions(&self, request: SendSessionsRequest) -> ChannelFuture<'_, ()> {
+        Box::pin(async move {
+            let json =
+                serde_json::to_string(&request).map_err(|error| ChannelError::Transport {
+                    message: error.to_string(),
+                })?;
+            self.publish(&request.target, WebEventData::ConversationSessions { json })?;
             Ok(())
         })
     }

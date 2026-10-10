@@ -17,10 +17,11 @@ use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
 
 pub use barracuda_imessage_gateway_runtime::{
-    GatewayAccepted, GatewayControlKind, GatewayControlReceived, GatewayInboundControl,
-    GatewayInboundMessage, GatewayIngressError, GatewayMediaKind, GatewayMessageReceived,
-    GatewayOperationError, GatewayRoute, GatewaySendMediaFinished, GatewaySendMediaRequest,
-    GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished, GatewaySendStreamRequest,
+    parse_command, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
+    GatewayInboundControl, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
+    GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
+    GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
+    GatewaySendStreamRequest,
 };
 pub use gateway::*;
 pub use gateway_http::*;
@@ -74,6 +75,13 @@ impl IMessageGateway {
         request: GatewaySendRequest,
     ) -> Result<GatewaySendResponse, GatewayOperationError> {
         self.runtime.send(request).await
+    }
+
+    /// Shows a conversation's sessions after a session command: as text by
+    /// default, or however the conversation's channel overrides
+    /// [`MessageChannel::send_sessions`].
+    pub async fn send_sessions(&self, request: SendSessionsRequest) -> Result<(), GatewayError> {
+        self.gateway.send_sessions(request).await
     }
 
     /// Accepts one semantic event for an outbound text stream.

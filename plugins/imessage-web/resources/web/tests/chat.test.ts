@@ -13,6 +13,8 @@ import { mount } from "../entry";
 let browser: ReturnType<typeof installBrowser>;
 let sockets: Socket[];
 let sent: string[];
+/** Session list requests, kept apart so `sent` holds what the reader sends. */
+let listings: number;
 let failSend: boolean;
 const previous = globalThis.WebSocket;
 /** Bun's own Event: the fake socket is a Bun EventTarget, while happy-dom replaces the global. */
@@ -28,7 +30,8 @@ class Socket extends EventTarget {
   }
   send(text: string) {
     if (failSend) throw new Error("closed");
-    sent.push(text);
+    if (text === '{"control":"sessions"}') listings += 1;
+    else sent.push(text);
   }
   close() {
     this.readyState = 3;
@@ -59,6 +62,7 @@ beforeEach(() => {
   browser = installBrowser();
   sockets = [];
   sent = [];
+  listings = 0;
   failSend = false;
   Object.assign(globalThis, { WebSocket: Socket });
 });
@@ -147,13 +151,16 @@ test("opens on a fresh temporary session with the composer mid-page", () => {
   expect(empty.querySelector("hl-figure")?.getAttribute("name")).toBe(
     "imessage-web",
   );
-  expect(empty.querySelector(".bc-title")?.textContent).toBe("临时会话");
-  expect(empty.textContent).toContain("刷新页面后从空白开始。");
-  // suggestions sit under the composer; the pinned head waits for the first message
+  expect(empty.querySelector(".bc-title")?.textContent).toBe("新会话");
+  expect(empty.textContent).toContain("会话保存在设备上");
+  // suggestions sit under the composer; no temporary badge, and no rail until the device lists sessions
   expect(root.querySelector(".bc-chat-dock")!.textContent).toContain(
     "今天适合骑车吗？",
   );
-  expect(root.querySelector<HTMLElement>(".bc-chat-head")!.hidden).toBe(true);
+  expect(
+    root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!.hidden,
+  ).toBe(true);
+  expect(root.querySelector<HTMLElement>(".bc-chat-rail")!.hidden).toBe(true);
   // one row: the textarea and its actions; no counter, no term in the composer
   const row = root.querySelector(".bc-composer__row")!;
   expect(row.firstElementChild?.tagName).toBe("TEXTAREA");
@@ -168,6 +175,8 @@ test("opens on a fresh temporary session with the composer mid-page", () => {
   expect(send().querySelector(".bc-tooltip")?.textContent).toBe("发送");
   expect(send().disabled).toBe(true);
   socket().open();
+  // connected, the page asks the device for the conversation's sessions
+  expect(listings).toBe(1);
   expect(send().disabled).toBe(true);
   type("你好");
   expect(send().disabled).toBe(false);
@@ -176,9 +185,11 @@ test("opens on a fresh temporary session with the composer mid-page", () => {
 test("renders in English", () => {
   const { root, input } = open("en");
   expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
-    "Temporary session",
+    "New session",
   );
-  expect(root.textContent).toContain("a reload starts from blank.");
+  expect(root.textContent).toContain(
+    "come back to one from the left any time.",
+  );
   expect(input.placeholder).toBe("Message the device");
   expect(root.textContent).not.toContain("临时会话");
 });
@@ -204,17 +215,12 @@ test("sends WebClientFrame JSON; past the limit send turns grey and one sentence
   expect(input.hasAttribute("aria-invalid")).toBe(false);
   expect(root.querySelector(".bc-bubble")!.textContent).toBe("hello");
   expect(root.textContent).toContain("已发送");
-  // the conversation began: the composer docks and the head pins 「临时会话」 with its tooltip
+  // the conversation began: the composer docks; a saved session needs no badge
   const page = root.firstElementChild as HTMLElement;
   expect(page.classList.contains("bc-chat--fresh")).toBe(false);
-  const head = root.querySelector<HTMLElement>(".bc-chat-head")!;
-  expect(head.hidden).toBe(false);
   expect(
-    head.querySelector(".bc-badge")?.firstChild?.nextSibling?.textContent,
-  ).toBe("临时会话");
-  expect(head.querySelector(".bc-tooltip")?.textContent).toBe(
-    "只显示连接后的消息，刷新页面后清空",
-  );
+    root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!.hidden,
+  ).toBe(true);
   expect(root.querySelector(".bc-empty")).toBeNull();
 });
 
@@ -559,6 +565,168 @@ test("rewinding the only message returns to a fresh conversation; a late start i
   ws.emit("message.end", { error: null, message_id: "web-1" });
   expect(root.querySelector(".bc-meta--author")).toBeNull();
   expect(root.textContent).not.toContain("晴");
+});
+
+const DAY = 86_400_000;
+
+/** The device's answer to a session command. */
+function listed(ws: Socket, state: Record<string, unknown>) {
+  ws.emit("conversation.sessions", {
+    current: "session-3",
+    temporary: false,
+    sessions: [
+      {
+        session: "session-3",
+        title: "骑行路线",
+        updated_at: Date.now(),
+        running: false,
+      },
+      {
+        session: "session-2",
+        title: "未读邮件",
+        updated_at: Date.now() - DAY,
+        running: true,
+      },
+      { session: "session-1", title: null, updated_at: null, running: false },
+    ],
+    notice: null,
+    now: null,
+    ...state,
+  });
+}
+
+test("the device's sessions fill a rail grouped by day; every change is a command", () => {
+  const { root, socket, button } = open();
+  const ws = socket();
+  ws.open();
+  listed(ws, {});
+  const rail = root.querySelector<HTMLElement>(".bc-chat-rail")!;
+  expect(rail.hidden).toBe(false);
+  expect(
+    [...rail.querySelectorAll(".bc-nav-label")].map((node) => node.textContent),
+  ).toEqual(["今天", "昨天", "更早"]);
+  const links = [...rail.querySelectorAll<HTMLElement>("a.bc-nav-item")];
+  expect(links.map((node) => node.textContent)).toEqual([
+    "骑行路线",
+    "未读邮件生成中",
+    "新会话",
+  ]);
+  expect(links[0].getAttribute("aria-current")).toBe("page");
+  expect(links[1].querySelector(".bc-spinner")).not.toBeNull();
+  expect(rail.querySelector(".bc-chat-rail__foot")?.textContent).toBe(
+    "保存在设备上会话记录存放在设备闪存里 · 03 个会话",
+  );
+  // the fresh view names the session it continues
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "骑行路线",
+  );
+  expect(root.querySelector(".bc-empty")?.textContent).toContain(
+    "从这里接着聊",
+  );
+  const commands = () => sent.map((frame) => JSON.parse(frame));
+  links[1].click();
+  button("新会话").click();
+  button("新临时会话").click();
+  expect(commands()).toEqual([
+    { control: "switch", session: "session-2" },
+    { control: "new" },
+    { control: "new", temporary: true },
+  ]);
+  // rename in place: Enter sends the new title
+  const more = () => [
+    ...rail.querySelectorAll<HTMLElement>(".bc-session__more"),
+  ];
+  more()[0].click();
+  expect(more()[0].getAttribute("aria-expanded")).toBe("true");
+  button("重命名").click();
+  const field = rail.querySelector<HTMLInputElement>(".bc-session__rename")!;
+  expect(field.value).toBe("骑行路线");
+  field.value = "周末骑行";
+  field.dispatchEvent(
+    new browser.window.KeyboardEvent("keydown", { key: "Enter" }),
+  );
+  expect(commands().at(-1)).toEqual({
+    control: "rename",
+    session: "session-3",
+    title: "周末骑行",
+  });
+  // delete asks first, in red, naming what goes
+  more()[1].click();
+  const destructive = rail.querySelector<HTMLElement>(
+    ".bc-menu-item--destructive",
+  )!;
+  expect(destructive.textContent).toBe("删除会话");
+  destructive.click();
+  const confirm = rail.querySelector<HTMLElement>("[role=alertdialog]")!;
+  expect(confirm.textContent).toContain("「未读邮件」的记录会从设备上移除。");
+  confirm.querySelector<HTMLElement>(".bc-button--danger")!.click();
+  expect(commands().at(-1)).toEqual({
+    control: "delete",
+    session: "session-2",
+    confirm: true,
+  });
+  expect(rail.querySelector("[role=alertdialog]")).toBeNull();
+});
+
+test("a switch starts the view over and drops what the left session still sends", () => {
+  const { root, socket, submit, toasts } = open();
+  const ws = socket();
+  ws.open();
+  listed(ws, {});
+  submit("一");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "好的" });
+  listed(ws, {
+    current: "session-2",
+    notice: { kind: "switched", title: "未读邮件" },
+  });
+  expect(root.querySelector(".bc-bubble")).toBeNull();
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "未读邮件",
+  );
+  // the left session's reply finishes elsewhere
+  ws.agent("web-1", "output_delta", { text: "迟到" });
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-2", "output_delta", { text: "也迟到" });
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.textContent).not.toContain("迟到");
+  expect(root.querySelector(".bc-meta--author")).toBeNull();
+  // a temporary chat says so, in the fresh view and then pinned at the head
+  listed(ws, {
+    current: null,
+    temporary: true,
+    notice: { kind: "created", temporary: true },
+  });
+  expect(root.querySelector(".bc-empty .bc-title")?.textContent).toBe(
+    "临时会话",
+  );
+  expect(root.querySelector(".bc-empty")?.textContent).toContain(
+    "离开这个会话后删除",
+  );
+  expect(
+    root
+      .querySelector('button[aria-label="新临时会话"]')
+      ?.getAttribute("aria-pressed"),
+  ).toBe("true");
+  submit("二");
+  const badge = root.querySelector<HTMLElement>(".bc-chat-head .bc-badge")!;
+  expect(badge.hidden).toBe(false);
+  expect(badge.textContent).toContain("临时会话");
+  // a finished turn may have named a session: the page asks again
+  const before = listings;
+  reply(ws, "web-3", "web-in-2", "嗯");
+  expect(listings).toBe(before + 1);
+  // a command that failed says so
+  listed(ws, { notice: { kind: "unknown_session" } });
+  expect(toasts.at(-1)?.title).toBe("找不到这个会话");
 });
 
 test("a permission request is answered by the next message", () => {

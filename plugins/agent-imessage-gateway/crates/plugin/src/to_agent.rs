@@ -44,7 +44,11 @@ pub(crate) enum ToAgentRequest {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum ToAgentResponse {
-    Missing {},
+    /// No current session: the Workflow creates one with this persistence
+    /// (`ephemeral` for a temporary chat) and binds it.
+    Missing {
+        persistence: &'static str,
+    },
     Resolved {
         open_required: bool,
         session: String,
@@ -146,6 +150,7 @@ where
                 Ok(route) => match validate_message_id(&message_id) {
                     Ok(()) => {
                         let found = resolve(shared, &route).await;
+                        let temporary = shared.book.lock().await.temporary_next(&route);
                         match &found {
                             ResolveResult::Missing => log::info!(
                                 "IMessage Bridge found no Agent session for inbound message `{message_id}`"
@@ -157,7 +162,7 @@ where
                                 "IMessage Bridge resolved inbound message `{message_id}` to `{session}` (open_required={open_required})"
                             ),
                         }
-                        Ok(found)
+                        Ok((found, temporary))
                     }
                     Err(error) => Err(error),
                 },
@@ -198,16 +203,24 @@ where
         ToAgentRequest::Lookup {
             route: route_request,
         } => match route(route_request) {
-            Ok(route) => Ok(shared.book.lock().await.resolve(&route)),
+            Ok(route) => {
+                let book = shared.book.lock().await;
+                Ok((book.resolve(&route), book.temporary_next(&route)))
+            }
             Err(error) => Err(error),
         },
     };
     match result {
-        Ok(ResolveResult::Missing) => ToAgentResponse::Missing {},
-        Ok(ResolveResult::Found {
-            session,
-            open_required,
-        }) => ToAgentResponse::Resolved {
+        Ok((ResolveResult::Missing, temporary)) => ToAgentResponse::Missing {
+            persistence: if temporary { "ephemeral" } else { "persistent" },
+        },
+        Ok((
+            ResolveResult::Found {
+                session,
+                open_required,
+            },
+            _,
+        )) => ToAgentResponse::Resolved {
             open_required,
             session,
         },

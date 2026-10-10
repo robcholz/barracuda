@@ -12,7 +12,10 @@
     },
     {
       "type": "object",
-      "maxProperties": 0,
+      "properties": {
+        "persistence": { "enum": ["persistent", "ephemeral"] }
+      },
+      "required": ["persistence"],
       "additionalProperties": false
     },
     {

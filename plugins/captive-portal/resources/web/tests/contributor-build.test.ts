@@ -13,6 +13,12 @@ const plugins = [
   "imessage-web",
 ];
 
+/**
+ * KiB per page bundle. Web chat carries a conversation, a WebGL mark and a session rail, so it
+ * gets more room than a settings page.
+ */
+const BUDGET: Record<string, number> = { "imessage-web": 48 };
+
 async function fresh(entry: string) {
   const built = await Bun.build({
     entrypoints: [entry],
@@ -39,7 +45,9 @@ test("each contributor has fresh standalone bundles in its own resource director
       Bun.file(new URL(`filesystem/resources/${name}`, directory));
     const code = await fresh(source("entry.ts"));
     expect(code).toBe(await output("entry.js").text());
-    expect(new TextEncoder().encode(code).byteLength).toBeLessThan(40 * 1024);
+    expect(new TextEncoder().encode(code).byteLength).toBeLessThan(
+      (BUDGET[id] ?? 40) * 1024,
+    );
     expect(code).not.toMatch(/\bimport\s*(?:\(|\{|["'])/);
     expect(code).toContain("mount");
     // the kit is bundled in, the kernel never is

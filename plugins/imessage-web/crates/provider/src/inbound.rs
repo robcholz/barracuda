@@ -28,6 +28,10 @@ pub struct InboundControl {
     pub conversation_id: String,
     pub thread_id: Option<String>,
     pub control: WebControl,
+    pub temporary: bool,
+    pub session: Option<String>,
+    pub title: Option<String>,
+    pub confirm: bool,
 }
 
 /// Binary body received through the REST-facing Web service.

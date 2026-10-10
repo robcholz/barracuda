@@ -10,14 +10,14 @@
       },
       {
         "if": {
-          "source": "$previous.output",
-          "equals": {}
+          "source": "$previous.output.persistence",
+          "not_equals": null
         },
         "then": [
           {
             "call": "session.new",
             "arguments": {
-              "persistence": "persistent"
+              "persistence": "$previous.output.persistence"
             }
           },
           {
@@ -131,21 +131,21 @@
     },
     "steps": [
       {
-        "call": "imessage_bridge.to_agent",
-        "arguments": {
-          "route": "$event.input.route"
-        }
-      },
-      {
         "if": {
-          "source": "$previous.output.open_required",
-          "equals": false
+          "source": "$event.input.control",
+          "equals": "interrupt"
         },
         "then": [
           {
+            "call": "imessage_bridge.to_agent",
+            "arguments": {
+              "route": "$event.input.route"
+            }
+          },
+          {
             "if": {
-              "source": "$event.input.control",
-              "equals": "interrupt"
+              "source": "$previous.output.open_required",
+              "equals": false
             },
             "then": [
               {
@@ -155,17 +155,45 @@
                 }
               }
             ],
+            "else": []
+          }
+        ],
+        "else": [
+          {
+            "if": {
+              "source": "$event.input.control",
+              "equals": "cancel"
+            },
+            "then": [
+              {
+                "call": "imessage_bridge.to_agent",
+                "arguments": {
+                  "route": "$event.input.route"
+                }
+              },
+              {
+                "if": {
+                  "source": "$previous.output.open_required",
+                  "equals": false
+                },
+                "then": [
+                  {
+                    "call": "session.cancel",
+                    "arguments": {
+                      "session": "$previous.output.session"
+                    }
+                  }
+                ],
+                "else": []
+              }
+            ],
             "else": [
               {
-                "call": "session.cancel",
-                "arguments": {
-                  "session": "$previous.output.session"
-                }
+                "call": "imessage_bridge.session"
               }
             ]
           }
-        ],
-        "else": []
+        ]
       },
       {
         "return": {}

@@ -36,11 +36,16 @@ WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`; replies
 exist only in the page, so a reply to an Agent message puts the quoted message
 ahead of the user's words as `<quote>…</quote>` XML, escaped and cut to 512
 UTF-8 bytes, inside `text`), or a control frame for the running turn:
-`{ "control": "interrupt" }` (stop) or `{ "control": "cancel" }` (rewind). A
-control takes no message id; the bridge passes it to
+`{ "control": "interrupt" }` (stop) or `{ "control": "cancel" }` (rewind), or
+a session command: `sessions`, `new` (`temporary`), `switch` (`session`),
+`rename` (`session`, `title`) or `delete` (`session`, `confirm`). A control
+takes no message id; the bridge passes it to
 `IMessageGateway::publish_control`, and the Agent Plugin's
 `imessage-control-to-agent` Workflow calls `session.interrupt` or
-`session.cancel` on the conversation's session. The page renders the
+`session.cancel` on the conversation's session, or `imessage_bridge.session`,
+which answers with a `conversation.sessions` event (the compact JSON of a
+`SendSessionsRequest`) to every page open on the conversation. The page
+renders the
 SSE-formatted frames the bridge returns: message start, delta, edit, delete,
 reaction and end (an end error marks the message incomplete), the Agent's
 semantic events inside `message.event` (reasoning, tool results, output and
@@ -51,9 +56,20 @@ become downloads once complete (at most 8 MiB is kept per attachment). It
 receives live events only, retains at most 100 log items with 65,536 UTF-16
 code units per text part, and closes the socket when unmounted.
 
-The page follows the design system's Chat card. A fresh temporary session
-holds the composer mid-page under the `laptop` figure, with suggestions below;
-once it has messages, a pinned head says 「临时会话」. The composer is one row:
+The page follows the design system's Chat card. Connected, it asks for the
+conversation's sessions and shows them in a rail at its left (a sheet opened
+from the head on a phone): 「新会话」 and the temporary-chat toggle, the
+sessions grouped by day (今天, 昨天, 过去 7 天, 更早), the one current
+highlighted and one still replying spinning, each with a menu to rename in
+place or delete (red, asking first), and the count at the foot. Every change
+is a command; the device's answer redraws the rail, and a switch or a new
+session (from this page or another) starts the view over: the device keeps
+the history, the page shows only what comes next, and output the left session
+still sends is dropped. The list is asked for again after each turn. A fresh
+conversation holds the composer mid-page under the `laptop` figure, with
+suggestions below, and says what it is: 「新会话」, the title of the session
+it continues, or 「临时会话」; a temporary chat keeps a pinned 「临时会话」
+badge at the head. The composer is one row:
 the textarea fits its text up to 200px beside its send button. Messages are
 capped at 1,024 UTF-8 bytes; past the cap send is disabled and one sentence
 says so, with no counter. The device runs one turn at a time, so a message

@@ -85,6 +85,10 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                                     conversation_id: self.conversation_id.clone(),
                                     thread_id: None,
                                     control: frame.control,
+                                    temporary: frame.temporary,
+                                    session: frame.session,
+                                    title: frame.title,
+                                    confirm: frame.confirm,
                                 };
                                 // a rejected control leaves the socket open: the turn just runs on
                                 if let Err(error) = self.sink.receive_control(control).await {

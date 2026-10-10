@@ -12,7 +12,7 @@ mod action {
     use barracuda_agent_runtime::{
         AgentRuntime, InputRequestId, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
         RuntimeError, SessionControlError, SessionCreateError, SessionDeleteError, SessionId,
-        SessionPersistence,
+        SessionInfo, SessionPersistence, SessionRenameError,
     };
     use barracuda_workflow_plugin::{
         workflow_action_schema, WorkflowActionFuture, WorkflowActionHandler,
@@ -49,6 +49,8 @@ mod action {
         NotAwaitingInput,
         /// The response targets a different input request.
         InputRequestMismatch,
+        /// The requested session title has no visible text.
+        InvalidTitle,
     }
 
     impl AgentActionError {
@@ -65,6 +67,7 @@ mod action {
                 Self::SessionClosed => "session_closed",
                 Self::NotAwaitingInput => "not_awaiting_input",
                 Self::InputRequestMismatch => "input_request_mismatch",
+                Self::InvalidTitle => "invalid_title",
             }
         }
     }
@@ -189,8 +192,27 @@ mod action {
     }
 
     #[derive(Serialize)]
+    struct SessionListEntry {
+        session: String,
+        persistent: bool,
+        title: Option<String>,
+        updated_at: Option<u64>,
+    }
+
+    impl From<SessionInfo> for SessionListEntry {
+        fn from(info: SessionInfo) -> Self {
+            Self {
+                session: format!("{}", info.session),
+                persistent: info.persistence == SessionPersistence::Persistent,
+                title: info.title,
+                updated_at: info.updated_at,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
     struct SessionListPage {
-        sessions: Vec<String>,
+        sessions: Vec<SessionListEntry>,
         next_offset: Option<usize>,
     }
 
@@ -222,15 +244,18 @@ mod action {
                         error: AgentActionError::InvalidRequest,
                     }));
                 }
-                let sessions = runtime.list_sessions().await;
-                let end = request
-                    .offset
-                    .saturating_add(request.limit)
-                    .min(sessions.len());
-                let page = sessions.get(request.offset..end).unwrap_or(&[]);
+                let sessions = runtime.describe_sessions().await;
+                let total = sessions.len();
+                let end = request.offset.saturating_add(request.limit).min(total);
+                let page = sessions
+                    .into_iter()
+                    .take(end)
+                    .skip(request.offset)
+                    .map(SessionListEntry::from)
+                    .collect();
                 Ok(ListSessionsResponse::Success(SessionListPage {
-                    sessions: page.iter().map(|session| format!("{session}")).collect(),
-                    next_offset: (end < sessions.len()).then_some(end),
+                    sessions: page,
+                    next_offset: (end < total).then_some(end),
                 }))
             })
         }
@@ -333,6 +358,42 @@ mod action {
                         EmptyOrErrorResponse::error(AgentActionError::WorkerStopped)
                     }
                     Err(_error) => EmptyOrErrorResponse::error(AgentActionError::Storage),
+                };
+                Ok(response)
+            })
+        }
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RenameSessionRequest {
+        session: String,
+        title: String,
+    }
+
+    struct RenameSessionAction {
+        runtime: Rc<AgentRuntime>,
+    }
+
+    impl WorkflowActionHandler for RenameSessionAction {
+        type Request = RenameSessionRequest;
+        type Response = EmptyOrErrorResponse;
+
+        const SCHEMA: WorkflowActionSchema = workflow_action_schema!("session.rename");
+
+        fn invoke(
+            &self,
+            request: RenameSessionRequest,
+        ) -> WorkflowActionFuture<'_, EmptyOrErrorResponse> {
+            let runtime = Rc::clone(&self.runtime);
+            Box::pin(async move {
+                let session = match parse_session(&request.session) {
+                    Ok(session) => session,
+                    Err(error) => return Ok(EmptyOrErrorResponse::error(error)),
+                };
+                let response = match runtime.rename_session(session, &request.title).await {
+                    Ok(()) => EmptyOrErrorResponse::success(),
+                    Err(error) => EmptyOrErrorResponse::error(map_rename_error(error)),
                 };
                 Ok(response)
             })
@@ -644,7 +705,10 @@ mod action {
                 runtime: Rc::clone(&runtime),
                 sessions: sessions.clone(),
             })?,
-            actions.add_action(DeleteSessionAction { runtime })?,
+            actions.add_action(DeleteSessionAction {
+                runtime: Rc::clone(&runtime),
+            })?,
+            actions.add_action(RenameSessionAction { runtime })?,
             actions.add_action(AppendAction {
                 sessions: sessions.clone(),
             })?,
@@ -699,6 +763,14 @@ mod action {
         }
     }
 
+    fn map_rename_error(error: SessionRenameError) -> AgentActionError {
+        match error {
+            SessionRenameError::SessionNotFound(_) => AgentActionError::SessionNotFound,
+            SessionRenameError::InvalidTitle => AgentActionError::InvalidTitle,
+            SessionRenameError::WorkerStopped => AgentActionError::WorkerStopped,
+        }
+    }
+
     fn map_control_error(error: SessionControlError) -> AgentActionError {
         match error {
             SessionControlError::SessionClosed(_) => AgentActionError::SessionClosed,
@@ -714,15 +786,20 @@ mod action {
     mod tests {
         #![allow(clippy::expect_used)]
 
+        use alloc::vec;
+
+        use barracuda_agent_runtime::{SessionId, SessionInfo, SessionPersistence};
         use barracuda_workflow_plugin::WorkflowActionHandler;
         use serde_json::json;
 
         use super::{
-            parse_input_request, parse_session, AgentActionError, AppendAction, CancelAction,
-            CloseAction, DeleteSessionAction, EmptyOrErrorResponse, InterruptAction,
-            ListSessionsAction, NewSessionAction, OpenSessionAction, RespondAction,
+            map_rename_error, parse_input_request, parse_session, AgentActionError, AppendAction,
+            CancelAction, CloseAction, DeleteSessionAction, EmptyOrErrorResponse, InterruptAction,
+            ListSessionsAction, ListSessionsResponse, NewSessionAction, OpenSessionAction,
+            RenameSessionAction, RespondAction, SessionListEntry, SessionListPage,
             SetPermissionLevelAction, SetReasoningEffortAction,
         };
+        use barracuda_agent_runtime::SessionRenameError;
 
         #[test]
         fn parses_public_identifiers() {
@@ -742,6 +819,7 @@ mod action {
                     ListSessionsAction::SCHEMA.address(),
                     OpenSessionAction::SCHEMA.address(),
                     DeleteSessionAction::SCHEMA.address(),
+                    RenameSessionAction::SCHEMA.address(),
                     AppendAction::SCHEMA.address(),
                     RespondAction::SCHEMA.address(),
                     SetReasoningEffortAction::SCHEMA.address(),
@@ -755,6 +833,7 @@ mod action {
                     "session.list",
                     "session.open",
                     "session.delete",
+                    "session.rename",
                     "session.append",
                     "session.respond",
                     "session.set_reasoning_effort",
@@ -779,6 +858,95 @@ mod action {
                     "text": "x".repeat(4_096)
                 }))
                 .is_ok());
+        }
+
+        #[test]
+        fn session_list_entries_carry_metadata_and_match_the_response_schema() {
+            let page = ListSessionsResponse::Success(SessionListPage {
+                sessions: vec![
+                    SessionListEntry::from(SessionInfo {
+                        session: SessionId::new(1),
+                        persistence: SessionPersistence::Persistent,
+                        title: Some("Trip plan".into()),
+                        updated_at: Some(1_700_000_000_000),
+                    }),
+                    SessionListEntry::from(SessionInfo {
+                        session: SessionId::new(2),
+                        persistence: SessionPersistence::Ephemeral,
+                        title: None,
+                        updated_at: None,
+                    }),
+                ],
+                next_offset: None,
+            });
+            let response = serde_json::to_value(page).expect("serialize response");
+            assert_eq!(
+                response,
+                json!({
+                    "sessions": [
+                        {
+                            "session": "session-1",
+                            "persistent": true,
+                            "title": "Trip plan",
+                            "updated_at": 1_700_000_000_000_u64
+                        },
+                        {
+                            "session": "session-2",
+                            "persistent": false,
+                            "title": null,
+                            "updated_at": null
+                        }
+                    ],
+                    "next_offset": null
+                })
+            );
+            assert!(ListSessionsAction::SCHEMA
+                .response()
+                .validate(&response)
+                .is_ok());
+            assert!(ListSessionsAction::SCHEMA
+                .response()
+                .validate(&json!({ "sessions": ["session-1"], "next_offset": null }))
+                .is_err());
+        }
+
+        #[test]
+        fn session_rename_schemas_and_errors_match_the_contract() {
+            assert!(RenameSessionAction::SCHEMA
+                .request()
+                .validate(&json!({ "session": "session-1", "title": "Trip plan" }))
+                .is_ok());
+            assert!(RenameSessionAction::SCHEMA
+                .request()
+                .validate(&json!({ "session": "session-1" }))
+                .is_err());
+            for error in [
+                SessionRenameError::SessionNotFound(SessionId::new(1)),
+                SessionRenameError::InvalidTitle,
+                SessionRenameError::WorkerStopped,
+            ] {
+                let response =
+                    serde_json::to_value(EmptyOrErrorResponse::error(map_rename_error(error)))
+                        .expect("serialize response");
+                assert!(RenameSessionAction::SCHEMA
+                    .response()
+                    .validate(&response)
+                    .is_ok());
+            }
+            for response in [
+                json!({}),
+                json!({ "error": "invalid_request" }),
+                json!({ "error": "invalid_title" }),
+            ] {
+                assert!(RenameSessionAction::SCHEMA
+                    .response()
+                    .validate(&response)
+                    .is_ok());
+            }
+            assert!(RenameSessionAction::SCHEMA
+                .response()
+                .validate(&json!({ "error": "storage" }))
+                .is_err());
         }
 
         #[test]

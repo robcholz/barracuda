@@ -140,15 +140,27 @@ impl InboundMessageSink for GatewayInboundSink {
     fn receive_control(&self, request: InboundControl) -> InboundFuture<'_, ()> {
         Box::pin(async move {
             let control = GatewayInboundControl {
-                route: GatewayRoute {
-                    channel: self.channel.clone(),
-                    conversation_id: request.conversation_id,
-                    thread_id: request.thread_id,
-                },
-                control: match request.control {
-                    WebControl::Interrupt => GatewayControlKind::Interrupt,
-                    WebControl::Cancel => GatewayControlKind::Cancel,
-                },
+                temporary: request.temporary,
+                session: request.session,
+                index: None,
+                title: request.title,
+                confirm: request.confirm,
+                ..GatewayInboundControl::new(
+                    GatewayRoute {
+                        channel: self.channel.clone(),
+                        conversation_id: request.conversation_id,
+                        thread_id: request.thread_id,
+                    },
+                    match request.control {
+                        WebControl::Interrupt => GatewayControlKind::Interrupt,
+                        WebControl::Cancel => GatewayControlKind::Cancel,
+                        WebControl::Sessions => GatewayControlKind::Sessions,
+                        WebControl::New => GatewayControlKind::New,
+                        WebControl::Switch => GatewayControlKind::Switch,
+                        WebControl::Rename => GatewayControlKind::Rename,
+                        WebControl::Delete => GatewayControlKind::Delete,
+                    },
+                )
             };
             self.gateway
                 .publish_control(control)

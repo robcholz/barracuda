@@ -16,10 +16,32 @@ and publish inbound messages through it; Workflow Actions and the separate
 `agent-imessage-gateway` adapter call the same send methods.
 
 `IMessageGateway::publish_control` publishes `gateway.control.received`
-(`{ route, control }`, control `interrupt` or `cancel`): a user asking to stop
-or withdraw the turn running for their conversation. It does not wait on
-`ready`, so a control never queues behind messages. Which session the route
-maps to is the consumer's business; the Gateway only names the route.
+(`GatewayInboundControl`: `{ route, control, temporary?, session?, index?,
+title?, confirm? }`). A control is `interrupt` or `cancel` for the turn
+running in the conversation, or a session command: `sessions` (list), `new`
+(`temporary` for a chat that is never saved), `switch`, `rename` (`title`),
+`delete` (`confirm`), or `help` for a malformed command. Commands name a
+session by `session` id (rich channels) or by `index`, its 1-based place in
+the conversation's newest-first list. Controls do not wait on `ready`, so
+they never queue behind messages. Which sessions a route owns is the
+consumer's business; the Gateway only names the route.
+
+## Session commands for every channel
+
+`IMessageGateway::publish` turns a session text command into a control
+instead of a message (`parse_command`), so every channel manages its
+sessions as text: `/sessions`, `/new`, `/new temp`, `/switch N`,
+`/rename N title`, `/delete N` and `/delete N confirm`. Other text,
+including other slash commands, stays a message; a known command with bad
+arguments becomes `help`.
+
+The answer comes back through `IMessageGateway::send_sessions`
+(`SendSessionsRequest`: the conversation's current session, whether it is
+temporary, its saved sessions newest first with title, last use and whether a
+turn runs, what the command did, and the device's clock).
+`MessageChannel::send_sessions` defaults to one plain English message
+(`sessions_text`); the Web channel overrides it to push the list to every
+open page.
 
 ## Ingress backpressure
 

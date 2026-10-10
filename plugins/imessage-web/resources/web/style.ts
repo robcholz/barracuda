@@ -1,7 +1,7 @@
 /**
  * Web chat's own rules, from the design system's Chat card: the one-row composer, the fresh
- * conversation, the pinned head, jump to the latest, the spinning mark's box and the live-state
- * motion. They serve this page alone, so the page adds them on mount and removes them on unmount
+ * conversation, the pinned head, jump to the latest, the session rail, the spinning mark's box and
+ * the live-state motion. They serve this page alone, so the page adds them on mount and removes them on unmount
  * rather than growing the shell's stylesheet; reduced motion stills every animation.
  */
 export const CHAT_CSS = `
@@ -19,6 +19,21 @@ export const CHAT_CSS = `
 .bc-chat-jump{position:absolute;left:50%;top:-52px;transform:translateX(-50%)}
 .bc-mark-tile{display:grid;place-items:center;flex:none;width:16px;height:16px}
 .bc-mark-spin{width:16px;height:16px}
+.bc-chat-rail{flex:none;width:260px;position:sticky;top:0;align-self:flex-start;height:calc(100vh - var(--topbar-height));display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-4) var(--space-3);border-right:1px solid var(--border);background:var(--background)}
+.bc-chat-rail__list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.bc-chat-rail__foot{margin:0;padding:0 8px}
+.bc-session{position:relative}
+.bc-session>.bc-nav-item{padding-right:36px}
+.bc-session__title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bc-session__more{position:absolute;right:6px;top:6px;opacity:0}
+.bc-session:hover .bc-session__more,.bc-session:focus-within .bc-session__more,.bc-session__more[aria-expanded="true"]{opacity:1}
+.bc-session:hover .bc-spinner,.bc-session:focus-within .bc-spinner,.bc-session:has([aria-expanded="true"]) .bc-spinner{visibility:hidden}
+.bc-session__rename{width:100%;height:36px}
+.bc-menu-item--destructive{color:var(--destructive)}
+.bc-menu-item--destructive:hover,.bc-menu-item--destructive:active{background:var(--destructive-surface)}
+.bc-menu--confirm{width:256px;padding:12px;display:flex;flex-direction:column;gap:12px}
+.bc-chat-rail .bc-menu--confirm{left:0;right:0;width:auto}
+.bc-chat-rail-toggle{display:none}
 @keyframes bc-blink{50%{opacity:0}}
 @keyframes bc-dot{0%,80%,100%{opacity:.3;transform:none}40%{opacity:1;transform:translateY(-2px)}}
 @keyframes bc-sweep{from{background-position:100% 0}to{background-position:0 0}}
@@ -32,5 +47,5 @@ export const CHAT_CSS = `
 .bc-spinner{animation:bc-spin .8s linear infinite}
 .bc-turn--new{animation:bc-rise .15s ease-out both}
 @media (prefers-reduced-motion:reduce){.bc-caret,.bc-typing>i,.bc-spinner,.bc-turn--new,.bc-shimmer{animation:none}.bc-shimmer{color:var(--muted-foreground);background:none}}
-@media (max-width:719px){.bc-chat-head{padding:var(--space-3) var(--space-4) 0}}
+@media (max-width:719px){.bc-chat-head{padding:var(--space-3) var(--space-4) 0}.bc-chat-rail{display:none;position:fixed;inset:0 auto 0 0;height:100vh;z-index:40;box-shadow:var(--shadow-xs)}.bc-chat-rail--open{display:flex}.bc-chat-rail-toggle{display:inline-flex}}
 `;

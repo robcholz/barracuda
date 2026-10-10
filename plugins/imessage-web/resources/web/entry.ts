@@ -13,6 +13,7 @@ import {
   ICON_LIGHTBULB,
   ICON_LOADER,
   ICON_MESSAGE_SQUARE_DASHED,
+  ICON_PANEL,
   ICON_PENCIL,
   ICON_REFRESH,
   ICON_REPLY,
@@ -29,6 +30,11 @@ import {
   type PortalContext,
 } from "../../../captive-portal/resources/web/ui";
 import { spinningMark } from "./mark";
+import {
+  sessionRail,
+  type SessionCommand,
+  type SessionsState,
+} from "./sessions";
 import { CHAT_CSS } from "./style";
 
 /**
@@ -71,8 +77,15 @@ const STRINGS = {
     approvalHint: "或直接回复",
     answering: "正在答复",
     answerPh: "回复这次请求…",
-    emptyTitle: "临时会话",
-    emptyBody: "在浏览器里直接和设备对话；刷新页面后从空白开始。",
+    newTitle: "新会话",
+    newLead: "会话保存在设备上，随时可以从左侧回来。",
+    tempTitle: "临时会话",
+    tempLead: "不会保存在设备上；离开这个会话后删除。",
+    continueLead: "之前的消息保存在设备上；从这里接着聊。",
+    showSessions: "会话",
+    sessionGone: "找不到这个会话",
+    badTitle: "会话名称不能为空",
+    sessionFailed: "设备没能完成这个操作",
     suggestions: [
       "今天适合骑车吗？",
       "总结一下我今天的日程",
@@ -102,7 +115,7 @@ const STRINGS = {
     replying: "回复 Barracuda",
     cancelReply: "取消回复",
     session: "临时会话",
-    sessionTip: "只显示连接后的消息，刷新页面后清空",
+    sessionTip: "不会保存；离开这个会话后删除",
     download: "下载",
     receiving: "接收中",
     received: "已接收",
@@ -138,9 +151,16 @@ const STRINGS = {
     approvalHint: "Or reply in your own words",
     answering: "Answering",
     answerPh: "Reply to this request…",
-    emptyTitle: "Temporary session",
-    emptyBody:
-      "Talk to the device right in the browser; a reload starts from blank.",
+    newTitle: "New session",
+    newLead:
+      "Sessions are saved on the device; come back to one from the left any time.",
+    tempTitle: "Temporary chat",
+    tempLead: "Not saved on the device; deleted when you leave it.",
+    continueLead: "Earlier messages stay on the device; carry on from here.",
+    showSessions: "Sessions",
+    sessionGone: "That session is gone",
+    badTitle: "A session needs a name",
+    sessionFailed: "The device couldn't do that",
     suggestions: [
       "Is it a good day for a ride?",
       "Summarize today's schedule",
@@ -169,9 +189,8 @@ const STRINGS = {
     jump: "Jump to latest",
     replying: "Replying to Barracuda",
     cancelReply: "Cancel reply",
-    session: "Temporary session",
-    sessionTip:
-      "Only messages since you connected; cleared when the page reloads",
+    session: "Temporary chat",
+    sessionTip: "Not saved; deleted when you leave it",
     download: "Download",
     receiving: "receiving",
     received: "received",
@@ -409,30 +428,40 @@ export const mount = definePage((context: PortalContext) => {
     },
     column,
   );
-  // a temporary session says so at the conversation's head, pinned while the history scrolls
-  const head = h(
-    "div",
-    { class: "bc-chat-head" },
+  // the device's sessions, at the page's left once the device lists them
+  const rail = sessionRail(lang, (command) => control(command), signal);
+  show(rail.node, false);
+  // a temporary chat says so at the conversation's head, pinned while the history scrolls
+  const tempBadge = h(
+    "span",
+    {
+      class: "bc-badge",
+      tabindex: 0,
+      "aria-describedby": "imessage-web-session-tip",
+    },
+    icon(ICON_MESSAGE_SQUARE_DASHED),
+    t.session,
     h(
       "span",
       {
-        class: "bc-badge",
-        tabindex: 0,
-        "aria-describedby": "imessage-web-session-tip",
+        class: "bc-tooltip",
+        role: "tooltip",
+        id: "imessage-web-session-tip",
       },
-      icon(ICON_MESSAGE_SQUARE_DASHED),
-      t.session,
-      h(
-        "span",
-        {
-          class: "bc-tooltip",
-          role: "tooltip",
-          id: "imessage-web-session-tip",
-        },
-        t.sessionTip,
-      ),
+      t.sessionTip,
     ),
   );
+  show(tempBadge, false);
+  // on a phone the rail is a sheet, opened from the head
+  const railToggle = iconButton(
+    t.showSessions,
+    ICON_PANEL,
+    () => rail.toggle(),
+    "bc-icon-button bc-chat-rail-toggle",
+  ).button;
+  railToggle.style.cssText = "position:absolute;left:var(--space-4)";
+  show(railToggle, false);
+  const head = h("div", { class: "bc-chat-head" }, railToggle, tempBadge);
   // the fresh conversation: the EmptyState with the page's laptop figure, over a mid-page composer
   const empty = h(
     "div",
@@ -442,12 +471,11 @@ export const mount = definePage((context: PortalContext) => {
       "aria-hidden": "true",
       style: "width:200px;max-width:100%",
     }),
-    h("h2", { class: "bc-title" }, t.emptyTitle),
-    h(
-      "p",
-      { class: "bc-small bc-muted", style: "margin:0;max-width:420px" },
-      t.emptyBody,
-    ),
+    h("h2", { class: "bc-title" }),
+    h("p", {
+      class: "bc-small bc-muted",
+      style: "margin:0;max-width:420px",
+    }),
   );
   const suggestions = h(
     "div",
@@ -622,18 +650,46 @@ export const mount = definePage((context: PortalContext) => {
   );
   const page = h(
     "div",
-    { style: "flex:1 1 auto;display:flex;flex-direction:column;min-width:0" },
-    head,
-    log,
-    form,
+    { style: "flex:1 1 auto;display:flex;min-width:0" },
+    rail.node,
+    h(
+      "div",
+      {
+        style: "flex:1 1 auto;display:flex;flex-direction:column;min-width:0",
+      },
+      head,
+      log,
+      form,
+    ),
   );
+
+  /** The device's latest session list; `null` until it answers. */
+  let sessions: SessionsState | null = null;
 
   /** The fresh conversation holds the composer mid-page; once it has messages, the head says what it is. */
   function setFresh(on: boolean) {
     page.classList.toggle("bc-chat--fresh", on);
     column.style.flex = on ? "0 0 auto" : "1 1 auto";
-    show(head, !on);
     show(suggestions, on);
+    label();
+  }
+
+  /** What the fresh conversation and the head say: a new session, a temporary chat, or the session continued. */
+  function label() {
+    const temporary = !!sessions?.temporary;
+    const continued = sessions?.sessions.find(
+      (item) => item.session === sessions?.current,
+    );
+    const [title, lead] = empty.querySelectorAll<HTMLElement>("h2, p");
+    title.textContent = temporary
+      ? t.tempTitle
+      : (continued?.title ?? t.newTitle);
+    lead.textContent = temporary
+      ? t.tempLead
+      : continued
+        ? t.continueLead
+        : t.newLead;
+    show(tempBadge, temporary && !page.classList.contains("bc-chat--fresh"));
   }
 
   // ---- conversation state
@@ -654,8 +710,10 @@ export const mount = definePage((context: PortalContext) => {
   const queue: Queued[] = [];
   /** Rewound messages: their turns' messages are dropped as they arrive. */
   const withdrawn = new Set<string>();
-  /** Agent messages of a rewound turn, ignored until they end. */
+  /** Agent messages of a rewound turn, or of a session left, ignored until they end. */
   const dropped = new Set<string>();
+  /** Sent messages of a conversation cleared for another session. */
+  const stale = new Set<string>();
   /** A rewound message waits in the composer: the queue holds until it is sent. */
   let held = false;
   /** Stop was asked for; the turn has not ended yet. */
@@ -1259,13 +1317,20 @@ export const mount = definePage((context: PortalContext) => {
       typingOn = value.typing === true;
       return;
     }
+    if (event === "conversation.sessions")
+      return applySessions(value as unknown as SessionsState);
     const id = str(value.message_id);
     if (!id) return;
+    if (event === "message.start" && stale.has(str(value.reply_to))) {
+      // the reply a left session still owes this page: it belongs to the conversation cleared
+      dropped.add(id);
+      return;
+    }
     if (event === "message.start" && withdrawn.has(str(value.reply_to))) {
       // the rewound message's turn began after all: cancel it again and keep it off the page
       dropped.add(id);
       awaiting.delete(str(value.reply_to));
-      control("cancel");
+      control({ control: "cancel" });
       return;
     }
     if (dropped.has(id)) {
@@ -1279,7 +1344,7 @@ export const mount = definePage((context: PortalContext) => {
         const replied = str(value.reply_to);
         started.replyTo = replied;
         // stop asked before the turn began reached no turn: ask again now that one runs
-        if (stopping) control("interrupt");
+        if (stopping) control({ control: "interrupt" });
         // the oldest waiting message's turn has started
         awaiting.delete(replied);
         const target = sent.get(replied);
@@ -1308,6 +1373,8 @@ export const mount = definePage((context: PortalContext) => {
         if (!known) return;
         known.ended = true;
         active.delete(known);
+        // a finished turn may have named or started a session: ask for the list again
+        if (sessions && !active.size) control({ control: "sessions" });
         caret.remove();
         close(known);
         if (request?.owner === known) setRequest(null);
@@ -1706,10 +1773,15 @@ export const mount = definePage((context: PortalContext) => {
     return true;
   }
 
-  /** Sends a control for the running turn: `interrupt` (stop) or `cancel` (rewind). */
-  function control(kind: "interrupt" | "cancel") {
+  /**
+   * Sends a control frame: `interrupt` (stop) or `cancel` (rewind) for the running turn, or a
+   * session command, which the device answers with `conversation.sessions`.
+   */
+  function control(
+    frame: SessionCommand | { control: "interrupt" | "cancel" },
+  ) {
     try {
-      if (online()) socket!.send(JSON.stringify({ control: kind }));
+      if (online()) socket!.send(JSON.stringify(frame));
     } catch {
       // the socket is going away; its close says so
     }
@@ -1718,7 +1790,61 @@ export const mount = definePage((context: PortalContext) => {
   function stop() {
     if (!busy() || stopping) return;
     stopping = true;
-    control("interrupt");
+    control({ control: "interrupt" });
+    refresh();
+  }
+
+  /**
+   * Takes the device's session list. A switch or a new session (from this page, another tab, or
+   * a deletion of the current one) starts the conversation view over: the device keeps the
+   * history, the page shows only what comes next.
+   */
+  function applySessions(next: SessionsState) {
+    const before = sessions;
+    sessions = next;
+    show(rail.node, true);
+    show(railToggle, true);
+    rail.update(next);
+    const kind = next.notice?.kind;
+    if (
+      kind === "switched" ||
+      kind === "created" ||
+      (!!before?.current && next.current !== before.current)
+    )
+      startOver();
+    const problem =
+      kind === "unknown_session"
+        ? t.sessionGone
+        : kind === "invalid_title"
+          ? t.badTitle
+          : kind === "failed"
+            ? t.sessionFailed
+            : "";
+    if (problem) context.toast({ kind: "error", title: problem });
+    label();
+  }
+
+  /** Clears the conversation view for another session; what the left one still sends is dropped. */
+  function startOver() {
+    for (const id of agents.keys()) dropped.add(id);
+    for (const id of sent.keys()) stale.add(id);
+    for (const item of items.splice(0)) item.forget();
+    column.replaceChildren();
+    group = null;
+    caret.remove();
+    active.clear();
+    awaiting.clear();
+    clearTimeout(stall);
+    withdrawn.clear();
+    held = false;
+    stopping = false;
+    answered = null;
+    setRequest(null);
+    setReply(null);
+    queue.length = 0;
+    renderQueue();
+    column.prepend(empty);
+    setFresh(true);
     refresh();
   }
 
@@ -1734,7 +1860,7 @@ export const mount = definePage((context: PortalContext) => {
     withdrawn.add(id);
     awaiting.delete(id);
     arm();
-    control("cancel");
+    control({ control: "cancel" });
     for (const record of active)
       if (record.replyTo === id) dropped.add(record.id);
     const from = items.findIndex((item) => item.node === entry.root);
@@ -1830,6 +1956,7 @@ export const mount = definePage((context: PortalContext) => {
     // message ids restart with the connection, so old rewinds name nothing now
     withdrawn.clear();
     dropped.clear();
+    stale.clear();
     warned = false;
     refresh();
     const url = new URL("/ws/message", document.baseURI);
@@ -1846,6 +1973,7 @@ export const mount = definePage((context: PortalContext) => {
       if (!live()) return;
       setLink("live");
       if (byUser) context.toast({ kind: "success", title: t.reconnected });
+      control({ control: "sessions" });
       refresh();
     });
     connection.addEventListener("message", (event) => {

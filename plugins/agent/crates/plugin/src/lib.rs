@@ -21,6 +21,7 @@ use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
     PluginStartContext, PluginTaskToken,
 };
+use barracuda_time_plugin::UtcClock;
 use barracuda_webserver_plugin::WebServer;
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
@@ -29,7 +30,8 @@ use workflow::AgentWorkflowAdapter;
 
 pub use barracuda_agent_runtime::{
     stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
-    SessionEvent, SessionPersistence, TurnEvent,
+    SessionDeleteError, SessionEvent, SessionId, SessionInfo, SessionPersistence,
+    SessionRenameError, TurnEvent, WallClock,
 };
 pub use model_api_http::SET_API_PATH;
 
@@ -121,6 +123,8 @@ impl Plugin for AgentPlugin {
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
             .map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
+        let clock = context.require::<UtcClock>("time")?;
+        runtime.set_wall_clock(Rc::new(move || clock.now().ok().map(u64::from)));
         let api_configuration =
             embassy_futures::block_on(model_api_http::load_configuration(context.storage()))?;
         runtime.replace_api_configuration(api_configuration.clone());

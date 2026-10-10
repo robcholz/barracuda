@@ -5,7 +5,7 @@ use barracuda_workflow_plugin::WorkflowService;
 use gateway::MessageGateway;
 
 use crate::gateway_control_received::{
-    valid_control, GatewayControlReceived, GatewayInboundControl,
+    parse_command, valid_control, GatewayControlReceived, GatewayInboundControl,
 };
 use crate::gateway_message_received::{
     valid_inbound, GatewayInboundMessage, GatewayMessageReceived,
@@ -50,9 +50,16 @@ impl GatewayIngress {
     }
 
     /// Publishes one normalized inbound message as a Workflow Event.
+    ///
+    /// A session text command (`/sessions`, `/new`, `/switch N`, ...) is not a
+    /// message for the Agent: it is published as `gateway.control.received`
+    /// instead, so every channel can manage its sessions as text.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         if !valid_inbound(&message) {
             return Err(GatewayIngressError::InvalidMessage);
+        }
+        if let Some(control) = parse_command(&message.route, &message.text) {
+            return self.publish_control(control);
         }
         let input =
             serde_json::to_value(message).map_err(|_error| GatewayIngressError::Delivery)?;

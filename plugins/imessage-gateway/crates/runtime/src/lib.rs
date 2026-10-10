@@ -20,7 +20,7 @@ pub mod route;
 mod runtime;
 
 pub use gateway_control_received::{
-    GatewayControlKind, GatewayControlReceived, GatewayInboundControl,
+    parse_command, GatewayControlKind, GatewayControlReceived, GatewayInboundControl,
 };
 pub use gateway_message_received::{GatewayInboundMessage, GatewayMessageReceived};
 pub use gateway_send::{GatewaySendRequest, GatewaySendResponse};

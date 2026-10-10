@@ -17,8 +17,9 @@ use portable_atomic_util::Arc;
 use barracuda_agent::AgentCreateError;
 use barracuda_agent::SharedApiManager;
 use barracuda_agent_session::{
-    OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
-    SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
+    OpenSessionError, SessionClock, SessionControl, SessionCreateError, SessionDeleteError,
+    SessionId, SessionInfo, SessionManager, SessionManagerInitError, SessionPersistence,
+    SessionRenameError, SessionStream,
 };
 
 use crate::service::RuntimeBuildError;
@@ -30,6 +31,14 @@ pub(super) enum RuntimeCommand {
     },
     ListSessions {
         ack: oneshot::Sender<Vec<SessionId>>,
+    },
+    DescribeSessions {
+        ack: oneshot::Sender<Vec<SessionInfo>>,
+    },
+    RenameSession {
+        session: SessionId,
+        title: String,
+        ack: oneshot::Sender<Result<(), SessionRenameError>>,
     },
     OpenSession {
         session: SessionId,
@@ -54,6 +63,7 @@ where
     pub(super) skill_roots: Vec<String>,
     pub(super) api_manager: SharedApiManager,
     pub(super) llm_factory: ModelApiFactory<Tcp, Resolver>,
+    pub(super) clock: SessionClock,
     pub(super) commands: Receiver<RuntimeCommand>,
 }
 
@@ -91,6 +101,7 @@ where
             skill_roots,
             api_manager,
             llm_factory,
+            clock,
             commands,
         } = init;
         let session_manager = SessionManager::new(
@@ -103,7 +114,8 @@ where
             llm_factory,
         )
         .await
-        .map_err(map_session_manager_init_error)?;
+        .map_err(map_session_manager_init_error)?
+        .with_clock(clock);
         Ok(Self {
             persistence: Some(persistence),
             persistence_task: None,
@@ -122,6 +134,16 @@ where
             }
             Some(RuntimeCommand::ListSessions { ack }) => {
                 let _ = ack.send(self.session_manager.list());
+            }
+            Some(RuntimeCommand::DescribeSessions { ack }) => {
+                let _ = ack.send(self.session_manager.describe());
+            }
+            Some(RuntimeCommand::RenameSession {
+                session,
+                title,
+                ack,
+            }) => {
+                let _ = ack.send(self.session_manager.rename(session, &title));
             }
             Some(RuntimeCommand::OpenSession { session, ack }) => {
                 let _ = ack.send(self.session_manager.open(session));
@@ -144,6 +166,12 @@ where
                 }
                 RuntimeCommand::ListSessions { ack } => {
                     let _ = ack.send(Vec::new());
+                }
+                RuntimeCommand::DescribeSessions { ack } => {
+                    let _ = ack.send(Vec::new());
+                }
+                RuntimeCommand::RenameSession { ack, .. } => {
+                    let _ = ack.send(Err(SessionRenameError::WorkerStopped));
                 }
                 RuntimeCommand::OpenSession { ack, .. } => {
                     let _ = ack.send(Err(OpenSessionError::WorkerStopped));

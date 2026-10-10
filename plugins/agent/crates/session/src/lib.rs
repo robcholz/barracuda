@@ -21,6 +21,7 @@ macro_rules! prompt {
 mod actor;
 mod agent_slot;
 mod approval;
+mod clock;
 mod control;
 mod manager;
 mod orchestration;
@@ -30,9 +31,11 @@ mod state;
 mod stream;
 
 pub use approval::ApprovalResolverError;
+pub use clock::{SessionClock, WallClock};
 pub use control::{SessionControl, SessionControlError};
 pub use manager::{
-    OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionPersistence,
+    OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionInfo,
+    SessionPersistence, SessionRenameError,
 };
 pub use manager::{SessionManager, SessionManagerInitError};
 pub use stream::{

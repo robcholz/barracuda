@@ -19,6 +19,7 @@ use super::approval::{
     ApprovalCompletion, ApprovalDisplay, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
 };
+use super::clock::SessionClock;
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SessionDeleteError, SharedAgentManager};
 use super::orchestration::{
@@ -26,7 +27,7 @@ use super::orchestration::{
     OrchestrationPhysicalError, ReapStatus, RemovalOutcome, SessionOrchestration,
 };
 use super::permission::SessionPermission;
-use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
+use super::state::{record_user_message, AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
     InputRequestId, IterationEvent, SessionCloseReason, SessionEvent, SessionEventError, SessionId,
     SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError, TurnId,
@@ -199,6 +200,7 @@ where
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
+    clock: SessionClock,
     agent_manager: SharedAgentManager<Tcp, Resolver>,
     agent_id_allocator: AgentIdAllocatorHandle,
 
@@ -230,6 +232,7 @@ where
         agent_manager: SharedAgentManager<Tcp, Resolver>,
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
+        clock: SessionClock,
         approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = local_channel::channel();
@@ -238,6 +241,7 @@ where
                 session,
                 persistence,
                 state,
+                clock,
                 agent_manager,
                 agent_id_allocator,
                 agents: AgentSlots::new(),
@@ -384,6 +388,7 @@ where
             self.reject_closed(ack);
             return;
         }
+        record_user_message(&self.state, message.as_str(), self.clock.now());
         self.inbox.push_back(message);
         let _ = ack.send(Ok(()));
     }
