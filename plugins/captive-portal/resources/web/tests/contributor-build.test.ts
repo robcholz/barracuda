@@ -14,10 +14,10 @@ const plugins = [
 ];
 
 /**
- * KiB per page bundle. Web chat carries a conversation, a WebGL mark and a session rail, so it
- * gets more room than a settings page.
+ * KiB per page bundle. Web chat carries a conversation, a WebGL mark, a session rail and its own
+ * streaming Markdown renderer with syntax highlighting, so it gets more room than a settings page.
  */
-const BUDGET: Record<string, number> = { "imessage-web": 48 };
+const BUDGET: Record<string, number> = { "imessage-web": 72 };
 
 async function fresh(entry: string) {
   const built = await Bun.build({

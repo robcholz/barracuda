@@ -4,16 +4,28 @@
  * (code, strong, emphasis, strikethrough, links). It builds DOM nodes and never parses markup, so
  * HTML in a reply stays text; links open only `http(s):` and `mailto:` targets, in a new tab.
  *
- * It is written for streaming: a reply is painted again as its text grows, an unclosed fence runs to
- * the end, an unclosed mark stays literal until it closes, and the top-level blocks whose source has
- * not changed keep their nodes, so a long reply re-builds only its last block each frame.
+ * It is written for streaming, as Streamdown is: the reply is parsed again as its text grows, and
+ * what is already on screen never flashes.
+ *
+ * - While a reply streams, its tail is made provisional ({@link provisional}): an open mark, code
+ *   span or link is closed (`**bol` shows bold, `[文档](https://ex` its label), a mark run at the very
+ *   end waits, a last line that is only a block's marker (`#`, `-`, `1.`, `` ` ``) waits to see which
+ *   block it starts, a table's header row waits for its delimiter row, and a code fence's own line
+ *   and closing backticks wait. What has been shown is not taken back as the text grows.
+ * - Painting patches the DOM in place ({@link morph}): a top-level block whose source is unchanged
+ *   keeps its node, and the block that grew keeps its elements and text nodes, its text appended, so
+ *   a selection, a hovered Copy button and a code block's scroll survive every frame.
  */
 import { h } from "../../../captive-portal/resources/web/ui";
 import { highlight } from "./highlight";
 
 export interface MarkdownOptions {
-  /** The actions on a code block's head (its Copy button), given the block's code. */
-  codeActions?: (code: string) => Node;
+  /** The actions on a code block's head (its Copy button), given a reader of the block's code. */
+  codeActions?: (read: () => string) => Node;
+  /** The text is still streaming: its tail is shown provisionally. */
+  streaming?: boolean;
+  /** A node of the page's own (the caret) that painting leaves where it is. */
+  keep?: Node;
 }
 
 type Segment = { from: number; to: number } & (
@@ -32,6 +44,8 @@ interface Painted {
 }
 
 const painted = new WeakMap<HTMLElement, Painted>();
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
 
 const FENCE = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`]*)/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
@@ -48,26 +62,239 @@ const SAFE_URL = /^(?:https?:\/\/|mailto:)/i;
 const FLOWING = /^(?:P|LI|UL|OL|BLOCKQUOTE|H[1-6])$/;
 
 /**
- * Paints `source` into `target`, replacing what an earlier paint drew there; a top-level block
- * whose source is unchanged keeps its node.
+ * Paints `source` into `target` over what an earlier paint drew there: a top-level block whose
+ * source is unchanged keeps its node, and one that changed is patched in place.
  */
 export function renderMarkdown(
   target: HTMLElement,
   source: string,
   options: MarkdownOptions = {},
 ) {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  const text = source.replace(/\r\n?/g, "\n");
+  const lines = (options.streaming ? provisional(text) : text).split("\n");
   const previous = painted.get(target)?.blocks ?? [];
   const blocks = segments(lines).map((segment, index) => {
     const raw = lines.slice(segment.from, segment.to).join("\n");
     const old = previous[index];
+    if (old?.raw === raw) return old;
+    const node = build(segment, options);
     return {
       raw,
-      node: old?.raw === raw ? old.node : build(segment, options),
+      node: old ? (morph(old.node, node, options.keep) as HTMLElement) : node,
     };
   });
-  target.replaceChildren(...blocks.map((block) => block.node));
+  sync(
+    target,
+    blocks.map((block) => block.node),
+    options.keep,
+  );
   painted.set(target, { source, blocks });
+}
+
+/**
+ * Makes `node` what `next` is, keeping `node`'s elements and text nodes wherever `next` has the same
+ * kind in the same place; returns the node to use (`next` when the kinds differ). An element marked
+ * `data-md-keep` (a code block's actions) is left as it is.
+ */
+function morph(node: Node, next: Node, keep?: Node): Node {
+  if (node.nodeName !== next.nodeName) return next;
+  if (node.nodeType === TEXT_NODE) {
+    const text = node as Text;
+    const { data } = next as Text;
+    // appending keeps a selection inside the text
+    if (data.startsWith(text.data))
+      text.appendData(data.slice(text.data.length));
+    else text.data = data;
+    return node;
+  }
+  const element = node as Element;
+  if (node.nodeType !== ELEMENT_NODE || element.hasAttribute("data-md-keep"))
+    return node;
+  const model = next as Element;
+  for (const { name } of [...element.attributes])
+    if (!model.hasAttribute(name)) element.removeAttribute(name);
+  for (const { name, value } of [...model.attributes])
+    if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+  const children = [...node.childNodes].filter((child) => child !== keep);
+  sync(
+    node,
+    [...model.childNodes].map((child, i) =>
+      children[i] ? morph(children[i], child, keep) : child,
+    ),
+    keep,
+  );
+  return node;
+}
+
+/** Puts `children` in `parent` in order, moving only what is out of place; new ones go before `keep`. */
+function sync(parent: Node, children: Node[], keep?: Node) {
+  let at = parent.firstChild;
+  for (const child of children) {
+    if (at === child) at = at.nextSibling;
+    else parent.insertBefore(child, at);
+  }
+  while (at) {
+    const next = at.nextSibling;
+    if (at !== keep) parent.removeChild(at);
+    at = next;
+  }
+}
+
+/** A last line that is only a block's marker: which block it starts is not known yet. */
+const MARKER_ONLY =
+  /^[ \t]*(?:#{1,6}|>|`{1,2}|~{1,2}|\d{1,9}[.)]?|[-*+_](?:[ \t]*[-*_])?|(?:[-*+]|\d{1,9}[.)])[ \t]+\[(?:[ xX]\]?)?)[ \t]*$/;
+/** The block marks ahead of a line's inline text. */
+const LINE_PREFIX =
+  /^([ \t]*(?:>[ \t]?)*(?:#{1,6}[ \t]+|(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?)(.*)$/;
+const TABLE_ROW = /^[ \t]*\|/;
+
+/**
+ * What a reply still streaming shows: `text` with its tail settled so that nothing shown is taken
+ * back as more arrives (see the module comment).
+ */
+function provisional(text: string) {
+  const lines = text.split("\n");
+  let last = lines.length - 1;
+  let fence = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const marks = /^[ \t]*(`{3,}|~{3,})/.exec(lines[i]);
+    if (!marks) continue;
+    if (fence < 0) fence = i;
+    else if (
+      /^[ \t]*(?:`{3,}|~{3,})[ \t]*$/.test(lines[i]) &&
+      marks[1][0] === lines[fence].trimStart()[0]
+    )
+      fence = -1;
+  }
+  if (fence >= 0) {
+    // the fence's line until its language is whole; a closing fence's first backticks
+    if (fence === last || /^[ \t]*(?:`+|~+)$/.test(lines[last])) lines.pop();
+    return lines.join("\n");
+  }
+  // a line just ended draws nothing yet; what it ended is still the tail
+  if (last > 0 && !lines[last]) {
+    lines.pop();
+    last -= 1;
+  }
+  const line = lines[last];
+  const above = lines[last - 1] ?? "";
+  if (MARKER_ONLY.test(line)) {
+    lines.pop();
+    last -= 1;
+  } else if (TABLE_ROW.test(line) && !above.includes("|")) {
+    // a header row waits for its delimiter row
+    lines.pop();
+    last -= 1;
+  } else if (
+    /^[ \t]*\|[ \t|:-]*$/.test(line) &&
+    TABLE_ROW.test(above) &&
+    !(lines[last - 2] ?? "").includes("|")
+  ) {
+    // a delimiter row on its way already makes the table, with the columns its header has
+    const typed = cells(line);
+    lines[last] = `|${cells(above)
+      .map((_, i) => (/^:?-+:?$/.test(typed[i] ?? "") ? typed[i] : "---"))
+      .join("|")}|`;
+    return lines.join("\n");
+  }
+  if (last >= 0 && !RULE.test(lines[last])) {
+    const [, prefix, body] = LINE_PREFIX.exec(lines[last])!;
+    lines[last] = prefix + closeInline(body);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Closes what a line's text leaves open at its end: a code span, a link (shown as its label until its
+ * URL is whole) and the marks still open, innermost first. A mark run at the very end, which could
+ * yet open, close or be text, is held back.
+ */
+function closeInline(text: string) {
+  let scan = openMarks(text);
+  if (!scan.code) {
+    // a link first, so the marks are read on the text that will show
+    const linked = closeLink(text);
+    if (linked !== text) {
+      text = linked;
+      scan = openMarks(text);
+    }
+  }
+  const [, core, space] = /^([\s\S]*?)(\s*)$/.exec(text.slice(0, scan.end))!;
+  return core + scan.code + scan.open.reverse().join("") + space;
+}
+
+/**
+ * A link still arriving: its URL closed with as many `)` as it leaves open, or, before its URL, its
+ * label without the brackets.
+ */
+function closeLink(text: string) {
+  const at = text.lastIndexOf("](");
+  if (at >= 0 && text.lastIndexOf("[", at) >= 0) {
+    let depth = 1;
+    for (let i = at + 2; i < text.length && depth > 0; i += 1) {
+      if (/\s/.test(text[i])) return text;
+      if (text[i] === "(") depth += 1;
+      else if (text[i] === ")") depth -= 1;
+    }
+    if (depth > 0) return text + ")".repeat(depth);
+  }
+  return text.replace(/\[([^\]]*)\]?$/, "$1");
+}
+
+/**
+ * Reads a line's inline text for what its end leaves open: the mark runs still open, in order, a code
+ * span's backticks, and where a run at the very end begins (`end`), which is held back.
+ */
+function openMarks(text: string) {
+  const open: string[] = [];
+  let end = text.length;
+  let code = "";
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    let run = 1;
+    while (text[i + run] === c) run += 1;
+    if (c === "`") {
+      const close = closingTicks(text, i, run);
+      if (close >= 0) {
+        i = close + run;
+        continue;
+      }
+      if (i + run === text.length) end = i;
+      else code = c.repeat(run);
+      break;
+    }
+    if (c !== "*" && c !== "_" && c !== "~") {
+      i += 1;
+      continue;
+    }
+    const before = text[i - 1];
+    if (open.at(-1)?.[0] === c && before && !/\s/.test(before)) {
+      let left = run;
+      while (left > 0 && open.at(-1)?.[0] === c && open.at(-1)!.length <= left)
+        left -= open.pop()!.length;
+      if (left < run) {
+        i += run;
+        continue;
+      }
+    }
+    const after = text[i + run];
+    if (after === undefined) {
+      end = i;
+      break;
+    }
+    if (
+      !/\s/.test(after) &&
+      !(c === "_" && /[\p{L}\p{N}]/u.test(before ?? "")) &&
+      (c !== "~" || run === 2)
+    )
+      open.push(c.repeat(run));
+    i += run;
+  }
+  return { open, end, code };
 }
 
 /** The Markdown last painted into `target`, as Copy and Reply take it. */
@@ -75,15 +302,22 @@ export function markdownSource(target: Element) {
   return painted.get(target as HTMLElement)?.source;
 }
 
-/** The element whose last line ends the painted text: where the caret or an 「已编辑」 note goes. */
-export function trailing(target: HTMLElement) {
+/**
+ * The element whose last line ends the painted text: where the caret or an 「已编辑」 note goes. `skip`
+ * (the caret itself) is passed over.
+ */
+export function trailing(target: HTMLElement, skip?: Node) {
+  const last = (node: Element) =>
+    node.lastElementChild === skip
+      ? node.lastElementChild?.previousElementSibling
+      : node.lastElementChild;
   let node = target;
   for (
-    let last = node.lastElementChild;
-    last && FLOWING.test(last.tagName);
-    last = node.lastElementChild
+    let next = last(node);
+    next && FLOWING.test(next.tagName);
+    next = last(node)
   )
-    node = last as HTMLElement;
+    node = next as HTMLElement;
   return node;
 }
 
@@ -312,6 +546,11 @@ function build(segment: Segment, options: MarkdownOptions): HTMLElement {
   switch (segment.kind) {
     case "code": {
       const { lang, body } = segment;
+      const pre = h(
+        "pre",
+        null,
+        h("code", null, (lang && highlight(body, lang)) || body),
+      );
       return h(
         "div",
         { class: "bc-md-code" },
@@ -319,13 +558,14 @@ function build(segment: Segment, options: MarkdownOptions): HTMLElement {
           "div",
           { class: "bc-md-code__head" },
           h("span", null, lang || "text"),
-          options.codeActions?.(body),
+          options.codeActions &&
+            h(
+              "span",
+              { "data-md-keep": true, style: "display:contents" },
+              options.codeActions(() => pre.textContent ?? ""),
+            ),
         ),
-        h(
-          "pre",
-          null,
-          h("code", null, (lang && highlight(body, lang)) || body),
-        ),
+        pre,
       );
     }
     case "heading":
@@ -397,6 +637,18 @@ function build(segment: Segment, options: MarkdownOptions): HTMLElement {
     case "paragraph":
       return h("p", null, inline(segment.text));
   }
+}
+
+/** Where the code span opened by `run` backticks at `start` closes: a run of exactly as many, or -1. */
+function closingTicks(text: string, start: number, run: number) {
+  const ticks = "`".repeat(run);
+  let close = text.indexOf(ticks, start + run);
+  while (close >= 0 && text[close + run] === "`") {
+    let next = close;
+    while (text[next] === "`") next += 1;
+    close = text.indexOf(ticks, next);
+  }
+  return close;
 }
 
 /** A link to `url` when it is one a reply may open, else just its label. */
@@ -498,15 +750,9 @@ function inline(text: string): Node[] {
     if (c === "`") {
       let run = 1;
       while (text[i + run] === "`") run += 1;
-      const ticks = "`".repeat(run);
-      let close = text.indexOf(ticks, i + run);
-      while (close >= 0 && text[close + run] === "`") {
-        let next = close;
-        while (text[next] === "`") next += 1;
-        close = text.indexOf(ticks, next);
-      }
+      const close = closingTicks(text, i, run);
       if (close < 0) {
-        plain += ticks;
+        plain += "`".repeat(run);
         i += run;
         continue;
       }

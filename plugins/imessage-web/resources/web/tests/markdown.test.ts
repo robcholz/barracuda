@@ -103,15 +103,170 @@ test("an unclosed mark stays literal; an unclosed fence runs to the end", () => 
   expect(code.querySelector(".bc-tok-k")!.textContent).toBe("fn");
 });
 
-test("painting again keeps the blocks whose source is unchanged", () => {
+test("painting again keeps unchanged blocks and patches the one that grew", () => {
   const root = paint("第一段\n\n第二");
   const first = root.firstElementChild;
-  const second = root.lastElementChild;
+  const second = root.lastElementChild!;
+  const text = second.firstChild!;
+  // a selection in the growing text survives the next paint
+  const range = document.createRange();
+  range.setStart(text, 0);
+  range.setEnd(text, 2);
   paint("第一段\n\n第二段", root);
   expect(root.firstElementChild).toBe(first);
-  expect(root.lastElementChild).not.toBe(second);
-  expect(root.lastElementChild!.textContent).toBe("第二段");
+  expect(root.lastElementChild).toBe(second);
+  expect(second.firstChild).toBe(text);
+  expect(text.textContent).toBe("第二段");
+  expect([range.startOffset, range.endOffset]).toEqual([0, 2]);
   expect(markdownSource(root)).toBe("第一段\n\n第二段");
+});
+
+/** A reply as a model streams it, touching every block and mark. */
+const SAMPLE = `## 让 LED 闪烁
+
+在 **ESP32** 上用 \`gpio\` 控制 LED，*每 500 ms* 切换一次，snake_case 不受影响。详见 [文档](https://example.com/docs)。
+
+\`\`\`rust
+async fn blink(mut led: Output<'static>) {
+    loop {
+        led.toggle(); // 翻转
+    }
+}
+\`\`\`
+
+1. 编译：\`cargo build --release\`
+2. 烧录
+   - 连接 **USB** 线
+   - [x] 选择端口
+
+> 注意：~~旧引脚~~ 以丝印为准。
+
+---
+
+| 引脚 | 功能 | 电压 |
+| --- | :-: | ---: |
+| GPIO2 | LED | 3.3 V |
+
+完成 2 * 3 = 6。`;
+
+/** Marks that nest, a link whose URL holds parentheses, fences inside a list, lists inside a quote. */
+const TRICKY = `**注意**：先读 *[链接](https://a.com/x_(y))* 再看 \`a*b\` 和 __粗__。
+
+- 项目 *一*
+  1. 子 \`code\`
+  2. 子二
+
+  \`\`\`python
+  def f(x): return x ** 2  # 平方
+  \`\`\`
+- 下一项 ~~删除~~
+
+### 小结 **重点**
+
+1) 第一
+2) 第二
+
+> - 引用里的列表
+> - 第二项 **粗体**
+
+价格 $5 * 2，结尾。`;
+
+/**
+ * Streams `source` a character at a time and checks that no paint takes back text an earlier one
+ * showed, and that a code block keeps its elements; returns the root and what it showed last.
+ */
+function stream(source: string) {
+  const root = document.createElement("div");
+  let shown = "";
+  let pre: Element | null = null;
+  let copy: Element | null = null;
+  for (let end = 1; end <= source.length; end += 1) {
+    renderMarkdown(root, source.slice(0, end), {
+      streaming: true,
+      codeActions: () => document.createElement("button"),
+    });
+    const text = (root.textContent ?? "").replace(/\s+/g, "");
+    if (!text.startsWith(shown))
+      throw new Error(
+        `after ${JSON.stringify(source.slice(end - 12, end))}: ${JSON.stringify(shown.slice(-12))} became ${JSON.stringify(text.slice(-12))}`,
+      );
+    shown = text;
+    const code: Element | null = root.querySelector("pre");
+    if (pre && code) expect(code).toBe(pre);
+    pre ??= code;
+    const button: Element | null = root.querySelector("button");
+    if (copy && button) expect(button).toBe(copy);
+    copy ??= button;
+  }
+  // the whole text painted as written draws what it showed
+  renderMarkdown(root, source);
+  expect((root.textContent ?? "").replace(/\s+/g, "")).toBe(shown);
+  return { root, shown };
+}
+
+test("streamed a character at a time, what is shown is never taken back", () => {
+  const { root, shown } = stream(SAMPLE);
+  // no raw mark or link syntax ever showed
+  expect(shown).not.toMatch(/\*\*|~~|\]\(|`|\[x\]/);
+  expect([...root.children].map((node) => node.tagName)).toEqual([
+    "H2",
+    "P",
+    "DIV",
+    "OL",
+    "BLOCKQUOTE",
+    "HR",
+    "DIV",
+    "P",
+  ]);
+  const tricky = stream(TRICKY).root;
+  expect(tricky.querySelector("em > a")!.getAttribute("href")).toBe(
+    "https://a.com/x_(y)",
+  );
+  expect(tricky.querySelector("li pre")!.textContent).toContain("x ** 2");
+  expect(tricky.querySelector("blockquote li strong")!.textContent).toBe(
+    "粗体",
+  );
+});
+
+test("a streaming tail is shown provisionally", () => {
+  const shown = (source: string) => {
+    const root = document.createElement("div");
+    renderMarkdown(root, source, { streaming: true });
+    return root;
+  };
+  expect(shown("先 **加").querySelector("strong")!.textContent).toBe("加");
+  expect(shown("先 *斜 **粗").innerHTML).toBe(
+    "<p>先 <em>斜 <strong>粗</strong></em></p>",
+  );
+  expect(shown("运行 `mak").querySelector("code")!.textContent).toBe("mak");
+  expect(shown("先 **").textContent).toBe("先");
+  expect(shown("见 [文档](https://exa").textContent).toBe("见 文档");
+  expect(shown("见 [文档](https://exa").querySelector("a")!.href).toBe(
+    "https://exa/",
+  );
+  expect(shown("见 [文").textContent).toBe("见 文");
+  // a line that is only a marker waits; so does a fence's line and a table's header
+  for (const tail of [
+    "#",
+    "- ",
+    "1",
+    "12.",
+    "``",
+    "> ",
+    "- [x",
+    "```ru",
+    "| a | b |",
+  ])
+    expect(shown(`段落\n\n${tail}`).textContent).toBe("段落");
+  // a delimiter row on its way makes the table
+  const table = shown("| a | b |\n| -");
+  expect(table.querySelectorAll("th")).toHaveLength(2);
+  // inside a fence, the closing backticks wait
+  expect(shown("```js\nx\n``").querySelector("code")!.textContent).toBe("x");
+  // as written, the same text is literal
+  const written = document.createElement("div");
+  renderMarkdown(written, "先 **加");
+  expect(written.textContent).toBe("先 **加");
 });
 
 test("the trailing element is the last line's block", () => {

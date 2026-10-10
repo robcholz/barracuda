@@ -877,7 +877,7 @@ export const mount = definePage((context: PortalContext) => {
   // ---- smooth streaming
   const flowing = new Set<Run>();
   /** A reply's code blocks carry their own Copy button. */
-  const markdown = { codeActions: (code: string) => copyButton(() => code) };
+  const markdown = { codeActions: copyButton, keep: caret };
   let frame = 0;
 
   /** Whether text should land at once: reduced motion, or a hidden tab whose frames pause. */
@@ -927,16 +927,33 @@ export const mount = definePage((context: PortalContext) => {
       return;
     }
     run.source = clip(run.source + text);
+    paint(run, true);
+  }
+
+  /** Paints a Markdown run: provisionally while it streams, as written once it is whole. */
+  function paint(run: Run, streaming: boolean) {
     const tail = run.node.contains(caret);
-    renderMarkdown(run.node, run.source, markdown);
-    if (tail) trailing(run.node).append(caret);
+    renderMarkdown(run.node, run.source, { ...markdown, streaming });
+    if (tail) placeCaret(run.node);
+  }
+
+  /** Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move restarts its blink). */
+  function placeCaret(node: HTMLElement) {
+    const end = trailing(node, caret);
+    if (end.lastChild !== caret) end.append(caret);
+  }
+
+  /** Lands a run's text in full; a Markdown run is painted as written, its provisional tail gone. */
+  function finish(run: Run) {
+    settle(run);
+    if (!run.text) paint(run, false);
   }
 
   /** Closes the message's open run: its text lands in full and its `done` runs. */
   function close(record: Agent) {
     const run = record.run;
     if (!run) return;
-    settle(run);
+    finish(run);
     record.run = null;
     run.done?.();
   }
@@ -971,7 +988,7 @@ export const mount = definePage((context: PortalContext) => {
     }
     const run = record.run!;
     flow(run, text);
-    if (stream === "output" && !record.ended) trailing(run.node).append(caret);
+    if (stream === "output" && !record.ended) placeCaret(run.node);
   }
 
   /** Adds a part to a message, above its footer. */
@@ -1426,7 +1443,7 @@ export const mount = definePage((context: PortalContext) => {
         write(known, "output", str(value.text) || " ");
         caret.remove();
         const run = known.run!;
-        settle(run);
+        finish(run);
         trailing(run.node).append(
           h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
         );

@@ -83,7 +83,13 @@ blinking caret, rendered as Markdown (`resources/web/markdown.ts`: headings,
 lists and task lists, quotes, rules, GFM tables, inline code, emphasis,
 strikethrough and links; it builds DOM nodes and never parses markup, so HTML
 in a reply stays text, and links open only `http(s):` and `mailto:` targets in
-a new tab). A fenced code block shows its language and its own Copy button and
+a new tab). It streams without flashing, as Vercel's Streamdown does: while a
+reply streams, its tail is shown provisionally (an open mark, code span or link
+is closed, a line that is only a block's marker or a table's header row waits
+for what follows), so text already shown is never taken back; and each paint
+patches the DOM in place, keeping the blocks that did not change and the
+elements and text nodes of the one that grew, so a selection, a hovered button
+and a code block's scroll survive. A fenced code block shows its language and its own Copy button and
 is coloured by `resources/web/highlight.ts`, a dependency-free scanner for Rust,
 C/C++, JavaScript/TypeScript, JSON, Python, shell, Go, Java/Kotlin/Swift/C#,
 TOML/YAML/INI, SQL, Lua and diffs; other languages stay plain. Copy and Reply
