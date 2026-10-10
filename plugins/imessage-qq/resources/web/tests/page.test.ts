@@ -18,7 +18,7 @@ afterEach(async () => {
 async function render(lang: "zh" | "en") {
   const page = await harness.render(mount, lang);
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-    ["GET", "/api/gateway/qq"],
+    ["GET", "/api/gateway/qq/status"],
   ]);
   harness.calls.length = 0;
   await settle();
@@ -90,7 +90,7 @@ test("validates, then posts App ID and App Secret and clears the secret", async 
   // the accepted save reads the channel again for its mode and accounts
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
     ["POST", "/api/gateway/qq"],
-    ["GET", "/api/gateway/qq"],
+    ["GET", "/api/gateway/qq/status"],
   ]);
   const [call] = harness.calls;
   expect([call.url, call.method]).toEqual(["/api/gateway/qq", "POST"]);
@@ -189,7 +189,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
 
 test("with every receive slot taken it says so and names the limit", async () => {
   harness.reply = async (call) => {
-    if (call.url === "/api/gateway/qq")
+    if (call.url === "/api/gateway/qq/status")
       return json(200, {
         configured: true,
         mode: "send_receive",

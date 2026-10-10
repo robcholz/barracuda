@@ -89,7 +89,7 @@ const T = {
 const SAMPLE_EMAIL = "you@example.com";
 const ENDPOINT = "/api/gateway/inkbox";
 
-/** `GET /api/gateway/inkbox`: `signup` is present when the stored configuration came from signup. */
+/** `GET /api/gateway/inkbox/status`: `signup` is present when the stored configuration came from signup. */
 interface InkboxState {
   signup?: {
     email_address?: string;
@@ -107,8 +107,8 @@ const show = (node: HTMLElement, visible: boolean) => (node.hidden = !visible);
  * The Inkbox page. 「用邮箱新建」 signs an agent up on the device (`POST /api/gateway/inkbox/signup`,
  * which already stores and registers the channel), then claims it with the emailed code
  * (`/verify`, `/resend`). 「已有 API Key」 posts an existing key to `POST /api/gateway/inkbox`.
- * On mount, `GET /api/gateway/inkbox` resumes a signup at its code or claimed step, or shows a
- * channel configured with a key. A signup error with `"retry": true` offers 「重试」: the device
+ * On mount, `GET /api/gateway/inkbox/status` resumes a signup at its code or claimed step, or
+ * shows a channel configured with a key. A signup error with `"retry": true` offers 「重试」: the device
  * kept the signup, so the same email resumes it without a second email.
  */
 export const mount = definePage((context) => {

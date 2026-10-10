@@ -71,8 +71,8 @@ export function titledLabel(entry: WebEntry, label: string, lang: Lang) {
 
 /**
  * A group's 「开始使用」 step is done when one of its entries is `ready`. The line names it: the
- * device step with its detail in mono (「已连接 `HomeNet`」), others by title and label. Entries
- * with a label are preferred, so the line names what the entry reports. Returns the words and the
+ * device step with its detail in mono (「已连接 `HomeNet`」) or, without one, its label, others by
+ * title and label. Entries with a label are preferred, so the line names what the entry reports. Returns the words and the
  * machine value, if any.
  */
 export function stepDone(
@@ -89,8 +89,11 @@ export function stepDone(
   const pick = ready.find((item) => item.status.label) ?? ready[0];
   if (!pick) return null;
   const { entry, status: found } = pick;
-  if (entry.group === "device" && found.detail)
-    return [STRINGS[lang].connectedTo, found.detail];
+  // a network the host manages has no name: just its label (「已连接」)
+  if (entry.group === "device")
+    return found.detail
+      ? [STRINGS[lang].connectedTo, found.detail]
+      : [found.label?.[lang] ?? ""];
   return [
     [entry.title[lang], found.label?.[lang], found.detail]
       .filter(Boolean)
@@ -140,21 +143,34 @@ export function paintStatus(root: ParentNode, view: OverviewView) {
     if (found) node.setAttribute("data-state", found.state);
     else node.removeAttribute("data-state");
   }
+  // the device's two k/v rows: 「状态」 with its label, then its title with its detail (the
+  // network name) in mono, or 「—」 when the device does not know it
   const device = deviceStatus(entries, status);
   for (const node of root.querySelectorAll<HTMLElement>(
     "[data-status-device]",
   )) {
-    const value =
-      device &&
-      (node.tagName === "DT"
-        ? device.entry.title[lang]
-        : (device.status.detail ?? device.status.label?.[lang]));
-    node.textContent = value || "";
-    node.style.display = value ? "" : "none";
-    // a detail (the network name) is a machine value; a label is words
+    node.style.display = device ? "" : "none";
+    if (!device) continue;
+    const state = node.dataset.statusDevice === "state";
+    const { label, detail } = device.status;
+    node.replaceChildren(
+      node.tagName === "DT"
+        ? state
+          ? STRINGS[lang].kvStatus
+          : device.entry.title[lang]
+        : state
+          ? h(
+              "span",
+              {
+                class: `bc-badge${device.status.state === "ready" ? " bc-badge--signal" : ""}`,
+              },
+              label?.[lang] ?? "—",
+            )
+          : (detail ?? "—"),
+    );
     node.classList.toggle(
       "bc-mono",
-      node.tagName === "DD" && !!device?.status.detail,
+      !state && node.tagName === "DD" && !!detail,
     );
   }
   for (const item of root.querySelectorAll<HTMLElement>("[data-step]")) {
@@ -364,8 +380,10 @@ export function renderOverview(view: OverviewView) {
         h(
           "dl",
           { class: "bc-kv portal-hero__kv" },
-          h("dt", { "data-status-device": "" }),
-          h("dd", { "data-status-device": "" }),
+          h("dt", { "data-status-device": "state" }),
+          h("dd", { "data-status-device": "state" }),
+          h("dt", { "data-status-device": "name" }),
+          h("dd", { "data-status-device": "name" }),
           h("dt", null, term(t.kvPages, t.pagesTip)),
           h("dd", { class: "bc-mono" }, String(entries.length)),
           h("dt", null, t.kvConn),

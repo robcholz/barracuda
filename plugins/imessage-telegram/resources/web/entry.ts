@@ -66,7 +66,7 @@ const ENDPOINT = "/api/gateway/telegram";
 
 /**
  * The Telegram page: the bot token, checked in the browser with Bot API `getMe` (Telegram allows any
- * origin), then saved with `POST /api/gateway/telegram`. `GET` on the same path says whether a
+ * origin), then saved with `POST /api/gateway/telegram`. `GET /status` below it says whether a
  * channel is configured; the page then shows it above the form that replaces it, with the channel's
  * mode and allowed accounts (`/mode`, `/owners`) before the 「高级」 fold.
  */

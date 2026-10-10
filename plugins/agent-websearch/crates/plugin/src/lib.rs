@@ -25,10 +25,12 @@ use barracuda_webserver_plugin::{
 };
 use http_client::ClientFactory;
 use search::{TavilyConfig, WebSearchTool};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// HTTP endpoint accepting Tavily credentials.
 pub const CONFIG_API_PATH: &str = "/api/tavily";
+/// HTTP endpoint reporting the active Tavily configuration without its key.
+pub const STATUS_API_PATH: &str = "/api/tavily/status";
 const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_API_BASE: &str = "https://api.tavily.com";
 const API_BASE_STORAGE_KEY: &str = "api_base";
@@ -98,6 +100,10 @@ impl Plugin for AgentWebsearchPlugin {
             .register_group(ToolGroup::new("websearch", false, [Tool::new(web_search)]))
             .map_err(PluginError::registration)?;
         let registration = webserver
+            .serve_http(STATUS_API_PATH, StatusEndpoint(Rc::clone(&config)))
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
+        let registration = webserver
             .serve_http(
                 CONFIG_API_PATH,
                 ConfigEndpoint {
@@ -130,32 +136,71 @@ fn default_api_base() -> String {
     DEFAULT_API_BASE.into()
 }
 
+/// `GET` [`STATUS_API_PATH`]: `{"configured":bool,"config"?:{"api_base":"…"}}`;
+/// `config` is present while configured. The API key is never reported.
+struct StatusEndpoint(Rc<SharedConfig>);
+
+#[derive(Serialize)]
+struct StatusBody<'a> {
+    configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config: Option<StatusConfig<'a>>,
+}
+
+#[derive(Serialize)]
+struct StatusConfig<'a> {
+    api_base: &'a str,
+}
+
+fn status_body(config: &SharedConfig) -> Vec<u8> {
+    let config = config.borrow();
+    let body = StatusBody {
+        configured: config.is_some(),
+        config: config.as_ref().map(|config| StatusConfig {
+            api_base: config
+                .search_url
+                .strip_suffix("/search")
+                .unwrap_or(&config.search_url),
+        }),
+    };
+    serde_json::to_vec(&body).unwrap_or_default()
+}
+
+impl HttpEndpoint for StatusEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if request.method() != HttpMethod::Get {
+                return response(405, br#"{"error":"method_not_allowed"}"#);
+            }
+            HttpResponse::new(200, JSON_CONTENT_TYPE, status_body(&self.0))
+        })
+    }
+}
+
 struct ConfigEndpoint<Storage> {
     config: Rc<RefCell<Option<Rc<TavilyConfig>>>>,
     storage: Storage,
 }
 
-impl<Storage> ConfigEndpoint<Storage> {
-    fn response(status: u16, body: &'static [u8]) -> HttpResponse {
-        HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
-    }
+fn response(status: u16, body: &'static [u8]) -> HttpResponse {
+    HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
 }
 
 impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+                return response(405, br#"{"error":"method_not_allowed"}"#);
             }
             let Ok(request) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
-                return Self::response(400, br#"{"error":"invalid_request"}"#);
+                return response(400, br#"{"error":"invalid_request"}"#);
             };
             if !valid_configuration(&request.api_key, &request.api_base) {
-                return Self::response(422, br#"{"error":"invalid_configuration"}"#);
+                return response(422, br#"{"error":"invalid_configuration"}"#);
             }
             if let Err(error) = persist_configuration(&self.storage, &request).await {
                 log::error!("failed to persist Tavily configuration: {error}");
-                return Self::response(500, br#"{"error":"storage"}"#);
+                return response(500, br#"{"error":"storage"}"#);
             }
             let search_url = search_url(&request.api_base);
             self.config.replace(Some(Rc::new(TavilyConfig {
@@ -163,7 +208,7 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                 search_url,
             })));
             log::info!("configured Tavily provider for web search");
-            Self::response(204, b"")
+            response(204, b"")
         })
     }
 }
@@ -283,6 +328,32 @@ mod tests {
             search_url: search_url(DEFAULT_API_BASE),
         })));
         assert_eq!(entry_status(&config), EntryStatus::configured(true));
+    }
+
+    #[test]
+    fn status_reports_the_api_base_without_the_key() {
+        let config = Rc::new(RefCell::new(None));
+        let endpoint = StatusEndpoint(Rc::clone(&config));
+        let get = || {
+            let response = embassy_futures::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())),
+            );
+            assert_eq!(response.status(), 200);
+            String::from_utf8(response.body().unwrap().to_vec()).unwrap()
+        };
+        assert_eq!(get(), r#"{"configured":false}"#);
+        config.replace(Some(Rc::new(TavilyConfig {
+            api_key: "secret".into(),
+            search_url: search_url("https://tavily.example/"),
+        })));
+        assert_eq!(
+            get(),
+            r#"{"configured":true,"config":{"api_base":"https://tavily.example"}}"#
+        );
+        let post = embassy_futures::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, Vec::new())),
+        );
+        assert_eq!(post.status(), 405);
     }
 
     #[test]

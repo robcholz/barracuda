@@ -18,7 +18,7 @@ afterEach(async () => {
 async function render(lang: "zh" | "en") {
   const page = await harness.render(mount, lang);
   expect(harness.calls.map((call) => [call.method, call.url])).toEqual([
-    ["GET", "/api/gateway/bluebubbles"],
+    ["GET", "/api/gateway/bluebubbles/status"],
   ]);
   harness.calls.length = 0;
   await settle();
@@ -237,7 +237,7 @@ test("a configured channel shows above the form; a save shows it and refreshes t
 
 test("a configured channel shows its mode and the code to send from iMessage", async () => {
   harness.reply = async (call) => {
-    if (call.url === "/api/gateway/bluebubbles")
+    if (call.url === "/api/gateway/bluebubbles/status")
       return json(200, {
         configured: true,
         mode: "send",

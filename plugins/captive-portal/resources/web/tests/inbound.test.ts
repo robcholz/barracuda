@@ -11,9 +11,10 @@ import {
 } from "../ui";
 
 const ENDPOINT = "/api/gateway/qq";
+const STATUS = `${ENDPOINT}/status`;
 
 let harness: ReturnType<typeof pageHarness>;
-/** What the device answers to `GET <endpoint>` and `GET <endpoint>/owners`. */
+/** What the device answers to `GET <endpoint>/status` and `GET <endpoint>/owners`. */
 let status: ChannelStatus | null;
 let owners: OwnersReply;
 /** Overrides the reply to a POST (default 204). */
@@ -37,7 +38,7 @@ beforeEach(() => {
   post = () => new Response(null, { status: 204 });
   harness.reply = async (call) => {
     if (call.method === "POST") return post(call);
-    if (call.url === ENDPOINT)
+    if (call.url === STATUS)
       return status ? json(200, status) : new Response(null, { status: 204 });
     if (call.url === `${ENDPOINT}/owners`) return json(200, owners);
     return new Response(null, { status: 404 });
@@ -150,7 +151,7 @@ const press = async (page: Page, label: string) => {
 
 test("a configured channel shows 模式 and 授权账号 before the fold, in the design's words", async () => {
   const page = await render("zh");
-  expect(requests()).toEqual([`GET ${ENDPOINT}`, `GET ${ENDPOINT}/owners`]);
+  expect(requests()).toEqual([`GET ${STATUS}`, `GET ${ENDPOINT}/owners`]);
   expect(rows(page)).toEqual(["Bot", "模式", "授权账号", "高级"]);
   const mode = modeRow(page);
   expect(mode.querySelector(".bc-row__label")?.textContent).toBe(
@@ -250,9 +251,9 @@ test("an unconfigured channel, or a reply without a mode, shows neither row", as
     "授权账号 (hidden)",
     "高级",
   ]);
-  expect(requests()).toEqual([`GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${STATUS}`]);
   await advance(10_000);
-  expect(requests()).toEqual([`GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${STATUS}`]);
 
   page.unmount();
   harness.calls.length = 0;
@@ -456,7 +457,7 @@ test("choosing a mode posts it at once, reads the channel again and refreshes th
   await pick(page, "send");
   expect(requests()).toEqual([
     `POST ${ENDPOINT}/mode {"mode":"send"}`,
-    `GET ${ENDPOINT}`,
+    `GET ${STATUS}`,
   ]);
   expect(page.refreshes.count).toBe(1);
   expect(page.toasts).toEqual([]);
@@ -480,7 +481,7 @@ test("a full receive pool (409 no_slot) still saves the mode and shows the limit
   await pick(page, "send_receive");
   expect(requests()).toEqual([
     `POST ${ENDPOINT}/mode {"mode":"send_receive"}`,
-    `GET ${ENDPOINT}`,
+    `GET ${STATUS}`,
   ]);
   expect(page.toasts).toEqual([]);
   expect(radio(page, "send_receive").checked).toBe(true);
@@ -524,7 +525,7 @@ test("while receiving, the channel is read every 5 s; the badge, the shell and t
     owners: { count: 1 },
   };
   await advance(1);
-  expect(requests()).toEqual([`GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${STATUS}`]);
   expect(stateLine(page).textContent).toBe("收发中");
   expect(page.refreshes.count).toBe(1);
 
@@ -537,7 +538,7 @@ test("while receiving, the channel is read every 5 s; the badge, the shell and t
   status = { ...status, owners: { count: 2 } };
   harness.calls.length = 0;
   await advance(5_000);
-  expect(requests()).toEqual([`GET ${ENDPOINT}`, `GET ${ENDPOINT}/owners`]);
+  expect(requests()).toEqual([`GET ${STATUS}`, `GET ${ENDPOINT}/owners`]);
   expect(accountsRow(page).querySelector(".bc-code-display")?.textContent).toBe(
     "730055",
   );
@@ -570,7 +571,7 @@ test("a missed read keeps the rows and asks again; leaving the page stops the re
   expect(rows(page)).toEqual(["Bot", "模式", "授权账号", "高级"]);
   harness.reply = before;
   await advance(5_000);
-  expect(requests()).toEqual([`GET ${ENDPOINT}`, `GET ${ENDPOINT}`]);
+  expect(requests()).toEqual([`GET ${STATUS}`, `GET ${STATUS}`]);
   page.unmount();
   harness.calls.length = 0;
   await advance(30_000);

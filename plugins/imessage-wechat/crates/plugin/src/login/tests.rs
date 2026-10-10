@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -10,7 +11,9 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
-use barracuda_imessage_gateway_channel::{channel_entry_status, ChannelMode, ReceiveState};
+use barracuda_imessage_gateway_channel::{
+    channel_entry_status, ChannelEndpoint, ChannelMode, ReceiveState,
+};
 use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, IMessageGateway, IMessageGatewayPlugin, MessageChannel, Operation,
     SendMessageRequest, SendReceipt,
@@ -35,6 +38,7 @@ use super::{LoginEndpoint, LoginRuntime, LoginTiming};
 use crate::receive::PollTiming;
 use crate::{
     decode_configuration, ChannelConfiguration, ConfigEndpoint, CONFIGURATION_STORAGE_KEY,
+    CONFIG_API_PATH,
 };
 
 const API_BASE: &str = "http://wechat.test";
@@ -53,6 +57,8 @@ type StatusReader = Box<dyn Fn() -> EntryStatus>;
 struct Parts {
     login: Rc<dyn HttpEndpoint>,
     config: Rc<dyn HttpEndpoint>,
+    /// Every route under the configuration path, `/status` among them.
+    routes: Rc<dyn HttpEndpoint>,
     runtime: LoginRuntime,
     gateway: Rc<IMessageGateway>,
     stored: StoredReader,
@@ -113,7 +119,14 @@ impl Plugin for Probe {
         });
         self.parts.replace(Some(Parts {
             login: Rc::new(login),
-            config: Rc::new(ConfigEndpoint { configuration }),
+            config: Rc::new(ConfigEndpoint {
+                configuration: Rc::clone(&configuration),
+            }),
+            routes: Rc::new(ChannelEndpoint::new(
+                Rc::clone(&configuration),
+                CONFIG_API_PATH,
+                ConfigEndpoint { configuration },
+            )),
             runtime,
             gateway,
             stored,
@@ -139,6 +152,7 @@ impl MessageChannel for OtherWechatChannel {
 struct Harness {
     login: Rc<dyn HttpEndpoint>,
     config: Rc<dyn HttpEndpoint>,
+    routes: Rc<dyn HttpEndpoint>,
     gateway: Rc<IMessageGateway>,
     stored: StoredReader,
     entry_status: StatusReader,
@@ -149,6 +163,18 @@ struct Harness {
 impl Harness {
     async fn call(&self, method: HttpMethod, body: &[u8]) -> (u16, Value) {
         call(self.login.as_ref(), method, body).await
+    }
+
+    /// `GET /api/gateway/wechat/status`.
+    async fn channel_status(&self) -> (u16, Value) {
+        let path = format!("{CONFIG_API_PATH}/status");
+        let response = self
+            .routes
+            .handle(HttpRequest::with_path(HttpMethod::Get, path, Vec::new()))
+            .await;
+        let body = serde_json::from_slice(response.body().expect("buffered response"))
+            .expect("JSON response");
+        (response.status(), body)
     }
 
     async fn status(&self) -> Value {
@@ -270,6 +296,7 @@ where
     let Parts {
         login,
         config,
+        routes,
         runtime,
         gateway,
         stored,
@@ -278,6 +305,7 @@ where
     let harness = Rc::new(Harness {
         login,
         config,
+        routes,
         gateway,
         stored,
         entry_status,
@@ -594,9 +622,12 @@ fn wrong_methods_return_405() {
 }
 
 #[test]
-fn config_get_reports_only_whether_a_channel_is_configured() {
+fn status_reports_only_whether_a_channel_is_configured() {
     scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
-        let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        // The configuration path takes changes only; its state is under `/status`.
+        let (code, _body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        assert_eq!(code, 405);
+        let (code, body) = harness.channel_status().await;
         assert_eq!(code, 200);
         assert_eq!(body["configured"], false);
         assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
@@ -609,7 +640,7 @@ fn config_get_reports_only_whether_a_channel_is_configured() {
         .await;
         assert_eq!(code, 204);
 
-        let (code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        let (code, body) = harness.channel_status().await;
         assert_eq!(code, 200);
         assert_eq!(body["configured"], true);
         assert_eq!(body["mode"], "send_receive");
@@ -631,7 +662,7 @@ fn config_rejected_by_the_gateway_is_registration_failed() {
         assert_eq!(code, 422);
         assert_eq!(body, json!({ "error": "registration_failed" }));
         assert!((harness.stored)().await.is_none());
-        let (_code, body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        let (_code, body) = harness.channel_status().await;
         assert_eq!(body["configured"], false);
         assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
     });

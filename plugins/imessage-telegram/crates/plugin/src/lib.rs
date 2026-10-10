@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_channel::{
-    entry_status, status_response, ChannelEndpoint, PairingEntropy, ReceiveRuntime, ReceiveTiming,
+    entry_status, ChannelEndpoint, PairingEntropy, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin::api::PluginContext;
@@ -191,7 +191,7 @@ const fn default_draft_min_delta_bytes() -> usize {
     24
 }
 
-/// `GET` reports the channel status; `POST` stores a configuration.
+/// `POST` stores a configuration; the channel status is under `/status`.
 struct ConfigEndpoint<Storage, C: 'static, D: 'static> {
     channel: Rc<TelegramChannel<Storage, C, D>>,
 }
@@ -210,7 +210,6 @@ where
         Box::pin(async move {
             match request.method() {
                 HttpMethod::Post => {}
-                HttpMethod::Get => return status_response(&*self.channel),
                 _ => return response(405, br#"{"error":"method_not_allowed"}"#),
             }
             let Ok(config) = serde_json::from_slice::<ConfigRequest>(request.body()) else {

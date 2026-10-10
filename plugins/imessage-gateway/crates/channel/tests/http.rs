@@ -395,9 +395,18 @@ impl Scenario for Routes {
                 harness.status(),
                 r#"{"configured":true,"mode":"disabled","owners":{"count":0}}"#
             );
+            assert_eq!(
+                call(HttpMethod::Get, "/api/gateway/probe/status", "").await,
+                (200, harness.status())
+            );
+            assert_eq!(
+                call(HttpMethod::Post, "/api/gateway/probe/status", "{}").await,
+                (405, r#"{"error":"method_not_allowed"}"#.into())
+            );
             for path in [
                 "/api/gateway/probe/",
                 "/api/gateway/probe/modes",
+                "/api/gateway/probe/status/x",
                 "/api/gateway/probe/owners/x",
                 "/api/gateway/other",
             ] {

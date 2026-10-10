@@ -54,9 +54,10 @@ after all Plugins have registered their Actions. Bundled definitions remain in
 takes precedence. A missing or invalid resource, or a rejected definition, is
 logged and stops the Agent task before it begins driving sessions.
 
-The shared `WebServer` capability continues to own `POST /api/model-api`.
-The retained route registration is released automatically when the Agent Plugin
-unloads. Accepted model configurations are atomically persisted before they
+The shared `WebServer` capability continues to own `POST /api/model-api` and
+`GET /api/model-api/status` (see `http.md`); both read the same in-memory
+configuration. The retained route registrations are released automatically
+when the Agent Plugin unloads. Accepted model configurations are atomically persisted before they
 become active. Registration restores the complete model, purpose-binding, and
 default-model snapshot before Agent work starts. Missing storage yields an empty
 configuration; malformed stored data fails Plugin registration.
@@ -98,7 +99,9 @@ portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
 
 The page submits the existing POST configuration contract and, once the device
 accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and
-navigation follow. It does not read current settings or claim that acceptance
+navigation follow. Its header shows the 状态 badge and, for each purpose, the
+model it uses (its own, or the default), read from `GET /api/model-api/status`
+on mount and after each accepted save. It does not claim that acceptance
 verifies the upstream service. Secrets
 are password inputs, never persisted in browser storage, and cleared on success
 or unmount. Requests are cancelled on unmount and are never retried automatically.
