@@ -6,8 +6,9 @@ use core::{
 };
 
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::{BackgroundToolEvent, BackgroundToolPool, BackgroundToolUpdate};
+use barracuda_agent_tool::{BackgroundToolCall, BackgroundToolPool, ToolOutput};
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::background::{BackgroundEvent, BackgroundUpdate};
 use barracuda_runtime_utils::local_channel::{Receiver, TryRecvError};
 use futures_lite::{future, StreamExt as _};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -29,23 +30,24 @@ use barracuda_runtime_utils::yield_stream::yield_stream;
 struct BackgroundNotification {
     id: u32,
     call: ToolCall,
-    update: BackgroundToolUpdate,
+    update: BackgroundUpdate<ToolOutput>,
 }
 
 impl BackgroundNotification {
     fn is_completion(&self) -> bool {
-        matches!(self.update, BackgroundToolUpdate::Completed(_))
+        matches!(self.update, BackgroundUpdate::Completed(_))
     }
 }
 
-impl From<BackgroundToolEvent> for BackgroundNotification {
-    fn from(event: BackgroundToolEvent) -> Self {
+impl From<BackgroundEvent<BackgroundToolCall, ToolOutput>> for BackgroundNotification {
+    fn from(event: BackgroundEvent<BackgroundToolCall, ToolOutput>) -> Self {
+        let invocation = event.meta.invocation();
         Self {
             id: event.id,
             call: ToolCall {
-                id: event.invocation.id().unwrap_or_default().to_owned(),
-                name: event.invocation.name().to_owned(),
-                arguments_json: event.invocation.arguments_json().to_owned(),
+                id: invocation.id().unwrap_or_default().to_owned(),
+                name: invocation.name().to_owned(),
+                arguments_json: invocation.arguments_json().to_owned(),
             },
             update: event.update,
         }
@@ -431,9 +433,9 @@ fn render_notifications(notifications: &[BackgroundNotification]) -> String {
     let mut message = String::from("[background:updates]");
     for notification in notifications {
         let (status, label, output) = match &notification.update {
-            BackgroundToolUpdate::Progress(output) => ("progress", "update", output),
-            BackgroundToolUpdate::Completed(output) if output.ok => ("completed", "result", output),
-            BackgroundToolUpdate::Completed(output) => ("failed", "error", output),
+            BackgroundUpdate::Progress(output) => ("progress", "update", output),
+            BackgroundUpdate::Completed(output) if output.ok => ("completed", "result", output),
+            BackgroundUpdate::Completed(output) => ("failed", "error", output),
         };
         let _ = write!(
             message,
@@ -448,12 +450,13 @@ fn render_notifications(notifications: &[BackgroundNotification]) -> String {
 mod tests {
     use alloc::{collections::VecDeque, string::ToString, vec};
 
-    use barracuda_agent_tool::{BackgroundToolUpdate, ToolOutput};
+    use barracuda_agent_tool::ToolOutput;
     use barracuda_model_api::ToolCall;
+    use barracuda_runtime_utils::background::BackgroundUpdate;
 
     use super::{background_turn, render_notifications, BackgroundNotification};
 
-    fn notification(update: BackgroundToolUpdate) -> BackgroundNotification {
+    fn notification(update: BackgroundUpdate<ToolOutput>) -> BackgroundNotification {
         BackgroundNotification {
             id: 7,
             call: ToolCall {
@@ -468,7 +471,7 @@ mod tests {
     #[test]
     fn progress_is_rendered_as_non_terminal_update() {
         let rendered =
-            render_notifications(&[notification(BackgroundToolUpdate::Progress(ToolOutput {
+            render_notifications(&[notification(BackgroundUpdate::Progress(ToolOutput {
                 content: "input_required".to_string(),
                 ok: true,
             }))]);
@@ -481,11 +484,11 @@ mod tests {
     #[test]
     fn background_turn_tracks_only_terminal_updates_as_applied_completions() {
         let mut notifications = VecDeque::from(vec![
-            notification(BackgroundToolUpdate::Progress(ToolOutput {
+            notification(BackgroundUpdate::Progress(ToolOutput {
                 content: "working".to_string(),
                 ok: true,
             })),
-            notification(BackgroundToolUpdate::Completed(ToolOutput {
+            notification(BackgroundUpdate::Completed(ToolOutput {
                 content: "done".to_string(),
                 ok: true,
             })),

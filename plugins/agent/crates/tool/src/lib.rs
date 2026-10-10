@@ -19,9 +19,8 @@ mod set;
 mod validate;
 
 pub use background::{
-    BackgroundTool, BackgroundToolControl, BackgroundToolEvent, BackgroundToolFuture,
-    BackgroundToolInfo, BackgroundToolPool, BackgroundToolUpdate, BackgroundToolWait,
-    ToolCompletionFuture, ToolProgressSender,
+    BackgroundTool, BackgroundToolCall, BackgroundToolControl, BackgroundToolFuture,
+    BackgroundToolPool, ToolCompletionFuture, ToolProgressSender,
 };
 pub use barracuda_agent_permission::{Action, Resource, RiskClass};
 pub use definition::{

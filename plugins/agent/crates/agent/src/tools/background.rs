@@ -1,7 +1,9 @@
-//! The `background` group: model-facing control over the Agent's
-//! [`BackgroundToolPool`].
+//! The `background` group: model-facing control over the calls in the Agent's
+//! [`BackgroundToolPool`]. The pool addresses calls by id; each call's
+//! [`BackgroundToolCall`](barracuda_agent_tool::BackgroundToolCall) supplies
+//! the Tool-level status, input, and cancel behavior.
 
-use alloc::{boxed::Box, string::String, string::ToString};
+use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
@@ -65,8 +67,20 @@ impl ToolHandler for BackgroundListTool {
 
     fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
+            let calls = self
+                .pool
+                .list()
+                .into_iter()
+                .map(|(id, call)| {
+                    serde_json::json!({
+                        "id": id,
+                        "tool": call.invocation().name(),
+                        "status": call.status(),
+                    })
+                })
+                .collect::<Vec<_>>();
             Ok(ToolOutput {
-                content: serde_json::json!({ "calls": self.pool.list() }).to_string(),
+                content: serde_json::json!({ "calls": calls }).to_string(),
                 ok: true,
             })
         })
@@ -91,7 +105,7 @@ impl ToolHandler for BackgroundWaitTool {
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let wait = self.pool.wait(args.id)?;
-            future::or(wait, async {
+            future::or(async { Ok(wait.await?.1) }, async {
                 Timer::after_millis(u64::from(args.timeout_ms)).await;
                 Ok(ToolOutput {
                     content: format!(
@@ -123,7 +137,7 @@ impl ToolHandler for BackgroundInputTool {
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         // The schema admits exactly one of `input` or `eof: true`.
-        Box::pin(async move { self.pool.input(args.id, args.input).await })
+        Box::pin(async move { self.pool.get(args.id)?.input(args.input).await })
     }
 }
 
@@ -144,7 +158,7 @@ impl ToolHandler for BackgroundCancelTool {
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            self.pool.cancel(args.id)?;
+            self.pool.remove(args.id)?.cancel();
             Ok(ToolOutput {
                 content: format!("Background call {} cancelled.", args.id),
                 ok: true,

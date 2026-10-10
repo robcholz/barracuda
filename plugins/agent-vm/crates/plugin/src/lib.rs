@@ -177,9 +177,9 @@ mod tests {
     };
 
     use barracuda_agent_tool::{
-        BackgroundToolEvent, BackgroundToolPool, BackgroundToolUpdate, ToolInvocation, ToolRunner,
-        ToolSet,
+        BackgroundToolCall, BackgroundToolPool, ToolInvocation, ToolOutput, ToolRunner, ToolSet,
     };
+    use barracuda_runtime_utils::background::{BackgroundEvent, BackgroundUpdate};
     use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmRunRequest};
     use embassy_executor::{Executor, Spawner};
     use embassy_time::Timer;
@@ -188,7 +188,9 @@ mod tests {
 
     use super::vm_tool_group;
 
-    async fn next_update(pool: &BackgroundToolPool) -> BackgroundToolEvent {
+    async fn next_update(
+        pool: &BackgroundToolPool,
+    ) -> BackgroundEvent<BackgroundToolCall, ToolOutput> {
         poll_fn(|context| pool.poll_next(context)).await
     }
 
@@ -249,7 +251,7 @@ mod tests {
             let accepted_run = json(run_json)?;
 
             let progress = next_update(&pool).await;
-            let BackgroundToolUpdate::Progress(progress) = progress.update else {
+            let BackgroundUpdate::Progress(progress) = progress.update else {
                 return Err(format!("expected progress update, got: {progress:?}"));
             };
             let progress = json(&progress.content)?;
@@ -259,15 +261,19 @@ mod tests {
                 return Err(format!("invalid progress update: {progress}"));
             }
 
-            let listed = pool.list();
-            if listed.len() != 1
-                || listed.first().map(|call| call.status.as_str()) != Some("input_required")
-            {
+            let listed = pool
+                .list()
+                .into_iter()
+                .map(|(id, call)| (id, call.status()))
+                .collect::<alloc::vec::Vec<_>>();
+            if listed != [(1, String::from("input_required"))] {
                 return Err(format!("invalid pool listing: {listed:?}"));
             }
 
             let fed = pool
-                .input(1, Some("result".into()))
+                .get(1)
+                .map_err(|error| error.to_string())?
+                .input(Some("result".into()))
                 .await
                 .map_err(|error| error.to_string())?;
             if !fed.ok {
@@ -275,7 +281,7 @@ mod tests {
             }
 
             let completion = next_update(&pool).await;
-            let BackgroundToolUpdate::Completed(completion) = completion.update else {
+            let BackgroundUpdate::Completed(completion) = completion.update else {
                 return Err(format!("expected completion update, got: {completion:?}"));
             };
             let completion = json(&completion.content)?;
@@ -297,11 +303,13 @@ mod tests {
                 return Err(format!("second vm_run was not accepted: {accepted:?}"));
             }
             let update = next_update(&pool).await;
-            if update.id != 2 || !matches!(update.update, BackgroundToolUpdate::Progress(_)) {
+            if update.id != 2 || !matches!(update.update, BackgroundUpdate::Progress(_)) {
                 return Err(format!("expected progress update, got: {update:?}"));
             }
 
-            pool.cancel(2).map_err(|error| error.to_string())?;
+            pool.remove(2)
+                .map(BackgroundToolCall::cancel)
+                .map_err(|error| error.to_string())?;
             for _attempt in 0..50 {
                 if vm.list().runs.is_empty() {
                     return Ok(());

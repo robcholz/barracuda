@@ -42,13 +42,20 @@ settles inside the model turn, or a background Tool (`Tool::background` with a
 running. Being a background Tool is part of the Tool's definition, not a choice
 made per call.
 
-Every Agent owns one `BackgroundToolPool`. An accepted background call moves
-into that pool under a pool-assigned `id`, and its accepted output becomes
-`[background:accepted]` with that `id`. The pool delivers the call's progress
-and terminal result to the Agent automatically as `[background:progress]`,
-`[background:completed]`, or `[background:failed]` updates; an idle Agent opens
-a new turn for them. The always-visible `background` Tool group manipulates the
-pool by `id`:
+Every Agent owns one `BackgroundToolPool`. The pool is a lower layer than
+Tools: it is the generic `barracuda_runtime_utils::background::BackgroundPool`,
+which stores tasks under pool-assigned ids beside metadata it never inspects,
+delivers their progress and completion, and lets holders wait for or remove a
+task by id. The Tool layer instantiates it with `BackgroundToolCall` metadata
+(the invocation, the Tool's control hooks, and the `toolcall` span) and owns
+every Tool-level behavior.
+
+The runner moves an accepted background call into the pool, and its accepted
+output becomes `[background:accepted]` with the pool `id`. The Agent drives the
+pool and delivers the call's progress and terminal result automatically as
+`[background:progress]`, `[background:completed]`, or `[background:failed]`
+updates; an idle Agent opens a new turn for them. The always-visible
+`background` Tool group manipulates the pool by `id`:
 
 - `background_list` snapshots every running call with its Tool and status;
 - `background_wait` blocks until one call finishes and returns its result,

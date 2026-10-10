@@ -383,11 +383,12 @@ mod tool_registry_capability_tests {
     use barracuda_agent_persistence::Persistence;
     use barracuda_agent_tool::ToolSetSource;
     use barracuda_agent_tool::{
-        BackgroundTool, BackgroundToolFuture, BackgroundToolHandler, BackgroundToolPool,
-        BackgroundToolUpdate, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput,
-        ToolRegistry, ToolRunner, ToolSpec,
+        BackgroundTool, BackgroundToolFuture, BackgroundToolHandler, BackgroundToolPool, EmptyArgs,
+        Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner,
+        ToolSpec,
     };
     use barracuda_platform_test::memory_vfs;
+    use barracuda_runtime_utils::background::BackgroundUpdate;
     use futures_lite::{future::block_on, StreamExt as _};
     use portable_atomic_util::Arc;
 
@@ -513,7 +514,7 @@ mod tool_registry_capability_tests {
             let event = futures_lite::future::poll_fn(|context| pool.poll_next(context)).await;
             assert_eq!(
                 event.update,
-                BackgroundToolUpdate::Completed(ToolOutput {
+                BackgroundUpdate::Completed(ToolOutput {
                     content: "completed".into(),
                     ok: true,
                 })

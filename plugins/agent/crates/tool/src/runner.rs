@@ -13,7 +13,8 @@ use portable_atomic::{AtomicU32, Ordering};
 use tracing::Instrument as _;
 
 use super::{
-    BackgroundToolPool, Tool, ToolError, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle,
+    background, BackgroundToolPool, Tool, ToolError, ToolInvocation, ToolOutput, ToolResult,
+    ToolSetHandle,
 };
 
 type ToolRunFuture = Pin<Box<dyn Future<Output = (ToolInvocation, ToolOutput)> + 'static>>;
@@ -127,7 +128,9 @@ fn start_background(
                 .into()),
             };
             let output = match started {
-                Ok((pool, background)) => pool.insert(invocation.clone(), background, call_span),
+                Ok((pool, background)) => {
+                    background::start(&pool, invocation.clone(), background, call_span)
+                }
                 Err(error) => {
                     let output = settle(Err(error));
                     trace_result(&output, false);
@@ -179,13 +182,15 @@ pub(crate) fn settle(output: ToolResult<ToolOutput>) -> ToolOutput {
 #[allow(clippy::expect_used)]
 mod tests {
     use alloc::vec;
+    use barracuda_runtime_utils::background::{BackgroundError, BackgroundUpdate};
     use futures_lite::future::{block_on, poll_fn};
     use futures_lite::StreamExt as _;
 
     use super::*;
     use crate::{
-        BackgroundTool, BackgroundToolControl, BackgroundToolFuture, BackgroundToolHandler,
-        BackgroundToolUpdate, EmptyArgs, ToolFuture, ToolGroup, ToolHandler, ToolSet, ToolSpec,
+        BackgroundTool, BackgroundToolCall, BackgroundToolControl, BackgroundToolFuture,
+        BackgroundToolHandler, EmptyArgs, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
+        ToolSet, ToolSpec,
     };
 
     macro_rules! object_spec {
@@ -330,18 +335,18 @@ mod tests {
             .iter()
             .any(|(call, output)| call.id() == Some("call-2")
                 && output.content == "[background:accepted]\nid: 1\naccepted"));
-        assert_eq!(pool.list().len(), 1);
 
         let progress = block_on(poll_fn(|context| pool.poll_next(context)));
         assert_eq!(progress.id, 1);
+        assert_eq!(progress.meta.invocation().id(), Some("call-2"));
         assert_eq!(
             progress.update,
-            BackgroundToolUpdate::Progress(output("input-required"))
+            BackgroundUpdate::Progress(output("input-required"))
         );
         let completed = block_on(poll_fn(|context| pool.poll_next(context)));
         assert_eq!(
             completed.update,
-            BackgroundToolUpdate::Completed(output("completed"))
+            BackgroundUpdate::Completed(output("completed"))
         );
         assert!(pool.is_empty());
     }
@@ -356,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_lists_feeds_and_cancels_calls_by_id() {
+    fn pooled_calls_report_status_take_input_and_cancel() {
         let mut tools = tool_set();
         let tools = tools.begin().expect("tool set begins");
         let pool = BackgroundToolPool::new();
@@ -367,67 +372,36 @@ mod tests {
         let _ = block_on(join.collect::<Vec<_>>());
 
         let listed = pool.list();
-        assert_eq!(listed.len(), 2);
-        assert!(listed
-            .iter()
-            .any(|info| info.tool == "endless" && info.status == "input_required"));
-        assert!(listed
-            .iter()
-            .any(|info| info.tool == "progressing" && info.status == "running"));
-        let endless = listed
-            .iter()
-            .find(|info| info.tool == "endless")
-            .map_or(0, |info| info.id);
-        let progressing = listed
-            .iter()
-            .find(|info| info.tool == "progressing")
-            .map_or(0, |info| info.id);
+        let status = |name: &str| {
+            listed
+                .iter()
+                .find(|(_, call)| call.invocation().name() == name)
+                .map(|(id, call)| (*id, call.status()))
+                .expect("call is pooled")
+        };
+        let (endless, endless_status) = status("endless");
+        let (progressing, progressing_status) = status("progressing");
+        assert_eq!(endless_status, "input_required");
+        assert_eq!(progressing_status, "running");
 
-        let fed = block_on(pool.input(endless, Some("hello".to_owned())));
+        let call = pool.get(endless).expect("endless call is pooled");
+        let fed = block_on(call.input(Some("hello".to_owned())));
         assert!(matches!(fed, Ok(output) if output.content == "hello"));
-        assert!(block_on(pool.input(progressing, None)).is_err());
+        let call = pool.get(progressing).expect("progressing call is pooled");
+        assert!(block_on(call.input(None)).is_err());
 
-        assert!(pool.cancel(endless).is_ok());
-        assert!(pool.cancel(endless).is_err());
-        assert_eq!(pool.list().len(), 1);
-    }
-
-    #[test]
-    fn waited_result_is_not_delivered_again() {
-        let mut tools = tool_set();
-        let tools = tools.begin().expect("tool set begins");
-        let pool = BackgroundToolPool::new();
-        let join = ToolRunner::new(&tools)
-            .with_background(&pool)
-            .run(vec![call("call-1", "progressing")]);
-        let _ = block_on(join.collect::<Vec<_>>());
-
-        let wait = pool.wait(1).expect("call 1 is running");
-        assert!(pool.wait(1).is_err());
-        let waited = block_on(wait);
-        assert!(matches!(waited, Ok(output) if output.content == "completed"));
-        assert!(pool.is_empty());
-        assert!(pool.wait(1).is_err());
-    }
-
-    #[test]
-    fn dropped_wait_returns_the_result_to_automatic_delivery() {
-        let mut tools = tool_set();
-        let tools = tools.begin().expect("tool set begins");
-        let pool = BackgroundToolPool::new();
-        let join = ToolRunner::new(&tools)
-            .with_background(&pool)
-            .run(vec![call("call-1", "progressing")]);
-        let _ = block_on(join.collect::<Vec<_>>());
-
-        drop(pool.wait(1));
-        let mut updates = Vec::new();
-        while !pool.is_empty() {
-            updates.push(block_on(poll_fn(|context| pool.poll_next(context))).update);
-        }
+        pool.remove(endless)
+            .map(BackgroundToolCall::cancel)
+            .expect("endless call cancels");
+        let missing = ToolInvokeError::from(pool.remove(endless).expect_err("call is gone"));
         assert_eq!(
-            updates.last(),
-            Some(&BackgroundToolUpdate::Completed(output("completed")))
+            missing.to_string(),
+            "tool invocation rejected: no running background call 1; finished results are delivered automatically"
         );
+        assert_eq!(
+            pool.remove(endless).err(),
+            Some(BackgroundError::NotFound(endless))
+        );
+        assert_eq!(pool.list().len(), 1);
     }
 }
