@@ -7,7 +7,9 @@ use portable_atomic::{AtomicUsize, Ordering};
 use portable_atomic_util::Arc;
 
 use crate::path::{backend_path, matches_mount, normalize};
-use crate::{DirEntry, File, FileType, FsError, Metadata, OpenOptions, ReadDir, SeekFrom, Vfs};
+use crate::{
+    DirEntry, File, FileType, FsError, Metadata, MountOptions, OpenOptions, ReadDir, SeekFrom, Vfs,
+};
 
 static TEMP_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
@@ -20,6 +22,9 @@ static TEMP_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 /// Every mount point is a directory of the view: it lists as empty until its
 /// source exists and cannot be written, removed, or renamed. The parents of
 /// mount points, such as `/` or `/workspace`, list the mount points below them.
+///
+/// A mount may be read-only in the view even when its source is writable:
+/// every operation that would change it fails with [`FsError::ReadOnly`].
 #[derive(Clone)]
 pub struct ScopedVfs {
     vfs: Vfs,
@@ -41,9 +46,24 @@ impl ScopedVfs {
         }
     }
 
-    /// The source path of a view path that is not itself a mount point.
+    /// The source path of a view path whose mount may be changed.
+    fn writable_path(&self, path: &str) -> Result<String, FsError> {
+        match self.locate(path)? {
+            Location::Mounted {
+                read_only: true, ..
+            } => Err(FsError::ReadOnly),
+            Location::Mounted { path, .. } => Ok(path),
+            Location::Above(_) => Err(FsError::NotMounted),
+        }
+    }
+
+    /// The source path of a view path that is not itself a mount point and
+    /// whose mount may be changed.
     fn entry_path(&self, path: &str, at_mount_point: FsError) -> Result<String, FsError> {
         match self.locate(path)? {
+            Location::Mounted {
+                read_only: true, ..
+            } => Err(FsError::ReadOnly),
             Location::Mounted { root: true, .. } => Err(at_mount_point),
             Location::Mounted { path, .. } => Ok(path),
             Location::Above(_) => Err(at_mount_point),
@@ -67,6 +87,7 @@ impl ScopedVfs {
         {
             return Ok(Location::Mounted {
                 root: path == mount.point,
+                read_only: mount.read_only,
                 path: backend_path(&path, &mount.point, &mount.source_root),
             });
         }
@@ -226,7 +247,7 @@ impl ScopedVfs {
     /// Returns metadata for one path.
     pub async fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
         match self.locate(path)? {
-            Location::Mounted { path, root } => match self.vfs.metadata(&path).await {
+            Location::Mounted { path, root, .. } => match self.vfs.metadata(&path).await {
                 Err(FsError::NotFound) if root => Ok(DIRECTORY),
                 result => result,
             },
@@ -237,7 +258,7 @@ impl ScopedVfs {
     /// Lists immediate directory children.
     pub async fn read_dir(&self, path: &str) -> Result<ReadDir, FsError> {
         match self.locate(path)? {
-            Location::Mounted { path, root } => match self.vfs.read_dir(&path).await {
+            Location::Mounted { path, root, .. } => match self.vfs.read_dir(&path).await {
                 Err(FsError::NotFound) if root => Ok(ReadDir::new(Vec::new())),
                 result => result,
             },
@@ -247,7 +268,7 @@ impl ScopedVfs {
 
     /// Creates a directory and missing ancestors.
     pub async fn create_dir_all(&self, path: &str) -> Result<(), FsError> {
-        self.vfs.create_dir_all(&self.path(path)?).await
+        self.vfs.create_dir_all(&self.writable_path(path)?).await
     }
 
     /// Removes one regular file.
@@ -275,7 +296,11 @@ const DIRECTORY: Metadata = Metadata::new(FileType::Directory, 0);
 /// Where a view path lands.
 enum Location {
     /// Inside a mount; `root` marks the mount point itself.
-    Mounted { path: String, root: bool },
+    Mounted {
+        path: String,
+        root: bool,
+        read_only: bool,
+    },
     /// Above one or more mount points, outside every mount.
     Above(String),
 }
@@ -284,10 +309,19 @@ enum Location {
 pub(crate) struct ScopedMount {
     pub(crate) point: Cow<'static, str>,
     source_root: Cow<'static, str>,
+    read_only: bool,
 }
 
 impl ScopedMount {
-    pub(crate) const fn new(point: Cow<'static, str>, source_root: Cow<'static, str>) -> Self {
-        Self { point, source_root }
+    pub(crate) const fn new(
+        point: Cow<'static, str>,
+        source_root: Cow<'static, str>,
+        options: MountOptions,
+    ) -> Self {
+        Self {
+            point,
+            source_root,
+            read_only: options.is_read_only(),
+        }
     }
 }

@@ -11,8 +11,9 @@ task. Its constructor takes the common `PluginContext` and copies the public
 stack `10.42.0.2`, so its endpoint is `10.42.0.2:8787`.
 
 It provides the typed `WebServer` capability so dependent Plugins can register
-resource providers with `serve`, WebSocket routes with `serve_websocket`, and
-ordinary HTTP routes with `serve_http`. All return scoped registrations that dependent Plugins retain
+resource providers with `serve`, WebSocket routes with `serve_websocket`,
+ordinary HTTP routes with `serve_http`, and streaming request bodies with
+`serve_upload`. All return scoped registrations that dependent Plugins retain
 for their lifetime. Registration publishes the capability and installs every
 route before startup. The WebServer startup hook then obtains the System-owned
 Embassy spawner and starts the server task.
@@ -64,6 +65,15 @@ backpressure. Missing resources can return an ordinary 404 response.
 fallback. This resource entry accepts GET only (other methods receive 405),
 passes the encoded path by reference without its query, and does not collect
 the request body. The older `serve_http` interface remains buffered and owned.
+
+A request body larger than the 8 KiB HTTP buffer needs `serve_upload`, which
+registers a prefix route like `serve_http_prefix` and hands the endpoint an
+`HttpUpload`: the method, the encoded path without its query, the declared
+Content-Length, and the body as an `embedded_io_async::Read` (0.7) source
+read straight from the socket. The endpoint may stop reading at any point and
+answer; the server discards the unread remainder before writing the response,
+so the connection stays usable. Upload endpoints accept every method and
+choose their own status codes.
 
 `HttpRequest::path()` exposes the original encoded path without its query.
 The server does not decode paths or assign filesystem meaning to them. A

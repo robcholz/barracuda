@@ -650,6 +650,21 @@ Plugin Manager derives one `ScopedVfs` for each filesystem-enabled Plugin:
 | `/workspace/media` | `/media/workspace` | Shared, durable |
 | `/workspace/removable` | `/removable` | Shared, dynamically available |
 
+A Plugin that declares `PluginFilesystem::Inspect` receives the same view plus,
+read-only, every Plugin's private trees. They are for a Plugin that shows the
+device's files to its owner, and System decides which Plugins ship with it:
+
+| Plugin-visible path | Global source | Ownership |
+| --- | --- | --- |
+| `/plugins/data` | `/data/plugins` | Every Plugin's, read-only |
+| `/plugins/cache` | `/cache/plugins` | Every Plugin's, read-only |
+| `/plugins/media` | `/media/plugins` | Every Plugin's, read-only |
+| `/plugins/resources` | `/resources/plugins` | Every Plugin's, read-only |
+
+The view refuses every change below these mounts with `FsError::ReadOnly`, even
+though their sources are writable. Plugin settings and credentials live in
+Plugin Manager's KV storage, not in these trees, and stay out of every view.
+
 Every filesystem-enabled Plugin sees the same Workspace content at the same
 logical paths. Private paths remain isolated by Plugin identity. Shared state
 required for correctness retains an explicit owner and belongs in that

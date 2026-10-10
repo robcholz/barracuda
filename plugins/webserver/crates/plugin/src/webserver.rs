@@ -251,6 +251,57 @@ pub trait HttpEndpoint: 'static {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a>;
 }
 
+/// A request whose body is read as it arrives, handed to an [`HttpUploadEndpoint`].
+///
+/// It implements `embedded_io_async::Read` over exactly `content_length` bytes, read
+/// from the socket through the connection's own buffers: nothing is collected in memory.
+pub struct HttpUpload<'a> {
+    method: HttpMethod,
+    path: &'a str,
+    length: usize,
+    body: &'a mut dyn BodyReader,
+}
+
+impl HttpUpload<'_> {
+    /// Returns the request method.
+    #[must_use]
+    pub const fn method(&self) -> HttpMethod {
+        self.method
+    }
+
+    /// Returns the encoded path, without its query.
+    /// Consumers mapping URLs to resources must validate and decode that mapping themselves.
+    #[must_use]
+    pub const fn path(&self) -> &str {
+        self.path
+    }
+
+    /// Returns the body's declared length in bytes.
+    #[must_use]
+    pub const fn content_length(&self) -> usize {
+        self.length
+    }
+}
+
+impl picoserve::io::ErrorType for HttpUpload<'_> {
+    type Error = ErrorKind;
+}
+
+impl Read for HttpUpload<'_> {
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, ErrorKind> {
+        self.body.read(buffer).await
+    }
+}
+
+/// Portable behavior served at an HTTP subtree whose request bodies are streamed.
+///
+/// Use it for bodies larger than the connection's request buffer, such as uploads.
+/// Bytes of the body the endpoint leaves unread are discarded before the response.
+pub trait HttpUploadEndpoint: 'static {
+    /// Handles one request, reading its body as it arrives.
+    fn handle<'a>(&'a self, upload: HttpUpload<'a>) -> HttpFuture<'a>;
+}
+
 /// Resource provider receiving a borrowed encoded URL path (without its query).
 /// No request body is collected. Providers choose their own storage and path policy.
 /// The returned future must fit 256 machine words with machine-word alignment;
@@ -374,6 +425,7 @@ pub trait WebSocketEndpoint: 'static {
 enum Endpoint {
     WebSocket(Rc<dyn WebSocketEndpoint>),
     Http(Rc<dyn HttpEndpoint>),
+    Upload(Rc<dyn HttpUploadEndpoint>),
     Provider(Rc<dyn ErasedProvider<256>>),
 }
 
@@ -453,6 +505,31 @@ impl PathRouterService for EndpointRouter<'_> {
                     async move { upgrade.on_upgrade(callback) }
                 })
                 .call_method_handler(&(), (), request, response_writer)
+                .await
+            }
+            Endpoint::Upload(endpoint) => {
+                let method = HttpMethod::from_request(request.parts.method());
+                let response = {
+                    let mut reader = request.body_connection.body().reader();
+                    let length = reader.content_length();
+                    endpoint
+                        .handle(HttpUpload {
+                            method,
+                            path: path.encoded(),
+                            length,
+                            body: &mut reader,
+                        })
+                        .await
+                };
+                Response::new(
+                    StatusCode::new(response.status),
+                    HttpContent {
+                        content_type: response.content_type,
+                        body: response.body,
+                        stream_error: self.stream_error,
+                    },
+                )
+                .write_to(request.body_connection.finalize().await?, response_writer)
                 .await
             }
             Endpoint::Http(endpoint) => {
@@ -840,11 +917,33 @@ impl WebServer {
         self.register_http(path, true, endpoint)
     }
 
+    /// Registers an HTTP subtree whose request bodies are streamed to the endpoint
+    /// instead of collected. It routes like [`Self::serve_http_prefix`].
+    ///
+    /// # Errors
+    /// Rejects relative paths and duplicate prefixes.
+    pub fn serve_upload<E: HttpUploadEndpoint>(
+        &self,
+        path: &'static str,
+        endpoint: E,
+    ) -> Result<WebRouteRegistration, WebServerError> {
+        self.register_route(path, true, Endpoint::Upload(Rc::new(endpoint)))
+    }
+
     fn register_http<E: HttpEndpoint>(
         &self,
         path: &'static str,
         prefix: bool,
         endpoint: E,
+    ) -> Result<WebRouteRegistration, WebServerError> {
+        self.register_route(path, prefix, Endpoint::Http(Rc::new(endpoint)))
+    }
+
+    fn register_route(
+        &self,
+        path: &'static str,
+        prefix: bool,
+        endpoint: Endpoint,
     ) -> Result<WebRouteRegistration, WebServerError> {
         if !path.starts_with('/') {
             return Err(WebServerError::InvalidPath);
@@ -859,7 +958,7 @@ impl WebServer {
         endpoints.push(RegisteredEndpoint {
             path,
             prefix,
-            endpoint: Endpoint::Http(Rc::new(endpoint)),
+            endpoint,
         });
         Ok(WebRouteRegistration {
             endpoints: Rc::downgrade(&self.endpoints),

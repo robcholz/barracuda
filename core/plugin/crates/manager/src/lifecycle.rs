@@ -29,6 +29,12 @@ pub enum PluginFilesystem {
     None,
     /// The Plugin receives an isolated semantic filesystem namespace.
     Private,
+    /// The Plugin receives its isolated namespace and, read-only, every
+    /// Plugin's private trees: `/plugins/data`, `/plugins/cache`,
+    /// `/plugins/media` and `/plugins/resources`, each holding one directory
+    /// per Plugin identity. It is for a Plugin that shows files to the device's
+    /// owner; System decides which Plugins ship with it.
+    Inspect,
 }
 
 /// Machine-readable resources requested before Plugin registration.
@@ -781,12 +787,16 @@ where
 
         let filesystem = match plugin.requirements().filesystem() {
             PluginFilesystem::None => None,
-            PluginFilesystem::Private => {
+            requirement @ (PluginFilesystem::Private | PluginFilesystem::Inspect) => {
                 let root = self
                     .vfs_root
                     .as_ref()
                     .ok_or_else(|| PluginRegisterError::FilesystemUnavailable(id.clone()))?;
-                Some(crate::filesystem::scoped_filesystem(root, &id)?)
+                Some(crate::filesystem::scoped_filesystem(
+                    root,
+                    &id,
+                    requirement == PluginFilesystem::Inspect,
+                )?)
             }
         };
 

@@ -375,6 +375,7 @@ where
             barracuda_agent_websearch_plugin::AgentWebsearchPlugin::new(&mut plugin_context),
             barracuda_agent_workflow_plugin::AgentWorkflowPlugin::new(&mut plugin_context),
             barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&mut plugin_context),
+            barracuda_files_plugin::FilesPlugin::new(&mut plugin_context),
             barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&mut plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&mut plugin_context),
