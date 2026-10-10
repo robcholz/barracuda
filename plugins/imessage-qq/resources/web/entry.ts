@@ -38,8 +38,8 @@ const ENDPOINT = "/api/gateway/qq";
 /**
  * The QQ page: App ID and App Secret, posted to `POST /api/gateway/qq`. The device fetches one access
  * token before it stores anything; QQ's own rejection (422 `verification_failed`) is shown on the
- * secret field. `GET` on the same path says whether a channel is configured, and its mode and allowed
- * accounts (`/mode`, `/owners`) show while it is.
+ * secret field. `GET /status` below it says whether a channel is configured, and its mode and
+ * allowed accounts (`/mode`, `/owners`) show while it is.
  */
 export const mount = definePage((context) => {
   const { lang } = context;

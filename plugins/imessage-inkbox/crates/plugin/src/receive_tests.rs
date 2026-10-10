@@ -17,7 +17,7 @@ use alloc::vec;
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use barracuda_imessage_gateway_channel::{
-    ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
+    status_response, ModeEndpoint, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
 };
 use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
 use barracuda_platform::{Entropy, EntropyUnavailable};
@@ -215,11 +215,7 @@ impl<Storage: PluginStorage> Harness<Storage> {
     }
 
     fn status(&self) -> Value {
-        let endpoint = InkboxEndpoint {
-            state: Rc::clone(&self.state),
-            route: Route::Config,
-        };
-        let response = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+        let response = status_response(&*self.state);
         serde_json::from_slice(response.body().expect("buffered")).expect("JSON")
     }
 

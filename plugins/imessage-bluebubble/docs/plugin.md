@@ -171,7 +171,7 @@ server version, macOS version and Private API state are shown, and the Private
 API switch is set to the server's value; the server's refusal is shown on the
 URL field. When the browser cannot reach the server (no route or CORS) the page
 notes that the connection is untested; testing never gates saving.
-On mount it reads `GET /api/gateway/bluebubbles` (the shared channel status);
+On mount it reads `GET /api/gateway/bluebubbles/status` (the shared channel status);
 a configured channel shows as a 「通道」 row with the 已配置 card above the form
 that replaces it, and the shared mode and allowed-accounts controls
 (`channelInbound`) use `/mode` and `/owners`. The row also appears after a save

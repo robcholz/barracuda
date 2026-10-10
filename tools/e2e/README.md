@@ -100,7 +100,7 @@ kinds = ["tool"]           # message roles that must appear in the turn
 
 [[http]]                   # direct WebServer request after startup
 method = "GET"
-path = "/api/wifi"
+path = "/api/wifi/status"
 status = 200
 body_contains = ['"station"']
 

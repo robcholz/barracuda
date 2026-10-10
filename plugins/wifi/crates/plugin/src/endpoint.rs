@@ -9,6 +9,7 @@ use crate::{WifiControl, WifiControlErrorKind};
 
 pub(crate) const WIFI_API_PATH: &str = "/api/wifi";
 pub(crate) const WIFI_SCAN_API_PATH: &str = "/api/wifi/scan";
+pub(crate) const WIFI_STATUS_API_PATH: &str = "/api/wifi/status";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 #[derive(Deserialize)]
@@ -46,9 +47,6 @@ impl HttpEndpoint for WifiEndpoint {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
-                HttpMethod::Get => {
-                    Self::json_response(200, &StatusResponse::from(self.control.status()))
-                }
                 HttpMethod::Put => {
                     if !self.control.capabilities().station_configuration {
                         return Self::static_response(409, br#"{"error":"platform_managed"}"#);
@@ -98,6 +96,28 @@ impl HttpEndpoint for WifiEndpoint {
                 }
                 _ => Self::static_response(405, br#"{"error":"method_not_allowed"}"#),
             }
+        })
+    }
+}
+
+/// `GET` [`WIFI_STATUS_API_PATH`]: the capabilities, station, and access point.
+pub(crate) struct StatusEndpoint {
+    control: Rc<WifiControl>,
+}
+
+impl StatusEndpoint {
+    pub(crate) const fn new(control: Rc<WifiControl>) -> Self {
+        Self { control }
+    }
+}
+
+impl HttpEndpoint for StatusEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if request.method() != HttpMethod::Get {
+                return WifiEndpoint::static_response(405, br#"{"error":"method_not_allowed"}"#);
+            }
+            WifiEndpoint::json_response(200, &StatusResponse::from(self.control.status()))
         })
     }
 }

@@ -25,7 +25,7 @@ export type ReceiveState =
   "idle" | "starting" | "receiving" | "no_slot" | "error";
 
 /**
- * `GET <channel endpoint>`: `receive` only in `send_receive`, `message` only with `error`, `capacity`
+ * `GET <channel endpoint>/status`: `receive` only in `send_receive`, `message` only with `error`, `capacity`
  * only with `no_slot`, `slots` (the device's receive slots held now, across every channel) whenever
  * the channel draws from that bounded pool (a webhook channel holds none).
  */
@@ -459,7 +459,7 @@ export interface ChannelInbound {
   attach(form: Pick<SettingsForm, "element" | "footer">): void;
   /** Shows a channel state the page read itself (the mount's `readChannel`). */
   apply(status: ChannelStatus | null): void;
-  /** Reads `GET <endpoint>` again and shows it; call it after a save succeeds. */
+  /** Reads `GET <endpoint>/status` again and shows it; call it after a save succeeds. */
   refresh(): Promise<ChannelStatus | null>;
 }
 
@@ -519,7 +519,10 @@ export function channelInbound(
 
   async function refresh(polled = false): Promise<ChannelStatus | null> {
     const mine = ++seq;
-    const result = await callDevice<ChannelStatus>(context, options.endpoint);
+    const result = await callDevice<ChannelStatus>(
+      context,
+      `${options.endpoint}/status`,
+    );
     if (mine !== seq || context.signal.aborted) return last;
     const status =
       result.kind === "ok" && typeof result.data?.configured === "boolean"

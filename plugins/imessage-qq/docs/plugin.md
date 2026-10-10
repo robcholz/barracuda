@@ -15,8 +15,8 @@
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities and follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
-`/api/gateway/qq` configures the channel and `GET` on it answers the shared
-channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
+`POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
+answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
 shared mode and owner endpoints, served with it from one prefix route
 (`ChannelEndpoint`). The allowed accounts are loaded only once the channel is
 configured, and the gateway session by the first receive session. The `qq` channel is registered with the
@@ -150,7 +150,7 @@ The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
 `{app_id, app_secret, api_base, token_url}` to `POST /api/gateway/qq` with
 「验证并保存」. The device fetches one access token before storing anything, so a 422
 `verification_failed` puts QQ's own `message` and `code` on the App Secret
-field; other errors toast the device's `message`. On mount it reads `GET /api/gateway/qq`, of whose channel status it uses
+field; other errors toast the device's `message`. On mount it reads `GET /api/gateway/qq/status`, of whose channel status it uses
 `configured`; a configured channel shows as a 「通道」 row with the
 已配置 card above the form that replaces it. The row also appears after a save
 succeeds, and the page then calls `context.refreshStatus()` so the portal's

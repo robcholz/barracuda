@@ -16,9 +16,9 @@ use core::cell::{Cell, RefCell};
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_channel::{
-    entry_status, load_mode, receive_runtime, status_response, store_mode, sync_receive,
-    ChannelControl, ChannelEndpoint, ChannelMode, ModeError, ModeFuture, OnDemand, Owners,
-    OwnersError, PairingEntropy, ReceiveControl, ReceiveRuntime, ReceiveTiming,
+    entry_status, load_mode, receive_runtime, store_mode, sync_receive, ChannelControl,
+    ChannelEndpoint, ChannelMode, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
+    PairingEntropy, ReceiveControl, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{GatewayError, MessageChannel, MessageChannelRegistration};
@@ -225,7 +225,7 @@ struct StoredConfiguration {
     signup: Option<SignupRecord>,
 }
 
-/// Account details of a signup, reported by `GET` without the key.
+/// Account details of a signup, reported by `GET /status` without the key.
 #[derive(Clone, Deserialize, Serialize)]
 struct SignupRecord {
     /// Address the person entered, which Inkbox sent the code to.
@@ -450,30 +450,6 @@ where
     /// The current configuration and its provider.
     pub(crate) fn settings(&self) -> Option<Rc<Settings>> {
         self.settings.borrow().clone()
-    }
-
-    /// `GET`: the shared channel status and, for a signup, its account.
-    fn configuration_status(&self) -> HttpResponse {
-        let status = status_response(self);
-        let signup = self
-            .settings()
-            .and_then(|settings| settings.config.signup.clone());
-        let Some(signup) = signup else {
-            return status;
-        };
-        let Some(mut body) = status
-            .body()
-            .and_then(|body| serde_json::from_slice::<Map<String, Value>>(body).ok())
-        else {
-            return status;
-        };
-        match serde_json::to_value(signup) {
-            Ok(signup) => {
-                body.insert("signup".into(), signup);
-                json_response(200, &Value::Object(body))
-            }
-            Err(_) => static_response(500, br#"{"error":"internal"}"#),
-        }
     }
 
     /// Registers or unregisters with the Gateway so that a registration
@@ -848,6 +824,20 @@ where
     fn owners(&self) -> Option<&Owners<Storage>> {
         self.owners.get()
     }
+
+    /// `signup`: the account of a configuration that came from signup; the
+    /// API key is never reported.
+    fn status_details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        let signup = self
+            .settings()
+            .and_then(|settings| settings.config.signup.clone())
+            .and_then(|signup| serde_json::to_value(signup).ok());
+        if let Some(signup) = signup {
+            details.insert("signup".into(), signup);
+        }
+        details
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -880,9 +870,6 @@ where
         Box::pin(async move {
             match (request.method(), self.route) {
                 (HttpMethod::Post, _) => {}
-                (HttpMethod::Get, Route::Config) => {
-                    return self.state.configuration_status();
-                }
                 _ => return static_response(405, br#"{"error":"method_not_allowed"}"#),
             }
             match self.route {
@@ -1020,6 +1007,8 @@ mod tests {
         signup: Box<dyn HttpEndpoint>,
         verify: Box<dyn HttpEndpoint>,
         resend: Box<dyn HttpEndpoint>,
+        /// Every route under the configuration path, `/status` among them.
+        routes: Box<dyn HttpEndpoint>,
         stored: Box<dyn Fn() -> Option<Vec<u8>>>,
         entry_status: Box<dyn Fn() -> EntryStatus>,
         /// Another `inkbox` channel holding the name while present.
@@ -1046,7 +1035,11 @@ mod tests {
 
     impl Harness {
         fn call(endpoint: &dyn HttpEndpoint, method: HttpMethod, body: &str) -> Reply {
-            let response = block_on(endpoint.handle(HttpRequest::new(method, body.into())));
+            Self::call_path(endpoint, HttpRequest::new(method, body.into()))
+        }
+
+        fn call_path(endpoint: &dyn HttpEndpoint, request: HttpRequest) -> Reply {
+            let response = block_on(endpoint.handle(request));
             let raw = String::from_utf8(response.body().expect("buffered body").to_vec())
                 .expect("UTF-8 body");
             let json = if raw.is_empty() {
@@ -1070,8 +1063,13 @@ mod tests {
             assert_eq!(Self::post(&*self.config, body).status, 204);
         }
 
+        /// `GET /api/gateway/inkbox/status`.
         fn get(&self) -> Reply {
-            Self::call(&*self.config, HttpMethod::Get, "")
+            let path = format!("{CONFIG_API_PATH}/status");
+            Self::call_path(
+                &*self.routes,
+                HttpRequest::with_path(HttpMethod::Get, path, Vec::new()),
+            )
         }
 
         fn stored(&self) -> Option<StoredConfiguration> {
@@ -1149,6 +1147,14 @@ mod tests {
                 signup: endpoint(Route::Signup),
                 verify: endpoint(Route::Verify),
                 resend: endpoint(Route::Resend),
+                routes: Box::new(ChannelEndpoint::new(
+                    Rc::clone(&state),
+                    CONFIG_API_PATH,
+                    InkboxEndpoint {
+                        state: Rc::clone(&state),
+                        route: Route::Config,
+                    },
+                )),
                 stored: Box::new(move || {
                     block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY)).expect("read storage")
                 }),
@@ -1710,8 +1716,13 @@ mod tests {
                     assert_eq!(reply.json, json!({"error": "method_not_allowed"}));
                 }
             }
-            // Only the configuration path answers GET.
-            for endpoint in [&harness.signup, &harness.verify, &harness.resend] {
+            // Only `/status` answers GET; the configuration path takes changes only.
+            for endpoint in [
+                &harness.config,
+                &harness.signup,
+                &harness.verify,
+                &harness.resend,
+            ] {
                 let reply = Harness::call(&**endpoint, HttpMethod::Get, "");
                 assert_eq!(reply.status, 405);
             }

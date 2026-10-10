@@ -52,6 +52,12 @@ async function render(lang: Lang = "zh") {
   const root = browser.document.createElement("div");
   browser.document.body.append(root);
   const cleanup = await mount(root, context);
+  // the mount reads what the device holds; set that read aside
+  await settle();
+  expect(calls.map(([url, init]) => [url, init.method])).toEqual([
+    ["/api/tavily/status", "GET"],
+  ]);
+  calls.length = 0;
   const form = root.querySelector("form")!;
   return {
     root,
@@ -129,8 +135,11 @@ test("posts the key and API base, toasts success and clears the key", async () =
   const { input, submit, toasts, routes, refreshes } = await render("zh");
   input("api_key").value = "tvly-secret";
   await submit();
-  expect(calls).toHaveLength(1);
-  expect(calls[0][0]).toBe("/api/tavily");
+  // the accepted save reads the device's configuration again
+  expect(calls.map(([url]) => url)).toEqual([
+    "/api/tavily",
+    "/api/tavily/status",
+  ]);
   expect(calls[0][1].method).toBe("POST");
   expect(JSON.parse(String(calls[0][1].body))).toEqual({
     api_key: "tvly-secret",
@@ -143,6 +152,18 @@ test("posts the key and API base, toasts success and clears the key", async () =
   expect(routes).toEqual(["imessage-web"]);
   expect(input("api_key").value).toBe("");
   expect(refreshes.count).toBe(1);
+});
+
+test("the header shows the API base the device holds", async () => {
+  respond = async () =>
+    Response.json({
+      configured: true,
+      config: { api_base: "https://tavily.example" },
+    });
+  const { root } = await render("en");
+  expect(root.querySelector(".bc-kv")?.textContent).toBe(
+    "Status—API Base URLhttps://tavily.example",
+  );
 });
 
 test("a rejected key toasts the status and stays in the field", async () => {

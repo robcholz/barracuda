@@ -1,9 +1,10 @@
 # IMessage BlueBubble HTTP API
 
-## `GET /api/gateway/bluebubbles`
+## `GET /api/gateway/bluebubbles/status`
 
 Returns `200` with the shared channel status (see the Gateway's
-`docs/plugin.md`). It never returns settings or the password.
+`docs/plugin.md`). It never returns settings or the password; other methods
+answer `405`.
 
 ```json
 {"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":0,"skipped":2}}
@@ -33,7 +34,7 @@ Responses:
   server URL changed while receiving, the device first deletes its webhook
   from the old server, best effort.
 - `400 Bad Request`: the JSON body was invalid or required fields were absent.
-- `405 Method Not Allowed`: the endpoint only accepts `GET` and `POST`.
+- `405 Method Not Allowed`: the endpoint only accepts `POST`.
 - `422 Unprocessable Content`, `{"error":"registration_failed"}`: the Gateway
   rejected channel registration. The previous stored configuration is restored
   and no BlueBubbles channel stays registered.

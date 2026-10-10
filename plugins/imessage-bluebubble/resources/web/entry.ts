@@ -77,8 +77,8 @@ const ENDPOINT = "/api/gateway/bluebubbles";
 
 /**
  * The BlueBubbles page: the server URL and password, checked in the browser against the server's
- * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`. `GET` on that path
- * says whether a channel is configured, and its mode and allowed accounts (`/mode`, `/owners`) show
+ * `GET /api/v1/server/info`, then saved with `POST /api/gateway/bluebubbles`. `GET /status` below
+ * that path says whether a channel is configured, and its mode and allowed accounts (`/mode`, `/owners`) show
  * while it is.
  */
 export const mount = definePage((context) => {

@@ -17,6 +17,11 @@ is restored when the Plugin registers. An active search retains an `Rc`
 snapshot of the configuration without cloning the API key. The API key is never
 logged or returned.
 
+`GET /api/tavily/status` reports the active configuration:
+`{"configured":true,"config":{"api_base":"https://api.tavily.com"}}`, or
+`{"configured":false}`. Other methods on it, and methods other than `POST` on
+`/api/tavily`, answer `405`.
+
 The portal entry is registered with `CaptivePortal::register_with_status`; its
 `GET /portal/status` record is `EntryStatus::configured`: `ready`
 已配置/Configured while a Tavily configuration is active, otherwise `off`
@@ -33,7 +38,7 @@ scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `agent-websearch`, group `WebGroup::Agent`, order 20, title `网页搜索` / `Web
 search`, a bilingual summary, icon `icon.svg`, figure `figure.js`, module
 `entry.js`, and a `ResourceFiles` provider. Unload removes the navigation entry
-and resource provider; no extra HTTP route is registered.
+and resource provider; the page uses the two `/api/tavily` routes above.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin agent-websearch`
@@ -53,9 +58,10 @@ the Tavily API key, and an open 高级 fold with `api_base` (default
 `resources/web/icon.svg` is the Lucide `search` mark.
 
 The page submits the existing POST configuration contract and, once the device
-accepts, calls `context.refreshStatus()` so the portal's navigation follows. It
-does not read current settings or claim that acceptance verifies the upstream
-service. Secrets
+accepts, calls `context.refreshStatus()` so the portal's navigation follows. Its
+header shows the 状态 badge and the API base the device holds, read from
+`GET /api/tavily/status` on mount and after each accepted save. It does not
+claim that acceptance verifies the upstream service. Secrets
 are password inputs, never persisted in browser storage, and cleared on success
 or unmount. Requests are cancelled on unmount and are never retried automatically.
 The existing HTTP API has no authentication or transport encryption added here;

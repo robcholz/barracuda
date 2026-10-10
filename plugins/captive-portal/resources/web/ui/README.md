@@ -155,9 +155,9 @@ Device calls (`device.ts`), for flows beyond one POST (QR login, signup codes)
 
 Channel state (`channel.ts`)
 
-- `readChannel<T>(context, endpoint)`: `GET` a channel's config path, which answers
-  `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T` adds
-  page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
+- `readChannel<T>(context, endpoint)`: `GET <endpoint>/status` for a channel's config path,
+  which answers `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T`
+  adds page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
   in that shape. It never toasts.
 - `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
   the result card `name` and the 已配置 badge, hidden until `show(true)`. Put it first in
@@ -174,7 +174,7 @@ Channel state (`channel.ts`)
 
 Channel mode and allowed accounts (`inbound.ts`), for the external channel pages
 
-Every channel serves the same JSON under its config path: `GET <endpoint>` answers
+Every channel serves the same JSON under its config path: `GET <endpoint>/status` answers
 `ChannelStatus` (`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`),
 `POST <endpoint>/mode` takes `{mode}`, and `GET`/`POST <endpoint>/owners` answer `OwnersReply`
 (`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take

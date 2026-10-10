@@ -22,6 +22,7 @@ const zh = {
   lead: "配置这台设备的网络、模型与消息通道。",
   phoneLead: "配置网络、模型与消息通道。",
   figAlt: "Barracuda 开发板：射频模组、USB-C 接口与两排排针",
+  kvStatus: "状态",
   kvPages: "插件页面",
   pagesTip: "每个页面由一个插件提供，停用插件后页面随之消失",
   kvConn: "连接",
@@ -85,6 +86,7 @@ const en: Strings = {
   lead: "Set up this device's network, models and message channels.",
   phoneLead: "Set up the network, models and message channels.",
   figAlt: "Barracuda board: radio module, USB-C port and two pin headers",
+  kvStatus: "Status",
   kvPages: "Plugin pages",
   pagesTip:
     "Each page comes from a plugin and goes away when the plugin is turned off",

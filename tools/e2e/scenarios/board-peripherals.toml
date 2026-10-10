@@ -6,7 +6,7 @@ mode = "none"
 
 # Any request: the peripherals initialize before the WebServer starts.
 [[http]]
-path = "/api/wifi"
+path = "/api/wifi/status"
 body_contains = ['"station"']
 
 [virtual_io]
