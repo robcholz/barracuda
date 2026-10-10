@@ -59,7 +59,7 @@ contract.
 
 | Who | How they customize |
 | --- | --- |
-| Users and makers | Enable and disable Plugins in the Device Portal |
+| Users and makers | Choose the Plugin set on their machine and build; configure each Plugin in the Device Portal |
 | App developers | Use Plugins from their apps through the Live Editor |
 | Plugin developers | Create new Plugins with `create-plugin` |
 | Builders | Choose the exact Plugin set for a product and trim each Plugin to the target's budget with `fully-customize` |

@@ -27,8 +27,8 @@ Plugin, and an agent helps at every step.**
 1. **An agent on the device.** Every Barracuda device carries a lightweight
    agent that codes its own hardware in real time: ask for something physical,
    watch it write the script and run it.
-2. **Plugins are the primitive.** Every capability is a Plugin. Switch them on
-   and off, build with them, write your own, and ship only what you need.
+2. **Plugins are the primitive.** Every capability is a Plugin. Choose them,
+   build with them, write your own, and ship only what you need.
 3. **Agentic at every level.** The in-browser agent builds apps; coding agents
    create Plugins, Boards, Platforms, and custom firmware with Barracuda's skills.
 4. **A modern developer experience on embedded.** Install from a browser,
@@ -50,12 +50,12 @@ Plugin, and an agent helps at every step.**
 
 | Audience | Lead with | Then |
 | --- | --- | --- |
-| Makers | "Talk to your board; it writes the code and runs it." | Browser install, Plugins on and off |
+| Makers | "Talk to your board; it writes the code and runs it." | Browser install, choosing Plugins |
 | App developers | "Describe a device app; get it with its UI; flash it from the browser." | Live Editor, App Manager |
 | Plugin and runtime developers | "Your coding agent builds Barracuda the Barracuda way." | Skills, Plugin contract, one System on every target |
 | Builders | "Ship firmware sized to your chip and your job." | `fully-customize`, removable Plugins |
 | Education | "From a sentence to hardware on day one, from scripts to systems by the end of term." | No setup, the ladder as curriculum |
-| Board companies | "Make your board AI-ready, from the browser to preinstalled." | `create-board`, Web Installer listing, vendor Plugins |
+| Board companies | "Make your board AI-ready and installable from a browser." | `create-board`, Web Installer listing |
 
 ## Vocabulary
 

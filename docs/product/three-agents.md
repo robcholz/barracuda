@@ -16,7 +16,7 @@ and each one works with Plugins as its unit of capability.
 
 The on-board agent runs on the device as the Agent Plugin. It owns sessions,
 memory, plans, sub-agents, skills, and tools; only model inference is a remote
-call to the model provider the user chose. Users reach it through any channel:
+call — to a model provider the user configures, or to Barracuda's model service. Users reach it through any channel:
 WeChat, Telegram, QQ, iMessage, the device's web chat, or the terminal.
 
 Its signature ability is **in-time coding**. When a request touches the physical

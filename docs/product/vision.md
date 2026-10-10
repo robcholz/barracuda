@@ -47,7 +47,7 @@ Barracuda's skills to create Plugins, add Boards and Platforms, and compose full
 custom firmware.
 
 **A ladder, not a cliff.** People start by installing from a browser and talking
-to their board. They can stop there, or climb: switch Plugins on and off, build
+to their board. They can stop there, or climb: choose the Plugins in their firmware, build
 an app, write a Plugin, add a Board, and finally shape the whole firmware to a
 chip and a budget. Each step up trades a little ease for a lot of freedom, and
 each step has an agent doing the heavy lifting.
@@ -84,8 +84,9 @@ each step has an agent doing the heavy lifting.
 - A student plugs in a board, opens a web page, and within minutes asks the
   board to blink an LED in a pattern — and watches it happen, with the script
   that did it on screen.
-- A maker turns on the camera and display Plugins, turns off what they do not
-  need, and has a device that fits their project without touching code.
+- A maker picks the camera and display Plugins, leaves out what they do not
+  need, builds once, and has a device that fits their project without writing
+  code.
 - An app developer describes a small device app in the Live Editor, previews its
   UI, and flashes it.
 - A Plugin author asks their coding agent to "create a plugin for this sensor"

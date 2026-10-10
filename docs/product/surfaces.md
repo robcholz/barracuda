@@ -41,7 +41,7 @@ network.
 
 The portal is served by the device. It shows the device's state and the Plugins
 it runs. Each Plugin contributes its own page: Wi-Fi, models, web search, each
-channel, files, and anything a new Plugin adds. Users enable and disable Plugins
+channel, files, and anything a new Plugin adds. Users configure each Plugin
 here, and the device's web chat lives here too.
 
 ## Channels

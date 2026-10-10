@@ -8,7 +8,7 @@ the heavy lifting.
 | Level | Name | Who | What they do | Where | Agent |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts |
-| 2 | Configure | Makers, educators | Enable and disable Plugins to shape the device | Device Portal | — (configuration, not generation) |
+| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) |
 | 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent |
 | 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill |
 | 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills |
@@ -35,16 +35,18 @@ Agent, the VM and its peripheral packages, channels, Workflow.
 
 ## Level 2 — Configure
 
-**Goal:** make the device fit the project without writing code.
+**Goal:** make the device fit the project by choosing its Plugins, without
+writing code.
 
-The Device Portal lists the Plugins on the device. Users enable what they need —
-camera, display, LED strip, sensors, web search, a messaging channel — and
-disable what they do not, freeing memory and simplifying the device. Each Plugin
-brings its own settings page, so new capabilities arrive with their own
-configuration surface.
+Plugins are compiled into the firmware, so the Plugin set is chosen on the
+developer's machine. Select the Board, choose the Plugins the project needs —
+camera, display, LED strip, sensors, web search, a messaging channel — leave out
+the rest, then build and flash. A Plugin that is left out costs no memory, flash,
+or tasks. On the device, every Plugin brings its own page in the Device Portal,
+so each capability arrives with its own settings.
 
-**What makes it work:** Plugin declarations, per-Plugin portal pages, the
-Plugin manager.
+**What makes it work:** Plugin declarations, the host build, per-Plugin portal
+pages.
 
 ## Level 3 — Build apps
 
