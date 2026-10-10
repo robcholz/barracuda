@@ -79,7 +79,15 @@ ends; a permission answer goes out at once. While a turn runs its author mark
 spins (`resources/web/mark.ts`: WebGL, which plain HTTP allows; the static mark
 and typing dots where WebGL is missing, the mark at rest under reduced motion)
 and 「思考中」 shimmers until text streams. Replies stream in smoothly behind a
-blinking caret; reasoning folds itself away as 「思考了 N 秒」; a running tool
+blinking caret, rendered as Markdown (`resources/web/markdown.ts`: headings,
+lists and task lists, quotes, rules, GFM tables, inline code, emphasis,
+strikethrough and links; it builds DOM nodes and never parses markup, so HTML
+in a reply stays text, and links open only `http(s):` and `mailto:` targets in
+a new tab). A fenced code block shows its language and its own Copy button and
+is coloured by `resources/web/highlight.ts`, a dependency-free scanner for Rust,
+C/C++, JavaScript/TypeScript, JSON, Python, shell, Go, Java/Kotlin/Swift/C#,
+TOML/YAML/INI, SQL, Lua and diffs; other languages stay plain. Copy and Reply
+take a reply's Markdown source. Reasoning folds itself away as 「思考了 N 秒」; a running tool
 spins; each finished reply ends with Copy and Reply icon buttons. While a turn
 runs, Stop (`circle-stop`) replaces send as the primary (outline once the
 reader types, beside 「加入队列」); the turn's `turn_ended` outcome

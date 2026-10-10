@@ -363,6 +363,47 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and an icon fo
   expect(root.textContent).not.toContain("weather_forecast");
 });
 
+test("a reply streams in as Markdown; its code blocks carry Copy and replies quote the source", () => {
+  // reduced motion: streamed text lands at once rather than over animation frames
+  Object.assign(browser.window, {
+    matchMedia: (query: string) => ({ matches: query.includes("reduce") }),
+  });
+  const { root, socket, button, submit } = open();
+  const ws = socket();
+  ws.open();
+  submit("示例");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", {
+    text: "## 用法\n\n运行 `make`：\n\n```sh\nmake ",
+  });
+  // streaming: the fence is open, and the caret ends its last line
+  const reply = root.querySelector(".bc-reply.bc-md")!;
+  expect(reply.querySelector("h2")!.textContent).toBe("用法");
+  expect(reply.querySelector("p code")!.textContent).toBe("make");
+  expect(reply.querySelector("pre code")!.textContent).toBe("make ");
+  expect(reply.lastElementChild!.className).toBe("bc-caret");
+  ws.agent("web-1", "output_delta", { text: "all\n```\n完成 **了**" });
+  expect(reply.querySelector("pre code")!.textContent).toBe("make all");
+  expect(reply.querySelector("p:last-of-type > .bc-caret")).not.toBeNull();
+  expect(reply.querySelector("p:last-of-type strong")!.textContent).toBe("了");
+  ws.agent("web-1", "output_ended");
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.querySelector(".bc-caret")).toBeNull();
+  // the code block's head names its language and holds its own Copy
+  const head = reply.querySelector(".bc-md-code__head")!;
+  expect(head.firstElementChild!.textContent).toBe("sh");
+  expect(head.querySelector('[aria-label="复制"]')).not.toBeNull();
+  button("回复").click();
+  submit("为什么？");
+  const quoted = JSON.parse(sent.at(-1)!).text as string;
+  expect(quoted).toContain("## 用法");
+  expect(quoted).toContain("```sh");
+});
+
 test("a long quote is cut to 512 bytes, whole characters, ending in an ellipsis", () => {
   const { socket, submit, button } = open();
   const ws = socket();
@@ -447,7 +488,7 @@ test("stop interrupts the running turn, which ends 「已停止」 and keeps its
   ws.emit("message.end", { error: null, message_id: "web-1" });
   const status = root.querySelector(".bc-status.bc-muted")!;
   expect(status.textContent).toBe("已停止");
-  expect(root.querySelector(".bc-reply")!.textContent).toBe("1. 断电恢复");
+  expect(root.querySelector(".bc-reply ol > li")!.textContent).toBe("断电恢复");
   // its footer follows the status line
   expect(
     status.nextElementSibling?.querySelector('[aria-label="复制"]'),
