@@ -1,25 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 
-const plugins = [
-  "wifi",
-  "agent",
-  "agent-websearch",
-  "imessage-qq",
-  "imessage-wechat",
-  "imessage-bluebubble",
-  "imessage-telegram",
-  "imessage-inkbox",
-  "imessage-web",
-];
-
-/**
- * KiB per page bundle. Web chat carries a conversation, a WebGL mark, a session rail and its own
- * streaming Markdown package (healing, rendering and syntax highlighting, about 29 KB), so it gets
- * more room than a settings page.
- */
-const BUDGET: Record<string, number> = { "imessage-web": 80 };
-
 async function fresh(entry: string) {
   const built = await Bun.build({
     entrypoints: [entry],
@@ -32,22 +13,22 @@ async function fresh(entry: string) {
   return built.outputs[0].text();
 }
 
-test("each contributor has fresh standalone bundles in its own resource directory", async () => {
-  const shell = await Bun.file(
-    new URL("../../../filesystem/resources/app.js", import.meta.url),
-  ).text();
-  expect(shell).not.toContain("/api/gateway/");
-  expect(shell).not.toContain("/api/model-api");
-  for (const id of plugins) {
-    const directory = new URL(`../../../../${id}/`, import.meta.url);
+/**
+ * Checks a portal contributor's committed bundles: `entry.js` (and `figure.js` when the plugin has a
+ * figure) match a fresh build of its `resources/web` sources, import nothing, carry the portal kit but
+ * never the shell's kernel, and the entry stays under `budgetKiB`; icons are copied unchanged.
+ * `plugin` is the plugin's root directory.
+ */
+export function testContributorBundles(plugin: URL, budgetKiB = 40) {
+  test("the page's bundles are fresh, standalone and within budget", async () => {
     const source = (name: string) =>
-      new URL(`resources/web/${name}`, directory).pathname;
+      new URL(`resources/web/${name}`, plugin).pathname;
     const output = (name: string) =>
-      Bun.file(new URL(`filesystem/resources/${name}`, directory));
+      Bun.file(new URL(`filesystem/resources/${name}`, plugin));
     const code = await fresh(source("entry.ts"));
     expect(code).toBe(await output("entry.js").text());
     expect(new TextEncoder().encode(code).byteLength).toBeLessThan(
-      (BUDGET[id] ?? 40) * 1024,
+      budgetKiB * 1024,
     );
     expect(code).not.toMatch(/\bimport\s*(?:\(|\{|["'])/);
     expect(code).toContain("mount");
@@ -69,5 +50,5 @@ test("each contributor has fresh standalone bundles in its own resource director
         expect(await output(icon).bytes()).toEqual(await from.bytes());
       else expect(await output(icon).exists()).toBe(false);
     }
-  }
-});
+  });
+}

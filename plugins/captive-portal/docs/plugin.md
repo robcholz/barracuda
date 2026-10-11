@@ -286,19 +286,17 @@ across firmware versions; JavaScript module caching is browser-owned.
 
 ## Verification
 
-Built-in contributors are `wifi`, `agent` (model configuration),
-`agent-websearch` (Tavily), `imessage-qq`, `imessage-wechat`,
-`imessage-bluebubble`, `imessage-telegram`, `imessage-inkbox`, and
-`imessage-web` (live text chat). Each owns its `resources/web/entry.ts`, optional
-figure and icon, tests, build declaration, and resource output. Ordinary entries
-use `tools/web/build.ts`; this shell retains its custom build script. Chat-specific
-styles live in the chat module and are removed on unmount. No dependency scan
-creates navigation entries.
+A contributor is any Plugin that registers an entry. Each owns its
+`resources/web/entry.ts`, optional figure and icon, tests, build declaration,
+and resource output. Ordinary entries use `tools/web/build.ts`; this shell
+retains its custom build script. A page's own styles live in its module and are
+removed on unmount. No dependency scan creates navigation entries.
 
 After changing a contributor or the build-time `resources/web/ui/` kit, rebuild
 the affected contributor(s) with `cargo plugin run build` from the repository root.
-The portal frontend tests verify all checked-in contributor outputs (entry,
-figure and icon) against a fresh in-memory Bun build, manifest parsing, routing,
+Each contributor verifies its checked-in outputs (entry, figure and icon)
+against a fresh in-memory Bun build with `tools/web/bundle-test.ts`. The portal
+frontend tests verify manifest parsing, routing,
 module session lifecycle and context, overview grouping, status pages, toasts,
 live-figure loading and teardown, the kit's fields, validation, submission and
 secret cleanup. These are DOM/protocol tests, not device or visual browser

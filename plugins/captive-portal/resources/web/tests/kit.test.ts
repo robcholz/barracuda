@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { installBrowser, settle } from "./browser";
 import {
-  MARK_OPENAI,
+  ICON_BOT,
   definePage,
   header,
   kv,
@@ -79,7 +79,7 @@ const OPTIONS: SettingsFormOptions = {
           name: "backend",
           label: { zh: "接口协议", en: "API format" },
           options: [
-            { value: "openai_compatible", label: "OpenAI", icon: MARK_OPENAI },
+            { value: "remote", label: "Provider", icon: ICON_BOT },
             { value: "anthropic_compatible", label: "Anthropic" },
           ],
         },
@@ -92,7 +92,7 @@ const OPTIONS: SettingsFormOptions = {
         kind: "url",
         name: "api_base",
         label: "API Base URL",
-        value: "https://api.telegram.org",
+        value: "https://api.example.com",
       },
       {
         kind: "number",
@@ -225,8 +225,8 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
   expect(JSON.parse(String(calls[0][1].body))).toEqual({
     token: " secret ",
     use_private_api: true,
-    backend: "openai_compatible",
-    api_base: "https://api.telegram.org",
+    backend: "remote",
+    api_base: "https://api.example.com",
     draft_min_delta_bytes: 24,
   });
   expect(toasts[0]).toEqual({
@@ -295,7 +295,7 @@ test("clear restores defaults; English strings follow the context language", () 
   (root.querySelector('[role="switch"]') as HTMLButtonElement).click();
   expect(form.values()?.use_private_api).toBe(false);
   root.dispatchEvent(new browser.window.Event("reset", { cancelable: true }));
-  expect(input(root, "api_base").value).toBe("https://api.telegram.org");
+  expect(input(root, "api_base").value).toBe("https://api.example.com");
   expect(input(root, "token").value).toBe("");
   expect(
     root.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
@@ -318,9 +318,9 @@ test("header, kv and definePage build the page frame and clean up", async () => 
     page(
       header(
         {
-          title: "Telegram",
+          title: "Alpha",
           lead: {
-            zh: "通过 Telegram Bot 收发消息。",
+            zh: "通过 Alpha 收发消息。",
             en: "Send and receive through a bot.",
           },
           icon: "/portal/assets/example/icon.svg",
@@ -335,7 +335,7 @@ test("header, kv and definePage build the page frame and clean up", async () => 
   const root = browser.document.createElement("div");
   const cleanup = await mount(root, ctx);
   expect(root.querySelector(".bc-page .bc-header h1")?.textContent).toBe(
-    "Telegram",
+    "Alpha",
   );
   expect(root.querySelector(".bc-header .bc-asset-icon")).not.toBeNull();
   expect(

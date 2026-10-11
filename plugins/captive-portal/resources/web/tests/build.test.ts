@@ -11,6 +11,8 @@ test("device output is self-contained, carries the kernel once and imports plugi
   expect(js).toContain("import(");
   expect(js).toContain("data-hairline-style");
   expect(js).toContain("hl-figure");
+  // the shell calls no plugin's API; pages do, from their own bundles
+  expect(js).not.toContain("/api/");
   // no fetches leave the device (the SVG namespace in the favicon is a name, not a request)
   expect(
     (html + css + js).replaceAll("http://www.w3.org/2000/svg", ""),

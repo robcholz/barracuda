@@ -326,16 +326,16 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             Assets,
         )
         .expect("register wifi");
-    let _qq = portal
+    let _one = portal
         .register(
             WebEntry {
-                id: "imessage-qq",
+                id: "channel-one",
                 group: WebGroup::Channel,
                 order: 40,
-                title: WebText { zh: "QQ", en: "QQ" },
+                title: WebText { zh: "Bravo", en: "Bravo" },
                 summary: WebText {
-                    zh: "QQ Bot 消息通道",
-                    en: "QQ bot message channel",
+                    zh: "Bravo 消息通道",
+                    en: "Bravo message channel",
                 },
                 icon: None,
                 figure: None,
@@ -343,7 +343,7 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             },
             Assets,
         )
-        .expect("register qq");
+        .expect("register one");
     let _agent = portal
         .register(
             WebEntry {
@@ -386,14 +386,14 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
                 "module": "/portal/assets/wifi/entry.js"
             },
             {
-                "id": "imessage-qq",
+                "id": "channel-one",
                 "group": "channel",
                 "order": 40,
-                "title": {"zh": "QQ", "en": "QQ"},
-                "summary": {"zh": "QQ Bot 消息通道", "en": "QQ bot message channel"},
+                "title": {"zh": "Bravo", "en": "Bravo"},
+                "summary": {"zh": "Bravo 消息通道", "en": "Bravo message channel"},
                 "icon": null,
                 "figure": null,
-                "module": "/portal/assets/imessage-qq/chunks/entry.js"
+                "module": "/portal/assets/channel-one/chunks/entry.js"
             },
             {
                 "id": "agent",
@@ -479,7 +479,7 @@ fn icon_and_figure_are_served_by_the_entry_provider() {
         .register(
             WebEntry {
                 icon: Some("icon.png"),
-                ..entry("imessage-inkbox", "Inkbox")
+                ..entry("channel-four", "Delta")
             },
             Named("inkbox"),
         )
@@ -488,7 +488,7 @@ fn icon_and_figure_are_served_by_the_entry_provider() {
         ("/portal/assets/wifi/icon.svg", &b"wifi:icon.svg"[..]),
         ("/portal/assets/wifi/figure.js", b"wifi:figure.js"),
         (
-            "/portal/assets/imessage-inkbox/icon.png",
+            "/portal/assets/channel-four/icon.png",
             b"inkbox:icon.png",
         ),
     ] {
@@ -581,7 +581,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
         })
         .expect("register agent");
     let _web = portal
-        .register_with_status(entry("imessage-web", "Web"), Assets, || EntryStatus {
+        .register_with_status(entry("chat", "Web"), Assets, || EntryStatus {
             state: EntryState::Ready,
             label: None,
             detail: None,
@@ -605,7 +605,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
             r#"{"entries":{"#,
             r#""wifi":{"state":"ready","label":{"zh":"已连接","en":"Connected"},"detail":"Home \"Net\""},"#,
             r#""agent":{"state":"off","label":{"zh":"未配置","en":"Not set up"}},"#,
-            r#""imessage-web":{"state":"ready"}"#,
+            r#""chat":{"state":"ready"}"#,
             r#"}}"#
         )
     );
@@ -619,7 +619,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
             r#"{"entries":{"#,
             r#""wifi":{"state":"off","label":{"zh":"未连接","en":"Not connected"}},"#,
             r#""agent":{"state":"ready","label":{"zh":"已配置","en":"Configured"}},"#,
-            r#""imessage-web":{"state":"ready"}"#,
+            r#""chat":{"state":"ready"}"#,
             r#"}}"#
         )
     );
@@ -634,7 +634,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
         status,
         serde_json::json!({"entries": {
             "agent": {"state": "ready", "label": {"zh": "已配置", "en": "Configured"}},
-            "imessage-web": {"state": "ready"}
+            "chat": {"state": "ready"}
         }})
     );
 

@@ -25,13 +25,13 @@ function record(
 }
 /** The nine built-in registrations, deliberately out of order. */
 const NINE = [
-  record("imessage-inkbox", "channel", 60, text("Inkbox"), false),
-  record("imessage-web", "channel", 10, text("Web 聊天", "Web chat"), true),
-  record("imessage-telegram", "channel", 20, text("Telegram"), false),
-  record("imessage-wechat", "channel", 30, text("微信", "WeChat"), false),
-  record("imessage-qq", "channel", 40, text("QQ"), false),
-  record("imessage-bluebubble", "channel", 50, text("BlueBubbles"), false),
-  record("agent-websearch", "agent", 20, text("网页搜索", "Web search"), true),
+  record("channel-four", "channel", 60, text("Delta"), false),
+  record("chat", "channel", 10, text("Web 聊天", "Web chat"), true),
+  record("channel-two", "channel", 20, text("Alpha"), false),
+  record("channel-three", "channel", 30, text("Charlie"), false),
+  record("channel-one", "channel", 40, text("Bravo"), false),
+  record("channel-five", "channel", 50, text("Echo"), false),
+  record("search", "agent", 20, text("网页搜索", "Web search"), true),
   record("agent", "agent", 10, text("模型配置", "Models"), true),
   record("wifi", "device", 10, text("Wi-Fi"), true),
 ];
@@ -166,30 +166,30 @@ test("routes read #overview or #<id>", () => {
   expect(routeOf("#")).toBe("overview");
   expect(routeOf("#overview")).toBe("overview");
   expect(routeOf("#wifi")).toBe("wifi");
-  expect(routeOf("#imessage-qq")).toBe("imessage-qq");
+  expect(routeOf("#channel-one")).toBe("channel-one");
 });
 
 test("module layout: tiles for device, agent and figured channels; rows for the rest", () => {
   const sorted = [...NINE].sort((a, b) => a.order - b.order);
   const layout = layoutModules(sorted);
   expect(layout.tiles.map((entry) => entry.id).sort()).toEqual(
-    ["agent", "agent-websearch", "imessage-web", "wifi"].sort(),
+    ["agent", "search", "chat", "wifi"].sort(),
   );
   expect(layout.rows).toHaveLength(5);
   expect(layout.span).toBe(2);
   const [wifi, agent, search] = NINE.slice(-3).reverse();
-  const qq = NINE[4];
-  expect(layoutModules([wifi, agent, search, qq]).span).toBe(3);
+  const one = NINE[4];
+  expect(layoutModules([wifi, agent, search, one]).span).toBe(3);
   const figured = {
     ...NINE[2],
-    figure: "/portal/assets/imessage-telegram/figure.js",
+    figure: "/portal/assets/channel-two/figure.js",
   };
-  const five = layoutModules([wifi, agent, search, NINE[1], figured, qq]);
+  const five = layoutModules([wifi, agent, search, NINE[1], figured, one]);
   expect(five.tiles).toHaveLength(5);
   expect(five.span).toBe(3);
-  expect(layoutModules([wifi, qq])).toEqual({
+  expect(layoutModules([wifi, one])).toEqual({
     tiles: [wifi],
-    rows: [qq],
+    rows: [one],
     span: 2,
   });
 });
@@ -206,13 +206,13 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
       "#overview",
       "#wifi",
       "#agent",
-      "#agent-websearch",
-      "#imessage-web",
-      "#imessage-telegram",
-      "#imessage-wechat",
-      "#imessage-qq",
-      "#imessage-bluebubble",
-      "#imessage-inkbox",
+      "#search",
+      "#chat",
+      "#channel-two",
+      "#channel-three",
+      "#channel-one",
+      "#channel-five",
+      "#channel-four",
     ],
   );
   expect(h.$(".bc-nav-item")?.getAttribute("aria-current")).toBe("page");
@@ -238,7 +238,7 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   expect(h.$(".portal-hero__kv")?.getAttribute("style")).toBeNull();
   expect(
     h.$$(".portal-steps a").map((node) => node.getAttribute("href")),
-  ).toEqual(["#wifi", "#agent", "#imessage-web"]);
+  ).toEqual(["#wifi", "#agent", "#chat"]);
   expect(h.$$(".portal-steps a").map((node) => node.textContent)).toEqual([
     "前往 Wi-Fi",
     "前往模型配置",
@@ -247,19 +247,19 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   expect(h.$$(".bc-tile").map((node) => node.getAttribute("href"))).toEqual([
     "#wifi",
     "#agent",
-    "#agent-websearch",
-    "#imessage-web",
+    "#search",
+    "#chat",
   ]);
   expect(
     h.$$(".bc-tile hl-figure").map((node) => node.getAttribute("name")),
-  ).toEqual(["wifi", "agent", "agent-websearch", "imessage-web"]);
+  ).toEqual(["wifi", "agent", "search", "chat"]);
   const rows = h.$$(".portal-channel-row");
   expect(rows.map((node) => node.getAttribute("href"))).toEqual([
-    "#imessage-telegram",
-    "#imessage-wechat",
-    "#imessage-qq",
-    "#imessage-bluebubble",
-    "#imessage-inkbox",
+    "#channel-two",
+    "#channel-three",
+    "#channel-one",
+    "#channel-five",
+    "#channel-four",
   ]);
   expect(rows[0].getAttribute("data-hl-at")).toBe("161,149");
   expect(h.$(".portal-channels")?.hasAttribute("data-hl-zone")).toBe(true);
@@ -297,9 +297,7 @@ test("the overview is generated from the manifest: sidebar groups, steps, tiles 
   expect(list.querySelector(".bc-list-head .bc-caption")?.textContent).toBe(
     "05",
   );
-  expect(rows[0].querySelector(".bc-option-title")?.textContent).toBe(
-    "Telegram",
-  );
+  expect(rows[0].querySelector(".bc-option-title")?.textContent).toBe("Alpha");
   for (const node of [
     ...h.$$(".portal-overview .bc-grid__cell"),
     ...h.$$(".portal-overview .bc-tile__figure"),
@@ -365,27 +363,27 @@ test("an unknown or vanished entry shows the unavailable state, and comes back",
   );
   expect(h.$(".portal-status__title")?.textContent).toBe("nope 插件已停用");
 
-  await h.go("#imessage-qq");
-  expect(h.$(".module-text")?.textContent).toBe("imessage-qq:zh");
-  h.records.value = NINE.filter((entry) => entry.id !== "imessage-qq");
+  await h.go("#channel-one");
+  expect(h.$(".module-text")?.textContent).toBe("channel-one:zh");
+  h.records.value = NINE.filter((entry) => entry.id !== "channel-one");
   await h.portal.refresh();
-  expect(h.cleanups).toEqual(["imessage-qq"]);
-  expect(h.$(".portal-status__title")?.textContent).toBe("QQ 插件已停用");
+  expect(h.cleanups).toEqual(["channel-one"]);
+  expect(h.$(".portal-status__title")?.textContent).toBe("Bravo 插件已停用");
   expect(h.$(".portal-status__text .bc-lead")?.textContent).toBe(
-    "在设备上启用 QQ 插件后刷新。",
+    "在设备上启用 Bravo 插件后刷新。",
   );
   expect(h.$$(".bc-crumb").map((node) => node.textContent)).toEqual([
     "消息通道",
     "/",
   ]);
-  expect(h.$('.bc-nav-item[href="#imessage-qq"]')).toBeNull();
+  expect(h.$('.bc-nav-item[href="#channel-one"]')).toBeNull();
 
   h.records.value = NINE;
   (
     h.$(".portal-status__actions .bc-button--outline") as HTMLButtonElement
   ).click();
   await settle();
-  expect(h.$(".module-text")?.textContent).toBe("imessage-qq:zh");
+  expect(h.$(".module-text")?.textContent).toBe("channel-one:zh");
   (
     h.$(".portal-status__actions .bc-button") as HTMLButtonElement | null
   )?.click();
@@ -742,7 +740,7 @@ test("on a phone the overview is the grouped list, and pages get a back link", a
 });
 
 const label = (zh: string, en: string) => ({ zh, en });
-/** A device that joined HomeNet, has one model and a Telegram channel. */
+/** A device that joined HomeNet, has one model and a Alpha channel. */
 const STATUS = {
   entries: {
     wifi: {
@@ -751,16 +749,16 @@ const STATUS = {
       detail: "HomeNet",
     },
     agent: { state: "ready", label: label("已配置", "Configured") },
-    "agent-websearch": { state: "off", label: label("未配置", "Not set up") },
-    "imessage-telegram": {
+    search: { state: "off", label: label("未配置", "Not set up") },
+    "channel-two": {
       state: "ready",
       label: label("已配置", "Configured"),
     },
-    "imessage-wechat": {
+    "channel-three": {
       state: "attention",
       label: label("等待扫码", "Waiting for scan"),
     },
-    "imessage-qq": { state: "off", label: label("未配置", "Not set up") },
+    "channel-one": { state: "off", label: label("未配置", "Not set up") },
   },
 } as const;
 
@@ -805,7 +803,7 @@ test("the status fills the badge, sidebar, header, steps, tiles and channel rows
   ).toEqual([false, false, false]);
   expect(
     steps.map((step) => step.querySelector(".portal-step__done")?.textContent),
-  ).toEqual(["已连接 HomeNet", "模型配置 · 已配置", "Telegram · 已配置"]);
+  ).toEqual(["已连接 HomeNet", "模型配置 · 已配置", "Alpha · 已配置"]);
   expect(
     steps[0].querySelector(".portal-step__done .bc-mono")?.textContent,
   ).toBe("HomeNet");
@@ -918,10 +916,10 @@ test("the status is read with the manifest, on navigation, on focus and when a p
   const moved = h.records.statusReads;
   expect(moved).toBeGreaterThan(reads);
   expect(h.contexts[0].status()).toEqual(STATUS.entries.wifi);
-  expect(h.contexts[0].status("imessage-qq")).toEqual(
-    STATUS.entries["imessage-qq"],
+  expect(h.contexts[0].status("channel-one")).toEqual(
+    STATUS.entries["channel-one"],
   );
-  expect(h.contexts[0].status("imessage-inkbox")).toBeNull();
+  expect(h.contexts[0].status("channel-four")).toBeNull();
   // a page that saved: the sidebar follows without remounting the page
   h.records.status = {
     entries: {
@@ -980,7 +978,7 @@ test("step 03 depends only on the channels that report a status", async () => {
     status: {
       entries: {
         wifi: STATUS.entries.wifi,
-        "imessage-telegram": {
+        "channel-two": {
           state: "off",
           label: label("未配置", "Not set up"),
         },

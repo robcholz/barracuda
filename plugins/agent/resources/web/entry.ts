@@ -3,8 +3,6 @@ import {
   ICON_BRAIN,
   ICON_FOLD_VERTICAL,
   ICON_NETWORK,
-  MARK_ANTHROPIC,
-  MARK_OPENAI,
   callDevice,
   definePage,
   entryStatus,
@@ -15,6 +13,7 @@ import {
   settingsForm,
   type Text,
 } from "../../../captive-portal/resources/web/ui";
+import { MARK_ANTHROPIC, MARK_OPENAI } from "./marks";
 
 type Purpose = "root_agent" | "sub_agent" | "memory" | "compaction";
 

@@ -65,8 +65,7 @@ Text and DOM (`dom.ts`)
   `icons.ts`), 16px by default, 18px on phone rows; `className` adds classes such as a
   text colour (`bc-muted`, `bc-warning`).
 - `mark(MARK_*, size?)`: a design mark from `marks.ts` — `MARK_BARE`, `MARK_TILE`
-  (chat avatar), `MARK_OPENAI`, `MARK_ANTHROPIC`, `MARK_TELEGRAM`, `MARK_WECHAT`,
-  `MARK_QQ`, `MARK_BLUEBUBBLES`.
+  (chat avatar), or a brand mark a page keeps in its own sources.
 - `assetIcon(url, size?)`: an icon file; `.svg` is drawn as a `currentColor` mask,
   anything else as an image. Use `new URL("./icon.svg", import.meta.url).href` for
   the page's own icon.
