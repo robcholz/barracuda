@@ -1,15 +1,35 @@
 # IMessage Gateway Plugin
 
+The IMessage Gateway Plugin routes messages between channel Plugins and
+Workflow, and owns what every channel Plugin shares: mode, owners, receive
+loops and slots, their HTTP routes and status, and HTTP helpers.
+
 - Plugin ID: `imessage-gateway`
-- Direct dependency: `workflow`
-- Provided capability: `IMessageGateway`
-- Required capabilities: `WorkflowService`, `WorkflowActionRegistry`
-- Workflow Actions: `gateway.send`, `gateway.send_stream`, `gateway.send_media`
-- Workflow Events: `gateway.message.received`, `gateway.control.received`,
-  `gateway.send_stream.finished`, `gateway.send_media.finished`
+- Dependencies: `workflow`, `http`, `webserver`
+- Settings: `receive-slots` (`usize`, default `1`): connections reserved for
+  channel receive loops, each with its own statically allocated socket
+  buffers
+- Context resources: `ip_stack`, `entropy`
+- Provided capabilities: `IMessageGateway`
+- Required capabilities: `WorkflowService` from `workflow`,
+  `WorkflowActionRegistry` from `workflow`, `ClientFactory` from `http`,
+  `WebServer` from `webserver`
+- Workflow: Actions `gateway.send`, `gateway.send_stream`,
+  `gateway.send_media`, see `action.md`; Events `gateway.message.received`,
+  `gateway.control.received`, `gateway.send_stream.finished`,
+  `gateway.send_media.finished`, see `event.md`
 - Agent Tools: none
-- Owned tasks: four text stream workers and four media workers
-- Storage: none
+- Lua packages: none
+- Web: none of its own; `IMessageGateway::serve_channel` mounts a channel
+  Plugin's prefix route on the `WebServer` for that Plugin
+- Tasks: four text stream workers (`gateway_event_worker`, pool size 4) and
+  four media workers (`gateway_media_worker`, pool size 4)
+- Storage: none of its own; `load_mode`, `store_mode`, and `load_owners`
+  read and write the `mode` and `owners` keys in the calling channel
+  Plugin's storage
+
+The Plugin keeps its Workflow Action registrations alive for its lifetime.
+Pairing codes for channel owner books come from the Platform's entropy.
 
 `IMessageGateway` is the shared typed API. Provider Plugins register channels
 and publish inbound messages through it; Workflow Actions and the separate
@@ -52,24 +72,20 @@ Event are queued or running, and at once when no Workflow listens. It is
 cancellation-safe. Receive loops await it before fetching each batch, so a burst
 waits upstream instead of in RAM.
 
-## Channel plumbing crates
+## Channel services
 
-Two library crates hold what every external channel Plugin (Telegram, WeChat,
-QQ, BlueBubbles, Inkbox) shares. They are not part of this Plugin's
-capability: the base Gateway does not depend on the webserver or the captive
-portal, and only channel Plugins, which already do, use them.
+The `owners` and `channel` modules of this Plugin's crate hold what every
+external channel Plugin (Telegram, WeChat, QQ, BlueBubbles, Inkbox) shares. A
+channel Plugin reaches them through the `IMessageGateway` capability and the
+types the crate exports. The Gateway does not depend on the captive portal; a
+channel Plugin maps `ChannelStatus` to its own portal card.
 
-### `barracuda-imessage-gateway-owners` (`crates/owners`)
+### Owners
 
 Owner book per channel: at most `MAX_OWNERS` (8) senders may command the
 device; everyone else is dropped and counted.
 
 ```rust
-pub struct PairingEntropy;                     // type-erased Platform Entropy
-impl PairingEntropy {
-    pub fn new<E: barracuda_platform::Entropy>(entropy: E) -> Self;
-    pub fn unavailable() -> Self;
-}
 pub struct Owner;                              // {"id":"…","label":"…"|null}
 impl Owner {
     pub fn new(id: &str, label: Option<&str>) -> Option<Self>; // id 1..=128 bytes
@@ -78,8 +94,11 @@ impl Owner {
 }
 pub enum Classification { Owner, Paired, Ignored }
 pub struct Owners<Storage>;                    // persisted under key "owners"
+impl IMessageGateway {
+    // codes come from the Platform entropy the Gateway holds
+    pub async fn load_owners<S: PluginStorage>(&self, storage: S) -> Result<Owners<S>, OwnersError>;
+}
 impl<Storage: PluginStorage> Owners<Storage> {
-    pub async fn load(storage: Storage, entropy: PairingEntropy) -> Result<Self, OwnersError>;
     pub async fn classify(&self, sender: &str, label: Option<&str>, text: &str) -> Classification;
     pub fn is_owner(&self, id: &str) -> bool;
     pub fn count(&self) -> usize;
@@ -108,9 +127,7 @@ pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You
   only.
 - `OwnerBook` is the same logic without storage, taking the time explicitly.
 
-### `barracuda-imessage-gateway-channel` (`crates/channel`)
-
-It re-exports the owners crate (as `owners`, plus its main types).
+### Channel
 
 **Mode.**
 
@@ -124,10 +141,12 @@ impl ChannelMode {
     pub const fn registers(self) -> bool;    // not Disabled
     pub const fn receives(self) -> bool;     // SendReceive
 }
-pub async fn load_mode<S: PluginStorage>(storage: &S, configured: bool, legacy: ChannelMode)
-    -> Result<ChannelMode, StorageError>;
-pub async fn store_mode<S: PluginStorage>(storage: &S, mode: ChannelMode)
-    -> Result<(), StorageError>;
+impl IMessageGateway {
+    pub async fn load_mode<S: PluginStorage>(&self, storage: &S, configured: bool,
+        legacy: ChannelMode) -> Result<ChannelMode, StorageError>;
+    pub async fn store_mode<S: PluginStorage>(&self, storage: &S, mode: ChannelMode)
+        -> Result<(), StorageError>;
+}
 ```
 
 The mode is stored under its own key, `mode`, as a JSON string. When no mode is
@@ -169,8 +188,12 @@ impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
 }
 pub struct ReceiveTiming { initial_backoff, max_backoff, slot_retry }
 // ReceiveTiming::DEVICE = 1 s, 30 s, 5 s
-pub fn receive_runtime<Slots, Channel>(control: Rc<ReceiveControl<Slots>>,
-    channel: Rc<Channel>, timing: ReceiveTiming) -> ReceiveRuntime;
+impl IMessageGateway {
+    pub fn receive_control(&self) -> ReceiveControl<ReceiveSlots>;      // the Gateway's slots
+    pub fn webhook_receive_control(&self) -> ReceiveControl<UnlimitedSlots>;
+    pub fn receive_runtime<Slots, Channel>(&self, control: Rc<ReceiveControl<Slots>>,
+        channel: Rc<Channel>, timing: ReceiveTiming) -> ReceiveRuntime;
+}
 pub struct OnDemand<T>;                      // Box<T> loaded by the first session
 impl<T> OnDemand<T> {
     pub const fn new() -> Self;
@@ -202,8 +225,9 @@ impl<T> OnDemand<T> {
 - Dropping the runtime, as task cancellation does, drops the session and the
   lease, reports `idle`, and stops the control from taking slots.
 
-The System's receive slot pool reaches a channel through a small
-`ReceiveSlotSource` adapter in the channel Plugin.
+The Gateway's receive slots (`http_client::ReceiveSlots`, as many as the
+`receive-slots` setting) implement `ReceiveSlotSource`, so a channel takes its
+control from `IMessageGateway::receive_control`.
 
 **HTTP surface.** The channel implements:
 
@@ -219,18 +243,20 @@ pub trait ChannelControl: 'static {
     fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
     fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `webhook`
 }
-pub fn sync_receive<C: ChannelControl + ?Sized>(channel: &C) -> Result<(), NoSlot>;
-pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse;
-pub struct ChannelEndpoint<C, Config>; // ChannelEndpoint::new(Rc<C>, base, config): HttpEndpoint
-pub struct ModeEndpoint<C>;   // ModeEndpoint::new(Rc<C>): HttpEndpoint
-pub struct OwnersEndpoint<C>; // OwnersEndpoint::new(Rc<C>): HttpEndpoint
+impl IMessageGateway {
+    pub fn sync_receive<C: ChannelControl + ?Sized>(&self, channel: &C) -> Result<(), NoSlot>;
+    pub fn serve_channel<C: ChannelControl, Config: HttpEndpoint>(&self, base: &'static str,
+        channel: Rc<C>, config: Config) -> Result<WebRouteRegistration, WebServerError>;
+    pub fn channel_status<C: ChannelControl + ?Sized>(&self, channel: &C) -> ChannelStatus;
+}
 ```
 
-A channel registers one prefix route for its configuration path,
-`serve_http_prefix(base, ChannelEndpoint::new(channel, base, config))`:
+A channel registers one prefix route for its configuration path with
+`serve_channel(base, channel, config)`, which the Gateway mounts on the
+`WebServer` with `serve_http_prefix`:
 `base` goes to the Plugin's own `config` endpoint, which takes changes only;
-`GET base/status` answers `status_response` (405 for other methods);
-`base/mode` goes to `ModeEndpoint`, `base/owners` to `OwnersEndpoint`, and any
+`GET base/status` answers the channel status (405 for other methods);
+`base/mode` takes mode changes, `base/owners` the owner book, and any
 other path below
 `base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
 `/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
@@ -268,9 +294,9 @@ allocation.
   - 404 `{"error":"not_found"}` for another path below the channel's;
   - 405 `{"error":"method_not_allowed"}` for other methods.
 
-**Portal status.** `entry_status(&channel)` (or
-`channel_entry_status(configured, mode, &state)`) gives the
-`barracuda_captive_portal_plugin::EntryStatus`:
+**Portal status.** `IMessageGateway::channel_status(&channel)` gives a
+`ChannelStatus { level, zh, en }`; the channel Plugin maps `level`
+(`ChannelLevel::Off`, `Ready`, `Attention`) to its portal card's `EntryStatus`:
 
 | Channel | Status |
 | --- | --- |
@@ -291,22 +317,19 @@ portal. Its tests are in `resources/web/tests/`.
 
 ## How a channel plugs in
 
-1. **Dependencies.** Depend on `barracuda-imessage-gateway-channel` (path
-   `../../../imessage-gateway/crates/channel`) and on
-   `barracuda-platform` for `Entropy`.
-2. **Constructor.** Take the Platform entropy and the receive slots:
-   `new(context, entropy: impl barracuda_platform::Entropy)`, keep
-   `PairingEntropy::new(entropy)`, and wrap the receive pool from
-   `PluginContext` in a `ReceiveSlotSource` adapter. BlueBubbles, which
-   receives by webhook, uses `UnlimitedSlots`. The System must pass
-   `prepared.entropy.clone()` to the constructor: add the Plugin to the
-   entropy case in `tools/plugin-tool` and regenerate.
+1. **Dependencies.** List `imessage-gateway` in `depends-on` and depend on
+   `barracuda-imessage-gateway-plugin`.
+2. **Constructor.** The channel takes nothing from `PluginContext`; the
+   Gateway holds the entropy for pairing codes and the receive slots.
+   `require::<IMessageGateway>("imessage-gateway")` in `register`. Take the
+   control from `gateway.receive_control()`; BlueBubbles, which receives by
+   webhook, takes `gateway.webhook_receive_control()` (`UnlimitedSlots`).
 3. **State.** In `register`:
    - load the configuration;
-   - `load_mode(storage, configured, ChannelMode::legacy())` (WeChat:
-     `ChannelMode::SendReceive`);
+   - `gateway.load_mode(&storage, configured, ChannelMode::legacy())`
+     (WeChat: `ChannelMode::SendReceive`);
    - keep the owner book in an `OnDemand<Owners<_>>`, loaded with
-     `Owners::load(storage.clone(), entropy)` only when the channel is
+     `gateway.load_owners(storage.clone())` only when the channel is
      configured, here or before a configuration is stored;
    - keep cursors and other receive bookkeeping in an `OnDemand` the first
      session loads, so an unconfigured channel holds and reads none of it;
@@ -315,16 +338,16 @@ portal. Its tests are in `resources/web/tests/`.
    - put all of this in one channel-state type that implements
      `ChannelControl`. WeChat overrides `modes()` with
      `ChannelMode::WITHOUT_SEND_ONLY`.
-4. **`apply_mode`.** Call `store_mode`, then add or drop the Gateway
+4. **`apply_mode`.** Call `gateway.store_mode`, then add or drop the Gateway
    registration so that one exists exactly when the channel is configured and
    `mode.registers()`, then update `mode()`. Map failures to
    `ModeError::Storage` or `ModeError::Registration`.
 5. **Receiver.** Implement `ReceiveChannel<Lease>`. Each session loops:
    1. await `IMessageGateway::ready()`;
    2. fetch one batch over the lease. A polling channel uses
-      `barracuda_imessage_gateway_plugin::poll` over `lease.client_factory()`
+      `GatewayHttp::poll` (from `gateway.http()`) over the lease
       (one kept-alive connection; `GET` or `POST`, a per-request deadline, a
-      body cap with an optional tail): only the Gateway's HTTP crate and
+      body cap with an optional tail): only the Gateway's `http` module and
       `shared/http-client` may use reqwless (`workspace_boundary`);
    3. call `session.receiving()`;
    4. for each new message (deduplicated), call
@@ -338,18 +361,18 @@ portal. Its tests are in `resources/web/tests/`.
    ones it cannot (WeChat `-14`: 「需要重新扫码」), and `.retry_after(..)` for
    429s.
 6. **Runtime.** Build
-   `receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`, then
-   call `sync_receive(&*state)`; a `NoSlot` there is already reported as
-   state. Keep the runtime for `start`.
+   `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`,
+   then call `gateway.sync_receive(&*state)`; a `NoSlot` there is already
+   reported as state. Keep the runtime for `start`.
 7. **Endpoints.**
-   - The configuration endpoint takes `POST` only; `ChannelEndpoint` answers
+   - The configuration endpoint takes `POST` only; the Gateway answers
      `GET /status`.
    - After a successful configuration `POST`, it calls `sync_receive` and
      `control.restart()`.
    - Register the configuration endpoint, `/mode`, and `/owners` as one
-     prefix route:
-     `serve_http_prefix(CONFIG_API_PATH, ChannelEndpoint::new(state, CONFIG_API_PATH, config))`.
-8. **Portal.** `register_with_status(.., move || entry_status(&*state))`. The
+     prefix route: `gateway.serve_channel(CONFIG_API_PATH, state, config)`.
+8. **Portal.** `register_with_status(.., move || entry_status(gateway.channel_status(&*state)))`,
+   where the channel's `entry_status` maps `ChannelStatus` to `EntryStatus`. The
    page imports the channel page kit and lists
    `../imessage-gateway/resources/web/channel` in its build `inputs`.
 9. **Task.** In `start`, spawn one task that owns the runtime:

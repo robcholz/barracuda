@@ -1,12 +1,25 @@
 # Agent File Plugin
 
+Exposes the Plugin filesystem to Agents as bounded native file Tools.
+
 - Plugin ID: `agent-file`
-- Direct Plugin dependencies: `agent`
-- Provided typed capabilities: none
-- Required typed capabilities: `AgentToolRegistry`
-- Agent Tools: `file_read`, `file_list`, `file_write`, `file_edit`, `file_move`, `file_delete`
-- Owned tasks: none
-- Filesystem: required; Plugin-private mounts and shared Workspace mounts
+- Dependencies: `agent`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`
+- Workflow: none
+- Agent Tools: `file_read`, `file_list`, `file_write`, `file_edit`, `file_move`,
+  `file_delete`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: no KV keys; the Tools read and write caller-supplied paths in the
+  Plugin's `ScopedVfs` (`/resources`, `/data`, `/cache`, `/media`,
+  `/workspace/resources`, `/workspace/cache`, `/workspace/media`)
+
+The Plugin requires a private filesystem (`PluginFilesystem::Private`), which
+gives it the Plugin-private mounts and the shared Workspace mounts.
 
 The Plugin declares filesystem access and receives its ordinary `ScopedVfs`
 from `PluginRegisterContext`. During registration it gives that same scope to

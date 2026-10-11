@@ -1,10 +1,21 @@
 # Scheduler Plugin
 
+The Scheduler Plugin owns persistent schedules and emits a Workflow Event when
+one becomes due.
+
 - Plugin ID: `scheduler`
-- Depends on: `time`, `workflow`
-- Provided capability: `Scheduler`
+- Dependencies: `time`, `workflow`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `Scheduler`
+- Required capabilities: `UtcClock` from `time`, `WorkflowService` from
+  `workflow`
+- Workflow: Events `scheduler.triggered`, see `event.md`
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: one cancellable due-occurrence loop (`scheduler_task`, pool size 1)
 - Storage: Plugin-scoped KV records keyed by schedule ID
-- Background tasks: one cancellable due-occurrence loop
 
 The Scheduler Plugin owns schedule state, persistence, timing, and
 `scheduler.triggered` Workflow Event emission. It publishes typed `schedule`

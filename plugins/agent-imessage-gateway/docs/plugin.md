@@ -1,14 +1,30 @@
 # Agent IMessage Gateway Plugin
 
-`agent-imessage-gateway` depends on `agent`, `imessage-gateway`, `time`, and
-`workflow`. It requires `AgentToolRegistry` and `AgentRuntime` from `agent`,
-`IMessageGateway` from `imessage-gateway`, `UtcClock` from `time`, and
-`WorkflowActionRegistry` and `WorkflowService` from `workflow`. During Plugin
-registration it adds
-the awaited `gateway_send` and `gateway_send_media` Tools to
-`AgentToolRegistry` and registers `imessage_bridge.to_agent`,
-`imessage_bridge.to_gateway` and `imessage_bridge.session` in
-`WorkflowActionRegistry`.
+Exposes iMessage Agent Tools, the Workflow Actions that bridge Gateway
+conversations to Agent sessions, and session commands.
+
+- Plugin ID: `agent-imessage-gateway`
+- Dependencies: `agent`, `imessage-gateway`, `time`, `workflow`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `AgentRuntime` from
+  `agent`, `IMessageGateway` from `imessage-gateway`, `UtcClock` from `time`,
+  `WorkflowActionRegistry` from `workflow`, `WorkflowService` from `workflow`
+- Workflow: Actions `imessage_bridge.to_agent`, `imessage_bridge.to_gateway`,
+  `imessage_bridge.session`, see `action.md`
+- Agent Tools: `gateway_send`, `gateway_send_media`
+- Lua packages: none
+- Web: none
+- Tasks: one Workflow-loading task (pool size 1), spawned from `start`, which
+  ends once the bundled Workflows are loaded
+- Storage: Plugin-scoped KV entries keyed by Agent session ID, each holding
+  the saved Gateway route of that session; reads `/resources/workflows.json`
+
+During registration the Plugin adds the awaited `gateway_send` and
+`gateway_send_media` Tools to `AgentToolRegistry` and registers the three
+Actions in `WorkflowActionRegistry`, retaining their registration guards for
+the Plugin lifetime.
 
 ## Sessions per conversation
 

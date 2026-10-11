@@ -1,11 +1,24 @@
 # Captive Portal Plugin
 
+Aggregates pluggable web entries and resource providers into the portal shell.
+
 - Plugin ID: `captive-portal`
-- Direct Plugin dependencies: `webserver`
-- Provided typed capabilities: `CaptivePortal` (with `WebEntry`, `EntryStatus`
-  and the `EntryStatusSource` trait in its registration API)
-- Required typed capabilities: `WebServer`
-- Workflow Actions, Events, and Agent Tools: none
+- Dependencies: `webserver`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `CaptivePortal` (with `WebEntry`, `EntryStatus` and
+  the `EntryStatusSource` trait in its registration API)
+- Required capabilities: `WebServer` from `webserver`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: no portal entry of its own; the `GET /portal/*` subtree
+  (`GET /portal/`, `GET /portal/entries.json`, `GET /portal/status`,
+  `GET /portal/assets/<id>/<path>`, `GET /portal/<path>`)
+- Tasks: none
+- Storage: no KV keys; reads its bundled `/resources/index.html`,
+  `/resources/app.js`, `/resources/app.css` and other `/resources/<path>`
+  files
 
 This plugin owns web entry aggregation and the portal scaffold resource entry.
 It registers one GET subtree, `/portal/*`, with WebServer. It owns no additional
