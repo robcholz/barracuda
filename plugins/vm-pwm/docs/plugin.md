@@ -1,9 +1,19 @@
 # PWM Plugin
 
+Installs the `pwm` Lua package over the Board's exposed I/O pins.
+
 - Plugin ID: `pwm`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `pwm`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin shares the Board's unified exposed-I/O owner and installs the
 `pwm` Lua package. The returned output implements

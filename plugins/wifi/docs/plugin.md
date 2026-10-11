@@ -1,21 +1,32 @@
 # Wi-Fi Plugin
 
+Owns Wi-Fi policy: station and setup access-point lifecycle, persisted station
+credentials, and the provisioning page and API.
+
 - Plugin ID: `wifi`
-- Direct Plugin dependencies: `webserver`, `captive-portal`
-- Required typed capabilities: `barracuda_webserver_plugin::WebServer` from
-  `webserver`, `barracuda_captive_portal_plugin::CaptivePortal` from
-  `captive-portal`
-- Provided typed capability: `barracuda_wifi_plugin::WifiControl`
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `wifi` (`take()` of the selected Platform's `WifiDevice`), `ip_stack`
+  (the access-point stack when no radio is present)
+- Provided capabilities: `WifiControl`
+- Required capabilities: `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none
 - Agent Tools: none
-- System resource: the selected Platform's concrete
-  `barracuda_platform::WifiDevice`
-- Owned long-running tasks: one station/AP policy task, one DHCP server task,
-  and one captive DNS task
-- Retained registrations: the Wi-Fi Portal entry, Wi-Fi HTTP routes, captive
-  detection routes, and the AP-side WebServer listener
-- Storage: station credentials under the Plugin-scoped KV key `station`
+- Lua packages: none
+- Web: portal entry `wifi`, with status; `GET /api/wifi/status`,
+  `GET /api/wifi/scan`, `PUT /api/wifi`, `DELETE /api/wifi`; the captive-detection
+  paths `/`, `/generate_204`, `/gen_204`, `/hotspot-detect.html`,
+  `/library/test/success.html`, `/ncsi.txt`, `/connecttest.txt` and `/fwlink`,
+  answered with `CaptivePortal::landing()`; and, when the radio supports an
+  access point, a WebServer listener on the access-point stack's port 80
+- Tasks: when the Platform supports station configuration, three tasks in the
+  `run_wifi_runtime` pool (size 3): the station/AP policy task, the DHCP server
+  task, and the captive DNS task
+- Storage: station credentials under the Plugin-scoped KV key `station`; the portal
+  files `/resources/entry.js`, `/resources/figure.js` and `/resources/icon.svg`
+
+The Plugin declares a private filesystem, from which its portal entry serves
+those bundled files.
 
 Dependent Plugins can require `WifiControl` from `wifi` to inspect support and
 state, scan networks, start or stop the access point, configure a persisted

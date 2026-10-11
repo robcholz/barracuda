@@ -1,9 +1,19 @@
 # LED Strip Plugin
 
+Installs the `led_strip` Lua package over the Board's primary built-in LED strip.
+
 - Plugin ID: `led-strip`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_led_strip()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `led_strip`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary built-in `LedStrip` capability exactly
 once and installs the `led_strip` Lua package. It consumes the semantic peripheral

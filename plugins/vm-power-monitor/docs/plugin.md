@@ -1,13 +1,20 @@
 # Power Monitor Plugin
 
+Installs the `power_monitor` Lua package over the Board's primary attached
+power monitor.
+
 - Plugin ID: `power-monitor`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_power_monitor()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
 - Agent Tools: none
-- Owned long-running tasks: none
+- Lua packages: `power_monitor`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary attached `PowerMonitor` capability
 exactly once and installs the `power_monitor` Lua package. I2C ownership, chip
