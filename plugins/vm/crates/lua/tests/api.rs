@@ -1,6 +1,6 @@
 use barracuda_lua::{
-    Environment, Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Package, Result, Table,
-    UserData, UserDataHandle, UserDataMethods, Variadic,
+    Environment, Error, ErrorKind, Function, Lua, LuaReturn, LuaValue, MetaMethod, Package, Result,
+    Table, UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 
 #[test]
@@ -1417,5 +1417,46 @@ fn execution_rejects_async_values_owned_by_another_vm() -> Result<()> {
     let error = futures_lite::future::block_on(lua.load("return foreign_table()").exec_async())
         .unwrap_err();
     assert!(error.message().contains("different state"));
+    Ok(())
+}
+
+#[test]
+fn lua_value_converts_every_plain_type_both_ways() -> Result<()> {
+    let mut lua = Lua::new()?;
+    lua.register("describe", |values: Variadic<LuaValue>| {
+        let kinds: Vec<String> = values
+            .iter()
+            .map(|value| {
+                match value {
+                    LuaValue::Nil => "nil",
+                    LuaValue::Boolean(_) => "boolean",
+                    LuaValue::Integer(_) => "integer",
+                    LuaValue::Number(_) => "number",
+                    LuaValue::String(_) => "string",
+                    LuaValue::Table(_) => "table",
+                }
+                .into()
+            })
+            .collect();
+        Some(Ok(kinds.join(",")))
+    })?;
+    lua.register("echo", |values: Variadic<LuaValue>| Some(Ok(values)))?;
+    let kinds: String = lua
+        .load("return describe(nil, true, 3, 1.5, 'x', {})")
+        .eval()?;
+    assert_eq!(kinds, "nil,boolean,integer,number,string,table");
+    let echoed: bool = lua
+        .load(
+            "local t = {} \
+             local a, b, c, d, e = echo(false, 7, 2.5, 'y', t) \
+             return a == false and math.type(b) == 'integer' and b == 7 \
+                and math.type(c) == 'float' and c == 2.5 and d == 'y' and e == t",
+        )
+        .eval()?;
+    assert!(echoed);
+    let rejected = lua
+        .load("return describe(print or function() end)")
+        .eval::<String>();
+    assert!(rejected.is_err());
     Ok(())
 }

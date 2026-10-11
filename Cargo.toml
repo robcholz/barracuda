@@ -74,6 +74,7 @@ barracuda-agent-time-plugin = { path = "plugins/agent-time/crates/plugin" }
 barracuda-agent-vm-plugin = { path = "plugins/agent-vm/crates/plugin" }
 barracuda-agent-websearch-plugin = { path = "plugins/agent-websearch/crates/plugin" }
 barracuda-agent-workflow-plugin = { path = "plugins/agent-workflow/crates/plugin" }
+barracuda-app-manager-plugin = { path = "plugins/app-manager/crates/plugin" }
 barracuda-captive-portal-plugin = { path = "plugins/captive-portal/crates/plugin" }
 barracuda-http-plugin = { path = "plugins/http/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "plugins/imessage-bluebubble/crates/plugin" }
@@ -85,6 +86,7 @@ barracuda-imessage-web-plugin = { path = "plugins/imessage-web/crates/plugin" }
 barracuda-imessage-wechat-plugin = { path = "plugins/imessage-wechat/crates/plugin" }
 barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
+barracuda-ui-plugin = { path = "plugins/ui/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-analog-plugin = { path = "plugins/vm-analog/crates/plugin" }

@@ -17,10 +17,12 @@ use barracuda_plugin::manager::{
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
-    Context, Error, Function, Lua, MetaMethod, Package, Result, Table, UserData, UserDataHandle,
-    UserDataMethods,
+    Context, Error, Function, Lua, LuaValue, MetaMethod, Package, Result, Table, UserData,
+    UserDataHandle, UserDataMethods, Variadic,
 };
-pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
+pub use barracuda_vm_package_api::{
+    LuaPackage, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError,
+};
 pub use barracuda_vm_runtime::{
     Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,
     VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,

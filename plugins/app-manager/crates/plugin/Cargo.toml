@@ -1,0 +1,37 @@
+[package]
+name = "barracuda-app-manager-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin that lists, launches, and supervises apps"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-plugin.workspace = true
+barracuda-ui-plugin.workspace = true
+barracuda-vfs.workspace = true
+barracuda-vm-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+barracuda-vfs-memfs.workspace = true
+critical-section = { version = "1", features = ["std"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

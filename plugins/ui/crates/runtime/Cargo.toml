@@ -1,0 +1,40 @@
+[package]
+name = "barracuda-ui-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Runs compiled MicroTS views (BVIR) on the vendored PocketJS core"
+license = "Apache-2.0"
+
+[dependencies]
+microts = { path = "../microts" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
+serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
+
+# Targets without atomic CAS (ESP32-C3) emulate MicroTS's atomics with critical sections.
+[target.'cfg(not(target_has_atomic = "32"))'.dependencies]
+microts = { path = "../microts", features = ["critical-section"] }
+
+[features]
+default = []
+# Host-side linking of MicroTS View IR JSON into a `Program`.
+compiler = ["dep:serde", "dep:serde_json"]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[[bin]]
+name = "ui-link"
+required-features = ["compiler"]
+
+[[test]]
+name = "link"
+required-features = ["compiler"]

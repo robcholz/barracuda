@@ -1,0 +1,3 @@
+id = "ui"
+depends-on = ["vm"]
+description = "Runs compiled MicroTS views for apps and exposes them to Lua as the ui package."
