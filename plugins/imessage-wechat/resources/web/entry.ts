@@ -4,7 +4,6 @@ import {
   ICON_REFRESH,
   button,
   callDevice,
-  channelInbound,
   copyText,
   definePage,
   h,
@@ -19,6 +18,7 @@ import {
   toastDeviceError,
   type Text,
 } from "../../../captive-portal/resources/web/ui";
+import { channelInbound } from "../../../imessage-gateway/resources/web/channel";
 
 const T = {
   zh: {
@@ -157,12 +157,15 @@ export const mount = definePage((context) => {
         render();
         void context.refreshStatus();
       },
-      success: {
-        action: {
-          label: t.tryChat,
-          run: () => context.navigate("imessage-web"),
-        },
-      },
+      // Web chat is another plugin: offer the way there only while its entry is listed
+      success: context.has("imessage-web")
+        ? {
+            action: {
+              label: t.tryChat,
+              run: () => context.navigate("imessage-web"),
+            },
+          }
+        : undefined,
     },
     context,
   );

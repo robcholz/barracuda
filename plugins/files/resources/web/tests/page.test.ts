@@ -82,6 +82,7 @@ async function render() {
     lang: "zh",
     toast: (toast) => toasts.push(toast),
     navigate: () => {},
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {},
   };

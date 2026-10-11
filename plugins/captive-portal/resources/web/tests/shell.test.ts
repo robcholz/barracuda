@@ -391,6 +391,24 @@ test("an unknown or vanished entry shows the unavailable state, and comes back",
   )?.click();
 });
 
+test("has says whether the manifest lists an entry now, and follows a manifest refresh", async () => {
+  const h = await start({ hash: "#wifi" });
+  const [context] = h.contexts;
+  expect(context.has("wifi")).toBe(true);
+  expect(context.has("agent")).toBe(true);
+  expect(context.has("nope")).toBe(false);
+  expect(context.has("overview")).toBe(false);
+  // the plugin behind an entry was disabled: the open page learns it without a remount
+  h.records.value = NINE.filter((entry) => entry.id !== "agent");
+  await h.portal.refresh();
+  expect(h.contexts).toHaveLength(1);
+  expect(context.has("agent")).toBe(false);
+  expect(context.has("wifi")).toBe(true);
+  h.records.value = NINE;
+  await h.portal.refresh();
+  expect(context.has("agent")).toBe(true);
+});
+
 test("a manifest refresh that keeps the entry does not remount it", async () => {
   const h = await start({ hash: "#wifi" });
   h.records.value = NINE.map((entry) =>

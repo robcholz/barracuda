@@ -1,11 +1,22 @@
-import type { Lang, PortalContext } from "../src/contract";
+import {
+  ICON_REFRESH,
+  ICON_TRIANGLE_ALERT,
+  badge,
+  button,
+  callDevice,
+  fitColumns,
+  h,
+  icon,
+  pick,
+  row,
+  term,
+  toastDeviceError,
+  type Lang,
+  type PortalContext,
+  type SettingsForm,
+  type Text,
+} from "../../../../captive-portal/resources/web/ui";
 import type { ChannelState } from "./channel";
-import { callDevice, toastDeviceError } from "./device";
-import { h, icon, pick, type Text } from "./dom";
-import { fitColumns } from "./grid";
-import { ICON_REFRESH, ICON_TRIANGLE_ALERT } from "./icons";
-import { badge, button, row, term } from "./layout";
-import type { SettingsForm } from "./settings";
 
 /**
  * The inbound side of an external channel (the design's `mode` and `owners` blocks): how the device

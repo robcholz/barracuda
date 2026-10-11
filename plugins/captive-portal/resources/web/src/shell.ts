@@ -142,10 +142,7 @@ export class Portal {
     this.toaster = new Toaster(() => STRINGS[this.lang].close, options.toastMs);
 
     defineFigureElement(this.win);
-    setFigureSource(
-      (name) => this.entries.find((entry) => entry.id === name)?.figure ?? null,
-      options.load,
-    );
+    setFigureSource((name) => this.entry(name)?.figure ?? null, options.load);
 
     this.sidebar = h("nav", { class: "bc-sidebar" });
     this.desktopBar = h("header", {
@@ -834,6 +831,7 @@ export class Portal {
           lang: this.lang,
           toast: (toast) => this.toast(toast),
           navigate: (id) => this.go(id),
+          has: (id) => !!this.entry(id),
           status: this.statusOf,
           refreshStatus: () => this.refreshStatus(),
           badge: (badge) => {

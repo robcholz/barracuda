@@ -165,7 +165,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) posts
 `{server_url, password, use_private_api, stream_edit_min_delta_bytes,
 stream_max_edits}` to `POST /api/gateway/bluebubbles`. Its 「测试连接」 button calls
 the server's `GET /api/v1/server/info?password=…` straight from the browser: the

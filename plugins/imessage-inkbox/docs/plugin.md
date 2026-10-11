@@ -134,7 +134,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) offers
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) offers
 two methods. 「用邮箱新建」 posts the email to `POST /api/gateway/inkbox/signup`, then
 the emailed 6-digit code to `/verify` (「重新发送」 calls `/resend`; a cooldown is
 shown beside it) and shows the claimed identity's address; Inkbox's own messages

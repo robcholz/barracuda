@@ -245,7 +245,7 @@ export function mount(root: HTMLElement, context: PortalContext) {
 }
 ```
 
-The context is `{ signal, lang, toast, navigate, status, refreshStatus, badge? }`:
+The context is `{ signal, lang, toast, navigate, has, status, refreshStatus, badge? }`:
 
 - `signal` is aborted on navigation, language change, unload, or page exit;
 - `lang` (`"zh"` or `"en"`) is the language the module renders its own strings in;
@@ -254,6 +254,9 @@ The context is `{ signal, lang, toast, navigate, status, refreshStatus, badge? }
   adds to the shell's toast stack (bottom-right; errors stay until closed,
   others close after 4 s);
 - `navigate(id)` goes to another entry, or `"overview"`;
+- `has(id)` says whether the manifest lists an entry with that ID now (a disabled
+  Plugin's entry is absent); a page offers a way to another Plugin's entry only
+  while it answers `true`;
 - `status(id?)` returns the latest `/portal/status` record
   (`{ state, label?, detail? }`) of the page's own entry, or of `id`, or `null`;
 - `refreshStatus()` reads the status again and redraws what shows it; a page

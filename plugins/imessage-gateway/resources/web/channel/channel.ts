@@ -1,9 +1,17 @@
-import type { Lang, PortalContext } from "../src/contract";
-import { resultCard } from "./blocks";
-import { callDevice } from "./device";
-import type { Text } from "./dom";
-import { row } from "./layout";
-import { KIT_STRINGS } from "./strings";
+import {
+  callDevice,
+  resultCard,
+  row,
+  type Lang,
+  type PortalContext,
+  type Text,
+} from "../../../../captive-portal/resources/web/ui";
+
+/** The channel kit's own copy; `inbound.ts` keeps the rows' strings beside them. */
+const STRINGS = {
+  zh: { channel: "通道" },
+  en: { channel: "Channel" },
+} satisfies Record<Lang, unknown>;
 
 /** What `GET <endpoint>/status` answers: whether a channel is stored, never the settings. */
 export interface ChannelState {
@@ -39,8 +47,7 @@ export interface ConfiguredRow {
  * the bare `success` check, placed above the form that replaces it. Hidden until `show(true)`.
  */
 export function configuredRow(name: Text, lang: Lang): ConfiguredRow {
-  const s = KIT_STRINGS[lang];
-  const element = row(s.channel, undefined, lang);
+  const element = row(STRINGS[lang].channel, undefined, lang);
   const body = element.querySelector(".bc-row__body")!;
   // the card exists only while shown, so a hidden row holds no status region
   const show = (visible: boolean) => {

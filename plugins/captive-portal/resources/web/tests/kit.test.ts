@@ -46,6 +46,7 @@ function context(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {},
   };
@@ -53,7 +54,7 @@ function context(lang: "zh" | "en" = "zh") {
 }
 
 const OPTIONS: SettingsFormOptions = {
-  endpoint: "/api/gateway/telegram",
+  endpoint: "/api/example",
   submit: { zh: "保存并替换通道", en: "Save and replace channel" },
   rows: [
     {
@@ -204,8 +205,8 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
       onSuccess: (values) => (accepted = values),
       success: {
         action: {
-          label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
-          run: () => ctx.navigate("imessage-web"),
+          label: { zh: "去看看", en: "Take a look" },
+          run: () => ctx.navigate("other"),
         },
       },
     },
@@ -215,7 +216,7 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
   input(root, "token").value = " secret ";
   respond = async () => new Response(null, { status: 422 });
   expect(await form.submit()).toBe("rejected");
-  expect(calls[0][0]).toBe("/api/gateway/telegram");
+  expect(calls[0][0]).toBe("/api/example");
   expect(calls[0][1].method).toBe("POST");
   expect(calls[0][1].redirect).toBe("error");
   expect((calls[0][1].headers as Record<string, string>)["Content-Type"]).toBe(
@@ -239,7 +240,7 @@ test("submit posts JSON, toasts the outcome and clears secrets once accepted", a
   expect(await form.submit()).toBe("accepted");
   expect(toasts[1].kind).toBe("success");
   expect(toasts[1].title).toBe("设备已接受配置");
-  expect(toasts[1].action?.label).toBe("去 Web 聊天试试");
+  expect(toasts[1].action?.label).toBe("去看看");
   expect(input(root, "token").value).toBe("");
   expect(accepted).toMatchObject({ token: " secret " });
 
@@ -322,7 +323,7 @@ test("header, kv and definePage build the page frame and clean up", async () => 
             zh: "通过 Telegram Bot 收发消息。",
             en: "Send and receive through a bot.",
           },
-          icon: "/portal/assets/imessage-telegram/icon.svg",
+          icon: "/portal/assets/example/icon.svg",
           figure: "riffle",
           figureWidth: 280,
           extra: kv([["状态", "—"]], lang, { live: true }),

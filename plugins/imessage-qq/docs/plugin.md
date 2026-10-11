@@ -163,7 +163,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) binds
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) binds
 by QR code, as the WeChat page does. On mount it reads `GET /api/gateway/qq/login`:
 a configured channel with no session waiting shows the 「绑定」 row with the
 「QQ 已绑定」 card (its App ID in mono) and 「重新绑定」; otherwise the page posts

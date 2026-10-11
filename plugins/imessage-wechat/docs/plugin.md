@@ -164,7 +164,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) starts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) starts
 a QR login on mount (`POST /api/gateway/wechat/login`), draws the returned `url`
 as a QR Code with a countdown from `expires_in`, polls `GET` every 2 s (wait,
 scanned, confirmed, expired or failed) and sends a `keepalive` `DELETE` when it

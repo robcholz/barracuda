@@ -28,12 +28,18 @@ and a `PortalContext`:
 | `lang`            | `"zh"` or `"en"`; render every string in it (a language change remounts the page)          |
 | `toast(toast)`    | the shell's stack, bottom-right: `{ kind, title, body?, code?, action? }`                  |
 | `navigate(id)`    | go to another entry ID, or `"overview"`                                                    |
+| `has(id)`         | whether the manifest lists an entry with that ID now; offer a way to another plugin's page only when it does |
 | `status(id?)`     | the entry's latest `GET /portal/status` record (this page's own by default), or `null`     |
 | `refreshStatus()` | reads the status again and redraws the sidebar and overview; call it after a save succeeds |
 | `badge?(badge)`   | shows the page's live state in the top bar (`{ label, tone: "live" \| "lost" }`), or clears it with `null`; Web chat's connection |
 
 `mount` may return a cleanup function (or a promise of one). After the signal
-aborts, `toast`, `navigate`, `refreshStatus` and `badge` do nothing. Types: `PortalModule`,
+aborts, `toast`, `navigate`, `refreshStatus` and `badge` do nothing.
+
+An entry is listed only while its plugin is enabled, and a page depends on no
+other plugin's page. Before offering to go to another entry (a toast action, a
+button), ask `context.has(id)`, and leave the offer out when it answers `false`;
+`navigate` to an absent entry shows the shell's 「插件已停用」 state. Types: `PortalModule`,
 `PortalContext`, `PageBadge`, `Toast`, `Lang`, `PortalText`, `EntryStatus`, `EntryState` (all
 exported by the kit).
 
@@ -153,78 +159,6 @@ Device calls (`device.ts`), for flows beyond one POST (QR login, signup codes)
   「重试」 when nothing came back. An error with `retry: true` also gets 「重试」 when
   `retry` is given.
 
-Channel state (`channel.ts`)
-
-- `readChannel<T>(context, endpoint)`: `GET <endpoint>/status` for a channel's config path,
-  which answers `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T`
-  adds page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
-  in that shape. It never toasts.
-- `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
-  the result card `name` led by the bare check, hidden until `show(true)`. Put it first in
-  the form; show it when `readChannel` says `configured`, and after a save succeeds:
-
-  ```ts
-  const current = configuredRow("Telegram", lang);
-  form.element.prepend(current.element);
-  void readChannel(context, "/api/gateway/telegram").then((state) => {
-    if (state?.configured) current.show(true);
-  });
-  // settingsForm options: onSuccess: () => { current.show(true); void context.refreshStatus(); }
-  ```
-
-Channel mode and allowed accounts (`inbound.ts`), for the external channel pages
-
-Every channel serves the same JSON under its config path: `GET <endpoint>/status` answers
-`ChannelStatus` (`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`),
-`POST <endpoint>/mode` takes `{mode}`, and `GET`/`POST <endpoint>/owners` answer `OwnersReply`
-(`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take
-`{"remove": id}` or `{"rotate": true}`.
-
-- `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
-  returns `{ rows, alert, attach(form), apply(status), refresh() }`: the two rows below, wired to the
-  device. `onStatus(status)` runs with each state the rows show (WeChat offers 「重新绑定」 when
-  its receive state is the 「需要重新扫码」 error).
-  - `attach(form)` puts them before the form's 「高级」 fold (or its footer).
-  - `alert` is the no-slot caution alert: put it in the page under the header frame, before the form
-    (`page(header(…), inbound.alert, form.element)`).
-  - `apply(status)` shows the state the page's own `readChannel` read; `refresh()` reads it again
-    (call it after a save succeeds). Both rows show only while `configured`.
-  - A mode change reads the channel again, then calls `context.refreshStatus()`. In `send_receive`
-    the channel is read every `pollMs` until the page goes away, so the badge stays live; a
-    change of receive state there refreshes the shell's status too, and a change of `owners.count`
-    reads the list again. A missed read keeps what is shown.
-
-  ```ts
-  const inbound = channelInbound(context, {
-    endpoint: "/api/gateway/telegram",
-    channel: "Telegram",
-    how: { zh: "在 Telegram 里给 Bot 发送", en: "In Telegram, send the bot" },
-    command: (code) => `/start ${code}`,
-  });
-  inbound.attach(form);
-  void readChannel<ChannelStatus>(context, ENDPOINT).then(inbound.apply);
-  // settingsForm options: onSuccess: () => void inbound.refresh()
-  ```
-
-- `modeRow({ endpoint, channel, modes?, onChange? }, context)` returns `{ element, update(status) }`:
-  the 「模式」 row, one radio card per mode in `modes` (default `CHANNEL_MODES`: 停用 / 仅发送 /
-  收发; WeChat passes `["disabled", "send_receive"]`). Under the cards, the state badge: 收发中
-  (signal) for `receiving`, 连接中 for `starting` and `idle`, 等待名额 for `no_slot`, 连接中断 with
-  the device's `message` in mono for `error`, followed by the slots in use (the term 「名额」, saying
-  what sets them, and the count `1/2` in mono); `no_slot` also shows the returned `alert`
-  (「收发名额已满」, `triangle-alert` in `warning`); 仅发送 and 已停用 for the
-  other modes. Choosing posts `{mode}` at once; a 204 or a 409 `no_slot` (the mode is saved) runs
-  `onChange`, any other answer is toasted and the choice goes back.
-- `accountsRow({ endpoint, how, command? }, context)` returns `{ element, load(), hide(), count() }`:
-  the 「授权账号」 row. A card holds the binding code (`.bc-code-display`, `command(code)` when
-  given) under `how`, its countdown (「有效期还剩 m:ss」, counted locally; the list is read again when
-  it ends) and 「换一个绑定码」 (`{"rotate": true}`); `pairing: null` drops that box. Then each account,
-  `label` over its `id` in mono (the `id` alone, in mono, without a label), with 「移除」
-  (`{"remove": id}`, no confirmation), or 「还没有授权账号」. Refusals are toasted; a success reads
-  the list again.
-- Types: `ChannelMode`, `ReceiveState`, `ChannelStatus`, `Owner`, `OwnersReply`, and the options
-  and handles above.
-
 Blocks (`blocks.ts`): the design's form blocks, for a row's `blocks` or anywhere
 
 - `resultCard({ title, badge?, live?, sub?, initial?, rows?, action? }, lang)`: what a check found
@@ -257,7 +191,7 @@ QR Codes (`qr.ts`)
 - `qrSvg(text, px, quiet? = 2)`: an `<svg>` of it; put it directly in a `.bc-qr` plate
   (`qrPlate`), which fills it `foreground` on light, never on a dark surface.
 
-## Example: a channel settings page
+## Example: a settings page
 
 ```ts
 import {
@@ -271,16 +205,16 @@ export const mount = definePage((context) => {
   const { lang } = context;
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/telegram",
-      submit: { zh: "保存并替换通道", en: "Save and replace channel" },
+      endpoint: "/api/example",
+      submit: { zh: "保存", en: "Save" },
       rows: [
         {
-          title: { zh: "机器人", en: "Bot" },
+          title: { zh: "服务", en: "Service" },
           hint: {
-            zh: "在 `@BotFather` 发送 `/newbot` 获得 Token",
-            en: "Send `/newbot` to `@BotFather` to get a token",
+            zh: "在服务的控制台创建 `API Key`",
+            en: "Create an `API Key` in the service's console",
           },
-          fields: [{ kind: "secret", name: "token", label: "Bot Token" }],
+          fields: [{ kind: "secret", name: "api_key", label: "API Key" }],
         },
       ],
       advanced: {
@@ -289,33 +223,36 @@ export const mount = definePage((context) => {
             kind: "url",
             name: "api_base",
             label: "API Base URL",
-            value: "https://api.telegram.org",
+            value: "https://api.example.com",
           },
           {
             kind: "number",
-            name: "draft_min_delta_bytes",
-            label: { zh: "草稿最小增量", en: "Draft minimum delta" },
-            value: 24,
-            unit: "bytes",
+            name: "timeout_secs",
+            label: { zh: "超时", en: "Timeout" },
+            value: 30,
+            unit: "s",
           },
         ],
       },
-      success: {
-        action: {
-          label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
-          run: () => context.navigate("imessage-web"),
-        },
-      },
+      // another plugin's page: offered only while the manifest lists it
+      success: context.has("other")
+        ? {
+            action: {
+              label: { zh: "去看看", en: "Take a look" },
+              run: () => context.navigate("other"),
+            },
+          }
+        : undefined,
     },
     context,
   );
   return page(
     header(
       {
-        title: "Telegram",
+        title: "Example",
         lead: {
-          zh: "通过 Telegram Bot 收发消息。",
-          en: "Send and receive messages through a Telegram bot.",
+          zh: "连接一个外部服务。",
+          en: "Connect an external service.",
         },
         icon: new URL("./icon.svg", import.meta.url).href,
         figure: "riffle",
@@ -328,9 +265,9 @@ export const mount = definePage((context) => {
 });
 ```
 
-Submitting posts `{"token": "…", "api_base": "https://api.telegram.org",
-"draft_min_delta_bytes": 24}` to `/api/gateway/telegram`; a 204 shows
-「设备已接受配置」 with the 「去 Web 聊天试试」 action and clears the token.
+Submitting posts `{"api_key": "…", "api_base": "https://api.example.com",
+"timeout_secs": 30}` to `/api/example`; a 204 shows 「设备已接受配置」, with the
+「去看看」 action while the manifest lists `other`, and clears the key.
 
 ## Resources a contributor may ship
 

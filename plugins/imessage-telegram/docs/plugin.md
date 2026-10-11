@@ -117,7 +117,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) posts
 `{token, api_base, draft_min_delta_bytes}` to `POST /api/gateway/telegram`. Its
 「验证」 button calls the Bot API's `getMe` straight from the browser (Telegram
 allows any origin) at the 「高级」 `api_base`: a bot shows its name, `@username` and

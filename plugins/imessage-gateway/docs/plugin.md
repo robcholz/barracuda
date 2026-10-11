@@ -282,6 +282,13 @@ allocation.
 | `send_receive`, no slot | `attention` 名额已满/No slot |
 | `send_receive`, error | `attention` 连接中断/Disconnected |
 
+**Channel page kit.** `resources/web/channel/` (documented in its
+`README.md`) is build-time TypeScript for the JSON above: `readChannel`,
+`configuredRow` and `channelInbound` (the 「模式」 and 「授权账号」 rows). A
+channel's portal entry bundles it together with the captive portal's UI kit;
+the Gateway itself serves no portal entry and does not depend on the captive
+portal. Its tests are in `resources/web/tests/`.
+
 ## How a channel plugs in
 
 1. **Dependencies.** Depend on `barracuda-imessage-gateway-channel` (path
@@ -342,7 +349,9 @@ allocation.
    - Register the configuration endpoint, `/mode`, and `/owners` as one
      prefix route:
      `serve_http_prefix(CONFIG_API_PATH, ChannelEndpoint::new(state, CONFIG_API_PATH, config))`.
-8. **Portal.** `register_with_status(.., move || entry_status(&*state))`.
+8. **Portal.** `register_with_status(.., move || entry_status(&*state))`. The
+   page imports the channel page kit and lists
+   `../imessage-gateway/resources/web/channel` in its build `inputs`.
 9. **Task.** In `start`, spawn one task that owns the runtime:
 
    ```rust

@@ -1,17 +1,19 @@
 import {
   button,
-  channelInbound,
-  configuredRow,
   definePage,
   h,
   header,
   note,
   page,
-  readChannel,
   resultCard,
   settingsForm,
-  type ChannelStatus,
 } from "../../../captive-portal/resources/web/ui";
+import {
+  channelInbound,
+  configuredRow,
+  readChannel,
+  type ChannelStatus,
+} from "../../../imessage-gateway/resources/web/channel";
 
 const T = {
   zh: {
@@ -156,12 +158,15 @@ export const mount = definePage((context) => {
         void inbound.refresh();
         void context.refreshStatus();
       },
-      success: {
-        action: {
-          label: t.tryChat,
-          run: () => context.navigate("imessage-web"),
-        },
-      },
+      // Web chat is another plugin: offer the way there only while its entry is listed
+      success: context.has("imessage-web")
+        ? {
+            action: {
+              label: t.tryChat,
+              run: () => context.navigate("imessage-web"),
+            },
+          }
+        : undefined,
     },
     context,
   );

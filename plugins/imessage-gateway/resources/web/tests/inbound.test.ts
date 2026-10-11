@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, expect, jest, test } from "bun:test";
-import { json, pageHarness, type FetchCall } from "./page";
+import {
+  json,
+  pageHarness,
+  type FetchCall,
+} from "../../../../captive-portal/resources/web/tests/page";
+import {
+  definePage,
+  settingsForm,
+} from "../../../../captive-portal/resources/web/ui";
 import {
   channelInbound,
-  definePage,
   readChannel,
-  settingsForm,
   type ChannelInboundOptions,
   type ChannelStatus,
   type OwnersReply,
-} from "../ui";
+} from "../channel";
 
 const ENDPOINT = "/api/gateway/qq";
 const STATUS = `${ENDPOINT}/status`;

@@ -103,6 +103,7 @@ function host(lang: "zh" | "en" = "zh") {
       lang,
       toast: (toast: Toast) => toasts.push(toast),
       navigate: (id: string) => routes.push(id),
+      has: (id: string) => id === "wifi",
       status: (id: string) => {
         asked.push(id);
         return id === "wifi" ? { state: "ready" as const } : null;
@@ -140,6 +141,9 @@ test("a mount gets the language, toast and navigate; all go quiet once it is lef
   expect(Object.isFrozen(context)).toBe(true);
   expect(toasts).toEqual([{ kind: "info", title: "hello" }]);
   expect(routes).toEqual(["agent"]);
+  // the host answers which entries the manifest lists
+  expect(context?.has("wifi")).toBe(true);
+  expect(context?.has("agent")).toBe(false);
   session.close();
   expect(context?.signal.aborted).toBe(true);
   expect(disposed).toBe(1);

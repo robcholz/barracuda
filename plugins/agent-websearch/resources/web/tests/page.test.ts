@@ -44,6 +44,7 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {
       refreshes.count++;
