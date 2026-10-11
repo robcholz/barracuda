@@ -19,14 +19,16 @@ embedded-io-async = "0.7"
 spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 
 [dev-dependencies]
-barracuda-vm-filesystem-plugin = { path = "../../../vm-filesystem/crates/plugin", features = ["test-fixture"] }
+barracuda-platform-test.workspace = true
 barracuda-vfs.workspace = true
-barracuda-vfs-memfs.workspace = true
+barracuda-workflow-plugin.workspace = true
 barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
 barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
+picoserve = { version = "0.19.0", default-features = false, features = ["alloc", "embassy"] }
 
 [lints.rust]
 unsafe_code = "forbid"

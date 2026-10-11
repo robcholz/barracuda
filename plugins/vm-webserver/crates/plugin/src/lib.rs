@@ -538,17 +538,14 @@ mod tests {
     extern crate std;
 
     use alloc::string::{String, ToString};
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
 
     use barracuda_plugin::manager::{Plugin, PluginDeclaration, PluginRequirements};
-    use barracuda_vfs::{MountOptions, Vfs};
-    use barracuda_vfs_memfs::MemFs;
-    use barracuda_vm_filesystem_plugin::{VmFileTransfer, package_for_test};
+    use barracuda_vm_filesystem_plugin::VmFileTransfer;
     use barracuda_vm_plugin::{Package, Result};
     use barracuda_vm_runtime::FixedMemoryLua;
     use barracuda_webserver_plugin::{HttpMethod, HttpRequest};
     use embassy_time::Duration;
-    use embedded_io_async::Read as _;
     use futures_lite::future::{block_on, zip};
     use portable_atomic_util::Arc;
 
@@ -605,95 +602,6 @@ mod tests {
                     }
                     HandlerResponse::File { .. } => panic!("expected buffered response"),
                 }
-                Result::<()>::Ok(())
-            };
-            let (execution, request) = zip(execution, request).await;
-            request?;
-            execution
-        })
-    }
-
-    #[test]
-    fn streams_an_existing_vm_file_and_closes_its_lua_handle() -> Result<()> {
-        block_on(async {
-            let vfs = Vfs::new();
-            vfs.mount(
-                "/data",
-                MemFs::new().into_backend(),
-                MountOptions::read_write(),
-            )
-            .await
-            .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let filesystem = vfs
-                .scoped_mounts([("/data", "/data")])
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            filesystem
-                .write("/data/index.html", b"<h1>VM</h1>")
-                .await
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-
-            let state = Arc::new(SharedState::new());
-            let webserver = VmWebServerPackage {
-                state: Arc::clone(&state),
-                files: VmFileTransfer::new(),
-            };
-            let mut fixed = FixedMemoryLua::with_default_heap()
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
-                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
-            )
-            .install(fixed.lua_mut())?;
-            package_for_test(filesystem).install(fixed.lua_mut())?;
-            webserver.install(fixed.lua_mut())?;
-            let execution = fixed
-                .lua_mut()
-                .load(
-                    "local webserver=require('webserver') \
-                     local served_file \
-                     webserver.serve({mount='site', handler=function(_) \
-                       served_file=assert(io.open('/data/index.html', 'rb')) \
-                       return webserver.file(served_file, 'text/html') \
-                     end}) \
-                     assert(io.type(served_file) == 'closed file')",
-                )
-                .exec_async();
-            let request = async {
-                let response = VmEndpoint::new(Arc::clone(&state))
-                    .dispatch(HttpRequest::with_path(
-                        HttpMethod::Get,
-                        String::from("/vm/site/"),
-                        Vec::new(),
-                    ))
-                    .await;
-                state.revoke();
-                let (status, content_type, length, mut reader) = match response {
-                    HandlerResponse::File {
-                        status,
-                        content_type,
-                        length,
-                        reader,
-                    } => (status, content_type, length, reader),
-                    HandlerResponse::Buffered { status, body, .. } => panic!(
-                        "expected file response, got {status}: {}",
-                        String::from_utf8_lossy(&body)
-                    ),
-                };
-                assert_eq!(status, 200);
-                assert_eq!(content_type, "text/html");
-                assert_eq!(length, 11);
-                let mut bytes = vec![0; length];
-                let mut offset = 0;
-                while offset < bytes.len() {
-                    let read = reader
-                        .read(&mut bytes[offset..])
-                        .await
-                        .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-                    if read == 0 {
-                        break;
-                    }
-                    offset += read;
-                }
-                assert_eq!(bytes, b"<h1>VM</h1>");
                 Result::<()>::Ok(())
             };
             let (execution, request) = zip(execution, request).await;

@@ -426,12 +426,6 @@ impl FilePackage {
     }
 }
 
-/// Creates the scoped package for cross-Plugin memory tests.
-#[cfg(feature = "test-fixture")]
-pub fn package_for_test(filesystem: ScopedVfs) -> impl LuaPackage {
-    FilePackage::new(filesystem)
-}
-
 impl Package for FilePackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
         let open_state = Arc::clone(&self.state);
