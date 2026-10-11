@@ -133,6 +133,7 @@ unsafe extern "C-unwind" {
     pub fn lua_close(state: *mut lua_State);
     pub fn lua_newthread(state: *mut lua_State) -> *mut lua_State;
     pub fn lua_resetthread(state: *mut lua_State) -> c_int;
+    pub fn lua_gc(state: *mut lua_State, what: c_int, ...) -> c_int;
 
     pub fn lua_gettop(state: *mut lua_State) -> c_int;
     pub fn lua_settop(state: *mut lua_State, index: c_int);

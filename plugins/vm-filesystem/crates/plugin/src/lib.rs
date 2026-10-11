@@ -1384,6 +1384,12 @@ mod tests {
         .expect("revoked vm-filesystem package");
     }
 
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = FilePackage::new(block_on(filesystem()).expect("mount test filesystem"));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
+
     mod barracuda_lua_test_fixture {
         use alloc::string::ToString;
 

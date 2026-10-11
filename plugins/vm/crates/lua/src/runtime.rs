@@ -283,6 +283,26 @@ impl Lua {
         })
     }
 
+    /// Runs a full garbage collection cycle.
+    pub fn collect_garbage(&mut self) {
+        const LUA_GCCOLLECT: c_int = 2;
+        unsafe { crate::ffi::lua_gc(self.raw.as_ptr(), LUA_GCCOLLECT) };
+    }
+
+    /// Returns the bytes this state currently has allocated.
+    #[must_use]
+    pub fn memory_in_use(&mut self) -> usize {
+        const LUA_GCCOUNT: c_int = 3;
+        const LUA_GCCOUNTB: c_int = 4;
+        let state = self.raw.as_ptr();
+        let kibibytes = unsafe { crate::ffi::lua_gc(state, LUA_GCCOUNT) };
+        let bytes = unsafe { crate::ffi::lua_gc(state, LUA_GCCOUNTB) };
+        usize::try_from(kibibytes)
+            .unwrap_or(0)
+            .saturating_mul(1024)
+            .saturating_add(usize::try_from(bytes).unwrap_or(0))
+    }
+
     /// Installs a count hook called after every `instruction_interval` Lua instructions.
     ///
     /// The hook callback runs immediately before Lua yields from its current resume. It can

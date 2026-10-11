@@ -138,19 +138,42 @@ impl FixedMemoryLua {
     }
 }
 
-/// Whether a Lua package fits the VM's per-package heap budget.
+/// Whether a Lua package fits the VM's per-package heap budgets.
 ///
-/// Finds the smallest heap that holds the built-in packages, then installs
-/// the built-ins and `package` into that heap enlarged by
-/// [`LUA_PACKAGE_HEAP_BUDGET_BYTES`](barracuda_vm_package_api::LUA_PACKAGE_HEAP_BUDGET_BYTES).
+/// Installed beside the built-in packages, `package` must keep at most
+/// [`LUA_PACKAGE_HEAP_BUDGET_BYTES`](barracuda_vm_package_api::LUA_PACKAGE_HEAP_BUDGET_BYTES)
+/// once garbage is collected, and its installation must succeed in the
+/// smallest heap that holds the built-ins enlarged by that budget and
+/// [`LUA_PACKAGE_INSTALL_PEAK_BYTES`](barracuda_vm_package_api::LUA_PACKAGE_INSTALL_PEAK_BYTES).
 /// A package Plugin's tests assert it for every package it registers.
 #[cfg(any(test, feature = "test-fixture"))]
 #[must_use]
 pub fn fits_package_budget(package: &impl barracuda_lua::Package) -> bool {
-    let floor = builtins_floor();
-    floor
-        .checked_add(barracuda_vm_package_api::LUA_PACKAGE_HEAP_BUDGET_BYTES)
-        .is_some_and(|bytes| installs(bytes, Some(package)))
+    use barracuda_vm_package_api::{LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES};
+
+    let kept = retained_bytes(package);
+    let peak = builtins_floor()
+        .checked_add(LUA_PACKAGE_HEAP_BUDGET_BYTES)
+        .and_then(|bytes| bytes.checked_add(LUA_PACKAGE_INSTALL_PEAK_BYTES));
+    kept.is_some_and(|kept| kept <= LUA_PACKAGE_HEAP_BUDGET_BYTES)
+        && peak.is_some_and(|bytes| installs(bytes, Some(package)))
+}
+
+/// Bytes `package` keeps in a run's heap beside the built-ins, after a full
+/// garbage collection.
+#[cfg(any(test, feature = "test-fixture"))]
+fn retained_bytes(package: &impl barracuda_lua::Package) -> Option<usize> {
+    let mut fixed = FixedMemoryLua::with_default_heap().ok()?;
+    let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+        barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+    )
+    .install(fixed.lua_mut())
+    .ok()?;
+    fixed.lua_mut().collect_garbage();
+    let before = fixed.lua_mut().memory_in_use();
+    package.install(fixed.lua_mut()).ok()?;
+    fixed.lua_mut().collect_garbage();
+    Some(fixed.lua_mut().memory_in_use().saturating_sub(before))
 }
 
 /// Whether the built-in packages, and `package` when given, install into a
@@ -228,7 +251,9 @@ pub enum VmMemoryPoolError {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use barracuda_vm_package_api::{LUA_PACKAGE_HEAP_BUDGET_BYTES, MAX_LUA_PACKAGES};
+    use barracuda_vm_package_api::{
+        LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_LUA_PACKAGES,
+    };
 
     use super::{VmMemoryPool, VmMemoryPoolError};
     use crate::runtime::{SCRIPT_HEAP_RESERVE_BYTES, VM_MEMORY_BYTES_PER_RUN};
@@ -271,7 +296,9 @@ mod tests {
 
     #[test]
     fn a_full_registry_leaves_the_script_its_reserve() {
-        let packages = MAX_LUA_PACKAGES.saturating_mul(LUA_PACKAGE_HEAP_BUDGET_BYTES);
+        let packages = MAX_LUA_PACKAGES
+            .saturating_mul(LUA_PACKAGE_HEAP_BUDGET_BYTES)
+            .saturating_add(LUA_PACKAGE_INSTALL_PEAK_BYTES);
         let left = VM_MEMORY_BYTES_PER_RUN
             .saturating_sub(packages)
             .saturating_sub(SCRIPT_HEAP_RESERVE_BYTES);

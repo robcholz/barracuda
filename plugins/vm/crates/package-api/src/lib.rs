@@ -13,12 +13,19 @@ use spin::Mutex;
 /// Most Lua packages the registry holds at once.
 pub const MAX_LUA_PACKAGES: usize = 32;
 
-/// Lua heap one installed package may take from a run.
+/// Lua heap one installed package may keep in a run once its installation's
+/// garbage is collected.
 ///
-/// The VM sizes each run's heap so that the built-in packages, this many
-/// packages at this budget each, and the script all fit; each package proves
-/// it stays within the budget.
-pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 8 * 1024;
+/// The VM sizes each run's heap so that the built-in packages,
+/// [`MAX_LUA_PACKAGES`] packages at this budget each, one installation's
+/// transient peak, and the script all fit; each package proves it stays
+/// within both budgets.
+pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 12 * 1024;
+
+/// Heap one package's installation may use beyond what it keeps, such as
+/// compiling Lua source. Packages install one after another, so only one
+/// such peak is ever live.
+pub const LUA_PACKAGE_INSTALL_PEAK_BYTES: usize = 32 * 1024;
 
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
