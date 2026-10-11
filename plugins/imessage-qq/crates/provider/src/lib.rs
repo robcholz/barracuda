@@ -16,12 +16,11 @@ use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
     TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Response};
 use core::cell::RefCell;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 /// Default QQ Bot OpenAPI origin.
@@ -175,24 +174,20 @@ impl ReplyBook {
 /// The provider exchanges the configured App Secret for an access token on
 /// demand and keeps that token in RAM only. Concurrent sends share one
 /// refresh.
-pub struct QQ<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct QQ {
+    http: GatewayHttp,
     config: QQConfig,
     access_token: Mutex<NoopRawMutex, Option<AccessToken>>,
     replies: RefCell<ReplyBook>,
 }
 
-impl<'net, T, D> QQ<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    /// Creates a QQ channel using the supplied HTTP client factory.
+impl QQ {
+    /// Creates a QQ channel sending through the Gateway's HTTP.
     ///
     /// No request is made until [`Self::authenticate`] or the first send.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: QQConfig) -> Self {
+    pub fn new(http: GatewayHttp, config: QQConfig) -> Self {
         Self {
-            http_clients,
+            http,
             config,
             access_token: Mutex::new(None),
             replies: RefCell::new(ReplyBook::default()),
@@ -279,20 +274,20 @@ where
 
     async fn get(&self, url: &str, access_token: &str) -> Result<Response, ChannelError> {
         let authorization = format!("QQBot {access_token}");
-        barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::GET,
-            url,
-            &[
-                ("Authorization", authorization.as_str()),
-                ("X-Union-Appid", self.config.app_id.as_str()),
-            ],
-            &[][..],
-        )
-        .await
-        .map_err(|error| ChannelError::Transport {
-            message: error.to_string(),
-        })
+        self.http
+            .send(
+                Method::GET,
+                url,
+                &[
+                    ("Authorization", authorization.as_str()),
+                    ("X-Union-Appid", self.config.app_id.as_str()),
+                ],
+                &[][..],
+            )
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })
     }
 
     /// Exchanges the App Secret for a fresh access token and keeps it for later sends.
@@ -327,17 +322,18 @@ where
         .map_err(|error| TokenError::Unavailable {
             message: error.to_string(),
         })?;
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::POST,
-            &self.config.token_url,
-            &[("Content-Type", "application/json")],
-            body.as_slice(),
-        )
-        .await
-        .map_err(|error| TokenError::Unavailable {
-            message: error.to_string(),
-        })?;
+        let response = self
+            .http
+            .send(
+                Method::POST,
+                &self.config.token_url,
+                &[("Content-Type", "application/json")],
+                body.as_slice(),
+            )
+            .await
+            .map_err(|error| TokenError::Unavailable {
+                message: error.to_string(),
+            })?;
         parse_token_response(&response, Instant::now())
     }
 
@@ -397,21 +393,21 @@ where
         body: &[u8],
     ) -> Result<Response, ChannelError> {
         let authorization = format!("QQBot {access_token}");
-        barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::POST,
-            url,
-            &[
-                ("Content-Type", "application/json"),
-                ("Authorization", authorization.as_str()),
-                ("X-Union-Appid", self.config.app_id.as_str()),
-            ],
-            body,
-        )
-        .await
-        .map_err(|error| ChannelError::Transport {
-            message: error.to_string(),
-        })
+        self.http
+            .send(
+                Method::POST,
+                url,
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Authorization", authorization.as_str()),
+                    ("X-Union-Appid", self.config.app_id.as_str()),
+                ],
+                body,
+            )
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })
     }
 
     async fn send_stream(
@@ -429,11 +425,7 @@ where
     }
 }
 
-impl<T, D> MessageChannel for QQ<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for QQ {
     fn channel(&self) -> &str {
         "qq"
     }

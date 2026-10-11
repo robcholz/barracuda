@@ -13,12 +13,18 @@ barracuda-tls.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 embassy-sync.workspace = true
 embassy-time.workspace = true
-http-client.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
+barracuda-http-plugin.workspace = true
 barracuda-platform-test.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
+barracuda-webserver-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-futures.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 embedded-io = "0.7"
 futures-lite = "2"

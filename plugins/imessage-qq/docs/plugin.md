@@ -18,14 +18,16 @@ and `WebServer` capabilities and follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
 `POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
 answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
-shared mode and owner endpoints, served with it from one prefix route
-(`ChannelEndpoint`). The allowed accounts are loaded only once the channel is
+shared mode and owner endpoints. The Gateway serves all of them from one prefix
+route (`IMessageGateway::serve_channel`); the Plugin registers only the exact
+login route on the `WebServer` itself. HTTP requests go through
+`IMessageGateway::http`. The allowed accounts are loaded only once the channel is
 configured, and the gateway session by the first receive session. The `qq` channel is registered with the
 Gateway exactly while it is configured and its mode is `send` or
 `send_receive`. A configuration stored before modes existed loads as `send`;
 a new configuration starts in `send_receive`. The portal entry's
 `GET /portal/status` record is 等待扫码 (`attention`) while a scan-to-bind
-session waits, otherwise `entry_status` of the channel (未配置, 已停用,
+session waits, otherwise the Gateway's `channel_status` of the channel (未配置, 已停用,
 仅发送, 收发中, 连接中, 名额已满, or 连接中断). See [`http.md`](http.md).
 
 The stored configuration is `{"app_id","app_secret","api_base","token_url"}`.
@@ -47,10 +49,11 @@ OpenAPI requests carry `Authorization: QQBot <access_token>` and
 
 QQ delivers messages only over its WebSocket gateway, so the Plugin owns one
 Embassy task, `qq_receive_task`, spawned in `start` and raced against the
-Plugin's task token. It runs the channel crate's `receive_runtime`: parked
+Plugin's task token. It runs the Gateway's `receive_runtime`: parked
 without a slot unless the channel is configured and in `send_receive`, it
-leases one receive slot from `PluginContext::receive_slots` (never a request
-pool connection) and runs one gateway session at a time on it.
+leases one of the Gateway's receive slots through
+`IMessageGateway::receive_control` (never a request pool connection) and runs
+one gateway session at a time on it.
 
 A session:
 

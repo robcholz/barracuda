@@ -17,14 +17,12 @@ use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
 
-use barracuda_imessage_gateway_channel::ReceiveSlotSource;
 use barracuda_plugin::api::Entropy;
 use barracuda_plugin::manager::PluginStorage;
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
 use qq::bind::{connect_url, BindError, BindKey, BindStatus, BoundBot, QQBind};
 use qq::QQ;
 use serde::{Deserialize, Serialize};
@@ -150,22 +148,16 @@ impl LoginWatch {
 }
 
 /// `POST`, `GET`, and `DELETE` on [`crate::LOGIN_API_PATH`].
-pub(crate) struct LoginEndpoint<Storage, Slots: ReceiveSlotSource, T: 'static, D: 'static> {
+pub(crate) struct LoginEndpoint<Storage> {
     shared: Rc<LoginShared>,
-    channel: Rc<QQChannel<Storage, Slots, T, D>>,
+    channel: Rc<QQChannel<Storage>>,
 }
 
-impl<Storage, Slots, T, D> LoginEndpoint<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> LoginEndpoint<Storage> {
     /// Creates the endpoint and the runtime future that must run as one task,
     /// calling the bind portal at `portal_base`.
     pub(crate) fn new(
-        channel: Rc<QQChannel<Storage, Slots, T, D>>,
+        channel: Rc<QQChannel<Storage>>,
         portal_base: String,
         timing: LoginTiming,
     ) -> (Self, LoginRuntime) {
@@ -227,13 +219,7 @@ where
     }
 }
 
-impl<Storage, Slots, T, D> HttpEndpoint for LoginEndpoint<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for LoginEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
@@ -296,20 +282,14 @@ fn to_json(status: u16, body: &impl Serialize) -> HttpResponse {
     HttpResponse::new(status, JSON_CONTENT_TYPE, body)
 }
 
-struct LoginRunner<Storage, Slots: ReceiveSlotSource, T: 'static, D: 'static> {
+struct LoginRunner<Storage> {
     shared: Rc<LoginShared>,
-    channel: Rc<QQChannel<Storage, Slots, T, D>>,
+    channel: Rc<QQChannel<Storage>>,
     portal_base: String,
     timing: LoginTiming,
 }
 
-impl<Storage, Slots, T, D> LoginRunner<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> LoginRunner<Storage> {
     async fn run(self) {
         let _stopped = StopOnDrop(Rc::clone(&self.shared));
         let mut command = self.shared.commands.wait().await;
@@ -348,7 +328,7 @@ where
             return None;
         }
         let key = BindKey::new(key);
-        let bind = QQBind::new(self.channel.http_clients.clone(), self.portal_base.as_str());
+        let bind = QQBind::new(self.channel.gateway.http(), self.portal_base.as_str());
         let task = match bind.create(&key).await {
             Ok(task) => task,
             Err(error) => {
@@ -369,12 +349,7 @@ where
         }
     }
 
-    async fn poll(
-        &self,
-        bind: &QQBind<'static, T, D>,
-        task: &str,
-        key: &BindKey,
-    ) -> Option<BoundBot> {
+    async fn poll(&self, bind: &QQBind, task: &str, key: &BindKey) -> Option<BoundBot> {
         loop {
             let polled = Instant::now();
             match bind.poll(task, key).await {
@@ -425,10 +400,7 @@ where
             api_base,
             token_url,
         };
-        let sender = Rc::new(QQ::new(
-            self.channel.http_clients.clone(),
-            config.clone().into(),
-        ));
+        let sender = Rc::new(QQ::new(self.channel.gateway.http(), config.clone().into()));
         if let Err(error) = sender.authenticate().await {
             log::warn!("QQ refused the bound bot's credentials: {error}");
             self.shared.set(SessionStatus::Failed(error.to_string()));
