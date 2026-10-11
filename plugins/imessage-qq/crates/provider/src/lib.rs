@@ -5,6 +5,7 @@ extern crate alloc;
 
 pub mod bind;
 pub mod gateway;
+pub mod media;
 
 use alloc::{
     boxed::Box,
@@ -13,14 +14,15 @@ use alloc::{
     string::{String, ToString},
 };
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
-    TextBody,
+    ChannelError, ChannelFuture, MediaKind, MessageChannel, MessageTarget, SendMediaRequest,
+    SendMessageRequest, SendReceipt, StreamBody, StreamError, TextBody,
 };
 use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Response};
 use core::cell::RefCell;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant};
 use futures_lite::StreamExt as _;
+use media::Content;
 use serde_json::{json, Value};
 
 /// Default QQ Bot OpenAPI origin.
@@ -354,23 +356,42 @@ impl QQ {
         } else {
             json!({ "content": text, "msg_type": 0 })
         };
-        if let Some(message_id) = reply_to {
-            let seq = self.replies.borrow_mut().reply(&message_id, Instant::now());
-            // Past its window a reply would be refused, so it goes out as an
-            // ordinary message instead.
-            if let Some(seq) = seq {
-                let Some(fields) = payload.as_object_mut() else {
-                    return Err(ChannelError::InvalidRequest {
-                        message: "failed to build QQ message payload".into(),
-                    });
-                };
-                fields.insert("msg_id".into(), Value::String(message_id));
-                if !is_guild {
-                    fields.insert("msg_seq".into(), Value::from(seq));
-                }
+        self.reply_fields(&mut payload, reply_to, is_guild)?;
+        self.post_payload(&path, &payload).await
+    }
+
+    /// Adds `msg_id` and `msg_seq` to `payload` when `reply_to` names a
+    /// message whose reply window is still open.
+    fn reply_fields(
+        &self,
+        payload: &mut Value,
+        reply_to: Option<String>,
+        is_guild: bool,
+    ) -> Result<(), ChannelError> {
+        let Some(message_id) = reply_to else {
+            return Ok(());
+        };
+        let seq = self.replies.borrow_mut().reply(&message_id, Instant::now());
+        // Past its window a reply would be refused, so it goes out as an
+        // ordinary message instead.
+        if let Some(seq) = seq {
+            let Some(fields) = payload.as_object_mut() else {
+                return Err(ChannelError::InvalidRequest {
+                    message: "failed to build QQ message payload".into(),
+                });
+            };
+            fields.insert("msg_id".into(), Value::String(message_id));
+            if !is_guild {
+                fields.insert("msg_seq".into(), Value::from(seq));
             }
         }
-        let body = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
+        Ok(())
+    }
+
+    /// Posts one message `payload` to `path`, retrying once with a new
+    /// token after a 401.
+    async fn post_payload(&self, path: &str, payload: &Value) -> Result<SendReceipt, ChannelError> {
+        let body = serde_json::to_vec(payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),
         })?;
         let url = format!("{}{}", self.config.api_base.trim_end_matches('/'), path);
@@ -410,6 +431,121 @@ impl QQ {
             })
     }
 
+    /// Uploads a file with `file_data` and sends it as a `msg_type` 7
+    /// message, a passive reply like text when `reply_to` names a message.
+    async fn send_file(
+        &self,
+        kind: MediaKind,
+        request: SendMediaRequest,
+    ) -> Result<SendReceipt, ChannelError> {
+        let SendMediaRequest {
+            target,
+            body,
+            size,
+            filename,
+            mime_type,
+            caption,
+            reply_to,
+        } = request;
+        let (path, is_guild) = target_path(&target.conversation_id)?;
+        if is_guild {
+            // The files endpoints serve direct and group chats only.
+            return Err(ChannelError::unsupported(kind.operation()));
+        }
+        let (mut content, len) = Content::new(body, size)?;
+        if len > media::MAX_UPLOAD_BYTES {
+            return Err(ChannelError::InvalidRequest {
+                message: format!(
+                    "QQ takes files of at most {} bytes from a device",
+                    media::MAX_UPLOAD_BYTES
+                ),
+            });
+        }
+        let file_type = media::upload_file_type(kind, mime_type.as_deref(), filename.as_deref());
+        let file_name = media::upload_file_name(kind, mime_type.as_deref(), filename.as_deref());
+        let envelope = serde_json::to_string(&json!({
+            "file_type": file_type,
+            "srv_send_msg": false,
+            "file_name": file_name,
+        }))
+        .map_err(|error| ChannelError::InvalidRequest {
+            message: error.to_string(),
+        })?;
+        let envelope = String::from(envelope.trim_end_matches('}'));
+        let upload_path = path.replace("/messages", "/files");
+        let url = format!(
+            "{}{}",
+            self.config.api_base.trim_end_matches('/'),
+            upload_path
+        );
+        let token = self.access_token(None).await.map_err(token_channel_error)?;
+        let mut response = self
+            .upload(&url, &token, &envelope, &mut content, len)
+            .await?;
+        if response.status == 401 && !matches!(content, Content::Stream(_)) {
+            let token = self
+                .access_token(Some(token.as_str()))
+                .await
+                .map_err(token_channel_error)?;
+            response = self
+                .upload(&url, &token, &envelope, &mut content, len)
+                .await?;
+        }
+        let file_info = media::file_info(&parse_json(response)?)?;
+        let mut payload = json!({
+            "msg_type": media::MEDIA_MESSAGE,
+            "media": { "file_info": file_info },
+        });
+        if let Some(caption) = caption.filter(|caption| !caption.trim().is_empty()) {
+            if let Some(fields) = payload.as_object_mut() {
+                fields.insert("content".into(), Value::String(caption));
+            }
+        }
+        self.reply_fields(&mut payload, reply_to, false)?;
+        self.post_payload(&path, &payload).await
+    }
+
+    /// Posts the upload of `content`; a body that ended early is the
+    /// stream's failure, whatever QQ answered.
+    async fn upload(
+        &self,
+        url: &str,
+        access_token: &str,
+        envelope: &str,
+        content: &mut Content,
+        len: u64,
+    ) -> Result<Response, ChannelError> {
+        let Some(stream) = content.open().await? else {
+            return Err(ChannelError::Authentication);
+        };
+        let (stream, length) = media::upload_body(envelope.into(), stream, len);
+        let length = usize::try_from(length).map_err(|_overflow| ChannelError::InvalidRequest {
+            message: "QQ upload is too large".into(),
+        })?;
+        let body = StreamBody::new(stream, length);
+        let probe = body.clone();
+        let authorization = format!("QQBot {access_token}");
+        let sent = self
+            .http
+            .send(
+                Method::POST,
+                url,
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Authorization", authorization.as_str()),
+                    ("X-Union-Appid", self.config.app_id.as_str()),
+                ],
+                body,
+            )
+            .await;
+        if let Some(failure) = probe.failure() {
+            return Err(ChannelError::Stream(StreamError::failed(failure)));
+        }
+        sent.map_err(|error| ChannelError::Transport {
+            message: error.to_string(),
+        })
+    }
+
     async fn send_stream(
         &self,
         target: MessageTarget,
@@ -443,6 +579,17 @@ impl MessageChannel for QQ {
             }
         })
     }
+
+    /// Uploads the file to QQ and sends it; see [`media`]. Images go as
+    /// `file_type` 1, mp4 video as 2, SILK audio as 3, and everything else,
+    /// other audio included, as a file (4). Guild channels are unsupported.
+    fn send_media(
+        &self,
+        kind: MediaKind,
+        request: SendMediaRequest,
+    ) -> ChannelFuture<'_, SendReceipt> {
+        Box::pin(self.send_file(kind, request))
+    }
 }
 
 fn target_path(conversation_id: &str) -> Result<(String, bool), ChannelError> {
@@ -473,6 +620,20 @@ fn validate_id(id: &str) -> Result<(), ChannelError> {
 }
 
 fn parse_response(response: Response) -> Result<SendReceipt, ChannelError> {
+    let status = response.status;
+    let root = parse_json(response)?;
+    let message_id =
+        root.get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ChannelError::Platform {
+                code: Some(status.to_string()),
+                message: "QQ response omitted message id".into(),
+            })?;
+    Ok(SendReceipt::new(message_id))
+}
+
+/// The JSON body of a 2xx answer; a refusal as its [`ChannelError`].
+fn parse_json(response: Response) -> Result<Value, ChannelError> {
     if response.status == 401 || response.status == 403 {
         return Err(ChannelError::Authentication);
     }
@@ -498,14 +659,7 @@ fn parse_response(response: Response) -> Result<SendReceipt, ChannelError> {
                 .into(),
         });
     }
-    let message_id =
-        root.get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ChannelError::Platform {
-                code: Some(response.status.to_string()),
-                message: "QQ response omitted message id".into(),
-            })?;
-    Ok(SendReceipt::new(message_id))
+    Ok(root)
 }
 
 fn parse_token_response(response: &Response, now: Instant) -> Result<AccessToken, TokenError> {

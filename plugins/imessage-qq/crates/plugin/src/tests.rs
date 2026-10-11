@@ -31,7 +31,7 @@ use barracuda_imessage_gateway_plugin::{
 use barracuda_platform::{Entropy, EntropyUnavailable};
 use barracuda_platform_test::{
     install_global_memory_vfs, loopback_network, memory_partition, LoopbackNetwork,
-    MemoryPartition, ScriptStep, ScriptedServer,
+    MemoryPartition, ScriptStep, ScriptedRoute, ScriptedServer,
 };
 use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
@@ -426,6 +426,8 @@ struct Setup {
     /// OpenAPI and portal answers, in order: tokens, gateway URL, sends, and
     /// bind calls.
     send: Vec<ScriptStep>,
+    /// Answers to attachment downloads (`/download/…`), in order.
+    downloads: Vec<ScriptStep>,
     behaviours: Vec<Behaviour>,
     /// Whether other receivers hold every Gateway slot.
     hold_slot: bool,
@@ -448,6 +450,7 @@ impl Setup {
             mode: None,
             stored: Vec::new(),
             send: Vec::new(),
+            downloads: Vec::new(),
             behaviours: Vec::new(),
             hold_slot: false,
             occupied: false,
@@ -460,6 +463,8 @@ impl Setup {
 struct Bench {
     /// Answers the OpenAPI, the token endpoint, and the bind portal.
     server: ScriptedServer,
+    /// Answers attachment downloads.
+    downloads: ScriptedRoute,
     gateway: Rc<FakeGateway>,
     driver: RefCell<Pin<Box<dyn Future<Output = ()>>>>,
 }
@@ -468,6 +473,7 @@ impl Bench {
     fn new(network: LoopbackNetwork, setup: &mut Setup) -> Rc<Self> {
         let stack = network.stack();
         let server = ScriptedServer::new(core::mem::take(&mut setup.send));
+        let downloads = server.route("/download/", core::mem::take(&mut setup.downloads));
         let gateway = Rc::new(FakeGateway::default());
         gateway.script(core::mem::take(&mut setup.behaviours));
         let serving = server.clone();
@@ -482,6 +488,7 @@ impl Bench {
         });
         Rc::new(Self {
             server,
+            downloads,
             gateway,
             driver: RefCell::new(driver),
         })
@@ -1319,7 +1326,7 @@ impl WorkflowActionHandler for Record {
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
         "test.record",
-        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"}}}"#,
+        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"},"attachments":{"type":"array"}}}"#,
         r#"{"type":"object"}"#
     );
 
@@ -1329,14 +1336,11 @@ impl WorkflowActionHandler for Record {
     }
 }
 
+/// Hands the whole Event, attachments included, to `test.record`.
 const RECORD_WORKFLOW: &str = r#"{
     "id": "record-inbound",
     "match": {"event": "gateway.message.received"},
-    "steps": [{"call": "test.record", "arguments": {
-        "route": "$event.input.route",
-        "message_id": "$event.input.message_id",
-        "text": "$event.input.text"
-    }}]
+    "steps": [{"call": "test.record"}]
 }"#;
 
 struct Recorder(Rc<RefCell<Vec<Value>>>);
@@ -1428,10 +1432,35 @@ async fn run_bench(bench: Rc<Bench>) {
     driver.as_mut().await;
 }
 
+/// One end-to-end test's steps, run on the executor.
+type Steps = fn(Spawner) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
+
 #[embassy_executor::task]
-async fn end_to_end(spawner: Spawner, done: SyncSender<Result<(), String>>) {
-    let outcome = end_to_end_steps(spawner).await;
+async fn end_to_end(spawner: Spawner, steps: Steps, done: SyncSender<Result<(), String>>) {
+    let outcome = steps(spawner).await;
     let _sent = done.send(outcome);
+}
+
+/// Runs `steps` on an executor thread of their own and fails the test with
+/// their error.
+fn on_executor(steps: Steps) {
+    let (done, outcome) = sync_channel(1);
+    std::thread::Builder::new()
+        .name("qq-end-to-end".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let executor = Box::leak(Box::new(Executor::new()));
+            executor.run(|spawner| {
+                spawner.spawn(end_to_end(spawner, steps, done).expect("spawn the end-to-end test"));
+            });
+        })
+        .expect("spawn the executor thread");
+    let outcome = outcome
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the end-to-end test finished");
+    if let Err(message) = outcome {
+        panic!("{message}");
+    }
 }
 
 async fn wait_for(what: &str, done: impl Fn() -> bool) -> Result<(), String> {
@@ -1508,13 +1537,13 @@ async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
                "attachments": [{"content_type": "image/png"}]}),
     );
     // The connection drops; after the resume QQ delivers m1 again.
-    wait_for("three messages", || records.borrow().len() == 2).await?;
+    wait_for("three messages", || records.borrow().len() == 3).await?;
     gateway.close(4009);
     wait_for("the resume", || gateway.ops() == [2, 6]).await?;
     Timer::after_millis(20).await;
     gateway.dispatch("C2C_MESSAGE_CREATE", c2c("m1", "OWNER", " hello "));
     gateway.dispatch("C2C_MESSAGE_CREATE", c2c("m5", "OWNER", "again"));
-    wait_for("the last message", || records.borrow().len() >= 3).await?;
+    wait_for("the last message", || records.borrow().len() >= 4).await?;
     Timer::after_millis(30).await;
 
     let records = records.borrow().clone();
@@ -1534,6 +1563,7 @@ async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
             == vec![
                 json!({"route": {"channel": "qq", "conversation_id": "c2c:OWNER"}, "message_id": "m1", "text": "hello"}),
                 json!({"route": {"channel": "qq", "conversation_id": "group:GROUP"}, "message_id": "g1", "text": "status"}),
+                json!({"route": {"channel": "qq", "conversation_id": "c2c:OWNER"}, "message_id": "m4", "text": "[image not received]"}),
                 json!({"route": {"channel": "qq", "conversation_id": "c2c:OWNER"}, "message_id": "m5", "text": "again"}),
             ],
         "owner messages are published once each with routes the sender accepts",
@@ -1565,23 +1595,183 @@ rusty_fork_test! {
     /// static, so each test needs a fresh process to get them.
     #[test]
     fn owners_publish_codes_pair_strangers_are_ignored_and_redeliveries_dropped() {
-        let (done, outcome) = sync_channel(1);
-        std::thread::Builder::new()
-            .name("qq-end-to-end".into())
-            .stack_size(8 * 1024 * 1024)
-            .spawn(move || {
-                let executor = Box::leak(Box::new(Executor::new()));
-                executor.run(|spawner| {
-                    spawner.spawn(end_to_end(spawner, done).expect("spawn the end-to-end test"));
-                });
-            })
-            .expect("spawn the executor thread");
-        let outcome = outcome
-            .recv_timeout(std::time::Duration::from_secs(20))
-            .expect("the end-to-end test finished");
-        if let Err(message) = outcome {
-            panic!("{message}");
+        on_executor(|spawner| Box::pin(end_to_end_steps(spawner)));
+    }
+}
+
+// --- Attachments -------------------------------------------------------------
+
+/// Larger than any `attachment-max-bytes`.
+const HUGE: u64 = 1 << 40;
+
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\nIMAGE";
+
+fn download(path: &str) -> String {
+    format!("{PORTAL}/download/{path}")
+}
+
+/// Hands the receive runtime to the probe's task.
+struct Receiving;
+
+impl Scenario for Receiving {
+    fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
+        WORLD.with(|world| {
+            world.replace(Some((
+                Rc::clone(&harness.gateway),
+                harness.bench.server.clone(),
+            )))
+        });
+        harness.runtime.take()
+    }
+}
+
+async fn attachment_steps(spawner: Spawner) -> Result<(), String> {
+    install_global_memory_vfs()
+        .await
+        .map_err(|error| error.to_string())?;
+    let partition = memory_partition(64 * 1024)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut manager = PluginManager::open(partition)
+        .await
+        .map_err(|error| error.to_string())?;
+    manager.install_vfs(barracuda_vfs::global_namespace().await);
+    manager.install_task_spawner(spawner);
+    let network = loopback_network();
+    let mut context = plugin_context(&network);
+    let records = Rc::new(RefCell::new(Vec::new()));
+    register_services(&mut manager, &mut context);
+    manager
+        .register(Recorder(Rc::clone(&records)))
+        .map_err(|error| error.to_string())?;
+    let mut setup = Setup {
+        stored: vec![("owners", br#"[{"id":"OWNER","label":"Ann"}]"#.to_vec())],
+        downloads: vec![
+            ScriptStep::response(200, "image/png", PNG, usize::MAX),
+            ScriptStep::json(404, r#"{"error":"gone"}"#),
+            ScriptStep::response(200, "audio/wav", b"RIFFWAVE", usize::MAX),
+        ],
+        // A short heartbeat, so one falls due while a file downloads.
+        behaviours: vec![Behaviour {
+            hello_interval_ms: 1_000,
+            ..Behaviour::default()
+        }],
+        ..Setup::configured("send_receive")
+    };
+    let bench = Bench::new(network, &mut setup);
+    spawner.spawn(run_bench(Rc::clone(&bench)).map_err(|error| format!("{error:?}"))?);
+    manager
+        .register(Probe {
+            setup: Some(setup),
+            bench: Rc::clone(&bench),
+            scenario: Receiving,
+            runtime: None,
+            completed: Rc::new(Cell::new(false)),
+        })
+        .map_err(|error| error.to_string())?;
+    manager.start().map_err(|error| error.to_string())?;
+    let (gateway, _send) = WORLD
+        .with(|world| world.borrow().clone())
+        .ok_or("the scenario's world")?;
+    wait_for("the first login", || gateway.ops() == [2]).await?;
+    Timer::after_millis(20).await;
+
+    gateway.dispatch(
+        "C2C_MESSAGE_CREATE",
+        json!({"id": "m1", "author": {"user_openid": "OWNER"}, "content": " look ",
+        "attachments": [
+            {"content_type": "image/png", "url": download("a.png"), "filename": "a.png",
+             "size": PNG.len()},
+            {"content_type": "application/zip", "url": download("big.zip"),
+             "filename": "big.zip", "size": HUGE},
+            {"content_type": "application/pdf", "url": download("gone.pdf"),
+             "filename": "gone.pdf"}
+        ]}),
+    );
+    gateway.dispatch(
+        "C2C_MESSAGE_CREATE",
+        json!({"id": "m2", "author": {"user_openid": "STRANGER"}, "content": "",
+               "attachments": [{"content_type": "image/png", "url": download("theirs.png")}]}),
+    );
+    gateway.dispatch(
+        "C2C_MESSAGE_CREATE",
+        json!({"id": "m3", "author": {"user_openid": "OWNER"}, "content": "",
+               "attachments": [{"content_type": "voice", "url": download("v.silk"),
+                                "filename": "v.silk", "size": 4,
+                                "voice_wav_url": download("v.wav")}]}),
+    );
+    wait_for("two messages", || records.borrow().len() == 2).await?;
+    Timer::after_millis(30).await;
+
+    let records = records.borrow().clone();
+    let fetched: Vec<String> = bench
+        .downloads
+        .requests()
+        .iter()
+        .map(|request| request.lines().next().unwrap_or_default().to_string())
+        .collect();
+    let check = |condition: bool, what: &str| {
+        if condition {
+            Ok(())
+        } else {
+            Err(format!("{what}: records {records:?}, fetched {fetched:?}"))
         }
+    };
+    check(
+        records.len() == 2,
+        "the stranger's message is not published",
+    )?;
+    let first = &records[0];
+    check(
+        first["message_id"] == "m1"
+            && first["text"] == "look\n[file too large, not received]\n[file not received]",
+        "the caption leads, and each missed file adds one line",
+    )?;
+    let image = &first["attachments"][0];
+    check(
+        first["attachments"].as_array().map(Vec::len) == Some(1)
+            && image["kind"] == "image"
+            && image["mime_type"] == "image/png"
+            && image["filename"] == "a.png"
+            && image["size"] == PNG.len()
+            && image["path"].as_str().is_some_and(|path| {
+                path.starts_with("/workspace/cache/gateway/qq/") && path.ends_with(".png")
+            }),
+        "the image is stored under the Gateway's cache",
+    )?;
+    let voice = &records[1]["attachments"][0];
+    check(
+        records[1]["text"] == ""
+            && voice["kind"] == "audio"
+            && voice["mime_type"] == "audio/wav"
+            && voice["filename"] == "v.wav"
+            && voice["size"] == 8,
+        "a voice message arrives as QQ's WAV conversion",
+    )?;
+    check(
+        fetched
+            == [
+                "GET /download/a.png HTTP/1.1",
+                "GET /download/gone.pdf HTTP/1.1",
+                "GET /download/v.wav HTTP/1.1",
+            ],
+        "only owners' files within the limit are fetched",
+    )?;
+    let ops = gateway.ops();
+    check(
+        ops.iter().filter(|op| **op == 2).count() == 1 && !ops.contains(&6),
+        "the session stayed up through the downloads",
+    )?;
+    core::mem::forget(manager);
+    Ok(())
+}
+
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static.
+    #[test]
+    fn owners_attachments_are_stored_and_missed_ones_become_notes() {
+        on_executor(|spawner| Box::pin(attachment_steps(spawner)));
     }
 }
 
