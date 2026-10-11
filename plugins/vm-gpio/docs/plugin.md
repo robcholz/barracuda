@@ -1,9 +1,20 @@
 # GPIO Plugin
 
+The GPIO Plugin exposes digital input and output on the Board's exposed pins
+to Lua code as the `gpio` Lua package.
+
 - Plugin ID: `gpio`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `gpio`
+- Web: none
+- Tasks: none
+- Storage: none
 
 During unified Plugin construction, this Plugin shares the Board's single
 runtime I/O owner. During registration it installs the require-only `gpio` Lua

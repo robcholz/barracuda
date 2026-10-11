@@ -13,6 +13,8 @@ barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 
 [dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 
 [lints.rust]

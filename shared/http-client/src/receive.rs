@@ -1,18 +1,14 @@
 //! Dedicated connections for long-lived receive loops.
 //!
-//! Model calls and ordinary sends share the request pool behind
-//! [`ClientFactory::create`]. A channel that holds a long poll or a push
-//! connection open must never take one of those connections, so receive loops
-//! lease a slot from [`ReceiveSlots`] instead. Each slot owns one TCP socket
-//! with its own static buffers and shares the System's DNS resolver and TLS
-//! engine; a lease holds at most one open connection at a time.
+//! Ordinary requests share the pool behind [`ClientFactory::create`]. A loop
+//! that holds a long poll or a push connection open must never take one of
+//! those connections, so it leases a slot from [`ReceiveSlots`] instead. Each
+//! slot owns one TCP socket with its own static buffers and shares the
+//! factory's DNS resolver and TLS engine; a lease holds at most one open
+//! connection at a time.
 //!
-//! The slots' socket buffers are static: the application declares one
-//! [`ReceiveBuffers`] sized at build time from the selected Platform's
-//! long-lived connection budget, so a Target without receive connections
-//! links no receive buffers at all. [`ReceiveSlots::capacity`] is the runtime
-//! limit System derives from the selected Board's memory; it never exceeds
-//! the static size.
+//! The slots' owner declares one static [`ReceiveBuffers`] of the size it
+//! needs, so an owner that needs none links no receive buffers at all.
 
 #[cfg(feature = "mbedtls")]
 use alloc::ffi::CString;
@@ -74,15 +70,11 @@ impl Default for ReceiveSlotBuffers {
     }
 }
 
-/// Static socket buffers for `N` receive slots.
-///
-/// The application declares exactly one, sized from the selected Platform's
-/// long-lived connection budget, so the buffers are placed in `.bss` at link
-/// time and a Target that allows none links no buffers:
+/// Static socket buffers for `N` receive slots, placed in `.bss` at link
+/// time:
 ///
 /// ```rust,ignore
-/// static RECEIVE_BUFFERS: ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }> =
-///     ReceiveBuffers::new();
+/// static RECEIVE_BUFFERS: ReceiveBuffers<4> = ReceiveBuffers::new();
 /// ```
 pub struct ReceiveBuffers<const N: usize> {
     buffers: ConstStaticCell<[ReceiveSlotBuffers; N]>,
@@ -234,11 +226,10 @@ struct Pool<C, D: 'static> {
     waiting: RefCell<Vec<Waker>>,
 }
 
-/// The receive-connection slots System sizes for the selected Target.
+/// A fixed set of receive-connection slots.
 ///
-/// Plugins receive it in `PluginContext::receive_slots` and clone it freely;
-/// every clone shares the same slots. A channel takes a [`ReceiveLease`] while
-/// it receives and drops it when it stops.
+/// Every clone shares the same slots. A receive loop takes a [`ReceiveLease`]
+/// while it receives and drops it when it stops.
 pub struct ReceiveSlots<C = ReceiveSocket, D: 'static = Resolver> {
     pool: Rc<Pool<C, D>>,
 }
@@ -268,8 +259,8 @@ impl<C, D> Default for ReceiveSlots<C, D> {
 }
 
 impl ReceiveSlots {
-    /// Creates up to `limit` receive slots on `stack`, one per entry of
-    /// `buffers`, sharing the DNS resolver and TLS engine of `shared`.
+    /// Creates one receive slot on `stack` per entry of `buffers`, sharing
+    /// the DNS resolver and TLS engine of `shared`.
     ///
     /// Each slot registers one socket with the stack for the life of the
     /// process, so the stack's socket table must have room for them.
@@ -278,11 +269,9 @@ impl ReceiveSlots {
         stack: Stack<'static>,
         shared: &ClientFactory<'static>,
         buffers: &'static mut [ReceiveSlotBuffers],
-        limit: usize,
     ) -> Self {
         let slots = buffers
             .iter_mut()
-            .take(limit)
             .map(|buffers| {
                 Rc::new(Slot {
                     connector: ReceiveSocket::new(stack, buffers),
@@ -305,8 +294,8 @@ impl<C, D> ReceiveSlots<C, D> {
         Self::from_slots(Vec::new())
     }
 
-    /// Creates one plaintext slot per connector, for a network that is not
-    /// the System's (tests, or a subsystem that owns its own stack).
+    /// Creates one plaintext slot per connector, for a caller that owns its
+    /// own network (tests, or a subsystem with its own stack).
     #[must_use]
     pub fn from_connectors(connectors: impl IntoIterator<Item = C>, resolver: &'static D) -> Self {
         let slots = connectors
@@ -440,8 +429,8 @@ where
     C: TcpConnect,
     D: Dns,
 {
-    /// HTTP clients over this slot's single connection, with the System's
-    /// DNS resolver and TLS engine.
+    /// HTTP clients over this slot's single connection, with the shared DNS
+    /// resolver and TLS engine.
     ///
     /// Every client created from it shares the slot's one connection: a
     /// request on a second client while the first holds its connection fails
@@ -695,7 +684,7 @@ pub enum StreamError {
     Dns,
     /// The TCP connection could not be established.
     Connect,
-    /// A TLS URL was given but the System has no TLS engine.
+    /// A TLS URL was given but the slots have no TLS engine.
     TlsUnavailable,
     /// The TLS handshake or a TLS record failed with this mbedTLS error code.
     Tls(i32),
@@ -812,9 +801,9 @@ mod tests {
     #[test]
     fn stream_urls_name_a_host_port_and_security() {
         assert_eq!(
-            Endpoint::parse("wss://api.sgroup.qq.com/websocket"),
+            Endpoint::parse("wss://stream.example.com/websocket"),
             Ok(Endpoint {
-                host: "api.sgroup.qq.com",
+                host: "stream.example.com",
                 port: 443,
                 tls: true
             })

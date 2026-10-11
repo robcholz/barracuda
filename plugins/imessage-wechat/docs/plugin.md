@@ -1,19 +1,32 @@
 # IMessage WeChat Plugin
 
+The IMessage WeChat Plugin adds WeChat iLink as an iMessage Gateway channel:
+it links a bot by QR login, sends through iLink, and receives by long polling.
+
 - Plugin ID: `imessage-wechat`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required typed capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`
-- Workflow Actions, Events, and Agent Tools: none of its own; inbound text
-  from allowed accounts is published through `IMessageGateway::publish` (the
-  Gateway's `gateway.message.received` Event)
-- Construction: `IMessageWechatPlugin::new(context)` keeps
-  `context.http_clients`, `context.receive_slots`, and `context.entropy`
-- Owned tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1
-  each), both started in `start` and raced against the `PluginTaskToken`
-- Receive slots: one from `PluginContext::receive_slots` while the channel is
-  linked and in `send_receive`; none otherwise
-- Storage (Plugin-scoped KV keys):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (for `X-WECHAT-UIN`)
+- Provided capabilities: none
+- Required capabilities: `IMessageGateway` from `imessage-gateway`,
+  `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none of its own; inbound text from allowed accounts is published
+  through `IMessageGateway::publish` (the Gateway's `gateway.message.received`
+  Event)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-wechat`, with status; `POST
+  /api/gateway/wechat`, `GET /api/gateway/wechat/status`, `POST
+  /api/gateway/wechat/mode`, `GET /api/gateway/wechat/owners`, `POST
+  /api/gateway/wechat/owners`, `POST /api/gateway/wechat/login`, `GET
+  /api/gateway/wechat/login`, `DELETE /api/gateway/wechat/login` (see
+  [`http.md`](http.md))
+- Tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1 each),
+  both started in `start` and raced against the `PluginTaskToken`; the
+  receive task holds one of the Gateway's receive slots
+  (`IMessageGateway::receive_control`) while the channel is linked and in
+  `send_receive`, and none otherwise
+- Storage: Plugin-scoped KV keys:
   - `configuration`: the complete provider configuration;
   - `mode`: `"disabled"` or `"send_receive"` (JSON string);
   - `owners`: the allowed accounts (JSON array of `{id,label}`);
@@ -21,6 +34,10 @@
   - `context_tokens`: the latest `context_token` of up to 16 users (JSON
     array `[{user,token}]`, most recently used first);
   - `bot_id`: the `ilink_bot_id` of the last confirmed QR login.
+
+`IMessageWechatPlugin::new(context)` keeps only `context.entropy`; HTTP,
+receive slots, mode, owners (and their pairing codes), routes, and status come
+from `IMessageGateway`.
 
 The Plugin starts without provider credentials when storage is empty. It
 requires the `IMessageGateway` and `WebServer` capabilities, exposes
@@ -43,15 +60,14 @@ before modes existed both receive; a stored `send` is read as `send_receive`.
 ## Receiving
 
 `wechat_receive_task` owns the shared receive runtime
-(`barracuda-imessage-gateway-channel`). While the channel is linked and in
+(`IMessageGateway::receive_runtime`). While the channel is linked and in
 `send_receive` it holds one receive-slot lease, otherwise it is parked and
 holds no connection. When every slot is in use the channel reports `no_slot`
-and waits on `ReceiveSlots::wait_available`, so it starts as soon as another
-channel frees one.
+and waits for a freed slot, so it starts as soon as another channel frees
+one.
 
 Each receive session opens one kept-alive connection to the configured
-`api_base` through the lease's own client factory with the Gateway's poll
-helper (`barracuda_imessage_gateway_plugin::poll`; not the `send` helper,
+`api_base` over the lease with `GatewayHttp::poll` (not `GatewayHttp::send`,
 whose 30 s deadline is shorter than a long poll) and repeats:
 
 1. await `IMessageGateway::ready()`;
@@ -121,14 +137,14 @@ The portal entry is registered with `CaptivePortal::register_with_status`. Its
 `GET /portal/status` record is `attention` 等待扫码/Waiting for scan while a QR
 login session is in `wait` or `scanned`, `attention` 需要重新扫码/Scan again to
 relink while receiving is halted by an expired bot session, and otherwise the
-shared channel mapping (`entry_status`): `off` 未配置 when not linked, `off`
+Gateway's `channel_status` of the channel: `off` 未配置 when not linked, `off`
 已停用 when disabled, `ready` 收发中 while receiving, `attention` 连接中,
 名额已满 or 连接中断 otherwise.
 
 The configuration can also be obtained by QR login at
 `/api/gateway/wechat/login`. Registration retains two HTTP routes: the
-configuration prefix, which also serves `/mode` and `/owners`
-(`ChannelEndpoint`), and the exact login route. Both configuration paths
+configuration prefix, whose `/status`, `/mode`, and `/owners` the Gateway
+serves (`IMessageGateway::serve_channel`), and the exact login route. Both configuration paths
 store and register through one shared path, so a confirmed login writes the
 same `configuration` key and format as a manual `POST /api/gateway/wechat`:
 the iLink `bot_token` as `token`, iLink's `baseurl` (or the `api_base` used for
@@ -164,7 +180,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) starts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) starts
 a QR login on mount (`POST /api/gateway/wechat/login`), draws the returned `url`
 as a QR Code with a countdown from `expires_in`, polls `GET` every 2 s (wait,
 scanned, confirmed, expired or failed) and sends a `keepalive` `DELETE` when it
@@ -176,6 +193,6 @@ the footer shows only while that fold is open. After a confirmed login or an
 accepted token the page calls `context.refreshStatus()`, so the portal's
 navigation and overview follow. Secrets are password inputs,
 never persisted in browser storage, and cleared on success or unmount. Requests
-are cancelled on unmount and are never retried automatically. The existing HTTP
-API has no authentication or transport encryption added here; use only within a
+are cancelled on unmount and are never retried automatically. The HTTP
+API has no authentication or transport encryption; use only within a
 trusted provisioning network.

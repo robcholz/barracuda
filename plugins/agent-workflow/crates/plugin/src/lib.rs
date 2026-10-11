@@ -6,7 +6,6 @@ extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 
-use barracuda_agent_message::json;
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
@@ -14,6 +13,7 @@ use barracuda_agent_plugin::{
         ToolOutput, ToolSpec,
     },
 };
+use barracuda_json_writer as json;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_workflow_plugin::{

@@ -15,6 +15,7 @@ embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 
 [dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

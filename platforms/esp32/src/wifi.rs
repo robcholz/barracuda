@@ -18,7 +18,7 @@ use esp_radio::wifi::{
 
 const DHCP_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// ESP radio mechanism controlled by the portable Wi-Fi Plugin.
+/// ESP radio mechanism; Wi-Fi policy belongs to its consumer.
 pub struct EspWifiDevice {
     controller: WifiController<'static>,
     station_stack: Stack<'static>,

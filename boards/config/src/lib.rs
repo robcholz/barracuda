@@ -102,6 +102,8 @@ pub struct BoardDefinition {
     peripherals: PeripheralsDefinition,
     #[serde(default, rename = "exposed-io")]
     exposed_io: ExposedIoDefinition,
+    #[serde(default)]
+    plugins: BTreeMap<String, BTreeMap<String, PluginSetting>>,
 }
 
 impl BoardDefinition {
@@ -171,6 +173,23 @@ impl BoardDefinition {
             .devices
             .iter()
             .map(|(name, peripheral)| (name.as_str(), peripheral))
+    }
+
+    /// Returns the settings this Board gives one Plugin, in name order.
+    ///
+    /// The Board only stores them: each Plugin declares which settings it
+    /// accepts, and its build checks them.
+    pub fn plugin_settings(&self, plugin: &str) -> impl Iterator<Item = (&str, &PluginSetting)> {
+        self.plugins
+            .get(plugin)
+            .into_iter()
+            .flatten()
+            .map(|(name, setting)| (name.as_str(), setting))
+    }
+
+    /// Iterates the identities of Plugins this Board configures.
+    pub fn configured_plugins(&self) -> impl Iterator<Item = &str> {
+        self.plugins.keys().map(String::as_str)
     }
 
     /// Returns whether this Board declares any attached peripherals or exposed I/O.
@@ -1270,6 +1289,18 @@ pub enum PeripheralParameter {
     Sequence(Vec<PeripheralParameter>),
     /// Named collection of nested settings.
     Mapping(BTreeMap<String, PeripheralParameter>),
+}
+
+/// One Plugin setting given by a Board.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PluginSetting {
+    /// Boolean setting.
+    Boolean(bool),
+    /// Integer setting.
+    Integer(i64),
+    /// Text setting.
+    String(String),
 }
 
 fn validate_resource_name(section: &'static str, name: &str) -> Result<(), ConfigError> {

@@ -396,4 +396,10 @@ mod tests {
         let result: bool = futures_lite::future::block_on(lua.load("local i2s = require('i2s')\nlocal stream <close> = i2s.open('D1', 'D2', 'D3', nil, nil, 48000, 2, 16)\nstream:write('\\001\\000\\002\\000')\nlocal pcm = stream:read(2)\nlocal rate, channels, bits = stream:format()\nreturn #pcm == 8 and rate == 48000 and channels == 2 and bits == 16").eval_async()).expect("use I2S");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = I2sPackage::new(Arc::new(Provider));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

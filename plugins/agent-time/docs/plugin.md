@@ -1,3 +1,20 @@
 # Agent Time Plugin
 
-`agent-time` depends on `agent` and `time`. During Plugin registration it adds the awaited `time_now` Tool to the shared `AgentToolRegistry`. It owns no clock state or background task.
+Exposes the `time` Plugin's `UtcClock` capability to Agents as a native Tool.
+
+- Plugin ID: `agent-time`
+- Dependencies: `agent`, `time`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `UtcClock` from
+  `time`
+- Workflow: none
+- Agent Tools: `time_now`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
+
+During Plugin registration it adds the awaited `time_now` Tool to the shared
+`AgentToolRegistry`. It owns no clock state or background task.

@@ -426,12 +426,6 @@ impl FilePackage {
     }
 }
 
-/// Creates the scoped package for cross-Plugin memory tests.
-#[cfg(feature = "test-fixture")]
-pub fn package_for_test(filesystem: ScopedVfs) -> impl LuaPackage {
-    FilePackage::new(filesystem)
-}
-
 impl Package for FilePackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
         let open_state = Arc::clone(&self.state);
@@ -1388,6 +1382,12 @@ mod tests {
             Ok::<_, Box<dyn core::error::Error>>(())
         })
         .expect("revoked vm-filesystem package");
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = FilePackage::new(block_on(filesystem()).expect("mount test filesystem"));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 
     mod barracuda_lua_test_fixture {

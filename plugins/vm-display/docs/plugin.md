@@ -1,9 +1,20 @@
 # Display Plugin
 
+The Display Plugin owns the Board's primary built-in display and exposes
+drawing and panel control to Lua code as the `display` Lua package.
+
 - Plugin ID: `display`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_display()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `display`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary built-in `Display` capability exactly
 once and installs the `display` Lua package. Panel buses and control pins stay

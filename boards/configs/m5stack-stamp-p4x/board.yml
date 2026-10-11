@@ -5,3 +5,7 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+plugins:
+  imessage-gateway:
+    # No channel receive connections on this Board.
+    receive-slots: 0

@@ -1,13 +1,19 @@
 # IMU Plugin
 
+Installs the `imu` Lua package over the Board's primary built-in IMU.
+
 - Plugin ID: `imu`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_imu()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
 - Agent Tools: none
-- Owned long-running tasks: none
+- Lua packages: `imu`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary built-in `Imu` capability exactly once
 and installs the `imu` Lua package. I2C ownership, chip initialization, integer

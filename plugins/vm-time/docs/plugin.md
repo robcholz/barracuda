@@ -1,10 +1,21 @@
 # VM Time Plugin
 
+Exposes the Time Plugin's UTC clock to Lua through the standard `os` time
+functions.
+
 - Plugin ID: `vm-time`
-- Direct Plugin dependencies: `time`, `vm`
-- Required typed capabilities: `barracuda_time_plugin::UtcClock` from `time`, `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Owned tasks: one cancellable UTC request bridge
+- Dependencies: `time`, `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `UtcClock` from `time`, `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `vm-time`, which extends the standard `os` table
+- Web: none
+- Tasks: one cancellable UTC request bridge task (`vm_time_task`, pool size 1), fed
+  by a request queue of depth 4
+- Storage: none
 
 This Plugin projects the Time Plugin's network-synchronized, locally advanced
 UTC clock into Lua's standard `os` table. It owns no clock, network source, or

@@ -1,13 +1,30 @@
 # Agent IMessage Gateway Plugin
 
-`agent-imessage-gateway` depends on `agent`, `imessage-gateway`, `time`, and
-`workflow`. It requires `AgentToolRegistry` and `AgentRuntime` from `agent`,
-`IMessageGateway` from `imessage-gateway`, `UtcClock` from `time`, and
-`WorkflowActionRegistry` from `workflow`. During Plugin registration it adds
-the awaited `gateway_send` and `gateway_send_media` Tools to
-`AgentToolRegistry` and registers `imessage_bridge.to_agent`,
-`imessage_bridge.to_gateway` and `imessage_bridge.session` in
-`WorkflowActionRegistry`.
+Exposes iMessage Agent Tools, the Workflow Actions that bridge Gateway
+conversations to Agent sessions, and session commands.
+
+- Plugin ID: `agent-imessage-gateway`
+- Dependencies: `agent`, `imessage-gateway`, `time`, `workflow`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `AgentRuntime` from
+  `agent`, `IMessageGateway` from `imessage-gateway`, `UtcClock` from `time`,
+  `WorkflowActionRegistry` from `workflow`, `WorkflowService` from `workflow`
+- Workflow: Actions `imessage_bridge.to_agent`, `imessage_bridge.to_gateway`,
+  `imessage_bridge.session`, see `action.md`
+- Agent Tools: `gateway_send`, `gateway_send_media`
+- Lua packages: none
+- Web: none
+- Tasks: one Workflow-loading task (pool size 1), spawned from `start`, which
+  ends once the bundled Workflows are loaded
+- Storage: Plugin-scoped KV entries keyed by Agent session ID, each holding
+  the saved Gateway route of that session; reads `/resources/workflows.json`
+
+During registration the Plugin adds the awaited `gateway_send` and
+`gateway_send_media` Tools to `AgentToolRegistry` and registers the three
+Actions in `WorkflowActionRegistry`, retaining their registration guards for
+the Plugin lifetime.
 
 ## Sessions per conversation
 
@@ -40,8 +57,22 @@ for the Plugin lifetime. The Action request and response contracts are in
 text }` resolves the session for an inbound message (reserving an unmapped
 route while its session is created), `{ route, message_id, session }` binds
 it, and `{ route }` only looks the route up, for `gateway.control.received`:
-the Agent Plugin's `imessage-control-to-agent` Workflow maps a control to
+the `imessage-control-to-agent` Workflow maps a control to
 `session.interrupt` or `session.cancel` on the session it finds, and does
 nothing for a route with no open session.
 
-The Plugin owns no channel, streaming runtime, or background task.
+## Bundled Workflows
+
+The Plugin ships the Workflows that connect the Gateway and the Agent in its
+scoped `/resources/workflows.json`: `imessage-to-agent` and
+`imessage-control-to-agent` route `gateway.message.received` and
+`gateway.control.received` to Agent sessions, and `agent-to-imessage` sends
+each `session.event` back to its route with `gateway.send_stream`. At start,
+once every Plugin has registered its Actions, a Plugin-owned task loads each
+definition transiently through `WorkflowService` and ends. The definitions stay
+in `/resources` and are never copied into the user-created
+`/data/workflows.json` catalog; a persisted user definition with the same ID
+takes precedence. A missing or invalid resource, or a rejected definition, is
+logged and the remaining definitions are not loaded.
+
+The Plugin owns no channel or streaming runtime.

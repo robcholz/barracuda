@@ -14,6 +14,7 @@ barracuda-vm-plugin.workspace = true
 critical-section = "1"
 
 [dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

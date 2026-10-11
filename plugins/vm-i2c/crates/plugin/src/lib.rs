@@ -431,4 +431,12 @@ mod tests {
         assert!(rejected);
         assert!(!provider.busy.load(Ordering::Acquire));
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = I2cPackage::new(Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
+        }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

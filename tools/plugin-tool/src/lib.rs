@@ -6,6 +6,8 @@ use std::{
 };
 
 use barracuda_plugin::manifest::{parse, PluginManifest};
+
+mod conventions;
 use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
@@ -216,12 +218,45 @@ pub fn sync(root: &Path, check: bool) -> Result<(), CommandError> {
     sync_with_report(root, check).map(|_| ())
 }
 
+/// Checks every Plugin against the checkable Plugin API conventions: its
+/// root layout, schema tree, `plugin.md` summary, Action and Event documents,
+/// and crate dependencies on other Plugins.
+///
+/// # Errors
+/// Returns every violation at once, or an error when discovery fails.
+pub fn check_conventions(root: &Path) -> Result<(), CommandError> {
+    let plugins = discover(root)?;
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    conventions::check(
+        root,
+        &plugins
+            .iter()
+            .zip(&manifests)
+            .map(|(plugin, manifest)| conventions::Checked {
+                directory: &plugin.directory,
+                manifest,
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(())
+}
+
 /// Synchronizes the registry and returns the enabled and disabled Plugin sets.
 ///
 /// # Errors
 /// Returns an error when discovery, generated files, or filesystem access fail.
 pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandError> {
     let plugins = discover(root)?;
+    validate_board_settings(root, &plugins)?;
     let disabled_names = read_disabled(root)?;
     let (disabled, enabled): (Vec<_>, Vec<_>) = plugins
         .iter()
@@ -557,6 +592,55 @@ fn validate_dependency_graph(plugins: &[Plugin]) -> Result<(), CommandError> {
     }
 }
 
+/// Checks every Board's `plugins` section against the Plugins' declared
+/// settings, whether or not the Board or the Plugin is selected.
+fn validate_board_settings(root: &Path, plugins: &[Plugin]) -> Result<(), CommandError> {
+    let boards = root.join("boards/configs");
+    if !boards.is_dir() {
+        return Ok(());
+    }
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let entries = fs::read_dir(&boards).map_err(|source| CommandError::Io {
+        path: boards.clone(),
+        source,
+    })?;
+    let mut paths = entries
+        .map(|entry| entry.map(|entry| entry.path().join("board.yml")))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| CommandError::Io {
+            path: boards.clone(),
+            source,
+        })?;
+    paths.sort();
+    for path in paths.into_iter().filter(|path| path.is_file()) {
+        let board = barracuda_board_config::parse(&read(&path)?).map_err(|error| {
+            CommandError::Metadata(format!("invalid Board {}: {error}", path.display()))
+        })?;
+        for id in board.configured_plugins() {
+            let manifest = manifests
+                .iter()
+                .find(|manifest| manifest.id() == id)
+                .ok_or_else(|| {
+                    CommandError::Metadata(format!(
+                        "{} configures unknown Plugin `{id}`",
+                        path.display()
+                    ))
+                })?;
+            barracuda_plugin_build::resolve_config(manifest, Some(&board))?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_metadata(path: &Path, contents: &str) -> Result<PluginManifest, CommandError> {
     parse(contents).map_err(|error| {
         CommandError::Metadata(format!(
@@ -651,16 +735,9 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
     let entries = plugins
         .iter()
         .map(|plugin| {
-            // Platform resource routing is part of the fixed System composition,
-            // not author-controlled Plugin metadata.
-            let platform_resources = match plugin.id.as_str() {
-                "wifi" => ", prepared.wifi",
-                "vm" => ", prepared.entropy",
-                _ => "",
-            };
             format!(
-                "            {}::{}::new(&mut plugin_context{}),",
-                plugin.crate_name, plugin.entry, platform_resources
+                "            {}::{}::new(&mut plugin_context),",
+                plugin.crate_name, plugin.entry
             )
         })
         .collect::<Vec<_>>()
@@ -711,10 +788,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
+        cascade_disabled, discover, format_cascade_dependencies, format_selection_summary, info,
         package_name, parse_metadata, persist_disabled_selection, plugin_entry,
         render_dependencies, render_registrations, replace_block, sync_with_report,
-        validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
+        validate_board_settings, validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -1010,31 +1087,56 @@ mod tests {
     }
 
     #[test]
-    fn renders_platform_owned_wifi_constructor_argument() {
-        let demo = plugin("wifi", "wifi", &[]);
+    fn every_plugin_is_constructed_from_the_context_alone() {
+        let wifi = plugin("wifi", "wifi", &[]);
+        let vm = plugin("vm", "vm", &[]);
 
         assert_eq!(
-            render_registrations(&[&demo]),
+            render_registrations(&[&wifi, &vm]),
             concat!(
                 "        register_plugins!(plugins;\n",
-                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context, prepared.wifi),\n",
+                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context),\n",
+                "            barracuda_vm_plugin::TestPlugin::new(&mut plugin_context),\n",
                 "        );"
             )
         );
     }
 
     #[test]
-    fn renders_platform_owned_entropy_constructor_argument() {
-        let demo = plugin("vm", "vm", &[]);
+    fn boards_may_set_only_declared_plugin_settings() {
+        let root = tempdir().expect("temporary workspace");
+        let plugin = root.path().join("plugins/demo/crates/plugin");
+        fs::create_dir_all(plugin.join("src")).expect("Plugin source directory");
+        fs::write(
+            plugin.join("Cargo.toml"),
+            "[package]\nname = \"barracuda-demo-plugin\"\n",
+        )
+        .expect("Plugin manifest");
+        fs::write(
+            root.path().join("plugins/demo/plugin.toml"),
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates settings.\"\n\n[config.slots]\ntype = \"usize\"\ndefault = 1\ndescription = \"Slots.\"\n",
+        )
+        .expect("Plugin metadata");
+        fs::write(plugin.join("src/lib.rs"), "impl Plugin for DemoPlugin {}\n")
+            .expect("Plugin source");
+        let board = root.path().join("boards/configs/demo-board");
+        fs::create_dir_all(&board).expect("Board directory");
+        let base =
+            "name: demo-board\nhardware:\n  chip: demo\nnative-layout:\n  artifact: layout.yml\n";
+        let plugins = discover(root.path()).expect("discover Plugins");
 
-        assert_eq!(
-            render_registrations(&[&demo]),
-            concat!(
-                "        register_plugins!(plugins;\n",
-                "            barracuda_vm_plugin::TestPlugin::new(&mut plugin_context, prepared.entropy),\n",
-                "        );"
-            )
-        );
+        for (settings, valid) in [
+            ("plugins:\n  demo:\n    slots: 3\n", true),
+            ("plugins:\n  demo:\n    lanes: 3\n", false),
+            ("plugins:\n  missing:\n    slots: 3\n", false),
+        ] {
+            fs::write(board.join("board.yml"), format!("{base}{settings}")).expect("Board");
+            assert_eq!(
+                validate_board_settings(root.path(), &plugins).is_ok(),
+                valid,
+                "{settings}"
+            );
+        }
     }
 
     #[test]

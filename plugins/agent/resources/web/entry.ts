@@ -3,8 +3,6 @@ import {
   ICON_BRAIN,
   ICON_FOLD_VERTICAL,
   ICON_NETWORK,
-  MARK_ANTHROPIC,
-  MARK_OPENAI,
   callDevice,
   definePage,
   entryStatus,
@@ -15,6 +13,7 @@ import {
   settingsForm,
   type Text,
 } from "../../../captive-portal/resources/web/ui";
+import { MARK_ANTHROPIC, MARK_OPENAI } from "./marks";
 
 type Purpose = "root_agent" | "sub_agent" | "memory" | "compaction";
 
@@ -211,12 +210,15 @@ export const mount = definePage((context) => {
         void status.refresh();
         void load();
       },
-      success: {
-        action: {
-          label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
-          run: () => context.navigate("imessage-web"),
-        },
-      },
+      // Web chat is another plugin: offer the way there only while its entry is listed
+      success: context.has("imessage-web")
+        ? {
+            action: {
+              label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
+              run: () => context.navigate("imessage-web"),
+            },
+          }
+        : undefined,
     },
     context,
   );

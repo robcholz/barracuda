@@ -20,6 +20,9 @@ spin = { version = "0.10", default-features = false, features = ["portable_atomi
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 
 [lints.rust]

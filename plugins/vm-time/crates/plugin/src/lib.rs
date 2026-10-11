@@ -176,12 +176,6 @@ impl TimePackage {
     }
 }
 
-/// Creates the package without its clock bridge for cross-Plugin memory tests.
-#[cfg(feature = "test-fixture")]
-pub fn package_for_test() -> impl LuaPackage {
-    TimePackage::new().0
-}
-
 impl Package for TimePackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
         let state = Arc::clone(&self.state);
@@ -609,5 +603,11 @@ mod tests {
                 .exec_async()
                 .await
         })
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let (package, _requests) = TimePackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

@@ -1,20 +1,44 @@
 # Agent Plugin
 
+Runs conversational Agents and exposes model configuration over HTTP and a
+portal page.
+
 - Plugin ID: `agent`
-- Direct Plugin dependencies: `webserver`, `workflow`, `captive-portal`, `time`
-- Provided typed capabilities: `AgentRuntime`, `AgentToolRegistry`
-- Required typed capabilities: `WebServer` from `webserver`,
-  `WorkflowActionRegistry` and `WorkflowService` from `workflow`,
-  `CaptivePortal` from `captive-portal`, and `UtcClock` from `time`
-- Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
-  `background_list`, `background_wait`, `background_input`, `background_cancel`,
-  plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
-- Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
-  skills from `/workspace/media/skills`, and shared bundled skills from
-  `/workspace/resources/skills`
+- Dependencies: `webserver`, `workflow`, `captive-portal`, `time`, `http`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `AgentRuntime`, `AgentToolRegistry`
+- Required capabilities: `CaptivePortal` from `captive-portal`, `WebServer`
+  from `webserver`, `WorkflowActionRegistry` from `workflow`,
+  `WorkflowService` from `workflow`, `ClientFactory` from `http`, `UtcClock`
+  from `time`
+- Workflow: Actions `session.new`, `session.open`, `session.append`,
+  `session.respond`, `session.interrupt`, `session.cancel`, `session.close`,
+  `session.delete`, `session.list`, `session.rename`,
+  `session.set_permission_level`, `session.set_reasoning_effort`, see
+  `action.md`; Events `session.event`, see `event.md`
+- Agent Tools: `background_list`, `background_wait`, `background_input`,
+  `background_cancel`, `conversation_end`, `skill_list`, `skill_read`,
+  `skill_resource_read`, `skill_reload`, `memory_store`, `memory_recall`,
+  `memory_list`, `memory_update`, `memory_forget`, `plan_enter`, `plan_exit`,
+  `plan_clarify`, `profile_read`, `profile_replace`, `profile_clear`,
+  `todo_update`, `tool_search`, `tool_load`, `subagent_spawn`, `subagent_run`,
+  `subagent_list`, `subagent_list_spawnable`, `subagent_watch`,
+  `subagent_interrupt`, `subagent_delete`; the permission-reply resolver uses
+  `permission_resolve_reply` in its own model call
+- Lua packages: none
+- Web: portal entry `agent`, with status; `POST /api/model-api`,
+  `GET /api/model-api/status` (see `http.md`)
+- Tasks: one Agent task (pool size 1) that drives the Agent runtime and
+  forwards open-session output as `session.event`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
-  `purpose.{root_agent,sub_agent,memory,compaction}`
-- Plugin-owned tasks: Agent runtime and `session.event` forwarding
+  `purpose.{root_agent,sub_agent,memory,compaction}`; persistent runtime state
+  as `.bin` files under `/data`; user-installed skills read from
+  `/workspace/media/skills` and shared bundled skills from
+  `/workspace/resources/skills`; bundled `/resources/entry.js`,
+  `/resources/figure.js`, `/resources/icon.svg`
+
+The Plugin requires a private filesystem (`PluginFilesystem::Private`).
 
 System constructs the Agent Plugin from the common `PluginContext`. During
 registration it creates and publishes `AgentRuntime`, publishes
@@ -43,7 +67,7 @@ The Plugin owns and drives `RuntimeService` directly. Alongside it, the
 Agent-to-Workflow adapter only forwards open-session output as `session.event`;
 it does not own or run either the Agent runtime or the Workflow runtime.
 
-Dependent Plugins may still register native Agent `ToolGroup`s through
+Dependent Plugins may register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
 
@@ -95,16 +119,8 @@ the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
 UTF-8 file path relative to that unique skill directory without exposing the
 backing path to the model.
 
-At task startup, Agent reads its scoped `/resources/workflows.json` and loads
-each definition transiently through the required `WorkflowService` capability,
-after all Plugins have registered their Actions. Bundled definitions remain in
-`/resources` and are never copied into the user-created
-`/data/workflows.json` catalog. A persisted user definition with the same ID
-takes precedence. A missing or invalid resource, or a rejected definition, is
-logged and stops the Agent task before it begins driving sessions.
-
-The shared `WebServer` capability continues to own `POST /api/model-api` and
-`GET /api/model-api/status` (see `http.md`); both read the same in-memory
+The Plugin serves `POST /api/model-api` and `GET /api/model-api/status`
+through `WebServer` (see `http.md`); both read the same in-memory
 configuration. The retained route registrations are released automatically
 when the Agent Plugin unloads. Accepted model configurations are atomically persisted before they
 become active. Registration restores the complete model, purpose-binding, and

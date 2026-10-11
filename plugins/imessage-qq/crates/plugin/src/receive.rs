@@ -15,21 +15,16 @@ use alloc::format;
 use alloc::string::String;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    ReceiveSlotSource, SlotWait, PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget,
-    SendMessageRequest,
+    ChannelControl, ChannelError, Classification, GatewayInboundMessage, GatewayRoute,
+    MessageChannel, MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease,
+    ReceiveSession, SendMessageRequest, PAIRED_REPLY,
 };
 use barracuda_plugin::api::Entropy;
 use barracuda_plugin::manager::{PluginStorage, StorageError};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use embedded_io_async::{Read, Write};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ReceiveLease, ReceiveSlots, ReceiveSocket};
 use qq::gateway::{
     self, close_action, event, op, CloseAction, Hello, InboundText, MessageEvent, Ready, Scene,
     Skipped,
@@ -76,29 +71,6 @@ pub(crate) const WS_LIMITS: Limits = Limits {
 };
 
 const USER_AGENT: &str = "barracuda";
-
-/// The System's receive slots as the channel's slot source.
-pub(crate) struct QQSlots<C: 'static, D: 'static>(pub(crate) ReceiveSlots<C, D>);
-
-impl<C: 'static, D: 'static> ReceiveSlotSource for QQSlots<C, D> {
-    type Lease = ReceiveLease<C, D>;
-
-    fn acquire(&self) -> Option<Self::Lease> {
-        self.0.acquire()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn in_use(&self) -> usize {
-        self.0.in_use()
-    }
-
-    fn wait_available(&self) -> SlotWait<'_> {
-        Box::pin(self.0.wait_available())
-    }
-}
 
 /// The stored form of [`GatewaySession`].
 #[derive(Deserialize, Serialize)]
@@ -343,8 +315,8 @@ fn ws_error(error: WsError) -> ReceiveError {
 }
 
 /// What a connection uses of the channel: its settings and gateway state.
-struct Link<'a, T: 'static, D: 'static> {
-    settings: &'a Settings<T, D>,
+struct Link<'a> {
+    settings: &'a Settings,
     state: &'a GatewayState,
 }
 
@@ -355,16 +327,10 @@ enum Ended {
     Failed(ReceiveError),
 }
 
-impl<Storage, T, D> ReceiveChannel<ReceiveLease<ReceiveSocket, D>>
-    for QQChannel<Storage, QQSlots<ReceiveSocket, D>, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ReceiveChannel<ReceiveLease> for QQChannel<Storage> {
     fn receive<'a>(
         &'a self,
-        lease: &'a mut ReceiveLease<ReceiveSocket, D>,
+        lease: &'a mut ReceiveLease,
         session: ReceiveSession<'a>,
     ) -> ReceiveFuture<'a> {
         Box::pin(async move {
@@ -390,18 +356,12 @@ where
     }
 }
 
-impl<Storage, Slots, T, D> QQChannel<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> QQChannel<Storage> {
     /// The settings, the gateway state (loaded by the first session), and
     /// the gateway URL for the next connection.
-    pub(crate) async fn prepare(
+    async fn prepare(
         &self,
-    ) -> Result<(alloc::rc::Rc<Settings<T, D>>, String, &GatewayState), ReceiveError> {
+    ) -> Result<(alloc::rc::Rc<Settings>, String, &GatewayState), ReceiveError> {
         let Some(settings) = self.settings() else {
             return Err(ReceiveError::halt("QQ is not set up"));
         };
@@ -454,9 +414,9 @@ where
     }
 
     /// Runs the gateway protocol over an open byte stream until it ends.
-    pub(crate) async fn run<R: Read, W: Write>(
+    async fn run<R: Read, W: Write>(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         url: &str,
         reader: R,
@@ -529,7 +489,7 @@ where
     /// token until the connection ends.
     async fn connected<R: Read, W: Write, M: ws_client::MaskSource>(
         &self,
-        link: Link<'_, T, D>,
+        link: Link<'_>,
         token: &str,
         reader: &mut WsReader<R>,
         writer: &mut WsWriter<W, M>,
@@ -678,7 +638,7 @@ where
     /// The server closed the connection with `code`.
     async fn closed(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         token: &str,
         code: Option<u16>,
@@ -712,7 +672,7 @@ where
     /// Handles one message event at most once.
     async fn handle(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         message: MessageEvent,
         scene: Scene,

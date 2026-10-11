@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter};
+use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter, PluginSetting};
 use std::path::Path;
 
 const VALID: &str = r#"
@@ -20,6 +20,26 @@ fn parses_concrete_board_hardware_and_native_layout() {
     assert_eq!(board.name(), "local-macos");
     assert_eq!(board.hardware().chip(), "macos");
     assert_eq!(board.native_layout().artifact(), "file-layout.yml");
+}
+
+#[test]
+fn keeps_plugin_settings_without_interpreting_them() {
+    let yaml = format!(
+        "{VALID}plugins:\n  example:\n    slots: 3\n    label: kitchen\n    enabled: true\n"
+    );
+    let board = parse(&yaml).expect("Board with Plugin settings");
+
+    assert_eq!(
+        board.plugin_settings("example").collect::<Vec<_>>(),
+        [
+            ("enabled", &PluginSetting::Boolean(true)),
+            ("label", &PluginSetting::String("kitchen".into())),
+            ("slots", &PluginSetting::Integer(3)),
+        ]
+    );
+    assert_eq!(board.configured_plugins().collect::<Vec<_>>(), ["example"]);
+    assert_eq!(board.plugin_settings("other").count(), 0);
+    assert!(!render_rust(&board).contains("kitchen"));
 }
 
 #[test]

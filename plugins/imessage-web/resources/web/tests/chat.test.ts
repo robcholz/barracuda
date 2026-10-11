@@ -82,6 +82,7 @@ function open(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {},
     badge: (badge) => badges.push(badge),

@@ -1,6 +1,6 @@
 # IMessage Telegram HTTP API
 
-The shared shapes come from `barracuda-imessage-gateway-channel`; see the
+The shared shapes are served by the Gateway's `IMessageGateway::serve_channel`; see the
 Gateway's [`plugin.md`](../../imessage-gateway/docs/plugin.md).
 
 ## `GET /api/gateway/telegram/status`

@@ -1,7 +1,10 @@
 //! IMessage QQ provider Plugin.
 #![no_std]
+#![recursion_limit = "256"]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod channel;
 mod login;
@@ -13,10 +16,9 @@ use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use barracuda_captive_portal_plugin::{
     CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
-use barracuda_imessage_gateway_channel::{
-    ChannelEndpoint, ReceiveRuntime, ReceiveSlotSource, ReceiveTiming,
+use barracuda_imessage_gateway_plugin::{
+    ChannelLevel, ChannelStatus, IMessageGateway, ReceiveRuntime, ReceiveTiming,
 };
-use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
@@ -26,21 +28,15 @@ use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
 use embassy_futures::select::select;
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ClientFactory, ReceiveSlots};
 use qq::{QQConfig, TokenError, QQ};
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 
 use crate::channel::{build_channel, ConfigureError, QQChannel};
 use crate::login::{LoginEndpoint, LoginRuntime, LoginTiming, LoginWatch};
-use crate::receive::QQSlots;
 
-/// HTTP path accepting QQ configuration and reporting channel status.
+/// HTTP path accepting QQ configuration; the Gateway serves the channel's
+/// `/status`, `/mode`, and `/owners` below it.
 pub const CONFIG_API_PATH: &str = "/api/gateway/qq";
-/// HTTP path setting the channel mode.
-pub const MODE_API_PATH: &str = "/api/gateway/qq/mode";
-/// HTTP path listing owners and the pairing code.
-pub const OWNERS_API_PATH: &str = "/api/gateway/qq/owners";
 /// HTTP path starting, observing, and cancelling a QR-code binding.
 pub const LOGIN_API_PATH: &str = "/api/gateway/qq/login";
 
@@ -53,21 +49,17 @@ const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 /// receives its messages over the QQ WebSocket gateway.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageQQPlugin {
-    http_clients: ClientFactory<'static>,
-    receive_slots: ReceiveSlots,
     entropy: SharedEntropy,
     runtime: Option<ReceiveRuntime>,
     login: Option<LoginRuntime>,
 }
 
 impl IMessageQQPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources, the
-    /// receive slots, and the Platform entropy.
+    /// Creates the unregistered QQ channel Plugin; the Platform entropy makes
+    /// its WebSocket keys and masks and its scan-to-bind keys.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
-            receive_slots: context.receive_slots.clone(),
             entropy: context.entropy.clone(),
             runtime: None,
             login: None,
@@ -88,17 +80,11 @@ impl Plugin for IMessageQQPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
+        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+        let webserver = context.require::<WebServer>("webserver")?;
         let (channel, runtime) = build_channel(
             context.storage().clone(),
-            gateway,
-            self.http_clients.clone(),
-            QQSlots(self.receive_slots.clone()),
+            Rc::clone(&gateway),
             self.entropy.clone(),
             ReceiveTiming::DEVICE,
         )?;
@@ -126,20 +112,19 @@ impl Plugin for IMessageQQPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
-                    move || entry_status(&*status, &login_watch),
+                    move || card_status(&status, &login_watch),
                 )
                 .map_err(PluginError::registration)?,
         );
-        // One route serves the configuration path and its `/mode` and
-        // `/owners`; the exact login route takes its own requests.
-        let endpoint = ChannelEndpoint::new(
-            Rc::clone(&channel),
-            CONFIG_API_PATH,
-            ConfigEndpoint { channel },
-        );
+        // The Gateway serves the configuration path and its `/status`,
+        // `/mode`, and `/owners`; the exact login route takes its own
+        // requests.
+        let config = ConfigEndpoint {
+            channel: Rc::clone(&channel),
+        };
         context.retain(
-            webserver
-                .serve_http_prefix(CONFIG_API_PATH, endpoint)
+            gateway
+                .serve_channel(CONFIG_API_PATH, channel, config)
                 .map_err(PluginError::registration)?,
         );
         context.retain(
@@ -176,17 +161,11 @@ impl Plugin for IMessageQQPlugin {
 }
 
 /// Portal status: `attention` while a QR binding waits for its scan,
-/// otherwise the shared channel mapping.
-fn entry_status<Storage, Slots, T, D>(
-    channel: &QQChannel<Storage, Slots, T, D>,
+/// otherwise the Gateway's status of the channel.
+fn card_status<Storage: PluginStorage>(
+    channel: &QQChannel<Storage>,
     login: &LoginWatch,
-) -> EntryStatus
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+) -> EntryStatus {
     if login.waiting_for_scan() {
         return EntryStatus::new(
             EntryState::Attention,
@@ -196,7 +175,23 @@ where
             },
         );
     }
-    barracuda_imessage_gateway_channel::entry_status(channel)
+    entry_status(channel.gateway.channel_status(channel))
+}
+
+/// The portal card status of a channel status.
+fn entry_status(status: ChannelStatus) -> EntryStatus {
+    let state = match status.level {
+        ChannelLevel::Off => EntryState::Off,
+        ChannelLevel::Ready => EntryState::Ready,
+        ChannelLevel::Attention => EntryState::Attention,
+    };
+    EntryStatus::new(
+        state,
+        WebText {
+            zh: status.zh,
+            en: status.en,
+        },
+    )
 }
 
 /// Owns the QR binding session; parked on its command signal while no
@@ -274,13 +269,8 @@ struct ErrorBody<'a> {
 
 /// `POST` verifies and stores a configuration; the channel status is under
 /// `/status`.
-struct ConfigEndpoint<
-    Storage,
-    Slots: barracuda_imessage_gateway_channel::ReceiveSlotSource,
-    T: 'static,
-    D: 'static,
-> {
-    channel: Rc<QQChannel<Storage, Slots, T, D>>,
+struct ConfigEndpoint<Storage> {
+    channel: Rc<QQChannel<Storage>>,
 }
 
 fn response(status: u16, body: &'static [u8]) -> HttpResponse {
@@ -321,13 +311,7 @@ fn token_error_response(error: &TokenError) -> HttpResponse {
     }
 }
 
-impl<Storage, Slots, T, D> HttpEndpoint for ConfigEndpoint<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: barracuda_imessage_gateway_channel::ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
@@ -338,10 +322,7 @@ where
                 log::warn!("rejected invalid QQ gateway configuration");
                 return response(400, br#"{"error":"invalid_request"}"#);
             };
-            let sender = Rc::new(QQ::new(
-                self.channel.http_clients.clone(),
-                config.clone().into(),
-            ));
+            let sender = Rc::new(QQ::new(self.channel.gateway.http(), config.clone().into()));
             if let Err(error) = sender.authenticate().await {
                 return token_error_response(&error);
             }

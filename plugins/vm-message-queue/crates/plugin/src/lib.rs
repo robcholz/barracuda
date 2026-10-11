@@ -386,4 +386,10 @@ mod tests {
             assert_eq!(first, (0..32_u8).collect::<Vec<_>>());
         });
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = MessageQueuePackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

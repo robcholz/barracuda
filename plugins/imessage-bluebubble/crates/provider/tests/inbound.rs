@@ -1,29 +1,23 @@
-//! Webhook payloads, webhook registration, and the catch-up query.
+//! Webhook payloads, and webhook registration and the catch-up query against
+//! a scripted server, sent through a real Gateway's HTTP.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-use std::boxed::Box;
+mod bench;
 
-use barracuda_imessage_gateway_plugin::ChannelError;
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use barracuda_imessage_gateway_plugin::{ChannelError, GatewayHttp};
+use barracuda_platform_test::ScriptStep;
 use bluebubbles::inbound::{
     is_body_too_large, parse_webhook, MessageQuery, Sort, WebhookPayload, QUERY_BODY_LIMIT,
 };
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
-use futures_lite::future::block_on;
-use http_client::ClientFactory;
+
+use crate::bench::{bench, SERVER_URL};
 
 const MESSAGE: &str = r#"{"originalROWID":12,"guid":"p:0/AB-12","text":"hello","attributedBody":[{"string":"hello","runs":[]}],"handle":{"originalROWID":3,"address":"+15550001111","service":"iMessage","country":"us","uncanonicalizedId":null},"handleId":3,"otherHandle":0,"attachments":[],"subject":null,"error":0,"dateCreated":1700000000123,"dateRead":null,"isFromMe":false,"itemType":0,"associatedMessageGuid":null,"associatedMessageType":null,"chats":[{"originalROWID":2,"guid":"iMessage;-;+15550001111","style":45,"chatIdentifier":"+15550001111","isArchived":false,"displayName":"","participants":[{"address":"+15550001111"}]},{"guid":"second"}]}"#;
 
-fn server(steps: impl IntoIterator<Item = ScriptStep>) -> &'static ScriptedStack {
-    Box::leak(Box::new(ScriptedStack::new(steps)))
-}
-
-fn provider(server: &'static ScriptedStack) -> BlueBubbles<'static, ScriptedStack, ScriptedStack> {
-    BlueBubbles::new(
-        ClientFactory::from_network(server, server),
-        BlueBubblesConfig::new("http://blue.test", "pw"),
-    )
+fn provider(http: GatewayHttp) -> BlueBubbles {
+    BlueBubbles::new(http, BlueBubblesConfig::new(SERVER_URL, "pw"))
 }
 
 #[test]
@@ -80,7 +74,7 @@ fn only_ordinary_text_counts_as_text() {
 
 #[test]
 fn webhooks_are_listed_created_and_deleted() {
-    let server = server([
+    let steps = [
         ScriptStep::json(
             200,
             r#"{"status":200,"message":"ok","data":[{"id":4,"url":"http://10.0.0.2:8787/hook/x","events":["new-message"],"created":"2026-01-01"}]}"#,
@@ -94,29 +88,33 @@ fn webhooks_are_listed_created_and_deleted() {
             r#"{"status":404,"message":"Not Found","error":{"type":"Not Found","message":"Webhook does not exist!"}}"#,
         ),
         ScriptStep::json(401, r#"{"status":401,"message":"Unauthorized"}"#),
-    ]);
-    let provider = provider(server);
+    ];
+    bench(steps, async |http, server| {
+        let provider = provider(http);
 
-    let listed = block_on(provider.list_webhooks()).expect("list");
-    let created = block_on(provider.create_webhook("http://10.0.0.2:8787/hook/y")).expect("create");
-    let gone = block_on(provider.delete_webhook(9));
-    let refused = block_on(provider.list_webhooks());
+        let listed = provider.list_webhooks().await.expect("list");
+        let created = provider
+            .create_webhook("http://10.0.0.2:8787/hook/y")
+            .await
+            .expect("create");
+        let gone = provider.delete_webhook(9).await;
+        let refused = provider.list_webhooks().await;
 
-    assert_eq!(listed.len(), 1);
-    assert_eq!(
-        (listed[0].id, listed[0].url.as_str()),
-        (4, "http://10.0.0.2:8787/hook/x")
-    );
-    assert_eq!(created.id, 5);
-    assert_eq!(gone, Ok(()), "an unknown ID counts as deleted");
-    assert!(matches!(refused, Err(ChannelError::Authentication)));
-    let requests = server.requests();
-    assert!(requests[0].starts_with("GET /api/v1/webhook?password=pw "));
-    assert!(requests[1].starts_with("POST /api/v1/webhook?password=pw "));
-    assert!(
-        requests[1].ends_with(r#"{"events":["new-message"],"url":"http://10.0.0.2:8787/hook/y"}"#)
-    );
-    assert!(requests[2].starts_with("DELETE /api/v1/webhook/9?password=pw "));
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            (listed[0].id, listed[0].url.as_str()),
+            (4, "http://10.0.0.2:8787/hook/x")
+        );
+        assert_eq!(created.id, 5);
+        assert_eq!(gone, Ok(()), "an unknown ID counts as deleted");
+        assert!(matches!(refused, Err(ChannelError::Authentication)));
+        let requests = server.requests();
+        assert!(requests[0].starts_with("GET /api/v1/webhook?password=pw "));
+        assert!(requests[1].starts_with("POST /api/v1/webhook?password=pw "));
+        assert!(requests[1]
+            .ends_with(r#"{"events":["new-message"],"url":"http://10.0.0.2:8787/hook/y"}"#));
+        assert!(requests[2].starts_with("DELETE /api/v1/webhook/9?password=pw "));
+    });
 }
 
 #[test]
@@ -128,25 +126,27 @@ fn the_message_query_is_parsed_and_capped() {
         r#"{{"status":200,"data":[{{"guid":"x","text":"{}"}}]}}"#,
         "y".repeat(QUERY_BODY_LIMIT)
     );
-    let server = server([ScriptStep::json(200, &page), ScriptStep::json(200, &huge)]);
-    let provider = provider(server);
-    let query = MessageQuery {
-        after: Some(1_700_000_000_000),
-        offset: 10,
-        limit: 10,
-        sort: Sort::Ascending,
-    };
+    let steps = [ScriptStep::json(200, &page), ScriptStep::json(200, &huge)];
+    bench(steps, async |http, server| {
+        let provider = provider(http);
+        let query = MessageQuery {
+            after: Some(1_700_000_000_000),
+            offset: 10,
+            limit: 10,
+            sort: Sort::Ascending,
+        };
 
-    let page = block_on(provider.query_messages(query)).expect("page");
-    let too_large = block_on(provider.query_messages(query)).expect_err("too large");
+        let page = provider.query_messages(query).await.expect("page");
+        let too_large = provider.query_messages(query).await.expect_err("too large");
 
-    assert_eq!(page.total, Some(31));
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].guid, "p:0/AB-12");
-    assert!(is_body_too_large(&too_large));
-    let request = &server.requests()[0];
-    assert!(request.starts_with("POST /api/v1/message/query?password=pw "));
-    assert!(request.ends_with(
-        r#"{"after":1700000000000,"limit":10,"offset":10,"sort":"ASC","with":["chat"]}"#
-    ));
+        assert_eq!(page.total, Some(31));
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].guid, "p:0/AB-12");
+        assert!(is_body_too_large(&too_large));
+        let request = &server.requests()[0];
+        assert!(request.starts_with("POST /api/v1/message/query?password=pw "));
+        assert!(request.ends_with(
+            r#"{"after":1700000000000,"limit":10,"offset":10,"sort":"ASC","with":["chat"]}"#
+        ));
+    });
 }

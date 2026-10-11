@@ -14,10 +14,9 @@ use alloc::{
 };
 use core::fmt;
 
-use barracuda_imessage_gateway_plugin::{Method, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Response};
 use barracuda_tls::{aes_256_gcm_open, GCM_NONCE_LEN};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 /// Origin of the QQ bot portal serving the bind-task calls.
@@ -130,20 +129,17 @@ impl fmt::Display for BindError {
 }
 
 /// Unauthenticated `q.qq.com` calls of the scan-to-bind flow.
-pub struct QQBind<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct QQBind {
+    http: GatewayHttp,
     portal_base: String,
 }
 
-impl<'net, T, D> QQBind<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    /// Creates a bind client for the portal at `portal_base`.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, portal_base: impl Into<String>) -> Self {
+impl QQBind {
+    /// Creates a bind client for the portal at `portal_base`, calling it
+    /// through the Gateway's HTTP.
+    pub fn new(http: GatewayHttp, portal_base: impl Into<String>) -> Self {
         Self {
-            http_clients,
+            http,
             portal_base: portal_base.into(),
         }
     }
@@ -178,15 +174,11 @@ where
         let url = format!("{}{path}", self.portal_base.trim_end_matches('/'));
         let body =
             serde_json::to_vec(body).map_err(|error| BindError::transport(error.to_string()))?;
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::POST,
-            &url,
-            HEADERS,
-            body.as_slice(),
-        )
-        .await
-        .map_err(|error| BindError::transport(error.to_string()))?;
+        let response = self
+            .http
+            .send(Method::POST, &url, HEADERS, body.as_slice())
+            .await
+            .map_err(|error| BindError::transport(error.to_string()))?;
         parse_reply(&response)
     }
 }

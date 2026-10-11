@@ -1,13 +1,20 @@
 # Audio Plugin
 
+The Audio Plugin owns the Board's primary built-in audio codec and exposes
+playback and recording to Lua code as the `audio` Lua package.
+
 - Plugin ID: `audio`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Events: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_audio_codec()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
 - Agent Tools: none
-- Owned long-running tasks: none
+- Lua packages: `audio`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary built-in `AudioCodec` capability exactly
 once and installs the `audio` Lua package. Codec register control stays in the

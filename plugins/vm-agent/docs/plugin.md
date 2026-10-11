@@ -1,11 +1,22 @@
 # VM Agent Plugin
 
+The VM Agent Plugin exposes isolated, non-persistent Agent asks to Lua code as
+the require-only `agent` Lua package.
+
 - Plugin ID: `vm-agent`
-- Direct Plugin dependencies: `agent`, `vm`
-- Required typed capabilities: `AgentRuntime` from `agent` and
-  `LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Owned tasks: one Agent ask adapter service
+- Dependencies: `agent`, `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentRuntime` from `agent`, `LuaPackageRegistry`
+  from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `agent`
+- Web: none
+- Tasks: one Agent ask adapter service task, serving at most two concurrent
+  asks
+- Storage: none
 
 This Plugin registers the require-only `agent` Lua package for every VM
 execution. It owns the VM-facing API shape and translates each request into a

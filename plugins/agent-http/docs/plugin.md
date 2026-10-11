@@ -1,5 +1,19 @@
 # Agent HTTP Plugin
 
-`agent-http` depends on `agent` and `http`. During registration it adds the
-awaited `http_request` Tool to `AgentToolRegistry`. It owns no transport,
-workspace, or background task.
+Exposes the `http` Plugin's `Http` capability to Agents as a native Tool.
+
+- Plugin ID: `agent-http`
+- Dependencies: `agent`, `http`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `Http` from `http`
+- Workflow: none
+- Agent Tools: `http_request`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
+
+During registration the Plugin adds the awaited `http_request` Tool to
+`AgentToolRegistry`. It owns no transport, workspace, or background task.

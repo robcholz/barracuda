@@ -6,8 +6,7 @@ use alloc::{
 };
 use core::fmt;
 
-use barracuda_imessage_gateway_plugin::{Error, Method, Response};
-use http_client::ClientFactory;
+use barracuda_imessage_gateway_plugin::{Error, GatewayHttp, Method, Response};
 use serde_json::Value;
 
 /// Bot type requested from iLink for a message-channel bot.
@@ -98,20 +97,16 @@ impl fmt::Display for LoginError {
 }
 
 /// Unauthenticated iLink calls of the QR bot login flow.
-pub struct WechatLogin<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct WechatLogin {
+    http: GatewayHttp,
     api_base: String,
 }
 
-impl<'net, T, D> WechatLogin<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
+impl WechatLogin {
     /// Creates a login client for the iLink service at `api_base`.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, api_base: impl Into<String>) -> Self {
+    pub fn new(http: GatewayHttp, api_base: impl Into<String>) -> Self {
         Self {
-            http_clients,
+            http,
             api_base: api_base.into(),
         }
     }
@@ -183,8 +178,7 @@ where
     /// `412 Precondition Failed`. An empty slice sends `Content-Length: 0`.
     async fn fetch(&self, url: &str) -> Result<Response, Error> {
         let body: &[u8] = &[];
-        barracuda_imessage_gateway_plugin::send(&self.http_clients, Method::GET, url, &[], body)
-            .await
+        self.http.send(Method::GET, url, &[], body).await
     }
 }
 

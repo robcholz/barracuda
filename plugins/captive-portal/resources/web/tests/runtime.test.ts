@@ -27,11 +27,11 @@ test("manifest accepts the full record, null assets, and keeps only known fields
   expect(parseEntries([{ ...entry, extra: "ignored" }])).toEqual([entry]);
   const bare = {
     ...entry,
-    id: "imessage-qq",
+    id: "channel-one",
     group: "channel",
     icon: null,
     figure: null,
-    module: "/portal/assets/imessage-qq/entry.js",
+    module: "/portal/assets/channel-one/entry.js",
   };
   expect(parseEntries([bare])).toEqual([bare as WebEntry]);
 });
@@ -74,7 +74,7 @@ test("entries sort by group, then order, then ID", () => {
     order,
   });
   const sorted = sortEntries([
-    make("imessage-web", "channel", 10),
+    make("chat", "channel", 10),
     make("b", "agent", 20),
     make("a", "agent", 20),
     make("agent", "agent", 10),
@@ -85,7 +85,7 @@ test("entries sort by group, then order, then ID", () => {
     "agent",
     "a",
     "b",
-    "imessage-web",
+    "chat",
   ]);
 });
 
@@ -103,6 +103,7 @@ function host(lang: "zh" | "en" = "zh") {
       lang,
       toast: (toast: Toast) => toasts.push(toast),
       navigate: (id: string) => routes.push(id),
+      has: (id: string) => id === "wifi",
       status: (id: string) => {
         asked.push(id);
         return id === "wifi" ? { state: "ready" as const } : null;
@@ -140,6 +141,9 @@ test("a mount gets the language, toast and navigate; all go quiet once it is lef
   expect(Object.isFrozen(context)).toBe(true);
   expect(toasts).toEqual([{ kind: "info", title: "hello" }]);
   expect(routes).toEqual(["agent"]);
+  // the host answers which entries the manifest lists
+  expect(context?.has("wifi")).toBe(true);
+  expect(context?.has("agent")).toBe(false);
   session.close();
   expect(context?.signal.aborted).toBe(true);
   expect(disposed).toBe(1);
@@ -223,7 +227,7 @@ test("status: valid records are kept, malformed ones left out, a non-object reje
         extra: 1,
       },
       agent: { state: "off", label: { zh: "未配置", en: "Not set up" } },
-      "imessage-web": { state: "ready" },
+      chat: { state: "ready" },
       "bad state": { state: "ready" },
       odd: { state: "busy" },
       half: { state: "ready", label: { zh: "只有中文" } },
@@ -232,13 +236,13 @@ test("status: valid records are kept, malformed ones left out, a non-object reje
       number: { state: "ready", detail: 7 },
     },
   });
-  expect([...status.keys()]).toEqual(["wifi", "agent", "imessage-web"]);
+  expect([...status.keys()]).toEqual(["wifi", "agent", "chat"]);
   expect(status.get("wifi")).toEqual({
     state: "ready",
     label: { zh: "已连接", en: "Connected" },
     detail: "HomeNet",
   });
-  expect(status.get("imessage-web")).toEqual({ state: "ready" });
+  expect(status.get("chat")).toEqual({ state: "ready" });
   for (const value of [null, [], {}, { entries: [] }, { entries: "x" }])
     expect(() => parseStatus(value)).toThrow();
   expect(parseStatus({ entries: {} }).size).toBe(0);

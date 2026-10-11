@@ -20,9 +20,8 @@ use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
     TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 pub use context::{ContextTokens, MAX_CONTEXT_TOKENS};
@@ -64,32 +63,28 @@ impl WechatConfig {
 }
 
 /// Outbound WeChat provider backed by the iLink bot API.
-pub struct Wechat<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct Wechat {
+    http: GatewayHttp,
     config: WechatConfig,
     context_tokens: Rc<ContextTokens>,
     next_client_id: Cell<u64>,
 }
 
-impl<'net, T, D> Wechat<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: WechatConfig) -> Self {
-        Self::with_context_tokens(http_clients, config, Rc::default())
+impl Wechat {
+    pub fn new(http: GatewayHttp, config: WechatConfig) -> Self {
+        Self::with_context_tokens(http, config, Rc::default())
     }
 
     /// Creates a provider whose sends attach the latest `context_token` that
     /// `context_tokens` holds for the recipient, unless the target's
     /// `thread_id` names one.
     pub fn with_context_tokens(
-        http_clients: ClientFactory<'net, T, D>,
+        http: GatewayHttp,
         config: WechatConfig,
         context_tokens: Rc<ContextTokens>,
     ) -> Self {
         Self {
-            http_clients,
+            http,
             config,
             context_tokens,
             next_client_id: Cell::new(0),
@@ -186,17 +181,13 @@ where
         if let Some(route_tag) = &self.config.route_tag {
             headers.push(("SKRouteTag", route_tag));
         }
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::POST,
-            &url,
-            &headers,
-            bytes.as_slice(),
-        )
-        .await
-        .map_err(|error| ChannelError::Transport {
-            message: error.to_string(),
-        })?;
+        let response = self
+            .http
+            .send(Method::POST, &url, &headers, bytes.as_slice())
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)?;
         Ok(SendReceipt::new(client_id))
     }
@@ -214,11 +205,7 @@ where
     }
 }
 
-impl<T, D> MessageChannel for Wechat<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for Wechat {
     fn channel(&self) -> &str {
         "wechat"
     }

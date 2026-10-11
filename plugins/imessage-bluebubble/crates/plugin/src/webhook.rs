@@ -9,14 +9,14 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-use barracuda_imessage_gateway_channel::{ChannelControl, JSON_CONTENT_TYPE};
+use barracuda_imessage_gateway_plugin::ChannelControl;
 use barracuda_plugin::manager::PluginStorage;
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use bluebubbles::inbound::{parse_webhook, WebhookPayload};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::channel::BlueBubblesChannel;
 use crate::state::{Offer, HOOK_PATH};
+use crate::JSON_CONTENT_TYPE;
 
 /// Largest webhook body handled; larger deliveries are counted as lost. The
 /// webserver's request buffer (8 KiB with the head) rejects larger ones
@@ -57,16 +57,9 @@ impl Delivery {
 }
 
 /// The webhook endpoint, served under [`HOOK_PATH`] as a prefix.
-pub(crate) struct WebhookEndpoint<Storage, T: 'static, D: 'static>(
-    pub(crate) Rc<BlueBubblesChannel<Storage, T, D>>,
-);
+pub(crate) struct WebhookEndpoint<Storage>(pub(crate) Rc<BlueBubblesChannel<Storage>>);
 
-impl<Storage, T, D> HttpEndpoint for WebhookEndpoint<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for WebhookEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         let delivery = self
             .0
@@ -83,12 +76,7 @@ where
     }
 }
 
-impl<Storage, T, D> BlueBubblesChannel<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
     /// Checks one delivery and queues a new incoming message.
     pub(crate) fn deliver(&self, method: HttpMethod, path: &str, body: &[u8]) -> Delivery {
         let secret = path

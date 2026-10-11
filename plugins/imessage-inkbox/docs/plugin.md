@@ -1,20 +1,41 @@
 # IMessage Inkbox Plugin
 
+The IMessage Inkbox Plugin adds Inkbox as an iMessage Gateway channel: it
+configures an Inkbox agent by API key or self-signup, sends through the Inkbox
+API, and receives by polling.
+
 - Plugin ID: `imessage-inkbox`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Gateway channel: `inkbox`
-- Owned task: `inkbox_receive_task`, one receive loop (see below)
-- Receive slots: one, while the channel is configured and in `send_receive`
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-inkbox`, with status; `POST
+  /api/gateway/inkbox`, `GET /api/gateway/inkbox/status`, `POST
+  /api/gateway/inkbox/mode`, `GET /api/gateway/inkbox/owners`, `POST
+  /api/gateway/inkbox/owners`, `POST /api/gateway/inkbox/signup`, `POST
+  /api/gateway/inkbox/verify`, `POST /api/gateway/inkbox/resend` (see
+  [`http.md`](http.md))
+- Tasks: `inkbox_receive_task` (pool size 1), one receive loop (see below)
+  that holds one of the Gateway's receive slots while the channel is
+  configured and in `send_receive`
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode (`ChannelMode` JSON string);
   - `owners`: the allowed accounts (owner book);
   - `cursor`: the receive cursor, `{"start":"<created_at>","recent":["<id>",…]}`.
 
+The Gateway channel is `inkbox`.
+
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
-and `WebServer` capabilities, exposes `/api/gateway/inkbox` for runtime configuration, and
-registers the configured channel `inkbox` for its lifetime, so it can be active
+and `WebServer` capabilities and reaches the network only through
+`IMessageGateway::http()`, exposes `/api/gateway/inkbox` for runtime configuration, and
+registers the channel `inkbox` while configured and not `disabled`, so it can be active
 beside the BlueBubbles `bluebubbles` channel. Inkbox cannot quote a message, so
 `reply_to` on text and media is ignored instead of failing. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
@@ -46,15 +67,18 @@ signup; a signup for another email drops it.
 
 The Plugin follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
-`/api/gateway/inkbox/mode` and `/api/gateway/inkbox/owners` are the shared mode
-and owner endpoints, served with `/api/gateway/inkbox` from one prefix route
-(`ChannelEndpoint`); the allowed accounts are loaded only once the channel is
-configured, and the cursor by the first receive session. The `inkbox` channel is registered with the Gateway
+`/api/gateway/inkbox/status`, `/api/gateway/inkbox/mode` and
+`/api/gateway/inkbox/owners` are the shared status, mode and owner endpoints,
+which the Gateway serves with `/api/gateway/inkbox` from one prefix route
+(`IMessageGateway::serve_channel`); the sign-up routes are exact WebServer
+routes below it. The allowed accounts are loaded through
+`IMessageGateway::load_owners` (pairing codes from the Platform entropy the
+Gateway holds) only once the channel is configured, and the cursor by the first receive session. The `inkbox` channel is registered with the Gateway
 exactly while it is configured and its mode is `send` or `send_receive`. A
 configuration stored before modes existed loads as `send`. A device without an
 Inkbox channel starts in `send_receive`, and a signup on such a device sets
 `send_receive` before storing its result. The portal entry's `GET
-/portal/status` record is `entry_status` of the channel (未配置, 已停用, 仅发送,
+/portal/status` record maps the Gateway's `channel_status` of the channel (未配置, 已停用, 仅发送,
 收发中, 连接中, 名额已满, or 连接中断).
 
 ## Receiving
@@ -62,10 +86,11 @@ Inkbox channel starts in `send_receive`, and a signup on such a device sets
 Inkbox offers no long poll, WebSocket, or push a device on a private network
 can receive, so the Plugin polls. It owns one Embassy task,
 `inkbox_receive_task`, spawned in `start` and raced against the Plugin's task
-token, running the channel crate's `receive_runtime`. Parked without a slot
-unless the channel is configured and in `send_receive`, it leases one receive
-slot (never a request pool connection) and opens one kept-alive connection on
-it with `client_factory()`. Every 3 s it sends
+token, running the runtime from `IMessageGateway::receive_runtime`. Parked without a
+slot unless the channel is configured and in `send_receive`, it leases one of
+the Gateway's receive slots (`IMessageGateway::receive_control`, never a
+request pool connection) and opens one kept-alive connection on it with
+`GatewayHttp::poll`. Every 3 s it sends
 
 ```
 GET {api_base}/api/v1/imessage/messages?limit=50&start_datetime=<cursor>
@@ -129,7 +154,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) offers
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) offers
 two methods. 「用邮箱新建」 posts the email to `POST /api/gateway/inkbox/signup`, then
 the emailed 6-digit code to `/verify` (「重新发送」 calls `/resend`; a cooldown is
 shown beside it) and shows the claimed identity's address; Inkbox's own messages
@@ -147,6 +173,6 @@ step with the agent's `email_address`; a channel configured with a key shows a
 key the page calls `context.refreshStatus()`. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser
 storage, and cleared on success or unmount. Requests are cancelled on unmount
-and are never retried automatically. The existing HTTP API has no authentication
-or transport encryption added here; use only within a trusted provisioning
+and are never retried automatically. The HTTP API has no authentication
+or transport encryption; use only within a trusted provisioning
 network.

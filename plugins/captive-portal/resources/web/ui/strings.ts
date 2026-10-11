@@ -21,7 +21,6 @@ export const KIT_STRINGS: Record<
     unreachableHint: string;
     noReply: string;
     retry: string;
-    channel: string;
   }
 > = {
   zh: {
@@ -44,7 +43,6 @@ export const KIT_STRINGS: Record<
     unreachableHint: "检查设备的网络后重试。",
     noReply: "未收到设备确认",
     retry: "重试",
-    channel: "通道",
   },
   en: {
     advanced: "Advanced",
@@ -64,6 +62,5 @@ export const KIT_STRINGS: Record<
     unreachableHint: "Check the device's network, then try again.",
     noReply: "No confirmation from the device",
     retry: "Retry",
-    channel: "Channel",
   },
 };

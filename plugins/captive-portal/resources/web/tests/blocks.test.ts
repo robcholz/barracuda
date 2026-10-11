@@ -4,7 +4,6 @@ import { QR_VECTORS } from "./qr-vectors";
 import {
   button,
   callDevice,
-  configuredRow,
   deviceError,
   encodeQr,
   note,
@@ -12,7 +11,6 @@ import {
   qrPath,
   qrPlate,
   qrSvg,
-  readChannel,
   resultCard,
   settingsForm,
   stepList,
@@ -39,6 +37,7 @@ function context(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {},
   };
@@ -325,7 +324,7 @@ test("settingsForm extensions: field action, row link and blocks, coded errors, 
   const toggles: boolean[] = [];
   const form = settingsForm(
     {
-      endpoint: "/api/gateway/qq",
+      endpoint: "/api/example",
       submit: "验证并保存",
       rows: [
         {
@@ -475,45 +474,4 @@ test("an error the device can resume says so: retry is read and offered as 重�
     retry,
   );
   expect(toasts.at(-1)?.action).toBeUndefined();
-});
-
-test("readChannel reads the configured flag; configuredRow shows the card once told", async () => {
-  const { context: ctx } = context();
-  harness.reply = async () =>
-    json(200, {
-      configured: true,
-      signup: { email_address: "a@inkboxmail.com" },
-    });
-  expect(
-    await readChannel<{ signup?: { email_address: string } }>(
-      ctx,
-      "/api/gateway/inkbox",
-    ),
-  ).toEqual({
-    configured: true,
-    signup: { email_address: "a@inkboxmail.com" },
-  });
-  expect(harness.calls.at(-1)?.method).toBe("GET");
-  expect(harness.calls.at(-1)?.url).toBe("/api/gateway/inkbox/status");
-  harness.reply = async () => json(200, { configured: "yes" });
-  expect(await readChannel(ctx, "/api/gateway/qq")).toBeNull();
-  harness.reply = async () => new Response(null, { status: 405 });
-  expect(await readChannel(ctx, "/api/gateway/qq")).toBeNull();
-
-  for (const lang of ["zh", "en"] as const) {
-    const current = configuredRow("Telegram", lang);
-    expect(current.element.hidden).toBe(true);
-    current.show(true);
-    expect(current.element.hidden).toBe(false);
-    expect(current.element.querySelector(".bc-row__label")?.textContent).toBe(
-      lang === "zh" ? "通道" : "Channel",
-    );
-    expect(current.element.querySelector(".bc-option-title")?.textContent).toBe(
-      "Telegram",
-    );
-    // a stored configuration is a plain state: the bare check, no tile and no badge
-    expect(current.element.querySelector("svg.bc-success")).not.toBeNull();
-    expect(current.element.querySelector(".bc-option-icon")).toBeNull();
-    expect(current.element.querySelector(".bc-badge")).toBeNull();
-  }
 });

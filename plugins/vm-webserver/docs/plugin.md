@@ -1,14 +1,22 @@
 # VM WebServer Plugin
 
+Lets Lua executions handle inbound HTTP requests below `/vm` and stream VM
+files as responses, through the require-only `webserver` package.
+
 - Plugin ID: `vm-webserver`
-- Direct Plugin dependencies: `vm`, `vm-filesystem`, `webserver`
-- Required typed capabilities: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`, `barracuda_vm_filesystem_plugin::VmFileTransfer` from `vm-filesystem`, `barracuda_webserver_plugin::WebServer` from `webserver`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `vm`, `vm-filesystem`, `webserver`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`, `VmFileTransfer` from
+  `vm-filesystem`, `WebServer` from `webserver`
+- Workflow: none
 - Agent Tools: none
-- Owned long-running tasks: none
-- Retained registrations: the `webserver` Lua package and the `/vm` HTTP prefix route
+- Lua packages: `webserver`
+- Web: no portal entry; every method below the `/vm` prefix (`/vm/<mount>/...`),
+  dispatched to the Lua handler that claimed the mount
+- Tasks: none
+- Storage: none
 
 This Plugin installs the require-only Lua `webserver` package. A Lua execution
 claims one bounded mount below `/vm` while `webserver.serve` is running. The

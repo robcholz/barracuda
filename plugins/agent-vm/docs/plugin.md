@@ -1,10 +1,20 @@
 # Agent VM Plugin
 
+Exposes the `vm` Plugin's `Vm` capability to Agents as a native background
+Tool.
+
 - Plugin ID: `agent-vm`
-- Direct dependencies: `agent`, `vm`
-- Provided typed capabilities: none
-- Required typed capabilities: `AgentToolRegistry` from `agent`, `Vm` from `vm`
-- Plugin-owned tasks: none
+- Dependencies: `agent`, `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `Vm` from `vm`
+- Workflow: none
+- Agent Tools: `vm_run`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
 
 During Plugin registration, `agent-vm` adds `vm_run` to `AgentToolRegistry`.
 `vm_run` is a background Tool: its accepted output contains the `run_id`, and

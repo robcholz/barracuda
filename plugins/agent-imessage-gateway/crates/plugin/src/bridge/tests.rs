@@ -36,7 +36,7 @@ use super::ImessageBridge;
 use crate::sessions::{LocalFuture, RenameFailure, SessionMeta, SessionReplies, SessionStore};
 
 /// The Workflow file that ships the bridge's inbound route.
-const WORKFLOWS: &str = include_str!("../../../../../agent/filesystem/resources/workflows.json");
+const WORKFLOWS: &str = include_str!("../../../../filesystem/resources/workflows.json");
 
 /// Polls of the Workflow Runtime a `session.new` takes, so a second inbound
 /// message is dispatched while the first is still creating its session.

@@ -120,3 +120,8 @@ exposed-io:
     # Magnetic accessory UART connector.
     magnetic-uart-rx: { pin: GPIO4 }
     magnetic-uart-tx: { pin: GPIO5 }
+plugins:
+  imessage-gateway:
+    # With PSRAM the TLS record buffers live in external memory, so the
+    # station stack's free sockets (16, about 11 in use) bound it at three.
+    receive-slots: 3

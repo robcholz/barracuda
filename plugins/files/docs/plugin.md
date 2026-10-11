@@ -1,11 +1,25 @@
 # Files Plugin
 
+Browses Workspace files and shows every Plugin's private files read-only.
+
 - Plugin ID: `files`
-- Direct Plugin dependencies: `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required typed capabilities: `WebServer`, `CaptivePortal`
-- Workflow Actions, Events and Agent Tools: none
-- Owned long-running tasks: none
+- Dependencies: `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `WebServer` from `webserver`, `CaptivePortal` from
+  `captive-portal`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `files`; `GET /api/files/list/<path>`,
+  `GET /api/files/raw/<path>`, `PUT /api/files/upload/<path>`,
+  `POST /api/files/mkdir`, `POST /api/files/rename`, `POST /api/files/delete`
+- Tasks: none
+- Storage: no KV keys and nothing under its own `/data`; reads and changes
+  `/workspace/...`, reads `/plugins/{data,cache,media,resources}/<id>`, and
+  serves its bundled `/resources/entry.js`, `/resources/figure.js`,
+  `/resources/icon.svg`
 
 The Files Plugin is the portal's file browser. It registers the 文件/Files
 entry in the Device group, after Wi-Fi, with the cabinet figure, and the

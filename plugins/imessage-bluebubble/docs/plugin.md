@@ -1,21 +1,39 @@
 # IMessage BlueBubble Plugin
 
+The IMessage BlueBubble Plugin adds a BlueBubbles server as an iMessage
+Gateway channel: it sends through the BlueBubbles API and receives through a
+webhook the server posts to the device's own webserver.
+
 - Plugin ID: `imessage-bluebubble`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`; the
-  Platform entropy (`PluginContext::entropy`) and IP stack
-  (`PluginContext::ip_stack`)
-- Owned task: `bluebubbles_receive_task`, one receive runtime (below)
-- Receive slots: none. The webhook is served by the device's own webserver, so
-  the channel uses `UnlimitedSlots` and never reports `no_slot`.
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `ip_stack` (the station address the webhook URL names),
+  `entropy` (the webhook secret)
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-bluebubble`, with status; `POST
+  /api/gateway/bluebubbles`, `GET /api/gateway/bluebubbles/status`, `POST
+  /api/gateway/bluebubbles/mode`, `GET /api/gateway/bluebubbles/owners`,
+  `POST /api/gateway/bluebubbles/owners`, `POST
+  /api/gateway/bluebubbles/hook/<secret>` (see [`http.md`](http.md))
+- Tasks: `bluebubbles_receive_task` (pool size 1), one receive runtime
+  (below); it holds no receive slot
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode;
   - `owners`: the allowed accounts;
   - `webhook`: `{"server","secret","url"?}`, the webhook secret, the server it
     was minted for, and the URL last registered;
   - `cursor`: `{"after"?,"seen":[…]}`, the catch-up cursor.
+
+Receive slots: none. The webhook is served by the device's own webserver, so
+the channel uses the Gateway's `webhook_receive_control()` and never reports
+`no_slot`. Sends and webhook requests go through `IMessageGateway::http()`.
 
 The Plugin starts without provider credentials when storage is empty. It
 exposes `/api/gateway/bluebubbles` for runtime configuration and registers the
@@ -42,7 +60,8 @@ The channel follows the shared plumbing in the Gateway's `docs/plugin.md`
 Leaving `send_receive` stops the receive session and then deletes the webhook
 from the server, waiting at most 10 s. A failure is logged and keeps the
 record, so the next registration deletes the stale entry. The portal status
-comes from `entry_status`: 仅发送, 收发中, 连接中, 连接中断 or 已停用.
+comes from `IMessageGateway::channel_status`: 仅发送, 收发中, 连接中, 连接中断 or
+已停用.
 
 ## Receiving
 
@@ -147,10 +166,10 @@ Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-bluebubble`, group `WebGroup::Channel`, order 50, title `BlueBubbles`,
 a bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
-`ResourceFiles` provider whose status is `entry_status` of the channel. Unload
-removes the navigation entry, the resource provider, and the two HTTP routes:
+`ResourceFiles` provider whose status is the Gateway's `channel_status` of the
+channel. Unload removes the navigation entry, the resource provider, and the two HTTP routes:
 the configuration prefix, which also serves `/mode` and `/owners`
-(`ChannelEndpoint`), and the `/hook` prefix.
+(`IMessageGateway::serve_channel`), and the `/hook` prefix.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-bluebubble`
@@ -163,7 +182,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) posts
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) posts
 `{server_url, password, use_private_api, stream_edit_min_delta_bytes,
 stream_max_edits}` to `POST /api/gateway/bluebubbles`. Its 「测试连接」 button calls
 the server's `GET /api/v1/server/info?password=…` straight from the browser: the
@@ -178,6 +198,6 @@ that replaces it, and the shared mode and allowed-accounts controls
 succeeds, and the page then calls `context.refreshStatus()` so the portal's
 navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never persisted in browser
 storage, and cleared on success or unmount. Requests are cancelled on unmount
-and are never retried automatically. The existing HTTP API has no authentication
-or transport encryption added here; use only within a trusted provisioning
+and are never retried automatically. The HTTP API has no authentication
+or transport encryption; use only within a trusted provisioning
 network.

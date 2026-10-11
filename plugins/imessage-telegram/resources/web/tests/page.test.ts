@@ -190,6 +190,17 @@ test("no route to Telegram shows a note and saving still works", async () => {
   expect(page.input("token").value).toBe("");
 });
 
+test("with no Web chat entry listed, the accepted save offers no way there", async () => {
+  // Web chat is another plugin; the page does not depend on it, so it may be disabled
+  harness.absent.add("imessage-web");
+  const page = await render("zh");
+  page.type("token", "123:abc");
+  await page.submit();
+  expect(page.toasts.at(-1)?.title).toBe("设备已接受配置");
+  expect(page.toasts.at(-1)?.action).toBeUndefined();
+  expect(page.routes).toEqual([]);
+});
+
 test("a rejected save toasts the device's message", async () => {
   const page = await render("zh");
   harness.reply = async () =>

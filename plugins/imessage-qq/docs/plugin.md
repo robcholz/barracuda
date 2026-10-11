@@ -1,31 +1,52 @@
 # IMessage QQ Plugin
 
+The IMessage QQ Plugin adds a QQ Bot as an iMessage Gateway channel: it binds
+the bot by scan or configuration, sends through the QQ OpenAPI, and receives
+over the QQ gateway WebSocket.
+
 - Plugin ID: `imessage-qq`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Gateway channel: `qq`
-- Owned tasks: `qq_receive_task`, one receive loop (see below), and
-  `qq_login_task`, the scan-to-bind session (see "Scan-to-bind")
-- Receive slots: one, while the channel is configured and in `send_receive`
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (WebSocket keys and masks, scan-to-bind keys)
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-qq`, with status; `POST /api/gateway/qq`,
+  `GET /api/gateway/qq/status`, `POST /api/gateway/qq/mode`, `GET
+  /api/gateway/qq/owners`, `POST /api/gateway/qq/owners`, `POST
+  /api/gateway/qq/login`, `GET /api/gateway/qq/login`, `DELETE
+  /api/gateway/qq/login` (see [`http.md`](http.md))
+- Tasks: `qq_receive_task` (pool size 1), one receive loop (see below) that
+  holds one of the Gateway's receive slots while the channel is configured
+  and in `send_receive`; `qq_login_task` (pool size 1), the scan-to-bind
+  session (see "Scan-to-bind")
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode (`ChannelMode` JSON string);
   - `owners`: the allowed accounts (owner book);
   - `session`: the gateway session to resume, `{"session_id","seq"}`.
+
+The Gateway channel is `qq`.
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities and follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
 `POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
 answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
-shared mode and owner endpoints, served with it from one prefix route
-(`ChannelEndpoint`). The allowed accounts are loaded only once the channel is
+shared mode and owner endpoints. The Gateway serves all of them from one prefix
+route (`IMessageGateway::serve_channel`); the Plugin registers only the exact
+login route on the `WebServer` itself. HTTP requests go through
+`IMessageGateway::http`. The allowed accounts are loaded only once the channel is
 configured, and the gateway session by the first receive session. The `qq` channel is registered with the
 Gateway exactly while it is configured and its mode is `send` or
 `send_receive`. A configuration stored before modes existed loads as `send`;
 a new configuration starts in `send_receive`. The portal entry's
 `GET /portal/status` record is 等待扫码 (`attention`) while a scan-to-bind
-session waits, otherwise `entry_status` of the channel (未配置, 已停用,
+session waits, otherwise the Gateway's `channel_status` of the channel (未配置, 已停用,
 仅发送, 收发中, 连接中, 名额已满, or 连接中断). See [`http.md`](http.md).
 
 The stored configuration is `{"app_id","app_secret","api_base","token_url"}`.
@@ -47,10 +68,11 @@ OpenAPI requests carry `Authorization: QQBot <access_token>` and
 
 QQ delivers messages only over its WebSocket gateway, so the Plugin owns one
 Embassy task, `qq_receive_task`, spawned in `start` and raced against the
-Plugin's task token. It runs the channel crate's `receive_runtime`: parked
+Plugin's task token. It runs the Gateway's `receive_runtime`: parked
 without a slot unless the channel is configured and in `send_receive`, it
-leases one receive slot from `PluginContext::receive_slots` (never a request
-pool connection) and runs one gateway session at a time on it.
+leases one of the Gateway's receive slots through
+`IMessageGateway::receive_control` (never a request pool connection) and runs
+one gateway session at a time on it.
 
 A session:
 
@@ -160,7 +182,8 @@ builder includes that directory only when this Plugin is selected. No business
 page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
-The page (`resources/web/entry.ts`, built on the captive portal's UI kit) binds
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) binds
 by QR code, as the WeChat page does. On mount it reads `GET /api/gateway/qq/login`:
 a configured channel with no session waiting shows the 「绑定」 row with the
 「QQ 已绑定」 card (its App ID in mono) and 「重新绑定」; otherwise the page posts
@@ -182,5 +205,5 @@ own `message` and `code` on the App Secret field; other errors toast the
 device's `message`. A save ends the QR session and shows the linked card. The
 page never reads the App Secret back. Secrets are password inputs, never persisted in browser storage, and
 cleared on success or unmount. Requests are cancelled on unmount and are never
-retried automatically. The existing HTTP API has no authentication or transport
-encryption added here; use only within a trusted provisioning network.
+retried automatically. The HTTP API has no authentication or transport
+encryption; use only within a trusted provisioning network.

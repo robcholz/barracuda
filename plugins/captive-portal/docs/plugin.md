@@ -1,11 +1,24 @@
 # Captive Portal Plugin
 
+Aggregates pluggable web entries and resource providers into the portal shell.
+
 - Plugin ID: `captive-portal`
-- Direct Plugin dependencies: `webserver`
-- Provided typed capabilities: `CaptivePortal` (with `WebEntry`, `EntryStatus`
-  and the `EntryStatusSource` trait in its registration API)
-- Required typed capabilities: `WebServer`
-- Workflow Actions, Events, and Agent Tools: none
+- Dependencies: `webserver`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `CaptivePortal` (with `WebEntry`, `EntryStatus` and
+  the `EntryStatusSource` trait in its registration API)
+- Required capabilities: `WebServer` from `webserver`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: no portal entry of its own; the `GET /portal/*` subtree
+  (`GET /portal/`, `GET /portal/entries.json`, `GET /portal/status`,
+  `GET /portal/assets/<id>/<path>`, `GET /portal/<path>`)
+- Tasks: none
+- Storage: no KV keys; reads its bundled `/resources/index.html`,
+  `/resources/app.js`, `/resources/app.css` and other `/resources/<path>`
+  files
 
 This plugin owns web entry aggregation and the portal scaffold resource entry.
 It registers one GET subtree, `/portal/*`, with WebServer. It owns no additional
@@ -39,6 +52,10 @@ never queries a device or network, and must not call back into the portal. An
 `Attention` or `Off`; `label` is an optional `WebText`; `detail` an optional
 untranslated `String` such as a network name. `EntryStatus::configured(bool)`
 gives the shared `ready` 已配置/Configured or `off` 未配置/Not set up record.
+A Plugin that sends clients to the portal from routes of its own, such as
+captive-network detection paths, answers them with `CaptivePortal::landing()`,
+the portal's landing page; it never names the portal's paths.
+
 `AssetsProvider` is the existing WebServer `HttpProvider` trait, re-exported
 under the portal's resource role; no second reader or transport contract exists.
 The provider receives a validated relative path such as `chunks/main.js` and
@@ -241,7 +258,7 @@ export function mount(root: HTMLElement, context: PortalContext) {
 }
 ```
 
-The context is `{ signal, lang, toast, navigate, status, refreshStatus, badge? }`:
+The context is `{ signal, lang, toast, navigate, has, status, refreshStatus, badge? }`:
 
 - `signal` is aborted on navigation, language change, unload, or page exit;
 - `lang` (`"zh"` or `"en"`) is the language the module renders its own strings in;
@@ -250,6 +267,9 @@ The context is `{ signal, lang, toast, navigate, status, refreshStatus, badge? }
   adds to the shell's toast stack (bottom-right; errors stay until closed,
   others close after 4 s);
 - `navigate(id)` goes to another entry, or `"overview"`;
+- `has(id)` says whether the manifest lists an entry with that ID now (a disabled
+  Plugin's entry is absent); a page offers a way to another Plugin's entry only
+  while it answers `true`;
 - `status(id?)` returns the latest `/portal/status` record
   (`{ state, label?, detail? }`) of the page's own entry, or of `id`, or `null`;
 - `refreshStatus()` reads the status again and redraws what shows it; a page
@@ -279,19 +299,17 @@ across firmware versions; JavaScript module caching is browser-owned.
 
 ## Verification
 
-Built-in contributors are `wifi`, `agent` (model configuration),
-`agent-websearch` (Tavily), `imessage-qq`, `imessage-wechat`,
-`imessage-bluebubble`, `imessage-telegram`, `imessage-inkbox`, and
-`imessage-web` (live text chat). Each owns its `resources/web/entry.ts`, optional
-figure and icon, tests, build declaration, and resource output. Ordinary entries
-use `tools/web/build.ts`; this shell retains its custom build script. Chat-specific
-styles live in the chat module and are removed on unmount. No dependency scan
-creates navigation entries.
+A contributor is any Plugin that registers an entry. Each owns its
+`resources/web/entry.ts`, optional figure and icon, tests, build declaration,
+and resource output. Ordinary entries use `tools/web/build.ts`; this shell
+retains its custom build script. A page's own styles live in its module and are
+removed on unmount. No dependency scan creates navigation entries.
 
 After changing a contributor or the build-time `resources/web/ui/` kit, rebuild
 the affected contributor(s) with `cargo plugin run build` from the repository root.
-The portal frontend tests verify all checked-in contributor outputs (entry,
-figure and icon) against a fresh in-memory Bun build, manifest parsing, routing,
+Each contributor verifies its checked-in outputs (entry, figure and icon)
+against a fresh in-memory Bun build with `tools/web/bundle-test.ts`. The portal
+frontend tests verify manifest parsing, routing,
 module session lifecycle and context, overview grouping, status pages, toasts,
 live-figure loading and teardown, the kit's fields, validation, submission and
 secret cleanup. These are DOM/protocol tests, not device or visual browser

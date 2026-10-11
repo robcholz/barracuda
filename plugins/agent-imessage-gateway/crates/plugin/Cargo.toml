@@ -10,7 +10,9 @@ barracuda-agent-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-time-plugin.workspace = true
+barracuda-vfs.workspace = true
 barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
@@ -23,7 +25,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true
-barracuda-vfs.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

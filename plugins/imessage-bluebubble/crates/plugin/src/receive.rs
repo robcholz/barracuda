@@ -3,23 +3,18 @@
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::String;
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget,
-    SendMessageRequest,
+    ChannelControl, ChannelError, Classification, GatewayInboundMessage, GatewayRoute,
+    MessageChannel, MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
+    SendMessageRequest, PAIRED_REPLY,
 };
 use barracuda_plugin::manager::PluginStorage;
 use bluebubbles::inbound::{is_body_too_large, InboundMessage, MessageQuery, Sort};
 use bluebubbles::{BlueBubbles, CHANNEL};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Instant, Timer};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::channel::BlueBubblesChannel;
 use crate::state::{SecretError, HOOK_PATH};
@@ -38,28 +33,14 @@ pub(crate) const CATCH_UP_PAGE: u32 = 10;
 /// Wait before retrying after the server rate-limited the device.
 const RATE_LIMIT_RETRY: Duration = Duration::from_secs(30);
 
-/// The channel's [`ReceiveChannel`].
-pub(crate) struct Receiver<Storage, T: 'static, D: 'static>(
-    pub(crate) Rc<BlueBubblesChannel<Storage, T, D>>,
-);
-
-impl<Storage, T, D> ReceiveChannel<()> for Receiver<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+/// Webhook receiving holds no slot, so its lease is `()`.
+impl<Storage: PluginStorage> ReceiveChannel<()> for BlueBubblesChannel<Storage> {
     fn receive<'a>(&'a self, _lease: &'a mut (), session: ReceiveSession<'a>) -> ReceiveFuture<'a> {
-        Box::pin(self.0.session(session))
+        Box::pin(self.session(session))
     }
 }
 
-impl<Storage, T, D> BlueBubblesChannel<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
     /// One receive session: set up the webhook, catch up, then serve the
     /// inbox and re-check the registration until the runtime drops it.
     async fn session(&self, session: ReceiveSession<'_>) -> Result<(), ReceiveError> {
@@ -101,7 +82,7 @@ where
                         self.catch_up(&provider).await?;
                     }
                     if self.book.has_queued() {
-                        self.inbound.ready().await;
+                        self.gateway.ready().await;
                         if let Some(message) = self.book.next() {
                             self.handle(&provider, message).await;
                         }
@@ -127,10 +108,7 @@ where
 
     /// Starts a new cursor at the newest message, so a new channel does not
     /// replay the server's history.
-    async fn start_cursor(
-        &self,
-        provider: &BlueBubbles<'static, T, D>,
-    ) -> Result<(), ReceiveError> {
+    async fn start_cursor(&self, provider: &BlueBubbles) -> Result<(), ReceiveError> {
         let page = provider
             .query_messages(MessageQuery {
                 after: None,
@@ -151,7 +129,7 @@ where
     /// (an old secret or address).
     async fn register_webhook(
         &self,
-        provider: &BlueBubbles<'static, T, D>,
+        provider: &BlueBubbles,
         url: &str,
     ) -> Result<(), ReceiveError> {
         let Some(mut hook) = self.book.hook() else {
@@ -188,14 +166,14 @@ where
 
     /// Handles messages created since the cursor, oldest first: at most
     /// [`CATCH_UP_MAX`], skipping (and counting) older ones beyond that.
-    async fn catch_up(&self, provider: &BlueBubbles<'static, T, D>) -> Result<(), ReceiveError> {
+    async fn catch_up(&self, provider: &BlueBubbles) -> Result<(), ReceiveError> {
         let after = self.book.after();
         let mut offset = 0_u64;
         let mut limit = CATCH_UP_PAGE;
         let mut handled = 0_u64;
         let mut first = true;
         while handled < CATCH_UP_MAX {
-            self.inbound.ready().await;
+            self.gateway.ready().await;
             let query = MessageQuery {
                 after,
                 offset,
@@ -246,7 +224,7 @@ where
 
     /// Records `message`, then publishes it, answers a pairing, or drops it
     /// by its sender.
-    async fn handle(&self, provider: &BlueBubbles<'static, T, D>, message: InboundMessage) {
+    async fn handle(&self, provider: &BlueBubbles, message: InboundMessage) {
         self.book.record(&message);
         if message.is_from_me {
             return;
@@ -272,7 +250,7 @@ where
                     message_id: message.guid.clone(),
                     text: String::from(text),
                 };
-                if let Err(error) = self.inbound.publish(inbound).await {
+                if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a BlueBubbles message: {error}");
                 }
             }

@@ -384,4 +384,10 @@ mod tests {
         let result: bool = lua.load("local analog = require('analog')\nlocal input <close> = analog.open_input('A0')\nlocal output <close> = analog.open_output('A1')\noutput:write(42)\nreturn input:read() == 1234 and input:max_value() == 4095 and output:max_value() == 255").eval().expect("use analog");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = AnalogPackage::new(Arc::new(Provider));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

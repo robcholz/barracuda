@@ -657,4 +657,10 @@ mod tests {
         wav.extend_from_slice(pcm);
         wav
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

@@ -275,4 +275,10 @@ mod tests {
         .expect("read IMU sample");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = ImuPackage::new(Some(TestImu));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

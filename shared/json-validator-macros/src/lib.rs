@@ -474,19 +474,31 @@ fn compile_pattern(
     path: &str,
     runtime: &TokenStream2,
 ) -> Result<TokenStream2, String> {
+    if let Some(prefix) = decimal_prefix(pattern) {
+        return Ok(quote!(::core::option::Option::Some(
+            #runtime::StringPattern::PrefixedDecimal(#prefix)
+        )));
+    }
     let pattern = match pattern {
         "^[A-Za-z0-9_.-]+$" => quote!(#runtime::StringPattern::AsciiIdentifier),
         "^https?://" => quote!(#runtime::StringPattern::HttpUrl),
-        "^session-[0-9]+$" => quote!(#runtime::StringPattern::SessionId),
-        "^run-[0-9]+$" => quote!(#runtime::StringPattern::RunId),
-        "^input-[0-9]+$" => quote!(#runtime::StringPattern::InputId),
-        "^command-[0-9]+$" => quote!(#runtime::StringPattern::CommandId),
         "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$" => {
             quote!(#runtime::StringPattern::UtcMilliseconds)
         }
         _ => return Err(format!("{path}.pattern '{pattern}' is unsupported")),
     };
     Ok(quote!(::core::option::Option::Some(#pattern)))
+}
+
+/// The literal prefix of a `^<prefix>[0-9]+$` pattern whose prefix holds no
+/// regular-expression syntax.
+fn decimal_prefix(pattern: &str) -> Option<&str> {
+    let prefix = pattern.strip_prefix('^')?.strip_suffix("[0-9]+$")?;
+    (!prefix.is_empty()
+        && prefix
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+    .then_some(prefix)
 }
 
 fn reject_unsupported_keys(object: &Map<String, Value>, path: &str) -> Result<(), String> {

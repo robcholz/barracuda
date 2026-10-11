@@ -31,7 +31,7 @@ use barracuda_board_hal::{
     PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources, WifiDevice};
-use barracuda_plugin::api::{PluginContext, SharedEntropy};
+use barracuda_plugin::api::{PlatformWifi, PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
@@ -174,11 +174,6 @@ where
 
 pub use resources::SystemResourceError;
 
-/// Static socket buffers of the receive slots, declared once by the
-/// application and sized from the selected Platform's long-lived connection
-/// budget.
-pub use http_client::{ReceiveBuffers, ReceiveSlotBuffers};
-
 /// The selected Target's Platform and Board resources, as System consumes them.
 type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
     PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
@@ -281,10 +276,9 @@ where
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
     /// The caller supplies resources from the selected-target resource
-    /// factory, the static receive-slot buffers sized for the selected
-    /// Platform ([`ReceiveBuffers`]), and the current Embassy executor
-    /// spawner. System consumes them, owns the complete Plugin registration
-    /// order, and exposes the spawner only to Plugin startup hooks.
+    /// factory and the current Embassy executor spawner. System consumes
+    /// them, owns the complete Plugin registration order, and exposes the
+    /// spawner only to Plugin startup hooks.
     ///
     /// # Errors
     ///
@@ -292,7 +286,6 @@ where
     pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send + Sync>(
         resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
-        receive_buffers: &'static mut [ReceiveSlotBuffers],
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
@@ -329,39 +322,10 @@ where
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
-        let tls = match barracuda_tls::Tls::new(prepared.entropy.clone()) {
-            Ok(tls) => {
-                log::info!("initialized TLS");
-                Some(tls)
-            }
-            Err(error) => {
-                log::warn!("HTTPS is unavailable: {error}");
-                None
-            }
-        };
-        let http_clients = http_client::ClientFactory::new(prepared.ip_stack, tls);
-        let receive_limit = usize::from(target_identity.long_lived_connections());
-        let receive_static = receive_buffers.len();
-        let receive_slots = http_client::ReceiveSlots::new(
-            prepared.ip_stack,
-            &http_clients,
-            receive_buffers,
-            receive_limit,
-        );
-        log::info!(
-            "receive connections: {} of {} allowed by the Target ({} static)",
-            receive_slots.capacity(),
-            receive_limit,
-            receive_static
-        );
-        let mut plugin_context = PluginContext::from_hal(
-            target_identity,
-            prepared.ip_stack,
-            http_clients,
-            prepared.board_hal,
-        );
-        plugin_context.receive_slots = receive_slots;
-        plugin_context.entropy = SharedEntropy::new(prepared.entropy.clone());
+        let mut plugin_context =
+            PluginContext::from_hal(target_identity, prepared.ip_stack, prepared.board_hal);
+        plugin_context.entropy = SharedEntropy::new(prepared.entropy);
+        plugin_context.wifi = Some(PlatformWifi::new(prepared.wifi));
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins;
@@ -386,7 +350,7 @@ where
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
-            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context, prepared.entropy),
+            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
             barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),
@@ -408,7 +372,7 @@ where
             barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
             barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
-            barracuda_wifi_plugin::WifiPlugin::new(&mut plugin_context, prepared.wifi),
+            barracuda_wifi_plugin::WifiPlugin::new(&mut plugin_context),
             barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS

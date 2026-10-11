@@ -7,9 +7,8 @@
 // macro.
 
 use core::cell::RefCell;
-use core::net::Ipv4Addr;
 
-use embassy_net::{Ipv4Cidr, Runner, StackResources, StaticConfigV4};
+use embassy_net::{Runner, StackResources};
 use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use esp_hal::rng::Rng;
 use esp_radio::wifi::{ControllerConfig, Interface, WifiController};
@@ -69,11 +68,9 @@ pub fn bindings(
     let rng = Rng::new();
     let seed = (rng.random() as u64) << 32 | rng.random() as u64;
     let station_config = embassy_net::Config::dhcpv4(Default::default());
-    let access_point_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(Ipv4Addr::new(192, 168, 4, 1), 24),
-        gateway: Some(Ipv4Addr::new(192, 168, 4, 1)),
-        dns_servers: Default::default(),
-    });
+    // The access point's address is its consumer's choice, assigned when it
+    // starts the access point's services.
+    let access_point_config = embassy_net::Config::default();
     let (ip_stack, station_runner) = embassy_net::new(
         station_interface,
         station_config,

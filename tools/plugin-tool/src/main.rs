@@ -8,7 +8,9 @@ use std::{
 
 use anstream::{eprintln, println};
 use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS, WARNING};
-use barracuda_plugin_tool::{configure, info, sync_with_report, PluginInfo, SyncStatus};
+use barracuda_plugin_tool::{
+    check_conventions, configure, info, sync_with_report, PluginInfo, SyncStatus,
+};
 use clap::{Parser, Subcommand};
 use dialoguer::console::Term;
 
@@ -63,9 +65,11 @@ fn main() -> ExitCode {
         Command::Run { task, plugin } => {
             barracuda_plugin_tool::run(&root, &task, plugin.as_deref())
         }
-        Command::Sync { check } => sync_with_report(&root, check).map(|report| {
-            print_report(&report);
-        }),
+        Command::Sync { check } => check_conventions(&root)
+            .and_then(|()| sync_with_report(&root, check))
+            .map(|report| {
+                print_report(&report);
+            }),
         Command::Select => configure(&root).and_then(|()| {
             let report = sync_with_report(&root, false)?;
             print_report(&report);

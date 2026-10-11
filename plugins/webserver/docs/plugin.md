@@ -1,8 +1,23 @@
 # WebServer Plugin
 
+The WebServer Plugin owns the portable HTTP and WebSocket server and lets
+dependent Plugins host routes on it through the typed `WebServer` capability.
+
 - Plugin ID: `webserver`
-- Direct Plugin dependencies: none
-- Provided typed capabilities: `WebServer`
+- Dependencies: none
+- Settings: none
+- Context resources: `ip_stack`
+- Provided capabilities: `WebServer`
+- Required capabilities: none
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: one server task (`web_server`, pool size 1) with four connection
+  workers; one additional listener task (`additional_web_server`, pool size
+  1) with one connection worker, when a dependent Plugin calls
+  `listen_on_stack`
+- Storage: none
 
 The WebServer Plugin owns one portable picoserve server and one Embassy server
 task. Its constructor takes the common `PluginContext` and copies the public
@@ -64,7 +79,7 @@ backpressure. Missing resources can return an ordinary 404 response.
 `/assets/` and descendants, not `/assets` or `/assets-other`. `/*` is the root
 fallback. This resource entry accepts GET only (other methods receive 405),
 passes the encoded path by reference without its query, and does not collect
-the request body. The older `serve_http` interface remains buffered and owned.
+the request body. The `serve_http` interface is buffered and owned.
 
 A request body larger than the 8 KiB HTTP buffer needs `serve_upload`, which
 registers a prefix route like `serve_http_prefix` and hands the endpoint an
@@ -78,7 +93,7 @@ choose their own status codes.
 `HttpRequest::path()` exposes the original encoded path without its query.
 The server does not decode paths or assign filesystem meaning to them. A
 consumer implementing URL-to-resource mapping must validate that mapping and
-enforce its own resource scope. `HttpRequest::new` remains available for
+enforce its own resource scope. `HttpRequest::new` is available for
 synthetic requests without a path; `with_path` supplies one explicitly.
 
 `HttpResponse::new` returns buffered bytes. `HttpResponse::stream` accepts an
@@ -86,7 +101,7 @@ owned `embedded_io_async::Read` (0.7) source and an exact byte length. The serve
 emits Content-Type and Content-Length, copies at most 1024 bytes at a time,
 and never reads beyond the declared length. The source need not be a file and
 the server does not depend on a filesystem implementation. Empty streams do
-not read their source. `HttpResponse::body()` now returns `Option<&[u8]>`:
+not read their source. `HttpResponse::body()` returns `Option<&[u8]>`:
 `Some` for buffered bodies, `None` for streams.
 
 The streaming adapter uses inline storage, not boxed readers or boxed read
@@ -108,7 +123,7 @@ request/response path using a 40,000-byte generated resource, a yielding reader,
 and a bounded short-writing test socket. This does not claim that an arbitrary
 provider or the actual network stack allocates nothing. In particular the
 current VFS `BackendFuture` is boxed, so a VFS-backed provider still incurs
-VFS-owned allocations. That separate API is not changed here.
+VFS-owned allocations.
 
 If a source returns an I/O error, premature EOF, or an invalid read length,
 `serve_connection` returns `ServeConnectionError::ResponseSource` and drops

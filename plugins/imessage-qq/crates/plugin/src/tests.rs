@@ -1,5 +1,6 @@
-//! The QQ channel against a scripted OpenAPI, an in-memory WebSocket gateway,
-//! real Plugin storage, and the real Gateway and Workflow.
+//! The QQ channel against a scripted OpenAPI and a fake QQ WebSocket gateway
+//! on a loopback network, real Plugin storage, and the real Gateway, HTTP,
+//! WebServer, and Workflow.
 
 #![allow(
     clippy::expect_used,
@@ -10,50 +11,63 @@
     missing_docs
 )]
 
-extern crate std;
-
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::ToString;
 use alloc::vec;
 use core::cell::{Cell, RefCell};
+use core::future::{poll_fn, Future};
+use core::pin::Pin;
 use core::task::{Poll, Waker};
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus};
-use barracuda_imessage_gateway_channel::{
-    entry_status, ChannelControl, ChannelEndpoint, ModeEndpoint, ReceiveChannel, ReceiveError,
-    ReceiveFuture, ReceiveSession, ReceiveSlotSource, ReceiveState, MODE_STORAGE_KEY, PAIRED_REPLY,
-};
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, ChannelFuture, IMessageGatewayPlugin, MessageChannel, Operation,
-    SendMessageRequest, SendReceipt,
+    ChannelControl, ChannelError, ChannelFuture, IMessageGatewayPlugin, MessageChannel,
+    MessageChannelRegistration, Operation, ReceiveControl, ReceiveSlots, ReceiveState,
+    SendMessageRequest, SendReceipt, PAIRED_REPLY,
 };
 use barracuda_platform::{Entropy, EntropyUnavailable};
 use barracuda_platform_test::{
-    install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
+    install_global_memory_vfs, loopback_network, memory_partition, LoopbackNetwork,
+    MemoryPartition, ScriptStep, ScriptedServer,
 };
 use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
+use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
 use barracuda_workflow_plugin::{
     workflow_action_schema_inline, WorkflowActionFuture, WorkflowActionHandler,
     WorkflowActionRegistry, WorkflowActionSchema, WorkflowPlugin, WorkflowService,
 };
 use embassy_executor::{Executor, Spawner};
+use embassy_futures::join::{join3, join_array};
 use embassy_futures::select::{select, Either};
+use embassy_net::tcp::TcpSocket;
+use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
+use embedded_io_async::Write as _;
 use futures_lite::future::block_on;
+use rusty_fork::rusty_fork_test;
 use serde_json::{json, Value};
 
 use super::*;
 use crate::receive::SESSION_STORAGE_KEY;
 
-type Scripted = ScriptedStack;
-type Channel<Storage> = QQChannel<Storage, TestSlots, Scripted, Scripted>;
+type Channel<Storage> = QQChannel<Storage>;
 
-const CONFIG: &str = r#"{"app_id":"app","app_secret":"secret","api_base":"http://qq.test","token_url":"http://qq.test/app/getAppAccessToken"}"#;
+/// Port of the scripted OpenAPI, token endpoint, and bind portal.
+const PORT: u16 = 9000;
+/// Connections the scripted server holds at once. Every request opens a
+/// fresh connection whose client side is dropped without a FIN, so each one
+/// keeps a listener until the test ends.
+const LISTENERS: usize = 10;
+/// Port of the fake QQ WebSocket gateway.
+const WS_PORT: u16 = 9001;
+/// Connections the fake gateway accepts at once: the one ending and the next.
+const WS_LISTENERS: usize = 2;
+const CONFIG: &str = r#"{"app_id":"app","app_secret":"secret","api_base":"http://10.0.0.1:9000","token_url":"http://10.0.0.1:9000/app/getAppAccessToken"}"#;
 const TOKEN: &str = r#"{"access_token":"token-1","expires_in":"7200"}"#;
-const GATEWAY: &str = r#"{"url":"wss://gateway.qq.test/websocket/"}"#;
+const GATEWAY: &str = r#"{"url":"ws://10.0.0.1:9001/websocket/"}"#;
 const MESSAGE_SENT: &str = r#"{"id":"reply-1"}"#;
 const REJECTED: &str = r#"{"code":10004,"message":"机器人不存在"}"#;
 const PAIRING_CODE: &str = "123456";
@@ -65,22 +79,14 @@ const TIMING: ReceiveTiming = ReceiveTiming {
 
 // --- Entropy ---------------------------------------------------------------
 
-/// Entropy that fills every four bytes with a per-thread counter, starting
-/// at a seed, so the first pairing code is the seed.
+/// Entropy that fills every four bytes of one draw with a counter, starting
+/// at a seed, so the first draw is the seed.
 #[derive(Clone)]
-struct Sequence;
-
-std::thread_local! {
-    static SEQUENCE: Cell<u32> = const { Cell::new(0) };
-}
+struct Sequence(portable_atomic_util::Arc<portable_atomic::AtomicU32>);
 
 impl Entropy for Sequence {
     fn fill(&self, bytes: &mut [u8]) -> Result<(), EntropyUnavailable> {
-        let value = SEQUENCE.with(|sequence| {
-            let value = sequence.get();
-            sequence.set(value.wrapping_add(1));
-            value
-        });
+        let value = self.0.fetch_add(1, portable_atomic::Ordering::Relaxed);
         for chunk in bytes.chunks_mut(4) {
             chunk.copy_from_slice(&value.to_le_bytes()[..chunk.len()]);
         }
@@ -88,12 +94,15 @@ impl Entropy for Sequence {
     }
 }
 
+/// Entropy whose first draw is [`PAIRING_CODE`]: the Gateway's first pairing
+/// code, and the channel's first bind key.
 fn entropy() -> SharedEntropy {
-    SEQUENCE.with(|sequence| sequence.set(123_456));
-    SharedEntropy::new(Sequence)
+    SharedEntropy::new(Sequence(portable_atomic_util::Arc::new(
+        portable_atomic::AtomicU32::new(123_456),
+    )))
 }
 
-// --- In-memory WebSocket gateway -------------------------------------------
+// --- Fake QQ WebSocket gateway ---------------------------------------------
 
 /// What the fake gateway answers on its own.
 #[derive(Clone, Copy)]
@@ -131,16 +140,30 @@ struct Connection {
 impl Connection {
     fn push(&self, bytes: &[u8]) {
         self.to_client.borrow_mut().extend(bytes);
+        self.wake();
+    }
+
+    fn end(&self) {
+        self.closed.set(true);
+        self.wake();
+    }
+
+    fn wake(&self) {
         if let Some(waker) = self.waker.borrow_mut().take() {
             waker.wake();
         }
     }
 
-    fn end(&self) {
-        self.closed.set(true);
-        if let Some(waker) = self.waker.borrow_mut().take() {
-            waker.wake();
-        }
+    /// Waits until there are bytes for the client or the connection ends.
+    async fn outgoing(&self) {
+        poll_fn(|context| {
+            if self.closed.get() || !self.to_client.borrow().is_empty() {
+                return Poll::Ready(());
+            }
+            self.waker.replace(Some(context.waker().clone()));
+            Poll::Pending
+        })
+        .await;
     }
 }
 
@@ -165,7 +188,8 @@ fn close_frame(code: u16) -> Vec<u8> {
     frame(0x8, &code.to_be_bytes())
 }
 
-/// The fake QQ gateway: accepts connections and records what clients send.
+/// The fake QQ gateway: a TCP server on the loopback network that speaks the
+/// WebSocket protocol and records what clients send.
 #[derive(Default)]
 struct FakeGateway {
     behaviour: RefCell<VecDeque<Behaviour>>,
@@ -184,7 +208,64 @@ impl FakeGateway {
         self.behaviour.borrow_mut().extend(behaviours);
     }
 
-    fn accept(self: &Rc<Self>) -> Rc<Connection> {
+    /// Serves `port` on `stack` with `N` concurrent connections, forever.
+    async fn serve<const N: usize>(&self, stack: Stack<'static>, port: u16) {
+        join_array(core::array::from_fn::<_, N, _>(|_| {
+            self.listen(stack, port)
+        }))
+        .await;
+    }
+
+    async fn listen(&self, stack: Stack<'static>, port: u16) {
+        let mut rx = vec![0; 8 * 1024];
+        let mut tx = vec![0; 8 * 1024];
+        loop {
+            let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
+            if socket.accept(port).await.is_err() {
+                continue;
+            }
+            let (connection, behaviour) = self.accept();
+            self.pump(&mut socket, &connection, behaviour).await;
+            connection.end();
+            socket.abort();
+            let _flushed = socket.flush().await;
+        }
+    }
+
+    /// Moves bytes between `socket` and `connection` until either ends.
+    async fn pump(
+        &self,
+        socket: &mut TcpSocket<'_>,
+        connection: &Connection,
+        behaviour: Behaviour,
+    ) {
+        let mut buffer = [0; 1024];
+        loop {
+            let outgoing: Vec<u8> = connection.to_client.borrow_mut().drain(..).collect();
+            if !outgoing.is_empty()
+                && (socket.write_all(&outgoing).await.is_err() || socket.flush().await.is_err())
+            {
+                return;
+            }
+            if connection.closed.get() {
+                return;
+            }
+            match select(socket.read(&mut buffer), connection.outgoing()).await {
+                Either::First(Ok(0) | Err(_)) => return,
+                Either::First(Ok(count)) => {
+                    connection
+                        .from_client
+                        .borrow_mut()
+                        .extend_from_slice(&buffer[..count]);
+                    self.received(connection, behaviour);
+                }
+                Either::Second(()) => {}
+            }
+        }
+    }
+
+    /// Makes a new connection the current one; the previous one ends.
+    fn accept(&self) -> (Rc<Connection>, Behaviour) {
         let connection = Rc::new(Connection::default());
         let behaviour = self.behaviour.borrow_mut().pop_front().unwrap_or_default();
         self.connections.set(self.connections.get() + 1);
@@ -194,7 +275,7 @@ impl FakeGateway {
         {
             previous.end();
         }
-        connection
+        (connection, behaviour)
     }
 
     fn connection(&self) -> Rc<Connection> {
@@ -236,7 +317,10 @@ impl FakeGateway {
             };
             connection.from_client.borrow_mut().drain(..end + 4);
             let head = String::from_utf8(request[..end].to_vec()).expect("UTF-8 request");
-            assert!(head.starts_with("GET /websocket/ HTTP/1.1\r\nHost: gateway.qq.test\r\n"));
+            assert!(
+                head.starts_with("GET /websocket/ HTTP/1.1\r\nHost: 10.0.0.1:9001\r\n"),
+                "{head}"
+            );
             let key = head
                 .lines()
                 .find_map(|line| line.strip_prefix("Sec-WebSocket-Key: "))
@@ -319,148 +403,6 @@ impl FakeGateway {
     }
 }
 
-#[derive(Debug)]
-struct PipeError;
-
-impl core::fmt::Display for PipeError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("pipe closed")
-    }
-}
-
-impl core::error::Error for PipeError {}
-
-impl embedded_io_async::Error for PipeError {
-    fn kind(&self) -> ErrorKind {
-        ErrorKind::ConnectionReset
-    }
-}
-
-struct ConnectionReader(Rc<Connection>);
-
-impl ErrorType for ConnectionReader {
-    type Error = PipeError;
-}
-
-impl Read for ConnectionReader {
-    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, PipeError> {
-        core::future::poll_fn(|context| {
-            let mut bytes = self.0.to_client.borrow_mut();
-            if bytes.is_empty() {
-                if self.0.closed.get() {
-                    return Poll::Ready(Ok(0));
-                }
-                self.0.waker.replace(Some(context.waker().clone()));
-                return Poll::Pending;
-            }
-            let count = buffer.len().min(bytes.len());
-            for slot in buffer.iter_mut().take(count) {
-                *slot = bytes.pop_front().unwrap();
-            }
-            Poll::Ready(Ok(count))
-        })
-        .await
-    }
-}
-
-struct ConnectionWriter {
-    connection: Rc<Connection>,
-    gateway: Rc<FakeGateway>,
-    behaviour: Behaviour,
-}
-
-impl ErrorType for ConnectionWriter {
-    type Error = PipeError;
-}
-
-impl Write for ConnectionWriter {
-    async fn write(&mut self, bytes: &[u8]) -> Result<usize, PipeError> {
-        if self.connection.closed.get() {
-            return Err(PipeError);
-        }
-        self.connection
-            .from_client
-            .borrow_mut()
-            .extend_from_slice(bytes);
-        self.gateway.received(&self.connection, self.behaviour);
-        Ok(bytes.len())
-    }
-
-    async fn flush(&mut self) -> Result<(), PipeError> {
-        Ok(())
-    }
-}
-
-/// Receive slots over the fake gateway.
-#[derive(Clone)]
-struct TestSlots {
-    gateway: Rc<FakeGateway>,
-    capacity: usize,
-    in_use: Rc<Cell<usize>>,
-}
-
-struct TestLease {
-    gateway: Rc<FakeGateway>,
-    in_use: Rc<Cell<usize>>,
-}
-
-impl Drop for TestLease {
-    fn drop(&mut self) {
-        self.in_use.set(self.in_use.get() - 1);
-    }
-}
-
-impl ReceiveSlotSource for TestSlots {
-    type Lease = TestLease;
-
-    fn acquire(&self) -> Option<TestLease> {
-        if self.in_use.get() >= self.capacity {
-            return None;
-        }
-        self.in_use.set(self.in_use.get() + 1);
-        Some(TestLease {
-            gateway: Rc::clone(&self.gateway),
-            in_use: Rc::clone(&self.in_use),
-        })
-    }
-
-    fn capacity(&self) -> usize {
-        self.capacity
-    }
-
-    fn in_use(&self) -> usize {
-        self.in_use.get()
-    }
-}
-
-impl<Storage: PluginStorage> ReceiveChannel<TestLease> for Channel<Storage> {
-    fn receive<'a>(
-        &'a self,
-        lease: &'a mut TestLease,
-        session: ReceiveSession<'a>,
-    ) -> ReceiveFuture<'a> {
-        Box::pin(async move {
-            let (settings, url, state) = self.prepare().await?;
-            assert_eq!(url, "wss://gateway.qq.test/websocket/");
-            let connection = lease.gateway.accept();
-            let behaviour = lease.gateway.current.borrow().as_ref().expect("current").1;
-            let reader = ConnectionReader(Rc::clone(&connection));
-            let writer = ConnectionWriter {
-                connection,
-                gateway: Rc::clone(&lease.gateway),
-                behaviour,
-            };
-            let outcome = self
-                .run(&settings, state, &url, reader, writer, session)
-                .await;
-            if outcome.is_err() {
-                lease.gateway.connection().end();
-            }
-            outcome.map_err(|error: ReceiveError| error)
-        })
-    }
-}
-
 // --- Harness ---------------------------------------------------------------
 
 struct OccupiedQQChannel;
@@ -475,14 +417,17 @@ impl MessageChannel for OccupiedQQChannel {
     }
 }
 
-/// What the probe stores and scripts before building the channel.
+/// What the probe stores before building the channel, and what the QQ
+/// servers answer.
 struct Setup {
     configured: bool,
     mode: Option<&'static str>,
     stored: Vec<(&'static str, Vec<u8>)>,
-    /// OpenAPI answers: tokens, gateway URL, and sends.
+    /// OpenAPI and portal answers, in order: tokens, gateway URL, sends, and
+    /// bind calls.
     send: Vec<ScriptStep>,
     behaviours: Vec<Behaviour>,
+    /// Whether other receivers hold every Gateway slot.
     hold_slot: bool,
     occupied: bool,
 }
@@ -510,16 +455,108 @@ impl Setup {
     }
 }
 
+/// The loopback network, the scripted OpenAPI, and the fake gateway, all
+/// running whenever a test waits.
+struct Bench {
+    /// Answers the OpenAPI, the token endpoint, and the bind portal.
+    server: ScriptedServer,
+    gateway: Rc<FakeGateway>,
+    driver: RefCell<Pin<Box<dyn Future<Output = ()>>>>,
+}
+
+impl Bench {
+    fn new(network: LoopbackNetwork, setup: &mut Setup) -> Rc<Self> {
+        let stack = network.stack();
+        let server = ScriptedServer::new(core::mem::take(&mut setup.send));
+        let gateway = Rc::new(FakeGateway::default());
+        gateway.script(core::mem::take(&mut setup.behaviours));
+        let serving = server.clone();
+        let accepting = Rc::clone(&gateway);
+        let driver: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
+            let _stopped = join3(
+                network.run(),
+                serving.run::<LISTENERS>(stack, PORT),
+                accepting.serve::<WS_LISTENERS>(stack, WS_PORT),
+            )
+            .await;
+        });
+        Rc::new(Self {
+            server,
+            gateway,
+            driver: RefCell::new(driver),
+        })
+    }
+
+    /// Runs `future` to its end while the network and the QQ servers run.
+    fn drive<F: Future>(&self, future: F) -> F::Output {
+        let mut driver = self.driver.borrow_mut();
+        match block_on(select(driver.as_mut(), future)) {
+            Either::First(()) => panic!("the loopback network stopped"),
+            Either::Second(output) => output,
+        }
+    }
+}
+
+/// A route's answer.
+struct Reply {
+    status: u16,
+    body: Vec<u8>,
+}
+
+impl Reply {
+    const fn status(&self) -> u16 {
+        self.status
+    }
+
+    fn body(&self) -> Option<&[u8]> {
+        Some(&self.body)
+    }
+
+    fn json(&self) -> Value {
+        if self.body.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&self.body).expect("JSON body")
+        }
+    }
+}
+
+/// Requests `method path` with `body` from the WebServer's routes.
+async fn call(webserver: &WebServer, method: &str, path: &str, body: &str) -> Reply {
+    let mut input = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    input.extend_from_slice(body.as_bytes());
+    let output = routes::send(webserver, input).await;
+    let split = output
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("response head");
+    let head = core::str::from_utf8(&output[..split]).expect("ASCII head");
+    Reply {
+        status: head[9..12].parse().expect("status code"),
+        body: output[split + 4..].to_vec(),
+    }
+}
+
+/// The built channel, its routes, and the QQ servers.
 struct Harness<Storage: PluginStorage> {
     channel: Rc<Channel<Storage>>,
     runtime: RefCell<Option<ReceiveRuntime>>,
+    bench: Rc<Bench>,
+    /// The fake QQ WebSocket gateway.
     gateway: Rc<FakeGateway>,
-    send: &'static ScriptedStack,
-    held: RefCell<Option<TestLease>>,
+    webserver: Rc<WebServer>,
+    /// Receivers holding every Gateway slot, when the setup asks for it.
+    held: RefCell<Vec<ReceiveControl<ReceiveSlots>>>,
+    /// The Gateway's slot count.
+    capacity: usize,
     registry: Rc<IMessageGateway>,
     storage: Storage,
     /// Another `qq` channel holding the name while present.
-    _occupied: Option<barracuda_imessage_gateway_plugin::MessageChannelRegistration>,
+    _occupied: Option<MessageChannelRegistration>,
 }
 
 impl<Storage: PluginStorage> Harness<Storage> {
@@ -527,7 +564,7 @@ impl<Storage: PluginStorage> Harness<Storage> {
     fn run_until(&self, what: &str, done: impl Fn() -> bool) {
         let mut runtime = self.runtime.borrow_mut();
         let runtime = runtime.as_mut().expect("receive runtime");
-        let waited = block_on(select(
+        let waited = self.bench.drive(select(
             runtime,
             with_timeout(Duration::from_secs(5), async {
                 while !done() {
@@ -543,45 +580,35 @@ impl<Storage: PluginStorage> Harness<Storage> {
         );
     }
 
+    /// Drives the receive runtime for `duration`.
     fn run_for(&self, duration: Duration) {
         let mut runtime = self.runtime.borrow_mut();
         let runtime = runtime.as_mut().expect("receive runtime");
-        let _elapsed = block_on(select(runtime, Timer::after(duration)));
+        let _elapsed = self.bench.drive(select(runtime, Timer::after(duration)));
     }
 
     fn state(&self) -> ReceiveState {
         ChannelControl::receive(&*self.channel).state()
     }
 
+    /// Requests the channel's routes on the WebServer.
+    fn request(&self, method: &str, path: &str, body: &str) -> Reply {
+        self.bench.drive(call(&self.webserver, method, path, body))
+    }
+
     fn status(&self) -> Value {
-        let endpoint = ChannelEndpoint::new(
-            Rc::clone(&self.channel),
-            CONFIG_API_PATH,
-            ConfigEndpoint {
-                channel: Rc::clone(&self.channel),
-            },
-        );
-        let request = HttpRequest::with_path(
-            HttpMethod::Get,
-            format!("{CONFIG_API_PATH}/status"),
-            Vec::new(),
-        );
-        let response = block_on(endpoint.handle(request));
-        assert_eq!(response.status(), 200);
-        serde_json::from_slice(response.body().expect("buffered body")).expect("status JSON")
+        let reply = self.request("GET", &format!("{CONFIG_API_PATH}/status"), "");
+        assert_eq!(reply.status(), 200);
+        reply.json()
     }
 
-    fn configure(&self, body: &str) -> HttpResponse {
-        let endpoint = ConfigEndpoint {
-            channel: Rc::clone(&self.channel),
-        };
-        block_on(endpoint.handle(HttpRequest::new(HttpMethod::Post, body.as_bytes().to_vec())))
+    fn configure(&self, body: &str) -> Reply {
+        self.request("POST", CONFIG_API_PATH, body)
     }
 
-    fn set_mode(&self, mode: &str) -> HttpResponse {
-        let endpoint = ModeEndpoint::new(Rc::clone(&self.channel));
+    fn set_mode(&self, mode: &str) -> Reply {
         let body = format!(r#"{{"mode":"{mode}"}}"#);
-        block_on(endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())))
+        self.request("POST", &format!("{CONFIG_API_PATH}/mode"), &body)
     }
 
     fn stored(&self, key: &str) -> Option<Vec<u8>> {
@@ -599,17 +626,21 @@ impl<Storage: PluginStorage> Harness<Storage> {
         self.registry.register(probe).is_err()
     }
 
+    /// Requests the OpenAPI and the portal answered, in order.
     fn requests(&self) -> Vec<String> {
-        self.send.requests()
+        self.bench.server.requests()
     }
 }
 
+/// One test's steps, run inside Plugin registration where scoped storage
+/// exists. Returning the runtime asks the probe to spawn it in `start`.
 trait Scenario: 'static {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime>;
 }
 
 struct Probe<S> {
     setup: Option<Setup>,
+    bench: Rc<Bench>,
     scenario: S,
     runtime: Option<ReceiveRuntime>,
     completed: Rc<Cell<bool>>,
@@ -617,7 +648,7 @@ struct Probe<S> {
 
 impl<S> PluginDeclaration for Probe<S> {
     const ID: &'static str = "qq-probe";
-    const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
+    const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway", "webserver"];
 }
 
 impl<S: Scenario> Plugin for Probe<S> {
@@ -634,41 +665,47 @@ impl<S: Scenario> Plugin for Probe<S> {
             block_on(storage.put(CONFIGURATION_STORAGE_KEY, CONFIG.as_bytes()))?;
         }
         if let Some(mode) = setup.mode {
-            block_on(storage.put(MODE_STORAGE_KEY, format!("\"{mode}\"").as_bytes()))?;
+            block_on(storage.put("mode", format!("\"{mode}\"").as_bytes()))?;
         }
         for (key, value) in &setup.stored {
             block_on(storage.put(key, value.as_slice()))?;
         }
         let registry = context.require::<IMessageGateway>("imessage-gateway")?;
+        let webserver = context.require::<WebServer>("webserver")?;
         let occupied = setup.occupied.then(|| {
             let occupied: Rc<dyn MessageChannel> = Rc::new(OccupiedQQChannel);
             registry.register(occupied).expect("occupy the qq channel")
         });
-        let send: &'static ScriptedStack = Box::leak(Box::new(ScriptedStack::new(setup.send)));
-        let gateway = Rc::new(FakeGateway::default());
-        gateway.script(setup.behaviours);
-        let slots = TestSlots {
-            gateway: Rc::clone(&gateway),
-            capacity: 1,
-            in_use: Rc::new(Cell::new(0)),
+        let capacity = registry.receive_control().capacity();
+        let held = if setup.hold_slot {
+            (0..capacity)
+                .map(|_| {
+                    let control = registry.receive_control();
+                    control.set_enabled(true).expect("a free slot");
+                    control
+                })
+                .collect()
+        } else {
+            Vec::new()
         };
-        let held = setup
-            .hold_slot
-            .then(|| slots.acquire().expect("a free slot"));
-        let (channel, runtime) = build_channel(
-            storage.clone(),
-            Rc::clone(&registry),
-            ClientFactory::from_network(send, send),
-            slots,
-            entropy(),
-            TIMING,
-        )?;
+        let (channel, runtime) =
+            build_channel(storage.clone(), Rc::clone(&registry), entropy(), TIMING)?;
+        let config = ConfigEndpoint {
+            channel: Rc::clone(&channel),
+        };
+        context.retain(
+            registry
+                .serve_channel(CONFIG_API_PATH, Rc::clone(&channel), config)
+                .map_err(PluginError::registration)?,
+        );
         self.runtime = self.scenario.run(Harness {
             channel,
             runtime: RefCell::new(Some(runtime)),
-            gateway,
-            send,
+            gateway: Rc::clone(&self.bench.gateway),
+            bench: Rc::clone(&self.bench),
+            webserver,
             held: RefCell::new(held),
+            capacity,
             registry,
             storage,
             _occupied: occupied,
@@ -690,8 +727,8 @@ impl<S: Scenario> Plugin for Probe<S> {
     }
 }
 
-fn plugin_context() -> PluginContext {
-    let stack = never_embassy_stack();
+/// A context on `network`'s stack.
+fn plugin_context(network: &LoopbackNetwork) -> PluginContext {
     let info = barracuda_plugin::api::TargetIdentity::new(
         barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
         barracuda_plugin::api::BoardInfo::new(
@@ -699,33 +736,49 @@ fn plugin_context() -> PluginContext {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+    PluginContext::new(info, network.stack())
 }
 
-/// Registers Workflow, the Gateway, and a probe running `scenario`, without
-/// starting any task.
-fn run(setup: Setup, scenario: impl Scenario) {
+/// Registers Workflow, HTTP, WebServer, the Gateway, and a probe running
+/// `scenario` on a loopback network, without starting any task.
+fn run(mut setup: Setup, scenario: impl Scenario) {
     block_on(install_global_memory_vfs()).expect("install test VFS");
     let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
     let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
     manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
-    let mut context = plugin_context();
+    let network = loopback_network();
+    let mut context = plugin_context(&network);
+    let bench = Bench::new(network, &mut setup);
     let completed = Rc::new(Cell::new(false));
-    manager
-        .register(WorkflowPlugin::new(&mut context))
-        .expect("register Workflow Plugin");
-    manager
-        .register(IMessageGatewayPlugin::new(&mut context))
-        .expect("register IMessage Gateway Plugin");
+    register_services(&mut manager, &mut context);
     manager
         .register(Probe {
             setup: Some(setup),
+            bench,
             scenario,
             runtime: None,
             completed: Rc::clone(&completed),
         })
         .expect("run the QQ scenario");
     assert!(completed.get());
+}
+
+/// Registers the Plugins the channel runs on.
+fn register_services(manager: &mut PluginManager<MemoryPartition>, context: &mut PluginContext) {
+    manager
+        .register(WorkflowPlugin::new(context))
+        .expect("register Workflow Plugin");
+    manager
+        .register(HttpPlugin::new(context))
+        .expect("register HTTP Plugin");
+    manager
+        .register(WebServerPlugin::new(context))
+        .expect("register WebServer Plugin");
+    // Only the Gateway draws from the entropy that mints the first code.
+    context.entropy = entropy();
+    manager
+        .register(IMessageGatewayPlugin::new(context))
+        .expect("register IMessage Gateway Plugin");
 }
 
 // --- Configuration ---------------------------------------------------------
@@ -737,13 +790,11 @@ impl Scenario for AcceptedConfiguration {
         assert_eq!(
             harness.status(),
             json!({"configured": false, "mode": "send_receive",
-                   "receive": {"state": "idle", "slots": {"in_use": 0, "capacity": 1}},
+                   "receive": {"state": "idle", "slots": {"in_use": 0, "capacity": harness.capacity}},
                    "owners": {"count": 0}})
         );
         assert!(!harness.registered());
-        let response = harness.configure(
-            r#"{"app_id":"app","app_secret":"secret","api_base":"http://qq.test","token_url":"http://qq.test/app/getAppAccessToken"}"#,
-        );
+        let response = harness.configure(CONFIG);
         assert_eq!(response.status(), 204);
         let stored = harness.stored(CONFIGURATION_STORAGE_KEY).expect("stored");
         assert!(!String::from_utf8_lossy(&stored).contains("token-1"));
@@ -752,7 +803,7 @@ impl Scenario for AcceptedConfiguration {
         assert_eq!(
             harness.status(),
             json!({"configured": true, "mode": "send_receive",
-                   "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": 1}},
+                   "receive": {"state": "receiving", "slots": {"in_use": 1, "capacity": harness.capacity}},
                    "owners": {"count": 0}})
         );
         let requests = harness.requests();
@@ -770,7 +821,7 @@ impl Scenario for AcceptedConfiguration {
             Some(json!({"session_id": "session-1", "seq": 1}))
         );
         assert_eq!(
-            entry_status(&*harness.channel),
+            entry_status(harness.registry.channel_status(&*harness.channel)),
             EntryStatus::new(
                 EntryState::Ready,
                 barracuda_captive_portal_plugin::WebText {
@@ -780,28 +831,26 @@ impl Scenario for AcceptedConfiguration {
             )
         );
         // The configuration path takes changes only; its state is under `/status`.
-        for method in [HttpMethod::Get, HttpMethod::Delete] {
-            let response = block_on(
-                ConfigEndpoint {
-                    channel: Rc::clone(&harness.channel),
-                }
-                .handle(HttpRequest::new(method, Vec::new())),
-            );
-            assert_eq!(response.status(), 405);
+        for method in ["GET", "DELETE"] {
+            assert_eq!(harness.request(method, CONFIG_API_PATH, "").status(), 405);
         }
         None
     }
 }
 
-#[test]
-fn a_new_configuration_registers_identifies_and_receives() {
-    run(
-        Setup {
-            send: vec![ScriptStep::json(200, TOKEN), ScriptStep::json(200, GATEWAY)],
-            ..Setup::unconfigured()
-        },
-        AcceptedConfiguration,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_new_configuration_registers_identifies_and_receives() {
+        run(
+            Setup {
+                send: vec![ScriptStep::json(200, TOKEN), ScriptStep::json(200, GATEWAY)],
+                ..Setup::unconfigured()
+            },
+            AcceptedConfiguration,
+        );
+    }
 }
 
 struct RejectedCredentials;
@@ -829,18 +878,22 @@ impl Scenario for RejectedCredentials {
     }
 }
 
-#[test]
-fn rejected_or_unverifiable_credentials_store_nothing() {
-    run(
-        Setup {
-            send: vec![
-                ScriptStep::json(200, REJECTED),
-                ScriptStep::response(502, "text/html", b"<html>bad gateway</html>", usize::MAX),
-            ],
-            ..Setup::unconfigured()
-        },
-        RejectedCredentials,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn rejected_or_unverifiable_credentials_store_nothing() {
+        run(
+            Setup {
+                send: vec![
+                    ScriptStep::json(200, REJECTED),
+                    ScriptStep::response(502, "text/html", b"<html>bad gateway</html>", usize::MAX),
+                ],
+                ..Setup::unconfigured()
+            },
+            RejectedCredentials,
+        );
+    }
 }
 
 struct RegistrationRejected;
@@ -859,16 +912,20 @@ impl Scenario for RegistrationRejected {
     }
 }
 
-#[test]
-fn rejected_channel_registration_is_registration_failed() {
-    run(
-        Setup {
-            send: vec![ScriptStep::json(200, TOKEN)],
-            occupied: true,
-            ..Setup::unconfigured()
-        },
-        RegistrationRejected,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn rejected_channel_registration_is_registration_failed() {
+        run(
+            Setup {
+                send: vec![ScriptStep::json(200, TOKEN)],
+                occupied: true,
+                ..Setup::unconfigured()
+            },
+            RegistrationRejected,
+        );
+    }
 }
 
 struct LegacyConfiguration;
@@ -879,10 +936,7 @@ impl Scenario for LegacyConfiguration {
             harness.status(),
             json!({"configured": true, "mode": "send", "owners": {"count": 0}})
         );
-        assert_eq!(
-            harness.stored(MODE_STORAGE_KEY).as_deref(),
-            Some(&br#""send""#[..])
-        );
+        assert_eq!(harness.stored("mode").as_deref(), Some(&br#""send""#[..]));
         assert!(harness.registered());
         harness.run_for(Duration::from_millis(50));
         assert_eq!(harness.gateway.connections.get(), 0);
@@ -891,15 +945,19 @@ impl Scenario for LegacyConfiguration {
     }
 }
 
-#[test]
-fn a_configuration_stored_before_modes_sends_only() {
-    run(
-        Setup {
-            mode: None,
-            ..Setup::configured("send")
-        },
-        LegacyConfiguration,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_configuration_stored_before_modes_sends_only() {
+        run(
+            Setup {
+                mode: None,
+                ..Setup::configured("send")
+            },
+            LegacyConfiguration,
+        );
+    }
 }
 
 struct LegacyToken;
@@ -913,19 +971,23 @@ impl Scenario for LegacyToken {
     }
 }
 
-#[test]
-fn a_stored_access_token_configuration_leaves_qq_unconfigured() {
-    run(
-        Setup {
-            stored: vec![(
-                CONFIGURATION_STORAGE_KEY,
-                br#"{"app_id":"app","access_token":"old-token","api_base":"https://api.sgroup.qq.com"}"#
-                    .to_vec(),
-            )],
-            ..Setup::unconfigured()
-        },
-        LegacyToken,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_stored_access_token_configuration_leaves_qq_unconfigured() {
+        run(
+            Setup {
+                stored: vec![(
+                    CONFIGURATION_STORAGE_KEY,
+                    br#"{"app_id":"app","access_token":"old-token","api_base":"https://api.sgroup.qq.com"}"#
+                        .to_vec(),
+                )],
+                ..Setup::unconfigured()
+            },
+            LegacyToken,
+        );
+    }
 }
 
 #[test]
@@ -981,9 +1043,13 @@ impl Scenario for Modes {
     }
 }
 
-#[test]
-fn modes_start_stop_and_register_the_channel() {
-    run(Setup::configured("send_receive"), Modes);
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn modes_start_stop_and_register_the_channel() {
+        run(Setup::configured("send_receive"), Modes);
+    }
 }
 
 struct FullPool;
@@ -992,31 +1058,35 @@ impl Scenario for FullPool {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         assert_eq!(harness.state(), ReceiveState::NoSlot);
         assert_eq!(harness.status()["receive"]["state"], "no_slot");
-        assert_eq!(harness.status()["receive"]["capacity"], 1);
+        assert_eq!(harness.status()["receive"]["capacity"], harness.capacity);
         assert_eq!(harness.set_mode("send").status(), 204);
         let response = harness.set_mode("send_receive");
         assert_eq!(response.status(), 409);
         assert_eq!(
             response.body().unwrap(),
-            br#"{"error":"no_slot","capacity":1}"#
+            format!(r#"{{"error":"no_slot","capacity":{}}}"#, harness.capacity).as_bytes()
         );
         harness.run_for(Duration::from_millis(60));
         assert_eq!(harness.gateway.connections.get(), 0);
-        harness.held.borrow_mut().take();
+        drop(harness.held.take());
         harness.run_until("receiving", || harness.state() == ReceiveState::Receiving);
         None
     }
 }
 
-#[test]
-fn a_full_pool_reports_no_slot_and_starts_when_a_slot_frees() {
-    run(
-        Setup {
-            hold_slot: true,
-            ..Setup::configured("send_receive")
-        },
-        FullPool,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_full_pool_reports_no_slot_and_starts_when_a_slot_frees() {
+        run(
+            Setup {
+                hold_slot: true,
+                ..Setup::configured("send_receive")
+            },
+            FullPool,
+        );
+    }
 }
 
 // --- Gateway protocol ------------------------------------------------------
@@ -1090,18 +1160,22 @@ impl Scenario for Heartbeats {
     }
 }
 
-#[test]
-fn heartbeats_resume_reidentify_and_halt_by_close_code() {
-    run(
-        Setup {
-            behaviours: vec![Behaviour {
-                hello_interval_ms: 1000,
-                ..Behaviour::default()
-            }],
-            ..Setup::configured("send_receive")
-        },
-        Heartbeats,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn heartbeats_resume_reidentify_and_halt_by_close_code() {
+        run(
+            Setup {
+                behaviours: vec![Behaviour {
+                    hello_interval_ms: 1000,
+                    ..Behaviour::default()
+                }],
+                ..Setup::configured("send_receive")
+            },
+            Heartbeats,
+        );
+    }
 }
 
 struct MissedAck;
@@ -1117,19 +1191,23 @@ impl Scenario for MissedAck {
     }
 }
 
-#[test]
-fn an_unacknowledged_heartbeat_reconnects_and_resumes() {
-    run(
-        Setup {
-            behaviours: vec![Behaviour {
-                hello_interval_ms: 1000,
-                ack: false,
-                ..Behaviour::default()
-            }],
-            ..Setup::configured("send_receive")
-        },
-        MissedAck,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn an_unacknowledged_heartbeat_reconnects_and_resumes() {
+        run(
+            Setup {
+                behaviours: vec![Behaviour {
+                    hello_interval_ms: 1000,
+                    ack: false,
+                    ..Behaviour::default()
+                }],
+                ..Setup::configured("send_receive")
+            },
+            MissedAck,
+        );
+    }
 }
 
 struct StoredSession;
@@ -1146,18 +1224,22 @@ impl Scenario for StoredSession {
     }
 }
 
-#[test]
-fn a_stored_session_is_resumed_after_a_restart() {
-    run(
-        Setup {
-            stored: vec![(
-                SESSION_STORAGE_KEY,
-                br#"{"session_id":"old","seq":41}"#.to_vec(),
-            )],
-            ..Setup::configured("send_receive")
-        },
-        StoredSession,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_stored_session_is_resumed_after_a_restart() {
+        run(
+            Setup {
+                stored: vec![(
+                    SESSION_STORAGE_KEY,
+                    br#"{"session_id":"old","seq":41}"#.to_vec(),
+                )],
+                ..Setup::configured("send_receive")
+            },
+            StoredSession,
+        );
+    }
 }
 
 struct RefusedUpgrade;
@@ -1179,18 +1261,22 @@ impl Scenario for RefusedUpgrade {
     }
 }
 
-#[test]
-fn a_refused_upgrade_drops_the_url_and_respects_the_lookup_rate_limit() {
-    run(
-        Setup {
-            behaviours: vec![Behaviour {
-                refuse_upgrade: true,
-                ..Behaviour::default()
-            }],
-            ..Setup::configured("send_receive")
-        },
-        RefusedUpgrade,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_refused_upgrade_drops_the_url_and_respects_the_lookup_rate_limit() {
+        run(
+            Setup {
+                behaviours: vec![Behaviour {
+                    refuse_upgrade: true,
+                    ..Behaviour::default()
+                }],
+                ..Setup::configured("send_receive")
+            },
+            RefusedUpgrade,
+        );
+    }
 }
 
 struct BadSecret;
@@ -1207,15 +1293,19 @@ impl Scenario for BadSecret {
     }
 }
 
-#[test]
-fn a_rejected_app_secret_halts_receiving() {
-    run(
-        Setup {
-            send: vec![ScriptStep::json(200, REJECTED)],
-            ..Setup::configured("send_receive")
-        },
-        BadSecret,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_rejected_app_secret_halts_receiving() {
+        run(
+            Setup {
+                send: vec![ScriptStep::json(200, REJECTED)],
+                ..Setup::configured("send_receive")
+            },
+            BadSecret,
+        );
+    }
 }
 
 // --- Owners, publishing, and dedup with Workflow running --------------------
@@ -1287,7 +1377,7 @@ type Snapshots = Rc<RefCell<Option<Box<dyn Fn() -> Snapshot>>>>;
 struct Started(Snapshots);
 
 std::thread_local! {
-    static WORLD: RefCell<Option<(Rc<FakeGateway>, &'static ScriptedStack)>> =
+    static WORLD: RefCell<Option<(Rc<FakeGateway>, ScriptedServer)>> =
         const { RefCell::new(None) };
 }
 
@@ -1311,7 +1401,13 @@ impl Scenario for Started {
                 .collect(),
             ignored: channel.owners().expect("owners").ignored(),
         })));
-        WORLD.with(|world| world.replace(Some((Rc::clone(&harness.gateway), harness.send))));
+        // Keeps the QQ servers reachable from the end-to-end test.
+        WORLD.with(|world| {
+            world.replace(Some((
+                Rc::clone(&harness.gateway),
+                harness.bench.server.clone(),
+            )))
+        });
         harness.runtime.take()
     }
 }
@@ -1319,6 +1415,17 @@ impl Scenario for Started {
 fn c2c(id: &str, sender: &str, text: &str) -> Value {
     json!({"id": id, "author": {"id": sender, "user_openid": sender}, "content": text,
            "timestamp": "2026-07-21T10:00:00+08:00"})
+}
+
+/// Runs the bench's network and QQ servers on the executor.
+#[allow(
+    clippy::await_holding_refcell_ref,
+    reason = "the end-to-end test only waits on the executor, never through `Bench::drive`"
+)]
+#[embassy_executor::task]
+async fn run_bench(bench: Rc<Bench>) {
+    let mut driver = bench.driver.borrow_mut();
+    driver.as_mut().await;
 }
 
 #[embassy_executor::task]
@@ -1349,32 +1456,32 @@ async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     manager.install_vfs(barracuda_vfs::global_namespace().await);
     manager.install_task_spawner(spawner);
-    let mut context = plugin_context();
+    let network = loopback_network();
+    let mut context = plugin_context(&network);
     let records = Rc::new(RefCell::new(Vec::new()));
     let snapshots: Snapshots = Rc::new(RefCell::new(None));
-    manager
-        .register(WorkflowPlugin::new(&mut context))
-        .map_err(|error| error.to_string())?;
-    manager
-        .register(IMessageGatewayPlugin::new(&mut context))
-        .map_err(|error| error.to_string())?;
+    register_services(&mut manager, &mut context);
     manager
         .register(Recorder(Rc::clone(&records)))
         .map_err(|error| error.to_string())?;
+    let mut setup = Setup {
+        stored: vec![(
+            "owners",
+            br#"[{"id":"OWNER","label":"Ann"},{"id":"MEMBER"}]"#.to_vec(),
+        )],
+        send: vec![
+            ScriptStep::json(200, TOKEN),
+            ScriptStep::json(200, GATEWAY),
+            ScriptStep::json(200, MESSAGE_SENT),
+        ],
+        ..Setup::configured("send_receive")
+    };
+    let bench = Bench::new(network, &mut setup);
+    spawner.spawn(run_bench(Rc::clone(&bench)).map_err(|error| format!("{error:?}"))?);
     manager
         .register(Probe {
-            setup: Some(Setup {
-                stored: vec![(
-                    "owners",
-                    br#"[{"id":"OWNER","label":"Ann"},{"id":"MEMBER"}]"#.to_vec(),
-                )],
-                send: vec![
-                    ScriptStep::json(200, TOKEN),
-                    ScriptStep::json(200, GATEWAY),
-                    ScriptStep::json(200, MESSAGE_SENT),
-                ],
-                ..Setup::configured("send_receive")
-            }),
+            setup: Some(setup),
+            bench,
             scenario: Started(Rc::clone(&snapshots)),
             runtime: None,
             completed: Rc::new(Cell::new(false)),
@@ -1448,29 +1555,39 @@ async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
         "the sender with the code paired",
     )?;
     check(snapshot.ignored == 1, "the stranger is counted")?;
+    // The executor thread outlives the test; keep its Plugins running.
+    core::mem::forget(manager);
     Ok(())
 }
 
-#[test]
-fn owners_publish_codes_pair_strangers_are_ignored_and_redeliveries_dropped() {
-    let (done, outcome) = sync_channel(1);
-    std::thread::spawn(move || {
-        let executor = Box::leak(Box::new(Executor::new()));
-        executor.run(|spawner| {
-            spawner.spawn(end_to_end(spawner, done).expect("spawn the end-to-end test"));
-        });
-    });
-    let outcome = outcome
-        .recv_timeout(std::time::Duration::from_secs(20))
-        .expect("the end-to-end test finished");
-    if let Err(message) = outcome {
-        panic!("{message}");
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn owners_publish_codes_pair_strangers_are_ignored_and_redeliveries_dropped() {
+        let (done, outcome) = sync_channel(1);
+        std::thread::Builder::new()
+            .name("qq-end-to-end".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || {
+                let executor = Box::leak(Box::new(Executor::new()));
+                executor.run(|spawner| {
+                    spawner.spawn(end_to_end(spawner, done).expect("spawn the end-to-end test"));
+                });
+            })
+            .expect("spawn the executor thread");
+        let outcome = outcome
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the end-to-end test finished");
+        if let Err(message) = outcome {
+            panic!("{message}");
+        }
     }
 }
 
 // --- QR binding --------------------------------------------------------------
 
-const PORTAL: &str = "http://portal.test";
+const PORTAL: &str = "http://10.0.0.1:9000";
 /// `bound-secret` sealed to the first bind key the test entropy makes.
 const SEALED_SECRET: &str = "BwcHBwcHBwcHBwcHfZEIFfZC1bTS4qY8MD2oy9+GDTnvVXKHf+S6Ow==";
 const LOGIN_TIMING: LoginTiming = LoginTiming {
@@ -1503,43 +1620,37 @@ fn bound() -> ScriptStep {
     )
 }
 
-/// The login endpoint and runtime over the harness channel, run side by side.
+/// The login endpoint on the WebServer and its runtime over the harness
+/// channel, run side by side with `test` while the QQ servers run.
 fn with_login<Storage: PluginStorage>(
     harness: &Harness<Storage>,
-    test: impl AsyncFnOnce(&LoginEndpoint<Storage, TestSlots, Scripted, Scripted>, &LoginWatch),
+    test: impl AsyncFnOnce(&WebServer, &LoginWatch),
 ) {
     let (endpoint, runtime) =
         LoginEndpoint::new(Rc::clone(&harness.channel), PORTAL.into(), LOGIN_TIMING);
     let watch = endpoint.watch();
-    block_on(async {
-        match select(runtime, test(&endpoint, &watch)).await {
+    let _route = harness
+        .webserver
+        .serve_http(LOGIN_API_PATH, endpoint)
+        .expect("serve the login route");
+    harness.bench.drive(async {
+        match select(runtime, test(&harness.webserver, &watch)).await {
             Either::First(()) => panic!("login runtime ended"),
             Either::Second(()) => {}
         }
     });
 }
 
-async fn login_call<Storage: PluginStorage>(
-    endpoint: &LoginEndpoint<Storage, TestSlots, Scripted, Scripted>,
-    method: HttpMethod,
-) -> (u16, Value) {
-    let response = endpoint.handle(HttpRequest::new(method, Vec::new())).await;
-    let body = response.body().expect("buffered body");
-    let json = if body.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(body).expect("JSON body")
-    };
-    (response.status(), json)
+/// Calls the login route without a body.
+async fn login_call(webserver: &WebServer, method: &str) -> (u16, Value) {
+    let reply = call(webserver, method, LOGIN_API_PATH, "").await;
+    (reply.status(), reply.json())
 }
 
 /// Lets the runtime run until GET reports `expected`.
-async fn login_status<Storage: PluginStorage>(
-    endpoint: &LoginEndpoint<Storage, TestSlots, Scripted, Scripted>,
-    expected: &str,
-) -> Value {
+async fn login_status(webserver: &WebServer, expected: &str) -> Value {
     for _ in 0..10_000 {
-        let (code, status) = login_call(endpoint, HttpMethod::Get).await;
+        let (code, status) = login_call(webserver, "GET").await;
         assert_eq!(code, 200);
         if status["status"] == expected {
             return status;
@@ -1562,13 +1673,13 @@ impl Scenario for BoundByQr {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         with_login(&harness, async |login, watch| {
             assert_eq!(
-                login_call(login, HttpMethod::Get).await,
+                login_call(login, "GET").await,
                 (
                     200,
                     json!({"status": "idle", "configured": true, "app_id": "app"})
                 )
             );
-            let (code, body) = login_call(login, HttpMethod::Post).await;
+            let (code, body) = login_call(login, "POST").await;
             assert_eq!(code, 200);
             assert_eq!(
                 body,
@@ -1588,8 +1699,8 @@ impl Scenario for BoundByQr {
         assert_eq!(
             stored,
             json!({"app_id": "102345678", "app_secret": "bound-secret",
-                   "api_base": "http://qq.test",
-                   "token_url": "http://qq.test/app/getAppAccessToken"})
+                   "api_base": "http://10.0.0.1:9000",
+                   "token_url": "http://10.0.0.1:9000/app/getAppAccessToken"})
         );
         assert!(harness.registered());
         assert_eq!(harness.status()["owners"], json!({"count": 1}));
@@ -1614,20 +1725,24 @@ impl Scenario for BoundByQr {
     }
 }
 
-#[test]
-fn a_qr_binding_verifies_stores_the_bot_and_makes_the_scanner_an_owner() {
-    run(
-        Setup {
-            send: vec![
-                bind_task(),
-                bind_status(1),
-                bound(),
-                ScriptStep::json(200, TOKEN),
-            ],
-            ..Setup::configured("send")
-        },
-        BoundByQr,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_qr_binding_verifies_stores_the_bot_and_makes_the_scanner_an_owner() {
+        run(
+            Setup {
+                send: vec![
+                    bind_task(),
+                    bind_status(1),
+                    bound(),
+                    ScriptStep::json(200, TOKEN),
+                ],
+                ..Setup::configured("send")
+            },
+            BoundByQr,
+        );
+    }
 }
 
 struct BindingRefused;
@@ -1635,7 +1750,7 @@ struct BindingRefused;
 impl Scenario for BindingRefused {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         with_login(&harness, async |login, _watch| {
-            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            assert_eq!(login_call(login, "POST").await.0, 200);
             let status = login_status(login, "failed").await;
             assert_eq!(status["configured"], true);
             assert!(status["message"]
@@ -1643,10 +1758,10 @@ impl Scenario for BindingRefused {
                 .expect("message")
                 .contains("10004"));
             // The QR code expires; a new one replaces it.
-            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            assert_eq!(login_call(login, "POST").await.0, 200);
             login_status(login, "expired").await;
             // The portal refuses a task: its words come back.
-            let (code, body) = login_call(login, HttpMethod::Post).await;
+            let (code, body) = login_call(login, "POST").await;
             assert_eq!(code, 502);
             assert_eq!(
                 body,
@@ -1663,24 +1778,28 @@ impl Scenario for BindingRefused {
     }
 }
 
-#[test]
-fn a_refused_binding_stores_nothing_and_expired_or_refused_tasks_end_the_session() {
-    run(
-        Setup {
-            send: vec![
-                bind_task(),
-                bound(),
-                ScriptStep::json(200, REJECTED),
-                bind_task(),
-                bind_status(1),
-                ScriptStep::response(502, "text/html", b"<html>bad gateway</html>", usize::MAX),
-                bind_status(3),
-                ScriptStep::json(200, r#"{"retcode":429,"msg":"rate limited"}"#),
-            ],
-            ..Setup::configured("send")
-        },
-        BindingRefused,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_refused_binding_stores_nothing_and_expired_or_refused_tasks_end_the_session() {
+        run(
+            Setup {
+                send: vec![
+                    bind_task(),
+                    bound(),
+                    ScriptStep::json(200, REJECTED),
+                    bind_task(),
+                    bind_status(1),
+                    ScriptStep::response(502, "text/html", b"<html>bad gateway</html>", usize::MAX),
+                    bind_status(3),
+                    ScriptStep::json(200, r#"{"retcode":429,"msg":"rate limited"}"#),
+                ],
+                ..Setup::configured("send")
+            },
+            BindingRefused,
+        );
+    }
 }
 
 struct BindingCancelled;
@@ -1688,18 +1807,16 @@ struct BindingCancelled;
 impl Scenario for BindingCancelled {
     fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
         with_login(&harness, async |login, watch| {
-            let response = login
-                .handle(HttpRequest::new(HttpMethod::Post, br#"{"x":1}"#.to_vec()))
-                .await;
+            let response = call(login, "POST", LOGIN_API_PATH, r#"{"x":1}"#).await;
             assert_eq!(response.status(), 400);
-            assert_eq!(login_call(login, HttpMethod::Post).await.0, 200);
+            assert_eq!(login_call(login, "POST").await.0, 200);
             assert_eq!(
-                login_call(login, HttpMethod::Get).await,
+                login_call(login, "GET").await,
                 (200, json!({"status": "wait", "configured": false}))
             );
             assert!(watch.waiting_for_scan());
             assert_eq!(
-                crate::entry_status(&*harness.channel, watch),
+                crate::card_status(&harness.channel, watch),
                 EntryStatus::new(
                     EntryState::Attention,
                     barracuda_captive_portal_plugin::WebText {
@@ -1708,29 +1825,159 @@ impl Scenario for BindingCancelled {
                     }
                 )
             );
-            assert_eq!(login_call(login, HttpMethod::Delete).await.0, 204);
+            assert_eq!(login_call(login, "DELETE").await.0, 204);
             assert_eq!(
-                login_call(login, HttpMethod::Get).await,
+                login_call(login, "GET").await,
                 (200, json!({"status": "idle", "configured": false}))
             );
             assert!(!watch.waiting_for_scan());
-            assert_eq!(login_call(login, HttpMethod::Put).await.0, 405);
+            assert_eq!(login_call(login, "PUT").await.0, 405);
         });
         assert!(harness.stored(CONFIGURATION_STORAGE_KEY).is_none());
         None
     }
 }
 
-#[test]
-fn a_cancelled_binding_returns_to_idle() {
-    run(
-        Setup {
-            send: vec![
-                bind_task(),
-                ScriptStep::pending_after_headers(200, "application/json"),
-            ],
-            ..Setup::unconfigured()
-        },
-        BindingCancelled,
-    );
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn a_cancelled_binding_returns_to_idle() {
+        run(
+            Setup {
+                send: vec![
+                    bind_task(),
+                    ScriptStep::pending_after_headers(200, "application/json"),
+                ],
+                ..Setup::unconfigured()
+            },
+            BindingCancelled,
+        );
+    }
+}
+
+/// Serves one in-memory connection through the WebServer's routes.
+mod routes {
+    use alloc::vec::Vec;
+    use core::future::Future;
+
+    use barracuda_webserver_plugin::WebServer;
+    use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
+    use picoserve::io::Socket;
+    use picoserve::time::{Duration, TimeoutError, Timer};
+
+    /// Returns the WebServer's raw answer to the raw request `input`.
+    pub(super) async fn send(server: &WebServer, input: Vec<u8>) -> Vec<u8> {
+        let mut output = Output(Vec::new());
+        server
+            .serve_connection(
+                TestTimer,
+                &mut [0; 4096],
+                TestSocket {
+                    input: Input(input, 0),
+                    output: &mut output,
+                },
+            )
+            .await
+            .expect("serve the connection");
+        output.0
+    }
+
+    struct Input(Vec<u8>, usize);
+
+    impl ErrorType for Input {
+        type Error = ErrorKind;
+    }
+
+    impl Read for Input {
+        async fn read(&mut self, bytes: &mut [u8]) -> Result<usize, ErrorKind> {
+            let rest = &self.0[self.1..];
+            let count = bytes.len().min(rest.len());
+            bytes[..count].copy_from_slice(&rest[..count]);
+            self.1 += count;
+            Ok(count)
+        }
+    }
+
+    struct Output(Vec<u8>);
+
+    impl ErrorType for Output {
+        type Error = ErrorKind;
+    }
+
+    impl Write for Output {
+        async fn write(&mut self, bytes: &[u8]) -> Result<usize, ErrorKind> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        async fn flush(&mut self) -> Result<(), ErrorKind> {
+            Ok(())
+        }
+    }
+
+    impl picoserve::io::Write for Output {
+        async fn write_with<F: FnOnce(&mut [u8]) -> (usize, R), R>(
+            &mut self,
+            f: F,
+        ) -> Result<R, ErrorKind> {
+            let mut scratch = [0; 128];
+            let (count, result) = f(&mut scratch);
+            self.0.extend_from_slice(&scratch[..count]);
+            Ok(result)
+        }
+    }
+
+    struct TestSocket<'a> {
+        input: Input,
+        output: &'a mut Output,
+    }
+
+    impl Socket<()> for TestSocket<'_> {
+        type Error = ErrorKind;
+        type ReadHalf<'a>
+            = &'a mut Input
+        where
+            Self: 'a;
+        type WriteHalf<'a>
+            = &'a mut Output
+        where
+            Self: 'a;
+
+        fn split(&mut self) -> (Self::ReadHalf<'_>, Self::WriteHalf<'_>) {
+            (&mut self.input, self.output)
+        }
+
+        async fn abort<T: Timer<()>>(
+            self,
+            _: &picoserve::Timeouts,
+            _: &mut T,
+        ) -> Result<(), picoserve::Error<ErrorKind>> {
+            Ok(())
+        }
+
+        async fn shutdown<T: Timer<()>>(
+            self,
+            _: &picoserve::Timeouts,
+            _: &mut T,
+        ) -> Result<(), picoserve::Error<ErrorKind>> {
+            Ok(())
+        }
+    }
+
+    struct TestTimer;
+
+    impl Timer<()> for TestTimer {
+        async fn delay(&self, _: Duration) {
+            core::future::pending::<()>().await;
+        }
+
+        async fn run_with_timeout<F: Future>(
+            &self,
+            _: Duration,
+            future: F,
+        ) -> Result<F::Output, TimeoutError> {
+            Ok(future.await)
+        }
+    }
 }

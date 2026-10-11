@@ -1,10 +1,24 @@
 # Agent Websearch Plugin
 
+Registers Tavily-backed Web Search directly with the Agent runtime, with a
+portal page for the Tavily configuration.
+
 - Plugin ID: `agent-websearch`
-- Direct Plugin dependencies: `agent`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required typed capabilities: `AgentToolRegistry`, `WebServer`, `CaptivePortal`
-- Owned tasks: none
+- Dependencies: `agent`, `webserver`, `captive-portal`, `http`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `AgentToolRegistry` from `agent`, `WebServer` from `webserver`,
+  `ClientFactory` from `http`
+- Workflow: none
+- Agent Tools: `web_search`
+- Lua packages: none
+- Web: portal entry `agent-websearch`, with status; `GET /api/tavily/status`,
+  `POST /api/tavily` (see `http.md`)
+- Tasks: none
+- Storage: Plugin-scoped KV keys `api_base` and `api_key`; bundled
+  `/resources/entry.js`, `/resources/figure.js`, `/resources/icon.svg`
 
 During registration the Plugin adds the awaited `web_search` Tool directly to
 `AgentToolRegistry`.

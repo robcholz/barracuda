@@ -13,20 +13,14 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    ReceiveSlotSource, SlotWait, PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    poll, Error as GatewayHttpError, PollEnd, PollLimits, PollRequest, Polled, Poller,
-};
-use barracuda_imessage_gateway_plugin::{
-    GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget, SendMessageRequest,
+    ChannelControl, Classification, Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute,
+    MessageChannel, MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller,
+    ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease, ReceiveSession, SendMessageRequest,
+    PAIRED_REPLY,
 };
 use barracuda_plugin::manager::{PluginStorage, StorageError};
 use embassy_time::{Duration, Instant};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ReceiveLease, ReceiveSlots};
 use telegram::updates::{
     delete_webhook_path, first_update_id, get_updates_path, parse_acknowledgement, parse_updates,
     ApiError, Update, UpdatesError, POLL_TIMEOUT_SECS, UPDATE_BATCH,
@@ -67,29 +61,6 @@ const LIMITS: PollLimits = PollLimits {
 
 /// Update ids remembered to drop a redelivered update.
 const RECENT_UPDATES: usize = 16;
-
-/// The System's receive slots as the channel's slot source.
-pub(crate) struct TelegramSlots<C: 'static, D: 'static>(pub(crate) ReceiveSlots<C, D>);
-
-impl<C: 'static, D: 'static> ReceiveSlotSource for TelegramSlots<C, D> {
-    type Lease = ReceiveLease<C, D>;
-
-    fn acquire(&self) -> Option<Self::Lease> {
-        self.0.acquire()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn in_use(&self) -> usize {
-        self.0.in_use()
-    }
-
-    fn wait_available(&self) -> SlotWait<'_> {
-        Box::pin(self.0.wait_available())
-    }
-}
 
 /// Where the next poll starts, and the updates handled most recently.
 pub(crate) struct Cursor {
@@ -224,15 +195,10 @@ fn api_error(error: ApiError) -> ReceiveError {
     }
 }
 
-impl<Storage, C, D> ReceiveChannel<ReceiveLease<C, D>> for TelegramChannel<Storage, C, D>
-where
-    Storage: PluginStorage,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ReceiveChannel<ReceiveLease> for TelegramChannel<Storage> {
     fn receive<'a>(
         &'a self,
-        lease: &'a mut ReceiveLease<C, D>,
+        lease: &'a mut ReceiveLease,
         session: ReceiveSession<'a>,
     ) -> ReceiveFuture<'a> {
         Box::pin(self.poll(lease, session))
@@ -247,8 +213,8 @@ enum InFlight {
 }
 
 /// One session's polls: what to ask for next and what to do with answers.
-struct TelegramPoller<'a, Storage, C: 'static, D: 'static> {
-    channel: &'a TelegramChannel<Storage, C, D>,
+struct TelegramPoller<'a, Storage> {
+    channel: &'a TelegramChannel<Storage>,
     cursor: &'a Cursor,
     token: &'a str,
     sender: &'a Rc<dyn MessageChannel>,
@@ -263,12 +229,7 @@ struct TelegramPoller<'a, Storage, C: 'static, D: 'static> {
     in_flight: InFlight,
 }
 
-impl<Storage, C, D> Poller for TelegramPoller<'_, Storage, C, D>
-where
-    Storage: PluginStorage,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> Poller for TelegramPoller<'_, Storage> {
     type Error = ReceiveError;
 
     async fn next(&mut self) -> Result<PollRequest, ReceiveError> {
@@ -335,16 +296,11 @@ where
     }
 }
 
-impl<Storage, C, D> TelegramChannel<Storage, C, D>
-where
-    Storage: PluginStorage,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> TelegramChannel<Storage> {
     /// One receive session: polls on one connection until it ends or fails.
     async fn poll(
         &self,
-        lease: &mut ReceiveLease<C, D>,
+        lease: &mut ReceiveLease,
         session: ReceiveSession<'_>,
     ) -> Result<(), ReceiveError> {
         let Some(settings) = self.settings() else {
@@ -371,7 +327,8 @@ where
             in_flight: InFlight::Updates,
         };
         let api_base = settings.config.api_base.as_str();
-        match poll(&lease.client_factory(), api_base, LIMITS, &mut poller).await {
+        let http = self.gateway.http();
+        match http.poll(lease, api_base, LIMITS, &mut poller).await {
             PollEnd::Connect(error) => Err(transport_error(error)),
             // A kept-alive connection the server closed after a healthy
             // poll: reconnect at once.

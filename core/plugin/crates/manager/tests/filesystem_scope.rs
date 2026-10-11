@@ -364,11 +364,11 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         );
 
         first
-            .write("/workspace/cache/vm-output", b"temporary")
+            .write("/workspace/cache/output", b"temporary")
             .await
             .unwrap();
         assert_eq!(
-            second.read("/workspace/cache/vm-output").await.unwrap(),
+            second.read("/workspace/cache/output").await.unwrap(),
             b"temporary"
         );
         second
@@ -381,7 +381,7 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         );
         assert_eq!(
             first
-                .rename("/workspace/cache/vm-output", "/workspace/media/vm-output")
+                .rename("/workspace/cache/output", "/workspace/media/output")
                 .await,
             Err(FsError::CrossMount)
         );

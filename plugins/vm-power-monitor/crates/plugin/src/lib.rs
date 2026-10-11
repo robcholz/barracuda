@@ -299,4 +299,10 @@ mod tests {
             .expect("query power monitor");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = PowerMonitorPackage::new(Some(TestMonitor { result: Err(()) }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }
