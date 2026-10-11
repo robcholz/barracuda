@@ -89,7 +89,7 @@ pub struct Attachment {                        // {"kind","path","mime_type","fi
 }
 pub struct AttachmentMeta { pub kind: MediaKind, pub mime_type: Option<String>,
     pub filename: Option<String> }
-pub enum StoreError { TooLarge { limit: u64 }, Filesystem(FsError), Stream(StreamError) }
+pub enum StoreError { TooLarge { limit: u64 }, NoSpace, Filesystem(FsError), Stream(StreamError) }
 pub fn mime_extension(mime_type: &str) -> &'static str;   // "image/jpeg" -> "jpg", else "bin"
 pub fn extension_mime(path: &str) -> Option<&'static str>; // "a.png" -> "image/png"
 impl IMessageGateway {
@@ -113,7 +113,8 @@ impl IMessageGateway {
   `opus`, `mp3`, `m4a`, `wav`, `pdf`, `txt`, else `bin`); a missing type is
   `application/octet-stream`.
 - A body over `attachment-max-bytes` fails with `StoreError::TooLarge`, a
-  failed stream with `StoreError::Stream`, and the filesystem with
+  failed stream with `StoreError::Stream`, a full cache with
+  `StoreError::NoSpace`, and any other filesystem failure with
   `StoreError::Filesystem`; every failure removes the partial file. A future
   that is dropped mid-write leaves its `.part` file in the cache.
 - `download_inbound` streams one `GatewayHttp::download` straight into

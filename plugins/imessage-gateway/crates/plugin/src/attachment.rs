@@ -73,6 +73,9 @@ pub enum StoreError {
         /// The setting's value.
         limit: u64,
     },
+    /// The filesystem holding the attachment ran out of space.
+    #[error("attachment filesystem is out of space")]
+    NoSpace,
     /// The filesystem failed, or the path to open does not name a file.
     #[error("attachment filesystem failed: {0}")]
     Filesystem(FsError),
@@ -83,7 +86,10 @@ pub enum StoreError {
 
 impl From<FsError> for StoreError {
     fn from(error: FsError) -> Self {
-        Self::Filesystem(error)
+        match error {
+            FsError::NoSpace => Self::NoSpace,
+            error => Self::Filesystem(error),
+        }
     }
 }
 
@@ -105,7 +111,9 @@ impl StoreError {
                 | FsError::NotDirectory
                 | FsError::InvalidPath,
             ) => GatewayOperationError::NotFound,
-            Self::Filesystem(_) | Self::Stream(_) => GatewayOperationError::Delivery,
+            Self::NoSpace | Self::Filesystem(_) | Self::Stream(_) => {
+                GatewayOperationError::Delivery
+            }
         }
     }
 }
