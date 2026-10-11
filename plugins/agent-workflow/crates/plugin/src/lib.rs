@@ -9,8 +9,8 @@ use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
-        ToolOutput, ToolSpec,
+        EmptyArgs, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+        ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
 use barracuda_json_writer as json;
@@ -75,12 +75,12 @@ impl ToolSpec for ActionsTool {
 impl ToolHandler for ActionsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            Ok(ToolOutput {
-                content: render_actions(&self.actions.descriptors()),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                render_actions(&self.actions.descriptors()),
+                true,
+            ))
         })
     }
 }
@@ -118,7 +118,7 @@ impl ToolSpec for ListTool {
 impl ToolHandler for ListTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let workflows = self
                 .service
@@ -147,7 +147,7 @@ impl ToolSpec for LoadTool {
 impl ToolHandler for LoadTool {
     type Args = WorkflowValue;
 
-    fn invoke<'a>(&'a self, definition: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, definition: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let definition = serde_json::to_string(&definition).map_err(|_error| {
                 ToolError::InvokeRejected(String::from("failed to encode Workflow definition"))
@@ -171,7 +171,7 @@ impl ToolSpec for UnloadTool {
 impl ToolHandler for UnloadTool {
     type Args = UnloadRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let id = match WorkflowId::try_from(request.id) {
                 Ok(id) => id,
@@ -242,7 +242,7 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
     let content = serde_json::to_string(response).map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode Workflow Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }
 
 #[cfg(test)]

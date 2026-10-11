@@ -6,7 +6,7 @@ use barracuda_agent_memory::{
 };
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::{BackgroundToolPool, ToolSet};
+use barracuda_agent_tool::{BackgroundToolPool, ToolContext, ToolSet};
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
@@ -49,6 +49,8 @@ pub(crate) struct AgentEngineConfig {
     /// The filesystem the attachments of messages and Tool results are read
     /// from when a request inlines them.
     pub(crate) files: ScopedVfs,
+    /// Handed to every Tool call the Agent makes.
+    pub(crate) tool_context: ToolContext,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +109,7 @@ where
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
     files: ScopedVfs,
+    tool_context: ToolContext,
     #[getset(get = "pub(crate)")]
     context: Context,
     run_state: RunState,
@@ -160,6 +163,7 @@ where
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
             files: config.files,
+            tool_context: config.tool_context,
             context,
             run_state: RunState::Stopped(StopReason::Ready),
             iteration_id_allocator: IterationIdAllocator::new(),
@@ -686,6 +690,7 @@ where
                         tools: &tools,
                         background: &self.agent.background,
                         files: &self.agent.files,
+                        tool_context: self.agent.tool_context,
                     };
                     drop(render_span);
                     drop(prepare_span);
@@ -797,7 +802,12 @@ where
                                             break;
                                         }
                                         match consumer.turn.tool(&call.id, !output.ok) {
-                                            Ok(mut tool) => tool.append(&output.content),
+                                            Ok(mut tool) => {
+                                                tool.append(&output.content);
+                                                for attachment in &output.attachments {
+                                                    tool.attach(attachment);
+                                                }
+                                            }
                                             Err(error) => {
                                                 result = Some(Err(AgentError::from(error)));
                                                 break;

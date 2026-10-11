@@ -1,5 +1,7 @@
 use barracuda_agent_memory::ChatMessage;
-use barracuda_agent_tool::{BackgroundToolPool, ToolOutput, ToolSetError, ToolSetHandle};
+use barracuda_agent_tool::{
+    BackgroundToolPool, ToolContext, ToolOutput, ToolSetError, ToolSetHandle,
+};
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::{Error as ModelError, ToolCall};
@@ -46,6 +48,8 @@ pub(crate) struct LlmStep<'a> {
     pub(crate) background: &'a BackgroundToolPool,
     /// The filesystem attachments in `messages` are read from.
     pub(crate) files: &'a ScopedVfs,
+    /// Handed to every Tool call of this step.
+    pub(crate) tool_context: ToolContext,
 }
 
 /// One event from an iteration.

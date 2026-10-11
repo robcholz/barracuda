@@ -1,7 +1,9 @@
 use alloc::{borrow::Cow, boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{cell::RefCell, fmt};
 
-use barracuda_agent_plugin::tools::{ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec};
+use barracuda_agent_plugin::tools::{
+    ToolContext, ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
+};
 use barracuda_bulk_memory::{BulkBox, BulkVec};
 use http_client::ClientFactory;
 use http_client::reqwless::request::RequestBuilder as _;
@@ -94,7 +96,7 @@ impl ToolSpec for WebSearchTool {
 impl ToolHandler for WebSearchTool {
     type Args = SearchRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let Some(config) = self.config.borrow().clone() else {
                 return Ok(SearchFailure::NotConfigured.into_output());
@@ -129,7 +131,7 @@ impl ToolHandler for WebSearchTool {
             .map_err(|_error| {
                 ToolError::InvokeRejected(String::from("failed to encode Web Search response"))
             })?;
-            Ok(ToolOutput { content, ok: true })
+            Ok(ToolOutput::new(content, true))
         })
     }
 }
@@ -162,10 +164,7 @@ impl SearchFailure {
     }
 
     fn into_output(self) -> ToolOutput {
-        ToolOutput {
-            content: alloc::format!(r#"{{"error":"{}"}}"#, self.code()),
-            ok: false,
-        }
+        ToolOutput::new(alloc::format!(r#"{{"error":"{}"}}"#, self.code()), false)
     }
 }
 

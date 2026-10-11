@@ -21,7 +21,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_agent_message::attachment::{has_media, Attachment, MediaKind};
+use barracuda_agent_message::attachment::{has_media, sniff_media_type, Attachment, MediaKind};
 use barracuda_agent_message::json::{write_object, write_value, Object, Sink};
 use barracuda_agent_message::ChatMessage;
 use barracuda_bulk_memory::BulkVec;
@@ -193,8 +193,7 @@ async fn resolve_one(
     match eligible {
         Candidate::Image => image_media_type(&bytes)
             .map(|media_type| Resolved::Inline(Inline::Image { media_type, bytes })),
-        Candidate::Pdf => bytes
-            .starts_with(b"%PDF-")
+        Candidate::Pdf => (sniff_media_type(&bytes) == Some("application/pdf"))
             .then(|| Resolved::Inline(Inline::Pdf(bytes))),
     }
 }
@@ -231,17 +230,7 @@ async fn read_capped(
 
 /// The MIME type of a JPEG, PNG, GIF or WebP image, from its first bytes.
 fn image_media_type(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some("image/jpeg")
-    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("image/png")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if bytes.get(..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        Some("image/webp")
-    } else {
-        None
-    }
+    sniff_media_type(bytes).filter(|media_type| media_type.starts_with("image/"))
 }
 
 fn marker(message: usize, part: usize) -> Value {

@@ -7,8 +7,8 @@ use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, BackgroundToolPool, EmptyArgs, Tool, ToolFuture, ToolGroup, ToolHandler,
-    ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, BackgroundToolPool, EmptyArgs, Tool, ToolContext, ToolFuture, ToolGroup,
+    ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 use embassy_time::Timer;
 use futures_lite::future;
@@ -65,7 +65,7 @@ impl ToolSpec for BackgroundListTool {
 impl ToolHandler for BackgroundListTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let calls = self
                 .pool
@@ -79,10 +79,10 @@ impl ToolHandler for BackgroundListTool {
                     })
                 })
                 .collect::<Vec<_>>();
-            Ok(ToolOutput {
-                content: serde_json::json!({ "calls": calls }).to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                serde_json::json!({ "calls": calls }).to_string(),
+                true,
+            ))
         })
     }
 }
@@ -102,18 +102,15 @@ impl ToolSpec for BackgroundWaitTool {
 impl ToolHandler for BackgroundWaitTool {
     type Args = WaitArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let wait = self.pool.wait(args.id)?;
             future::or(async { Ok(wait.await?.1) }, async {
                 Timer::after_millis(u64::from(args.timeout_ms)).await;
-                Ok(ToolOutput {
-                    content: format!(
+                Ok(ToolOutput::new(format!(
                         "Background call {} is still running after {} ms; its result will be delivered automatically.",
                         args.id, args.timeout_ms
-                    ),
-                    ok: true,
-                })
+                    ), true))
             })
             .await
         })
@@ -135,7 +132,7 @@ impl ToolSpec for BackgroundInputTool {
 impl ToolHandler for BackgroundInputTool {
     type Args = InputArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         // The schema admits exactly one of `input` or `eof: true`.
         Box::pin(async move { self.pool.get(args.id)?.input(args.input).await })
     }
@@ -156,13 +153,13 @@ impl ToolSpec for BackgroundCancelTool {
 impl ToolHandler for BackgroundCancelTool {
     type Args = CallArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             self.pool.remove(args.id)?.cancel();
-            Ok(ToolOutput {
-                content: format!("Background call {} cancelled.", args.id),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                format!("Background call {} cancelled.", args.id),
+                true,
+            ))
         })
     }
 }
@@ -202,13 +199,14 @@ mod tests {
     impl BackgroundToolHandler for PendingTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> BackgroundToolFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            _context: ToolContext,
+            _args: Self::Args,
+        ) -> BackgroundToolFuture<'a> {
             Box::pin(async {
                 Ok(BackgroundTool::new(
-                    ToolOutput {
-                        content: "accepted".to_string(),
-                        ok: true,
-                    },
+                    ToolOutput::new("accepted", true),
                     Box::pin(core::future::pending()),
                 ))
             })
@@ -224,10 +222,13 @@ mod tests {
         let tools = tools.begin().expect("tool set begins");
         let call = ToolInvocation::try_new(Some("call"), name, arguments).expect("valid call");
         block_on(
-            ToolRunner::new(&tools)
-                .with_background(pool)
-                .run(vec![call])
-                .collect::<alloc::vec::Vec<_>>(),
+            ToolRunner::new(
+                &tools,
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+            )
+            .with_background(pool)
+            .run(vec![call])
+            .collect::<alloc::vec::Vec<_>>(),
         )
         .pop()
         .expect("tool result")

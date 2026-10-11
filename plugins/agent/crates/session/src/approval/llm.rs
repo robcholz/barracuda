@@ -1,6 +1,6 @@
 //! LLM-backed implementation of the Session approval resolver.
 
-use alloc::{borrow::ToOwned, boxed::Box, format, rc::Rc, string::String, string::ToString, vec};
+use alloc::{borrow::ToOwned, boxed::Box, format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
@@ -8,8 +8,8 @@ use core::task::{Context, Poll};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolRunner, ToolSet, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+    ToolInvocation, ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
 use barracuda_model_api::{ChatMessage, ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
@@ -74,6 +74,7 @@ where
 {
     async fn resolve(
         self: Rc<Self>,
+        context: ToolContext,
         tool_call: ToolCall,
         reason: String,
         reply: Message,
@@ -86,6 +87,7 @@ where
             resolve_permission_reply(
                 &api_manager,
                 &llm_factory,
+                context,
                 &tool_call,
                 &reason,
                 reply.as_str(),
@@ -137,7 +139,7 @@ impl ToolSpec for ResolvePermissionReplyTool {
 impl ToolHandler for ResolvePermissionReplyTool {
     type Args = ResolutionArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let resolution = match args.decision {
                 ResolutionDecision::Yes => ApprovalDecision::Approved,
@@ -154,10 +156,7 @@ impl ToolHandler for ResolvePermissionReplyTool {
             };
 
             *self.resolution.borrow_mut() = Some(resolution);
-            Ok(ToolOutput {
-                content: "approval reply resolved".to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new("approval reply resolved", true))
         })
     }
 }
@@ -165,6 +164,7 @@ impl ToolHandler for ResolvePermissionReplyTool {
 async fn resolve_permission_reply(
     api_manager: &SharedApiManager,
     llm_factory: &ModelApiFactory<impl TcpConnect + 'static, impl Dns + 'static>,
+    context: ToolContext,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
@@ -206,7 +206,7 @@ async fn resolve_permission_reply(
         return Err(ApprovalResolverError::MalformedToolCall);
     };
 
-    let runner = ToolRunner::new(&tools);
+    let runner = ToolRunner::new(&tools, context);
     let call = ToolInvocation::try_new(
         Some(&tool_call.id),
         &tool_call.name,

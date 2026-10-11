@@ -6,7 +6,7 @@ use core::task::{Context, Poll};
 
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_tool::{ToolContext, ToolGroup};
 use barracuda_model_api::ToolCall;
 use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
 use barracuda_runtime_utils::oneshot;
@@ -248,7 +248,7 @@ where
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
-                approval: ApprovalFlow::new(approval_resolver),
+                approval: ApprovalFlow::new(approval_resolver, ToolContext::new(session)),
                 orchestration: SessionOrchestration::new(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
@@ -686,6 +686,7 @@ where
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
+                self.session,
                 true,
                 Arc::clone(&permission),
                 reasoning_effort,
@@ -702,6 +703,7 @@ where
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.create(
                 id,
+                self.session,
                 &kind,
                 true,
                 Arc::clone(&permission),
@@ -1082,6 +1084,7 @@ where
             .agent_manager
             .create(
                 agent,
+                self.session,
                 kind,
                 false,
                 permission,

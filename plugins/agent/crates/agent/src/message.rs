@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
+pub use barracuda_agent_message::attachment::{sniff_media_type, SNIFF_BYTES};
 pub use barracuda_agent_message::{Attachment, MediaKind};
 
 /// One message delivered to an agent: text and the files sent with it.

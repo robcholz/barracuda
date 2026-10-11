@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "send_attachment",
+    "description": "Send a file to the conversation this session talks in.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "caption": { "type": "string" },
+        "kind": { "enum": ["file", "image", "audio", "video"] }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    }
+  }
+}

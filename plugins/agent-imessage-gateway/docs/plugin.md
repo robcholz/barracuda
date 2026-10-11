@@ -13,7 +13,7 @@ conversations to Agent sessions, and session commands.
   `WorkflowActionRegistry` from `workflow`, `WorkflowService` from `workflow`
 - Workflow: Actions `imessage_bridge.to_agent`, `imessage_bridge.to_gateway`,
   `imessage_bridge.session`, see `action.md`
-- Agent Tools: `gateway_send`, `gateway_send_media`
+- Agent Tools: `gateway_send`, `send_attachment`
 - Lua packages: none
 - Web: none
 - Tasks: one Workflow-loading task (pool size 1), spawned from `start`, which
@@ -21,10 +21,27 @@ conversations to Agent sessions, and session commands.
 - Storage: Plugin-scoped KV entries keyed by Agent session ID, each holding
   the saved Gateway route of that session; reads `/resources/workflows.json`
 
-During registration the Plugin adds the awaited `gateway_send` and
-`gateway_send_media` Tools to `AgentToolRegistry` and registers the three
-Actions in `WorkflowActionRegistry`, retaining their registration guards for
-the Plugin lifetime.
+During registration the Plugin adds the awaited `gateway_send` Tool and the
+background `send_attachment` Tool to `AgentToolRegistry` as the hidden
+`gateway` group, and registers the three Actions in `WorkflowActionRegistry`,
+retaining their registration guards for the Plugin lifetime.
+
+## Sending files
+
+`send_attachment { path, caption?, kind? }` sends a file to the conversation
+of the session that calls it, read from `ToolContext::session`: the route the
+bridge bound that session to, replying to the message its running turn
+answers. A session its route left reaches no one, as its output does, and a
+session bound to no route is refused before acceptance with
+`no_conversation`. The Tool sends one `GatewaySendMediaRequest::File`, so the
+Gateway opens the file by path and the bytes never pass through the model or
+Workflow; there is no path restriction beyond what the Gateway can open.
+`kind` defaults from the MIME type the path's extension names: `image`,
+`audio`, `video`, else `file`. The call is a background Tool: it is accepted
+at once and completes with `{"message_id"}` or the Gateway's stable business
+error `{"error"}` (`not_found`, `too_large`, `unknown_channel`,
+`unsupported`, `authentication`, `rate_limited`, `delivery`,
+`invalid_request`).
 
 ## Sessions per conversation
 

@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod bridge;
+mod send_attachment;
 mod sessions;
 mod state;
 mod to_agent;
@@ -16,12 +17,12 @@ use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use barracuda_agent_plugin::{
     AgentRuntime, AgentToolRegistry, SessionDeleteError, SessionId, SessionRenameError,
     tools::{
-        Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
+        Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
+        ToolOutput, ToolSpec,
     },
 };
 use barracuda_imessage_gateway_plugin::{
-    GatewayOperationError, GatewaySendMediaRequest, GatewaySendRequest, IMessageGateway,
-    SendSessionsRequest,
+    GatewayOperationError, GatewaySendRequest, IMessageGateway, SendSessionsRequest,
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -34,6 +35,7 @@ use embassy_futures::select::select;
 use serde::Serialize;
 
 use crate::bridge::ImessageBridge;
+use crate::send_attachment::SendAttachmentTool;
 use crate::sessions::{LocalFuture, RenameFailure, SessionMeta, SessionReplies, SessionStore};
 
 /// Plugin registering IMessage Gateway operations with the Agent runtime.
@@ -70,6 +72,7 @@ impl Plugin for AgentIMessageGatewayPlugin {
         self.workflows = Some(context.require::<WorkflowService>("workflow")?);
         let bridge = embassy_futures::block_on(ImessageBridge::load(context.storage().clone()))
             .map_err(PluginError::registration)?;
+        let send_attachment = SendAttachmentTool::new(Rc::clone(&gateway), bridge.conversations());
         let replies = Rc::new(GatewaySessionReplies {
             gateway: Rc::clone(&gateway),
             clock,
@@ -85,10 +88,8 @@ impl Plugin for AgentIMessageGatewayPlugin {
                 "gateway",
                 false,
                 [
-                    Tool::new(GatewaySendTool {
-                        gateway: Rc::clone(&gateway),
-                    }),
-                    Tool::new(GatewaySendMediaTool { gateway }),
+                    Tool::new(GatewaySendTool { gateway }),
+                    Tool::background(send_attachment),
                 ],
             ))
             .map_err(PluginError::registration)
@@ -214,24 +215,8 @@ impl ToolSpec for GatewaySendTool {
 impl ToolHandler for GatewaySendTool {
     type Args = GatewaySendRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move { tool_output(self.gateway.send(request).await) })
-    }
-}
-
-struct GatewaySendMediaTool {
-    gateway: Rc<IMessageGateway>,
-}
-
-impl ToolSpec for GatewaySendMediaTool {
-    barracuda_agent_plugin::tools::tool_metadata!("gateway_send_media");
-}
-
-impl ToolHandler for GatewaySendMediaTool {
-    type Args = GatewaySendMediaRequest;
-
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
-        Box::pin(async move { tool_output(self.gateway.send_media(request).await) })
     }
 }
 
@@ -240,6 +225,8 @@ struct ErrorResponse {
     error: GatewayOperationError,
 }
 
+/// The model-facing answer to a Gateway operation: its response, or its
+/// stable business error as `{"error"}`.
 fn tool_output<Response: Serialize>(
     result: Result<Response, GatewayOperationError>,
 ) -> Result<ToolOutput, ToolInvokeError> {
@@ -250,5 +237,5 @@ fn tool_output<Response: Serialize>(
     let content = content.map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode Gateway Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }

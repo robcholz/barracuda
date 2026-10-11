@@ -89,17 +89,17 @@ fn convert_messages_to_anthropic(
         // Merge consecutive "tool"-role messages into one "user" message.
         if role == "tool" {
             let mut tool_blocks: Vec<Value> = Vec::new();
-            if let Some(block) = make_tool_result_block(msg) {
+            if let Some(block) = make_tool_result_block(msg, index, media) {
                 tool_blocks.push(block);
             }
             while iter
                 .peek()
                 .is_some_and(|(_, next)| str_field(next, "role") == Some("tool"))
             {
-                let Some((_, inner)) = iter.next() else {
+                let Some((inner_index, inner)) = iter.next() else {
                     break;
                 };
-                if let Some(block) = make_tool_result_block(inner) {
+                if let Some(block) = make_tool_result_block(inner, inner_index, media) {
                     tool_blocks.push(block);
                 }
             }
@@ -172,9 +172,24 @@ fn convert_messages_to_anthropic(
     Ok(Value::Array(out))
 }
 
-fn make_tool_result_block(message: &Value) -> Option<Value> {
+/// A `tool_result` block. A result that returned files has array content: its
+/// text and, for each file, the inlined image or document or a placeholder.
+fn make_tool_result_block(message: &Value, index: usize, media: &RequestMedia) -> Option<Value> {
     let tid = str_field(message, "tool_call_id").filter(|id| !id.is_empty())?;
-    let content = str_field(message, "content")?;
+    let content = match message.get("content")? {
+        Value::String(text) => Value::String(text.clone()),
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .enumerate()
+                .filter_map(|(part, block)| match Attachment::from_part(block) {
+                    Some(attachment) => Some(media.part(index, part, &attachment, |_inline| true)),
+                    None => (str_field(block, "type") == Some("text")).then(|| block.clone()),
+                })
+                .collect(),
+        ),
+        _ => return None,
+    };
     let is_error = message.get("is_error").and_then(|v| v.as_bool()) == Some(true);
     Some(json!({
         "type": "tool_result",

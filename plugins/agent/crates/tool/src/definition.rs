@@ -1,10 +1,12 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
 
+use barracuda_agent_message::Attachment;
 use barracuda_agent_permission::{Action, RiskClass};
 use portable_atomic_util::Arc;
 use serde::de::DeserializeOwned;
@@ -66,9 +68,14 @@ mod invocation_tests {
     use alloc::string::String;
     use core::cell::Cell;
 
-    use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
+    use super::{
+        SessionId, Tool, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+        ToolOutput, ToolSpec,
+    };
     use futures_lite::future::block_on;
     use serde::Deserialize;
+
+    const CONTEXT: ToolContext = ToolContext::new(SessionId::new(1));
 
     struct BusinessHandler {
         invoked: Rc<Cell<bool>>,
@@ -96,14 +103,9 @@ mod invocation_tests {
     impl ToolHandler for BusinessHandler {
         type Args = BusinessArgs;
 
-        fn invoke<'a>(&'a self, arguments: Self::Args) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, _context: ToolContext, arguments: Self::Args) -> ToolFuture<'a> {
             self.invoked.set(true);
-            Box::pin(async move {
-                Ok(ToolOutput {
-                    content: arguments.name,
-                    ok: arguments.enabled,
-                })
-            })
+            Box::pin(async move { Ok(ToolOutput::new(arguments.name, arguments.enabled)) })
         }
     }
 
@@ -138,7 +140,7 @@ mod invocation_tests {
             ToolError::ArgumentsSchema(_)
         ));
 
-        let error = block_on(tool.invoke(&invalid))
+        let error = block_on(tool.invoke(CONTEXT, &invalid))
             .err()
             .ok_or("expected error")?;
 
@@ -147,7 +149,7 @@ mod invocation_tests {
 
         let blank =
             ToolInvocation::try_new(None, "example", r#"{"name":"  \t\n","enabled":true}"#)?;
-        let error = block_on(tool.invoke(&blank))
+        let error = block_on(tool.invoke(CONTEXT, &blank))
             .err()
             .ok_or("expected error")?;
         assert!(matches!(error.error, ToolError::ArgumentsSchema(_)));
@@ -163,7 +165,7 @@ mod invocation_tests {
         });
         let valid = ToolInvocation::try_new(None, "example", r#"{"name":"lamp","enabled":true}"#)?;
 
-        let output = block_on(tool.invoke(&valid))?;
+        let output = block_on(tool.invoke(CONTEXT, &valid))?;
 
         assert!(invoked.get());
         assert_eq!(output.content, "lamp");
@@ -172,10 +174,48 @@ mod invocation_tests {
     }
 }
 
+barracuda_runtime_utils::define_prefixed_id!(SessionId, "session-", "session");
+
+/// What one Tool call runs for, handed to every invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolContext {
+    /// The Agent session the call belongs to.
+    pub session: SessionId,
+}
+
+impl ToolContext {
+    #[must_use]
+    pub const fn new(session: SessionId) -> Self {
+        Self { session }
+    }
+}
+
+/// The model-facing result of one Tool call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolOutput {
     pub content: String,
     pub ok: bool,
+    /// Files the result shows the model, by reference. The model reads the
+    /// newest images among them directly; the rest are named by path.
+    pub attachments: Vec<Attachment>,
+}
+
+impl ToolOutput {
+    /// A result of `content` alone.
+    pub fn new(content: impl Into<String>, ok: bool) -> Self {
+        Self {
+            content: content.into(),
+            ok,
+            attachments: Vec::new(),
+        }
+    }
+
+    /// This result with `attachments` returned along.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> Self {
+        self.attachments = attachments;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -244,7 +284,7 @@ pub trait ToolSpec {
 pub trait ToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a>;
+    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> ToolFuture<'a>;
 }
 
 /// A Tool whose call keeps running in the Agent's background pool after its
@@ -252,37 +292,53 @@ pub trait ToolHandler: ToolSpec {
 pub trait BackgroundToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> BackgroundToolFuture<'a>;
+    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> BackgroundToolFuture<'a>;
 }
 
 trait ErasedToolHandler: ToolSpec {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolFuture<'a>;
 }
 
 impl<Handler> ErasedToolHandler for Handler
 where
     Handler: ToolHandler,
 {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(args).await
+            self.invoke(context, args).await
         })
     }
 }
 
 trait ErasedBackgroundToolHandler: ToolSpec {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> BackgroundToolFuture<'a>;
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> BackgroundToolFuture<'a>;
 }
 
 impl<Handler> ErasedBackgroundToolHandler for Handler
 where
     Handler: BackgroundToolHandler,
 {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> BackgroundToolFuture<'a> {
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> BackgroundToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(args).await
+            self.invoke(context, args).await
         })
     }
 }
@@ -413,10 +469,14 @@ impl Tool {
         matches!(self.inner.as_ref(), ToolInner::Background(_))
     }
 
-    pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
+    pub(crate) async fn invoke<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolResult<ToolOutput> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.invoke_erased(call).await,
+            ToolInner::Handler(handler) => handler.invoke_erased(context, call).await,
             ToolInner::Background(_) => Err(ToolError::InvokeRejected(
                 "background tool requires a background pool".to_owned(),
             )
@@ -426,11 +486,12 @@ impl Tool {
 
     pub(crate) async fn invoke_background<'a>(
         &'a self,
+        context: ToolContext,
         call: &'a ToolInvocation,
     ) -> ToolResult<BackgroundTool> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Background(handler) => handler.invoke_erased(call).await,
+            ToolInner::Background(handler) => handler.invoke_erased(context, call).await,
             ToolInner::Handler(_) => Err(ToolError::InvokeRejected(
                 "tool does not run in the background".to_owned(),
             )

@@ -33,7 +33,13 @@ The scope exposes the Plugin-private `/resources`, `/data`, `/cache`, and
 other filesystem-enabled Plugins through the shared Workspace while private
 Plugin paths remain isolated.
 
-Reads and directory listings are bounded and paginated. Writes and edits are
+Reads and directory listings are bounded and paginated. `file_read` of a
+JPEG, PNG, GIF, WebP or PDF file, recognized by its first bytes, answers
+`{"path","mime_type","size"}` and returns the file as a Tool result
+attachment, which the Agent may show the model directly. Only a path below
+`/workspace` is attached, since the Agent opens the same path in its own view
+and a private path names a different file there; another path answers
+`not_shared`. Writes and edits are
 bounded to 32 KiB and use `ScopedVfs::write_atomic`. A create does not replace
 an existing path unless the caller explicitly opts in. Exact-text editing
 rejects missing or ambiguous matches before writing. Moves do not replace a

@@ -74,7 +74,7 @@ Use `GatewaySendMediaRequest::Start`, one or more `Chunk` commands containing
 canonical base64, and `Finish`; each answers
 `GatewaySendMediaResponse::Accepted`. Match `gateway.send_media.finished` by
 `stream_id` for the terminal result. The same commands are exposed as the
-`gateway.send_media` Workflow Action and `gateway_send_media` Agent tool.
+`gateway.send_media` Workflow Action.
 
 See [action.md](action.md) for the JSON contracts and [event.md](event.md) for
 Workflow Event documents.

@@ -67,6 +67,7 @@ impl LongTermMemoryContextProvider {
         let input = ExtractionInput {
             transcript: &transcript,
             existing: &existing,
+            context: self.tool_context,
         };
         let span = tracing::info_span!(
             "context.extract",
@@ -381,7 +382,12 @@ mod tests {
                 .expect("the global memory store opens");
             let extractor: Arc<dyn Extractor> =
                 Arc::from(Box::new(SharedRecorder(extractor)) as Box<dyn Extractor>);
-            LongTermMemoryContextProvider::new(agent, global, extractor)
+            LongTermMemoryContextProvider::new(
+                agent,
+                global,
+                extractor,
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+            )
         })
     }
 

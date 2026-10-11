@@ -141,6 +141,28 @@ impl Attachment {
     }
 }
 
+/// The MIME type of a JPEG, PNG, GIF or WebP image or a PDF, recognized by
+/// its first bytes, the only kinds a model reads directly.
+#[must_use]
+pub fn sniff_media_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.get(..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else if bytes.starts_with(b"%PDF-") {
+        Some("application/pdf")
+    } else {
+        None
+    }
+}
+
+/// How many leading bytes [`sniff_media_type`] reads.
+pub const SNIFF_BYTES: usize = 12;
+
 /// Whether an encoded message has a `media` content part.
 ///
 /// Encoded messages are compact `serde_json`, and quotes inside strings are

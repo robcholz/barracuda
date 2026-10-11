@@ -327,3 +327,113 @@ fn anthropic_body_without_attachments_keeps_its_shape() {
         )
     );
 }
+
+/// One tool round whose result returned a screenshot and a log file.
+fn tool_round() -> [ChatMessage; 3] {
+    [
+        ChatMessage::new(&json!({"role": "user", "content": "take a screenshot"})),
+        ChatMessage::new(&json!({"role": "assistant",
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "file_read", "arguments": "{}"}}]})),
+        ChatMessage::new(
+            &json!({"role": "tool", "tool_call_id": "c1", "is_error": false,
+            "content": [
+                text("{\"path\":\"/workspace/cache/shot.png\"}"),
+                part("image", "/workspace/cache/shot.png", "image/png", 18),
+                part("file", "/workspace/cache/run.log", "text/plain", 3),
+            ]}),
+        ),
+    ]
+}
+
+#[test]
+fn openai_tool_images_follow_the_tool_results_in_a_user_message() {
+    block_on(async {
+        let files = files(&[
+            ("/workspace/cache/shot.png", PNG),
+            ("/workspace/cache/run.log", b"log"),
+        ])
+        .await;
+        let body = sent_body(
+            config(BackendKind::OpenAiCompatible, |_| {}),
+            &tool_round(),
+            Some(&files),
+        );
+        assert_eq!(
+            body,
+            format!(
+                concat!(
+                    r#"{{"max_tokens":8192,"messages":[{{"content":"sys","role":"system"}},"#,
+                    r#"{{"content":"take a screenshot","role":"user"}},"#,
+                    r#"{{"role":"assistant","tool_calls":[{{"function":{{"arguments":"{{}}","name":"file_read"}},"id":"c1","type":"function"}}]}},"#,
+                    r#"{{"content":"{{\"path\":\"/workspace/cache/shot.png\"}}\n[image: shot.png]\n[attachment: run.log, text/plain, 3 bytes, /workspace/cache/run.log]","is_error":false,"role":"tool","tool_call_id":"c1"}},"#,
+                    r#"{{"content":[{{"text":"The tool results above returned these images.","type":"text"}},{{"text":"[image: shot.png]","type":"text"}},{{"image_url":{{"url":"data:image/png;base64,{png}"}},"type":"image_url"}}],"role":"user"}}],"#,
+                    r#""model":"model-x"}}"#,
+                ),
+                png = base64(PNG),
+            )
+        );
+    });
+}
+
+#[test]
+fn anthropic_tool_results_carry_their_images() {
+    block_on(async {
+        let files = files(&[("/workspace/cache/shot.png", PNG)]).await;
+        let body = sent_body(
+            config(BackendKind::AnthropicCompatible, |_| {}),
+            &tool_round(),
+            Some(&files),
+        );
+        assert_eq!(
+            body,
+            format!(
+                concat!(
+                    r#"{{"max_tokens":8192,"messages":["#,
+                    r#"{{"content":[{{"text":"take a screenshot","type":"text"}}],"role":"user"}},"#,
+                    r#"{{"content":[{{"id":"c1","input":{{}},"name":"file_read","type":"tool_use"}}],"role":"assistant"}},"#,
+                    r#"{{"content":[{{"content":[{{"text":"{{\"path\":\"/workspace/cache/shot.png\"}}","type":"text"}},"#,
+                    r#"{{"source":{{"data":"{png}","media_type":"image/png","type":"base64"}},"type":"image"}},"#,
+                    r#"{{"text":"[attachment: run.log, text/plain, 3 bytes, /workspace/cache/run.log, no longer available]","type":"text"}}],"#,
+                    r#""is_error":false,"tool_use_id":"c1","type":"tool_result"}}],"role":"user"}}],"#,
+                    r#""model":"model-x","system":"sys"}}"#,
+                ),
+                png = base64(PNG),
+            )
+        );
+    });
+}
+
+#[test]
+fn tool_images_count_toward_the_limit() {
+    block_on(async {
+        let files = files(&[
+            ("/workspace/cache/old.png", PNG),
+            ("/workspace/cache/shot.png", PNG),
+        ])
+        .await;
+        let mut messages = vec![user(vec![part(
+            "image",
+            "/workspace/cache/old.png",
+            "image/png",
+            18,
+        )])];
+        messages.extend(tool_round());
+        let body: Value = serde_json::from_str(&sent_body(
+            config(BackendKind::AnthropicCompatible, |config| {
+                config.max_images_in_context = 1;
+            }),
+            &messages,
+            Some(&files),
+        ))
+        .unwrap();
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            text("[attachment: old.png, image/png, 18 bytes, /workspace/cache/old.png]")
+        );
+        assert_eq!(
+            body["messages"][3]["content"][0]["content"][1]["type"],
+            "image"
+        );
+    });
+}

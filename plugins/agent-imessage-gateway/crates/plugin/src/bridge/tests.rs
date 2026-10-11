@@ -1,5 +1,6 @@
 //! Drives the builtin `imessage-to-agent` and `imessage-control-to-agent`
-//! Workflows against the bridge Actions.
+//! Workflows against the bridge Actions, and sends files with
+//! `send_attachment` to the conversation the bridge bound a session to.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -17,23 +18,33 @@ use core::{
     task::Poll,
 };
 
+use barracuda_agent_plugin::SessionId;
+use barracuda_agent_plugin::tools::{BackgroundToolHandler, ToolContext};
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_imessage_gateway_plugin::{
-    GatewayControlReceived, GatewayMessageReceived, GatewayRoute, SendSessionsRequest,
-    SessionNotice, parse_command,
+    ChannelFuture, GatewayControlReceived, GatewayMessageReceived, GatewayRoute,
+    GatewaySendMediaRequest, IMessageGateway, IMessageGatewayPlugin, MediaKind, MessageChannel,
+    SendMediaRequest, SendMessageRequest, SendReceipt, SendSessionsRequest, SessionNotice,
+    parse_command,
 };
-use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
+use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
+use barracuda_plugin::api::{BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity};
 use barracuda_plugin::manager::{
-    Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
+    Plugin, PluginDeclaration, PluginFilesystem, PluginManager, PluginRegisterContext,
+    PluginRequirements, PluginResult, PluginStorage,
 };
+use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
-    WorkflowRuntime, parse_definition, workflow_action_schema_inline,
+    WorkflowPlugin, WorkflowRuntime, parse_definition, workflow_action_schema_inline,
 };
 use futures_lite::future::{block_on, poll_once};
 use serde_json::{Value, json};
 
 use super::ImessageBridge;
+use crate::send_attachment::{SendAttachmentArgs, SendAttachmentTool, deliver};
 use crate::sessions::{LocalFuture, RenameFailure, SessionMeta, SessionReplies, SessionStore};
+use crate::state::{GatewayEvent, Route};
 
 /// The Workflow file that ships the bridge's inbound route.
 const WORKFLOWS: &str = include_str!("../../../../filesystem/resources/workflows.json");
@@ -593,6 +604,248 @@ fn quick_inbound_messages_on_a_new_route_bind_to_one_session() {
             completed: Rc::clone(&completed),
         })
         .expect("run the race probe");
+
+    assert!(completed.get());
+}
+
+/// What [`Recorder`] saw of one file the Gateway sent.
+#[derive(Debug, Eq, PartialEq)]
+struct SentFile {
+    kind: MediaKind,
+    conversation_id: String,
+    filename: Option<String>,
+    mime_type: Option<String>,
+    caption: Option<String>,
+    reply_to: Option<String>,
+}
+
+/// A channel named `chat` that records the files it is given.
+struct Recorder(Rc<RefCell<Vec<SentFile>>>);
+
+impl MessageChannel for Recorder {
+    fn channel(&self) -> &str {
+        "chat"
+    }
+
+    fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
+        Box::pin(async { Ok(SendReceipt::new("text")) })
+    }
+
+    fn send_media(
+        &self,
+        kind: MediaKind,
+        request: SendMediaRequest,
+    ) -> ChannelFuture<'_, SendReceipt> {
+        self.0.borrow_mut().push(SentFile {
+            kind,
+            conversation_id: request.target.conversation_id,
+            filename: request.filename,
+            mime_type: request.mime_type,
+            caption: request.caption,
+            reply_to: request.reply_to,
+        });
+        Box::pin(async { Ok(SendReceipt::new("sent-1")) })
+    }
+}
+
+/// Sends files through `send_attachment` on a real Gateway, inside Plugin
+/// registration where scoped storage and the shared filesystem exist.
+struct SendProbe {
+    completed: Rc<Cell<bool>>,
+}
+
+impl PluginDeclaration for SendProbe {
+    const ID: &'static str = "send-attachment-probe";
+    const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
+}
+
+impl Plugin for SendProbe {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+        let files = context.filesystem()?.clone();
+        let bridge =
+            block_on(ImessageBridge::load(context.storage().clone())).expect("load the bridge");
+        block_on(send_attachment_reaches_the_session_conversation(
+            &bridge, gateway, &files,
+        ));
+        self.completed.set(true);
+        Ok(())
+    }
+}
+
+fn tool_context(session: u32) -> ToolContext {
+    ToolContext::new(SessionId::new(session))
+}
+
+fn arguments(arguments: Value) -> SendAttachmentArgs {
+    serde_json::from_value(arguments).expect("arguments match the Tool")
+}
+
+async fn send_attachment_reaches_the_session_conversation<Storage: PluginStorage>(
+    bridge: &ImessageBridge<Storage>,
+    gateway: Rc<IMessageGateway>,
+    files: &barracuda_vfs::ScopedVfs,
+) {
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let _channel = gateway
+        .register(Rc::new(Recorder(Rc::clone(&sent))))
+        .expect("register the recording channel");
+    files
+        .write_atomic("/workspace/cache/out/cat.png", b"\x89PNG\r\n\x1a\n")
+        .await
+        .expect("write the file to send");
+    let tool = SendAttachmentTool::new(Rc::clone(&gateway), bridge.conversations());
+
+    // a session that talks in no conversation is refused before acceptance
+    let refused = tool
+        .request(
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png" })),
+        )
+        .await
+        .expect_err("an unbound session has no conversation");
+    assert!(refused.to_string().contains("no_conversation"), "{refused}");
+    assert!(
+        BackgroundToolHandler::invoke(
+            &tool,
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png" }))
+        )
+        .await
+        .is_err()
+    );
+
+    // a bound session answers the message its running turn replies to
+    {
+        let mut book = bridge.control.shared.book.lock().await;
+        let route = Route::new("chat", "conversation-1", None).expect("valid route");
+        let (mapping, _input) = book
+            .prepare_binding(route, "message-1", "session-5")
+            .expect("bind the session");
+        book.commit_mapping(mapping);
+        let _turn = book.gateway_target("session-5", GatewayEvent::UserTurnStarted);
+        let gone = Route::new("gone", "conversation-2", None).expect("valid route");
+        let (mapping, _input) = book
+            .prepare_binding(gone, "message-2", "session-6")
+            .expect("bind the session");
+        book.commit_mapping(mapping);
+    }
+    let request = tool
+        .request(
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png", "caption": "here" })),
+        )
+        .await
+        .expect("a bound session has a conversation");
+    assert!(
+        BackgroundToolHandler::invoke(
+            &tool,
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png" }))
+        )
+        .await
+        .is_ok()
+    );
+    let delivered = deliver(&gateway, request)
+        .await
+        .expect("the Gateway answers");
+    assert!(delivered.ok);
+    assert_eq!(delivered.content, r#"{"message_id":"sent-1"}"#);
+    assert_eq!(
+        sent.borrow().first(),
+        Some(&SentFile {
+            kind: MediaKind::Image,
+            conversation_id: "conversation-1".into(),
+            filename: Some("cat.png".into()),
+            mime_type: Some("image/png".into()),
+            caption: Some("here".into()),
+            reply_to: Some("message-1".into()),
+        })
+    );
+
+    // the kind is the caller's when given; the Gateway's errors come back as they are
+    let as_file = tool
+        .request(
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png", "kind": "file" })),
+        )
+        .await
+        .expect("a bound session has a conversation");
+    assert!(matches!(
+        as_file,
+        GatewaySendMediaRequest::File {
+            kind: MediaKind::File,
+            ..
+        }
+    ));
+    let missing = tool
+        .request(
+            tool_context(5),
+            arguments(json!({ "path": "/workspace/cache/out/none.png" })),
+        )
+        .await
+        .expect("a bound session has a conversation");
+    let missing = deliver(&gateway, missing)
+        .await
+        .expect("the Gateway answers");
+    assert!(!missing.ok);
+    assert_eq!(missing.content, r#"{"error":"not_found"}"#);
+    let unrouted = tool
+        .request(
+            tool_context(6),
+            arguments(json!({ "path": "/workspace/cache/out/cat.png" })),
+        )
+        .await
+        .expect("a bound session has a conversation");
+    let unrouted = deliver(&gateway, unrouted)
+        .await
+        .expect("the Gateway answers");
+    assert_eq!(unrouted.content, r#"{"error":"unknown_channel"}"#);
+    assert_eq!(sent.borrow().len(), 1);
+}
+
+fn plugin_context() -> PluginContext {
+    let identity = TargetIdentity::new(
+        PlatformInfo::new("test", "test", "test-arch", "hosted"),
+        BoardInfo::new("test-board", Hardware::new("test-chip")),
+    );
+    PluginContext::new(identity, never_embassy_stack())
+}
+
+#[test]
+fn send_attachment_sends_to_the_conversation_its_session_is_bound_to() {
+    block_on(install_global_memory_vfs()).expect("install test VFS");
+    let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
+    let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+    manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
+    let mut context = plugin_context();
+    manager
+        .register(WorkflowPlugin::new(&mut context))
+        .expect("register Workflow");
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP");
+    manager
+        .register(WebServerPlugin::new(&mut context))
+        .expect("register WebServer");
+    manager
+        .register(IMessageGatewayPlugin::new(&mut context))
+        .expect("register the Gateway");
+    let completed = Rc::new(Cell::new(false));
+    manager
+        .register(SendProbe {
+            completed: Rc::clone(&completed),
+        })
+        .expect("run the send probe");
 
     assert!(completed.get());
 }

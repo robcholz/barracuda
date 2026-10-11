@@ -1,13 +1,17 @@
 //! OpenAI-compatible backend.
 
+use alloc::borrow::ToOwned;
 use alloc::format;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use barracuda_agent_message::attachment::has_media;
 use barracuda_agent_message::json::Sink;
+use barracuda_agent_message::{Attachment, ChatMessage};
 use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{json, Value};
 
 use super::super::attachments::{replace_parts, write_with_media, Inline, RequestMedia};
 use super::super::chat_stream::ProviderStream;
@@ -42,7 +46,7 @@ fn encode_chat_body(
     if let Some(tools) = tools {
         validate_tools(tools)?;
     }
-    let converted = convert_media_messages(request, media);
+    let outgoing = outgoing_messages(request, media);
     encode(|sink| {
         let mut body = Object::begin(sink);
         body.value("max_tokens", &Value::from(backend.max_tokens));
@@ -56,19 +60,16 @@ fn encode_chat_body(
             system.end();
             first = false;
         }
-        for (message, converted) in request
-            .messages
-            .iter()
-            .chain(request.reminders)
-            .zip(&converted)
-        {
+        for message in &outgoing {
             if !first {
                 messages.put(b",");
             }
             first = false;
-            match converted {
-                Some(converted) => write_with_media(messages, converted, media, write_image_part),
-                None => messages.put(message.as_bytes()),
+            match message {
+                Outgoing::Stored(message) => messages.put(message.as_bytes()),
+                Outgoing::Converted(message) => {
+                    write_with_media(messages, message, media, write_image_part);
+                }
             }
         }
         messages.put(b"]");
@@ -102,23 +103,98 @@ fn encode_chat_body(
     })
 }
 
-/// Decodes each message that references attachments, with its `media` parts
-/// replaced by inlined images or placeholders; other messages stay `None` and
-/// are copied as stored.
-fn convert_media_messages(request: &ChatRequest<'_>, media: &RequestMedia) -> Vec<Option<Value>> {
-    request
-        .messages
-        .iter()
-        .chain(request.reminders)
-        .enumerate()
-        .map(|(index, message)| {
-            has_media(message.as_str()).then(|| {
-                let mut value = message.to_value();
-                replace_parts(&mut value, index, media, is_image);
-                value
-            })
-        })
-        .collect()
+/// One message of the request body.
+enum Outgoing<'a> {
+    /// Copied as stored.
+    Stored(&'a ChatMessage),
+    /// Decoded to replace its `media` parts, or added for tool images.
+    Converted(Value),
+}
+
+/// The text that opens the user message carrying tool results' images.
+const TOOL_IMAGES_LEAD: &str = "The tool results above returned these images.";
+
+#[derive(Deserialize)]
+struct Role<'a> {
+    #[serde(borrow)]
+    role: Option<&'a str>,
+}
+
+/// The request's messages with attachments resolved.
+///
+/// A user message's `media` parts become inlined images or placeholders. A
+/// tool message stays text, since tool messages take no images: each part
+/// becomes a line, an inlined image its label. The images then follow the run
+/// of tool results in one added user message.
+fn outgoing_messages<'a>(request: &ChatRequest<'a>, media: &RequestMedia) -> Vec<Outgoing<'a>> {
+    let mut outgoing = Vec::new();
+    let mut tool_images = Vec::new();
+    for (index, message) in request.messages.iter().chain(request.reminders).enumerate() {
+        let role = message.parse::<Role<'_>>().ok().and_then(|role| role.role);
+        if !tool_images.is_empty() && role != Some("tool") {
+            outgoing.push(Outgoing::Converted(tool_images_message(&mut tool_images)));
+        }
+        if !has_media(message.as_str()) {
+            outgoing.push(Outgoing::Stored(message));
+            continue;
+        }
+        let mut value = message.to_value();
+        if role == Some("tool") {
+            flatten_tool_content(&mut value, index, media, &mut tool_images);
+        } else {
+            replace_parts(&mut value, index, media, is_image);
+        }
+        outgoing.push(Outgoing::Converted(value));
+    }
+    if !tool_images.is_empty() {
+        outgoing.push(Outgoing::Converted(tool_images_message(&mut tool_images)));
+    }
+    outgoing
+}
+
+/// Replaces a tool message's content array with its text, moving the label
+/// and marker of each inlined image to `images`.
+fn flatten_tool_content(
+    message: &mut Value,
+    index: usize,
+    media: &RequestMedia,
+    images: &mut Vec<Value>,
+) {
+    let Some(parts) = message.get("content").and_then(Value::as_array) else {
+        return;
+    };
+    let mut lines = Vec::new();
+    for (part, content) in parts.iter().enumerate() {
+        match Attachment::from_part(content) {
+            Some(attachment) => {
+                let replacement = media.part(index, part, &attachment, is_image);
+                match replacement.get("text").and_then(Value::as_str) {
+                    Some(placeholder) => lines.push(placeholder.to_owned()),
+                    None => {
+                        let label = attachment.label();
+                        images.push(json!({"text": label, "type": "text"}));
+                        images.push(replacement);
+                        lines.push(label);
+                    }
+                }
+            }
+            None => {
+                if let Some(text) = content.get("text").and_then(Value::as_str) {
+                    lines.push(text.to_owned());
+                }
+            }
+        }
+    }
+    if let Some(content) = message.get_mut("content") {
+        *content = Value::String(lines.join("\n"));
+    }
+}
+
+/// The user message carrying the images of the tool results before it.
+fn tool_images_message(images: &mut Vec<Value>) -> Value {
+    let mut content = vec![json!({"text": TOOL_IMAGES_LEAD, "type": "text"})];
+    content.append(images);
+    json!({"content": content, "role": "user"})
 }
 
 fn is_image(inline: &Inline) -> bool {

@@ -1,9 +1,11 @@
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use barracuda_agent_plugin::tools::{
-    Action, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError,
+    ToolOutput, ToolSpec,
 };
-use barracuda_vfs::ScopedVfs;
+use barracuda_agent_plugin::{Attachment, MediaKind, SNIFF_BYTES, sniff_media_type};
+use barracuda_vfs::{FsError, ScopedVfs};
 use serde::{Deserialize, Serialize};
 
 use super::common::{Failure, encode_failure, encode_fs_failure, encode_success, path_action};
@@ -48,7 +50,7 @@ impl ToolSpec for FileReadTool {
 impl ToolHandler for FileReadTool {
     type Args = ReadArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let path = args.path.as_str();
             if args.limit == 0 || args.limit > MAX_READ_BYTES {
@@ -65,6 +67,12 @@ impl ToolHandler for FileReadTool {
                 return encode_failure(Failure::new("is_directory", "path is not a regular file"));
             }
             let length = metadata.len();
+            // A file the model reads directly is shown to it, not read as text.
+            match self.media_type(path, length).await {
+                Ok(Some(mime_type)) => return attach(path, mime_type, length),
+                Ok(None) => {}
+                Err(error) => return encode_fs_failure(error),
+            }
             if args.offset > length {
                 return encode_failure(Failure::new(
                     "range_out_of_bounds",
@@ -112,6 +120,67 @@ impl ToolHandler for FileReadTool {
     }
 }
 
+impl FileReadTool {
+    /// The type of an image or PDF at `path`, recognized by its first bytes.
+    async fn media_type(&self, path: &str, length: u64) -> Result<Option<&'static str>, FsError> {
+        let head = usize::try_from(length).map_or(SNIFF_BYTES, |length| length.min(SNIFF_BYTES));
+        if head == 0 {
+            return Ok(None);
+        }
+        let bytes = self.filesystem.read_at(path, 0, head).await?;
+        Ok(sniff_media_type(&bytes))
+    }
+}
+
+/// Answers an image or PDF read with the file attached, which the model sees
+/// itself. Only a file under `/workspace` can be: the Agent opens the same
+/// path in its own view, where every other path names a different file.
+fn attach(path: &str, mime_type: &'static str, size: u64) -> Result<ToolOutput, ToolInvokeError> {
+    let Some(shared) = shared_path(path) else {
+        return encode_failure(Failure::new(
+            "not_shared",
+            format!(
+                "{path} is a {mime_type} file; copy it below /workspace for the model to see it"
+            ),
+        ));
+    };
+    let output = encode_success(&AttachedResponse {
+        path: &shared,
+        mime_type,
+        size,
+    })?;
+    let kind = if mime_type.starts_with("image/") {
+        MediaKind::Image
+    } else {
+        MediaKind::File
+    };
+    Ok(output.with_attachments(alloc::vec![Attachment {
+        kind,
+        path: shared,
+        mime_type: String::from(mime_type),
+        filename: None,
+        size,
+    }]))
+}
+
+/// `path` as every Plugin names it, when it is a plain path below
+/// `/workspace`.
+fn shared_path(path: &str) -> Option<String> {
+    let relative = path.trim_start_matches('/');
+    let plain = relative
+        .split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    let below = relative.strip_prefix("workspace/")?;
+    (plain && !below.is_empty()).then(|| format!("/{relative}"))
+}
+
+#[derive(Serialize)]
+struct AttachedResponse<'a> {
+    path: &'a str,
+    mime_type: &'a str,
+    size: u64,
+}
+
 #[derive(Serialize)]
 struct ReadResponse<'a> {
     path: &'a str,
@@ -130,8 +199,10 @@ mod tests {
     };
     use embassy_futures::block_on;
 
+    use barracuda_agent_plugin::{Attachment, MediaKind};
+
     use super::{FileReadTool, ReadArgs};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn returns_a_bounded_byte_range() -> Result<(), Box<dyn core::error::Error>> {
@@ -141,11 +212,14 @@ mod tests {
             let output = FileReadTool {
                 filesystem: filesystem.clone(),
             }
-            .invoke(ReadArgs {
-                path: "/notes.txt".into(),
-                offset: 6,
-                limit: 5,
-            })
+            .invoke(
+                CONTEXT,
+                ReadArgs {
+                    path: "/notes.txt".into(),
+                    offset: 6,
+                    limit: 5,
+                },
+            )
             .await?;
 
             assert!(output.ok);
@@ -164,6 +238,71 @@ mod tests {
     }
 
     #[test]
+    fn an_image_or_pdf_is_attached_instead_of_read_as_text()
+    -> Result<(), Box<dyn core::error::Error>> {
+        block_on(async {
+            let filesystem = filesystem().await?;
+            filesystem
+                .write("/workspace/cache/photo.png", b"\x89PNG\r\n\x1a\npixels")
+                .await?;
+            filesystem
+                .write("/workspace/media/report.pdf", b"%PDF-1.7 body")
+                .await?;
+            filesystem
+                .write("/data/private.png", b"\x89PNG\r\n\x1a\n")
+                .await?;
+            let tool = FileReadTool {
+                filesystem: filesystem.clone(),
+            };
+            let read = |path: &str| {
+                tool.invoke(
+                    CONTEXT,
+                    ReadArgs {
+                        path: path.into(),
+                        offset: 0,
+                        limit: 4096,
+                    },
+                )
+            };
+
+            let image = read("workspace/cache/photo.png").await?;
+            assert!(image.ok);
+            assert_eq!(
+                json(&image.content)?,
+                serde_json::json!({
+                    "path": "/workspace/cache/photo.png",
+                    "mime_type": "image/png",
+                    "size": 14
+                })
+            );
+            assert_eq!(
+                image.attachments,
+                [Attachment {
+                    kind: MediaKind::Image,
+                    path: "/workspace/cache/photo.png".into(),
+                    mime_type: "image/png".into(),
+                    filename: None,
+                    size: 14,
+                }]
+            );
+
+            let pdf = read("/workspace/media/report.pdf").await?;
+            assert_eq!(json(&pdf.content)?["mime_type"], "application/pdf");
+            assert_eq!(
+                pdf.attachments.first().map(|attachment| attachment.kind),
+                Some(MediaKind::File)
+            );
+
+            // a private path names another file in the Agent's own view
+            let private = read("/data/private.png").await?;
+            assert!(!private.ok);
+            assert_eq!(json(&private.content)?["error"], "not_shared");
+            assert!(private.attachments.is_empty());
+            Ok::<_, Box<dyn core::error::Error>>(())
+        })
+    }
+
+    #[test]
     fn reports_invalid_utf8_and_out_of_bounds_ranges() -> Result<(), Box<dyn core::error::Error>> {
         block_on(async {
             let filesystem = filesystem().await?;
@@ -173,21 +312,27 @@ mod tests {
             };
 
             let invalid_utf8 = tool
-                .invoke(ReadArgs {
-                    path: "/binary".into(),
-                    offset: 0,
-                    limit: 1,
-                })
+                .invoke(
+                    CONTEXT,
+                    ReadArgs {
+                        path: "/binary".into(),
+                        offset: 0,
+                        limit: 1,
+                    },
+                )
                 .await?;
             assert!(!invalid_utf8.ok);
             assert_eq!(json(&invalid_utf8.content)?["error"], "invalid_utf8");
 
             let out_of_bounds = tool
-                .invoke(ReadArgs {
-                    path: "/binary".into(),
-                    offset: 2,
-                    limit: 1,
-                })
+                .invoke(
+                    CONTEXT,
+                    ReadArgs {
+                        path: "/binary".into(),
+                        offset: 2,
+                        limit: 1,
+                    },
+                )
                 .await?;
             assert!(!out_of_bounds.ok);
             assert_eq!(
@@ -209,20 +354,26 @@ mod tests {
             };
 
             let page = tool
-                .invoke(ReadArgs {
-                    path: "/note".into(),
-                    offset: 0,
-                    limit: 3,
-                })
+                .invoke(
+                    CONTEXT,
+                    ReadArgs {
+                        path: "/note".into(),
+                        offset: 0,
+                        limit: 3,
+                    },
+                )
                 .await?;
             assert_eq!(json(&page.content)?["next_offset"], 3);
 
             let empty = tool
-                .invoke(ReadArgs {
-                    path: "/note".into(),
-                    offset: 6,
-                    limit: 1,
-                })
+                .invoke(
+                    CONTEXT,
+                    ReadArgs {
+                        path: "/note".into(),
+                        offset: 6,
+                        limit: 1,
+                    },
+                )
                 .await?;
             assert_eq!(json(&empty.content)?["content"], "");
 

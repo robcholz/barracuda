@@ -23,9 +23,9 @@ use portable_atomic_util::Arc;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
-    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, Attachment, IterationId,
-    IterationLoopError, MediaKind, Message, ModelApiManager, PermissionLevel, ReasoningEffort,
-    ToolCall, ToolCallId, ToolOutput,
+    sniff_media_type, AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, Attachment,
+    IterationId, IterationLoopError, MediaKind, Message, ModelApiManager, PermissionLevel,
+    ReasoningEffort, ToolCall, ToolCallId, ToolOutput, SNIFF_BYTES,
 };
 use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
@@ -47,10 +47,10 @@ pub use service::{RuntimeBuildError, RuntimeService};
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, BackgroundTool, BackgroundToolControl, BackgroundToolFuture,
-        BackgroundToolHandler, EmptyArgs, Resource, RiskClass, Tool, ToolError, ToolFuture,
-        ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput, ToolProgressSender,
-        ToolResult, ToolSpec,
+        tool_metadata, Action, Attachment, BackgroundTool, BackgroundToolControl,
+        BackgroundToolFuture, BackgroundToolHandler, EmptyArgs, MediaKind, Resource, RiskClass,
+        SessionId, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+        ToolInvocation, ToolInvokeError, ToolOutput, ToolProgressSender, ToolResult, ToolSpec,
     };
 }
 
@@ -415,12 +415,12 @@ mod tool_registry_capability_tests {
     use alloc::{boxed::Box, vec};
 
     use barracuda_agent_persistence::Persistence;
-    use barracuda_agent_tool::ToolSetSource;
     use barracuda_agent_tool::{
         BackgroundTool, BackgroundToolFuture, BackgroundToolHandler, BackgroundToolPool, EmptyArgs,
         Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner,
         ToolSpec,
     };
+    use barracuda_agent_tool::{SessionId, ToolContext, ToolSetSource};
     use barracuda_platform_test::memory_vfs;
     use barracuda_runtime_utils::background::BackgroundUpdate;
     use futures_lite::{future::block_on, StreamExt as _};
@@ -457,13 +457,8 @@ mod tool_registry_capability_tests {
     impl ToolHandler for JoinedTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-            Box::pin(async {
-                Ok(ToolOutput {
-                    content: "joined".into(),
-                    ok: true,
-                })
-            })
+        fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+            Box::pin(async { Ok(ToolOutput::new("joined", true)) })
         }
     }
 
@@ -486,19 +481,15 @@ mod tool_registry_capability_tests {
     impl BackgroundToolHandler for EchoBackgroundTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> BackgroundToolFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            _context: ToolContext,
+            _args: Self::Args,
+        ) -> BackgroundToolFuture<'a> {
             Box::pin(async {
                 Ok(BackgroundTool::new(
-                    ToolOutput {
-                        content: "accepted".into(),
-                        ok: true,
-                    },
-                    Box::pin(async {
-                        Ok(ToolOutput {
-                            content: "completed".into(),
-                            ok: true,
-                        })
-                    }),
+                    ToolOutput::new("accepted", true),
+                    Box::pin(async { Ok(ToolOutput::new("completed", true)) }),
                 ))
             })
         }
@@ -539,7 +530,9 @@ mod tool_registry_capability_tests {
                 ToolInvocation::try_new(None, "background", "{}").expect("background invocation"),
             ];
             let pool = BackgroundToolPool::new();
-            let mut joined = ToolRunner::new(&handle).with_background(&pool).run(calls);
+            let mut joined = ToolRunner::new(&handle, ToolContext::new(SessionId::new(1)))
+                .with_background(&pool)
+                .run(calls);
 
             let first = joined.next().await.expect("first acceptance").1;
             let second = joined.next().await.expect("second acceptance").1;
@@ -548,10 +541,7 @@ mod tool_registry_capability_tests {
             let event = futures_lite::future::poll_fn(|context| pool.poll_next(context)).await;
             assert_eq!(
                 event.update,
-                BackgroundUpdate::Completed(ToolOutput {
-                    content: "completed".into(),
-                    ok: true,
-                })
+                BackgroundUpdate::Completed(ToolOutput::new("completed", true))
             );
         });
     }

@@ -264,8 +264,9 @@ pub(crate) fn start(
         },
         task,
     );
-    ToolOutput {
-        content: format!("[background:accepted]\nid: {id}\n{}", accepted.content),
-        ok: accepted.ok,
-    }
+    ToolOutput::new(
+        format!("[background:accepted]\nid: {id}\n{}", accepted.content),
+        accepted.ok,
+    )
+    .with_attachments(accepted.attachments)
 }

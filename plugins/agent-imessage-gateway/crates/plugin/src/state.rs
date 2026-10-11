@@ -396,6 +396,28 @@ impl BridgeBook {
         }
     }
 
+    /// Where `session` reaches its user now: the route of the turn it is
+    /// streaming, with the message that turn answers, or else its route while
+    /// it is the route's current session. A session its route left reaches
+    /// no one, as its output does.
+    pub(crate) fn conversation_of(&self, session: &str) -> Option<GatewayTarget> {
+        let mapping = self.by_session(session)?;
+        match mapping
+            .active_turn
+            .as_ref()
+            .filter(|active| active.delivered)
+        {
+            Some(active) => Some(GatewayTarget {
+                route: mapping.route.clone(),
+                reply_to: active.reply_to.clone(),
+            }),
+            None => mapping.current.then(|| GatewayTarget {
+                route: mapping.route.clone(),
+                reply_to: None,
+            }),
+        }
+    }
+
     pub(crate) fn gateway_target(
         &mut self,
         session: &str,
@@ -807,6 +829,41 @@ mod tests {
             .prepare_binding(route(), "message-11", "session-4")
             .expect("prepare next message");
         assert_eq!(request, None, "the request is answered once");
+    }
+
+    #[test]
+    fn a_session_reaches_the_conversation_of_its_turn_or_current_route() {
+        let mut book = BridgeBook::new();
+        assert_eq!(
+            book.conversation_of("session-4"),
+            None,
+            "an unbound session"
+        );
+        let mapping = book
+            .prepare_binding(route(), "message-9", "session-4")
+            .expect("prepare binding")
+            .0;
+        book.commit_mapping(mapping);
+        let idle = book
+            .conversation_of("session-4")
+            .expect("a current session");
+        assert_eq!((idle.route, idle.reply_to), (route(), None));
+
+        let _started = book
+            .gateway_target("session-4", GatewayEvent::UserTurnStarted)
+            .expect("start turn");
+        let _left = book.leave(&route(), false).expect("leave the session");
+        let turn = book
+            .conversation_of("session-4")
+            .expect("the running turn still answers there");
+        assert_eq!(turn.reply_to.as_deref(), Some("message-9"));
+
+        let _ended = book.gateway_target("session-4", GatewayEvent::TurnEnded);
+        assert_eq!(
+            book.conversation_of("session-4"),
+            None,
+            "a left session reaches no one"
+        );
     }
 
     #[test]

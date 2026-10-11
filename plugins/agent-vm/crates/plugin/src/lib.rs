@@ -16,7 +16,7 @@ use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
         BackgroundTool, BackgroundToolControl, BackgroundToolFuture, BackgroundToolHandler, Tool,
-        ToolError, ToolFuture, ToolGroup, ToolInvokeError, ToolOutput, ToolSpec,
+        ToolContext, ToolError, ToolFuture, ToolGroup, ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
 use barracuda_plugin::api::PluginContext;
@@ -71,7 +71,11 @@ impl ToolSpec for VmRunTool {
 impl BackgroundToolHandler for VmRunTool {
     type Args = VmRunRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> BackgroundToolFuture<'a> {
+    fn invoke<'a>(
+        &'a self,
+        _context: ToolContext,
+        request: Self::Args,
+    ) -> BackgroundToolFuture<'a> {
         let run = self.vm.run(request);
         Box::pin(async move {
             let run = run.map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
@@ -158,7 +162,7 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
     let content = serde_json::to_string(response).map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode VM Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }
 
 #[cfg(test)]
@@ -177,7 +181,8 @@ mod tests {
     };
 
     use barracuda_agent_tool::{
-        BackgroundToolCall, BackgroundToolPool, ToolInvocation, ToolOutput, ToolRunner, ToolSet,
+        BackgroundToolCall, BackgroundToolPool, SessionId, ToolContext, ToolInvocation, ToolOutput,
+        ToolRunner, ToolSet,
     };
     use barracuda_runtime_utils::background::{BackgroundEvent, BackgroundUpdate};
     use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmRunRequest};
@@ -228,7 +233,7 @@ mod tests {
                 )
                 .map_err(|error| error.to_string())?;
                 Ok::<_, String>(
-                    ToolRunner::new(&handle)
+                    ToolRunner::new(&handle, ToolContext::new(SessionId::new(1)))
                         .with_background(&pool)
                         .run(alloc::vec![invocation]),
                 )

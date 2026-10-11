@@ -14,8 +14,9 @@
 //! ```
 //!
 //! A user message is stored as `{"content":"…","role":"user"}`; one sent
-//! with files stores its content as an array of a text part and one `media`
-//! part per [`Attachment`] reference (see `barracuda_agent_message::attachment`).
+//! with files, like a tool result that returned files, stores its content as
+//! an array of a text part and one `media` part per [`Attachment`] reference
+//! (see `barracuda_agent_message::attachment`).
 //!
 //! The store owns committed turns, oldest-to-newest, each stamped with a
 //! monotonic [`TurnId`]. An in-progress turn belongs exclusively to its
@@ -250,6 +251,7 @@ enum MessageDraft {
         tool_call_id: String,
         content: BulkVec<u8>,
         is_error: bool,
+        attachments: Vec<Attachment>,
     },
 }
 
@@ -289,8 +291,9 @@ impl MessageDraft {
                 tool_call_id,
                 content,
                 is_error,
+                attachments,
             } => ChatMessage::encode_object(|object| {
-                object.str("content", text(content));
+                write_content(object, text(content), attachments);
                 object.value("is_error", &Value::Bool(*is_error));
                 object.str("role", "tool");
                 object.str("tool_call_id", tool_call_id);
@@ -929,6 +932,7 @@ impl TurnHandle {
                 tool_call_id: tool_call_id.to_owned(),
                 content: BulkVec::new(),
                 is_error,
+                attachments: Vec::new(),
             },
         )?;
         Ok(ToolHandle {
@@ -1071,6 +1075,21 @@ impl ToolHandle<'_> {
             return;
         };
         content.extend_from_slice(fragment.as_bytes());
+        state.invalidate_turns_cache();
+    }
+
+    /// Attach a file reference the result shows, stored as a `media` part.
+    pub fn attach(&mut self, attachment: &Attachment) {
+        let mut state = lock_state(self.state);
+        let Some(OpenTurn {
+            draft: Some(MessageDraft::Tool { attachments, .. }),
+            ..
+        }) = state.open_turn.as_mut()
+        else {
+            debug_assert!(false, "tool handle lost its draft");
+            return;
+        };
+        attachments.push(attachment.clone());
         state.invalidate_turns_cache();
     }
 }
@@ -1810,6 +1829,32 @@ mod persisted_format {
                 Some(48_213)
             );
         });
+    }
+
+    #[test]
+    fn tool_results_with_attachments_store_media_parts() {
+        let store = TransientTranscript::new();
+        let turn = store.open_turn().unwrap();
+        {
+            let mut user = turn.user().unwrap();
+            user.append("screenshot please");
+        }
+        {
+            let mut tool = turn.tool("c1", false).unwrap();
+            tool.append("{\"path\":\"/workspace/cache/shot.png\"}");
+            tool.attach(&Attachment {
+                kind: MediaKind::Image,
+                path: "/workspace/cache/shot.png".into(),
+                mime_type: "image/png".into(),
+                filename: None,
+                size: 9,
+            });
+        }
+        drop(turn);
+        assert_eq!(
+            store.turns()[0].messages[1].as_str(),
+            r#"{"content":[{"text":"{\"path\":\"/workspace/cache/shot.png\"}","type":"text"},{"kind":"image","mime_type":"image/png","path":"/workspace/cache/shot.png","size":9,"type":"media"}],"is_error":false,"role":"tool","tool_call_id":"c1"}"#
+        );
     }
 
     #[test]

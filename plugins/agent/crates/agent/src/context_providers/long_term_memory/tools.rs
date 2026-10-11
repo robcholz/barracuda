@@ -9,8 +9,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use barracuda_agent_memory::{MemoryDraft, MemoryId, MemoryItem, MemoryPatch, StoreOutcome};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRunner, ToolSet, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+    ToolInvocation, ToolInvokeError, ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
 use barracuda_model_api::ToolCall;
 use core::cell::RefCell;
@@ -68,6 +68,7 @@ impl ExtractionTools {
     pub(super) async fn run(
         &mut self,
         calls: Vec<ToolCall>,
+        context: ToolContext,
     ) -> Result<Vec<MemoryOp>, ToolInvokeError> {
         self.operations.borrow_mut().clear();
         let invocations = calls
@@ -77,7 +78,7 @@ impl ExtractionTools {
 
         {
             let tools = self.tools.begin().map_err(extraction_runtime_error)?;
-            let runner = ToolRunner::new(&tools);
+            let runner = ToolRunner::new(&tools, context);
             for invocation in invocations {
                 // Without a background pool, background tools fail inline.
                 let mut joined = runner.run(vec![invocation]);
@@ -152,10 +153,7 @@ impl MemoryMutationTarget for ExtractionTarget {
 }
 
 fn extraction_accepted() -> ToolOutput {
-    ToolOutput {
-        content: String::new(),
-        ok: true,
-    }
+    ToolOutput::new(String::new(), true)
 }
 
 pub(super) struct StoreTarget {
@@ -175,7 +173,7 @@ impl MemoryMutationTarget for StoreTarget {
                     format!("Already remembered (as {}); nothing changed.", item.id)
                 }
             };
-            Ok(ToolOutput { content, ok: true })
+            Ok(ToolOutput::new(content, true))
         })
     }
 
@@ -188,14 +186,8 @@ impl MemoryMutationTarget for StoreTarget {
                 keywords: optional_trimmed_strings(args.keywords),
             };
             Ok(match self.stores.update(&id, patch).await {
-                Ok(item) => ToolOutput {
-                    content: format!("Updated memory {}.", item.id),
-                    ok: true,
-                },
-                Err(error) => ToolOutput {
-                    content: format!("Could not update {id}: {error}."),
-                    ok: false,
-                },
+                Ok(item) => ToolOutput::new(format!("Updated memory {}.", item.id), true),
+                Err(error) => ToolOutput::new(format!("Could not update {id}: {error}."), false),
             })
         })
     }
@@ -204,14 +196,8 @@ impl MemoryMutationTarget for StoreTarget {
         Box::pin(async move {
             let id = MemoryId::from(trimmed(args.id).as_str());
             Ok(match self.stores.forget(&id).await {
-                Ok(()) => ToolOutput {
-                    content: format!("Forgot memory {id}."),
-                    ok: true,
-                },
-                Err(error) => ToolOutput {
-                    content: format!("Could not forget {id}: {error}."),
-                    ok: false,
-                },
+                Ok(()) => ToolOutput::new(format!("Forgot memory {id}."), true),
+                Err(error) => ToolOutput::new(format!("Could not forget {id}: {error}."), false),
             })
         })
     }
@@ -228,7 +214,7 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryStoreTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryStoreTool<T> {
     type Args = StoreArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         self.target.store(args)
     }
 }
@@ -244,17 +230,17 @@ impl ToolSpec for MemoryRecallTool {
 impl ToolHandler for MemoryRecallTool {
     type Args = RecallArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let labels = trimmed_strings(args.labels);
             let query = optional_trimmed(args.query);
             let limit = limit_or_default(args.limit);
 
             let items = self.stores.recall(&labels, query.as_deref(), limit);
-            Ok(ToolOutput {
-                content: render_items("Recalled memories", &items),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                render_items("Recalled memories", &items),
+                true,
+            ))
         })
     }
 }
@@ -270,15 +256,12 @@ impl ToolSpec for MemoryListTool {
 impl ToolHandler for MemoryListTool {
     type Args = ListArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let limit = limit_or_default(args.limit);
             let mut items = self.stores.list();
             items.truncate(limit);
-            Ok(ToolOutput {
-                content: render_items("All memories", &items),
-                ok: true,
-            })
+            Ok(ToolOutput::new(render_items("All memories", &items), true))
         })
     }
 }
@@ -294,7 +277,7 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryUpdateTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryUpdateTool<T> {
     type Args = UpdateArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         self.target.update(args)
     }
 }
@@ -310,7 +293,7 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryForgetTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryForgetTool<T> {
     type Args = IdArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         self.target.forget(args)
     }
 }
@@ -389,7 +372,10 @@ mod tests {
                 .expect("memory tools register");
 
             let handle = tools.begin().expect("memory tools begin");
-            let runner = ToolRunner::new(&handle);
+            let runner = ToolRunner::new(
+                &handle,
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+            );
             let store = ToolInvocation::try_new(
                 Some("store"),
                 "memory_store",
