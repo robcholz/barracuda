@@ -18,20 +18,14 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    ReceiveSlotSource, SlotWait, PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    poll, Error as GatewayHttpError, PollEnd, PollLimits, PollRequest, Polled, Poller,
-};
-use barracuda_imessage_gateway_plugin::{
-    GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget, SendMessageRequest,
+    ChannelControl, Classification, Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute,
+    MessageChannel, MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller,
+    ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease, ReceiveSession, SendMessageRequest,
+    PAIRED_REPLY,
 };
 use barracuda_plugin::manager::{PluginStorage, StorageError};
 use embassy_time::{Duration, Instant, Timer};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ReceiveLease, ReceiveSlots};
 use inkbox::inbound::{messages_path, parse_messages, InboundMessage, POLL_LIMIT};
 use serde::{Deserialize, Serialize};
 
@@ -69,29 +63,6 @@ const POLL_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Wait after a 429 without a usable `Retry-After`.
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(60);
-
-/// The System's receive slots as the channel's slot source.
-pub(crate) struct InkboxSlots<C: 'static, D: 'static>(pub(crate) ReceiveSlots<C, D>);
-
-impl<C: 'static, D: 'static> ReceiveSlotSource for InkboxSlots<C, D> {
-    type Lease = ReceiveLease<C, D>;
-
-    fn acquire(&self) -> Option<Self::Lease> {
-        self.0.acquire()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn in_use(&self) -> usize {
-        self.0.in_use()
-    }
-
-    fn wait_available(&self) -> SlotWait<'_> {
-        Box::pin(self.0.wait_available())
-    }
-}
 
 #[derive(Default, Deserialize, Serialize)]
 struct StoredCursor {
@@ -216,16 +187,10 @@ fn status_error(reply: &Polled) -> ReceiveError {
     }
 }
 
-impl<Storage, T, C, D> ReceiveChannel<ReceiveLease<C, D>> for InkboxState<Storage, T, C, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ReceiveChannel<ReceiveLease> for InkboxState<Storage> {
     fn receive<'a>(
         &'a self,
-        lease: &'a mut ReceiveLease<C, D>,
+        lease: &'a mut ReceiveLease,
         session: ReceiveSession<'a>,
     ) -> ReceiveFuture<'a> {
         Box::pin(self.poll(lease, session))
@@ -242,8 +207,8 @@ const LIMITS: PollLimits = PollLimits {
 };
 
 /// One session's polls: what to ask for next and what to do with answers.
-struct InkboxPoller<'a, Storage, T: 'static, C: 'static, D: 'static> {
-    state: &'a InkboxState<Storage, T, C, D>,
+struct InkboxPoller<'a, Storage> {
+    state: &'a InkboxState<Storage>,
     cursor: &'a Cursor,
     sender: Rc<dyn MessageChannel>,
     headers: &'a [(&'a str, &'a str)],
@@ -256,13 +221,7 @@ struct InkboxPoller<'a, Storage, T: 'static, C: 'static, D: 'static> {
     immediate: bool,
 }
 
-impl<Storage, T, C, D> Poller for InkboxPoller<'_, Storage, T, C, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> Poller for InkboxPoller<'_, Storage> {
     type Error = ReceiveError;
 
     async fn next(&mut self) -> Result<PollRequest, ReceiveError> {
@@ -338,17 +297,11 @@ fn start_at(cursor: &Cursor, messages: &[InboundMessage]) {
     log::info!("Inkbox receive starts after the newest stored message");
 }
 
-impl<Storage, T, C, D> InkboxState<Storage, T, C, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> InkboxState<Storage> {
     /// One receive session: polls on one connection until it ends or fails.
     async fn poll(
         &self,
-        lease: &mut ReceiveLease<C, D>,
+        lease: &mut ReceiveLease,
         session: ReceiveSession<'_>,
     ) -> Result<(), ReceiveError> {
         let Some(settings) = self.settings() else {
@@ -376,7 +329,8 @@ where
             immediate: true,
         };
         let origin = settings.config.api_base.trim_end_matches('/');
-        match poll(&lease.client_factory(), origin, LIMITS, &mut poller).await {
+        let http = self.gateway.http();
+        match http.poll(lease, origin, LIMITS, &mut poller).await {
             PollEnd::Connect(GatewayHttpError::TlsNotConfigured) => {
                 Err(ReceiveError::halt("TLS is unavailable"))
             }

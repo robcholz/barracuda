@@ -13,7 +13,8 @@
   - `cursor`: the receive cursor, `{"start":"<created_at>","recent":["<id>",…]}`.
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
-and `WebServer` capabilities, exposes `/api/gateway/inkbox` for runtime configuration, and
+and `WebServer` capabilities and reaches the network only through
+`IMessageGateway::http()`, exposes `/api/gateway/inkbox` for runtime configuration, and
 registers the configured channel `inkbox` for its lifetime, so it can be active
 beside the BlueBubbles `bluebubbles` channel. Inkbox cannot quote a message, so
 `reply_to` on text and media is ignored instead of failing. Accepted configuration is
@@ -46,15 +47,18 @@ signup; a signup for another email drops it.
 
 The Plugin follows the channel plumbing of
 [`imessage-gateway`](../../imessage-gateway/docs/plugin.md#how-a-channel-plugs-in):
-`/api/gateway/inkbox/mode` and `/api/gateway/inkbox/owners` are the shared mode
-and owner endpoints, served with `/api/gateway/inkbox` from one prefix route
-(`ChannelEndpoint`); the allowed accounts are loaded only once the channel is
-configured, and the cursor by the first receive session. The `inkbox` channel is registered with the Gateway
+`/api/gateway/inkbox/status`, `/api/gateway/inkbox/mode` and
+`/api/gateway/inkbox/owners` are the shared status, mode and owner endpoints,
+which the Gateway serves with `/api/gateway/inkbox` from one prefix route
+(`IMessageGateway::serve_channel`); the sign-up routes are exact WebServer
+routes below it. The allowed accounts are loaded through
+`IMessageGateway::load_owners` (pairing codes from the Platform entropy the
+Gateway holds) only once the channel is configured, and the cursor by the first receive session. The `inkbox` channel is registered with the Gateway
 exactly while it is configured and its mode is `send` or `send_receive`. A
 configuration stored before modes existed loads as `send`. A device without an
 Inkbox channel starts in `send_receive`, and a signup on such a device sets
 `send_receive` before storing its result. The portal entry's `GET
-/portal/status` record is `entry_status` of the channel (未配置, 已停用, 仅发送,
+/portal/status` record maps the Gateway's `channel_status` of the channel (未配置, 已停用, 仅发送,
 收发中, 连接中, 名额已满, or 连接中断).
 
 ## Receiving
@@ -62,10 +66,11 @@ Inkbox channel starts in `send_receive`, and a signup on such a device sets
 Inkbox offers no long poll, WebSocket, or push a device on a private network
 can receive, so the Plugin polls. It owns one Embassy task,
 `inkbox_receive_task`, spawned in `start` and raced against the Plugin's task
-token, running the channel crate's `receive_runtime`. Parked without a slot
-unless the channel is configured and in `send_receive`, it leases one receive
-slot (never a request pool connection) and opens one kept-alive connection on
-it with `client_factory()`. Every 3 s it sends
+token, running the runtime from `IMessageGateway::receive_runtime`. Parked without a
+slot unless the channel is configured and in `send_receive`, it leases one of
+the Gateway's receive slots (`IMessageGateway::receive_control`, never a
+request pool connection) and opens one kept-alive connection on it with
+`GatewayHttp::poll`. Every 3 s it sends
 
 ```
 GET {api_base}/api/v1/imessage/messages?limit=50&start_datetime=<cursor>
