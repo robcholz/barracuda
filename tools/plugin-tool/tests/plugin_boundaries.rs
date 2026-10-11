@@ -60,3 +60,10 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
+
+/// Every Plugin keeps the checkable Plugin API conventions.
+#[test]
+fn every_plugin_keeps_the_plugin_api_conventions() -> Result<(), barracuda_plugin_tool::CommandError>
+{
+    barracuda_plugin_tool::check_conventions(&workspace_root())
+}

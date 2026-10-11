@@ -15,6 +15,7 @@ ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false }
 syn = { version = "2", features = ["full"] }
 thiserror = "2"
+toml = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

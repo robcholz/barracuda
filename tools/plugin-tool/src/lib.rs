@@ -6,6 +6,8 @@ use std::{
 };
 
 use barracuda_plugin::manifest::{parse, PluginManifest};
+
+mod conventions;
 use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
@@ -214,6 +216,38 @@ pub fn info(root: &Path, name: &str) -> Result<PluginInfo, CommandError> {
 /// Returns an error when discovery, generated files, or filesystem access fail.
 pub fn sync(root: &Path, check: bool) -> Result<(), CommandError> {
     sync_with_report(root, check).map(|_| ())
+}
+
+/// Checks every Plugin against the checkable Plugin API conventions: its
+/// root layout, schema tree, `plugin.md` summary, Action and Event documents,
+/// and crate dependencies on other Plugins.
+///
+/// # Errors
+/// Returns every violation at once, or an error when discovery fails.
+pub fn check_conventions(root: &Path) -> Result<(), CommandError> {
+    let plugins = discover(root)?;
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    conventions::check(
+        root,
+        &plugins
+            .iter()
+            .zip(&manifests)
+            .map(|(plugin, manifest)| conventions::Checked {
+                directory: &plugin.directory,
+                manifest,
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(())
 }
 
 /// Synchronizes the registry and returns the enabled and disabled Plugin sets.
