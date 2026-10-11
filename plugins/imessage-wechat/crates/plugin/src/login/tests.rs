@@ -1,48 +1,23 @@
+//! The QR login against a scripted iLink service, with the real Gateway,
+//! Workflow, and WebServer running.
+
 #![allow(clippy::expect_used, clippy::panic)]
 
-use alloc::boxed::Box;
-use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::any::Any;
-use core::cell::RefCell;
-use core::future::Future;
-use core::pin::Pin;
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
-use barracuda_imessage_gateway_channel::{
-    channel_entry_status, ChannelEndpoint, ChannelMode, ReceiveState,
-};
-use barracuda_imessage_gateway_plugin::{
-    ChannelError, ChannelFuture, IMessageGateway, IMessageGatewayPlugin, MessageChannel, Operation,
-    SendMessageRequest, SendReceipt,
-};
-use barracuda_platform_test::{
-    install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
-};
-use barracuda_plugin::api::{PluginContext, SharedEntropy};
-use barracuda_plugin::manager::{
-    Plugin, PluginDeclaration, PluginError, PluginManager, PluginRegisterContext, PluginResult,
-    PluginStorage,
-};
-use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
-use barracuda_http_plugin::HttpPlugin;
-use barracuda_workflow_plugin::WorkflowPlugin;
-use embassy_futures::select::{select, Either};
-use embassy_time::{Duration, Instant};
-use futures_lite::future::{block_on, yield_now};
-use http_client::{ClientFactory, ReceiveSlots};
+use barracuda_imessage_gateway_plugin::ReceiveTiming;
+use barracuda_platform_test::ScriptStep;
+use embassy_time::Duration;
+use rusty_fork::rusty_fork_test;
 use serde_json::{json, Value};
 
-use super::{LoginEndpoint, LoginRuntime, LoginTiming};
+use super::LoginTiming;
+use crate::bench::{run, scenario, Setup, Stored, UNREACHABLE_API_BASE};
 use crate::receive::PollTiming;
-use crate::{
-    decode_configuration, ChannelConfiguration, ConfigEndpoint, CONFIGURATION_STORAGE_KEY,
-    CONFIG_API_PATH,
-};
+use crate::{decode_configuration, Timing, CONFIGURATION_STORAGE_KEY};
 
-const API_BASE: &str = "http://wechat.test";
 const QR_URL_1: &str = "https://liteapp.weixin.qq.com/q/one?qrcode=qr-1&bot_type=3";
 const QR_URL_2: &str = "https://liteapp.weixin.qq.com/q/two?qrcode=qr-2&bot_type=3";
 const BOT_TOKEN: &str = "bot-secret-token";
@@ -51,277 +26,27 @@ const TEST_TIMING: LoginTiming = LoginTiming {
     min_poll_interval: Duration::from_ticks(0),
 };
 
-type StoredReader = Box<dyn Fn() -> Pin<Box<dyn Future<Output = Option<Vec<u8>>>>>>;
-type StatusReader = Box<dyn Fn() -> EntryStatus>;
-
-/// Endpoints and runtime built against Plugin storage and a real Gateway.
-struct Parts {
-    login: Rc<dyn HttpEndpoint>,
-    config: Rc<dyn HttpEndpoint>,
-    /// Every route under the configuration path, `/status` among them.
-    routes: Rc<dyn HttpEndpoint>,
-    runtime: LoginRuntime,
-    gateway: Rc<IMessageGateway>,
-    stored: StoredReader,
-    entry_status: StatusReader,
-}
-
-struct Probe {
-    network: &'static ScriptedStack,
-    timing: LoginTiming,
-    occupy_channel: bool,
-    parts: Rc<RefCell<Option<Parts>>>,
-}
-
-impl PluginDeclaration for Probe {
-    const ID: &'static str = "wechat-login-probe";
-    const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
-}
-
-impl Plugin for Probe {
-    fn register<Storage>(
-        &mut self,
-        context: &mut PluginRegisterContext<'_, Storage>,
-    ) -> PluginResult<()>
-    where
-        Storage: PluginStorage,
-    {
-        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
-        if self.occupy_channel {
-            context.retain(
-                gateway
-                    .register(Rc::new(OtherWechatChannel))
-                    .map_err(PluginError::registration)?,
-            );
-        }
-        let configuration = Rc::new(block_on(ChannelConfiguration::load(
-            Rc::clone(&gateway),
-            ClientFactory::from_network(self.network, self.network),
-            context.storage().clone(),
-            ReceiveSlots::<ScriptedStack, ScriptedStack>::unavailable(),
-            SharedEntropy::unavailable(),
-            PollTiming::DEVICE,
-        ))?);
-        let (login, runtime) =
-            LoginEndpoint::new(Rc::clone(&configuration), API_BASE.into(), self.timing);
-        let watch = login.watch();
-        let status_configuration = Rc::clone(&configuration);
-        let entry_status: StatusReader =
-            Box::new(move || crate::entry_status(&status_configuration, &watch));
-        let storage = context.storage().clone();
-        let stored: StoredReader = Box::new(move || {
-            let storage = storage.clone();
-            Box::pin(async move {
-                storage
-                    .get_bytes(CONFIGURATION_STORAGE_KEY)
-                    .await
-                    .expect("read stored configuration")
-            })
-        });
-        self.parts.replace(Some(Parts {
-            login: Rc::new(login),
-            config: Rc::new(ConfigEndpoint {
-                configuration: Rc::clone(&configuration),
-            }),
-            routes: Rc::new(ChannelEndpoint::new(
-                Rc::clone(&configuration),
-                CONFIG_API_PATH,
-                ConfigEndpoint { configuration },
-            )),
-            runtime,
-            gateway,
-            stored,
-            entry_status,
-        }));
-        Ok(())
-    }
-}
-
-/// A second `wechat` channel, used to occupy the name or to probe registration.
-struct OtherWechatChannel;
-
-impl MessageChannel for OtherWechatChannel {
-    fn channel(&self) -> &str {
-        "wechat"
-    }
-
-    fn send_message(&self, _request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
-        Box::pin(async { Err(ChannelError::unsupported(Operation::SendMessage)) })
-    }
-}
-
-struct Harness {
-    login: Rc<dyn HttpEndpoint>,
-    config: Rc<dyn HttpEndpoint>,
-    routes: Rc<dyn HttpEndpoint>,
-    gateway: Rc<IMessageGateway>,
-    stored: StoredReader,
-    entry_status: StatusReader,
-    network: &'static ScriptedStack,
-    _manager: Box<dyn Any>,
-}
-
-impl Harness {
-    async fn call(&self, method: HttpMethod, body: &[u8]) -> (u16, Value) {
-        call(self.login.as_ref(), method, body).await
-    }
-
-    /// `GET /api/gateway/wechat/status`.
-    async fn channel_status(&self) -> (u16, Value) {
-        let path = format!("{CONFIG_API_PATH}/status");
-        let response = self
-            .routes
-            .handle(HttpRequest::with_path(HttpMethod::Get, path, Vec::new()))
-            .await;
-        let body = serde_json::from_slice(response.body().expect("buffered response"))
-            .expect("JSON response");
-        (response.status(), body)
-    }
-
-    async fn status(&self) -> Value {
-        let (code, body) = self.call(HttpMethod::Get, b"").await;
-        assert_eq!(code, 200);
-        body
-    }
-
-    /// Lets the runtime run until GET reports `expected`.
-    async fn wait_for_status(&self, expected: &str) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let status = self.status().await;
-            if status["status"] == expected {
-                return status;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "status stayed {status} instead of {expected}"
-            );
-            yield_now().await;
-        }
-    }
-
-    /// Lets the runtime run until the mock iLink has seen `count` requests.
-    async fn wait_for_requests(&self, count: usize) -> Vec<String> {
-        for _ in 0..10_000 {
-            let requests = self.request_paths();
-            if requests.len() >= count {
-                return requests;
-            }
-            yield_now().await;
-        }
-        panic!(
-            "iLink saw {:?} instead of {count} requests",
-            self.request_paths()
-        );
-    }
-
-    async fn settle(&self) {
-        for _ in 0..1_000 {
-            yield_now().await;
-        }
-    }
-
-    fn request_paths(&self) -> Vec<String> {
-        self.network
-            .requests()
-            .iter()
-            .map(|request| {
-                request
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or_default()
-                    .into()
-            })
-            .collect()
-    }
-
-    fn channel_registered(&self) -> bool {
-        self.gateway.register(Rc::new(OtherWechatChannel)).is_err()
-    }
-}
-
-async fn call(endpoint: &dyn HttpEndpoint, method: HttpMethod, body: &[u8]) -> (u16, Value) {
-    let response = endpoint
-        .handle(HttpRequest::new(method, body.to_vec()))
-        .await;
-    let body = response.body().expect("buffered response");
-    let json = if body.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(body).expect("JSON response")
-    };
-    (response.status(), json)
-}
-
-fn plugin_context() -> PluginContext {
-    let stack = never_embassy_stack();
-    let info = barracuda_plugin::api::TargetIdentity::new(
-        barracuda_plugin::api::PlatformInfo::new("test", "test", "test-arch", "hosted"),
-        barracuda_plugin::api::BoardInfo::new(
-            "test-board",
-            barracuda_plugin::api::Hardware::new("test-chip"),
-        ),
+/// A login service over iLink `steps`. Other receivers hold every receive
+/// slot, so a linked channel reports `no_slot` and never polls.
+fn setup(steps: Vec<ScriptStep>, login: LoginTiming) -> Setup {
+    let mut setup = Setup::new(
+        Stored::default(),
+        steps,
+        Timing {
+            poll: PollTiming::DEVICE,
+            receive: ReceiveTiming::DEVICE,
+            login,
+        },
     );
-    PluginContext::new(info, stack)
+    setup.hold_slots = true;
+    setup
 }
 
-/// Builds the login service over mock iLink `steps` and runs `scenario`
-/// beside the login runtime, as the Plugin's task would.
-fn scenario<F, Fut>(steps: Vec<ScriptStep>, timing: LoginTiming, occupy_channel: bool, test: F)
-where
-    F: FnOnce(Rc<Harness>) -> Fut,
-    Fut: Future<Output = ()>,
-{
-    block_on(install_global_memory_vfs()).expect("install test VFS");
-    let partition = block_on(memory_partition(64 * 1024)).expect("create test database region");
-    let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
-    manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
-    let mut context = plugin_context();
-    let network: &'static ScriptedStack = Box::leak(Box::new(ScriptedStack::new(steps)));
-    let parts = Rc::new(RefCell::new(None));
-    manager
-        .register(WorkflowPlugin::new(&mut context))
-        .expect("register Workflow Plugin");
-    manager
-        .register(HttpPlugin::new(&mut context))
-        .expect("register HTTP Plugin");
-    manager
-        .register(IMessageGatewayPlugin::new(&mut context))
-        .expect("register IMessage Gateway Plugin");
-    manager
-        .register(Probe {
-            network,
-            timing,
-            occupy_channel,
-            parts: Rc::clone(&parts),
-        })
-        .expect("register login probe");
-    let Parts {
-        login,
-        config,
-        routes,
-        runtime,
-        gateway,
-        stored,
-        entry_status,
-    } = parts.take().expect("probe built the login service");
-    let harness = Rc::new(Harness {
-        login,
-        config,
-        routes,
-        gateway,
-        stored,
-        entry_status,
-        network,
-        _manager: Box::new(manager),
-    });
-    block_on(async move {
-        match select(runtime, test(harness)).await {
-            Either::First(()) => panic!("login runtime ended"),
-            Either::Second(()) => {}
-        }
-    });
+/// The same with another `wechat` channel registered with the Gateway.
+fn occupied(steps: Vec<ScriptStep>) -> Setup {
+    let mut setup = setup(steps, TEST_TIMING);
+    setup.occupy_channel = true;
+    setup
 }
 
 fn qrcode(id: &str, url: &str) -> ScriptStep {
@@ -353,44 +78,99 @@ fn long_poll() -> ScriptStep {
     ScriptStep::pending_after_headers(200, "application/json")
 }
 
-/// Portal status of a linked channel when the test pool has no receive slot.
+/// Portal status of a linked channel while every receive slot is held.
 fn linked_without_slot() -> EntryStatus {
-    channel_entry_status(true, ChannelMode::SendReceive, &ReceiveState::NoSlot)
+    EntryStatus::new(
+        EntryState::Attention,
+        WebText {
+            zh: "名额已满",
+            en: "No slot",
+        },
+    )
 }
 
+/// `GET` on the login route, which always answers 200.
+macro_rules! login_status {
+    ($harness:ident) => {{
+        let (code, body) = $harness.login("GET", b"").await;
+        assert_eq!(code, 200);
+        body
+    }};
+}
+
+/// Lets the runtime run until GET on the login route reports `$expected`.
+macro_rules! wait_for_status {
+    ($harness:ident, $expected:expr) => {{
+        let expected: &str = $expected;
+        let deadline = embassy_time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status: Value = login_status!($harness);
+            if status["status"] == expected {
+                break status;
+            }
+            assert!(
+                embassy_time::Instant::now() < deadline,
+                "status stayed {status} instead of {expected}"
+            );
+            embassy_time::Timer::after(Duration::from_millis(1)).await;
+        }
+    }};
+}
+
+/// Lets the runtime run until iLink has seen `$count` requests; returns
+/// their paths.
+macro_rules! wait_for_requests {
+    ($harness:ident, $count:expr) => {{
+        let count: usize = $count;
+        $harness
+            .until("the iLink requests", |harness| {
+                harness.request_paths().len() >= count
+            })
+            .await;
+        $harness.request_paths()
+    }};
+}
+
+rusty_fork_test! {
 #[test]
 fn get_before_any_session_is_idle() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
+    scenario!(Body, |harness| {
         assert_eq!(
-            harness.status().await,
+            login_status!(harness),
             json!({ "status": "idle", "configured": false })
         );
         assert!(harness.request_paths().is_empty());
     });
+    run(setup(Vec::new(), TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn start_returns_the_qr_url_and_reports_wait() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), long_poll()]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (code, body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (code, body) = harness.login("POST", b"").await;
 
         assert_eq!(code, 200);
         assert_eq!(body, json!({ "url": QR_URL_1, "expires_in": 480 }));
         assert_eq!(
-            harness.wait_for_status("wait").await,
+            wait_for_status!(harness, "wait"),
             json!({ "status": "wait", "configured": false })
         );
         assert_eq!(
-            harness.wait_for_requests(2).await,
+            wait_for_requests!(harness, 2),
             [
                 "/ilink/bot/get_bot_qrcode?bot_type=3",
                 "/ilink/bot/get_qrcode_status?qrcode=qr-1",
             ]
         );
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn scaned_is_reported_as_scanned() {
     let steps = Vec::from([
@@ -399,17 +179,20 @@ fn scaned_is_reported_as_scanned() {
         status("scaned"),
         long_poll(),
     ]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (code, _body) = harness.call(HttpMethod::Post, b"{}").await;
+    scenario!(Body, |harness| {
+        let (code, _body) = harness.login("POST", b"{}").await;
 
         assert_eq!(code, 200);
         assert_eq!(
-            harness.wait_for_status("scanned").await,
+            wait_for_status!(harness, "scanned"),
             json!({ "status": "scanned", "configured": false })
         );
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn confirmed_login_stores_and_registers_the_channel() {
     let steps = Vec::from([
@@ -418,19 +201,23 @@ fn confirmed_login_stores_and_registers_the_channel() {
         status("scaned"),
         confirmed(),
     ]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        assert!(!harness.channel_registered());
-        let (code, body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        assert!(!harness.registered());
+        let (code, body) = harness.login("POST", b"").await;
         assert_eq!(code, 200);
         assert!(!body.to_string().contains(BOT_TOKEN));
 
-        let status = harness.wait_for_status("confirmed").await;
+        let status = wait_for_status!(harness, "confirmed");
 
         assert_eq!(status, json!({ "status": "confirmed", "configured": true }));
         assert!(!status.to_string().contains(BOT_TOKEN));
-        assert!(harness.channel_registered());
-        let stored = (harness.stored)().await.expect("configuration stored");
-        let config = decode_configuration(&stored).expect("stored configuration decodes");
+        assert!(harness.registered());
+        let stored = harness
+            .stored(CONFIGURATION_STORAGE_KEY)
+            .await
+            .expect("configuration stored");
+        let config =
+            decode_configuration(stored.as_bytes()).expect("stored configuration decodes");
         assert_eq!(config.token, BOT_TOKEN);
         assert_eq!(config.api_base, "http://ilink.example");
         assert_eq!(config.app_id, "bot");
@@ -440,25 +227,31 @@ fn confirmed_login_stores_and_registers_the_channel() {
         harness.settle().await;
         assert_eq!(harness.request_paths().len(), 4, "the session ended");
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn expired_qr_code_ends_the_session() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), status("expired")]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (code, _body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (code, _body) = harness.login("POST", b"").await;
         assert_eq!(code, 200);
 
         assert_eq!(
-            harness.wait_for_status("expired").await,
+            wait_for_status!(harness, "expired"),
             json!({ "status": "expired", "configured": false })
         );
         harness.settle().await;
         assert_eq!(harness.request_paths().len(), 2, "the session ended");
-        assert!((harness.stored)().await.is_none());
+        assert!(harness.stored(CONFIGURATION_STORAGE_KEY).await.is_none());
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn session_deadline_reports_expired() {
     let timing = LoginTiming {
@@ -466,39 +259,42 @@ fn session_deadline_reports_expired() {
         ..TEST_TIMING
     };
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), long_poll()]);
-    scenario(steps, timing, false, |harness| async move {
-        let (code, _body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (code, _body) = harness.login("POST", b"").await;
         assert_eq!(code, 200);
 
-        assert_eq!(
-            harness.wait_for_status("expired").await["status"],
-            "expired"
-        );
+        assert_eq!(wait_for_status!(harness, "expired")["status"], "expired");
     });
+    run(setup(steps, timing), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn delete_cancels_the_session() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), long_poll()]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (code, _body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (code, _body) = harness.login("POST", b"").await;
         assert_eq!(code, 200);
-        harness.wait_for_requests(2).await;
+        wait_for_requests!(harness, 2);
 
-        let (code, body) = harness.call(HttpMethod::Delete, b"").await;
+        let (code, body) = harness.login("DELETE", b"").await;
 
         assert_eq!(code, 204);
         assert_eq!(body, Value::Null);
         assert_eq!(
-            harness.status().await,
+            login_status!(harness),
             json!({ "status": "idle", "configured": false })
         );
         harness.settle().await;
-        assert_eq!(harness.status().await["status"], "idle");
+        assert_eq!(login_status!(harness)["status"], "idle");
         assert_eq!(harness.request_paths().len(), 2);
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn new_start_replaces_the_running_session() {
     let steps = Vec::from([
@@ -507,44 +303,52 @@ fn new_start_replaces_the_running_session() {
         qrcode("qr-2", QR_URL_2),
         long_poll(),
     ]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (_code, first) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (_code, first) = harness.login("POST", b"").await;
         assert_eq!(first["url"], QR_URL_1);
-        harness.wait_for_requests(2).await;
+        wait_for_requests!(harness, 2);
 
-        let (code, second) = harness.call(HttpMethod::Post, b"").await;
+        let (code, second) = harness.login("POST", b"").await;
 
         assert_eq!(code, 200);
         assert_eq!(second["url"], QR_URL_2);
-        let requests = harness.wait_for_requests(4).await;
+        let requests = wait_for_requests!(harness, 4);
         assert_eq!(
             requests.get(3).map(String::as_str),
             Some("/ilink/bot/get_qrcode_status?qrcode=qr-2")
         );
-        assert_eq!(harness.status().await["status"], "wait");
+        assert_eq!(login_status!(harness)["status"], "wait");
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn unreachable_upstream_returns_502() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
-        let (code, body) = harness.call(HttpMethod::Post, b"").await;
+    let mut setup = setup(Vec::new(), TEST_TIMING);
+    setup.login_api_base = UNREACHABLE_API_BASE;
+    scenario!(Body, |harness| {
+        let (code, body) = harness.login("POST", b"").await;
 
         assert_eq!(code, 502);
         assert_eq!(body["error"], "upstream_unavailable");
         assert!(body["message"].is_string());
-        assert_eq!(harness.status().await["status"], "idle");
+        assert_eq!(login_status!(harness)["status"], "idle");
     });
+    run(setup, Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn upstream_error_code_and_message_pass_through() {
     let steps = Vec::from([ScriptStep::json(
         200,
         r#"{"ret":-14,"errmsg":"session timeout"}"#,
     )]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        let (code, body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let (code, body) = harness.login("POST", b"").await;
 
         assert_eq!(code, 502);
         assert_eq!(
@@ -556,163 +360,177 @@ fn upstream_error_code_and_message_pass_through() {
             })
         );
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn failed_status_poll_reports_failed() {
     let steps = Vec::from([
         qrcode("qr-1", QR_URL_1),
         ScriptStep::json(200, r#"{"ret":1,"errmsg":"bad qrcode"}"#),
     ]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        harness.login("POST", b"").await;
 
-        let status = harness.wait_for_status("failed").await;
+        let status = wait_for_status!(harness, "failed");
 
         assert_eq!(status["configured"], false);
         assert!(status["message"]
             .as_str()
             .is_some_and(|message| message.contains("bad qrcode")));
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn rejected_registration_reports_failed() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), confirmed()]);
-    scenario(steps, TEST_TIMING, true, |harness| async move {
-        harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        harness.login("POST", b"").await;
 
-        let status = harness.wait_for_status("failed").await;
+        let status = wait_for_status!(harness, "failed");
 
         assert_eq!(status["configured"], false);
         assert!(status["message"].is_string());
         assert!(!status.to_string().contains(BOT_TOKEN));
-        assert!((harness.stored)().await.is_none());
+        assert!(harness.stored(CONFIGURATION_STORAGE_KEY).await.is_none());
     });
+    run(occupied(steps), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn configured_reflects_the_registered_channel() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
-        let (code, _body) = call(
-            harness.config.as_ref(),
-            HttpMethod::Post,
-            br#"{"token":"manual-token"}"#,
-        )
-        .await;
+    scenario!(Body, |harness| {
+        let (code, _body) = harness.config("POST", br#"{"token":"manual-token"}"#).await;
         assert_eq!(code, 204);
 
         assert_eq!(
-            harness.status().await,
+            login_status!(harness),
             json!({ "status": "idle", "configured": true })
         );
     });
+    run(setup(Vec::new(), TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn wrong_methods_return_405() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
-        for method in [HttpMethod::Put, HttpMethod::Patch, HttpMethod::Options] {
-            let (code, body) = harness.call(method, b"").await;
+    scenario!(Body, |harness| {
+        for method in ["PUT", "PATCH", "OPTIONS"] {
+            let (code, body) = harness.login(method, b"").await;
             assert_eq!(code, 405);
             assert_eq!(body, json!({ "error": "method_not_allowed" }));
         }
-        for method in [HttpMethod::Put, HttpMethod::Delete] {
-            let (code, body) = call(harness.config.as_ref(), method, b"").await;
+        for method in ["PUT", "DELETE"] {
+            let (code, body) = harness.config(method, b"").await;
             assert_eq!(code, 405);
             assert_eq!(body, json!({ "error": "method_not_allowed" }));
         }
     });
+    run(setup(Vec::new(), TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn status_reports_only_whether_a_channel_is_configured() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
+    scenario!(Body, |harness| {
         // The configuration path takes changes only; its state is under `/status`.
-        let (code, _body) = call(harness.config.as_ref(), HttpMethod::Get, b"").await;
+        let (code, _body) = harness.config("GET", b"").await;
         assert_eq!(code, 405);
-        let (code, body) = harness.channel_status().await;
+        let (code, body) = harness.status().await;
         assert_eq!(code, 200);
         assert_eq!(body["configured"], false);
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+        assert_eq!(harness.entry_status(), EntryStatus::configured(false));
 
-        let (code, _body) = call(
-            harness.config.as_ref(),
-            HttpMethod::Post,
-            br#"{"token":"manual-token"}"#,
-        )
-        .await;
+        let (code, _body) = harness.config("POST", br#"{"token":"manual-token"}"#).await;
         assert_eq!(code, 204);
 
-        let (code, body) = harness.channel_status().await;
+        let (code, body) = harness.status().await;
         assert_eq!(code, 200);
         assert_eq!(body["configured"], true);
         assert_eq!(body["mode"], "send_receive");
         assert!(!body.to_string().contains("manual-token"));
-        assert_eq!((harness.entry_status)(), linked_without_slot());
+        assert_eq!(harness.entry_status(), linked_without_slot());
     });
+    run(setup(Vec::new(), TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn config_rejected_by_the_gateway_is_registration_failed() {
-    scenario(Vec::new(), TEST_TIMING, true, |harness| async move {
-        let (code, body) = call(
-            harness.config.as_ref(),
-            HttpMethod::Post,
-            br#"{"token":"manual-token"}"#,
-        )
-        .await;
+    scenario!(Body, |harness| {
+        let (code, body) = harness.config("POST", br#"{"token":"manual-token"}"#).await;
 
         assert_eq!(code, 422);
         assert_eq!(body, json!({ "error": "registration_failed" }));
-        assert!((harness.stored)().await.is_none());
-        let (_code, body) = harness.channel_status().await;
+        assert!(harness.stored(CONFIGURATION_STORAGE_KEY).await.is_none());
+        let (_code, body) = harness.status().await;
         assert_eq!(body["configured"], false);
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+        assert_eq!(harness.entry_status(), EntryStatus::configured(false));
     });
+    run(occupied(Vec::new()), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn entry_status_waits_for_the_scan_until_the_login_is_confirmed() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), status("scaned"), long_poll()]);
-    let waiting = EntryStatus::new(
-        EntryState::Attention,
-        WebText {
-            zh: "等待扫码",
-            en: "Waiting for scan",
-        },
-    );
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
-        let (code, _body) = harness.call(HttpMethod::Post, b"").await;
+    scenario!(Body, |harness| {
+        let waiting = EntryStatus::new(
+            EntryState::Attention,
+            WebText {
+                zh: "等待扫码",
+                en: "Waiting for scan",
+            },
+        );
+        assert_eq!(harness.entry_status(), EntryStatus::configured(false));
+        let (code, _body) = harness.login("POST", b"").await;
         assert_eq!(code, 200);
         // The session reports `wait` before the start request is answered.
-        assert_eq!((harness.entry_status)(), waiting);
-        harness.wait_for_status("scanned").await;
-        assert_eq!((harness.entry_status)(), waiting);
+        assert_eq!(harness.entry_status(), waiting);
+        wait_for_status!(harness, "scanned");
+        assert_eq!(harness.entry_status(), waiting);
 
-        harness.call(HttpMethod::Delete, b"").await;
-        assert_eq!((harness.entry_status)(), EntryStatus::configured(false));
+        harness.login("DELETE", b"").await;
+        assert_eq!(harness.entry_status(), EntryStatus::configured(false));
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn entry_status_is_ready_after_a_confirmed_login() {
     let steps = Vec::from([qrcode("qr-1", QR_URL_1), confirmed()]);
-    scenario(steps, TEST_TIMING, false, |harness| async move {
-        harness.call(HttpMethod::Post, b"").await;
-        harness.wait_for_status("confirmed").await;
-        assert_eq!((harness.entry_status)(), linked_without_slot());
+    scenario!(Body, |harness| {
+        harness.login("POST", b"").await;
+        wait_for_status!(harness, "confirmed");
+        assert_eq!(harness.entry_status(), linked_without_slot());
     });
+    run(setup(steps, TEST_TIMING), Body);
+}
 }
 
+rusty_fork_test! {
 #[test]
 fn start_rejects_a_body_with_fields() {
-    scenario(Vec::new(), TEST_TIMING, false, |harness| async move {
-        let (code, body) = harness.call(HttpMethod::Post, br#"{"token":"x"}"#).await;
+    scenario!(Body, |harness| {
+        let (code, body) = harness.login("POST", br#"{"token":"x"}"#).await;
 
         assert_eq!(code, 400);
         assert_eq!(body, json!({ "error": "invalid_request" }));
         assert!(harness.request_paths().is_empty());
     });
+    run(setup(Vec::new(), TEST_TIMING), Body);
+}
 }

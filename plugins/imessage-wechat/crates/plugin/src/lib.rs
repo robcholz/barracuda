@@ -1,9 +1,14 @@
 //! IMessage Wechat provider Plugin.
 
 #![no_std]
+#![recursion_limit = "256"]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
+#[cfg(test)]
+mod bench;
 mod login;
 mod receive;
 
@@ -16,41 +21,33 @@ use core::cell::{Cell, RefCell};
 use barracuda_captive_portal_plugin::{
     CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
-use barracuda_imessage_gateway_channel::{
-    load_mode, receive_runtime, store_mode, sync_receive, ChannelControl, ChannelEndpoint,
-    ChannelMode, ModeError, ModeFuture, OnDemand, Owners, OwnersError, PairingEntropy,
-    ReceiveControl, ReceiveRuntime, ReceiveTiming,
+use barracuda_imessage_gateway_plugin::{
+    ChannelControl, ChannelLevel, ChannelMode, IMessageGateway, MessageChannel,
+    MessageChannelRegistration, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
+    ReceiveControl, ReceiveRuntime, ReceiveSlots, ReceiveTiming,
 };
-use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
     PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebRouteRegistration,
+    WebServer, WebServerError,
 };
 use embassy_futures::select::select;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ClientFactory, ReceiveSlots};
 use login::{LoginEndpoint, LoginRuntime, LoginTiming, LoginWatch};
-use receive::{InboundState, PollTiming, WechatReceiver, WechatSlots, SESSION_EXPIRED_MESSAGE};
+use receive::{InboundState, PollTiming, SESSION_EXPIRED_MESSAGE};
 use serde::{Deserialize, Serialize};
 use wechat::{Wechat, WechatConfig};
 
-/// HTTP path accepting Wechat configuration.
+/// HTTP path accepting Wechat configuration; the Gateway serves the
+/// channel's `/status`, `/mode`, and `/owners` below it.
 pub const CONFIG_API_PATH: &str = "/api/gateway/wechat";
 
 /// HTTP path running the WeChat QR login session.
 pub const LOGIN_API_PATH: &str = "/api/gateway/wechat/login";
-
-/// HTTP path selecting the channel mode.
-pub const MODE_API_PATH: &str = "/api/gateway/wechat/mode";
-
-/// HTTP path listing the allowed accounts and the pairing code.
-pub const OWNERS_API_PATH: &str = "/api/gateway/wechat/owners";
 
 /// Gateway channel name.
 const CHANNEL: &str = "wechat";
@@ -67,8 +64,8 @@ pub struct IMessageWechatPlugin {
 }
 
 impl IMessageWechatPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources, the
-    /// receive slot pool, and the Platform entropy.
+    /// Creates the unregistered WeChat channel Plugin; the Platform entropy
+    /// randomizes each iLink request's `X-WECHAT-UIN`.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
@@ -91,37 +88,18 @@ impl Plugin for IMessageWechatPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
-        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
-        let receive_slots = (*context.require::<ReceiveSlots>("imessage-gateway")?).clone();
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
-        let configuration = Rc::new(embassy_futures::block_on(ChannelConfiguration::load(
-            gateway,
-            http_clients.clone(),
-            context.storage().clone(),
-            receive_slots.clone(),
-            self.entropy.clone(),
-            PollTiming::DEVICE,
-        ))?);
-        let receive = receive_runtime(
-            Rc::clone(&configuration.receive),
-            Rc::new(WechatReceiver::new(Rc::clone(&configuration))),
-            ReceiveTiming::DEVICE,
-        );
-        // Without a free slot the control reports `no_slot` and retries.
-        let _no_slot = sync_receive(&*configuration);
-        let (login_endpoint, login_runtime) = LoginEndpoint::new(
-            Rc::clone(&configuration),
-            default_wechat_api_base(),
-            LoginTiming::DEVICE,
-        );
-        let status_configuration = Rc::clone(&configuration);
-        let login_watch = login_endpoint.watch();
+        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+        let webserver = context.require::<WebServer>("webserver")?;
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let built = build_channel(
+            context.storage().clone(),
+            Rc::clone(&gateway),
+            self.entropy.clone(),
+            default_wechat_api_base(),
+            Timing::DEVICE,
+        )?;
+        let status_channel = Rc::clone(&built.channel);
+        let login_watch = built.login.watch();
         context.retain(
             portal
                 .register_with_status(
@@ -142,29 +120,17 @@ impl Plugin for IMessageWechatPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
-                    move || entry_status(&status_configuration, &login_watch),
+                    move || entry_status(&status_channel, &login_watch),
                 )
                 .map_err(PluginError::registration)?,
         );
-        // One route serves the configuration path and its `/mode` and
-        // `/owners`; the exact login route takes its own requests.
-        let endpoint = ChannelEndpoint::new(
-            Rc::clone(&configuration),
-            CONFIG_API_PATH,
-            ConfigEndpoint { configuration },
-        );
-        context.retain(
-            webserver
-                .serve_http_prefix(CONFIG_API_PATH, endpoint)
-                .map_err(PluginError::registration)?,
-        );
-        context.retain(
-            webserver
-                .serve_http(LOGIN_API_PATH, login_endpoint)
-                .map_err(PluginError::registration)?,
-        );
-        self.login = Some(login_runtime);
-        self.receive = Some(receive);
+        for route in serve_routes(&gateway, &webserver, &built.channel, built.login)
+            .map_err(PluginError::registration)?
+        {
+            context.retain(route);
+        }
+        self.login = Some(built.login_runtime);
+        self.receive = Some(built.receive_runtime);
         Ok(())
     }
 
@@ -191,18 +157,89 @@ impl Plugin for IMessageWechatPlugin {
     }
 }
 
+/// Time limits of the channel's runtimes.
+#[derive(Clone, Copy)]
+struct Timing {
+    poll: PollTiming,
+    receive: ReceiveTiming,
+    login: LoginTiming,
+}
+
+impl Timing {
+    /// Limits used on the device.
+    const DEVICE: Self = Self {
+        poll: PollTiming::DEVICE,
+        receive: ReceiveTiming::DEVICE,
+        login: LoginTiming::DEVICE,
+    };
+}
+
+/// The channel, its login endpoint, and the runtimes its Plugin's tasks own.
+struct BuiltChannel<Storage> {
+    channel: Rc<ChannelConfiguration<Storage>>,
+    login: LoginEndpoint<Storage>,
+    login_runtime: LoginRuntime,
+    receive_runtime: ReceiveRuntime,
+}
+
+/// Loads the channel from storage, registers it with the Gateway when it is
+/// linked and its mode registers, and builds its login endpoint and the
+/// runtimes its Plugin's tasks own. A QR login uses `login_api_base` while no
+/// configuration is stored.
+fn build_channel<Storage: PluginStorage>(
+    storage: Storage,
+    gateway: Rc<IMessageGateway>,
+    entropy: SharedEntropy,
+    login_api_base: String,
+    timing: Timing,
+) -> PluginResult<BuiltChannel<Storage>> {
+    let channel = Rc::new(embassy_futures::block_on(ChannelConfiguration::load(
+        gateway,
+        storage,
+        entropy,
+        timing.poll,
+    ))?);
+    let receive_runtime = channel.gateway.receive_runtime(
+        Rc::clone(&channel.receive),
+        Rc::clone(&channel),
+        timing.receive,
+    );
+    // Without a free slot the control reports `no_slot` and retries.
+    let _no_slot = channel.gateway.sync_receive(&*channel);
+    let (login, login_runtime) =
+        LoginEndpoint::new(Rc::clone(&channel), login_api_base, timing.login);
+    Ok(BuiltChannel {
+        channel,
+        login,
+        login_runtime,
+        receive_runtime,
+    })
+}
+
+/// Serves the channel's routes: the configuration path, with the Gateway's
+/// shared `/status`, `/mode`, and `/owners` below it, and the exact login
+/// route, which takes precedence over that prefix.
+fn serve_routes<Storage: PluginStorage>(
+    gateway: &IMessageGateway,
+    webserver: &WebServer,
+    channel: &Rc<ChannelConfiguration<Storage>>,
+    login: LoginEndpoint<Storage>,
+) -> Result<[WebRouteRegistration; 2], WebServerError> {
+    let config = ConfigEndpoint {
+        configuration: Rc::clone(channel),
+    };
+    Ok([
+        gateway.serve_channel(CONFIG_API_PATH, Rc::clone(channel), config)?,
+        webserver.serve_http(LOGIN_API_PATH, login)?,
+    ])
+}
+
 /// Portal status: `attention` while a QR login waits for its scan or the bot
-/// session expired, otherwise the shared channel mapping.
-fn entry_status<Storage, T, D, R>(
-    configuration: &ChannelConfiguration<Storage, T, D, R>,
+/// session expired, otherwise the Gateway's channel status.
+fn entry_status<Storage: PluginStorage>(
+    configuration: &ChannelConfiguration<Storage>,
     login: &LoginWatch,
-) -> EntryStatus
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+) -> EntryStatus {
     if login.waiting_for_scan() {
         return EntryStatus::new(
             EntryState::Attention,
@@ -223,7 +260,19 @@ where
             },
         );
     }
-    barracuda_imessage_gateway_channel::entry_status(configuration)
+    let status = configuration.gateway.channel_status(configuration);
+    let state = match status.level {
+        ChannelLevel::Off => EntryState::Off,
+        ChannelLevel::Ready => EntryState::Ready,
+        ChannelLevel::Attention => EntryState::Attention,
+    };
+    EntryStatus::new(
+        state,
+        WebText {
+            zh: status.zh,
+            en: status.en,
+        },
+    )
 }
 
 /// Owns the QR login session; parked on its command signal while no session runs.
@@ -306,23 +355,17 @@ impl ConfigRequest {
 /// Shared by the configuration, mode, owners, and login endpoints, the QR
 /// login runtime, and the receive runtime, so all of them persist and
 /// register through one path.
-struct ChannelConfiguration<
-    Storage,
-    T: 'static = http_client::Tcp,
-    D: 'static = http_client::Resolver,
-    R: 'static = http_client::ReceiveSocket,
-> {
+struct ChannelConfiguration<Storage> {
     gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static, T, D>,
     /// Serializes configuration and mode changes; holds the registration that
     /// exists exactly while a provider is configured and the mode registers.
     channel_registration: Mutex<NoopRawMutex, Option<MessageChannelRegistration>>,
     /// The provider built from the stored configuration.
-    provider: RefCell<Option<Rc<Wechat<'static, T, D>>>>,
+    provider: RefCell<Option<Rc<Wechat>>>,
     mode: Cell<ChannelMode>,
     /// Loaded once a bot is linked.
     owners: OnDemand<Owners<Storage>>,
-    receive: Rc<ReceiveControl<WechatSlots<R, D>>>,
+    receive: Rc<ReceiveControl<ReceiveSlots>>,
     inbound: InboundState,
     entropy: SharedEntropy,
     storage: Storage,
@@ -336,34 +379,29 @@ enum ConfigureError {
     Registration,
 }
 
-impl<Storage, T, D, R> ChannelConfiguration<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
     /// Loads the stored configuration, mode, owners, and receive state, and
     /// registers the channel when it is configured and its mode registers.
     async fn load(
         gateway: Rc<IMessageGateway>,
-        http_clients: ClientFactory<'static, T, D>,
         storage: Storage,
-        receive_slots: ReceiveSlots<R, D>,
         entropy: SharedEntropy,
         timing: PollTiming,
     ) -> PluginResult<Self> {
         let config = load_configuration(&storage).await?;
         // WeChat has no send-only mode: iLink sends need the inbound
         // `context_token`, so configurations stored before modes receive.
-        let mode = match load_mode(&storage, config.is_some(), ChannelMode::SendReceive).await? {
+        let mode = match gateway
+            .load_mode(&storage, config.is_some(), ChannelMode::SendReceive)
+            .await?
+        {
             ChannelMode::Send => ChannelMode::SendReceive,
             mode => mode,
         };
         let inbound = InboundState::load(&storage, timing).await;
         let provider = config.map(|config| {
             Rc::new(Wechat::with_context_tokens(
-                http_clients.clone(),
+                gateway.http(),
                 config.into(),
                 inbound.context_tokens(),
             ))
@@ -376,14 +414,14 @@ where
             ),
             _ => None,
         };
+        let receive = Rc::new(gateway.receive_control());
         let configuration = Self {
             gateway,
-            http_clients,
             channel_registration: Mutex::new(registration),
             provider: RefCell::new(provider),
             mode: Cell::new(mode),
             owners: OnDemand::new(),
-            receive: Rc::new(ReceiveControl::new(WechatSlots::new(receive_slots))),
+            receive,
             inbound,
             entropy,
             storage,
@@ -400,12 +438,7 @@ where
     /// Loads the owner book, once; a linked channel needs it.
     async fn load_owners(&self) -> Result<&Owners<Storage>, OwnersError> {
         self.owners
-            .get_or_load(|| {
-                Owners::load(
-                    self.storage.clone(),
-                    PairingEntropy::new(self.entropy.clone()),
-                )
-            })
+            .get_or_load(|| self.gateway.load_owners(self.storage.clone()))
             .await
     }
 
@@ -415,7 +448,7 @@ where
     }
 
     /// The provider of the stored configuration.
-    fn provider(&self) -> Option<Rc<Wechat<'static, T, D>>> {
+    fn provider(&self) -> Option<Rc<Wechat>> {
         self.provider.borrow().clone()
     }
 
@@ -444,7 +477,7 @@ where
 
     fn restart_receive(&self) {
         // Without a free slot the control reports `no_slot` and retries.
-        let _no_slot = sync_receive(self);
+        let _no_slot = self.gateway.sync_receive(self);
         self.receive.restart();
     }
 
@@ -476,7 +509,7 @@ where
             return Err(ConfigureError::Storage);
         }
         let provider = Rc::new(Wechat::with_context_tokens(
-            self.http_clients.clone(),
+            self.gateway.http(),
             config.into(),
             self.inbound.context_tokens(),
         ));
@@ -522,7 +555,7 @@ where
     async fn set_mode(&self, mode: ChannelMode) -> Result<(), ModeError> {
         let mut channel_registration = self.channel_registration.lock().await;
         let previous = self.mode.get();
-        if let Err(error) = store_mode(&self.storage, mode).await {
+        if let Err(error) = self.gateway.store_mode(&self.storage, mode).await {
             log::error!("failed to store the WeChat channel mode: {error}");
             return Err(ModeError::Storage);
         }
@@ -536,7 +569,7 @@ where
                     }
                     Err(error) => {
                         log::warn!("rejected the WeChat channel: {error}");
-                        if let Err(error) = store_mode(&self.storage, previous).await {
+                        if let Err(error) = self.gateway.store_mode(&self.storage, previous).await {
                             log::error!("failed to restore the WeChat channel mode: {error}");
                         }
                         return Err(ModeError::Registration);
@@ -560,15 +593,9 @@ where
     }
 }
 
-impl<Storage, T, D, R> ChannelControl for ChannelConfiguration<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> ChannelControl for ChannelConfiguration<Storage> {
     type Storage = Storage;
-    type Slots = WechatSlots<R, D>;
+    type Slots = ReceiveSlots;
 
     fn configured(&self) -> bool {
         self.is_configured()
@@ -595,26 +622,16 @@ where
     }
 }
 
-struct ConfigEndpoint<
-    Storage,
-    T: 'static = http_client::Tcp,
-    D: 'static = http_client::Resolver,
-    R: 'static = http_client::ReceiveSocket,
-> {
-    configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
+/// `POST` stores a configuration; the channel status is under `/status`.
+struct ConfigEndpoint<Storage> {
+    configuration: Rc<ChannelConfiguration<Storage>>,
 }
 
 fn json_response(status: u16, body: &'static [u8]) -> HttpResponse {
     HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
 }
 
-impl<Storage, T, D, R> HttpEndpoint for ConfigEndpoint<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {

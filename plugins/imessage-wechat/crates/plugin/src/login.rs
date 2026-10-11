@@ -18,7 +18,6 @@ use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpReque
 use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use wechat::{LoginCredentials, LoginError, LoginStatus, WechatLogin};
 
@@ -120,18 +119,6 @@ impl Drop for StopOnDrop {
 pub(crate) struct LoginWatch(Rc<LoginShared>);
 
 impl LoginWatch {
-    /// A watch of a login service that never ran, for tests.
-    #[cfg(test)]
-    pub(crate) fn idle() -> Self {
-        Self(Rc::new(LoginShared {
-            status: RefCell::new(SessionStatus::Idle),
-            commands: Signal::new(),
-            started: Signal::new(),
-            control: Mutex::new(()),
-            stopped: Cell::new(false),
-        }))
-    }
-
     /// Returns whether a QR code is issued and not yet confirmed or ended.
     pub(crate) fn waiting_for_scan(&self) -> bool {
         matches!(
@@ -142,23 +129,17 @@ impl LoginWatch {
 }
 
 /// `POST`, `GET`, and `DELETE` on [`crate::LOGIN_API_PATH`].
-pub(crate) struct LoginEndpoint<Storage, T: 'static, D: 'static, R: 'static> {
+pub(crate) struct LoginEndpoint<Storage> {
     shared: Rc<LoginShared>,
-    configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
+    configuration: Rc<ChannelConfiguration<Storage>>,
 }
 
-impl<Storage, T, D, R> LoginEndpoint<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> LoginEndpoint<Storage> {
     /// Creates the endpoint and the runtime future that must run as one task.
     ///
     /// `default_api_base` is used when no configuration is stored.
     pub(crate) fn new(
-        configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
+        configuration: Rc<ChannelConfiguration<Storage>>,
         default_api_base: String,
         timing: LoginTiming,
     ) -> (Self, LoginRuntime) {
@@ -230,13 +211,7 @@ where
     }
 }
 
-impl<Storage, T, D, R> HttpEndpoint for LoginEndpoint<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for LoginEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
@@ -299,20 +274,14 @@ struct Confirmed {
     api_base: String,
 }
 
-struct LoginRunner<Storage, T: 'static, D: 'static, R: 'static> {
+struct LoginRunner<Storage> {
     shared: Rc<LoginShared>,
-    configuration: Rc<ChannelConfiguration<Storage, T, D, R>>,
+    configuration: Rc<ChannelConfiguration<Storage>>,
     default_api_base: String,
     timing: LoginTiming,
 }
 
-impl<Storage, T, D, R> LoginRunner<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> LoginRunner<Storage> {
     async fn run(self) {
         let _stopped = StopOnDrop(Rc::clone(&self.shared));
         let mut command = self.shared.commands.wait().await;
@@ -347,7 +316,7 @@ where
             .stored_api_base()
             .await
             .unwrap_or_else(|| self.default_api_base.clone());
-        let login = WechatLogin::new(self.configuration.http_clients.clone(), api_base);
+        let login = WechatLogin::new(self.configuration.gateway.http(), api_base);
         let qrcode = match login.qrcode().await {
             Ok(qrcode) => qrcode,
             Err(error) => {
@@ -370,7 +339,7 @@ where
         }
     }
 
-    async fn poll(&self, login: &WechatLogin<'static, T, D>, qrcode: &str) -> Option<Confirmed> {
+    async fn poll(&self, login: &WechatLogin, qrcode: &str) -> Option<Confirmed> {
         loop {
             let polled = Instant::now();
             match login.status(qrcode).await {

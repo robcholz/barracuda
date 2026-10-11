@@ -7,12 +7,13 @@
 - Workflow Actions, Events, and Agent Tools: none of its own; inbound text
   from allowed accounts is published through `IMessageGateway::publish` (the
   Gateway's `gateway.message.received` Event)
-- Construction: `IMessageWechatPlugin::new(context)` keeps
-  `context.http_clients`, `context.receive_slots`, and `context.entropy`
+- Construction: `IMessageWechatPlugin::new(context)` keeps only
+  `context.entropy` (for `X-WECHAT-UIN`); HTTP, receive slots, mode, owners
+  (and their pairing codes), routes, and status come from `IMessageGateway`
 - Owned tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1
   each), both started in `start` and raced against the `PluginTaskToken`
-- Receive slots: one from `PluginContext::receive_slots` while the channel is
-  linked and in `send_receive`; none otherwise
+- Receive slots: one of the Gateway's (`IMessageGateway::receive_control`)
+  while the channel is linked and in `send_receive`; none otherwise
 - Storage (Plugin-scoped KV keys):
   - `configuration`: the complete provider configuration;
   - `mode`: `"disabled"` or `"send_receive"` (JSON string);
@@ -43,15 +44,14 @@ before modes existed both receive; a stored `send` is read as `send_receive`.
 ## Receiving
 
 `wechat_receive_task` owns the shared receive runtime
-(`barracuda-imessage-gateway-channel`). While the channel is linked and in
+(`IMessageGateway::receive_runtime`). While the channel is linked and in
 `send_receive` it holds one receive-slot lease, otherwise it is parked and
 holds no connection. When every slot is in use the channel reports `no_slot`
-and waits on `ReceiveSlots::wait_available`, so it starts as soon as another
-channel frees one.
+and waits for a freed slot, so it starts as soon as another channel frees
+one.
 
 Each receive session opens one kept-alive connection to the configured
-`api_base` through the lease's own client factory with the Gateway's poll
-helper (`barracuda_imessage_gateway_plugin::poll`; not the `send` helper,
+`api_base` over the lease with `GatewayHttp::poll` (not `GatewayHttp::send`,
 whose 30 s deadline is shorter than a long poll) and repeats:
 
 1. await `IMessageGateway::ready()`;
@@ -127,8 +127,8 @@ shared channel mapping (`entry_status`): `off` 未配置 when not linked, `off`
 
 The configuration can also be obtained by QR login at
 `/api/gateway/wechat/login`. Registration retains two HTTP routes: the
-configuration prefix, which also serves `/mode` and `/owners`
-(`ChannelEndpoint`), and the exact login route. Both configuration paths
+configuration prefix, whose `/status`, `/mode`, and `/owners` the Gateway
+serves (`IMessageGateway::serve_channel`), and the exact login route. Both configuration paths
 store and register through one shared path, so a confirmed login writes the
 same `configuration` key and format as a manual `POST /api/gateway/wechat`:
 the iLink `bot_token` as `token`, iLink's `baseurl` (or the `api_base` used for

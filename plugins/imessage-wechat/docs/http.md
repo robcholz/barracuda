@@ -39,7 +39,7 @@ because iLink sends need inbound activity.
 ## `GET`/`POST /api/gateway/wechat/owners`
 
 The allowed accounts (授权账号) and the pairing code (绑定码), served by the
-shared `OwnersEndpoint`. `GET` answers
+Gateway's shared owners route. `GET` answers
 `{"owners":[{"id":"…@im.wechat","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`;
 `POST` `{"remove":"<id>"}` or `{"rotate":true}` answers `204`. A WeChat owner
 id is the sender's `from_user_id`; it has no label. A message whose trimmed
