@@ -25,7 +25,8 @@ use barracuda_imessage_gateway_plugin::{
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
+    Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
+    PluginStartContext, PluginTaskToken,
 };
 use barracuda_time_plugin::UtcClock;
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
@@ -50,6 +51,10 @@ impl AgentIMessageGatewayPlugin {
 }
 
 impl Plugin for AgentIMessageGatewayPlugin {
+    /// Its bundled Workflows are read from its `/resources`.
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
