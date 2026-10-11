@@ -10,9 +10,7 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 use std::time::Duration;
 
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{
-    BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity,
-};
+use barracuda_plugin::api::{BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
 };
