@@ -8,7 +8,7 @@ use barracuda_plugin_manifest::{
 
 const VALID: &str = r#"
 id = "web-search"
-depends-on = ["webserver", "agent"]
+depends-on = ["alpha", "beta"]
 description = "Provides Web search."
 "#;
 
@@ -60,7 +60,7 @@ fn parses_a_canonical_manifest() {
     let manifest = parse(VALID).expect("valid Plugin manifest");
 
     assert_eq!(manifest.id(), "web-search");
-    assert_eq!(manifest.dependencies(), ["webserver", "agent"]);
+    assert_eq!(manifest.dependencies(), ["alpha", "beta"]);
     assert_eq!(manifest.description(), "Provides Web search.");
 }
 
