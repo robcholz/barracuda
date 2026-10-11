@@ -1,7 +1,8 @@
 # IMessage WeChat Plugin
 
 The IMessage WeChat Plugin adds WeChat iLink as an iMessage Gateway channel:
-it links a bot by QR login, sends through iLink, and receives by long polling.
+it links a bot by QR login, sends text and files through iLink and its CDN,
+and receives messages and their files by long polling.
 
 - Plugin ID: `imessage-wechat`
 - Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
@@ -10,7 +11,7 @@ it links a bot by QR login, sends through iLink, and receives by long polling.
 - Provided capabilities: none
 - Required capabilities: `IMessageGateway` from `imessage-gateway`,
   `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
-- Workflow: none of its own; inbound text from allowed accounts is published
+- Workflow: none of its own; inbound messages from allowed accounts are published
   through `IMessageGateway::publish` (the Gateway's `gateway.message.received`
   Event)
 - Agent Tools: none
@@ -83,13 +84,16 @@ whose 30 s deadline is shorter than a long poll) and repeats:
    empty success: the session reports `receiving` and reopens the connection
    at once;
 4. for each new message: keep only `message_type` 1 (user) messages without a
-   `group_id` whose `item_list` has text items (type 1); the bot's own
-   (`message_type` 2) and non-text messages are skipped and counted. Message
-   ids are `u64` on the wire and are kept as decimal strings;
-5. classify the sender `from_user_id` (no label) with the owner book:
-   - owner: publish `gateway.message.received` with route
+   `group_id` whose `item_list` has text items (type 1) or files (image 2,
+   voice 3, file 4, video 5); the bot's own (`message_type` 2) and messages
+   with neither are skipped and counted. Message ids are `u64` on the wire
+   and are kept as decimal strings;
+5. classify the sender `from_user_id` (no label) with the owner book, on the
+   text, before any file is fetched:
+   - owner: fetch the message's files (see "Files"), then publish
+     `gateway.message.received` with route
      `{channel:"wechat", conversation_id:<from_user_id>}` (no `thread_id`),
-     the message id, and the text;
+     the message id, the text, and the files as `attachments`;
    - pairing code: reply once with the paired message through the normal
      send path;
    - anyone else: drop and count;
@@ -109,6 +113,71 @@ loop halts with receive state `error` and message
 「需要重新扫码 / Scan again to relink」 until a new QR login is confirmed or
 the configuration or mode changes.
 
+**Files.** Every iLink file lives on the CDN (`cdn_base`, default
+`https://novac2c.cdn.weixin.qq.com/c2c`), AES-128-ECB encrypted with PKCS#7
+padding under a key of its own. An item names it by `media.full_url`, else
+`media.encrypt_query_param` (downloaded from
+`<cdn_base>/download?encrypted_query_param=<param>`), and carries the key:
+`image_item.aeskey` as 32 hex digits, else `media.aes_key` as base64 of the
+16 raw bytes or of their hex digits.
+
+| Item | Kind | MIME type |
+| --- | --- | --- |
+| `image_item` (2) | `image` | from the decrypted bytes (JPEG, PNG, GIF, WebP), else the default |
+| `voice_item` (3) | `audio` | `audio/amr` for `encode_type` 5, `audio/mpeg` for 7, else `audio/silk` (stored as sent, not transcoded) |
+| `file_item` (4) | `file` | from `file_name`'s extension; `file_name` is the attachment's `filename` |
+| `video_item` (5) | `video` | `video/mp4` |
+
+A file item's `len` over `IMessageGateway::attachment_max_bytes()` is refused
+without a request. Otherwise the download (`GatewayHttp::download` on the
+shared request pool, never the receive slot, capped at the limit plus one
+block) is decrypted read by read: a sink decrypts each read and hands the
+plaintext through a two-piece channel to `IMessageGateway::store_inbound`,
+which writes `/workspace/cache/gateway/wechat/`; the decryptor holds back the
+last block until it checks and strips the padding. An image without any key
+is stored as sent (`download_inbound`). A file that has no reference or key,
+is over the limit, or whose download, decryption, or storing fails does not
+drop the message: one line is appended to its text, `[<kind> too large, not
+received]` or `[<kind> not received]`. Strangers' and pairing messages' files
+are never fetched. CDN URLs are credentials and are never logged. Files are
+fetched one after another while the next poll waits.
+
+Media items make a batch larger (each `encrypt_query_param` is several hundred
+bytes); a batch over 32 KiB is still skipped past its cursor as below.
+
+**Sending files.** `send_media` (image, video, file; audio goes as a file
+item, as iLink's own client sends no voice) takes a file that can be read
+twice: bytes, or a source such as `gateway.send_media`'s `file` command. A
+stream is `InvalidRequest`.
+
+1. One pass computes the plaintext MD5 and length.
+2. `POST {api_base}/ilink/bot/getuploadurl` with the bot's headers and
+   `{"filekey","media_type","to_user_id","rawsize","rawfilemd5","filesize","no_need_thumb":true,"aeskey","base_info"}`:
+   `filekey` and the AES key are 16 bytes each from the Platform entropy, as
+   hex; `media_type` is 1 image, 2 video, 3 file; `filesize` is the
+   ciphertext length (the next whole 16-byte block).
+3. `POST` the file, encrypted as it is read again, to `upload_full_url`, else
+   `<cdn_base>/upload?encrypted_query_param=<upload_param>&filekey=<filekey>`,
+   as `application/octet-stream` with a `Content-Length` (never chunked, and
+   without the bot token). The CDN answers the download parameter in its
+   `x-encrypted-param` header; a non-200 answer is `Platform` with the status
+   and `x-error-message`.
+4. A caption goes first as a text message of its own; then one
+   `sendmessage` with the item: `image_item {media, mid_size}`,
+   `video_item {media, video_size}`, or `file_item {media, file_name, len}`,
+   where `media` is `{encrypt_query_param, aes_key: base64 of the key's hex
+   digits, encrypt_type: 1}`, with the recipient's context token as for text.
+
+Like every send, the upload must finish within the Gateway's 30 s
+`SEND_TIMEOUT`. iLink errors (`ret`/`errcode`) are `Platform`, 401/403
+`Authentication`, 429 `RateLimited`, a failed read of the file `Stream`.
+
+Sources: Tencent's own iLink client, `@tencent-weixin/openclaw-weixin` 2.4.10
+(npm, published by Tencent): `src/api/types.ts` (items, `getuploadurl`),
+`src/cdn/aes-ecb.ts`, `cdn-url.ts`, `cdn-upload.ts`, `upload.ts`,
+`pic-decrypt.ts` (encryption, URLs, `x-encrypted-param`, key encodings),
+`src/media/media-download.ts` and `src/messaging/send.ts`.
+
 **Sending with the context token.** The provider attaches the latest stored
 `context_token` of the recipient (`to_user_id`) to every send. A target
 `thread_id` still overrides it. The token is never put in the route's
@@ -125,7 +194,10 @@ socket buffers, one mbedTLS session over them while connected (record buffers
 of about 2 × 16.7 KiB on the heap), a 2 KiB response-header buffer and a
 512-byte read chunk per poll, the reply body (capped at 32 KiB, plus a 4 KiB
 tail only while a larger batch is skipped), up to 32 remembered message ids, and up to 16 context tokens
-(each user id ≤ 128 bytes and token ≤ 1 KiB).
+(each user id ≤ 128 bytes and token ≤ 1 KiB). While a file downloads: a
+request pool connection with the Gateway's download buffers, one AES context,
+and at most two decrypted reads in flight; an upload holds one connection, one
+AES context, and one file chunk.
 
 **Login.** The QR login keeps its own task. A confirmed login stores the
 configuration like a manual `POST`; when its `ilink_bot_id` differs from the

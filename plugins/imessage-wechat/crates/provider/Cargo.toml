@@ -9,6 +9,10 @@ license = "Apache-2.0"
 [dependencies]
 futures-lite = { version = "2.6.1", default-features = false, features = ["alloc"] }
 barracuda-imessage-gateway-plugin.workspace = true
+barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
+barracuda-tls.workspace = true
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.145", default-features = false, features = ["alloc"] }
 
@@ -21,6 +25,8 @@ barracuda-webserver-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-futures.workspace = true
+embassy-net.workspace = true
+embedded-io-async = "0.7"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2.6.1", default-features = true }
 

@@ -51,7 +51,10 @@ yet.
 ## `POST /api/gateway/wechat`
 
 Configures or replaces the WeChat message-channel provider. The request body is
-a JSON object containing `token`, `api_base`, `app_id`, `client_version`, `route_tag`, and `x_wechat_uin`. Fields with provider defaults may be omitted.
+a JSON object containing `token`, `api_base`, `app_id`, `client_version`,
+`route_tag`, `x_wechat_uin`, and `cdn_base` (the CDN files are downloaded from
+and uploaded to, default `https://novac2c.cdn.weixin.qq.com/c2c`). Fields with
+provider defaults may be omitted.
 
 Responses:
 

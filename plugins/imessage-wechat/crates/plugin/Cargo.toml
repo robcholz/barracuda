@@ -16,6 +16,8 @@ embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
+barracuda-tls.workspace = true
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
@@ -23,6 +25,7 @@ thiserror = { version = "2", default-features = false }
 wechat = { path = "../provider" }
 
 [dev-dependencies]
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 embedded-io-async = "0.7"
 picoserve = { version = "0.19.0", default-features = false, features = ["alloc", "embassy"] }
 portable-atomic = { workspace = true, features = ["std"] }

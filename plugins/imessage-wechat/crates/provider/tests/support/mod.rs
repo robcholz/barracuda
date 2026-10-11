@@ -14,7 +14,7 @@ use barracuda_plugin::manager::{
 };
 use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_workflow_plugin::WorkflowPlugin;
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select4, Either4};
 use futures_lite::future::block_on;
 
 /// Port of the scripted iLink service on the loopback network.
@@ -44,8 +44,22 @@ impl Plugin for Probe {
 
 /// Runs `test` with the HTTP of a real Gateway on a loopback network, and an
 /// iLink service there answering `steps` in order.
+#[allow(
+    dead_code,
+    reason = "the media tests run their CDN through `bench_with`"
+)]
 pub fn bench(
     steps: impl IntoIterator<Item = ScriptStep>,
+    test: impl AsyncFnOnce(GatewayHttp, &ScriptedServer),
+) {
+    bench_with(steps, |_stack| core::future::pending(), test);
+}
+
+/// [`bench`] with `serve`, given the loopback stack, running beside the
+/// iLink service, for another server of the test's own.
+pub fn bench_with<Serve: core::future::Future<Output = ()>>(
+    steps: impl IntoIterator<Item = ScriptStep>,
+    serve: impl FnOnce(embassy_net::Stack<'static>) -> Serve,
     test: impl AsyncFnOnce(GatewayHttp, &ScriptedServer),
 ) {
     let network = loopback_network();
@@ -77,10 +91,11 @@ pub fn bench(
         .register(Probe(Rc::clone(&gateway)))
         .expect("register probe");
     let http = gateway.take().expect("Gateway capability").http();
-    let outcome = block_on(select3(
+    let outcome = block_on(select4(
         network.run(),
         server.run::<4>(stack, PORT),
+        serve(stack),
         test(http, &server),
     ));
-    assert!(matches!(outcome, Either3::Third(())), "the bench stopped");
+    assert!(matches!(outcome, Either4::Fourth(())), "the bench stopped");
 }

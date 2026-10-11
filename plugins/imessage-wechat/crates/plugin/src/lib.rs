@@ -10,6 +10,7 @@ extern crate std;
 #[cfg(test)]
 mod bench;
 mod login;
+mod media;
 mod receive;
 
 use alloc::boxed::Box;
@@ -307,6 +308,8 @@ struct ConfigRequest {
     route_tag: Option<String>,
     #[serde(default = "default_x_wechat_uin")]
     x_wechat_uin: String,
+    #[serde(default = "default_cdn_base")]
+    cdn_base: String,
 }
 
 impl From<ConfigRequest> for WechatConfig {
@@ -318,6 +321,7 @@ impl From<ConfigRequest> for WechatConfig {
             client_version: value.client_version,
             route_tag: value.route_tag,
             x_wechat_uin: value.x_wechat_uin,
+            cdn_base: value.cdn_base,
         }
     }
 }
@@ -330,6 +334,9 @@ fn default_app_id() -> String {
 }
 fn default_client_version() -> String {
     "131329".into()
+}
+fn default_cdn_base() -> String {
+    wechat::DEFAULT_CDN_BASE.into()
 }
 fn default_x_wechat_uin() -> String {
     "MA==".into()
@@ -345,6 +352,7 @@ impl ConfigRequest {
             client_version: default_client_version(),
             route_tag: None,
             x_wechat_uin: default_x_wechat_uin(),
+            cdn_base: default_cdn_base(),
         }
     }
 }
@@ -400,11 +408,14 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
         };
         let inbound = InboundState::load(&storage, timing).await;
         let provider = config.map(|config| {
-            Rc::new(Wechat::with_context_tokens(
-                gateway.http(),
-                config.into(),
-                inbound.context_tokens(),
-            ))
+            Rc::new(
+                Wechat::with_context_tokens(
+                    gateway.http(),
+                    config.into(),
+                    inbound.context_tokens(),
+                )
+                .with_entropy(entropy.clone()),
+            )
         });
         let registration = match &provider {
             Some(provider) if mode.registers() => Some(
@@ -508,11 +519,14 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
             log::error!("failed to persist Wechat gateway configuration: {error}");
             return Err(ConfigureError::Storage);
         }
-        let provider = Rc::new(Wechat::with_context_tokens(
-            self.gateway.http(),
-            config.into(),
-            self.inbound.context_tokens(),
-        ));
+        let provider = Rc::new(
+            Wechat::with_context_tokens(
+                self.gateway.http(),
+                config.into(),
+                self.inbound.context_tokens(),
+            )
+            .with_entropy(self.entropy.clone()),
+        );
         let previous_provider = self.provider.replace(Some(Rc::clone(&provider)));
         if !self.mode.get().registers() {
             log::info!("configured Wechat gateway provider (disabled)");
@@ -685,6 +699,7 @@ mod tests {
             client_version: "42".into(),
             route_tag: Some("route".into()),
             x_wechat_uin: "MQ==".into(),
+            cdn_base: "https://cdn.example/c2c".into(),
         };
 
         let bytes = encode_configuration(&config)?;
@@ -696,6 +711,9 @@ mod tests {
         assert_eq!(restored.client_version, config.client_version);
         assert_eq!(restored.route_tag, config.route_tag);
         assert_eq!(restored.x_wechat_uin, config.x_wechat_uin);
+        assert_eq!(restored.cdn_base, config.cdn_base);
+        let older = decode_configuration(br#"{"token":"t"}"#)?;
+        assert_eq!(older.cdn_base, wechat::DEFAULT_CDN_BASE);
         Ok(())
     }
 }

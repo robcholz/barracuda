@@ -121,6 +121,8 @@ pub(crate) struct Setup {
     pub(crate) steps: Vec<ScriptStep>,
     /// Answers to `sendmessage`.
     pub(crate) sends: Vec<ScriptStep>,
+    /// Answers to CDN downloads (`/c2c/download`).
+    pub(crate) downloads: Vec<ScriptStep>,
     /// Other receivers hold every Gateway receive slot before the channel
     /// loads.
     pub(crate) hold_slots: bool,
@@ -137,6 +139,7 @@ impl Setup {
             stored,
             steps,
             sends: Vec::new(),
+            downloads: Vec::new(),
             hold_slots: false,
             occupy_channel: false,
             timing,
@@ -191,6 +194,8 @@ pub(crate) struct Harness<S> {
     pub(crate) server: ScriptedServer,
     /// Answers `sendmessage`.
     sends: ScriptedRoute,
+    /// Answers CDN downloads.
+    pub(crate) downloads: ScriptedRoute,
     /// Receivers holding every Gateway slot, when the setup asks for it.
     held: RefCell<Vec<ReceiveControl<ReceiveSlots>>>,
     /// The Gateway's slot count.
@@ -239,6 +244,16 @@ impl<S: PluginStorage> Harness<S> {
                     text(&record["text"]),
                 )
             })
+            .collect()
+    }
+
+    /// The `attachments` of every published message, in order; `null` for
+    /// one without.
+    pub(crate) fn attachments(&self) -> Vec<Value> {
+        self.records
+            .borrow()
+            .iter()
+            .map(|record| record["attachments"].clone())
             .collect()
     }
 
@@ -403,7 +418,7 @@ impl WorkflowActionHandler for Record {
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
         "test.record",
-        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"}}}"#,
+        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"},"attachments":{"type":"array"}}}"#,
         r#"{"type":"object"}"#
     );
 
@@ -413,14 +428,11 @@ impl WorkflowActionHandler for Record {
     }
 }
 
+/// Hands the whole Event, attachments included, to `test.record`.
 const RECORD_WORKFLOW: &str = r#"{
     "id": "record-inbound",
     "match": {"event": "gateway.message.received"},
-    "steps": [{"call": "test.record", "arguments": {
-        "route": "$event.input.route",
-        "message_id": "$event.input.message_id",
-        "text": "$event.input.text"
-    }}]
+    "steps": [{"call": "test.record"}]
 }"#;
 
 /// Loads a Workflow that hands every inbound message to [`Record`].
@@ -461,6 +473,7 @@ struct Probe<Sc> {
     scenario: Option<Sc>,
     server: ScriptedServer,
     sends: ScriptedRoute,
+    downloads: ScriptedRoute,
     records: Rc<RefCell<Vec<Value>>>,
     test: Rc<RefCell<Option<TestFuture>>>,
     runtimes: Option<(ReceiveRuntime, LoginRuntime)>,
@@ -530,6 +543,7 @@ impl<Sc: Scenario> Plugin for Probe<Sc> {
             webserver,
             server: self.server.clone(),
             sends: self.sends.clone(),
+            downloads: self.downloads.clone(),
             held: RefCell::new(held),
             capacity,
             records: Rc::clone(&self.records),
@@ -558,7 +572,8 @@ impl<Sc: Scenario> Plugin for Probe<Sc> {
 
 async fn seed<S: PluginStorage>(storage: &S, stored: &Stored) {
     if stored.configured {
-        let config = ConfigRequest::from_login("bot-token".into(), API_BASE.into());
+        let mut config = ConfigRequest::from_login("bot-token".into(), API_BASE.into());
+        config.cdn_base = format!("{API_BASE}/c2c");
         let bytes = serde_json::to_vec(&config).expect("encode configuration");
         storage
             .put(CONFIGURATION_STORAGE_KEY, bytes.as_slice())
@@ -644,10 +659,11 @@ async fn bench(spawner: Spawner, mut setup: Setup, scenario: impl Scenario) {
     let mut context = plugin_context(&network);
     let server = ScriptedServer::new(core::mem::take(&mut setup.steps));
     let sends = server.route("/ilink/bot/sendmessage", core::mem::take(&mut setup.sends));
+    let downloads = server.route("/c2c/download", core::mem::take(&mut setup.downloads));
     let serving = server.clone();
     spawner.spawn(
         run_future(Box::pin(async move {
-            let _stopped = join(network.run(), serving.run::<4>(stack, PORT)).await;
+            let _stopped = join(network.run(), serving.run::<6>(stack, PORT)).await;
         }))
         .expect("spawn the network"),
     );
@@ -663,6 +679,7 @@ async fn bench(spawner: Spawner, mut setup: Setup, scenario: impl Scenario) {
             scenario: Some(scenario),
             server,
             sends,
+            downloads,
             records,
             test: Rc::clone(&test),
             runtimes: None,
