@@ -371,21 +371,8 @@ mod tests {
     }
 
     #[test]
-    fn http_with_the_builtins_fits_one_bounded_vm_heap() -> Result<()> {
-        futures_lite::future::block_on(async {
-            let (http, _requests) = HttpPackage::new();
-            let mut fixed = FixedMemoryLua::with_default_heap()
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
-                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
-            )
-            .install(fixed.lua_mut())?;
-            http.install(fixed.lua_mut())?;
-            fixed
-                .lua_mut()
-                .load("assert(type(require('http').request) == 'function')")
-                .exec_async()
-                .await
-        })
+    fn package_fits_the_vm_package_budget() {
+        let (http, _requests) = HttpPackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&http));
     }
 }

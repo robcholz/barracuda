@@ -10,6 +10,16 @@ use barracuda_lua::{Lua, Package, Result as LuaResult};
 use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
 
+/// Most Lua packages the registry holds at once.
+pub const MAX_LUA_PACKAGES: usize = 32;
+
+/// Lua heap one installed package may take from a run.
+///
+/// The VM sizes each run's heap so that the built-in packages, this many
+/// packages at this budget each, and the script all fit; each package proves
+/// it stays within the budget.
+pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 8 * 1024;
+
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
     /// Returns the stable name accepted by Lua's `require` function.
@@ -43,7 +53,8 @@ impl LuaPackageRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error when the package name is empty or already registered.
+    /// Returns an error when the package name is empty or already registered,
+    /// or when the registry already holds [`MAX_LUA_PACKAGES`] packages.
     pub fn register(
         &self,
         package: impl LuaPackage + 'static,
@@ -55,6 +66,9 @@ impl LuaPackageRegistry {
         }
 
         let mut state = self.state.lock();
+        if state.entries.len() >= MAX_LUA_PACKAGES {
+            return Err(LuaPackageRegistryError::Full);
+        }
         if state
             .entries
             .iter()
@@ -130,4 +144,7 @@ pub enum LuaPackageRegistryError {
     /// Only one Plugin may own a given Lua package name.
     #[error("Lua package `{0}` is already registered")]
     DuplicateName(&'static str),
+    /// The registry already holds [`MAX_LUA_PACKAGES`] packages.
+    #[error("the VM holds at most {MAX_LUA_PACKAGES} Lua packages")]
+    Full,
 }

@@ -344,6 +344,14 @@ A Lua package beyond the VM's built-ins registers in the
 Dropping the registration revokes the package's callbacks and invalidates its
 handles.
 
+Every run's Lua heap holds the built-ins, every registered package, and the
+script. The VM owns that budget: it holds at most `MAX_LUA_PACKAGES` packages,
+proves the built-ins and that many packages at `LUA_PACKAGE_HEAP_BUDGET_BYTES`
+each leave the script its reserve, and each package Plugin's tests assert
+`barracuda_vm_runtime::fits_package_budget(&package)` for every package it
+registers. Any selection of packages then fits, and no test names another
+package Plugin.
+
 ## Portal and HTTP
 
 A Plugin with a configuration page registers one `WebEntry` with

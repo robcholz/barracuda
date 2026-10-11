@@ -13,7 +13,7 @@ mod vm;
 
 pub use memory::VmMemoryPoolError;
 #[cfg(feature = "test-fixture")]
-pub use memory::{FixedMemoryLua, FixedMemoryLuaError};
+pub use memory::{FixedMemoryLua, FixedMemoryLuaError, fits_package_budget};
 pub use runtime::{VmRuntime, VmRuntimeStartError};
 pub use vm::{
     SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits,

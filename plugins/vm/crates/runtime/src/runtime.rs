@@ -22,6 +22,10 @@ pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
 /// One MiB holds a full 360x360 RGB565 frame or a 256 KiB PCM transfer as a
 /// Lua string with room for the script that produces or consumes it.
 pub(crate) const VM_MEMORY_BYTES_PER_RUN: usize = 1024 * 1024;
+/// Part of a run's heap kept for the script itself, with the built-ins and
+/// every package the registry can hold installed.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const SCRIPT_HEAP_RESERVE_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);

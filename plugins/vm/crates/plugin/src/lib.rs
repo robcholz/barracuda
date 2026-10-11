@@ -20,7 +20,9 @@ pub use barracuda_lua::{
     Bytes, Context, Error, Function, Lua, MetaMethod, Package, Result, Table, UserData,
     UserDataHandle, UserDataMethods,
 };
-pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
+pub use barracuda_vm_package_api::{
+    LuaPackage, LuaPackageRegistry, LUA_PACKAGE_HEAP_BUDGET_BYTES, MAX_LUA_PACKAGES,
+};
 pub use barracuda_vm_runtime::{
     SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse,
     VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
