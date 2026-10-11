@@ -71,6 +71,24 @@ Dependent Plugins may register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
 
+## Attachments
+
+A message reaches an Agent as text plus `Attachment` references
+(`Message::with_attachments`, the `attachments` of `session.append`): a kind,
+a path in the shared filesystem view (typically `/workspace/cache/...` or
+`/workspace/media/...`), a MIME type, an optional filename and a size. The
+transcript stores a user message with attachments with array content: a
+`{"type":"text"}` part and one internal `{"type":"media",...}` part per file.
+Before each model request the Agent reads, through its `ScopedVfs`, the newest
+attachments the model configuration lets it inline (`input_modalities`,
+`max_images_in_context`, `image_max_bytes`; see `http.md`), recognizing
+images by their bytes, and the request base64-encodes them into the body.
+Every other attachment, and one whose file is gone (the Workspace cache does
+not survive a restart), becomes a text line naming it by path. History
+compaction and memory extraction read attachments as labels such as
+`[image: cat.jpg]`, and the context size estimate counts an image as 1600
+tokens.
+
 ## Tools and background Tools
 
 A Tool is either an ordinary Tool (`Tool::new` with a `ToolHandler`), whose call
@@ -157,10 +175,11 @@ helper, not a runtime dependency on another contributor's files.
 The page is built on the portal UI kit: a header with the live `socket` figure
 (`resources/web/figure.js`, using the shell's global `HL`), radio cards for the
 API format (`backend`) and purpose, the 设为默认模型 switch (`default`),
-connection fields (`base_url`, `model`, `api_key`) and an open 高级 fold with
-`timeout_ms`, `max_tokens` and `image_max_bytes`. It sends every field the
-endpoint requires, as a one-element batch, and renders zh or en from the
-portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
+connection fields (`base_url`, `model`, `api_key`), the 输入 switches 图片 and
+PDF (`input_modalities.image`, `input_modalities.pdf`), and an open 高级 fold
+with `timeout_ms`, `max_tokens`, `image_max_bytes` and
+`max_images_in_context`. It sends every field the endpoint requires, as a
+one-element batch, and renders zh or en from the portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
 
 The page submits the existing POST configuration contract and, once the device
 accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and

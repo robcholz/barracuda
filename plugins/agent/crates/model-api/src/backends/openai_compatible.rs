@@ -1,19 +1,21 @@
 //! OpenAI-compatible backend.
 
 use alloc::format;
-use alloc::string::String;
+use alloc::vec::Vec;
 
+use barracuda_agent_message::attachment::has_media;
+use barracuda_agent_message::json::Sink;
 use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde_json::Value;
 
+use super::super::attachments::{replace_parts, write_with_media, Inline, RequestMedia};
 use super::super::chat_stream::ProviderStream;
 use super::super::errors::Error;
-use super::super::media::{prepare_asset, Prepared};
 use super::super::transport::Transport;
-use super::super::types::{ChatRequest, LlmResponse, MediaRequest};
-use super::body::{encode, validate_tools, write_base64_str, write_compact, write_str, Object};
-use super::shared::{media_text, parse_openai_chat_response, post_json, post_stream};
+use super::super::types::{ChatRequest, LlmResponse};
+use super::body::{encode, validate_tools, write_base64_str, write_compact, Object};
+use super::shared::{parse_openai_chat_response, post_json, post_stream};
 use super::sse::{OpenAiSse, ProviderSse};
 use super::Backend;
 
@@ -33,12 +35,14 @@ struct ChatExtras<'a> {
 fn encode_chat_body(
     backend: &Backend,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
     extras: ChatExtras<'_>,
 ) -> Result<BulkVec<u8>, Error> {
     let tools = request.tools_json.filter(|tools| !tools.is_empty());
     if let Some(tools) = tools {
         validate_tools(tools)?;
     }
+    let converted = convert_media_messages(request, media);
     encode(|sink| {
         let mut body = Object::begin(sink);
         body.value("max_tokens", &Value::from(backend.max_tokens));
@@ -52,12 +56,20 @@ fn encode_chat_body(
             system.end();
             first = false;
         }
-        for message in request.messages.iter().chain(request.reminders) {
+        for (message, converted) in request
+            .messages
+            .iter()
+            .chain(request.reminders)
+            .zip(&converted)
+        {
             if !first {
                 messages.put(b",");
             }
             first = false;
-            messages.put(message.as_bytes());
+            match converted {
+                Some(converted) => write_with_media(messages, converted, media, write_image_part),
+                None => messages.put(message.as_bytes()),
+            }
         }
         messages.put(b"]");
         body.str("model", &backend.model);
@@ -90,16 +102,65 @@ fn encode_chat_body(
     })
 }
 
-fn build_chat_body(backend: &Backend, request: &ChatRequest) -> Result<BulkVec<u8>, Error> {
-    encode_chat_body(backend, request, ChatExtras::default())
+/// Decodes each message that references attachments, with its `media` parts
+/// replaced by inlined images or placeholders; other messages stay `None` and
+/// are copied as stored.
+fn convert_media_messages(request: &ChatRequest<'_>, media: &RequestMedia) -> Vec<Option<Value>> {
+    request
+        .messages
+        .iter()
+        .chain(request.reminders)
+        .enumerate()
+        .map(|(index, message)| {
+            has_media(message.as_str()).then(|| {
+                let mut value = message.to_value();
+                replace_parts(&mut value, index, media, is_image);
+                value
+            })
+        })
+        .collect()
+}
+
+fn is_image(inline: &Inline) -> bool {
+    matches!(inline, Inline::Image { .. })
+}
+
+/// Writes an inlined image as an `image_url` part with a data URL.
+fn write_image_part(sink: &mut dyn Sink, inline: &Inline) {
+    let mut part = Object::begin(sink);
+    if let Inline::Image { media_type, bytes } = inline {
+        let image_url = part.field("image_url");
+        let mut url = Object::begin(image_url);
+        write_base64_str(
+            url.field("url"),
+            &format!("data:{media_type};base64,"),
+            bytes,
+        );
+        url.end();
+        part.str("type", "image_url");
+    }
+    part.end();
+}
+
+fn build_chat_body(
+    backend: &Backend,
+    request: &ChatRequest,
+    media: &RequestMedia,
+) -> Result<BulkVec<u8>, Error> {
+    encode_chat_body(backend, request, media, ChatExtras::default())
 }
 
 /// Like [`build_chat_body`] but sets `stream: true` so the provider replies
 /// with a `text/event-stream` body.
-fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<BulkVec<u8>, Error> {
+fn build_stream_body(
+    backend: &Backend,
+    request: &ChatRequest,
+    media: &RequestMedia,
+) -> Result<BulkVec<u8>, Error> {
     encode_chat_body(
         backend,
         request,
+        media,
         ChatExtras {
             stream: true,
             ..ChatExtras::default()
@@ -110,12 +171,14 @@ fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<BulkVec
 fn build_chat_json_body(
     backend: &Backend,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
     schema_name: &str,
     schema: &Value,
 ) -> Result<BulkVec<u8>, Error> {
     encode_chat_body(
         backend,
         request,
+        media,
         ChatExtras {
             response_format: Some((schema_name, schema)),
             ..ChatExtras::default()
@@ -123,61 +186,13 @@ fn build_chat_json_body(
     )
 }
 
-/// Encodes the media inference request body (no transport).
-fn build_media_body(backend: &Backend, request: &MediaRequest<'_>) -> Result<BulkVec<u8>, Error> {
-    let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
-        return Err(Error::IncompleteMediaRequest);
-    };
-    let prepared = prepare_asset(request.media, backend.image_max_bytes)?;
-    let system_prompt = request.system_prompt.filter(|prompt| !prompt.is_empty());
-    encode(|sink| {
-        let mut body = Object::begin(sink);
-        body.value("max_tokens", &Value::from(backend.max_tokens));
-        let messages = body.field("messages");
-        messages.put(b"[");
-        if let Some(system) = system_prompt {
-            let mut message = Object::begin(messages);
-            message.str("content", system);
-            message.str("role", "system");
-            message.end();
-            messages.put(b",");
-        }
-        let mut message = Object::begin(messages);
-        let content = message.field("content");
-        content.put(b"[");
-        let mut text = Object::begin(content);
-        text.str("text", user_prompt);
-        text.str("type", "text");
-        text.end();
-        content.put(b",");
-        let mut image = Object::begin(content);
-        let image_url = image.field("image_url");
-        let mut url = Object::begin(image_url);
-        let target = url.field("url");
-        match prepared {
-            Prepared::Inline { mime_type, bytes } => {
-                write_base64_str(target, &format!("data:{mime_type};base64,"), bytes);
-            }
-            Prepared::RemoteUrl(remote) => write_str(target, remote),
-        }
-        url.end();
-        image.str("type", "image_url");
-        image.end();
-        content.put(b"]");
-        message.str("role", "user");
-        message.end();
-        messages.put(b"]");
-        body.str("model", &backend.model);
-        body.end();
-    })
-}
-
 pub(super) async fn chat(
     backend: &Backend,
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
 ) -> Result<LlmResponse, Error> {
-    let body = build_chat_body(backend, request)?;
+    let body = build_chat_body(backend, request, media)?;
     let response = post_json(http, backend, &body).await?;
     parse_openai_chat_response(&response.body)
 }
@@ -186,30 +201,22 @@ pub(super) async fn chat_json(
     backend: &Backend,
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
     schema_name: &str,
     schema: &Value,
 ) -> Result<LlmResponse, Error> {
-    let body = build_chat_json_body(backend, request, schema_name, schema)?;
+    let body = build_chat_json_body(backend, request, media, schema_name, schema)?;
     let response = post_json(http, backend, &body).await?;
     parse_openai_chat_response(&response.body)
-}
-
-pub(super) async fn infer_media(
-    backend: &Backend,
-    http: &mut Transport<'_, impl TcpConnect, impl Dns>,
-    request: &MediaRequest<'_>,
-) -> Result<String, Error> {
-    let body = build_media_body(backend, request)?;
-    let response = post_json(http, backend, &body).await?;
-    media_text(parse_openai_chat_response(&response.body)?)
 }
 
 pub(super) async fn chat_stream<'h, 'r>(
     backend: &Backend,
     http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &'r ChatRequest<'r>,
+    media: &RequestMedia,
 ) -> Result<ProviderStream<'h>, Error> {
-    let body = build_stream_body(backend, request)?;
+    let body = build_stream_body(backend, request, media)?;
     post_stream(http, backend, body, ProviderSse::OpenAi(OpenAiSse::new())).await
 }
 
@@ -227,7 +234,12 @@ mod tests {
             "https://example.invalid/v1",
         ));
         let messages = [];
-        let body = build_stream_body(&backend, &ChatRequest::new("system", &messages)).unwrap();
+        let body = build_stream_body(
+            &backend,
+            &ChatRequest::new("system", &messages),
+            &RequestMedia::default(),
+        )
+        .unwrap();
         let body: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(body["stream"], true);
@@ -239,14 +251,13 @@ mod tests {
 mod wire_tests {
     #![allow(clippy::unwrap_used)]
 
-    use alloc::string::ToString;
+    use alloc::string::{String, ToString};
     use alloc::vec;
     use alloc::vec::Vec;
 
     use serde_json::{json, Map};
 
     use super::*;
-    use crate::types::MediaAsset;
     use crate::ChatMessage;
     use crate::{BackendKind, ModelApiConfig};
 
@@ -313,7 +324,7 @@ mod wire_tests {
         request.tools_json = Some(tools);
 
         assert_eq!(
-            text(&build_chat_body(&backend, &request).unwrap()),
+            text(&build_chat_body(&backend, &request, &RequestMedia::default()).unwrap()),
             reference(&backend, &request, &[])
         );
 
@@ -322,7 +333,7 @@ mod wire_tests {
             stream_extra.push(("stream_options", json!({"include_usage": true})));
         }
         assert_eq!(
-            text(&build_stream_body(&backend, &request).unwrap()),
+            text(&build_stream_body(&backend, &request, &RequestMedia::default()).unwrap()),
             reference(&backend, &request, &stream_extra)
         );
 
@@ -330,13 +341,22 @@ mod wire_tests {
         let format = json!({"type": "json_schema",
                             "json_schema": {"name": "answer", "strict": true, "schema": schema}});
         assert_eq!(
-            text(&build_chat_json_body(&backend, &request, "answer", &schema).unwrap()),
+            text(
+                &build_chat_json_body(
+                    &backend,
+                    &request,
+                    &RequestMedia::default(),
+                    "answer",
+                    &schema
+                )
+                .unwrap()
+            ),
             reference(&backend, &request, &[("response_format", format)])
         );
 
         let empty = ChatRequest::new("", &[]);
         assert_eq!(
-            text(&build_chat_body(&backend, &empty).unwrap()),
+            text(&build_chat_body(&backend, &empty, &RequestMedia::default()).unwrap()),
             reference(&backend, &empty, &[])
         );
     }
@@ -348,47 +368,23 @@ mod wire_tests {
             "[\n  {\n    \"type\": \"function\",\n    \"function\": {\"name\": \"a b\"}\n  }\n]";
         let mut request = ChatRequest::new("s", &[]);
         request.tools_json = Some(pretty);
-        let body: Value =
-            serde_json::from_slice(&build_chat_body(&backend, &request).unwrap()).unwrap();
+        let body: Value = serde_json::from_slice(
+            &build_chat_body(&backend, &request, &RequestMedia::default()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             body["tools"],
             serde_json::from_str::<Value>(pretty).unwrap()
         );
-        assert!(!text(&build_chat_body(&backend, &request).unwrap()).contains('\n'));
+        assert!(
+            !text(&build_chat_body(&backend, &request, &RequestMedia::default()).unwrap())
+                .contains('\n')
+        );
 
         request.tools_json = Some("{\"not\":\"an array\"}");
         assert!(matches!(
-            build_chat_body(&backend, &request),
+            build_chat_body(&backend, &request, &RequestMedia::default()),
             Err(Error::InvalidToolsJson)
         ));
-    }
-
-    #[test]
-    fn media_body_matches_the_previous_encoding() {
-        let backend = backend();
-        let asset = MediaAsset::inline_bytes(vec![0_u8, 1, 2, 250, 251, 252, 253], "image/png");
-        let mut request = MediaRequest::new(&asset);
-        request.system_prompt = Some("sys");
-        request.user_prompt = Some("what is \"this\"?");
-        let base64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            [0_u8, 1, 2, 250, 251, 252, 253],
-        );
-        let expected = serde_json::to_string(&json!({
-            "model": backend.model,
-            "max_tokens": backend.max_tokens,
-            "messages": [
-                {"role": "system", "content": "sys"},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "what is \"this\"?"},
-                    {"type": "image_url", "image_url": {"url": alloc::format!("data:image/png;base64,{base64}")}}
-                ]}
-            ]
-        }))
-        .unwrap();
-        assert_eq!(
-            text(&build_media_body(&backend, &request).unwrap()),
-            expected
-        );
     }
 }

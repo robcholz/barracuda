@@ -251,6 +251,7 @@ where
             inherited_context,
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
+            files: self.filesystem.clone(),
         };
         let engine =
             AgentEngine::build(engine_config, self.llm_factory.create()).map_err(|error| {

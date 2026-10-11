@@ -4,8 +4,8 @@ Both Actions use static request and response schemas under `schemas/action`.
 Their typed handlers use Serde after Workflow schema validation.
 
 `imessage_bridge.to_agent` resolves a complete `gateway.message.received`
-document without changing reply state, or binds an open Agent session to that
-route and queues the inbound `message_id`. Workflow calls the binding form for
+document, `attachments` included, without changing reply state, or binds an
+open Agent session to that route and queues the inbound `message_id`. Workflow calls the binding form for
 every accepted inbound message immediately before `session.append`. Restored
 mappings explicitly report `open_required: true` because Agent session
 ownership is not persisted.

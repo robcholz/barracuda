@@ -35,11 +35,29 @@
             }
           },
           {
-            "call": "session.append",
-            "arguments": {
-              "session": "$previous.output.session",
-              "text": "$event.input.text"
-            }
+            "if": {
+              "source": "$event.input.attachments",
+              "equals": null
+            },
+            "then": [
+              {
+                "call": "session.append",
+                "arguments": {
+                  "session": "$previous.output.session",
+                  "text": "$event.input.text"
+                }
+              }
+            ],
+            "else": [
+              {
+                "call": "session.append",
+                "arguments": {
+                  "session": "$previous.output.session",
+                  "text": "$event.input.text",
+                  "attachments": "$event.input.attachments"
+                }
+              }
+            ]
           },
           {
             "return": {}
@@ -99,21 +117,58 @@
             },
             "then": [
               {
-                "call": "session.respond",
-                "arguments": {
-                  "session": "$previous.output.session",
-                  "request": "$previous.output.input_request",
-                  "text": "$event.input.text"
-                }
+                "if": {
+                  "source": "$event.input.attachments",
+                  "equals": null
+                },
+                "then": [
+                  {
+                    "call": "session.respond",
+                    "arguments": {
+                      "session": "$previous.output.session",
+                      "request": "$previous.output.input_request",
+                      "text": "$event.input.text"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "call": "session.respond",
+                    "arguments": {
+                      "session": "$previous.output.session",
+                      "request": "$previous.output.input_request",
+                      "text": "$event.input.text",
+                      "attachments": "$event.input.attachments"
+                    }
+                  }
+                ]
               }
             ],
             "else": [
               {
-                "call": "session.append",
-                "arguments": {
-                  "session": "$previous.output.session",
-                  "text": "$event.input.text"
-                }
+                "if": {
+                  "source": "$event.input.attachments",
+                  "equals": null
+                },
+                "then": [
+                  {
+                    "call": "session.append",
+                    "arguments": {
+                      "session": "$previous.output.session",
+                      "text": "$event.input.text"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "call": "session.append",
+                    "arguments": {
+                      "session": "$previous.output.session",
+                      "text": "$event.input.text",
+                      "attachments": "$event.input.attachments"
+                    }
+                  }
+                ]
               }
             ]
           },

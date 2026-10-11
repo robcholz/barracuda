@@ -23,8 +23,9 @@ use portable_atomic_util::Arc;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
-    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, IterationId, IterationLoopError,
-    Message, ModelApiManager, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
+    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, Attachment, IterationId,
+    IterationLoopError, MediaKind, Message, ModelApiManager, PermissionLevel, ReasoningEffort,
+    ToolCall, ToolCallId, ToolOutput,
 };
 use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{

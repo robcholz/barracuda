@@ -120,6 +120,7 @@ where
                 reminders: step.reminders,
                 tools_json: Some(step.tools.schemas()),
                 retry: loop_.retry,
+                files: Some(step.files),
             };
             let cancel = Cancel::new(loop_.control.cancel_flag());
             let max_attempts = 1_u64;

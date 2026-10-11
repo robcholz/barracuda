@@ -584,7 +584,7 @@ where
         let Some(message) = self.inbox.pop_front() else {
             return false;
         };
-        if message.as_str().trim().is_empty() {
+        if message.is_empty() {
             self.begin_turn(TurnOrigin::User);
             self.finish_turn(TurnOutcome::Completed);
             return true;

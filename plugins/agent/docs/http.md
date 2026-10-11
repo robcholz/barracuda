@@ -13,7 +13,9 @@ Request body:
   {
     "timeout_ms": 30000,
     "max_tokens": 4096,
-    "image_max_bytes": 1048576,
+    "image_max_bytes": 524288,
+    "input_modalities": {"image": true, "pdf": false},
+    "max_images_in_context": 2,
     "backend": "openai_compatible",
     "purpose": "root_agent",
     "default": true,
@@ -24,9 +26,18 @@ Request body:
 ]
 ```
 
-The array must not be empty and unknown fields are rejected. `backend` is
-`openai_compatible` or `anthropic_compatible`. `purpose` is `root_agent`,
-`sub_agent`, `memory`, or `compaction`.
+The array must not be empty, every field is required, and unknown fields are
+rejected. `backend` is `openai_compatible` or `anthropic_compatible`.
+`purpose` is `root_agent`, `sub_agent`, `memory`, or `compaction`.
+
+The attachment fields decide which files a request gives the model to read
+directly. `input_modalities.image` sends JPEG, PNG, GIF and WebP images as
+image blocks; `input_modalities.pdf` sends PDFs as document blocks, on
+`anthropic_compatible` only. Only the newest `max_images_in_context` image or
+PDF attachments in the context are sent this way, each at most
+`image_max_bytes` bytes; every other attachment reaches the model as a text
+line naming its file, type, size and path. A stored model without these
+fields loads with `image` on, `pdf` off and `max_images_in_context` 2.
 
 | Status | Meaning |
 | --- | --- |

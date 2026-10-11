@@ -3,30 +3,21 @@
 //! A request is written twice by the shared message encoder: once to measure
 //! its exact length and once into a single bulk allocation of that length.
 //! History messages are copied as their stored JSON, the pre-rendered tools
-//! array is copied as text, and inline media is base64-encoded in place, so
-//! building a request needs no ordinary-heap copy of its content.
+//! array is copied as text, and inlined attachments are base64-encoded in
+//! place (see `attachments`), so building a request needs no ordinary-heap
+//! copy of its content.
 
-use alloc::string::String;
-
-use barracuda_agent_message::json::{self, write_object, Sink};
+use barracuda_agent_message::json::{self, Sink};
 use barracuda_bulk_memory::BulkVec;
 use serde::de::IgnoredAny;
-use serde_json::{Map, Value};
 
 use super::super::errors::Error;
 
-pub(super) use barracuda_agent_message::json::{
-    write_base64_str, write_compact, write_str, Object,
-};
+pub(super) use barracuda_agent_message::json::{write_base64_str, write_compact, Object};
 
 /// Encodes a request into one exactly sized bulk buffer.
 pub(super) fn encode(write: impl Fn(&mut dyn Sink)) -> Result<BulkVec<u8>, Error> {
     json::try_encode(write).map_err(|_error| Error::Api("out of memory encoding request"))
-}
-
-/// Encodes an already built JSON object into one exactly sized bulk buffer.
-pub(super) fn encode_object(object: &Map<String, Value>) -> Result<BulkVec<u8>, Error> {
-    encode(|sink| write_object(sink, object))
 }
 
 /// Checks that pre-rendered tools text is one JSON array.

@@ -198,6 +198,7 @@ async fn resolve_permission_reply(
         messages: &messages,
         reminders: &[],
         tools_json: Some(tools.schemas()),
+        files: None,
         retry: RetryPolicy::none(),
     };
     let response = llm.chat(&request, Cancel::new(cancelled)).await?;

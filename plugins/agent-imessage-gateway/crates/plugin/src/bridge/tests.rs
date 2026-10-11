@@ -46,6 +46,8 @@ const SESSION_NEW_POLLS: usize = 3;
 struct Trace {
     created: Cell<u32>,
     appended: RefCell<Vec<(String, String)>>,
+    /// The `attachments` of each append, `null` when the request had none.
+    appended_attachments: RefCell<Vec<Value>>,
     controls: RefCell<Vec<(&'static str, String)>>,
     persistence: RefCell<Vec<String>>,
     deleted: RefCell<Vec<String>>,
@@ -189,6 +191,10 @@ impl WorkflowActionHandler for SessionAppend {
         let session = request["session"].as_str().unwrap_or_default().to_owned();
         let text = request["text"].as_str().unwrap_or_default().to_owned();
         self.0.appended.borrow_mut().push((session, text));
+        self.0
+            .appended_attachments
+            .borrow_mut()
+            .push(request.get("attachments").cloned().unwrap_or(Value::Null));
         Box::pin(async { Ok(json!({})) })
     }
 }
@@ -268,6 +274,7 @@ impl Plugin for RaceProbe {
             block_on(ImessageBridge::load(context.storage().clone())).expect("load the bridge");
         two_quick_messages_on_a_new_route_share_one_session(&bridge);
         session_commands_list_switch_and_delete(&bridge);
+        attachments_reach_the_session_with_their_message(&bridge);
         self.completed.set(true);
         Ok(())
     }
@@ -501,6 +508,75 @@ fn session_commands_list_switch_and_delete<Storage: PluginStorage>(
     assert_eq!(
         trace.persistence.borrow().last().map(String::as_str),
         Some("persistent")
+    );
+}
+
+fn attachments_reach_the_session_with_their_message<Storage: PluginStorage>(
+    bridge: &ImessageBridge<Storage>,
+) {
+    let trace = Rc::new(Trace::starting_at(20));
+    let actions = WorkflowActionRegistry::new();
+    let (store, replies) = fakes(&trace);
+    let _bridge_actions = bridge
+        .register_actions(&actions, store, replies)
+        .expect("register bridge Actions");
+    let _stubs = [
+        actions.add_action(SessionNew(Rc::clone(&trace))),
+        actions.add_action(SessionOpen),
+        actions.add_action(SessionAppend(Rc::clone(&trace))),
+        actions.add_action(SessionRespond),
+        actions.add_action(GatewaySendStream),
+        actions.add_action(SessionInterrupt(Rc::clone(&trace))),
+        actions.add_action(SessionCancel(Rc::clone(&trace))),
+    ]
+    .map(|registration| registration.expect("register stub Action"));
+    let mut runtime = WorkflowRuntime::new(actions);
+    let control = runtime.control();
+    let workflows: Vec<Value> = serde_json::from_str(WORKFLOWS).expect("Workflow file");
+    let workflow = workflows
+        .iter()
+        .find(|workflow| workflow["id"] == "imessage-to-agent")
+        .expect("bundled Workflow");
+    control
+        .load(parse_definition(&workflow.to_string()).expect("parse Workflow"))
+        .expect("load Workflow");
+    let photo = json!([{
+        "kind": "image",
+        "path": "/workspace/cache/gateway/telegram/1.jpg",
+        "mime_type": "image/jpeg",
+        "filename": "cat.jpg",
+        "size": 3
+    }]);
+
+    // the first message creates the session; the second joins it
+    control
+        .emit::<GatewayMessageReceived>(json!({
+            "route": { "channel": "telegram", "conversation_id": "chat-photo" },
+            "message_id": "photo-1",
+            "text": "",
+            "attachments": photo,
+        }))
+        .expect("emit a photo");
+    drive(&mut runtime, 1);
+    for (message_id, attachments) in [("photo-2", Some(&photo)), ("text-3", None)] {
+        let mut message = json!({
+            "route": { "channel": "telegram", "conversation_id": "chat-photo" },
+            "message_id": message_id,
+            "text": "and this",
+        });
+        if let Some(attachments) = attachments {
+            message["attachments"] = attachments.clone();
+        }
+        control
+            .emit::<GatewayMessageReceived>(message)
+            .expect("emit a message");
+    }
+    drive(&mut runtime, 3);
+
+    assert_eq!(trace.created.get(), 21, "one session for the conversation");
+    assert_eq!(
+        *trace.appended_attachments.borrow(),
+        [photo.clone(), photo, Value::Null]
     );
 }
 
