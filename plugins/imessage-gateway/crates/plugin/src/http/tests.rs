@@ -8,7 +8,9 @@ use futures_lite::{future::block_on, stream};
 use gateway::{BinaryBody, BinaryChunk, MediaOpenFuture, MediaSource};
 use http_client::ClientFactory;
 
-use super::{send_limited, send_within, Error, Method, Multipart};
+use super::{
+    send_limited, send_reading_headers, send_within, Error, Method, Multipart, StreamBody,
+};
 
 const TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -239,4 +241,90 @@ fn a_source_longer_than_its_length_is_a_failure() {
         probe.failure().as_deref(),
         Some("media source is longer than its length")
     );
+}
+
+fn chunks(parts: &[&[u8]]) -> gateway::BinaryStream {
+    let chunks: Vec<_> = parts
+        .iter()
+        .map(|part| Ok(BinaryChunk::from(part.to_vec())))
+        .collect();
+    Box::pin(stream::iter(chunks))
+}
+
+#[test]
+fn a_stream_body_is_sent_whole_with_its_content_length() {
+    let network = network([ScriptStep::json(200, r#"{"ok":true}"#)]);
+    let body = StreamBody::new(chunks(&[br#"{"data":""#, b"QUJD", br#""}"#]), 15);
+    let probe = body.clone();
+
+    let response = block_on(send_within(
+        TIMEOUT,
+        &factory(network),
+        Method::POST,
+        "http://gateway.test/upload",
+        &[],
+        body,
+    ))
+    .expect("upload");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(probe.failure(), None);
+    let request = &network.requests()[0];
+    assert!(request.contains("Content-Length: 15\r\n"), "{request}");
+    assert!(!request.to_ascii_lowercase().contains("transfer-encoding"));
+    assert!(request.ends_with(r#"{"data":"QUJD"}"#), "{request}");
+}
+
+#[test]
+fn a_stream_body_of_the_wrong_length_is_a_failure() {
+    let cases: [(&[&[u8]], &str); 2] = [
+        (&[b"ABC", b"DEF"], "request body is longer than its length"),
+        (&[b"AB"], "request body is shorter than its length"),
+    ];
+    for (parts, failure) in cases {
+        let network = network([ScriptStep::json(200, r#"{"ok":true}"#)]);
+        let body = StreamBody::new(chunks(parts), 4);
+        let probe = body.clone();
+
+        let _result = block_on(send_within(
+            TIMEOUT,
+            &factory(network),
+            Method::POST,
+            "http://gateway.test/upload",
+            &[],
+            body,
+        ));
+
+        assert_eq!(probe.failure().as_deref(), Some(failure));
+    }
+}
+
+#[test]
+fn named_response_headers_are_read() {
+    let body = b"{}";
+    let mut bytes = alloc::format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Encrypted-Param:  param-1 \r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    bytes.extend_from_slice(body);
+    let network = network([ScriptStep::Response {
+        bytes,
+        max_read: usize::MAX,
+        pending_after: false,
+    }]);
+
+    let (response, headers) = block_on(send_reading_headers(
+        &factory(network),
+        Method::POST,
+        "http://gateway.test/upload",
+        &[],
+        &b"x"[..],
+        &["x-encrypted-param", "x-error-message"],
+    ))
+    .expect("response");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"{}".to_vec());
+    assert_eq!(headers, [Some("param-1".to_string()), None]);
 }

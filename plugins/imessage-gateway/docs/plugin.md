@@ -166,6 +166,29 @@ body, and a longer body once it passes `max_bytes`, both with
 head, each request write, and each body read; time in the sink does not
 count. A missed wait is `Error::Timeout`.
 
+### Uploads of known length
+
+```rust
+pub struct StreamBody;                         // RequestBody, Clone
+impl StreamBody {
+    pub fn new(stream: BinaryStream, len: usize) -> Self;
+    pub fn failure(&self) -> Option<String>;
+}
+impl GatewayHttp {
+    pub async fn send_reading_headers<B: RequestBody>(&self, method: Method, url: &str,
+        headers: &[(&str, &str)], body: B, names: &[&str])
+        -> Result<(Response, Vec<Option<String>>), Error>;
+}
+```
+
+`StreamBody` sends a body a provider builds as a stream (an encoded or
+encrypted file) with a `Content-Length` of `len`, never buffering it. A stream
+that fails, or yields more or fewer than `len` bytes, ends the body early and
+`failure()` says why, so the provider checks it before trusting the answer.
+`send_reading_headers` is `send` that also returns the values of the response
+headers named in `names` (any case), `None` for a missing one. Like `send`,
+a body of known length must go through within `SEND_TIMEOUT`.
+
 ## Ingress backpressure
 
 `IMessageGateway::ready(&self)` (async) waits until Workflow can take another

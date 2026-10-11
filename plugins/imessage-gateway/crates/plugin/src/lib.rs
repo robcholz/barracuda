@@ -50,7 +50,7 @@ pub use gateway::*;
 pub use http::{
     DownloadError, DownloadHead, DownloadLimits, DownloadRequest, DownloadSink, Error, GatewayHttp,
     Method, Multipart, MultipartBody, MultipartError, PollEnd, PollLimits, PollRequest, Polled,
-    Poller, RequestBody, Response, DOWNLOAD_IDLE_TIMEOUT, SEND_TIMEOUT,
+    Poller, RequestBody, Response, StreamBody, DOWNLOAD_IDLE_TIMEOUT, SEND_TIMEOUT,
 };
 pub use http_client::{ReceiveLease, ReceiveSlots};
 pub use owners::{Classification, Owner, Owners, OwnersError, PairingView, PAIRED_REPLY};
