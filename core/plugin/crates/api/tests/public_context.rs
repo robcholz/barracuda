@@ -1,7 +1,7 @@
 //! Public construction context API tests.
 
-use barracuda_platform_test::never_embassy_stack;
 use barracuda_platform::{HostWifiDevice, StationState, WifiCapabilities, WifiDevice};
+use barracuda_platform_test::never_embassy_stack;
 use barracuda_plugin_api::{
     BoardInfo, Entropy, Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity,
 };

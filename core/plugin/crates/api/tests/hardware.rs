@@ -4,9 +4,7 @@ use portable_atomic_util::Arc;
 
 use barracuda_board_hal::{BoardResources, ExposedIo};
 use barracuda_platform_test::never_embassy_stack;
-use barracuda_plugin_api::{
-    BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity,
-};
+use barracuda_plugin_api::{BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity};
 
 struct TestIo;
 

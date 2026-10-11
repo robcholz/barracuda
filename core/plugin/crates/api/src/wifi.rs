@@ -8,8 +8,8 @@ use alloc::{
 use core::{fmt, future::Future, pin::Pin};
 
 use barracuda_platform::{
-    AccessPointConfiguration, AccessPointState, StationConfiguration, StationState,
-    VisibleNetwork, WifiCapabilities, WifiDevice,
+    AccessPointConfiguration, AccessPointState, StationConfiguration, StationState, VisibleNetwork,
+    WifiCapabilities, WifiDevice,
 };
 use embassy_net::Stack;
 
@@ -36,7 +36,9 @@ impl PlatformWifi {
 
 impl fmt::Debug for PlatformWifi {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("PlatformWifi").finish_non_exhaustive()
+        formatter
+            .debug_struct("PlatformWifi")
+            .finish_non_exhaustive()
     }
 }
 
