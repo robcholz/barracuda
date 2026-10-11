@@ -20,11 +20,7 @@ thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
-barracuda-vm-filesystem-plugin = { path = "../../../vm-filesystem/crates/plugin", features = ["test-fixture"] }
 barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
-barracuda-vm-time-plugin = { path = "../../../vm-time/crates/plugin", features = ["test-fixture"] }
-barracuda-vfs.workspace = true
-barracuda-vfs-memfs.workspace = true
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

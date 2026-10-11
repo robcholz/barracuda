@@ -1,5 +1,5 @@
 id = "imessage-telegram"
-depends-on = ["imessage-gateway", "captive-portal"]
+depends-on = ["imessage-gateway", "webserver", "captive-portal"]
 description = "Adds Telegram Bot as an iMessage Gateway channel."
 
 [tasks.build]
