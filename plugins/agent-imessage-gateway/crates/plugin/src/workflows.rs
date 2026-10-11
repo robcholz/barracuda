@@ -1,4 +1,5 @@
-//! Agent-owned Workflow definitions loaded through the Workflow capability.
+//! The Workflows that route channel messages to Agent sessions and session
+//! events back to their channel, loaded through the Workflow capability.
 
 use alloc::vec::Vec;
 use barracuda_plugin::manager::{PluginError, PluginResult};
@@ -7,6 +8,7 @@ use barracuda_workflow_plugin::{
     WorkflowControlRejection, WorkflowService, WorkflowServiceError, WorkflowValue,
 };
 
+/// Loads every definition of `/resources/workflows.json` transiently.
 pub(super) async fn load(filesystem: &ScopedVfs, service: &WorkflowService) -> PluginResult<()> {
     let bytes = filesystem
         .read("/resources/workflows.json")

@@ -9,6 +9,7 @@ mod sessions;
 mod state;
 mod to_agent;
 mod to_gateway;
+mod workflows;
 
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 
@@ -23,9 +24,12 @@ use barracuda_imessage_gateway_plugin::{
     SendSessionsRequest,
 };
 use barracuda_plugin::api::PluginContext;
-use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_plugin::manager::{
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
+};
 use barracuda_time_plugin::UtcClock;
-use barracuda_workflow_plugin::WorkflowActionRegistry;
+use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
+use embassy_futures::select::select;
 use serde::Serialize;
 
 use crate::bridge::ImessageBridge;
@@ -33,13 +37,15 @@ use crate::sessions::{LocalFuture, RenameFailure, SessionMeta, SessionReplies, S
 
 /// Plugin registering IMessage Gateway operations with the Agent runtime.
 #[barracuda_plugin::macros::plugin]
-pub struct AgentIMessageGatewayPlugin;
+pub struct AgentIMessageGatewayPlugin {
+    workflows: Option<Rc<WorkflowService>>,
+}
 
 impl AgentIMessageGatewayPlugin {
-    /// Creates the stateless Agent adapter.
+    /// Creates the Agent adapter.
     #[must_use]
     pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self
+        Self { workflows: None }
     }
 }
 
@@ -56,6 +62,7 @@ impl Plugin for AgentIMessageGatewayPlugin {
         let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
         let clock = context.require::<UtcClock>("time")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
+        self.workflows = Some(context.require::<WorkflowService>("workflow")?);
         let bridge = embassy_futures::block_on(ImessageBridge::load(context.storage().clone()))
             .map_err(PluginError::registration)?;
         let replies = Rc::new(GatewaySessionReplies {
@@ -81,7 +88,41 @@ impl Plugin for AgentIMessageGatewayPlugin {
             ))
             .map_err(PluginError::registration)
     }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        let service = self
+            .workflows
+            .take()
+            .ok_or_else(|| PluginError::registration(WorkflowsUnavailable))?;
+        let filesystem = context.filesystem()?.clone();
+        let task = load_workflows(service, filesystem, context.task_token())
+            .map_err(PluginError::registration)?;
+        context.task_spawner()?.spawn(task);
+        Ok(())
+    }
 }
+
+/// Loads the bundled Workflows once every Plugin has registered its Actions.
+#[embassy_executor::task]
+async fn load_workflows(
+    service: Rc<WorkflowService>,
+    filesystem: barracuda_vfs::ScopedVfs,
+    cancellation: PluginTaskToken,
+) {
+    let loading = async move {
+        if let Err(error) = workflows::load(&filesystem, &service).await {
+            log::error!("failed to load the Agent IMessage Gateway Workflows: {error}");
+        }
+    };
+    let _completed = select(cancellation.cancelled(), loading).await;
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("the Workflow service was not required during Plugin registration")]
+struct WorkflowsUnavailable;
 
 /// The Agent's sessions, as session commands list, rename and delete them.
 struct AgentSessions(Rc<AgentRuntime>);

@@ -9,7 +9,7 @@
 - Agent Tools: `skill_list`, `skill_read`, `skill_resource_read`, `skill_reload`,
   `background_list`, `background_wait`, `background_input`, `background_cancel`,
   plus the runtime's mode, memory, plan, profile, conversation, and tool-loading Tools
-- Filesystem: private; reads bundled `/resources/workflows.json`, user-installed
+- Filesystem: private; reads user-installed
   skills from `/workspace/media/skills`, and shared bundled skills from
   `/workspace/resources/skills`
 - Storage: model API records under the Plugin-scoped KV keys `default` and
@@ -94,14 +94,6 @@ directory never stops the Agent. `skill_read` loads only
 the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
 UTF-8 file path relative to that unique skill directory without exposing the
 backing path to the model.
-
-At task startup, Agent reads its scoped `/resources/workflows.json` and loads
-each definition transiently through the required `WorkflowService` capability,
-after all Plugins have registered their Actions. Bundled definitions remain in
-`/resources` and are never copied into the user-created
-`/data/workflows.json` catalog. A persisted user definition with the same ID
-takes precedence. A missing or invalid resource, or a rejected definition, is
-logged and stops the Agent task before it begins driving sessions.
 
 The shared `WebServer` capability continues to own `POST /api/model-api` and
 `GET /api/model-api/status` (see `http.md`); both read the same in-memory

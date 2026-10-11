@@ -376,6 +376,7 @@ dependencies = [
  "barracuda-time-plugin",
  "barracuda-vfs",
  "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -674,8 +675,8 @@ dependencies = [
 name = "barracuda-agent-workflow-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-message",
  "barracuda-agent-plugin",
+ "barracuda-json-writer",
  "barracuda-plugin",
  "barracuda-workflow-plugin",
  "json-validator",

@@ -7,7 +7,6 @@ extern crate alloc;
 use alloc::rc::Rc;
 use core::cell::Cell;
 
-mod bundled_workflows;
 mod model_api_http;
 mod workflow;
 
@@ -178,12 +177,10 @@ impl Plugin for AgentPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
         let cancellation = context.task_token();
-        let filesystem = context.filesystem()?.clone();
         let task = agent_task(
             runtime_service,
             workflow_adapter,
             workflow_service,
-            filesystem,
             cancellation,
         )
         .map_err(PluginError::registration)?;
@@ -197,14 +194,9 @@ async fn agent_task(
     runtime_service: RuntimeService,
     workflow_adapter: AgentWorkflowAdapter,
     workflow_service: Rc<WorkflowService>,
-    filesystem: barracuda_vfs::ScopedVfs,
     cancellation: PluginTaskToken,
 ) {
     let running = async move {
-        if let Err(error) = bundled_workflows::load(&filesystem, &workflow_service).await {
-            log::error!("failed to load Agent bundled workflows: {error}");
-            return;
-        }
         let runtime = async move {
             runtime_service.await;
             log::info!("Agent runtime service stopped");
