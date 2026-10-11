@@ -10,7 +10,7 @@ mod workflow;
 
 use alloc::rc::Rc;
 
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{Entropy as _, PluginContext};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
@@ -43,10 +43,8 @@ impl VmPlugin {
     /// Creates the VM Plugin, seeding `math.random` from the Platform's
     /// entropy source.
     #[must_use]
-    pub fn new<Builtins, Io, Entropy: barracuda_platform::Entropy>(
-        _context: &mut PluginContext<Builtins, Io>,
-        entropy: Entropy,
-    ) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        let entropy = context.entropy.clone();
         Self {
             runtime: None,
             package_registry: LuaPackageRegistry::new(),

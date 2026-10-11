@@ -63,15 +63,18 @@ pub struct WifiPlugin {
 }
 
 impl WifiPlugin {
-    /// Takes ownership of the selected Platform's Wi-Fi mechanism.
+    /// Takes the selected Platform's Wi-Fi radio from the context.
+    ///
+    /// Without one, the access-point side falls back to the context's IP
+    /// stack and registration fails.
     #[must_use]
-    pub fn new<Builtins, Io, Device: WifiDevice>(
-        _context: &mut PluginContext<Builtins, Io>,
-        device: Device,
-    ) -> Self {
-        let access_point_stack = device.access_point_stack();
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        let device = context.wifi.take();
+        let access_point_stack = device
+            .as_ref()
+            .map_or(context.ip_stack, WifiDevice::access_point_stack);
         Self {
-            radio: Some(RadioControl::new(device)),
+            radio: device.map(RadioControl::new),
             control: None,
             access_point_stack,
             access_point_shutdown: Rc::new(Signal::new()),

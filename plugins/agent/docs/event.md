@@ -73,7 +73,7 @@ does not split text to fit a transport frame and does not truncate error text.
 Consumers still concatenate consecutive semantic delta records because the
 model runtime itself may produce output incrementally.
 
-The authoritative schema is `schemas/event/session_event.json`. It fixes the
+The authoritative schema is `schemas/event/session.event.json`. It fixes the
 four envelope properties while intentionally leaving each payload's contents
 to its event type, so adding a new semantic event does not require changing
 Workflow wiring.

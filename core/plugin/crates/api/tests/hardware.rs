@@ -5,7 +5,7 @@ use portable_atomic_util::Arc;
 use barracuda_board_hal::{BoardResources, ExposedIo};
 use barracuda_platform_test::never_embassy_stack;
 use barracuda_plugin_api::{
-    BoardInfo, ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity,
+    BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity,
 };
 
 struct TestIo;
@@ -20,7 +20,7 @@ fn plugin_context_carries_one_shared_runtime_io_owner() {
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
         BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
-    let context = PluginContext::from_hal(identity, stack, ClientFactory::plaintext(stack), hal);
+    let context = PluginContext::from_hal(identity, stack, hal);
 
     assert_eq!(context.hal.peripherals, 7);
     let shared = Arc::clone(&context.hal.exposed_io);

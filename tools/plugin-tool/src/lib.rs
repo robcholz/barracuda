@@ -651,16 +651,9 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
     let entries = plugins
         .iter()
         .map(|plugin| {
-            // Platform resource routing is part of the fixed System composition,
-            // not author-controlled Plugin metadata.
-            let platform_resources = match plugin.id.as_str() {
-                "wifi" => ", prepared.wifi",
-                "vm" => ", prepared.entropy",
-                _ => "",
-            };
             format!(
-                "            {}::{}::new(&mut plugin_context{}),",
-                plugin.crate_name, plugin.entry, platform_resources
+                "            {}::{}::new(&mut plugin_context),",
+                plugin.crate_name, plugin.entry
             )
         })
         .collect::<Vec<_>>()
@@ -1010,28 +1003,16 @@ mod tests {
     }
 
     #[test]
-    fn renders_platform_owned_wifi_constructor_argument() {
-        let demo = plugin("wifi", "wifi", &[]);
+    fn every_plugin_is_constructed_from_the_context_alone() {
+        let wifi = plugin("wifi", "wifi", &[]);
+        let vm = plugin("vm", "vm", &[]);
 
         assert_eq!(
-            render_registrations(&[&demo]),
+            render_registrations(&[&wifi, &vm]),
             concat!(
                 "        register_plugins!(plugins;\n",
-                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context, prepared.wifi),\n",
-                "        );"
-            )
-        );
-    }
-
-    #[test]
-    fn renders_platform_owned_entropy_constructor_argument() {
-        let demo = plugin("vm", "vm", &[]);
-
-        assert_eq!(
-            render_registrations(&[&demo]),
-            concat!(
-                "        register_plugins!(plugins;\n",
-                "            barracuda_vm_plugin::TestPlugin::new(&mut plugin_context, prepared.entropy),\n",
+                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context),\n",
+                "            barracuda_vm_plugin::TestPlugin::new(&mut plugin_context),\n",
                 "        );"
             )
         );

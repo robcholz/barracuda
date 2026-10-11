@@ -15,9 +15,7 @@ pub struct VmSystemInfoPlugin {
 impl VmSystemInfoPlugin {
     /// Copies the selected Target identity from the shared construction context.
     #[must_use]
-    pub const fn new<Peripherals, ExposedIo>(
-        context: &mut PluginContext<Peripherals, ExposedIo>,
-    ) -> Self {
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             target_identity: context.target_identity,
         }

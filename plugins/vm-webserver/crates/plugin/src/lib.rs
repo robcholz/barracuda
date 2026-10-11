@@ -76,9 +76,7 @@ pub struct VmWebServerPlugin;
 impl VmWebServerPlugin {
     /// Creates the stateless VM WebServer adapter.
     #[must_use]
-    pub const fn new<Peripherals, ExposedIo>(
-        _context: &mut PluginContext<Peripherals, ExposedIo>,
-    ) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }
