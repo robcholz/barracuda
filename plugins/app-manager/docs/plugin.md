@@ -26,10 +26,11 @@ a view run headless. A bundle is a directory named after the app ID, which is
 <id>/font-<n>.bin   its baked fonts; view, styles, and fonts total at most 512 KiB
 ```
 
-Bundles ship in the image under `/resources/apps` (this Plugin's
-`filesystem/resources/apps`) or are installed under
-`/workspace/media/apps`, which every filesystem-enabled Plugin can write. An
-installed bundle shadows a bundled one with the same ID. A bundle whose
+App containers are carved out of this Plugin's own private filesystem; the
+Plugin's scope is unchanged and no shared Workspace path is used. Bundles ship
+in the image under `/resources/apps` (this Plugin's
+`filesystem/resources/apps`) or are installed under `/media/apps`. An installed
+bundle shadows a bundled one with the same ID. A bundle whose
 manifest ID differs from its directory name is skipped.
 
 ## Running

@@ -14,10 +14,10 @@ use barracuda_ui_plugin::UiAssets;
 use barracuda_vfs::{FsError, ScopedVfs};
 use serde::{Deserialize, Serialize};
 
-/// Bundles shipped in the system image.
+/// Bundles shipped in the system image, inside this Plugin's private resources.
 pub const BUNDLED_APPS: &str = "/resources/apps";
-/// Bundles installed at runtime; any Plugin with filesystem access may write here.
-pub const INSTALLED_APPS: &str = "/workspace/media/apps";
+/// Bundles installed at runtime, inside this Plugin's private media.
+pub const INSTALLED_APPS: &str = "/media/apps";
 
 /// The largest `main.lua` an app may ship.
 pub const MAX_SOURCE_BYTES: u64 = 64 * 1024;

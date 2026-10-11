@@ -59,14 +59,14 @@ async fn filesystem() -> ScopedVfs {
     }
     filesystem
         .write(
-            "/workspace/media/apps/broken/app.json",
+            "/media/apps/broken/app.json",
             br#"{"id":"broken","name":"Broken","version":"1"}"#,
         )
         .await
         .unwrap();
     filesystem
         .write(
-            "/workspace/media/apps/broken/main.lua",
+            "/media/apps/broken/main.lua",
             b"print('starting')\nerror('boom: ' .. APP.id .. ' ' .. tostring(APP.ui))",
         )
         .await
@@ -74,13 +74,13 @@ async fn filesystem() -> ScopedVfs {
     // Not listed: the manifest names another app.
     filesystem
         .write(
-            "/workspace/media/apps/stray/app.json",
+            "/media/apps/stray/app.json",
             br#"{"id":"other","name":"","version":""}"#,
         )
         .await
         .unwrap();
     filesystem
-        .write("/workspace/media/apps/stray/main.lua", b"")
+        .write("/media/apps/stray/main.lua", b"")
         .await
         .unwrap();
     filesystem
