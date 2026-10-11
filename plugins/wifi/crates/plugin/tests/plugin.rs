@@ -10,7 +10,7 @@ use barracuda_platform::{HostWifiDevice, WifiCapabilities};
 use barracuda_platform_test::{loopback_network, memory_partition};
 use barracuda_plugin::{
     api::{
-        ClientFactory, Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity,
+        Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity,
     },
     manager::{Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult},
 };
@@ -52,7 +52,7 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
         barracuda_plugin::api::BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
-    let mut context = PluginContext::new(identity, stack, ClientFactory::plaintext(stack));
+    let mut context = PluginContext::new(identity, stack);
     context.wifi = Some(PlatformWifi::new(HostWifiDevice::new(stack)));
     let resources = MemFs::new();
     resources

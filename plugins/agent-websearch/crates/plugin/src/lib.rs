@@ -38,17 +38,13 @@ const API_KEY_STORAGE_KEY: &str = "api_key";
 
 /// Plugin providing Tavily-backed Web Search directly to Agents.
 #[barracuda_plugin::macros::plugin]
-pub struct AgentWebsearchPlugin {
-    http_clients: ClientFactory<'static>,
-}
+pub struct AgentWebsearchPlugin;
 
 impl AgentWebsearchPlugin {
-    /// Creates an Agent Web Search Plugin using the shared Platform HTTP service.
+    /// Creates the unregistered Agent Web Search Plugin.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self {
-            http_clients: context.http_clients.clone(),
-        }
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self
     }
 }
 
@@ -95,7 +91,8 @@ impl Plugin for AgentWebsearchPlugin {
         );
         let tools = context.require::<AgentToolRegistry>("agent")?;
         let webserver = context.require::<WebServer>("webserver")?;
-        let web_search = WebSearchTool::new(Rc::clone(&config), self.http_clients.clone());
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
+        let web_search = WebSearchTool::new(Rc::clone(&config), http_clients);
         tools
             .register_group(ToolGroup::new("websearch", false, [Tool::new(web_search)]))
             .map_err(PluginError::registration)?;

@@ -16,9 +16,9 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
 };
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_workflow_plugin::{WorkflowPlugin, WorkflowService, EVENT_BACKLOG_LIMIT};
 use futures_lite::future::block_on;
-use http_client::ClientFactory;
 
 type Captured = Rc<RefCell<Option<(Rc<IMessageGateway>, Rc<WorkflowService>)>>>;
 
@@ -53,7 +53,7 @@ fn plugin_context() -> PluginContext {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+    PluginContext::new(info, stack)
 }
 
 fn is_ready(future: impl Future<Output = ()>) -> bool {
@@ -82,6 +82,9 @@ fn scenario(test: impl AsyncFnOnce(&IMessageGateway, &WorkflowService)) {
     manager
         .register(WorkflowPlugin::new(&mut context))
         .expect("register Workflow");
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP Plugin");
     manager
         .register(IMessageGatewayPlugin::new(&mut context))
         .expect("register Gateway");

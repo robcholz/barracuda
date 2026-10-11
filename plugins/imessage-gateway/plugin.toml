@@ -1,3 +1,11 @@
 id = "imessage-gateway"
-depends-on = ["workflow"]
+depends-on = ["workflow", "http"]
 description = "Provides typed messaging capabilities and Workflow Actions."
+
+[config.receive-slots]
+type = "usize"
+default = 1
+description = """
+Connections reserved for channel receive loops (long polls and push sockets),
+beside the HTTP request pool. An open one holds a TLS session of about 35 KiB,
+in external memory where the Platform installs it as bulk memory."""

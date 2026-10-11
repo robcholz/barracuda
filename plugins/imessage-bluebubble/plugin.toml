@@ -1,5 +1,5 @@
 id = "imessage-bluebubble"
-depends-on = ["imessage-gateway", "webserver", "captive-portal"]
+depends-on = ["imessage-gateway", "webserver", "captive-portal", "http"]
 description = "Adds BlueBubbles as an iMessage Gateway channel."
 
 [tasks.build]

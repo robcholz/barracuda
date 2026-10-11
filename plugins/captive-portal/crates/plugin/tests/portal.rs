@@ -8,7 +8,7 @@ use barracuda_captive_portal_plugin::{
     WebText,
 };
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
@@ -183,7 +183,7 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    let mut context = PluginContext::new(info, stack, ClientFactory::plaintext(stack));
+    let mut context = PluginContext::new(info, stack);
     let resources = barracuda_vfs_memfs::MemFs::new();
     resources
         .create_dir_all("/plugins/captive-portal")

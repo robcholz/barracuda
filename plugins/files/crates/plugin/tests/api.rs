@@ -9,7 +9,7 @@ use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_files_plugin::FilesPlugin;
 use barracuda_platform_test::{MemoryPartition, loopback_network, memory_partition};
 use barracuda_plugin::{
-    api::{ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity},
+    api::{Hardware, PlatformInfo, PluginContext, TargetIdentity},
     manager::{Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult},
 };
 use barracuda_vfs::{MountOptions, Vfs};
@@ -46,7 +46,7 @@ async fn server() -> (PluginManager<MemoryPartition>, Rc<WebServer>) {
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
         barracuda_plugin::api::BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
-    let mut context = PluginContext::new(identity, stack, ClientFactory::plaintext(stack));
+    let mut context = PluginContext::new(identity, stack);
     let resources = MemFs::new();
     for directory in ["/plugins/captive-portal", "/plugins/files", "/workspace"] {
         resources.create_dir_all(directory).expect("resources");

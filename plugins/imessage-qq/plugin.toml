@@ -1,5 +1,5 @@
 id = "imessage-qq"
-depends-on = ["imessage-gateway", "webserver", "captive-portal"]
+depends-on = ["imessage-gateway", "webserver", "captive-portal", "http"]
 description = "Adds QQ Bot as an iMessage Gateway channel."
 
 [tasks.build]

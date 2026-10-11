@@ -41,3 +41,7 @@ exposed-io:
     vio-5: { pin: GPIO5 }
     vio-6: { pin: GPIO6 }
     vio-7: { pin: GPIO7 }
+plugins:
+  imessage-gateway:
+    # One receive connection for each channel that holds one open.
+    receive-slots: 4

@@ -29,6 +29,7 @@ use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
 };
 use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_workflow_plugin::WorkflowPlugin;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant};
@@ -406,7 +407,7 @@ fn plugin_context() -> PluginContext {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+    PluginContext::new(info, stack)
 }
 
 /// Options of one scenario.
@@ -440,6 +441,9 @@ fn scenario(setup: Setup, scenario: impl Scenario) {
     manager
         .register(WorkflowPlugin::new(&mut context))
         .expect("register Workflow Plugin");
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP Plugin");
     manager
         .register(IMessageGatewayPlugin::new(&mut context))
         .expect("register IMessage Gateway Plugin");

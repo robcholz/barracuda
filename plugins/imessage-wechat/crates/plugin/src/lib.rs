@@ -61,8 +61,6 @@ const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 /// Plugin that exposes Wechat configuration and registers the resulting channel.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageWechatPlugin {
-    http_clients: ClientFactory<'static>,
-    receive_slots: ReceiveSlots,
     entropy: SharedEntropy,
     login: Option<LoginRuntime>,
     receive: Option<ReceiveRuntime>,
@@ -74,8 +72,6 @@ impl IMessageWechatPlugin {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
-            receive_slots: context.receive_slots.clone(),
             entropy: context.entropy.clone(),
             login: None,
             receive: None,
@@ -95,6 +91,8 @@ impl Plugin for IMessageWechatPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
+        let receive_slots = (*context.require::<ReceiveSlots>("imessage-gateway")?).clone();
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
@@ -103,9 +101,9 @@ impl Plugin for IMessageWechatPlugin {
         )?;
         let configuration = Rc::new(embassy_futures::block_on(ChannelConfiguration::load(
             gateway,
-            self.http_clients.clone(),
+            http_clients.clone(),
             context.storage().clone(),
-            self.receive_slots.clone(),
+            receive_slots.clone(),
             self.entropy.clone(),
             PollTiming::DEVICE,
         ))?);

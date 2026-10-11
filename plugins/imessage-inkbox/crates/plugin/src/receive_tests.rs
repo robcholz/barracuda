@@ -25,6 +25,7 @@ use barracuda_platform_test::{
     install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
 };
 use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_workflow_plugin::{
     workflow_action_schema_inline, WorkflowActionFuture, WorkflowActionHandler,
     WorkflowActionRegistry, WorkflowActionSchema, WorkflowPlugin, WorkflowService,
@@ -314,7 +315,7 @@ fn plugin_context() -> PluginContext {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+    PluginContext::new(info, stack)
 }
 
 fn run(setup: Setup, scenario: impl Scenario) {
@@ -327,6 +328,9 @@ fn run(setup: Setup, scenario: impl Scenario) {
     manager
         .register(WorkflowPlugin::new(&mut context))
         .expect("register Workflow Plugin");
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP Plugin");
     manager
         .register(IMessageGatewayPlugin::new(&mut context))
         .expect("register IMessage Gateway Plugin");
@@ -790,6 +794,9 @@ async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
     manager
         .register(WorkflowPlugin::new(&mut context))
         .map_err(|error| error.to_string())?;
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP Plugin");
     manager
         .register(IMessageGatewayPlugin::new(&mut context))
         .map_err(|error| error.to_string())?;

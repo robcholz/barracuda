@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin::api::{
-    BoardInfo, ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity,
+    BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity,
 };
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
@@ -28,7 +28,7 @@ fn plugin_context() -> PluginContext {
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
         BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
-    PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+    PluginContext::new(info, stack)
 }
 
 struct Consumer {

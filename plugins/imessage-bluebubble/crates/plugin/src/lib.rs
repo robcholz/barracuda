@@ -59,7 +59,6 @@ pub const WEBHOOK_API_PATH: &str = HOOK_PATH;
 /// channel, and receives its messages by webhook.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageBlueBubblePlugin {
-    http_clients: ClientFactory<'static>,
     stack: Stack<'static>,
     entropy: SharedEntropy,
     runtime: Option<ReceiveRuntime>,
@@ -71,7 +70,6 @@ impl IMessageBlueBubblePlugin {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
             stack: context.ip_stack,
             entropy: context.entropy.clone(),
             runtime: None,
@@ -91,6 +89,7 @@ impl Plugin for IMessageBlueBubblePlugin {
     where
         Storage: PluginStorage,
     {
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
         let stack = self.stack;
         let address: LocalAddress = Box::new(move || {
             stack
@@ -99,7 +98,7 @@ impl Plugin for IMessageBlueBubblePlugin {
         });
         let runtime = register_channel(
             context,
-            self.http_clients.clone(),
+            http_clients.clone(),
             self.entropy.clone(),
             address,
         )?;

@@ -65,8 +65,6 @@ const VERIFICATION_CODE_DIGITS: usize = 6;
 /// channel, and polls it for inbound iMessages.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageInkboxPlugin {
-    http_clients: ClientFactory<'static>,
-    receive_slots: ReceiveSlots,
     entropy: SharedEntropy,
     runtime: Option<ReceiveRuntime>,
 }
@@ -77,8 +75,6 @@ impl IMessageInkboxPlugin {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
-            receive_slots: context.receive_slots.clone(),
             entropy: context.entropy.clone(),
             runtime: None,
         }
@@ -97,6 +93,8 @@ impl Plugin for IMessageInkboxPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
+        let receive_slots = (*context.require::<ReceiveSlots>("imessage-gateway")?).clone();
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
@@ -106,8 +104,8 @@ impl Plugin for IMessageInkboxPlugin {
         let (state, runtime) = build_state(
             context.storage().clone(),
             gateway,
-            self.http_clients.clone(),
-            InkboxSlots(self.receive_slots.clone()),
+            http_clients.clone(),
+            InkboxSlots(receive_slots.clone()),
             PairingEntropy::new(self.entropy.clone()),
             inkbox::DEFAULT_API_BASE.into(),
             Timing::DEVICE,
@@ -985,6 +983,7 @@ mod tests {
         install_global_memory_vfs, memory_partition, never_embassy_stack, ScriptStep, ScriptedStack,
     };
     use barracuda_plugin::manager::{PluginDeclaration, PluginManager};
+    use barracuda_http_plugin::HttpPlugin;
     use barracuda_workflow_plugin::WorkflowPlugin;
     use futures_lite::future::block_on;
 
@@ -1174,7 +1173,7 @@ mod tests {
                 barracuda_plugin::api::Hardware::new("test-chip"),
             ),
         );
-        PluginContext::new(info, stack, ClientFactory::plaintext(stack))
+        PluginContext::new(info, stack)
     }
 
     /// Runs `scenario` against Inkbox routes whose upstream replies are `steps`.
@@ -1196,6 +1195,9 @@ mod tests {
         manager
             .register(WorkflowPlugin::new(&mut context))
             .expect("register Workflow Plugin");
+        manager
+            .register(HttpPlugin::new(&mut context))
+            .expect("register HTTP Plugin");
         manager
             .register(IMessageGatewayPlugin::new(&mut context))
             .expect("register IMessage Gateway Plugin");

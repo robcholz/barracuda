@@ -22,7 +22,8 @@ pub use reqwless;
 mod receive;
 
 pub use receive::{
-    ReceiveConnection, ReceiveLease, ReceiveSlots, ReceiveSocket, ReceiveStream, StreamError,
+    ReceiveBuffers, ReceiveConnection, ReceiveLease, ReceiveSlotBuffers, ReceiveSlots,
+    ReceiveSocket, ReceiveStream, StreamError,
 };
 
 const TCP_CONNECTIONS: usize = 4;
@@ -79,7 +80,7 @@ impl ClientFactory<'static> {
         stack: Stack<'static>,
         #[cfg(feature = "mbedtls")] tls: Option<Rc<barracuda_tls::Tls>>,
     ) -> Self {
-        // The http Plugin builds one factory. Further factories in one process
+        // The System builds one factory. Further factories in one process
         // (host tests) fall back to a leaked heap pool.
         let state: &'static TcpState = match TCP_STATE.try_take() {
             Some(state) => state,

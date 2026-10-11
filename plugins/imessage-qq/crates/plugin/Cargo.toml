@@ -29,6 +29,7 @@ ws-client.workspace = true
 barracuda-platform.workspace = true
 barracuda-platform-test.workspace = true
 barracuda-vfs.workspace = true
+barracuda-http-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

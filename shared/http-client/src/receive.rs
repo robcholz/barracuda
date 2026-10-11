@@ -1,19 +1,18 @@
 //! Dedicated connections for long-lived receive loops.
 //!
-//! Model calls and ordinary sends share the request pool behind
-//! [`ClientFactory::create`]. A channel that holds a long poll or a push
-//! connection open must never take one of those connections, so receive loops
-//! lease a slot from [`ReceiveSlots`] instead. Each slot owns one TCP socket
-//! with its own buffers and shares the request pool's DNS resolver and TLS
-//! engine; a lease holds at most one open connection at a time.
+//! Ordinary requests share the pool behind [`ClientFactory::create`]. A loop
+//! that holds a long poll or a push connection open must never take one of
+//! those connections, so it leases a slot from [`ReceiveSlots`] instead. Each
+//! slot owns one TCP socket with its own static buffers and shares the
+//! factory's DNS resolver and TLS engine; a lease holds at most one open
+//! connection at a time.
 //!
-//! Each slot allocates its socket buffers once, on the heap, when the slots
-//! are created; a Target whose budget allows no receive connections
-//! allocates none.
+//! The slots' owner declares one static [`ReceiveBuffers`] of the size it
+//! needs, so an owner that needs none links no receive buffers at all.
 
 #[cfg(feature = "mbedtls")]
 use alloc::ffi::CString;
-use alloc::{rc::Rc, vec, vec::Vec};
+use alloc::{rc::Rc, vec::Vec};
 use core::{
     cell::{Cell, RefCell, RefMut},
     fmt,
@@ -31,6 +30,7 @@ use embassy_net::{
 use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use embedded_nal_async::{AddrType, Dns, TcpConnect};
+use static_cell::ConstStaticCell;
 
 use crate::{ClientFactory, Resolver};
 
@@ -47,6 +47,63 @@ const KEEP_ALIVE: Duration = Duration::from_secs(30);
 /// probe) after which a receive connection is dropped as dead.
 const DEAD_PEER_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Send and receive buffers of one receive slot: 1 KiB and 4 KiB.
+pub struct ReceiveSlotBuffers {
+    tx: [u8; RECEIVE_TX_BYTES],
+    rx: [u8; RECEIVE_RX_BYTES],
+}
+
+impl ReceiveSlotBuffers {
+    /// Zeroed buffers, for static storage.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            tx: [0; RECEIVE_TX_BYTES],
+            rx: [0; RECEIVE_RX_BYTES],
+        }
+    }
+}
+
+impl Default for ReceiveSlotBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Static socket buffers for `N` receive slots, placed in `.bss` at link
+/// time:
+///
+/// ```rust,ignore
+/// static RECEIVE_BUFFERS: ReceiveBuffers<4> = ReceiveBuffers::new();
+/// ```
+pub struct ReceiveBuffers<const N: usize> {
+    buffers: ConstStaticCell<[ReceiveSlotBuffers; N]>,
+}
+
+impl<const N: usize> ReceiveBuffers<N> {
+    /// Zeroed buffers for `N` slots.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            buffers: ConstStaticCell::new([const { ReceiveSlotBuffers::new() }; N]),
+        }
+    }
+
+    /// Hands out the buffers once; later calls get none.
+    pub fn take(&'static self) -> &'static mut [ReceiveSlotBuffers] {
+        match self.buffers.try_take() {
+            Some(buffers) => buffers.as_mut_slice(),
+            None => &mut [],
+        }
+    }
+}
+
+impl<const N: usize> Default for ReceiveBuffers<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The TCP socket of one receive slot.
 ///
 /// It connects one remote endpoint at a time: a second connection attempt
@@ -56,10 +113,8 @@ pub struct ReceiveSocket {
 }
 
 impl ReceiveSocket {
-    /// Allocates the socket's buffers for the life of the process.
-    fn new(stack: Stack<'static>) -> Self {
-        let rx = Vec::leak(vec![0; RECEIVE_RX_BYTES]);
-        let tx = Vec::leak(vec![0; RECEIVE_TX_BYTES]);
+    fn new(stack: Stack<'static>, buffers: &'static mut ReceiveSlotBuffers) -> Self {
+        let ReceiveSlotBuffers { tx, rx } = buffers;
         let mut socket = TcpSocket::new(stack, rx, tx);
         socket.set_keep_alive(Some(KEEP_ALIVE));
         socket.set_timeout(Some(DEAD_PEER_TIMEOUT));
@@ -171,11 +226,10 @@ struct Pool<C, D: 'static> {
     waiting: RefCell<Vec<Waker>>,
 }
 
-/// The receive-connection slots System sizes for the selected Target.
+/// A fixed set of receive-connection slots.
 ///
-/// Plugins receive it in `PluginContext::receive_slots` and clone it freely;
-/// every clone shares the same slots. A channel takes a [`ReceiveLease`] while
-/// it receives and drops it when it stops.
+/// Every clone shares the same slots. A receive loop takes a [`ReceiveLease`]
+/// while it receives and drops it when it stops.
 pub struct ReceiveSlots<C = ReceiveSocket, D: 'static = Resolver> {
     pool: Rc<Pool<C, D>>,
 }
@@ -205,18 +259,22 @@ impl<C, D> Default for ReceiveSlots<C, D> {
 }
 
 impl ReceiveSlots {
-    /// Creates `count` receive slots on `stack`, sharing the DNS resolver and
-    /// TLS engine of `shared`.
+    /// Creates one receive slot on `stack` per entry of `buffers`, sharing
+    /// the DNS resolver and TLS engine of `shared`.
     ///
-    /// Each slot allocates 5 KiB of socket buffers and registers one socket
-    /// with the stack, both for the life of the process, so the stack's
-    /// socket table must have room for them.
+    /// Each slot registers one socket with the stack for the life of the
+    /// process, so the stack's socket table must have room for them.
     #[must_use]
-    pub fn new(stack: Stack<'static>, shared: &ClientFactory<'static>, count: usize) -> Self {
-        let slots = (0..count)
-            .map(|_| {
+    pub fn new(
+        stack: Stack<'static>,
+        shared: &ClientFactory<'static>,
+        buffers: &'static mut [ReceiveSlotBuffers],
+    ) -> Self {
+        let slots = buffers
+            .iter_mut()
+            .map(|buffers| {
                 Rc::new(Slot {
-                    connector: ReceiveSocket::new(stack),
+                    connector: ReceiveSocket::new(stack, buffers),
                     resolver: shared.resolver,
                     #[cfg(feature = "mbedtls")]
                     tls: shared.tls.clone(),
@@ -236,8 +294,8 @@ impl<C, D> ReceiveSlots<C, D> {
         Self::from_slots(Vec::new())
     }
 
-    /// Creates one plaintext slot per connector, for a network that is not
-    /// the System's (tests, or a subsystem that owns its own stack).
+    /// Creates one plaintext slot per connector, for a caller that owns its
+    /// own network (tests, or a subsystem with its own stack).
     #[must_use]
     pub fn from_connectors(connectors: impl IntoIterator<Item = C>, resolver: &'static D) -> Self {
         let slots = connectors
@@ -371,8 +429,8 @@ where
     C: TcpConnect,
     D: Dns,
 {
-    /// HTTP clients over this slot's single connection, with the System's
-    /// DNS resolver and TLS engine.
+    /// HTTP clients over this slot's single connection, with the shared DNS
+    /// resolver and TLS engine.
     ///
     /// Every client created from it shares the slot's one connection: a
     /// request on a second client while the first holds its connection fails
@@ -626,7 +684,7 @@ pub enum StreamError {
     Dns,
     /// The TCP connection could not be established.
     Connect,
-    /// A TLS URL was given but the System has no TLS engine.
+    /// A TLS URL was given but the slots have no TLS engine.
     TlsUnavailable,
     /// The TLS handshake or a TLS record failed with this mbedTLS error code.
     Tls(i32),
@@ -728,7 +786,17 @@ impl<'a> Endpoint<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Endpoint, StreamError};
+    use super::{Endpoint, ReceiveBuffers, ReceiveSlotBuffers, StreamError};
+
+    #[test]
+    fn static_buffers_scale_with_the_slot_count() {
+        let slot = core::mem::size_of::<ReceiveSlotBuffers>();
+        assert_eq!(slot, 5 * 1024);
+        // A Target without receive connections keeps only the taken flag.
+        assert!(core::mem::size_of::<ReceiveBuffers<0>>() <= core::mem::align_of::<usize>());
+        let three = core::mem::size_of::<ReceiveBuffers<3>>();
+        assert!(three >= 3 * slot && three <= 3 * slot + core::mem::align_of::<usize>());
+    }
 
     #[test]
     fn stream_urls_name_a_host_port_and_security() {

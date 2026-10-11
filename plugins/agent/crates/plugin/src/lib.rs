@@ -54,7 +54,6 @@ fn runtime_storage_config() -> RuntimeStorageConfig {
 /// Plugin that constructs the Agent runtime and registers its Workflow Actions.
 #[barracuda_plugin::macros::plugin]
 pub struct AgentPlugin {
-    http_clients: ClientFactory<'static>,
     runtime: Option<Rc<AgentRuntime>>,
     runtime_service: Option<RuntimeService>,
     workflow_adapter: Option<AgentWorkflowAdapter>,
@@ -64,9 +63,8 @@ pub struct AgentPlugin {
 impl AgentPlugin {
     /// Creates the unregistered Agent Plugin.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
             runtime: None,
             runtime_service: None,
             workflow_adapter: None,
@@ -117,7 +115,7 @@ impl Plugin for AgentPlugin {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let workflow_service = context.require::<WorkflowService>("workflow")?;
         let filesystem = context.filesystem()?.clone();
-        let http_clients = self.http_clients.clone();
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
         let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
         let storage = runtime_storage_config();
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)

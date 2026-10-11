@@ -53,8 +53,6 @@ const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 /// receives its messages over the QQ WebSocket gateway.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageQQPlugin {
-    http_clients: ClientFactory<'static>,
-    receive_slots: ReceiveSlots,
     entropy: SharedEntropy,
     runtime: Option<ReceiveRuntime>,
     login: Option<LoginRuntime>,
@@ -66,8 +64,6 @@ impl IMessageQQPlugin {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
-            receive_slots: context.receive_slots.clone(),
             entropy: context.entropy.clone(),
             runtime: None,
             login: None,
@@ -87,6 +83,8 @@ impl Plugin for IMessageQQPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
+        let receive_slots = (*context.require::<ReceiveSlots>("imessage-gateway")?).clone();
         let portal = context.require::<CaptivePortal>("captive-portal")?;
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
@@ -97,8 +95,8 @@ impl Plugin for IMessageQQPlugin {
         let (channel, runtime) = build_channel(
             context.storage().clone(),
             gateway,
-            self.http_clients.clone(),
-            QQSlots(self.receive_slots.clone()),
+            http_clients.clone(),
+            QQSlots(receive_slots.clone()),
             self.entropy.clone(),
             ReceiveTiming::DEVICE,
         )?;

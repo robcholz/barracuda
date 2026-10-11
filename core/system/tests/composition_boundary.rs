@@ -21,12 +21,12 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(platform_entry.contains("$application"));
     assert!(!platform_entry.contains("barracuda_target"));
     assert!(!platform_entry.contains("barracuda_system_app"));
-    assert!(application.contains("System::new(\n        resources,\n        barracuda_target::TARGET_IDENTITY,\n        RECEIVE_BUFFERS.take(),\n        spawner,\n    )"));
     assert!(application
-        .contains("static RECEIVE_BUFFERS: ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }>"));
+        .contains("System::new(resources, barracuda_target::TARGET_IDENTITY, spawner)"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Partitions<"));
-    assert!(system.contains("barracuda_tls::Tls::new(prepared.entropy.clone())"));
+    assert!(!system.contains("barracuda_tls"));
+    assert!(!system.contains("http_client"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("prepared.partitions.resources.filesystem"));
     assert!(system.contains("mod read_only_flash;"));
@@ -76,7 +76,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(plugin_api.contains("pub struct PluginContext"));
     assert!(plugin_api.contains("pub target_identity: TargetIdentity"));
     assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
-    assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
+    assert!(!plugin_api.contains("http_client"));
     assert!(system.contains("let mut plugin_context"));
     assert!(system.contains("PluginContext::from_hal("));
     assert!(system.contains("prepared.board_hal"));

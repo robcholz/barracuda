@@ -6,15 +6,20 @@ extern crate alloc;
 
 mod workflow;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::rc::Rc;
 
 use barracuda_imessage_gateway_runtime::{GatewayIngress, GatewayRuntime};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, Stack};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
+use http_client::{ClientFactory, ReceiveBuffers, ReceiveSlots};
 
 pub use barracuda_imessage_gateway_runtime::{
     parse_command, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
@@ -27,6 +32,10 @@ pub use gateway::*;
 pub use gateway_http::*;
 
 const STREAM_WORKERS: usize = 4;
+
+/// Socket buffers of the channels' receive slots, as many as the selected
+/// Board configures.
+static RECEIVE_BUFFERS: ReceiveBuffers<{ config::RECEIVE_SLOTS }> = ReceiveBuffers::new();
 
 /// Typed capability shared by channel providers, Agent tools, and Workflow Actions.
 pub struct IMessageGateway {
@@ -101,17 +110,22 @@ impl IMessageGateway {
     }
 }
 
-/// Plugin that owns the shared IMessage Gateway capability and workers.
+/// Plugin that owns the shared IMessage Gateway capability, the channels'
+/// receive slots, and the Gateway workers.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageGatewayPlugin {
+    ip_stack: Stack<'static>,
     runtime: Option<Rc<GatewayRuntime>>,
 }
 
 impl IMessageGatewayPlugin {
-    /// Creates the base IMessage Gateway Plugin.
+    /// Creates the base IMessage Gateway Plugin on the Platform IP stack.
     #[must_use]
-    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self { runtime: None }
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self {
+            ip_stack: context.ip_stack,
+            runtime: None,
+        }
     }
 }
 
@@ -125,6 +139,10 @@ impl Plugin for IMessageGatewayPlugin {
     {
         let workflow_service = context.require::<WorkflowService>("workflow")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
+        let http_clients = context.require::<ClientFactory<'static>>("http")?;
+        let receive_slots = ReceiveSlots::new(self.ip_stack, &http_clients, RECEIVE_BUFFERS.take());
+        log::info!("channel receive slots: {}", receive_slots.capacity());
+        context.provide(Rc::new(receive_slots))?;
         let gateway = Rc::new(MessageGateway::new());
         let (runtime, ingress) =
             GatewayRuntime::new(Rc::clone(&gateway), Rc::clone(&workflow_service));
