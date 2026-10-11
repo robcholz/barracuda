@@ -489,4 +489,10 @@ mod tests {
             .expect("run revoked application");
         assert!(revoked);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = GpioPackage::new(Arc::new(TestProvider::new()));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

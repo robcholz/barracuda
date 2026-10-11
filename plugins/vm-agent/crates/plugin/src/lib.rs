@@ -678,4 +678,10 @@ mod tests {
         assert!(missing);
         assert_eq!(error, "Agent runtime is not available");
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let (package, _requests) = AgentLuaPackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

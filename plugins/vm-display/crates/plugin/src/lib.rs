@@ -651,4 +651,13 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = DisplayPackage::new(Some(TestDisplay {
+            drawn: 0,
+            areas: std::vec::Vec::new(),
+        }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

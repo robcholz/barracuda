@@ -289,4 +289,10 @@ mod tests {
         .expect("capture frame");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = CameraPackage::new(Some(TestCamera));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }
