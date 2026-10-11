@@ -2,11 +2,12 @@
 //!
 //! Only the request paths and the response decoding live here; the channel
 //! Plugin owns the connection, the cursor, and what happens to each message.
-//! Responses decode straight into the few fields a text message needs, and
-//! every other field is skipped without building a JSON tree.
+//! Responses decode straight into the few fields a message needs, and every
+//! other field is skipped without building a JSON tree.
 
 use alloc::{format, string::String, vec::Vec};
 
+use barracuda_imessage_gateway_plugin::MediaKind;
 use serde::Deserialize;
 
 /// Seconds the server holds a `getUpdates` request open while it has no
@@ -43,6 +44,28 @@ pub fn delete_webhook_path(token: &str) -> String {
     format!("/bot{token}/deleteWebhook")
 }
 
+/// Path of `getFile`, which names where the file of `file_id` can be
+/// downloaded. The path carries the bot token: never log it.
+#[must_use]
+pub fn get_file_path(token: &str, file_id: &str) -> String {
+    let mut path = format!("/bot{token}/getFile?file_id=");
+    for byte in file_id.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            path.push(char::from(byte));
+        } else {
+            path.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    path
+}
+
+/// Path of a file's content, from the `file_path` that `getFile` answered.
+/// The path carries the bot token: never log it.
+#[must_use]
+pub fn file_download_path(token: &str, file_path: &str) -> String {
+    format!("/file/bot{token}/{}", file_path.trim_start_matches('/'))
+}
+
 /// One update of a `getUpdates` response.
 #[derive(Debug, Deserialize)]
 pub struct Update {
@@ -66,6 +89,160 @@ pub struct Message {
     /// Text of a text message; absent for media, stickers, and service messages.
     #[serde(default)]
     pub text: Option<String>,
+    /// Caption of a media message.
+    #[serde(default)]
+    pub caption: Option<String>,
+    /// A photo in every size the server keeps, smallest first.
+    #[serde(default)]
+    pub photo: Vec<PhotoSize>,
+    /// A general file. Telegram also sets it beside `animation`.
+    #[serde(default)]
+    pub document: Option<FileRef>,
+    /// A voice note.
+    #[serde(default)]
+    pub voice: Option<FileRef>,
+    /// An audio file meant for a music player.
+    #[serde(default)]
+    pub audio: Option<FileRef>,
+    /// A video.
+    #[serde(default)]
+    pub video: Option<FileRef>,
+    /// A round video message.
+    #[serde(default)]
+    pub video_note: Option<FileRef>,
+    /// A GIF or a silent H.264 video.
+    #[serde(default)]
+    pub animation: Option<FileRef>,
+}
+
+impl Message {
+    /// The message's text: its `text`, else its media's `caption`.
+    #[must_use]
+    pub fn body(&self) -> Option<&str> {
+        self.text.as_deref().or(self.caption.as_deref())
+    }
+
+    /// The file the message carries, if any; a sticker carries none here.
+    ///
+    /// Of a photo's sizes it picks the largest whose `file_size` is at most
+    /// `max_bytes`, else the largest of all, which the caller's size check
+    /// then refuses.
+    #[must_use]
+    pub fn media(&self, max_bytes: u64) -> Option<Media<'_>> {
+        if let Some(photo) = largest_photo(&self.photo, max_bytes) {
+            return Some(Media {
+                kind: MediaKind::Image,
+                file_id: &photo.file_id,
+                file_size: photo.file_size,
+                // Telegram stores every photo as a JPEG.
+                mime_type: Some("image/jpeg"),
+                file_name: None,
+            });
+        }
+        let (kind, file, default_mime) = if let Some(file) = &self.voice {
+            (MediaKind::Audio, file, Some("audio/ogg"))
+        } else if let Some(file) = &self.audio {
+            (MediaKind::Audio, file, None)
+        } else if let Some(file) = &self.video {
+            (MediaKind::Video, file, None)
+        } else if let Some(file) = &self.video_note {
+            // Round videos are MP4 and carry no MIME type.
+            (MediaKind::Video, file, Some("video/mp4"))
+        } else if let Some(file) = &self.animation {
+            // Checked before `document`, which Telegram sets beside it.
+            (MediaKind::Video, file, None)
+        } else if let Some(file) = &self.document {
+            let kind = if file.mime_type.as_deref().is_some_and(is_model_image) {
+                MediaKind::Image
+            } else {
+                MediaKind::File
+            };
+            (kind, file, None)
+        } else {
+            return None;
+        };
+        Some(Media {
+            kind,
+            file_id: &file.file_id,
+            file_size: file.file_size,
+            mime_type: file
+                .mime_type
+                .as_deref()
+                .filter(|mime| !mime.is_empty())
+                .or(default_mime),
+            file_name: file.file_name.as_deref().filter(|name| !name.is_empty()),
+        })
+    }
+}
+
+/// Image types models accept, so a document of one is an image.
+fn is_model_image(mime_type: &str) -> bool {
+    let essence = mime_type.split(';').next().unwrap_or_default().trim();
+    ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        .iter()
+        .any(|image| image.eq_ignore_ascii_case(essence))
+}
+
+/// The largest size within `max_bytes`, else the largest of all.
+fn largest_photo(sizes: &[PhotoSize], max_bytes: u64) -> Option<&PhotoSize> {
+    sizes
+        .iter()
+        .filter(|size| size.file_size.is_some_and(|bytes| bytes <= max_bytes))
+        .max_by_key(|size| size.file_size)
+        .or_else(|| sizes.last())
+}
+
+/// One size of a photo.
+#[derive(Debug, Deserialize)]
+pub struct PhotoSize {
+    /// Identifier for `getFile`.
+    pub file_id: String,
+    /// Size in bytes, when known.
+    #[serde(default)]
+    pub file_size: Option<u64>,
+}
+
+/// A document, voice note, audio, video, round video, or animation.
+#[derive(Debug, Deserialize)]
+pub struct FileRef {
+    /// Identifier for `getFile`.
+    pub file_id: String,
+    /// Size in bytes, when known.
+    #[serde(default)]
+    pub file_size: Option<u64>,
+    /// MIME type the sender's client reported.
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    /// Name the sender gave the file.
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
+/// The file of one message, as [`Message::media`] picks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Media<'a> {
+    /// How the channel presents the file.
+    pub kind: MediaKind,
+    /// Identifier for `getFile`.
+    pub file_id: &'a str,
+    /// Size in bytes, when known.
+    pub file_size: Option<u64>,
+    /// MIME type, when Telegram or the sender's client names one.
+    pub mime_type: Option<&'a str>,
+    /// Name the sender gave the file.
+    pub file_name: Option<&'a str>,
+}
+
+/// The `getFile` answer: where to download a file.
+#[derive(Debug, Deserialize)]
+pub struct File {
+    /// Size in bytes, when known.
+    #[serde(default)]
+    pub file_size: Option<u64>,
+    /// Path for [`file_download_path`]; absent when the file cannot be
+    /// downloaded.
+    #[serde(default)]
+    pub file_path: Option<String>,
 }
 
 /// A message's sender.
@@ -173,6 +350,16 @@ pub fn parse_updates(status: u16, body: &[u8]) -> Result<Vec<Update>, UpdatesErr
     parse(status, body).map(Option::unwrap_or_default)
 }
 
+/// Decodes a `getFile` response.
+///
+/// # Errors
+///
+/// As [`parse_updates`]; a successful answer without a result is
+/// [`UpdatesError::Malformed`].
+pub fn parse_file(status: u16, body: &[u8]) -> Result<File, UpdatesError> {
+    parse(status, body)?.ok_or(UpdatesError::Malformed { status })
+}
+
 /// Decodes a response whose result the caller does not need, such as
 /// `deleteWebhook`.
 ///
@@ -272,6 +459,123 @@ mod tests {
         assert_eq!(second.chat.id, -5);
         assert_eq!(second.from.as_ref().unwrap().label(), "Bo");
         assert!(updates[2].message.is_none());
+    }
+
+    #[test]
+    fn file_paths_carry_the_token_and_encode_the_id() {
+        assert_eq!(
+            get_file_path("T", "AgAC-x_y"),
+            "/botT/getFile?file_id=AgAC-x_y"
+        );
+        assert_eq!(
+            get_file_path("T", "a+b/c"),
+            "/botT/getFile?file_id=a%2Bb%2Fc"
+        );
+        assert_eq!(
+            file_download_path("T", "photos/file_1.jpg"),
+            "/file/botT/photos/file_1.jpg"
+        );
+    }
+
+    fn message(fields: &str) -> Message {
+        let body = format!(
+            r#"{{"ok":true,"result":[{{"update_id":1,"message":{{"message_id":1,"chat":{{"id":1}}{fields}}}}}]}}"#
+        );
+        parse_updates(200, body.as_bytes())
+            .unwrap()
+            .pop()
+            .unwrap()
+            .message
+            .unwrap()
+    }
+
+    #[test]
+    fn a_photo_is_its_largest_size_within_the_limit() {
+        let photo = message(
+            r#","caption":"look","photo":[{"file_id":"s","file_size":10,"width":90},{"file_id":"m","file_size":500},{"file_id":"l","file_size":5000}]"#,
+        );
+        assert_eq!(photo.body(), Some("look"));
+        let media = photo.media(1000).unwrap();
+        assert_eq!(media.kind, MediaKind::Image);
+        assert_eq!(media.file_id, "m");
+        assert_eq!(media.mime_type, Some("image/jpeg"));
+        assert_eq!(photo.media(10_000).unwrap().file_id, "l");
+        // None fits: the largest, which the size check refuses.
+        assert_eq!(photo.media(5).unwrap().file_id, "l");
+    }
+
+    #[test]
+    fn media_kinds_follow_the_field_and_the_mime_type() {
+        let kind = |fields: &str| {
+            let message = message(fields);
+            message
+                .media(u64::MAX)
+                .map(|media| (media.kind, media.mime_type.map(String::from)))
+        };
+        assert_eq!(
+            kind(r#","voice":{"file_id":"v","mime_type":"audio/ogg","file_size":3}"#),
+            Some((MediaKind::Audio, Some("audio/ogg".into())))
+        );
+        assert_eq!(
+            kind(r#","voice":{"file_id":"v"}"#),
+            Some((MediaKind::Audio, Some("audio/ogg".into())))
+        );
+        assert_eq!(
+            kind(r#","audio":{"file_id":"a","mime_type":"audio/mpeg"}"#),
+            Some((MediaKind::Audio, Some("audio/mpeg".into())))
+        );
+        assert_eq!(
+            kind(r#","video":{"file_id":"v","mime_type":"video/mp4"}"#),
+            Some((MediaKind::Video, Some("video/mp4".into())))
+        );
+        assert_eq!(
+            kind(r#","video_note":{"file_id":"n","length":240}"#),
+            Some((MediaKind::Video, Some("video/mp4".into())))
+        );
+        assert_eq!(
+            kind(
+                r#","animation":{"file_id":"g","mime_type":"video/mp4"},"document":{"file_id":"g","mime_type":"video/mp4"}"#
+            ),
+            Some((MediaKind::Video, Some("video/mp4".into())))
+        );
+        assert_eq!(
+            kind(r#","document":{"file_id":"d","mime_type":"image/png","file_name":"a.png"}"#),
+            Some((MediaKind::Image, Some("image/png".into())))
+        );
+        assert_eq!(
+            kind(r#","document":{"file_id":"d","mime_type":"image/heic"}"#),
+            Some((MediaKind::File, Some("image/heic".into())))
+        );
+        assert_eq!(
+            kind(r#","document":{"file_id":"d"}"#),
+            Some((MediaKind::File, None))
+        );
+        assert_eq!(kind(r#","sticker":{"file_id":"s","emoji":"👍"}"#), None);
+        let named = message(r#","document":{"file_id":"d","file_name":"report.pdf"}"#);
+        assert_eq!(named.media(u64::MAX).unwrap().file_name, Some("report.pdf"));
+    }
+
+    #[test]
+    fn get_file_answers_the_download_path() {
+        let file = parse_file(
+            200,
+            br#"{"ok":true,"result":{"file_id":"x","file_unique_id":"u","file_size":12,"file_path":"photos/file_1.jpg"}}"#,
+        )
+        .unwrap();
+        assert_eq!(file.file_path.as_deref(), Some("photos/file_1.jpg"));
+        assert_eq!(file.file_size, Some(12));
+        let UpdatesError::Api(error) = parse_file(
+            400,
+            br#"{"ok":false,"error_code":400,"description":"Bad Request: file is too big"}"#,
+        )
+        .unwrap_err() else {
+            panic!("not an API error");
+        };
+        assert_eq!(error.description, "Bad Request: file is too big");
+        assert_eq!(
+            parse_file(200, br#"{"ok":true}"#).unwrap_err(),
+            UpdatesError::Malformed { status: 200 }
+        );
     }
 
     #[test]

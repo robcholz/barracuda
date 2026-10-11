@@ -5,7 +5,7 @@
 
 mod bench;
 
-use barracuda_imessage_gateway_plugin::{ChannelError, GatewayHttp};
+use barracuda_imessage_gateway_plugin::{ChannelError, GatewayHttp, MediaKind};
 use barracuda_platform_test::ScriptStep;
 use bluebubbles::inbound::{
     is_body_too_large, parse_webhook, MessageQuery, Sort, WebhookPayload, QUERY_BODY_LIMIT,
@@ -28,7 +28,8 @@ fn a_new_message_webhook_keeps_only_the_fields_used() {
         panic!("not a new message");
     };
     assert_eq!(message.guid, "p:0/AB-12");
-    assert_eq!(message.plain_text(), Some("hello"));
+    assert_eq!(message.body().as_deref(), Some("hello"));
+    assert_eq!(message.attachments().count(), 0);
     assert!(!message.is_from_me);
     assert_eq!(message.sender(), Some("+15550001111"));
     assert_eq!(message.chat_guid(), Some("iMessage;-;+15550001111"));
@@ -46,7 +47,7 @@ fn other_events_and_garbage_are_told_apart() {
 }
 
 #[test]
-fn only_ordinary_text_counts_as_text() {
+fn reactions_and_group_events_are_no_messages() {
     let parse = |replace: (&str, &str)| {
         let body = format!(
             r#"{{"type":"new-message","data":{}}}"#,
@@ -61,15 +62,81 @@ fn only_ordinary_text_counts_as_text() {
         r#""associatedMessageType":null"#,
         r#""associatedMessageType":"love""#,
     ));
-    assert_eq!(reaction.plain_text(), None);
+    assert_eq!(reaction.body(), None);
     let group_event = parse((r#""itemType":0"#, r#""itemType":2"#));
-    assert_eq!(group_event.plain_text(), None);
-    let attachment = parse((r#""text":"hello""#, "\"text\":\"\u{fffc} \""));
-    assert_eq!(attachment.plain_text(), None);
+    assert_eq!(group_event.body(), None);
+    let marks_only = parse((r#""text":"hello""#, "\"text\":\"\u{fffc} \""));
+    assert_eq!(marks_only.body().as_deref(), Some(""));
     let no_text = parse((r#""text":"hello""#, r#""text":null"#));
-    assert_eq!(no_text.plain_text(), None);
+    assert_eq!(no_text.body().as_deref(), Some(""));
     let no_chat = parse((r#""chats":[{"#, r#""chats":[],"x":[{"#));
     assert_eq!(no_chat.chat_guid(), None);
+}
+
+#[test]
+fn attachments_keep_their_guid_type_name_and_size_and_marks_leave_the_text() {
+    let attachments = r#""attachments":[
+        {"originalROWID":1,"guid":"at_0_A","uti":"public.jpeg","mimeType":"image/jpeg","transferName":"IMG_1.jpeg","totalBytes":1234,"height":10,"width":10},
+        {"guid":"at_1_B","mimeType":"image/heic","transferName":"IMG_2.HEIC","totalBytes":99},
+        {"guid":"at_2_C","mimeType":"audio/x-caf","transferName":"Audio Message.caf"},
+        {"guid":"at_3_D","mimeType":"video/quicktime","transferName":"clip.mov"},
+        {"guid":"at_4_E","mimeType":null,"transferName":"notes.pages"},
+        {"guid":"at_5_F","mimeType":null,"transferName":"9D1E.pluginPayloadAttachment"}
+    ]"#;
+    let body = format!(
+        r#"{{"type":"new-message","data":{}}}"#,
+        MESSAGE
+            .replace(r#""attachments":[]"#, attachments)
+            .replace(r#""text":"hello""#, "\"text\":\"\u{fffc}look \u{fffc}\"")
+    );
+    let WebhookPayload::NewMessage(message) = parse_webhook(body.as_bytes()).expect("payload")
+    else {
+        panic!("not a new message");
+    };
+    assert_eq!(message.body().as_deref(), Some("look"));
+    let attachments: Vec<_> = message.attachments().collect();
+    assert_eq!(attachments.len(), 5, "the link preview is no attachment");
+    let first = attachments[0];
+    assert_eq!(first.guid, "at_0_A");
+    assert_eq!(first.mime(), Some("image/jpeg"));
+    assert_eq!(first.name(), Some("IMG_1.jpeg"));
+    assert_eq!(first.total_bytes, Some(1234));
+    let kinds: Vec<_> = attachments
+        .iter()
+        .map(|attachment| attachment.kind())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            MediaKind::Image,
+            MediaKind::File,
+            MediaKind::Audio,
+            MediaKind::Video,
+            MediaKind::File
+        ]
+    );
+    assert_eq!(attachments[4].mime(), None);
+
+    let null = format!(
+        r#"{{"type":"new-message","data":{}}}"#,
+        MESSAGE.replace(r#""attachments":[]"#, r#""attachments":null"#)
+    );
+    let WebhookPayload::NewMessage(message) = parse_webhook(null.as_bytes()).expect("payload")
+    else {
+        panic!("not a new message");
+    };
+    assert_eq!(message.attachments().count(), 0);
+}
+
+#[test]
+fn an_attachment_downloads_from_its_guid_with_the_password() {
+    bench([], async |http, _server| {
+        let provider = BlueBubbles::new(http, BlueBubblesConfig::new(SERVER_URL, "p w&"));
+        assert_eq!(
+            provider.attachment_url("at_0_A/B"),
+            format!("{SERVER_URL}/api/v1/attachment/at_0_A%2FB/download?password=p%20w%26")
+        );
+    });
 }
 
 #[test]
@@ -146,7 +213,7 @@ fn the_message_query_is_parsed_and_capped() {
         let request = &server.requests()[0];
         assert!(request.starts_with("POST /api/v1/message/query?password=pw "));
         assert!(request.ends_with(
-            r#"{"after":1700000000000,"limit":10,"offset":10,"sort":"ASC","with":["chat"]}"#
+            r#"{"after":1700000000000,"limit":10,"offset":10,"sort":"ASC","with":["chat","attachment"]}"#
         ));
     });
 }

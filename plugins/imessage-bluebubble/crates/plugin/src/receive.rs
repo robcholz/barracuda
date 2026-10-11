@@ -7,12 +7,15 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use barracuda_imessage_gateway_plugin::{
-    ChannelControl, ChannelError, Classification, GatewayInboundMessage, GatewayRoute,
-    MessageChannel, MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    SendMessageRequest, PAIRED_REPLY,
+    Attachment, AttachmentMeta, ChannelControl, ChannelError, Classification, DownloadRequest,
+    GatewayInboundMessage, GatewayRoute, InboundDownloadError, MediaKind, MessageChannel,
+    MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession, SendMessageRequest,
+    StoreError, PAIRED_REPLY,
 };
 use barracuda_plugin::manager::PluginStorage;
-use bluebubbles::inbound::{is_body_too_large, InboundMessage, MessageQuery, Sort};
+use bluebubbles::inbound::{
+    is_body_too_large, InboundAttachment, InboundMessage, MessageQuery, Sort,
+};
 use bluebubbles::{BlueBubbles, CHANNEL};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Instant, Timer};
@@ -230,8 +233,11 @@ impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
         if message.is_from_me {
             return;
         }
-        let Some(text) = message.plain_text() else {
-            log::debug!("skipped a BlueBubbles message that is not plain text");
+        let Some(mut text) = message
+            .body()
+            .filter(|text| !text.is_empty() || message.attachments().next().is_some())
+        else {
+            log::debug!("skipped a BlueBubbles message without text or files");
             self.book.skip();
             return;
         };
@@ -244,13 +250,21 @@ impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
         let Some(owners) = self.owners() else {
             return;
         };
-        match owners.classify(sender, None, text).await {
+        // Classify first: a stranger's file is never fetched.
+        match owners.classify(sender, None, &text).await {
             Classification::Owner => {
+                let mut attachments = Vec::new();
+                for attachment in message.attachments() {
+                    match self.download(provider, attachment).await {
+                        Ok(stored) => attachments.push(stored),
+                        Err(missed) => append_note(&mut text, attachment.kind(), missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, chat),
                     message_id: message.guid.clone(),
-                    text: String::from(text),
-                    attachments: Vec::new(),
+                    text,
+                    attachments,
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a BlueBubbles message: {error}");
@@ -265,6 +279,65 @@ impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
             }
             Classification::Ignored => {}
         }
+    }
+
+    /// Streams one attachment into the Gateway's attachment storage.
+    async fn download(
+        &self,
+        provider: &BlueBubbles,
+        attachment: &InboundAttachment,
+    ) -> Result<Attachment, Missed> {
+        if attachment
+            .total_bytes
+            .is_some_and(|size| size > self.gateway.attachment_max_bytes())
+        {
+            return Err(Missed::TooLarge);
+        }
+        let meta = AttachmentMeta {
+            kind: attachment.kind(),
+            mime_type: attachment.mime().map(String::from),
+            filename: attachment.name().map(String::from),
+        };
+        // The URL carries the password: never log it.
+        let url = provider.attachment_url(&attachment.guid);
+        match self
+            .gateway
+            .download_inbound(CHANNEL, DownloadRequest::get(&url), meta)
+            .await
+        {
+            Ok(stored) => Ok(stored),
+            Err(InboundDownloadError::Store(StoreError::TooLarge { .. })) => Err(Missed::TooLarge),
+            Err(error) => {
+                log::warn!("failed to download a BlueBubbles attachment: {error}");
+                Err(Missed::Failed)
+            }
+        }
+    }
+}
+
+/// Why an attachment was not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Missed {
+    /// Over the Gateway's `attachment-max-bytes`.
+    TooLarge,
+    /// The download or storing failed.
+    Failed,
+}
+
+/// Appends the line that tells the reader a file did not arrive.
+fn append_note(text: &mut String, kind: MediaKind, missed: Missed) {
+    let kind = match kind {
+        MediaKind::File => "file",
+        MediaKind::Image => "image",
+        MediaKind::Audio => "audio",
+        MediaKind::Video => "video",
+    };
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    match missed {
+        Missed::TooLarge => text.push_str(&format!("[{kind} too large, not received]")),
+        Missed::Failed => text.push_str(&format!("[{kind} not received]")),
     }
 }
 

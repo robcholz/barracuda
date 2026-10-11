@@ -163,6 +163,9 @@ impl Telegram {
                 "application/octet-stream",
             ),
             MediaKind::Image => ("sendPhoto", "photo", "image.jpg", "image/jpeg"),
+            MediaKind::Audio if is_voice(&request) => {
+                ("sendVoice", "voice", "voice.ogg", "audio/ogg")
+            }
             MediaKind::Audio => (
                 "sendAudio",
                 "audio",
@@ -297,6 +300,24 @@ impl MessageChannel for Telegram {
             Ok(())
         })
     }
+}
+
+/// Whether audio is an OGG/Opus voice note, which `sendVoice` shows as one:
+/// MIME type `audio/ogg`, or a `.oga` or `.opus` file name.
+fn is_voice(request: &SendMediaRequest) -> bool {
+    let ogg = request.mime_type.as_deref().is_some_and(|mime| {
+        mime.split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .eq_ignore_ascii_case("audio/ogg")
+    });
+    let voice_name = request.filename.as_deref().is_some_and(|name| {
+        name.rsplit_once('.').is_some_and(|(_stem, extension)| {
+            extension.eq_ignore_ascii_case("oga") || extension.eq_ignore_ascii_case("opus")
+        })
+    });
+    ogg || voice_name
 }
 
 fn chat_id(value: &str) -> Value {
