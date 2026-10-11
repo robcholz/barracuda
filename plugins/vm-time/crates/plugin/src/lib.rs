@@ -604,4 +604,10 @@ mod tests {
                 .await
         })
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let (package, _requests) = TimePackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

@@ -280,4 +280,10 @@ mod tests {
             .expect("query strip");
         assert!(result);
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = LedStripPackage::new(Some(TestStrip { pixels: 2 }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

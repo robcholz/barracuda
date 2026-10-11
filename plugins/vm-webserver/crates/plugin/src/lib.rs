@@ -676,4 +676,13 @@ mod tests {
             ));
         });
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = VmWebServerPackage {
+            state: Arc::new(SharedState::new()),
+            files: VmFileTransfer::new(),
+        };
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }

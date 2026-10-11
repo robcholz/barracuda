@@ -160,4 +160,10 @@ mod tests {
         assert_eq!(first_name, "changed");
         assert_eq!(second_name, "test-board");
     }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = SystemInfoPackage::new(INFO);
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
 }
