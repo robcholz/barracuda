@@ -284,12 +284,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bare-vfs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8b435285f9068d2ec4c708f7992521dd84807cdae9724b76b31b1c1479b5212"
-
-[[package]]
 name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
@@ -2473,7 +2467,7 @@ dependencies = [
 name = "barracuda-vfs-memfs"
 version = "0.1.0"
 dependencies = [
- "bare-vfs",
+ "barracuda-bulk-memory",
  "barracuda-vfs",
  "critical-section",
  "embassy-futures",

@@ -591,7 +591,7 @@ backend:
 | --- | --- | --- |
 | `/resources` | FATFS or LittleFS selected by native partition metadata | Read-only image content. An upgrade may replace the complete filesystem. |
 | `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
-| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
+| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. MemFS keeps file pages in bulk memory, so its capacity is whatever bulk memory has free; a write that does not fit fails with `FsError::NoSpace` and leaves the file unchanged. |
 | `/media` | Target-selected installed filesystem; currently a System LittleFS subtree | Stable, durable, high-volume runtime content. Its physical medium may be soldered storage, installed storage, or FATFS on flash, but its namespace does not disappear while System is running. |
 | `/removable` | Read-only MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted read-write at `/removable/<slot-id>`; the anchor itself stores nothing. |
 

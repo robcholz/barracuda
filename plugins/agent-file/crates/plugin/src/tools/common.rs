@@ -65,6 +65,7 @@ fn fs_error_code(error: FsError) -> &'static str {
         FsError::DirectoryNotEmpty => "directory_not_empty",
         FsError::Unsupported => "unsupported",
         FsError::InvalidInput => "invalid_input",
+        FsError::NoSpace => "no_space",
         FsError::Io => "io",
         _ => "filesystem",
     }
