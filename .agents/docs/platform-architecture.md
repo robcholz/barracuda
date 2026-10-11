@@ -173,22 +173,23 @@ pub struct PlatformResources<Partitions, Wifi, Entropy> {
 
 `wifi` is a separate communication mechanism, not part of `ip_stack`.
 Platforms without a radio supply an explicitly unsupported implementation, and
-System hands the mechanism to the Wi-Fi Plugin, which owns the policy.
+System hands the mechanism to the one Plugin that takes it and owns the
+policy.
 
 `entropy` is the Platform's source of unpredictable bytes, fit for
 cryptographic use: the operating system's generator on Host Platforms, a true
 random number generator fed by physical noise on devices. A Platform without
-one supplies `UnavailableEntropy`, never a weaker generator. System builds the
-TLS engine from it and hands it to the VM Plugin, which seeds `math.random`
-from it; like Wi-Fi, the Plugin's constructor is generic over the Platform's
-type and erases it inside.
+one supplies `UnavailableEntropy`, never a weaker generator. System erases its
+type into `PluginContext::entropy`, which every Plugin that needs randomness
+clones, and the radio into `PluginContext::wifi`.
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
 fields such as filesystem_partition, resources_partition, or
 database_partition. The IP capability likewise remains `ip_stack` rather than
-web_network or database_network. TLS is not a Platform resource; System builds
-it above the Platform boundary (see "TLS and HTTP clients").
+web_network or database_network. TLS is not a Platform resource; the Plugin
+that owns HTTP builds it above the Platform boundary (see "TLS and HTTP
+clients").
 
 Adding a Plugin, peripheral, filesystem, database, or application subsystem
 does not modify the Platform API or PlatformResources shape.
@@ -322,8 +323,8 @@ generic fields preserve the concrete, statically composed peripheral types for
 each selected Board. Every generated peripheral field is `Option<T>` because no
 peripheral kind is mandatory. The single exposed-I/O value owns all runtime
 physical resources.
-System places it in `PluginContext` behind one shared `Arc`; hardware VM Plugins
-clone that owner, not independent protocol collections. Platform-owned
+System places it in `PluginContext` behind one shared `Arc`; Plugins that use
+exposed hardware clone that owner, not independent protocol collections. Platform-owned
 controller pools are part of this owner but are not application-visible names.
 
 Controller, channel, timer, DMA, and buffer inventory belongs to the Platform
@@ -727,7 +728,7 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
-## Logging and Agent tracing
+## Logging and tracing
 
 Ordinary diagnostics across Platform, HAL, System, Core, and Plugins use the
 `log` facade. Library and subsystem crates emit records; they do not choose an
@@ -757,11 +758,10 @@ does not become a `PlatformResources` field, Plugin capability, Workflow
 contract, or Board peripheral. Platform-specific output setup remains outside
 Core and Plugins.
 
-`tracing` is not the general logging API. It remains available only to the
-Agent subsystem where nested spans and inherited execution context justify its
-cost and complexity. Agent trace lines may be rendered into the same `log`
-sink, but ordinary Core and Plugin code must not acquire a `tracing`
-dependency.
+`tracing` is not the general logging API. A Plugin whose nested spans and
+inherited execution context justify its cost may use it inside its own crates,
+rendering trace lines into the same `log` sink; Core and the layers below
+Plugins never acquire a `tracing` dependency.
 
 Logs must identify lifecycle boundaries and failures without including API
 keys, credentials, message bodies, or other secret-bearing payloads.
@@ -815,7 +815,7 @@ the top certificate of a server chain arrives untrusted, and the callback
 trusts it only when a bundled root of its issuer's name verifies its
 signature, or it is itself a bundled root (name and key). mbedTLS verifies the
 rest of the chain. A server may also send an older root above a bundled one
-(bots.qq.com sends GlobalSign Root CA above GlobalSign Root CA - R3); the
+(one sends GlobalSign Root CA above GlobalSign Root CA - R3); the
 callback then sets the untrusted top aside in a per-session word and trusts
 the chain only if a bundled root appears further down the verified path, as a
 browser stops at the first root it trusts. The roots stay in flash and
@@ -833,77 +833,44 @@ added.
 No Platform reads its operating system's certificate store, and `shared/tls`
 reads no environment variables or certificate files at run time. Only a host
 test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
-a test network that intercepts TLS); device firmware refuses it. It also owns the few
-C library functions mbedTLS calls on bare-metal targets. A Plugin must not
-load certificates, initialize a TLS backend, or select a TLS implementation.
-`shared/tls` also exposes `aes_256_gcm_open` on the same mbedTLS build, so a
-provider that must open a value a service sealed for the device (QQ's
-scan-to-bind App Secret) carries no second AES implementation.
+a test network that intercepts TLS); device firmware refuses it. It also owns
+the few C library functions mbedTLS calls on bare-metal targets, and exposes
+`aes_256_gcm_open` on the same mbedTLS build, so a consumer that must open a
+value a service sealed for the device carries no second AES implementation.
 
-HTTP is a shared software service above the Platform boundary:
+HTTP is a library too:
 
 ~~~text
-PlatformResources { ip_stack, entropy }
+PluginContext { ip_stack, entropy }
                  |
                  v
-System composition: barracuda_tls::Tls::new(entropy)
+http Plugin: barracuda_tls::Tls::new(entropy)
+             http_client::ClientFactory::new(ip_stack, tls)
                  |
-                 v
-shared/http-client
-        +-- ClientFactory (composition only)
-        +-- Client request facade (consumer API)
-        +-- buffered execute
-        +-- streaming execute
-                 |
-                 +----> Agent model protocol adapter
-                 +----> message-channel Providers
+                 v  ClientFactory capability
+        every Plugin that depends on http
 ~~~
 
-`shared/http-client` is the workspace's only reqwless integration. It owns URL
-and header validation, connection reuse, request-body streaming, response-body
-streaming, buffering, and transport error classification. Protocol crates may
-adapt its domain-neutral request and response values, but they do not create a
-second reqwless transport implementation.
-
-System combines the Platform's `ip_stack` with the `Tls` it built into one
-`http_client::ClientFactory`. When TLS cannot start, the factory has no TLS and
-`https://` requests fail instead of falling back to plaintext. Construction code may clone that factory;
-business consumers receive only `http_client::Client` and use its fluent
-`get`/`post`/`request` facade. TCP, DNS, TLS configuration, reqwless types, and
-buffer sizes must not parameterize Plugin or domain APIs.
+`shared/http-client` is the workspace's only reqwless integration: it builds
+reqwless clients from a TCP connector, a DNS resolver, and an optional TLS
+engine, and offers dedicated receive slots for long-lived connections. It
+holds no process-wide service. The `http` Plugin builds the TLS engine from the
+context's `entropy` and the request pool from its `ip_stack`, and publishes
+the `ClientFactory` as its capability; every HTTP consumer depends on `http`.
+When TLS cannot start, the factory has no TLS and `https://` requests fail
+instead of falling back to plaintext. Disabling `http` removes TLS and the
+pool from the build.
 
 Each `ClientFactory::create()` result independently owns connection reuse and
-request serialization while all results share the Platform network pool. Thus
-“one shared HTTP client” means one facade, implementation, and construction
-policy, not one mandatory TCP connection for unrelated concurrent protocols.
+request serialization while all results share the pool. Thus "one shared HTTP
+client" means one implementation and construction policy, not one TCP
+connection for unrelated concurrent protocols.
 
-Long-lived receive loops (a channel's long poll or push connection) never take
-a connection from that request pool. System also builds
-`http_client::ReceiveSlots` over the same IP stack, DNS resolver, and TLS
-engine and places it in `PluginContext::receive_slots`. Each slot owns one
-statically allocated socket; a channel holds a `ReceiveLease` while it
-receives, and the lease gives either HTTP clients over its single connection
-or a raw byte stream whose read half is cancel-safe, for protocols such as
-WebSocket. The slots' socket buffers are static and sized at build time, so a
-Target pays only for the connections it can hold: `platforms/selected/build.rs`
-projects the larger of the manifest's two figures as
-`LONG_LIVED_CONNECTIONS`, the selected-target crate exposes it as
-`barracuda_target::RECEIVE_SLOTS`, and the application declares one
-`http_client::ReceiveBuffers` of that size and hands it to `System::new`. A
-Platform that allows none links no receive buffers. The runtime capacity is a
-memory budget the selected Platform declares in its manifest, because the
-Platform owns the heap and decides whether Board-declared external memory
-becomes bulk memory:
-
-~~~yaml
-network:
-  long-lived-connections:
-    internal-memory: 1   # TLS record buffers in internal RAM
-    external-memory: 3   # Board external memory installed as bulk memory
-~~~
-
-`TargetIdentity::long_lived_connections` picks the figure for the selected
-Board, and System never creates more slots than that.
+Long-lived receive loops never take a connection from that pool. The Plugin
+that runs them owns `http_client::ReceiveSlots` built from the shared factory,
+each slot one statically allocated socket. Their number is that Plugin's
+Board setting, so a Board pays only for the connections it can afford and a
+build without the Plugin links no receive buffers.
 
 Embassy is the common task, timer, and lifecycle model used by Barracuda on
 embedded, macOS, and Linux Platforms. The operating-system Platforms may use
@@ -942,102 +909,14 @@ For example, a Display Plugin consumes Display. It does not consume SPI pins,
 a Board matrix, or a concrete display implementation. A storage-consuming
 Plugin receives scoped storage rather than a raw partition.
 
-Guidance for choosing among typed Plugin capabilities, Workflow contracts, and
-Agent Tools lives in [`plugin-communication.md`](plugin-communication.md).
-Execution ownership for long-lived Plugin work lives in
-[`execution-ownership.md`](execution-ownership.md).
-
-### Plugin directory ownership
-
-The framework owns the top-level namespace of `plugins/<id>/`. Plugin authors
-organize custom content under `resources/`, leaving the root available for
-framework-defined directories and future framework extensions. The framework
-defines `plugin.toml`, `crates/`, `docs/`, `filesystem/`, and the `resources/`
-container; authors choose the organization within that container.
-
-~~~text
-plugins/<id>/
-├── plugin.toml
-├── crates/
-├── docs/
-├── filesystem/
-│   └── resources/       # bundled read-only runtime files
-└── resources/          # author-owned source content and build inputs
-    ├── web/
-    ├── agent-tools/
-    └── workflow-schema/
-~~~
-
-Web source and Plugin-owned tests live in `resources/web/`. Agent Tool
-definitions and Workflow schemas belong under the
-same author-owned container, grouped by their purpose. Consumers locate these
-inputs through explicit paths or a documented resource contract; arbitrary
-subdirectory names do not create framework behavior or Plugin dependencies.
-
-Repository `resources/` is separate from the Plugin's runtime `/resources`
-mount. Its contents are not automatically packaged. A Plugin's build process
-places deployable outputs in `filesystem/resources/`, which the generic image
-builder includes for selected Plugins. For example, Bun compiles
-`resources/web/entry.ts` into `filesystem/resources/entry.js`. Each Plugin owns
-its output; the portal shell loads independently registered entries on demand.
-
-Custom author directories stay within `resources/`; adding one does not reserve
-a new Plugin-root name. Existing root-level custom directories and crate-local
-resource collections are migration work. Their consuming paths and resource
-contracts must change together when they move.
-
-Frontend development tools are repository-owned: one root `package.json`,
-`bun.lock`, TypeScript configuration, formatter, and linter cover all Plugins.
-Install dependencies once at the repository root. Run `bun run format`,
-`bun run format:check`, `bun run lint`, `bun run check`, and `bun run test`
-there. Tests remain with their owning Plugins; shared test helpers and the
-ordinary browser-module builder live in `tools/web/`.
-
-Each Plugin declares its build command, inputs, and isolated outputs in
-`plugin.toml`. Ordinary web entries use the shared builder. A Plugin with
-different output needs, such as the portal shell's HTML/CSS/JS scaffold, owns
-its custom build script in `resources/web/`. Repository-wide development
-commands are not repeated as per-Plugin tasks or package manifests. Shared
-tooling does not merge Plugin assets or change image-selection semantics.
-
-### Plugin host tasks
-
-Plugins declare named host tasks in `plugin.toml`. Each task defines an
-executable and literal arguments, a working directory relative to the Plugin
-root, and optional input paths, output paths, and environment dependencies.
-The host executor treats Bun, npm, generators, and other commands uniformly.
-It executes trusted repository code with the developer's permissions and
-environment; this is a build integration boundary, not a sandbox.
-
-`cargo plugin run <task>` runs that task sequentially for enabled Plugins in
-directory order. Plugins without the task are skipped. `--plugin <id>` selects
-one enabled Plugin and requires the task to exist. A failure stops execution.
-Plugin `depends-on` describes capability dependencies, not a host-task DAG.
-
-Each Plugin with automatic resource generation installs a `build.rs` hook
-calling the shared `barracuda-plugin-build` executor. Cargo invokes only its
-`build` task before compiling the Plugin, including during `cargo build`,
-`cargo run`, and `cargo check`. Hooks follow Cargo's actual package graph;
-explicitly building a disabled package with `-p` still builds that package.
-The selected System registry determines the normal application's Plugin graph.
-
-Cargo watches the manifest, declared input and output paths, PATH, and declared
-environment variables. When both inputs and outputs are declared, the hook
-uses content fingerprints in Cargo's OUT_DIR to skip unchanged commands and
-recreate missing or changed outputs. Inputs may include explicitly named
-shared source paths; outputs and the working directory stay Plugin-relative.
-Without explicit inputs, Cargo watches the working directory. Without both
-input and output declarations, the command runs whenever the hook runs.
-Watched paths are literal files/directories, not glob expressions; fingerprinted
-trees contain ordinary files/directories rather than symlinks.
-
-The CLI invokes tasks unconditionally, allowing explicit rebuilds after tool
-updates. A per-Plugin host lock serializes manual execution with Cargo hooks.
-Tasks inherit terminal interrupt behavior and must remain foreground processes.
-Tool installation is an explicit developer action, never an implicit build step.
-Automatic build tasks must not re-enter Cargo, which may hold its build lock.
-Image collection consumes completed outputs; it is a separate operation and
-does not depend on accidental ordering between Cargo build scripts.
+Every layer below the Plugins is Plugin-neutral: disabling a Plugin removes its
+feature from the build, and nothing in core, System, composition, Platforms,
+Boards, or `shared/` names it. A per-Board value a Plugin needs is the Plugin's
+own setting, set in the Board's `plugins.<id>` section, never a Platform or
+Board field. The Plugin contract (layout, `plugin.toml`, settings, host tasks,
+construction, lifecycle, collaboration contracts, files, and documentation)
+is [`plugin-api.md`](plugin-api.md). Execution ownership for long-lived Plugin
+work lives in [`execution-ownership.md`](execution-ownership.md).
 
 ## Dependency and repository direction
 
@@ -1169,9 +1048,9 @@ Before changing target-sensitive code, verify:
     System or a Plugin?
 12. Does the application obtain the complete selected Target from the target
     composition crate without performing the wiring itself?
-13. Does System build TLS from the Platform's entropy and the shared trust
-    roots, with no Platform touching TLS, while all HTTP consumers use
-    `shared/http-client`?
+13. Does the Plugin that owns HTTP build TLS from the context's entropy and
+    the shared trust roots, with no Platform or System touching TLS, while all
+    HTTP consumers use its `ClientFactory`?
 14. Does the device entry acquire the hardware singleton exactly once and pass
     the resulting binding pair through selected-target composition before
     returning Target resources?
@@ -1186,3 +1065,5 @@ Before changing target-sensitive code, verify:
     operation trait?
 19. Does an SPI implementation receive `SpiDevice` when it owns a CS-selected device,
     with sharing and per-device configuration handled by an upstream adapter?
+20. Would disabling any Plugin remove every trace of its feature, with nothing
+    below the Plugins naming it?

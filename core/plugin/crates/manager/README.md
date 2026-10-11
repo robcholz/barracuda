@@ -70,7 +70,7 @@ does not own their internal services.
 
 ```text
 System
-├── PluginContext { ip_stack, http_clients }
+├── PluginContext { target_identity, ip_stack, entropy, wifi, hal }
 └── PluginManager
     ├── Typed capability registry
     │   └── (provider, TypeId) -> Rc<dyn Any>
