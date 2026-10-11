@@ -1,20 +1,32 @@
 # IMessage WeChat Plugin
 
+The IMessage WeChat Plugin adds WeChat iLink as an iMessage Gateway channel:
+it links a bot by QR login, sends through iLink, and receives by long polling.
+
 - Plugin ID: `imessage-wechat`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required typed capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`
-- Workflow Actions, Events, and Agent Tools: none of its own; inbound text
-  from allowed accounts is published through `IMessageGateway::publish` (the
-  Gateway's `gateway.message.received` Event)
-- Construction: `IMessageWechatPlugin::new(context)` keeps only
-  `context.entropy` (for `X-WECHAT-UIN`); HTTP, receive slots, mode, owners
-  (and their pairing codes), routes, and status come from `IMessageGateway`
-- Owned tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1
-  each), both started in `start` and raced against the `PluginTaskToken`
-- Receive slots: one of the Gateway's (`IMessageGateway::receive_control`)
-  while the channel is linked and in `send_receive`; none otherwise
-- Storage (Plugin-scoped KV keys):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (for `X-WECHAT-UIN`)
+- Provided capabilities: none
+- Required capabilities: `IMessageGateway` from `imessage-gateway`,
+  `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none of its own; inbound text from allowed accounts is published
+  through `IMessageGateway::publish` (the Gateway's `gateway.message.received`
+  Event)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-wechat`, with status; `POST
+  /api/gateway/wechat`, `GET /api/gateway/wechat/status`, `POST
+  /api/gateway/wechat/mode`, `GET /api/gateway/wechat/owners`, `POST
+  /api/gateway/wechat/owners`, `POST /api/gateway/wechat/login`, `GET
+  /api/gateway/wechat/login`, `DELETE /api/gateway/wechat/login` (see
+  [`http.md`](http.md))
+- Tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1 each),
+  both started in `start` and raced against the `PluginTaskToken`; the
+  receive task holds one of the Gateway's receive slots
+  (`IMessageGateway::receive_control`) while the channel is linked and in
+  `send_receive`, and none otherwise
+- Storage: Plugin-scoped KV keys:
   - `configuration`: the complete provider configuration;
   - `mode`: `"disabled"` or `"send_receive"` (JSON string);
   - `owners`: the allowed accounts (JSON array of `{id,label}`);
@@ -22,6 +34,10 @@
   - `context_tokens`: the latest `context_token` of up to 16 users (JSON
     array `[{user,token}]`, most recently used first);
   - `bot_id`: the `ilink_bot_id` of the last confirmed QR login.
+
+`IMessageWechatPlugin::new(context)` keeps only `context.entropy`; HTTP,
+receive slots, mode, owners (and their pairing codes), routes, and status come
+from `IMessageGateway`.
 
 The Plugin starts without provider credentials when storage is empty. It
 requires the `IMessageGateway` and `WebServer` capabilities, exposes
@@ -121,7 +137,7 @@ The portal entry is registered with `CaptivePortal::register_with_status`. Its
 `GET /portal/status` record is `attention` 等待扫码/Waiting for scan while a QR
 login session is in `wait` or `scanned`, `attention` 需要重新扫码/Scan again to
 relink while receiving is halted by an expired bot session, and otherwise the
-shared channel mapping (`entry_status`): `off` 未配置 when not linked, `off`
+Gateway's `channel_status` of the channel: `off` 未配置 when not linked, `off`
 已停用 when disabled, `ready` 收发中 while receiving, `attention` 连接中,
 名额已满 or 连接中断 otherwise.
 
@@ -177,6 +193,6 @@ the footer shows only while that fold is open. After a confirmed login or an
 accepted token the page calls `context.refreshStatus()`, so the portal's
 navigation and overview follow. Secrets are password inputs,
 never persisted in browser storage, and cleared on success or unmount. Requests
-are cancelled on unmount and are never retried automatically. The existing HTTP
-API has no authentication or transport encryption added here; use only within a
+are cancelled on unmount and are never retried automatically. The HTTP
+API has no authentication or transport encryption; use only within a
 trusted provisioning network.

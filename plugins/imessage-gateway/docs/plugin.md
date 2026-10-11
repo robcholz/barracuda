@@ -260,7 +260,7 @@ A channel registers one prefix route for its configuration path with
 other path below
 `base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
 `/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
-(BlueBubbles' `/webhook`) still take their own requests. One route per channel
+(BlueBubbles' `/hook`) still take their own requests. One route per channel
 instead of four keeps the webserver's route table within its first
 allocation.
 
@@ -347,7 +347,7 @@ portal. Its tests are in `resources/web/tests/`.
    2. fetch one batch over the lease. A polling channel uses
       `GatewayHttp::poll` (from `gateway.http()`) over the lease
       (one kept-alive connection; `GET` or `POST`, a per-request deadline, a
-      body cap with an optional tail): only the Gateway's `http` module and
+      body cap with an optional tail): only the Gateway's Plugin crate and
       `shared/http-client` may use reqwless (`workspace_boundary`);
    3. call `session.receiving()`;
    4. for each new message (deduplicated), call

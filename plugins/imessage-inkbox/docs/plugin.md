@@ -1,21 +1,41 @@
 # IMessage Inkbox Plugin
 
+The IMessage Inkbox Plugin adds Inkbox as an iMessage Gateway channel: it
+configures an Inkbox agent by API key or self-signup, sends through the Inkbox
+API, and receives by polling.
+
 - Plugin ID: `imessage-inkbox`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Gateway channel: `inkbox`
-- Owned task: `inkbox_receive_task`, one receive loop (see below)
-- Receive slots: one, while the channel is configured and in `send_receive`
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-inkbox`, with status; `POST
+  /api/gateway/inkbox`, `GET /api/gateway/inkbox/status`, `POST
+  /api/gateway/inkbox/mode`, `GET /api/gateway/inkbox/owners`, `POST
+  /api/gateway/inkbox/owners`, `POST /api/gateway/inkbox/signup`, `POST
+  /api/gateway/inkbox/verify`, `POST /api/gateway/inkbox/resend` (see
+  [`http.md`](http.md))
+- Tasks: `inkbox_receive_task` (pool size 1), one receive loop (see below)
+  that holds one of the Gateway's receive slots while the channel is
+  configured and in `send_receive`
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode (`ChannelMode` JSON string);
   - `owners`: the allowed accounts (owner book);
   - `cursor`: the receive cursor, `{"start":"<created_at>","recent":["<id>",…]}`.
 
+The Gateway channel is `inkbox`.
+
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities and reaches the network only through
 `IMessageGateway::http()`, exposes `/api/gateway/inkbox` for runtime configuration, and
-registers the configured channel `inkbox` for its lifetime, so it can be active
+registers the channel `inkbox` while configured and not `disabled`, so it can be active
 beside the BlueBubbles `bluebubbles` channel. Inkbox cannot quote a message, so
 `reply_to` on text and media is ignored instead of failing. Accepted configuration is
 persisted before activation and restored during Plugin registration. Malformed
@@ -153,6 +173,6 @@ step with the agent's `email_address`; a channel configured with a key shows a
 key the page calls `context.refreshStatus()`. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser
 storage, and cleared on success or unmount. Requests are cancelled on unmount
-and are never retried automatically. The existing HTTP API has no authentication
-or transport encryption added here; use only within a trusted provisioning
+and are never retried automatically. The HTTP API has no authentication
+or transport encryption; use only within a trusted provisioning
 network.

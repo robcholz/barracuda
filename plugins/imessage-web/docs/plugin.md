@@ -1,8 +1,23 @@
 # IMessage Web Plugin
 
+The IMessage Web Plugin adds the built-in Web conversation as an iMessage
+Gateway channel, bridged to the browser over a WebSocket.
+
 - Plugin ID: `imessage-web`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: `IMessageWebRoute`
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `IMessageWebRoute`
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages and controls reach Workflow as the
+  Gateway's `gateway.message.received` and `gateway.control.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-web`, without status; WebSocket route
+  `/ws/message`
+- Tasks: none
+- Storage: none
 
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,

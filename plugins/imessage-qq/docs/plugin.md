@@ -1,17 +1,36 @@
 # IMessage QQ Plugin
 
+The IMessage QQ Plugin adds a QQ Bot as an iMessage Gateway channel: it binds
+the bot by scan or configuration, sends through the QQ OpenAPI, and receives
+over the QQ gateway WebSocket.
+
 - Plugin ID: `imessage-qq`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Gateway channel: `qq`
-- Owned tasks: `qq_receive_task`, one receive loop (see below), and
-  `qq_login_task`, the scan-to-bind session (see "Scan-to-bind")
-- Receive slots: one, while the channel is configured and in `send_receive`
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (WebSocket keys and masks, scan-to-bind keys)
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-qq`, with status; `POST /api/gateway/qq`,
+  `GET /api/gateway/qq/status`, `POST /api/gateway/qq/mode`, `GET
+  /api/gateway/qq/owners`, `POST /api/gateway/qq/owners`, `POST
+  /api/gateway/qq/login`, `GET /api/gateway/qq/login`, `DELETE
+  /api/gateway/qq/login` (see [`http.md`](http.md))
+- Tasks: `qq_receive_task` (pool size 1), one receive loop (see below) that
+  holds one of the Gateway's receive slots while the channel is configured
+  and in `send_receive`; `qq_login_task` (pool size 1), the scan-to-bind
+  session (see "Scan-to-bind")
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode (`ChannelMode` JSON string);
   - `owners`: the allowed accounts (owner book);
   - `session`: the gateway session to resume, `{"session_id","seq"}`.
+
+The Gateway channel is `qq`.
 
 The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
 and `WebServer` capabilities and follows the channel plumbing of
@@ -186,5 +205,5 @@ own `message` and `code` on the App Secret field; other errors toast the
 device's `message`. A save ends the QR session and shows the linked card. The
 page never reads the App Secret back. Secrets are password inputs, never persisted in browser storage, and
 cleared on success or unmount. Requests are cancelled on unmount and are never
-retried automatically. The existing HTTP API has no authentication or transport
-encryption added here; use only within a trusted provisioning network.
+retried automatically. The HTTP API has no authentication or transport
+encryption; use only within a trusted provisioning network.

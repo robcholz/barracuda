@@ -1,15 +1,28 @@
 # IMessage Telegram Plugin
 
+The IMessage Telegram Plugin adds a Telegram Bot as an iMessage Gateway
+channel: it stores the bot configuration, sends through the Bot API, and
+receives by long polling.
+
 - Plugin ID: `imessage-telegram`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required typed capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`
-- Workflow Actions, Events, Agent Tools: none (inbound messages reach Workflow
-  as the Gateway's `gateway.message.received`)
-- Owned tasks: one, `telegram_receive_task`, which owns the receive loop
-- Receive slots: at most one, held only while the channel is configured and in
-  `send_receive`
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-telegram`, with status; `POST
+  /api/gateway/telegram`, `GET /api/gateway/telegram/status`, `POST
+  /api/gateway/telegram/mode`, `GET /api/gateway/telegram/owners`, `POST
+  /api/gateway/telegram/owners` (see [`http.md`](http.md))
+- Tasks: one, `telegram_receive_task` (pool size 1), which owns the receive
+  loop and holds at most one of the Gateway's receive slots, only while the
+  channel is configured and in `send_receive`
+- Storage: Plugin-scoped KV:
   - `configuration`: the complete provider configuration;
   - `mode`: the channel mode as a JSON string (see below);
   - `owners`: the allowed accounts, a JSON array of `{id, label}`;
@@ -17,16 +30,17 @@
     string.
 
 The Plugin starts without provider credentials when storage is empty. Its
-constructor takes the Platform HTTP clients, the receive slots, and the
-Platform entropy (for binding codes) from `PluginContext`. Registration loads
-the configuration and mode, and the allowed accounts only when configured;
-malformed stored data fails registration. The first receive session reads the
-cursor. The configuration path, `/mode`, and `/owners` are one prefix route
-(`ChannelEndpoint`). See [`http.md`](http.md) for the endpoints.
+constructor takes nothing from `PluginContext`; the Gateway supplies the HTTP
+clients, the receive slots, and the Platform entropy (for binding codes).
+Registration loads the configuration and mode, and the allowed accounts only
+when configured; malformed stored data fails registration. The first receive
+session reads the cursor. The configuration path, `/mode`, and `/owners` are
+one prefix route (`IMessageGateway::serve_channel`). See [`http.md`](http.md)
+for the endpoints.
 
 ## Modes and registration
 
-The mode is a `ChannelMode` from `barracuda-imessage-gateway-channel`:
+The mode is the Gateway's `ChannelMode`:
 
 - `disabled`: no Gateway channel, no connection;
 - `send`: the `telegram` channel is registered with the Gateway and only sends;
@@ -41,15 +55,15 @@ task share.
 ## Receive loop
 
 `telegram_receive_task` is spawned once in `start` and races the receive
-runtime (`receive_runtime` from the channel crate) against its
+runtime (`IMessageGateway::receive_runtime`) against its
 `PluginTaskToken`. While the channel is not configured or not in
 `send_receive`, the runtime is parked and holds no slot. Otherwise it holds one
-lease from the System's receive slots (never the shared request pool used by
+lease from the Gateway's receive slots (never the shared request pool used by
 model calls and sends); when every slot is taken it reports `no_slot` and
 starts as soon as `ReceiveSlots::wait_available` reports a freed slot.
 
 Each session opens one kept-alive connection on the lease's client factory,
-through the Gateway's poll helper (`barracuda_imessage_gateway_plugin::poll`),
+through the Gateway's poll helper (`GatewayHttp::poll`),
 and loops:
 
 1. await `IMessageGateway::ready()`;
@@ -101,8 +115,8 @@ Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-telegram`, group `WebGroup::Channel`, order 20, title `Telegram`, a
 bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
-`ResourceFiles` provider. Its `GET /portal/status` record is the channel
-crate's `entry_status`: 未配置/Not set up, 已停用/Disabled, 仅发送/Send only,
+`ResourceFiles` provider. Its `GET /portal/status` record is `entry_status`
+over `IMessageGateway::channel_status`: 未配置/Not set up, 已停用/Disabled, 仅发送/Send only,
 收发中/Receiving, 连接中/Connecting, 名额已满/No slot, or 连接中断/Disconnected.
 Unload removes the navigation entry and resource provider.
 
@@ -133,5 +147,5 @@ after a save succeeds, and the page then calls `context.refreshStatus()` so the
 portal's navigation and overview follow. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser storage, and cleared on
 success or unmount. Requests are cancelled on unmount and are never retried
-automatically. The existing HTTP API has no authentication or transport
-encryption added here; use only within a trusted provisioning network.
+automatically. The HTTP API has no authentication or transport
+encryption; use only within a trusted provisioning network.

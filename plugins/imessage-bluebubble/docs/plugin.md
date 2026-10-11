@@ -1,22 +1,39 @@
 # IMessage BlueBubble Plugin
 
+The IMessage BlueBubble Plugin adds a BlueBubbles server as an iMessage
+Gateway channel: it sends through the BlueBubbles API and receives through a
+webhook the server posts to the device's own webserver.
+
 - Plugin ID: `imessage-bluebubble`
-- Direct Plugin dependencies: `imessage-gateway`, `webserver`, `captive-portal`
-- Provided typed capabilities: none
-- Required capabilities: `IMessageGateway`, `WebServer`, `CaptivePortal`; the
-  Platform entropy (`PluginContext::entropy`) and IP stack
-  (`PluginContext::ip_stack`)
-- Owned task: `bluebubbles_receive_task`, one receive runtime (below)
-- Receive slots: none. The webhook is served by the device's own webserver, so
-  the channel uses the Gateway's `webhook_receive_control()` and never reports
-  `no_slot`. Sends and webhook requests go through `IMessageGateway::http()`.
-- Storage (Plugin-scoped KV):
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `ip_stack` (the station address the webhook URL names),
+  `entropy` (the webhook secret)
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-bluebubble`, with status; `POST
+  /api/gateway/bluebubbles`, `GET /api/gateway/bluebubbles/status`, `POST
+  /api/gateway/bluebubbles/mode`, `GET /api/gateway/bluebubbles/owners`,
+  `POST /api/gateway/bluebubbles/owners`, `POST
+  /api/gateway/bluebubbles/hook/<secret>` (see [`http.md`](http.md))
+- Tasks: `bluebubbles_receive_task` (pool size 1), one receive runtime
+  (below); it holds no receive slot
+- Storage: Plugin-scoped KV:
   - `configuration`: the provider configuration;
   - `mode`: the channel mode;
   - `owners`: the allowed accounts;
   - `webhook`: `{"server","secret","url"?}`, the webhook secret, the server it
     was minted for, and the URL last registered;
   - `cursor`: `{"after"?,"seen":[…]}`, the catch-up cursor.
+
+Receive slots: none. The webhook is served by the device's own webserver, so
+the channel uses the Gateway's `webhook_receive_control()` and never reports
+`no_slot`. Sends and webhook requests go through `IMessageGateway::http()`.
 
 The Plugin starts without provider credentials when storage is empty. It
 exposes `/api/gateway/bluebubbles` for runtime configuration and registers the
@@ -181,6 +198,6 @@ that replaces it, and the shared mode and allowed-accounts controls
 succeeds, and the page then calls `context.refreshStatus()` so the portal's
 navigation and overview follow. It never reads settings or keys. Secrets are password inputs, never persisted in browser
 storage, and cleared on success or unmount. Requests are cancelled on unmount
-and are never retried automatically. The existing HTTP API has no authentication
-or transport encryption added here; use only within a trusted provisioning
+and are never retried automatically. The HTTP API has no authentication
+or transport encryption; use only within a trusted provisioning
 network.
