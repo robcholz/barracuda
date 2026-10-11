@@ -258,6 +258,7 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
             let request = SendMediaRequest {
                 target: target(),
                 body: BinaryBody::Stream(Box::pin(data)),
+                size: None,
                 filename: Some("photo.jpg".to_owned()),
                 mime_type: Some("image/jpeg".to_owned()),
                 caption: Some("caption".to_owned()),

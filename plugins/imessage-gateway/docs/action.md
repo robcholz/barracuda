@@ -5,8 +5,55 @@ The Plugin registers three typed Actions with static schemas under
 
 - `gateway.send` sends one complete text message and returns `message_id`.
 - `gateway.send_stream` accepts one ordered semantic Agent event.
-- `gateway.send_media` accepts `start`, `chunk`, and `finish` commands for one
-  binary stream.
+- `gateway.send_media` sends one file by path (`file`), or accepts `start`,
+  `chunk`, and `finish` commands for one binary stream.
 
 Business failures are ordinary `{"error":"<code>"}` Action responses. The
 four active-stream limit and per-stream queue backpressure are runtime limits.
+
+## `gateway.send_media`
+
+Schemas: `schemas/action/gateway.send_media/request.json` and
+`response.json`.
+
+### `file`
+
+```json
+{"action":"file","channel":"telegram","conversation_id":"chat-42","kind":"image","path":"/workspace/cache/agent/chart.png","caption":"Today"}
+```
+
+Opens `path` in the Gateway's filesystem view, sends it as one message of
+`kind` (`file`, `image`, `audio`, or `video`), and waits for delivery, like
+`gateway.send`. Any path the Gateway can open is allowed, such as
+`/workspace/cache/...` or `/workspace/media/...`. `filename` defaults to the
+path's last segment, and `mime_type` to the type its extension names (`png`,
+`jpg`, `mp4`, `ogg`, `pdf`, ...); a provider picks its own for an unknown
+extension. `thread_id`, `caption`, and `reply_to` are optional.
+
+Response: `{"message_id":"<provider id>"}`. No `gateway.send_media.finished`
+Event follows.
+
+Errors:
+
+- `invalid_request`: an empty `channel`, `conversation_id`, or `path`;
+- `unknown_channel`: no channel is registered under `channel`;
+- `not_found`: `path` names no file;
+- `too_large`: the file exceeds the `attachment-max-bytes` setting;
+- `unsupported`: the channel cannot send media of `kind`;
+- `authentication`, `rate_limited`, `delivery`: the provider failed.
+
+### `start`, `chunk`, `finish`
+
+```json
+{"action":"start","stream_id":"s1","sequence":0,"channel":"telegram","conversation_id":"chat-42","kind":"file","filename":"a.bin"}
+{"action":"chunk","stream_id":"s1","sequence":1,"content_base64":"AAEC"}
+{"action":"finish","stream_id":"s1","sequence":2}
+```
+
+Each command answers `{"accepted_sequence":n}`; the delivery's outcome comes
+as `gateway.send_media.finished`, matched by `stream_id`. `start` takes
+sequence 0, and every later command the next sequence.
+
+Errors: `invalid_request`, `unknown_channel` (from `start`),
+`duplicate_stream`, `unknown_stream`, `out_of_order`, and `busy` when all four
+media workers or the stream's queue are occupied.

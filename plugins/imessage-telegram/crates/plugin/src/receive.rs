@@ -375,6 +375,7 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
                     route: GatewayRoute::new(CHANNEL, conversation_id),
                     message_id: message.message_id.to_string(),
                     text,
+                    attachments: Vec::new(),
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a Telegram message: {error}");

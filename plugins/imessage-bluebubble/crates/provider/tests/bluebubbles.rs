@@ -206,6 +206,7 @@ fn sends_streamed_attachments_without_buffering_them() {
         let request = SendMediaRequest {
             target: target(),
             body: BinaryBody::Stream(Box::pin(data)),
+            size: None,
             filename: Some("voice.m4a".to_owned()),
             mime_type: Some("audio/mp4".to_owned()),
             caption: Some("voice note".to_owned()),
@@ -334,6 +335,7 @@ fn without_private_api_replies_are_sent_unthreaded() {
             let attachment = SendMediaRequest {
                 target: target(),
                 body: BinaryBody::Bytes(vec![1, 2, 3]),
+                size: Some(3),
                 filename: Some("photo.jpg".to_owned()),
                 mime_type: None,
                 caption: None,
@@ -462,6 +464,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
         let request = SendMediaRequest {
             target: target(),
             body: BinaryBody::Bytes(vec![1, 2, 3]),
+            size: Some(3),
             filename: Some("image.jpg".to_owned()),
             mime_type: None,
             caption: None,
@@ -507,6 +510,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
                 SendMediaRequest {
                     target: target(),
                     body: BinaryBody::Bytes(vec![1]),
+                    size: Some(1),
                     filename: None,
                     mime_type: None,
                     caption: None,

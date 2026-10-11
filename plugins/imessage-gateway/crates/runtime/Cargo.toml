@@ -17,6 +17,7 @@ thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 futures-lite = "2"
+json-validator.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

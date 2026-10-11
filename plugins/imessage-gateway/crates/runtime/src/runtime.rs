@@ -12,7 +12,8 @@ use crate::gateway_message_received::{
 };
 use crate::gateway_send::{send, GatewaySendRequest, GatewaySendResponse};
 use crate::gateway_send_media::{
-    accept_media, deliver_media_stream, GatewaySendMediaRequest, MediaJob, MediaSessions,
+    deliver_media_stream, send_media, GatewaySendMediaRequest, GatewaySendMediaResponse, MediaJob,
+    MediaOpener, MediaSessions,
 };
 use crate::gateway_send_stream::{
     accept_stream, deliver_event_stream, EventJob, EventSessions, GatewaySendStreamRequest,
@@ -142,17 +143,21 @@ impl GatewayRuntime {
         accept_stream(&self.event_sessions, &self.event_jobs, request)
     }
 
-    /// Accepts one command for an outbound binary media stream.
-    pub fn send_media(
+    /// Accepts one command for an outbound binary media stream, or sends
+    /// one whole file that `opener` opens and waits for its delivery.
+    pub async fn send_media<Opener: MediaOpener>(
         &self,
         request: GatewaySendMediaRequest,
-    ) -> Result<GatewayAccepted, GatewayOperationError> {
-        accept_media(
+        opener: &Opener,
+    ) -> Result<GatewaySendMediaResponse, GatewayOperationError> {
+        send_media(
             &self.gateway,
             &self.media_sessions,
             &self.media_jobs,
+            opener,
             request,
         )
+        .await
     }
 
     /// Runs one of the fixed outbound semantic-stream workers.

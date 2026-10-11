@@ -231,7 +231,7 @@ impl ToolHandler for GatewaySendMediaTool {
     type Args = GatewaySendMediaRequest;
 
     fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
-        Box::pin(async move { tool_output(self.gateway.send_media(request)) })
+        Box::pin(async move { tool_output(self.gateway.send_media(request).await) })
     }
 }
 

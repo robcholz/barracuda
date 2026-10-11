@@ -35,6 +35,12 @@ pub enum GatewayOperationError {
     /// Provider delivery failed.
     #[error("Gateway delivery failed")]
     Delivery,
+    /// The file to send does not exist or cannot be opened.
+    #[error("Gateway file was not found")]
+    NotFound,
+    /// The file to send is larger than the Gateway sends.
+    #[error("Gateway file is too large")]
+    TooLarge,
 }
 
 pub(crate) fn map_gateway_error(error: &GatewayError) -> GatewayOperationError {

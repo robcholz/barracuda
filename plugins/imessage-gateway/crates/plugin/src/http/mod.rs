@@ -12,12 +12,17 @@ use barracuda_bulk_memory::BulkBox;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use futures_lite::StreamExt as _;
-use gateway::BinaryBody;
+use gateway::{BinaryBody, MediaSource};
 use reqwless::request::RequestBuilder as _;
 
 pub use reqwless::request::{Method, RequestBody};
 
+mod download;
 mod poll;
+pub use download::{
+    download, DownloadError, DownloadHead, DownloadLimits, DownloadRequest, DownloadSink,
+    DOWNLOAD_IDLE_TIMEOUT,
+};
 pub use poll::{poll, PollEnd, PollLimits, PollRequest, Polled, Poller};
 
 /// HTTP helpers over the http Plugin's clients, for channel providers.
@@ -65,6 +70,23 @@ impl GatewayHttp {
         send_limited(&self.clients, method, url, headers, body, limit).await
     }
 
+    /// Streams one response body into `sink` on a fresh connection; see
+    /// [`download`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DownloadError`] when the exchange fails, a read idles past
+    /// [`DownloadLimits::idle_timeout`], the body exceeds
+    /// [`DownloadLimits::max_bytes`], or `sink` fails.
+    pub async fn download<B: RequestBody, S: DownloadSink>(
+        &self,
+        request: DownloadRequest<'_, B>,
+        limits: DownloadLimits,
+        sink: &mut S,
+    ) -> Result<DownloadHead, DownloadError<S::Error>> {
+        download(&self.clients, request, limits, sink).await
+    }
+
     /// Polls `origin` over the receive slot `lease` until a request fails or
     /// the poller stops; see [`poll`].
     pub async fn poll<P: Poller>(
@@ -94,7 +116,8 @@ pub enum Error {
     /// The exchange missed its [`SEND_TIMEOUT`] deadline.
     #[error("HTTP request timed out")]
     Timeout,
-    /// The response body exceeded the limit given to [`send_limited`].
+    /// The response body exceeded the limit given to [`send_limited`] or
+    /// [`download`].
     #[error("HTTP response body is too large")]
     BodyTooLarge,
     /// The HTTP client failed.
@@ -374,6 +397,7 @@ pub enum MultipartError {
 enum Segment {
     Bytes(Vec<u8>),
     Stream(gateway::BinaryStream),
+    Source(Rc<dyn MediaSource>),
 }
 
 struct BodyState {
@@ -397,6 +421,15 @@ impl MultipartBody {
     }
 }
 
+impl MultipartBody {
+    /// Records why a part could not be written and ends the body.
+    fn fail(&self, message: String) {
+        let mut state = self.state.borrow_mut();
+        state.failure = Some(message);
+        state.completed = true;
+    }
+}
+
 impl RequestBody for MultipartBody {
     fn len(&self) -> Option<usize> {
         self.content_length
@@ -415,12 +448,44 @@ impl RequestBody for MultipartBody {
                         match chunk {
                             Ok(bytes) => writer.write_all(&bytes).await?,
                             Err(error) => {
-                                let mut state = self.state.borrow_mut();
-                                state.failure = Some(error.to_string());
-                                state.completed = true;
+                                self.fail(error.to_string());
                                 return Ok(());
                             }
                         }
+                    }
+                }
+                Some(Segment::Source(source)) => {
+                    let mut stream = match source.open().await {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            self.fail(error.to_string());
+                            return Ok(());
+                        }
+                    };
+                    // The declared length is part of `Content-Length`, so the
+                    // part never writes more than it.
+                    let mut remaining = source.len();
+                    while let Some(chunk) = stream.next().await {
+                        let bytes = match chunk {
+                            Ok(bytes) => bytes,
+                            Err(error) => {
+                                self.fail(error.to_string());
+                                return Ok(());
+                            }
+                        };
+                        let Some(rest) = u64::try_from(bytes.len())
+                            .ok()
+                            .and_then(|length| remaining.checked_sub(length))
+                        else {
+                            self.fail("media source is longer than its length".into());
+                            return Ok(());
+                        };
+                        writer.write_all(&bytes).await?;
+                        remaining = rest;
+                    }
+                    if remaining != 0 {
+                        self.fail("media source is shorter than its length".into());
+                        return Ok(());
                     }
                 }
                 None => {
@@ -471,7 +536,10 @@ impl Multipart {
         self
     }
 
-    /// Appends a file streamed from `body`.
+    /// Appends a file streamed from `body`. A body of known length
+    /// ([`BinaryBody::Bytes`] or [`BinaryBody::Source`]) keeps the whole
+    /// body's length known, so it is sent with a `Content-Length`; a
+    /// [`BinaryBody::Stream`] makes it unknown.
     #[must_use]
     pub fn file(
         mut self,
@@ -537,6 +605,15 @@ impl Multipart {
                         BinaryBody::Stream(stream) => {
                             length = None;
                             segments.push_back(Segment::Stream(stream));
+                        }
+                        BinaryBody::Source(source) => {
+                            if let Some(current) = &mut length {
+                                *current = usize::try_from(source.len())
+                                    .ok()
+                                    .and_then(|size| current.checked_add(size))
+                                    .ok_or(MultipartError::LengthOverflow)?;
+                            }
+                            segments.push_back(Segment::Source(source));
                         }
                     }
                     push_bytes(&mut segments, &mut length, b"\r\n".to_vec())?;

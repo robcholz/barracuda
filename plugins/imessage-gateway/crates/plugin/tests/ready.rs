@@ -68,6 +68,7 @@ fn message(id: usize) -> GatewayInboundMessage {
         route: GatewayRoute::new("test", "conversation"),
         message_id: format!("m{id}"),
         text: "hello".into(),
+        attachments: Vec::new(),
     }
 }
 

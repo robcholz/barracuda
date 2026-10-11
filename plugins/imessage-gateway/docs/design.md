@@ -32,8 +32,15 @@ defines channel ownership, and dropping the guard unregisters the channel.
 ## Inbound messages
 
 Providers publish a complete normalized message containing route, provider
-message ID, and text. The Gateway validates required routing identity and emits
-one `gateway.message.received` value through Workflow matching.
+message ID, text, and attachment references. The Gateway validates required
+routing identity and emits one `gateway.message.received` value through
+Workflow matching.
+
+Attachment bytes never enter Workflow JSON, Events, or transcripts. A channel
+stores each file through the Gateway first (`store_inbound`, or
+`download_inbound` for a URL), into the Gateway's
+`/workspace/cache/gateway/<channel>/`, and publishes only the returned
+reference: kind, path, MIME type, filename, and size.
 
 ## Outbound streams
 
@@ -43,7 +50,10 @@ a bounded per-stream queue, and `turn_ended` or `stream_error` closes it.
 
 Media streams use explicit `start`, `chunk`, and `finish` commands with a
 caller-owned stream ID and sequence. Base64 chunks are decoded before they
-enter the provider-facing stream.
+enter the provider-facing stream. A `file` command instead names a file the
+Gateway opens as a re-openable source of known length (`BinaryBody::Source`),
+so a provider can read it twice (to digest it, then to upload it) or send it
+with a `Content-Length`.
 
 The runtime owns four text workers and four media workers. This bounds active
 provider work and lets independent streams progress concurrently. Queue
@@ -66,3 +76,9 @@ drops the connection and returns `Error::Timeout`, which providers report as a
 `Transport` channel error. A body of unknown length is a caller-fed media
 stream, so time spent waiting for its next chunk does not count: connecting,
 each write, and the response after the last chunk are each bounded by 30 s.
+
+Downloads (`GatewayHttp::download`) stream the response body into a sink
+instead of buffering it, stop at a byte cap, and bound each wait for the
+server, connecting through the response head, each request write, and each
+body read, on its own, so a large file on a slow link is not cut off while it
+still moves.

@@ -501,6 +501,7 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
                     route: GatewayRoute::new(CHANNEL, from_user_id),
                     message_id,
                     text,
+                    attachments: Vec::new(),
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a WeChat message: {error}");

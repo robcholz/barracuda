@@ -4,6 +4,7 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use barracuda_imessage_gateway_plugin::{
     ChannelControl, ChannelError, Classification, GatewayInboundMessage, GatewayRoute,
@@ -249,6 +250,7 @@ impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
                     route: GatewayRoute::new(CHANNEL, chat),
                     message_id: message.guid.clone(),
                     text: String::from(text),
+                    attachments: Vec::new(),
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a BlueBubbles message: {error}");

@@ -300,7 +300,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                     },
                 },
             )?;
-            match request.body {
+            let opened = match request.body {
                 BinaryBody::Bytes(bytes) => {
                     self.publish(
                         &request.target,
@@ -310,12 +310,17 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                             phase: MediaPhase::Delta { bytes },
                         },
                     )?;
+                    None
                 }
-                BinaryBody::Stream(mut stream) => {
-                    while let Some(chunk) = stream.next().await {
-                        match chunk {
-                            Ok(bytes) if bytes.is_empty() => {}
-                            Ok(bytes) => {
+                BinaryBody::Stream(stream) => Some(Ok(stream)),
+                BinaryBody::Source(source) => Some(source.open().await),
+            };
+            if let Some(opened) = opened {
+                let failed = match opened {
+                    Ok(mut stream) => loop {
+                        match stream.next().await {
+                            Some(Ok(bytes)) if bytes.is_empty() => {}
+                            Some(Ok(bytes)) => {
                                 self.publish(
                                     &request.target,
                                     WebEventData::Media {
@@ -327,21 +332,24 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                     },
                                 )?;
                             }
-                            Err(error) => {
-                                self.publish(
-                                    &request.target,
-                                    WebEventData::Media {
-                                        message_id: message_id.clone(),
-                                        kind,
-                                        phase: MediaPhase::End {
-                                            error: Some(stream_error_message(&error)),
-                                        },
-                                    },
-                                )?;
-                                return Err(error.into());
-                            }
+                            Some(Err(error)) => break Some(error),
+                            None => break None,
                         }
-                    }
+                    },
+                    Err(error) => Some(error),
+                };
+                if let Some(error) = failed {
+                    self.publish(
+                        &request.target,
+                        WebEventData::Media {
+                            message_id: message_id.clone(),
+                            kind,
+                            phase: MediaPhase::End {
+                                error: Some(stream_error_message(&error)),
+                            },
+                        },
+                    )?;
+                    return Err(error.into());
                 }
             }
             self.publish(

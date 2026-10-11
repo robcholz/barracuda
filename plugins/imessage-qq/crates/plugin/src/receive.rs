@@ -13,6 +13,7 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
 use barracuda_imessage_gateway_plugin::{
@@ -710,6 +711,7 @@ impl<Storage: PluginStorage> QQChannel<Storage> {
                     route: GatewayRoute::new(CHANNEL, conversation_id),
                     message_id: id,
                     text,
+                    attachments: Vec::new(),
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a QQ message: {error}");

@@ -1,11 +1,11 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::ToString, vec::Vec};
 
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use embassy_time::{Duration, Instant, Timer};
 use futures_lite::{future::block_on, stream};
-use gateway::{BinaryBody, BinaryChunk};
+use gateway::{BinaryBody, BinaryChunk, MediaOpenFuture, MediaSource};
 use http_client::ClientFactory;
 
 use super::{send_limited, send_within, Error, Method, Multipart};
@@ -154,4 +154,89 @@ fn a_limited_send_rejects_a_body_over_its_limit() {
 
     assert_eq!(fits.body, br#"{"ok":true}"#.to_vec());
     assert!(matches!(too_large, Err(Error::BodyTooLarge)));
+}
+
+/// A source that claims `len` bytes and yields `bytes` in two chunks.
+struct Claimed {
+    len: u64,
+    bytes: Vec<u8>,
+}
+
+impl MediaSource for Claimed {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn open(&self) -> MediaOpenFuture<'_> {
+        let (first, second) = self.bytes.split_at(self.bytes.len() / 2);
+        let chunks = [
+            Ok(BinaryChunk::from(first.to_vec())),
+            Ok(BinaryChunk::from(second.to_vec())),
+        ];
+        Box::pin(async move { Ok(Box::pin(stream::iter(chunks)) as gateway::BinaryStream) })
+    }
+}
+
+fn source_multipart(len: u64, bytes: &[u8]) -> super::MultipartBody {
+    let (_content_type, body) = Multipart::new("boundary")
+        .text("chat_id", "42")
+        .file(
+            "photo",
+            "photo.jpg",
+            "image/jpeg",
+            BinaryBody::Source(Rc::new(Claimed {
+                len,
+                bytes: bytes.to_vec(),
+            })),
+        )
+        .finish()
+        .expect("multipart body");
+    body
+}
+
+#[test]
+fn a_source_part_keeps_the_body_length_known() {
+    let network = network([ScriptStep::json(200, r#"{"ok":true}"#)]);
+    let body = source_multipart(6, b"SOURCE");
+    let length = super::RequestBody::len(&body).expect("a known length");
+    let probe = body.clone();
+
+    let response = block_on(send_within(
+        TIMEOUT,
+        &factory(network),
+        Method::POST,
+        "http://gateway.test/upload",
+        &[],
+        body,
+    ))
+    .expect("upload");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(probe.failure(), None);
+    let request = &network.requests()[0];
+    assert!(request.contains(&alloc::format!("Content-Length: {length}\r\n")));
+    let (_head, sent) = request.split_once("\r\n\r\n").expect("request body");
+    assert_eq!(sent.len(), length);
+    assert!(sent.contains("\r\n\r\nSOURCE\r\n--boundary--\r\n"));
+}
+
+#[test]
+fn a_source_longer_than_its_length_is_a_failure() {
+    let network = network([ScriptStep::json(200, r#"{"ok":true}"#)]);
+    let body = source_multipart(4, b"SOURCE");
+    let probe = body.clone();
+
+    let _result = block_on(send_within(
+        TIMEOUT,
+        &factory(network),
+        Method::POST,
+        "http://gateway.test/upload",
+        &[],
+        body,
+    ));
+
+    assert_eq!(
+        probe.failure().as_deref(),
+        Some("media source is longer than its length")
+    );
 }

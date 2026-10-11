@@ -4,7 +4,11 @@
   "properties": {
     "route": { "$ref": "#/$defs/route" },
     "message_id": { "type": "string", "minLength": 1 },
-    "text": { "type": "string" }
+    "text": { "type": "string" },
+    "attachments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/attachment" }
+    }
   },
   "required": ["route", "message_id", "text"],
   "additionalProperties": false,
@@ -17,6 +21,18 @@
         "thread_id": { "type": "string" }
       },
       "required": ["channel", "conversation_id"],
+      "additionalProperties": false
+    },
+    "attachment": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["file", "image", "audio", "video"] },
+        "path": { "type": "string", "minLength": 1 },
+        "mime_type": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "path", "mime_type", "size"],
       "additionalProperties": false
     }
   }

@@ -14,11 +14,14 @@ gateway
         route: GatewayRoute::new("telegram", "chat-42"),
         message_id: "message-100".into(),
         text: "hello".into(),
+        attachments: Vec::new(),
     })
     .await?;
 ```
 
-Publishing emits one `gateway.message.received` Workflow Event.
+Publishing emits one `gateway.message.received` Workflow Event. A message
+with files carries the `Attachment` references `store_inbound` or
+`download_inbound` returned.
 
 ## 2. Send one complete message
 
@@ -57,10 +60,19 @@ Match `gateway.send_stream.finished` by `session` to receive the provider
 receipt or delivery error. Retry the same sequence after yielding when the
 operation returns `busy`.
 
-## 4. Send streamed media
+## 4. Send a file by path
+
+`GatewaySendMediaRequest::File` names a file in the Gateway's filesystem
+view; `IMessageGateway::send_media(..).await` opens it with `open_source`,
+sends it, and answers `GatewaySendMediaResponse::Sent` with the provider
+`message_id`. It is the `file` command of the `gateway.send_media` Workflow
+Action.
+
+## 5. Send streamed media
 
 Use `GatewaySendMediaRequest::Start`, one or more `Chunk` commands containing
-canonical base64, and `Finish`. Match `gateway.send_media.finished` by
+canonical base64, and `Finish`; each answers
+`GatewaySendMediaResponse::Accepted`. Match `gateway.send_media.finished` by
 `stream_id` for the terminal result. The same commands are exposed as the
 `gateway.send_media` Workflow Action and `gateway_send_media` Agent tool.
 

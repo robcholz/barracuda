@@ -4,9 +4,10 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 
 use barracuda_imessage_gateway_plugin::{
-    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
-    MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendStreamEvent, SendStreamRequest, SetTypingRequest, StreamError,
+    BinaryBody, BinaryChunk, BinaryStream, DeleteMessageRequest, EditMessageRequest, MediaKind,
+    MediaOpenFuture, MediaSource, MessageChannel, MessageGateway, MessageTarget, ReactRequest,
+    SendMediaRequest, SendMessageRequest, SendStreamEvent, SendStreamRequest, SetTypingRequest,
+    StreamError,
 };
 use futures_lite::{future::block_on, stream};
 use web::{
@@ -161,6 +162,7 @@ fn maps_all_media_and_mutation_operations_to_events() {
                 Ok(BinaryChunk::from(vec![1, 2])),
                 Ok(BinaryChunk::from(vec![3])),
             ]))),
+            size: None,
             filename: Some("photo.jpg".into()),
             mime_type: Some("image/jpeg".into()),
             caption: Some("photo".into()),
@@ -208,6 +210,71 @@ fn maps_all_media_and_mutation_operations_to_events() {
         assert!(
             matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::ConversationTyping { typing: true, .. }))
         );
+    });
+}
+
+/// Two chunks of known length, or a failure to open.
+struct Source(Option<[u8; 3]>);
+
+impl MediaSource for Source {
+    fn len(&self) -> u64 {
+        3
+    }
+
+    fn open(&self) -> MediaOpenFuture<'_> {
+        let opened = self
+            .0
+            .ok_or_else(|| StreamError::failed("gone"))
+            .map(|bytes| {
+                Box::pin(stream::iter([
+                    Ok(BinaryChunk::from(bytes[..2].to_vec())),
+                    Ok(BinaryChunk::from(bytes[2..].to_vec())),
+                ])) as BinaryStream
+            });
+        Box::pin(async move { opened })
+    }
+}
+
+#[test]
+fn a_source_body_streams_like_a_stream_and_reports_a_failed_open() {
+    block_on(async {
+        let web = Web::<16, 1>::new();
+        let mut events = web.subscribe("chat-42").expect("subscriber");
+
+        let sent = web
+            .send_media(
+                MediaKind::Audio,
+                SendMediaRequest::source(
+                    target(),
+                    "voice.ogg",
+                    "audio/ogg",
+                    Rc::new(Source(Some([4, 5, 6]))),
+                ),
+            )
+            .await;
+        let failed = web
+            .send_media(
+                MediaKind::Audio,
+                SendMediaRequest::source(target(), "voice.ogg", "audio/ogg", Rc::new(Source(None))),
+            )
+            .await;
+
+        assert!(sent.is_ok());
+        assert!(failed.is_err());
+        let mut phases = Vec::new();
+        for _event in 0..6 {
+            if let Some(WebDelivery::Event(event)) = events.next().await {
+                if let WebEventData::Media { phase, .. } = &event.data {
+                    phases.push(phase.clone());
+                }
+            }
+        }
+        assert!(matches!(&phases[0], MediaPhase::Start { .. }));
+        assert!(matches!(&phases[1], MediaPhase::Delta { bytes } if bytes == &vec![4, 5]));
+        assert!(matches!(&phases[2], MediaPhase::Delta { bytes } if bytes == &vec![6]));
+        assert!(matches!(&phases[3], MediaPhase::End { error: None }));
+        assert!(matches!(&phases[4], MediaPhase::Start { .. }));
+        assert!(matches!(&phases[5], MediaPhase::End { error: Some(_) }));
     });
 }
 

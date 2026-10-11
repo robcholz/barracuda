@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_plugin::{
@@ -180,6 +181,7 @@ impl InboundMessageSink for GatewayInboundSink {
                 },
                 message_id: request.message_id,
                 text: request.text,
+                attachments: Vec::new(),
             };
             self.gateway
                 .publish(message)

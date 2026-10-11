@@ -281,6 +281,7 @@ mod tests {
             route: GatewayRoute::new("web", "conversation"),
             message_id: "web-in-1".into(),
             text: "hello".into(),
+            attachments: alloc::vec::Vec::new(),
         };
 
         assert!(
