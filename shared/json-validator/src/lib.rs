@@ -740,10 +740,8 @@ impl Literal {
 pub enum StringPattern {
     AsciiIdentifier,
     HttpUrl,
-    SessionId,
-    RunId,
-    InputId,
-    CommandId,
+    /// `^<prefix>[0-9]+$`, for a literal prefix.
+    PrefixedDecimal(&'static str),
     UtcMilliseconds,
 }
 
@@ -757,10 +755,7 @@ impl StringPattern {
                         .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
             }
             Self::HttpUrl => value.starts_with("http://") || value.starts_with("https://"),
-            Self::SessionId => prefixed_decimal(value, "session-"),
-            Self::RunId => prefixed_decimal(value, "run-"),
-            Self::InputId => prefixed_decimal(value, "input-"),
-            Self::CommandId => prefixed_decimal(value, "command-"),
+            Self::PrefixedDecimal(prefix) => prefixed_decimal(value, prefix),
             Self::UtcMilliseconds => is_utc_milliseconds(value),
         }
     }

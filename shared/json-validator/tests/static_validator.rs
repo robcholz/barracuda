@@ -140,3 +140,12 @@ fn borrowed_validation_follows_recursive_local_references() {
         .expect_err("nested reference must retain the schema contract");
     assert_eq!(error.path, "$.child.name");
 }
+
+#[test]
+fn a_decimal_id_pattern_takes_its_prefix_from_the_schema() {
+    const JOB: JsonSchema = json_schema_inline!(r#"{"type":"string","pattern":"^job-[0-9]+$"}"#);
+    assert!(JOB.validate(&json!("job-42")).is_ok());
+    assert!(JOB.validate(&json!("job-")).is_err());
+    assert!(JOB.validate(&json!("job-4x")).is_err());
+    assert!(JOB.validate(&json!("session-42")).is_err());
+}
