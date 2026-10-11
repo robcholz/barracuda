@@ -1,9 +1,20 @@
 # I2C Plugin
 
+The I2C Plugin exposes I2C bus transfers on the Board's exposed pins to Lua code as
+the `i2c` Lua package.
+
 - Plugin ID: `i2c`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `i2c`
+- Web: none
+- Tasks: none
+- Storage: none
 
 During unified Plugin construction, this Plugin shares the Board's single
 runtime I/O owner. During registration it installs the require-only `i2c` Lua

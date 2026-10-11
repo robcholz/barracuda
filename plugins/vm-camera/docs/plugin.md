@@ -1,9 +1,20 @@
 # Camera Plugin
 
+The Camera Plugin owns the Board's primary built-in camera and exposes frame
+capture to Lua code as the `camera` Lua package.
+
 - Plugin ID: `camera`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.peripherals.take_camera()`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `camera`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin takes the Board's primary built-in `Camera` capability exactly
 once and installs the `camera` Lua package. OV2640/OV3660 control buses,
