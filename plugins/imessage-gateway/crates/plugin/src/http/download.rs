@@ -136,7 +136,7 @@ where
     // The clock pauses whenever the download waits on the request body or
     // the sink, and restarts from the full limit at every exchange with the
     // server.
-    let deadline = Deadline::new(limits.idle_timeout, true);
+    let deadline = Deadline::new(limits.idle_timeout);
     let exchange = async {
         let (mut client, tls_configured) = http_clients.create();
         if request.url.starts_with("https://") && !tls_configured {

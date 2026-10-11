@@ -70,12 +70,13 @@ at the adapter boundary.
 ## Provider HTTP
 
 Providers make their HTTP calls through the Gateway's `send` helper, which opens
-a fresh connection per request and buffers the response. Each exchange has a
-30 s deadline, matching the `http` Plugin's request deadline; a missed deadline
-drops the connection and returns `Error::Timeout`, which providers report as a
-`Transport` channel error. A body of unknown length is a caller-fed media
-stream, so time spent waiting for its next chunk does not count: connecting,
-each write, and the response after the last chunk are each bounded by 30 s.
+a fresh connection per request and buffers the response. Each step of an
+exchange has a 30 s deadline, matching the `http` Plugin's request deadline:
+connecting, each write of the request body, and the response after the last
+write. Time the body spends producing its next bytes does not count, so a
+multi-megabyte upload on a slow link is bounded per write, not as a whole. A
+missed deadline drops the connection and returns `Error::Timeout`, which
+providers report as a `Transport` channel error.
 
 Downloads (`GatewayHttp::download`) stream the response body into a sink
 instead of buffering it, stop at a byte cap, and bound each wait for the

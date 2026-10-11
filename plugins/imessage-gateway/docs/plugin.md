@@ -187,7 +187,8 @@ that fails, or yields more or fewer than `len` bytes, ends the body early and
 `failure()` says why, so the provider checks it before trusting the answer.
 `send_reading_headers` is `send` that also returns the values of the response
 headers named in `names` (any case), `None` for a missing one. Like `send`,
-a body of known length must go through within `SEND_TIMEOUT`.
+each step (connecting, each write, the response after the last write) is
+bounded by `SEND_TIMEOUT`, not the whole upload.
 
 ## Ingress backpressure
 

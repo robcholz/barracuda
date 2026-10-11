@@ -276,6 +276,41 @@ fn a_stream_body_is_sent_whole_with_its_content_length() {
 }
 
 #[test]
+fn a_known_length_body_is_bounded_per_write_not_as_a_whole() {
+    let network = network([ScriptStep::json(200, r#"{"ok":true}"#)]);
+    let parts = stream::unfold(0usize, |sent| async move {
+        if sent == 4 {
+            return None;
+        }
+        Timer::after(Duration::from_millis(60)).await;
+        Some((
+            Ok(BinaryChunk::from(b"PAYLOAD".to_vec())),
+            sent.saturating_add(1),
+        ))
+    });
+    let body = StreamBody::new(Box::pin(parts), 28);
+    let probe = body.clone();
+    let started = Instant::now();
+
+    let response = block_on(send_within(
+        TIMEOUT,
+        &factory(network),
+        Method::POST,
+        "http://gateway.test/upload",
+        &[],
+        body,
+    ))
+    .expect("slow upload of known length completes");
+
+    assert!(started.elapsed() > TIMEOUT.checked_mul(2).expect("duration"));
+    assert_eq!(response.status, 200);
+    assert_eq!(probe.failure(), None);
+    let request = &network.requests()[0];
+    assert!(request.contains("Content-Length: 28\r\n"), "{request}");
+    assert_eq!(request.matches("PAYLOAD").count(), 4);
+}
+
+#[test]
 fn a_stream_body_of_the_wrong_length_is_a_failure() {
     let cases: [(&[&[u8]], &str); 2] = [
         (&[b"ABC", b"DEF"], "request body is longer than its length"),

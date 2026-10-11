@@ -153,12 +153,12 @@ pub struct Response {
 
 /// Sends one request on a fresh connection and buffers the whole response.
 ///
-/// The exchange (DNS, connect, TLS handshake, request, and response) must
-/// finish within [`SEND_TIMEOUT`], otherwise it is dropped with
-/// [`Error::Timeout`], which providers report as a transport error. A body of
-/// unknown length is a caller-fed stream: time spent waiting for its next
-/// chunk does not count, but connecting, each write, and the response after
-/// the last chunk are each bounded by [`SEND_TIMEOUT`].
+/// Each step of the exchange must finish within [`SEND_TIMEOUT`], otherwise
+/// it is dropped with [`Error::Timeout`], which providers report as a
+/// transport error: connecting (DNS, connect, TLS handshake), each write of
+/// the request, and the response after the last write. Time the body spends
+/// producing its next bytes does not count, so a large upload is bounded per
+/// write rather than as a whole.
 pub async fn send<T, D, B>(
     http_clients: &http_client::ClientFactory<'_, T, D>,
     method: Method,
@@ -218,7 +218,7 @@ where
     D: http_client::embedded_nal_async::Dns,
     B: RequestBody,
 {
-    let deadline = Deadline::new(SEND_TIMEOUT, body.len().is_none());
+    let deadline = Deadline::new(SEND_TIMEOUT);
     let body = PacedBody {
         body,
         deadline: &deadline,
@@ -272,7 +272,7 @@ where
     D: http_client::embedded_nal_async::Dns,
     B: RequestBody,
 {
-    let deadline = Deadline::new(timeout, body.len().is_none());
+    let deadline = Deadline::new(timeout);
     let body = PacedBody {
         body,
         deadline: &deadline,
@@ -349,39 +349,32 @@ where
     ))
 }
 
-/// Expiry instant of one [`send`] exchange, paused while a streamed body waits
-/// for its caller.
+/// Expiry instant of the current step of one [`send`] exchange, paused while
+/// the body produces its next bytes.
 struct Deadline {
-    /// Instant the exchange expires at, or `None` while paused.
+    /// Instant the current step expires at, or `None` while paused.
     at: Cell<Option<Instant>>,
     timeout: Duration,
-    /// Whether the clock pauses between writes of a streamed body.
-    streamed: bool,
     changed: Signal<NoopRawMutex, ()>,
 }
 
 impl Deadline {
-    fn new(timeout: Duration, streamed: bool) -> Self {
+    fn new(timeout: Duration) -> Self {
         Self {
             at: Cell::new(Some(Instant::now().saturating_add(timeout))),
             timeout,
-            streamed,
             changed: Signal::new(),
         }
     }
 
-    /// Restarts the clock from now for a streamed body.
+    /// Starts a new step's clock from now.
     fn resume(&self) {
-        if self.streamed {
-            self.set(Some(Instant::now().saturating_add(self.timeout)));
-        }
+        self.set(Some(Instant::now().saturating_add(self.timeout)));
     }
 
-    /// Stops the clock while a streamed body waits for its next chunk.
+    /// Stops the clock while the body produces its next bytes.
     fn pause(&self) {
-        if self.streamed {
-            self.set(None);
-        }
+        self.set(None);
     }
 
     fn set(&self, at: Option<Instant>) {
