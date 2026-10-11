@@ -921,3 +921,137 @@ test("closes the socket and empties the page when it goes away", async () => {
   socket().dispatchEvent(new NativeEvent("close"));
   expect(toasts).toHaveLength(0);
 });
+
+test("a saved session's conversation comes back from the browser's copy after a reload", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("第一行\n第二行");
+  reply(ws, "web-1", "web-in-1", "**好的**\n\n- 一\n- 二");
+  first.controller.abort();
+  first.cleanup?.();
+
+  const again = open();
+  const next = again.socket();
+  next.open();
+  const before = listings;
+  listed(next, {});
+  // drawn as it was, without the device being asked for anything
+  expect(listings).toBe(before);
+  expect(again.root.querySelector(".bc-empty")).toBeNull();
+  expect(again.root.querySelector(".bc-bubble")?.textContent).toBe(
+    "第一行\n第二行",
+  );
+  expect(again.root.querySelector(".bc-reply strong")?.textContent).toBe(
+    "好的",
+  );
+  expect(again.root.querySelectorAll(".bc-reply li")).toHaveLength(2);
+  // ids restart with the connection and the device's boot: the new turn stands apart
+  again.submit("再来");
+  reply(next, "web-1", "web-in-1", "第二次");
+  expect(
+    [...again.root.querySelectorAll(".bc-bubble")].map((n) => n.textContent),
+  ).toEqual(["第一行\n第二行", "再来"]);
+  expect(
+    [...again.root.querySelectorAll(".bc-reply")].map((n) => n.textContent),
+  ).toEqual(["好的一二", "第二次"]);
+  // another session starts empty; coming back draws both turns
+  listed(next, { current: "session-2", notice: { kind: "switched" } });
+  expect(again.root.querySelector(".bc-bubble")).toBeNull();
+  listed(next, { current: "session-3", notice: { kind: "switched" } });
+  expect(
+    [...again.root.querySelectorAll(".bc-bubble")].map((n) => n.textContent),
+  ).toEqual(["第一行\n第二行", "再来"]);
+  expect(
+    [...again.root.querySelectorAll(".bc-reply")].map((n) => n.textContent),
+  ).toEqual(["好的一二", "第二次"]);
+  // and again: each drawing keeps its replies
+  listed(next, { current: "session-2", notice: { kind: "switched" } });
+  listed(next, { current: "session-3", notice: { kind: "switched" } });
+  expect(again.root.querySelectorAll(".bc-reply")).toHaveLength(2);
+});
+
+test("a new session keeps its first turn, sent before the device named it", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, { current: null, notice: { kind: "created" } });
+  first.submit("首条");
+  reply(ws, "web-1", "web-in-1", "收到");
+  listed(ws, { current: "session-4" });
+  first.controller.abort();
+
+  const again = open();
+  again.socket().open();
+  listed(again.socket(), { current: "session-4" });
+  expect(again.root.querySelector(".bc-bubble")?.textContent).toBe("首条");
+  expect(again.root.querySelector(".bc-reply")?.textContent).toBe("收到");
+});
+
+test("a turn cut off by the reload stays as far as it got", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("看看");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "写到一半" });
+  first.controller.abort();
+
+  const again = open();
+  again.socket().open();
+  listed(again.socket(), {});
+  expect(again.root.textContent).toContain("写到一半");
+  expect(again.root.querySelector(".bc-caret")).toBeNull();
+  expect(again.send().getAttribute("aria-label")).toBe("发送");
+});
+
+test("a temporary chat and a rewound message leave nothing in the browser", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, { current: null, temporary: true });
+  first.submit("临时");
+  reply(ws, "web-1", "web-in-1", "嗯");
+  listed(ws, { notice: { kind: "switched" } });
+  first.submit("撤回我");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  first.button("撤回").click();
+  first.controller.abort();
+  expect(
+    Object.keys(browser.window.localStorage).filter((key) =>
+      key.startsWith("barracuda.chat."),
+    ),
+  ).toEqual([]);
+});
+
+test("a session the device no longer lists loses its copy", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("要删的");
+  reply(ws, "web-1", "web-in-1", "好");
+  listed(ws, { current: "session-2", notice: { kind: "switched" } });
+  expect(
+    browser.window.localStorage.getItem("barracuda.chat.session-3"),
+  ).not.toBeNull();
+  listed(ws, {
+    current: "session-2",
+    sessions: [
+      { session: "session-2", title: null, updated_at: null, running: false },
+    ],
+  });
+  expect(
+    browser.window.localStorage.getItem("barracuda.chat.session-3"),
+  ).toBeNull();
+});

@@ -18,8 +18,10 @@ Gateway channel, bridged to the browser over a WebSocket.
   `/ws/message`; `PUT /api/web/upload/<mime>/<filename>`;
   `GET /api/web/media/<id>`
 - Tasks: none
-- Storage: none of its own; files are the Gateway's attachments, under
-  `/workspace/cache/gateway/web/`
+- Storage: none of its own on the device; files are the Gateway's
+  attachments, under `/workspace/cache/gateway/web/`. The page keeps a copy of
+  each saved session's conversation in the browser's `localStorage`
+  (`barracuda.chat.<session>`)
 
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,
@@ -171,6 +173,24 @@ refused frames. It receives live events only, retains at most 100 log items
 with 65,536 UTF-16 code units per text part, and closes the socket when
 unmounted.
 
+The device does not send a session's past messages, so the page keeps its own
+copy of each saved session's conversation in the browser's `localStorage`,
+under `barracuda.chat.<session>`: the messages this browser sent (text, quote,
+and each file's name, type and size) and the bridge's `message.*` events, in
+order, with consecutive text deltas of one stream joined. Message ids are kept
+with the connection they arrived on, since the page's `web-in-<n>` restart
+with every connection and the device's with every boot. When the page shows a
+saved session with nothing on screen yet (it opens, or switches to the
+session), it draws the copy again without asking the device for anything; a
+turn the reload cut off stays as far as it got, and a sent file, whose page
+copy is gone, is a card saying 「已不可用」. The copy is saved a second after
+it changes and when the page goes away; a session's copy past 100,000 UTF-16
+code units loses its oldest turns, only the 20 sessions saved last are kept, a
+full store gives up the oldest other copies first, and a store that is blocked
+leaves the page without a copy. A temporary chat is never copied, a rewound
+message and its turn leave the copy, and a session the device no longer lists
+loses its copy.
+
 Files follow the design system's Attachment, Media and Viewer cards. The
 composer's paperclip (「添加附件」, the first of its actions) opens the file
 picker; a pasted picture or a drop anywhere on the page adds files too, and
@@ -207,9 +227,9 @@ sessions grouped by day (今天, 昨天, 过去 7 天, 更早), the one current
 highlighted and one still replying spinning, each with a menu to rename in
 place or delete (red, asking first), and the count at the foot. Every change
 is a command; the device's answer redraws the rail, and a switch or a new
-session (from this page or another) starts the view over: the device keeps
-the history, the page shows only what comes next, and output the left session
-still sends is dropped. The list is asked for again after each turn. A fresh
+session (from this page or another) starts the view over: the page draws the
+browser's copy of the session, if it has one, then what comes next, and output
+the left session still sends is dropped. The list is asked for again after each turn. A fresh
 conversation holds the composer mid-page under the `laptop` figure, with
 suggestions below, and says what it is: 「新会话」, the title of the session
 it continues, or 「临时会话」; a temporary chat keeps a pinned 「临时会话」
