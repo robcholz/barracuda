@@ -1961,11 +1961,13 @@ dependencies = [
  "embassy-net",
  "embassy-net-driver-channel",
  "embassy-sync 0.7.2",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "embedded-storage-async",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
