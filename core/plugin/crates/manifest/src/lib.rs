@@ -26,6 +26,97 @@ pub struct PluginManifest {
     /// Author-declared host tasks, keyed by task name.
     #[serde(default)]
     pub tasks: BTreeMap<String, PluginTask>,
+    /// Settings a Board may override in its `plugins.<id>` section, keyed by
+    /// setting name.
+    #[serde(default)]
+    pub config: BTreeMap<String, ConfigSetting>,
+}
+
+/// One Board-configurable Plugin setting, generated into a constant.
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSetting {
+    /// Rust type of the generated constant.
+    #[serde(rename = "type")]
+    pub kind: ConfigType,
+    /// Value used when the selected Board does not set one.
+    pub default: ConfigValue,
+    /// What the setting controls, emitted as the constant's documentation.
+    pub description: String,
+}
+
+/// Rust type of a generated Plugin setting.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigType {
+    /// `bool`.
+    Bool,
+    /// `u8`.
+    U8,
+    /// `u16`.
+    U16,
+    /// `u32`.
+    U32,
+    /// `usize`.
+    Usize,
+    /// `i32`.
+    I32,
+    /// `&'static str`.
+    Str,
+}
+
+impl ConfigType {
+    /// Returns the Rust type of the generated constant.
+    #[must_use]
+    pub const fn rust_type(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::Usize => "usize",
+            Self::I32 => "i32",
+            Self::Str => "&str",
+        }
+    }
+
+    /// Returns whether `value` is a valid value of this type.
+    #[must_use]
+    pub fn accepts(self, value: &ConfigValue) -> bool {
+        match (self, value) {
+            (Self::Bool, ConfigValue::Bool(_)) | (Self::Str, ConfigValue::String(_)) => true,
+            (Self::U8, ConfigValue::Integer(value)) => u8::try_from(*value).is_ok(),
+            (Self::U16, ConfigValue::Integer(value)) => u16::try_from(*value).is_ok(),
+            (Self::U32, ConfigValue::Integer(value)) => u32::try_from(*value).is_ok(),
+            (Self::Usize, ConfigValue::Integer(value)) => u32::try_from(*value).is_ok(),
+            (Self::I32, ConfigValue::Integer(value)) => i32::try_from(*value).is_ok(),
+            _ => false,
+        }
+    }
+}
+
+/// A Plugin setting value, as written in `plugin.toml` or a Board.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged)]
+pub enum ConfigValue {
+    /// Boolean value.
+    Bool(bool),
+    /// Integer value.
+    Integer(i64),
+    /// Text value.
+    String(String),
+}
+
+impl ConfigValue {
+    /// Returns the value as a Rust literal.
+    #[must_use]
+    pub fn rust_literal(&self) -> String {
+        match self {
+            Self::Bool(value) => value.to_string(),
+            Self::Integer(value) => value.to_string(),
+            Self::String(value) => format!("{value:?}"),
+        }
+    }
 }
 
 /// A host command; paths are relative to the Plugin root, not to `cwd`.
@@ -118,6 +209,12 @@ pub enum ManifestError {
     /// The Plugin description is empty after trimming whitespace.
     #[error("Plugin description must not be empty")]
     EmptyDescription,
+    /// A setting has an invalid name, an empty description, or a default
+    /// that does not fit its type.
+    #[error(
+        "invalid Plugin setting `{0}`: expected a lowercase name, a description and a default of its type"
+    )]
+    InvalidSetting(String),
     /// The Plugin description exceeds [`MAX_DESCRIPTION_CHARS`].
     #[error("Plugin description is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}")]
     DescriptionTooLong {
@@ -153,6 +250,14 @@ pub fn parse(contents: &str) -> Result<PluginManifest, ManifestError> {
                 .any(|name| name.is_empty() || name.contains(['=', '\0', '\n', '\r']))
         {
             return Err(ManifestError::InvalidTask(name.clone()));
+        }
+    }
+    for (name, setting) in &manifest.config {
+        if !matches_plugin_id_pattern(name)
+            || setting.description.trim().is_empty()
+            || !setting.kind.accepts(&setting.default)
+        {
+            return Err(ManifestError::InvalidSetting(name.clone()));
         }
     }
     validate_identity(&manifest.id)?;

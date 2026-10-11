@@ -6,6 +6,7 @@ publish = false
 description = "Shared host task executor for Plugin CLI and Cargo build scripts"
 
 [dependencies]
+barracuda-board-config = { path = "../../../../boards/config" }
 barracuda-plugin-manifest = { path = "../manifest" }
 thiserror = "2"
 sha2 = "0.10"

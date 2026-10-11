@@ -2014,6 +2014,7 @@ dependencies = [
 name = "barracuda-plugin-build"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-config",
  "barracuda-plugin-manifest",
  "sha2 0.10.9",
  "tempfile",
@@ -2062,6 +2063,7 @@ name = "barracuda-plugin-tool"
 version = "0.1.0"
 dependencies = [
  "anstream",
+ "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-plugin",
  "barracuda-plugin-build",

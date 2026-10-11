@@ -222,6 +222,7 @@ pub fn sync(root: &Path, check: bool) -> Result<(), CommandError> {
 /// Returns an error when discovery, generated files, or filesystem access fail.
 pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandError> {
     let plugins = discover(root)?;
+    validate_board_settings(root, &plugins)?;
     let disabled_names = read_disabled(root)?;
     let (disabled, enabled): (Vec<_>, Vec<_>) = plugins
         .iter()
@@ -557,6 +558,55 @@ fn validate_dependency_graph(plugins: &[Plugin]) -> Result<(), CommandError> {
     }
 }
 
+/// Checks every Board's `plugins` section against the Plugins' declared
+/// settings, whether or not the Board or the Plugin is selected.
+fn validate_board_settings(root: &Path, plugins: &[Plugin]) -> Result<(), CommandError> {
+    let boards = root.join("boards/configs");
+    if !boards.is_dir() {
+        return Ok(());
+    }
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let entries = fs::read_dir(&boards).map_err(|source| CommandError::Io {
+        path: boards.clone(),
+        source,
+    })?;
+    let mut paths = entries
+        .map(|entry| entry.map(|entry| entry.path().join("board.yml")))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| CommandError::Io {
+            path: boards.clone(),
+            source,
+        })?;
+    paths.sort();
+    for path in paths.into_iter().filter(|path| path.is_file()) {
+        let board = barracuda_board_config::parse(&read(&path)?).map_err(|error| {
+            CommandError::Metadata(format!("invalid Board {}: {error}", path.display()))
+        })?;
+        for id in board.configured_plugins() {
+            let manifest = manifests
+                .iter()
+                .find(|manifest| manifest.id() == id)
+                .ok_or_else(|| {
+                    CommandError::Metadata(format!(
+                        "{} configures unknown Plugin `{id}`",
+                        path.display()
+                    ))
+                })?;
+            barracuda_plugin_build::resolve_config(manifest, Some(&board))?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_metadata(path: &Path, contents: &str) -> Result<PluginManifest, CommandError> {
     parse(contents).map_err(|error| {
         CommandError::Metadata(format!(
@@ -704,10 +754,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
+        cascade_disabled, discover, format_cascade_dependencies, format_selection_summary, info,
         package_name, parse_metadata, persist_disabled_selection, plugin_entry,
         render_dependencies, render_registrations, replace_block, sync_with_report,
-        validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
+        validate_board_settings, validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -1016,6 +1066,43 @@ mod tests {
                 "        );"
             )
         );
+    }
+
+    #[test]
+    fn boards_may_set_only_declared_plugin_settings() {
+        let root = tempdir().expect("temporary workspace");
+        let plugin = root.path().join("plugins/demo/crates/plugin");
+        fs::create_dir_all(plugin.join("src")).expect("Plugin source directory");
+        fs::write(
+            plugin.join("Cargo.toml"),
+            "[package]\nname = \"barracuda-demo-plugin\"\n",
+        )
+        .expect("Plugin manifest");
+        fs::write(
+            root.path().join("plugins/demo/plugin.toml"),
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates settings.\"\n\n[config.slots]\ntype = \"usize\"\ndefault = 1\ndescription = \"Slots.\"\n",
+        )
+        .expect("Plugin metadata");
+        fs::write(plugin.join("src/lib.rs"), "impl Plugin for DemoPlugin {}\n")
+            .expect("Plugin source");
+        let board = root.path().join("boards/configs/demo-board");
+        fs::create_dir_all(&board).expect("Board directory");
+        let base =
+            "name: demo-board\nhardware:\n  chip: demo\nnative-layout:\n  artifact: layout.yml\n";
+        let plugins = discover(root.path()).expect("discover Plugins");
+
+        for (settings, valid) in [
+            ("plugins:\n  demo:\n    slots: 3\n", true),
+            ("plugins:\n  demo:\n    lanes: 3\n", false),
+            ("plugins:\n  missing:\n    slots: 3\n", false),
+        ] {
+            fs::write(board.join("board.yml"), format!("{base}{settings}")).expect("Board");
+            assert_eq!(
+                validate_board_settings(root.path(), &plugins).is_ok(),
+                valid,
+                "{settings}"
+            );
+        }
     }
 
     #[test]

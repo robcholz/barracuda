@@ -1,6 +1,7 @@
 //! Host-only Plugin task execution shared by Cargo build scripts and the CLI.
 
-use barracuda_plugin_manifest::{parse, PluginManifest, PluginTask};
+use barracuda_board_config::{BoardDefinition, PluginSetting};
+use barracuda_plugin_manifest::{parse, ConfigValue, PluginManifest, PluginTask};
 use sha2::{Digest, Sha256};
 use std::{
     env,
@@ -128,6 +129,7 @@ pub fn build() -> Result<(), TaskError> {
         "cargo:rerun-if-changed={}",
         root.join("plugin.toml").display()
     );
+    write_config(root, &manifest)?;
     let Some(task) = manifest.tasks.get("build") else {
         return Ok(());
     };
@@ -260,4 +262,114 @@ fn hash_path(hash: &mut Sha256, path: &Path) -> Result<(), TaskError> {
         )));
     }
     Ok(())
+}
+
+/// Name of the file [`build`] writes to `OUT_DIR` with the Plugin's settings.
+pub const CONFIG_FILE: &str = "plugin_config.rs";
+
+/// Resolves a Plugin's settings for one Board: the Board's value where it
+/// gives one, the declared default otherwise.
+///
+/// # Errors
+/// Reports a Board setting the Plugin does not declare or whose value does
+/// not fit the declared type.
+pub fn resolve_config<'a>(
+    manifest: &'a PluginManifest,
+    board: Option<&BoardDefinition>,
+) -> Result<Vec<(&'a str, ConfigValue)>, TaskError> {
+    let mut values = manifest
+        .config
+        .iter()
+        .map(|(name, setting)| (name.as_str(), setting.default.clone()))
+        .collect::<Vec<_>>();
+    let Some(board) = board else {
+        return Ok(values);
+    };
+    for (name, setting) in board.plugin_settings(manifest.id()) {
+        let context = || {
+            format!(
+                "Board `{}` sets `plugins.{}.{name}`",
+                board.name(),
+                manifest.id()
+            )
+        };
+        let declared = manifest.config.get(name).ok_or_else(|| {
+            TaskError::Task(format!("{}, which the Plugin does not declare", context()))
+        })?;
+        let value = match setting {
+            PluginSetting::Boolean(value) => ConfigValue::Bool(*value),
+            PluginSetting::Integer(value) => ConfigValue::Integer(*value),
+            PluginSetting::String(value) => ConfigValue::String(value.clone()),
+        };
+        if !declared.kind.accepts(&value) {
+            return Err(TaskError::Task(format!(
+                "{}, which is not a valid `{}`",
+                context(),
+                declared.kind.rust_type()
+            )));
+        }
+        if let Some(slot) = values.iter_mut().find(|(declared, _)| *declared == name) {
+            slot.1 = value;
+        }
+    }
+    Ok(values)
+}
+
+/// Renders the resolved settings as documented Rust constants.
+///
+/// # Errors
+/// Reports the same failures as [`resolve_config`].
+pub fn render_config(
+    manifest: &PluginManifest,
+    board: Option<&BoardDefinition>,
+) -> Result<String, TaskError> {
+    let mut rendered = String::new();
+    for (name, value) in resolve_config(manifest, board)? {
+        let setting = &manifest.config[name];
+        for line in setting.description.trim().lines() {
+            rendered.push_str(&format!("/// {}\n", line.trim()));
+        }
+        rendered.push_str(&format!(
+            "pub const {}: {} = {};\n",
+            name.to_uppercase().replace('-', "_"),
+            setting.kind.rust_type(),
+            value.rust_literal()
+        ));
+    }
+    Ok(rendered)
+}
+
+/// Writes the settings for the selected Board, or the defaults when no Board
+/// is selected, to `OUT_DIR`.
+fn write_config(root: &Path, manifest: &PluginManifest) -> Result<(), TaskError> {
+    let output = env::var_os("OUT_DIR").ok_or_else(|| TaskError::Task("missing OUT_DIR".into()))?;
+    let workspace = root.join("../..");
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace
+            .join(barracuda_board_config::SELECTED_BOARD_PATH)
+            .display()
+    );
+    let selected = barracuda_board_config::read_selected_board(&workspace)
+        .map_err(|error| TaskError::Task(error.to_string()))?;
+    let board = match selected {
+        Some(name) => {
+            let path = workspace
+                .join("boards/configs")
+                .join(name)
+                .join("board.yml");
+            println!("cargo:rerun-if-changed={}", path.display());
+            let text = fs::read_to_string(&path)
+                .map_err(|error| TaskError::Task(format!("{}: {error}", path.display())))?;
+            Some(
+                barracuda_board_config::parse(&text)
+                    .map_err(|error| TaskError::Task(format!("{}: {error}", path.display())))?,
+            )
+        }
+        None => None,
+    };
+    let rendered = render_config(manifest, board.as_ref())?;
+    let path = PathBuf::from(output).join(CONFIG_FILE);
+    fs::write(&path, rendered)
+        .map_err(|error| TaskError::Task(format!("{}: {error}", path.display())))
 }
