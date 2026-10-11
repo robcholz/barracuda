@@ -14,8 +14,8 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
 use barracuda_imessage_gateway_plugin::{
-    ChannelControl, Classification, Error as GatewayHttpError, GatewayInboundMessage,
-    GatewayRoute, MessageChannel, MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller,
+    ChannelControl, Classification, Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute,
+    MessageChannel, MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller,
     ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease, ReceiveSession, SendMessageRequest,
     PAIRED_REPLY,
 };

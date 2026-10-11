@@ -78,9 +78,10 @@ async fn answers_in_order_records_requests_and_refuses_on_cue() {
     .expect("exchange within the timeout");
 
     let requests = server.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert!(requests[0].starts_with("POST /one ") && requests[0].ends_with("hello"));
-    assert!(requests[1].starts_with("POST /two ") && requests[1].ends_with("0\r\n\r\n"));
+    assert!(requests[1].starts_with("GET /refused "));
+    assert!(requests[2].starts_with("POST /two ") && requests[2].ends_with("0\r\n\r\n"));
     assert_eq!(server.remaining(), 0);
     assert_eq!(server.connect_count(), 3);
 }

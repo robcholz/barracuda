@@ -1,8 +1,11 @@
 //! IMessage Telegram provider Plugin.
 
 #![no_std]
+#![recursion_limit = "256"]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod channel;
 mod receive;

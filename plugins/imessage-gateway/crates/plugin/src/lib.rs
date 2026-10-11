@@ -29,7 +29,7 @@ use barracuda_plugin::manager::{PluginStorage, StorageError};
 use barracuda_webserver_plugin::{HttpEndpoint, WebRouteRegistration, WebServer, WebServerError};
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
-use http_client::{ClientFactory, ReceiveBuffers, ReceiveSlots};
+use http_client::{ClientFactory, ReceiveBuffers};
 
 pub use barracuda_imessage_gateway_runtime::{
     parse_command, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
@@ -48,7 +48,7 @@ pub use http::{
     Error, GatewayHttp, Method, Multipart, MultipartBody, MultipartError, PollEnd, PollLimits,
     PollRequest, Polled, Poller, RequestBody, Response, SEND_TIMEOUT,
 };
-pub use http_client::ReceiveLease;
+pub use http_client::{ReceiveLease, ReceiveSlots};
 pub use owners::{Classification, Owner, Owners, OwnersError, PairingView, PAIRED_REPLY};
 
 const STREAM_WORKERS: usize = 4;

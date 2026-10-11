@@ -5,6 +5,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
 
+use barracuda_imessage_gateway_plugin::ReceiveSlots;
 use barracuda_imessage_gateway_plugin::{
     ChannelControl, ChannelMode, GatewayError, IMessageGateway, MessageChannel,
     MessageChannelRegistration, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
@@ -12,7 +13,6 @@ use barracuda_imessage_gateway_plugin::{
 };
 use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::ReceiveSlots;
 use telegram::{Telegram, TelegramConfig};
 
 use crate::receive::{Cursor, CURSOR_STORAGE_KEY};
@@ -243,10 +243,13 @@ impl<Storage: PluginStorage> ChannelControl for TelegramChannel<Storage> {
         Box::pin(async move {
             let _change = self.changes.lock().await;
             let previous = self.mode.get();
-            self.gateway.store_mode(&self.storage, mode).await.map_err(|error| {
-                log::error!("failed to store the Telegram mode: {error}");
-                ModeError::Storage
-            })?;
+            self.gateway
+                .store_mode(&self.storage, mode)
+                .await
+                .map_err(|error| {
+                    log::error!("failed to store the Telegram mode: {error}");
+                    ModeError::Storage
+                })?;
             if let Err(error) = self.register_for(mode) {
                 log::warn!("the Gateway rejected the Telegram channel: {error}");
                 if let Err(error) = self.gateway.store_mode(&self.storage, previous).await {

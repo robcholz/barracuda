@@ -55,15 +55,14 @@ impl State {
 /// An HTTP server on a [`crate::LoopbackNetwork`] stack that answers each
 /// request with the next [`ScriptStep`], in arrival order across connections.
 ///
-/// [`ScriptStep::ConnectError`] at the front of the default queue resets the
-/// next accepted connection before it sends anything. A response built with
+/// [`ScriptStep::ConnectError`] resets the connection the request came on,
+/// without an answer. A response built with
 /// [`ScriptStep::pending_after_headers`] holds its connection open until the
 /// client closes it. Other responses keep the connection for the next request.
 ///
 /// A [`ScriptedRoute`] answers the requests whose request line contains its
 /// pattern from a queue of its own, so concurrent clients of one server (a
-/// long poll and ordinary sends) each get their own outcomes. A
-/// `ConnectError` there resets the connection the matching request came on.
+/// long poll and ordinary sends) each get their own outcomes.
 #[derive(Clone)]
 pub struct ScriptedServer {
     state: Rc<RefCell<State>>,
@@ -151,20 +150,8 @@ impl ScriptedServer {
             if socket.accept(port).await.is_err() {
                 continue;
             }
-            let refuse = {
-                let mut state = self.state.borrow_mut();
-                state.connect_count += 1;
-                let default = &mut state.queues[0].steps;
-                if matches!(default.front(), Some(ScriptStep::ConnectError(_))) {
-                    default.pop_front();
-                    true
-                } else {
-                    false
-                }
-            };
-            if !refuse {
-                self.serve(&mut socket).await;
-            }
+            self.state.borrow_mut().connect_count += 1;
+            self.serve(&mut socket).await;
             // Every response is flushed and every client has closed or gone
             // by now, so the connection ends at once and the listener
             // accepts the next one.
