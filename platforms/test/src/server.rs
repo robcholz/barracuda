@@ -16,23 +16,64 @@ use crate::ScriptStep;
 
 const SOCKET_BUFFER_BYTES: usize = 8 * 1024;
 
+/// One queue of outcomes and the requests it answered.
 #[derive(Default)]
-struct State {
+struct Queue {
+    /// Text a request line contains to take this queue; `None` for the
+    /// default queue.
+    pattern: Option<String>,
     steps: VecDeque<ScriptStep>,
     requests: Vec<Vec<u8>>,
+}
+
+#[derive(Default)]
+struct State {
+    /// The default queue first, then routes in the order they were added.
+    queues: Vec<Queue>,
     connect_count: usize,
+}
+
+impl State {
+    fn queue_for(&self, request: &[u8]) -> usize {
+        let line = request
+            .split(|byte| *byte == b'\n')
+            .next()
+            .unwrap_or_default();
+        let line = String::from_utf8_lossy(line);
+        self.queues
+            .iter()
+            .position(|queue| {
+                queue
+                    .pattern
+                    .as_deref()
+                    .is_some_and(|pattern| line.contains(pattern))
+            })
+            .unwrap_or(0)
+    }
 }
 
 /// An HTTP server on a [`crate::LoopbackNetwork`] stack that answers each
 /// request with the next [`ScriptStep`], in arrival order across connections.
 ///
-/// [`ScriptStep::ConnectError`] resets the next accepted connection before it
-/// sends anything. A response built with
+/// [`ScriptStep::ConnectError`] at the front of the default queue resets the
+/// next accepted connection before it sends anything. A response built with
 /// [`ScriptStep::pending_after_headers`] holds its connection open until the
 /// client closes it. Other responses keep the connection for the next request.
-#[derive(Clone, Default)]
+///
+/// A [`ScriptedRoute`] answers the requests whose request line contains its
+/// pattern from a queue of its own, so concurrent clients of one server (a
+/// long poll and ordinary sends) each get their own outcomes. A
+/// `ConnectError` there resets the connection the matching request came on.
+#[derive(Clone)]
 pub struct ScriptedServer {
     state: Rc<RefCell<State>>,
+}
+
+/// The outcomes and requests of one [`ScriptedServer::route`].
+#[derive(Clone)]
+pub struct ScriptedRoute {
+    state: Rc<RefCell<State>>,
+    index: usize,
 }
 
 impl ScriptedServer {
@@ -41,32 +82,51 @@ impl ScriptedServer {
     pub fn new(steps: impl IntoIterator<Item = ScriptStep>) -> Self {
         Self {
             state: Rc::new(RefCell::new(State {
-                steps: steps.into_iter().collect(),
-                ..State::default()
+                queues: vec![Queue {
+                    steps: steps.into_iter().collect(),
+                    ..Queue::default()
+                }],
+                connect_count: 0,
             })),
         }
     }
 
-    /// Appends one more outcome.
-    pub fn push(&self, step: ScriptStep) {
-        self.state.borrow_mut().steps.push_back(step);
+    /// Answers requests whose request line contains `pattern` with `steps`
+    /// instead of the default queue.
+    #[must_use]
+    pub fn route(
+        &self,
+        pattern: &str,
+        steps: impl IntoIterator<Item = ScriptStep>,
+    ) -> ScriptedRoute {
+        let mut state = self.state.borrow_mut();
+        state.queues.push(Queue {
+            pattern: Some(pattern.to_string()),
+            steps: steps.into_iter().collect(),
+            requests: Vec::new(),
+        });
+        ScriptedRoute {
+            state: Rc::clone(&self.state),
+            index: state.queues.len() - 1,
+        }
     }
 
-    /// Returns every request received, head and body, in arrival order.
+    /// Appends one more outcome to the default queue.
+    pub fn push(&self, step: ScriptStep) {
+        push(&self.state, 0, step);
+    }
+
+    /// Returns the requests the default queue answered, head and body, in
+    /// arrival order.
     #[must_use]
     pub fn requests(&self) -> Vec<String> {
-        self.state
-            .borrow()
-            .requests
-            .iter()
-            .map(|request| String::from_utf8_lossy(request).to_string())
-            .collect()
+        requests(&self.state, 0)
     }
 
-    /// Returns the number of unconsumed outcomes.
+    /// Returns the number of unconsumed outcomes of the default queue.
     #[must_use]
     pub fn remaining(&self) -> usize {
-        self.state.borrow().steps.len()
+        remaining(&self.state, 0)
     }
 
     /// Returns the number of accepted connections.
@@ -94,8 +154,9 @@ impl ScriptedServer {
             let refuse = {
                 let mut state = self.state.borrow_mut();
                 state.connect_count += 1;
-                if matches!(state.steps.front(), Some(ScriptStep::ConnectError(_))) {
-                    state.steps.pop_front();
+                let default = &mut state.queues[0].steps;
+                if matches!(default.front(), Some(ScriptStep::ConnectError(_))) {
+                    default.pop_front();
                     true
                 } else {
                     false
@@ -103,9 +164,10 @@ impl ScriptedServer {
             };
             if !refuse {
                 self.serve(&mut socket).await;
-                socket.close();
-                let _flushed = socket.flush().await;
             }
+            // Every response is flushed and every client has closed or gone
+            // by now, so the connection ends at once and the listener
+            // accepts the next one.
             socket.abort();
             let _flushed = socket.flush().await;
         }
@@ -117,8 +179,13 @@ impl ScriptedServer {
             let Some(request) = read_request(socket, &mut pending).await else {
                 return;
             };
-            self.state.borrow_mut().requests.push(request);
-            let step = self.state.borrow_mut().steps.pop_front();
+            let step = {
+                let mut state = self.state.borrow_mut();
+                let index = state.queue_for(&request);
+                let queue = &mut state.queues[index];
+                queue.requests.push(request);
+                queue.steps.pop_front()
+            };
             let Some(ScriptStep::Response {
                 bytes,
                 max_read,
@@ -139,6 +206,42 @@ impl ScriptedServer {
             }
         }
     }
+}
+
+impl ScriptedRoute {
+    /// Appends one more outcome.
+    pub fn push(&self, step: ScriptStep) {
+        push(&self.state, self.index, step);
+    }
+
+    /// Returns the requests this route answered, head and body, in arrival
+    /// order.
+    #[must_use]
+    pub fn requests(&self) -> Vec<String> {
+        requests(&self.state, self.index)
+    }
+
+    /// Returns the number of unconsumed outcomes.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        remaining(&self.state, self.index)
+    }
+}
+
+fn push(state: &RefCell<State>, index: usize, step: ScriptStep) {
+    state.borrow_mut().queues[index].steps.push_back(step);
+}
+
+fn requests(state: &RefCell<State>, index: usize) -> Vec<String> {
+    state.borrow().queues[index]
+        .requests
+        .iter()
+        .map(|request| String::from_utf8_lossy(request).to_string())
+        .collect()
+}
+
+fn remaining(state: &RefCell<State>, index: usize) -> usize {
+    state.borrow().queues[index].steps.len()
 }
 
 /// Reads one request: its head, then a `Content-Length` or chunked body.

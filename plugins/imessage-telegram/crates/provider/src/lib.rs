@@ -17,9 +17,8 @@ use barracuda_imessage_gateway_plugin::{
     MessageChannel, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
     SetTypingRequest, StreamError, TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Multipart, RequestBody, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 const DEFAULT_API_BASE: &str = "https://api.telegram.org";
@@ -41,20 +40,16 @@ impl TelegramConfig {
     }
 }
 
-pub struct Telegram<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct Telegram {
+    http: GatewayHttp,
     config: TelegramConfig,
     next_local_id: Cell<i32>,
 }
 
-impl<'net, T, D> Telegram<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: TelegramConfig) -> Self {
+impl Telegram {
+    pub fn new(http: GatewayHttp, config: TelegramConfig) -> Self {
         Self {
-            http_clients,
+            http,
             config,
             next_local_id: Cell::new(0),
         }
@@ -66,15 +61,16 @@ where
         content_type: &str,
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            Method::POST,
-            &self.endpoint(method),
-            &[("Content-Type", content_type)],
-            body,
-        )
-        .await
-        .map_err(transport_error)?;
+        let response = self
+            .http
+            .send(
+                Method::POST,
+                &self.endpoint(method),
+                &[("Content-Type", content_type)],
+                body,
+            )
+            .await
+            .map_err(transport_error)?;
         parse_response(response)
     }
 
@@ -206,11 +202,7 @@ where
     }
 }
 
-impl<T, D> MessageChannel for Telegram<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for Telegram {
     fn channel(&self) -> &str {
         "telegram"
     }

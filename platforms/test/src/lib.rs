@@ -18,5 +18,5 @@ pub use network::{
     loopback_network, never_embassy_stack, LoopbackNetwork, NeverConnection, NeverStack, NeverUdp,
     ScriptError, ScriptStep, ScriptedConnection, ScriptedStack,
 };
-pub use server::ScriptedServer;
+pub use server::{ScriptedRoute, ScriptedServer};
 pub use vfs::{install_global_memory_vfs, memory_vfs, memory_vfs_root};

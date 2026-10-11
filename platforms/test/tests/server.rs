@@ -84,3 +84,39 @@ async fn answers_in_order_records_requests_and_refuses_on_cue() {
     assert_eq!(server.remaining(), 0);
     assert_eq!(server.connect_count(), 3);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn routes_answer_their_own_requests_from_their_own_queue() {
+    let network = loopback_network();
+    let stack = network.stack();
+    let server = ScriptedServer::new([ScriptStep::json(200, r#"{"default":1}"#)]);
+    let polls = server.route("/poll", [ScriptStep::json(200, r#"{"poll":1}"#)]);
+    let client = async {
+        let poll = exchange(stack, "GET /poll?offset=3 HTTP/1.1\r\nHost: test\r\n\r\n")
+            .await
+            .expect("poll response");
+        assert!(poll.ends_with(r#"{"poll":1}"#));
+        let send = exchange(
+            stack,
+            "POST /send HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n",
+        )
+        .await
+        .expect("send response");
+        assert!(send.ends_with(r#"{"default":1}"#));
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            () = network.run() => panic!("network stopped"),
+            () = server.run::<2>(stack, PORT) => panic!("server stopped"),
+            () = client => {}
+        }
+    })
+    .await
+    .expect("exchange within the timeout");
+
+    assert_eq!(polls.requests().len(), 1);
+    assert!(polls.requests()[0].starts_with("GET /poll?offset=3 "));
+    assert_eq!(server.requests().len(), 1);
+    assert!(server.requests()[0].starts_with("POST /send "));
+    assert_eq!((polls.remaining(), server.remaining()), (0, 0));
+}

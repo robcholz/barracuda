@@ -5,21 +5,17 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    load_mode, receive_runtime, store_mode, sync_receive, ChannelControl, ChannelMode, ModeError,
-    ModeFuture, OnDemand, Owners, OwnersError, PairingEntropy, ReceiveControl, ReceiveRuntime,
-    ReceiveTiming,
-};
 use barracuda_imessage_gateway_plugin::{
-    GatewayError, IMessageGateway, MessageChannel, MessageChannelRegistration,
+    ChannelControl, ChannelMode, GatewayError, IMessageGateway, MessageChannel,
+    MessageChannelRegistration, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
+    ReceiveControl, ReceiveRuntime, ReceiveTiming,
 };
 use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ClientFactory, ReceiveSlots};
+use http_client::ReceiveSlots;
 use telegram::{Telegram, TelegramConfig};
 
-use crate::receive::{Cursor, TelegramSlots, CURSOR_STORAGE_KEY};
+use crate::receive::{Cursor, CURSOR_STORAGE_KEY};
 use crate::{decode_configuration, encode_configuration, ConfigRequest, CONFIGURATION_STORAGE_KEY};
 
 /// Builds the sending provider for a configuration.
@@ -41,7 +37,7 @@ pub(crate) enum ConfigureError {
 
 /// The Telegram channel: configuration, mode, Gateway registration, owners,
 /// and receive state.
-pub(crate) struct TelegramChannel<Storage, C: 'static, D: 'static> {
+pub(crate) struct TelegramChannel<Storage> {
     pub(crate) gateway: Rc<IMessageGateway>,
     pub(crate) storage: Storage,
     connect: Connect,
@@ -49,10 +45,9 @@ pub(crate) struct TelegramChannel<Storage, C: 'static, D: 'static> {
     mode: Cell<ChannelMode>,
     /// Present exactly while configured and the mode registers.
     registration: RefCell<Option<MessageChannelRegistration>>,
-    receive: Rc<ReceiveControl<TelegramSlots<C, D>>>,
+    receive: Rc<ReceiveControl<ReceiveSlots>>,
     /// Loaded once the channel is configured.
     owners: OnDemand<Owners<Storage>>,
-    entropy: PairingEntropy,
     /// Loaded by the first receive session.
     pub(crate) cursor: OnDemand<Cursor>,
     /// Whether this entry into `send_receive` already deleted a webhook.
@@ -62,32 +57,27 @@ pub(crate) struct TelegramChannel<Storage, C: 'static, D: 'static> {
 }
 
 /// The channel and the receive runtime its Plugin's task owns.
-pub(crate) type BuiltChannel<Storage, C, D> = (Rc<TelegramChannel<Storage, C, D>>, ReceiveRuntime);
+pub(crate) type BuiltChannel<Storage> = (Rc<TelegramChannel<Storage>>, ReceiveRuntime);
 
 /// Loads the channel from storage, registers it with the Gateway when its mode
 /// asks for it, and builds the receive runtime the Plugin's task owns.
-pub(crate) fn build_channel<Storage, T, C, D>(
+pub(crate) fn build_channel<Storage: PluginStorage>(
     storage: Storage,
     gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static, T, D>,
-    slots: ReceiveSlots<C, D>,
-    entropy: PairingEntropy,
     timing: ReceiveTiming,
-) -> PluginResult<BuiltChannel<Storage, C, D>>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    C: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+) -> PluginResult<BuiltChannel<Storage>> {
     let config = embassy_futures::block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY))?
         .map(|bytes| decode_configuration(&bytes))
         .transpose()
         .map_err(PluginError::registration)?;
-    let mode =
-        embassy_futures::block_on(load_mode(&storage, config.is_some(), ChannelMode::legacy()))?;
+    let mode = embassy_futures::block_on(gateway.load_mode(
+        &storage,
+        config.is_some(),
+        ChannelMode::legacy(),
+    ))?;
+    let http = gateway.http();
     let connect: Connect = Box::new(move |config| {
-        let sender: Rc<dyn MessageChannel> = Rc::new(Telegram::new(http_clients.clone(), config));
+        let sender: Rc<dyn MessageChannel> = Rc::new(Telegram::new(http.clone(), config));
         sender
     });
     let settings = config.map(|config| {
@@ -96,7 +86,7 @@ where
             config,
         })
     });
-    let receive = Rc::new(ReceiveControl::new(TelegramSlots(slots)));
+    let receive = Rc::new(gateway.receive_control());
     let channel = Rc::new(TelegramChannel {
         gateway,
         storage,
@@ -106,7 +96,6 @@ where
         registration: RefCell::new(None),
         receive: Rc::clone(&receive),
         owners: OnDemand::new(),
-        entropy,
         cursor: OnDemand::new(),
         webhook_cleared: Cell::new(false),
         changes: Mutex::new(()),
@@ -117,14 +106,16 @@ where
     channel
         .register_for(mode)
         .map_err(PluginError::registration)?;
-    let runtime = receive_runtime(receive, Rc::clone(&channel), timing);
-    if sync_receive(&*channel).is_err() {
+    let runtime = channel
+        .gateway
+        .receive_runtime(receive, Rc::clone(&channel), timing);
+    if channel.gateway.sync_receive(&*channel).is_err() {
         log::warn!("Telegram waits for a free receive slot");
     }
     Ok((channel, runtime))
 }
 
-impl<Storage: PluginStorage, C: 'static, D: 'static> TelegramChannel<Storage, C, D> {
+impl<Storage: PluginStorage> TelegramChannel<Storage> {
     /// The current configuration and its provider.
     pub(crate) fn settings(&self) -> Option<Rc<Settings>> {
         self.settings.borrow().clone()
@@ -141,7 +132,7 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> TelegramChannel<Storage, C,
     /// Loads the owner book, once; a configured channel needs it.
     async fn load_owners(&self) -> Result<&Owners<Storage>, OwnersError> {
         self.owners
-            .get_or_load(|| Owners::load(self.storage.clone(), self.entropy.clone()))
+            .get_or_load(|| self.gateway.load_owners(self.storage.clone()))
             .await
     }
 
@@ -200,7 +191,7 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> TelegramChannel<Storage, C,
         if let Err(error) = self.register_for(self.mode.get()) {
             log::warn!("rejected Telegram configuration: {error}");
             self.settings.replace(None);
-            let _no_slot = sync_receive(self);
+            let _no_slot = self.gateway.sync_receive(self);
             let restored = match previous.as_deref() {
                 Some(previous) => self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await,
                 None => self.storage.delete(CONFIGURATION_STORAGE_KEY).await,
@@ -218,7 +209,7 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> TelegramChannel<Storage, C,
                 cursor.clear();
             }
         }
-        if sync_receive(self).is_err() {
+        if self.gateway.sync_receive(self).is_err() {
             log::warn!("Telegram waits for a free receive slot");
         }
         self.receive.restart();
@@ -236,11 +227,9 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> TelegramChannel<Storage, C,
     }
 }
 
-impl<Storage: PluginStorage, C: 'static, D: 'static> ChannelControl
-    for TelegramChannel<Storage, C, D>
-{
+impl<Storage: PluginStorage> ChannelControl for TelegramChannel<Storage> {
     type Storage = Storage;
-    type Slots = TelegramSlots<C, D>;
+    type Slots = ReceiveSlots;
 
     fn configured(&self) -> bool {
         self.settings.borrow().is_some()
@@ -254,13 +243,13 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> ChannelControl
         Box::pin(async move {
             let _change = self.changes.lock().await;
             let previous = self.mode.get();
-            store_mode(&self.storage, mode).await.map_err(|error| {
+            self.gateway.store_mode(&self.storage, mode).await.map_err(|error| {
                 log::error!("failed to store the Telegram mode: {error}");
                 ModeError::Storage
             })?;
             if let Err(error) = self.register_for(mode) {
                 log::warn!("the Gateway rejected the Telegram channel: {error}");
-                if let Err(error) = store_mode(&self.storage, previous).await {
+                if let Err(error) = self.gateway.store_mode(&self.storage, previous).await {
                     log::error!("failed to restore the Telegram mode: {error}");
                 }
                 return Err(ModeError::Registration);
@@ -273,7 +262,7 @@ impl<Storage: PluginStorage, C: 'static, D: 'static> ChannelControl
         })
     }
 
-    fn receive(&self) -> &ReceiveControl<TelegramSlots<C, D>> {
+    fn receive(&self) -> &ReceiveControl<ReceiveSlots> {
         &self.receive
     }
 

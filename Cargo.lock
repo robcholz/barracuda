@@ -7472,11 +7472,17 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "telegram"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-time",
  "futures-lite",
- "http-client",
  "serde",
  "serde_json",
 ]
