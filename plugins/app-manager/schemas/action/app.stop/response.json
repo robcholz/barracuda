@@ -18,7 +18,8 @@
         "location": {
           "enum": [
             "bundled",
-            "installed"
+            "installed",
+            "workspace"
           ]
         },
         "has_view": {

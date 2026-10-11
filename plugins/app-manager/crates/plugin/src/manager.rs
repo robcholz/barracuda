@@ -1,6 +1,6 @@
 //! The `AppManager` capability and the task that supervises the foreground app.
 
-use crate::bundle::{self, AppInfo};
+use crate::bundle::{self, AppInfo, AppList};
 use alloc::{format, rc::Rc, string::String, vec::Vec};
 use barracuda_ui_plugin::{UiService, UiSession};
 use barracuda_vfs::ScopedVfs;
@@ -137,8 +137,9 @@ impl AppManager {
         }
     }
 
-    /// Every valid app, sorted by ID.
-    pub async fn list(&self) -> Vec<AppInfo> {
+    /// Every launchable app, sorted by ID, and every container that fails the
+    /// app format with the reason.
+    pub async fn list(&self) -> AppList {
         bundle::list(&self.inner.filesystem).await
     }
 

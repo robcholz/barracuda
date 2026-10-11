@@ -14,30 +14,22 @@
 
 ## Apps
 
-An app is a Lua program with an optional compiled MicroTS view. Apps without
-a view run headless. A bundle is a directory named after the app ID, which is
-1–32 characters of `a-z`, `0-9`, and `-`:
+An app is a Lua program with an optional compiled MicroTS view, stored as an
+app container. [`app-format.md`](app-format.md) defines the container and
+manifest; `schemas/app/manifest.json` checks the manifest.
 
-```text
-<id>/app.json       {"id": "<id>", "name": "…", "version": "…"}
-<id>/main.lua       the program, at most 64 KiB
-<id>/view.bvir      optional: the linked view
-<id>/styles.bin     its stylesheet
-<id>/font-<n>.bin   its baked fonts; view, styles, and fonts total at most 512 KiB
-```
-
-App containers are carved out of this Plugin's own private filesystem; the
-Plugin's scope is unchanged and no shared Workspace path is used. Bundles ship
-in the image under `/resources/apps` (this Plugin's
-`filesystem/resources/apps`) or are installed under `/media/apps`. An installed
-bundle shadows a bundled one with the same ID. A bundle whose
-manifest ID differs from its directory name is skipped.
+App containers are carved out of this Plugin's own filesystem scope, which is
+unchanged: installed apps under the private `/media/apps`, bundled apps under
+the private `/resources/apps`, and apps that Agents create under the shared
+`/workspace/media/apps`, which this Plugin only reads. An installed app
+replaces a bundled one with the same ID; a Workspace container never replaces
+either.
 
 ## Running
 
 `AppManager::launch` stops the foreground app, opens the new app's view with
-`UiService::open`, and starts `main.lua` on the VM with a global prelude on
-its first line:
+`UiService::open`, and starts its entry program on the VM with a global
+prelude on its first line:
 
 ```lua
 APP = { id = "counter", ui = "view-7" }  -- ui is nil for a headless app
@@ -57,9 +49,10 @@ out at the `ui` Plugin's default viewport.
 
 ## Building bundles
 
-App sources live in `resources/apps/<id>/`: `app.json`, `main.lua`, and an
-optional `app.tsx` view with its `app.d.ts` contract and `pocket.json`.
-`resources/apps/build.ts` compiles them into `filesystem/resources/apps`. It
+App sources live in `resources/apps/<id>/`: a manifest without `view`, the
+entry program, and an optional `app.tsx` view with its `app.d.ts` contract and
+`pocket.json`. `resources/apps/build.ts` compiles them into
+`filesystem/resources/apps` and adds the `view` files to the manifest. It
 needs a PocketJS checkout for the MicroTS compiler and font baker, so it is a
 manual task and its outputs are committed:
 

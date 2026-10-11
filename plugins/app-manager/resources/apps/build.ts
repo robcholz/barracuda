@@ -6,7 +6,7 @@
 // bakes the fonts it uses, and links the View IR into `view.bvir`.
 //
 //   POCKETJS_ROOT=~/src/pocketjs cargo plugin run apps --plugin app-manager
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -35,9 +35,13 @@ for (const name of readdirSync(sources, { withFileTypes: true }).filter((entry) 
   const bundle = join(output, name);
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
-  cpSync(join(source, "app.json"), join(bundle, "app.json"));
-  cpSync(join(source, "main.lua"), join(bundle, "main.lua"));
+  // The source manifest has no `view`; the build adds it once the view exists.
+  const manifest = JSON.parse(readFileSync(join(source, "app.json"), "utf8"));
+  const entry = manifest.entry ?? "main.lua";
+  const writeManifest = () => writeFileSync(join(bundle, "app.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  cpSync(join(source, entry), join(bundle, entry));
   if (!existsSync(join(source, "app.tsx"))) {
+    writeManifest();
     console.log(`${name}: headless`);
     continue;
   }
@@ -52,12 +56,19 @@ for (const name of readdirSync(sources, { withFileTypes: true }).filter((entry) 
     writeFileSync(view, JSON.stringify(strip({ version: program.version, types: program.types, components: program.components })));
     cpSync(join(work, "styles.bin"), join(bundle, "styles.bin"));
     const fonts = await bakeAtlases({ codepoints: [], slots: program.styles.usedFontSlots });
+    fonts.sort((left: { slot: number }, right: { slot: number }) => left.slot - right.slot);
     for (const font of fonts) writeFileSync(join(bundle, `font-${font.slot}.bin`), font.bytes);
     const link = Bun.spawnSync(
       ["cargo", "run", "--quiet", "--package", "barracuda-ui-runtime", "--features", "compiler", "--bin", "ui-link", "--", view, join(bundle, "view.bvir")],
       { stdout: "inherit", stderr: "inherit" },
     );
     if (link.exitCode !== 0) process.exit(link.exitCode ?? 1);
+    manifest.view = {
+      program: "view.bvir",
+      styles: "styles.bin",
+      fonts: fonts.map((font: { slot: number }) => `font-${font.slot}.bin`),
+    };
+    writeManifest();
     console.log(`${name}: view.bvir, styles.bin, ${fonts.length} font(s)`);
   } finally {
     rmSync(staged, { recursive: true, force: true });

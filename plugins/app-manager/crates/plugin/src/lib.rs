@@ -1,7 +1,8 @@
 //! Lists, launches, and supervises apps.
 //!
 //! An app is a Lua program with an optional compiled MicroTS view, stored as a
-//! bundle directory (see [`BUNDLED_APPS`] and [`INSTALLED_APPS`]). Launching an
+//! container directory in the format `docs/app-format.md` defines (see
+//! [`BUNDLED_APPS`], [`INSTALLED_APPS`], and [`WORKSPACE_APPS`]). Launching an
 //! app opens its view through the `ui` Plugin and runs its program on the VM;
 //! the program claims the view with `require("ui").attach(APP.ui)`. One app is
 //! in the foreground at a time.
@@ -26,7 +27,8 @@ use barracuda_workflow_plugin::WorkflowActionRegistry;
 use embassy_futures::select::select;
 
 pub use bundle::{
-    AppInfo, AppLocation, BUNDLED_APPS, INSTALLED_APPS, MAX_SOURCE_BYTES, MAX_VIEW_BYTES,
+    AppInfo, AppList, AppLocation, BUNDLED_APPS, DEFAULT_ENTRY, FORMAT_VERSION, INSTALLED_APPS,
+    InvalidApp, MANIFEST_FILE, MAX_SOURCE_BYTES, MAX_VIEW_BYTES, WORKSPACE_APPS,
 };
 pub use manager::{AppError, AppExit, AppManager, ForegroundApp, MAX_EXIT_OUTPUT_LINES};
 

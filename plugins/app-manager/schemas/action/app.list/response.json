@@ -18,7 +18,8 @@
         "location": {
           "enum": [
             "bundled",
-            "installed"
+            "installed",
+            "workspace"
           ]
         },
         "has_view": {
@@ -33,6 +34,30 @@
         "has_view"
       ],
       "additionalProperties": false
+    },
+    "invalid": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "enum": [
+            "bundled",
+            "installed",
+            "workspace"
+          ]
+        },
+        "dir": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "location",
+        "dir",
+        "problem"
+      ],
+      "additionalProperties": false
     }
   },
   "type": "object",
@@ -42,10 +67,17 @@
       "items": {
         "$ref": "#/$defs/app"
       }
+    },
+    "invalid": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/invalid"
+      }
     }
   },
   "required": [
-    "apps"
+    "apps",
+    "invalid"
   ],
   "additionalProperties": false
 }

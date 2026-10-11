@@ -1,5 +1,15 @@
 {
+  "format": 1,
   "id": "counter",
   "name": "计数器",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "fonts": [
+      "font-1.bin",
+      "font-2.bin",
+      "font-12.bin"
+    ]
+  }
 }

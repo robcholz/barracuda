@@ -5,10 +5,13 @@ The App Manager Plugin registers `app.list`, `app.launch`, `app.stop`,
 `schemas/action/<address>/`. Rejections return `{"error":"<code>"}` so a
 Workflow can branch on them.
 
-`app.list` takes `{}` and returns every valid app:
+`app.list` takes `{}` and returns every launchable app, and every container
+that breaks the [app format](app-format.md) with the reason, so its author can
+fix it. `location` is `installed`, `bundled`, or `workspace`:
 
 ```json
-{"apps":[{"id":"counter","name":"计数器","version":"0.1.0","location":"bundled","has_view":true}]}
+{"apps":[{"id":"counter","name":"计数器","version":"0.1.0","location":"bundled","has_view":true}],
+ "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
 ```
 
 `app.launch` replaces the foreground app and returns once the program has

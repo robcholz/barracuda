@@ -1,4 +1,4 @@
-use crate::bundle::AppInfo;
+use crate::bundle::AppList;
 use crate::manager::{AppError, AppExit, AppManager, ForegroundApp};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use barracuda_workflow_plugin::{
@@ -23,11 +23,6 @@ pub(crate) struct LaunchRequest {
 pub(crate) struct TapRequest {
     x: f32,
     y: f32,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ListResponse {
-    apps: Vec<AppInfo>,
 }
 
 #[derive(Serialize)]
@@ -68,16 +63,12 @@ struct ListAction(AppManager);
 
 impl WorkflowActionHandler for ListAction {
     type Request = Empty;
-    type Response = ListResponse;
+    type Response = AppList;
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.list");
 
     fn invoke(&self, _request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
-        Box::pin(async move {
-            Ok(ListResponse {
-                apps: self.0.list().await,
-            })
-        })
+        Box::pin(async move { Ok(self.0.list().await) })
     }
 }
 
@@ -161,7 +152,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
-    use crate::bundle::AppLocation;
+    use crate::bundle::{AppInfo, AppLocation, InvalidApp};
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
     use barracuda_workflow_plugin::WorkflowActionHandler;
@@ -198,8 +189,14 @@ mod tests {
 
     #[test]
     fn responses_match_their_schemas() {
-        check::<ListAction>(ListResponse {
+        check::<ListAction>(AppList::default());
+        check::<ListAction>(AppList {
             apps: vec![app(true), app(false)],
+            invalid: vec![InvalidApp {
+                location: AppLocation::Workspace,
+                dir: "Draft".into(),
+                problem: "app.json is missing".into(),
+            }],
         });
         check::<LaunchAction>(Response::from(Ok::<_, AppError>(foreground())));
         for error in [AppError::NotFound, AppError::InvalidBundle, AppError::Busy] {

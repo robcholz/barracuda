@@ -45,45 +45,108 @@ const COUNTER: &[(&str, &[u8])] = &[
     ),
 ];
 
+async fn put(filesystem: &ScopedVfs, path: &str, bytes: &[u8]) {
+    filesystem.write(path, bytes).await.unwrap();
+}
+
+/// The bundled counter, an installed app, and containers an Agent wrote to
+/// the Workspace: one launchable, the rest shadowed or broken.
 async fn filesystem() -> ScopedVfs {
     let vfs = Vfs::new();
     vfs.mount("/", MemFs::new().into_backend(), MountOptions::read_write())
         .await
         .unwrap();
-    let filesystem = vfs.scoped("/app-manager").unwrap();
+    let fs = vfs.scoped("/app-manager").unwrap();
     for (name, bytes) in COUNTER {
-        filesystem
-            .write(&format!("/resources/apps/counter/{name}"), bytes)
-            .await
-            .unwrap();
+        put(&fs, &format!("/resources/apps/counter/{name}"), bytes).await;
     }
-    filesystem
-        .write(
-            "/media/apps/broken/app.json",
-            br#"{"id":"broken","name":"Broken","version":"1"}"#,
+
+    put(
+        &fs,
+        "/media/apps/broken/app.json",
+        br#"{"format":1,"id":"broken","name":"Broken","version":"1"}"#,
+    )
+    .await;
+    put(
+        &fs,
+        "/media/apps/broken/main.lua",
+        b"print('starting')\nerror('boom: ' .. APP.id .. ' ' .. tostring(APP.ui))",
+    )
+    .await;
+
+    // An Agent-made app: the counter's view with its own entry program.
+    for (name, bytes) in COUNTER
+        .iter()
+        .filter(|(name, _)| name.ends_with(".bin") || *name == "view.bvir")
+    {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/agent-counter/{name}"),
+            bytes,
         )
-        .await
-        .unwrap();
-    filesystem
-        .write(
-            "/media/apps/broken/main.lua",
-            b"print('starting')\nerror('boom: ' .. APP.id .. ' ' .. tostring(APP.ui))",
+        .await;
+    }
+    put(
+        &fs,
+        "/workspace/media/apps/agent-counter/app.json",
+        br#"{"format":1,"id":"agent-counter","name":"Agent","version":"1","entry":"app.lua",
+            "view":{"program":"view.bvir","styles":"styles.bin","fonts":["font-1.bin"]}}"#,
+    )
+    .await;
+    put(
+        &fs,
+        "/workspace/media/apps/agent-counter/app.lua",
+        b"local view = assert(require('ui').attach(APP.ui)) \
+          assert(view:set('count', 42)) \
+          while view:next() do end",
+    )
+    .await;
+
+    // Workspace containers never replace an installed or bundled app.
+    for id in ["broken", "counter"] {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}/app.json"),
+            format!(r#"{{"format":1,"id":"{id}","name":"Impostor","version":"1"}}"#).as_bytes(),
         )
-        .await
-        .unwrap();
-    // Not listed: the manifest names another app.
-    filesystem
-        .write(
-            "/media/apps/stray/app.json",
-            br#"{"id":"other","name":"","version":""}"#,
+        .await;
+        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), b"").await;
+    }
+
+    for (dir, manifest) in [
+        (
+            "Draft",
+            r#"{"format":1,"id":"Draft","name":"x","version":"1"}"#,
+        ),
+        (
+            "escape",
+            r#"{"format":1,"id":"escape","name":"x","version":"1",
+                "view":{"program":"../counter/view.bvir","styles":"styles.bin"}}"#,
+        ),
+        (
+            "future",
+            r#"{"format":2,"id":"future","name":"x","version":"1"}"#,
+        ),
+        (
+            "nomain",
+            r#"{"format":1,"id":"nomain","name":"x","version":"1"}"#,
+        ),
+        (
+            "stray",
+            r#"{"format":1,"id":"other","name":"x","version":"1"}"#,
+        ),
+    ] {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{dir}/app.json"),
+            manifest.as_bytes(),
         )
-        .await
-        .unwrap();
-    filesystem
-        .write("/media/apps/stray/main.lua", b"")
-        .await
-        .unwrap();
-    filesystem
+        .await;
+        if dir != "nomain" {
+            put(&fs, &format!("/workspace/media/apps/{dir}/main.lua"), b"").await;
+        }
+    }
+    fs
 }
 
 /// Polls until `check` holds, giving the VM tasks time to run.
@@ -125,20 +188,55 @@ async fn scenario(spawner: Spawner) {
     let manager = AppManager::new(filesystem().await, vm, Rc::new(ui));
     spawner.spawn(supervise(manager.clone()).unwrap());
 
-    let apps = manager.list().await;
-    let summary: Vec<_> = apps
+    let list = manager.list().await;
+    let apps: Vec<_> = list
+        .apps
         .iter()
         .map(|app| (app.id.as_str(), app.location, app.has_view))
         .collect();
     assert_eq!(
-        summary,
+        apps,
         [
+            ("agent-counter", AppLocation::Workspace, true),
             ("broken", AppLocation::Installed, false),
             ("counter", AppLocation::Bundled, true),
         ]
     );
-    assert_eq!(apps[1].name, "计数器");
+    assert_eq!(list.apps[2].name, "计数器");
+    let invalid: Vec<_> = list
+        .invalid
+        .iter()
+        .map(|app| (app.dir.as_str(), app.location, app.problem.as_str()))
+        .collect();
+    assert_eq!(invalid.len(), 5, "{invalid:#?}");
+    for ((dir, location, problem), (expected_dir, expected)) in invalid.iter().zip([
+        ("Draft", "not an app ID"),
+        ("escape", "$.view.program"),
+        ("future", "$.format"),
+        ("nomain", "main.lua is missing"),
+        ("stray", "does not match the directory name"),
+    ]) {
+        assert_eq!((*dir, *location), (expected_dir, AppLocation::Workspace));
+        assert!(problem.contains(expected), "{dir}: {problem}");
+    }
+    assert_eq!(
+        manager.launch("escape").await.err(),
+        Some(AppError::InvalidBundle)
+    );
 
+    // The Agent's app runs with its own entry and declared fonts.
+    manager.launch("agent-counter").await.unwrap();
+    until("the agent app", || {
+        manager
+            .texts()
+            .is_ok_and(|texts| texts == ["42", "+1", "Reset"])
+    })
+    .await;
+
+    assert_eq!(
+        manager.stop().map(|app| app.app.id),
+        Some("agent-counter".into())
+    );
     assert_eq!(manager.tap(0.0, 0.0), Err(AppError::NoForegroundApp));
     let launched = manager.launch("counter").await.unwrap();
     assert_eq!(manager.foreground(), Some(launched));
