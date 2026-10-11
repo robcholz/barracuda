@@ -1,5 +1,5 @@
 id = "imessage-gateway"
-depends-on = ["workflow", "http"]
+depends-on = ["workflow", "http", "webserver"]
 description = "Provides typed messaging capabilities and Workflow Actions."
 
 [config.receive-slots]

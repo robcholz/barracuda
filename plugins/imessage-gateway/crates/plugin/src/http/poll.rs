@@ -15,7 +15,7 @@ use core::future::Future;
 use embassy_time::{with_timeout, Duration};
 use reqwless::request::RequestBuilder as _;
 
-use crate::Error;
+use crate::http::Error;
 
 /// Limits of a [`poll`] connection.
 #[derive(Clone, Copy, Debug)]

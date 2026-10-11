@@ -24,9 +24,9 @@ const MAX_RETRY_AFTER: Duration = Duration::from_secs(600);
 
 /// A source of receive-connection leases.
 ///
-/// The System's receive slot pool implements this through a small adapter in
-/// the channel Plugin; a channel that receives over the device's own HTTP
-/// server and holds no outbound connection uses [`UnlimitedSlots`].
+/// The Gateway's receive slots implement it; a channel that receives over the
+/// device's own HTTP server and holds no outbound connection uses
+/// [`UnlimitedSlots`].
 pub trait ReceiveSlotSource: 'static {
     /// One held slot; dropping it frees the slot.
     type Lease: 'static;
@@ -72,6 +72,27 @@ impl ReceiveSlotSource for UnlimitedSlots {
 
     fn in_use(&self) -> usize {
         0
+    }
+}
+
+/// The Gateway's receive slots.
+impl ReceiveSlotSource for http_client::ReceiveSlots {
+    type Lease = http_client::ReceiveLease;
+
+    fn acquire(&self) -> Option<Self::Lease> {
+        http_client::ReceiveSlots::acquire(self)
+    }
+
+    fn capacity(&self) -> usize {
+        http_client::ReceiveSlots::capacity(self)
+    }
+
+    fn in_use(&self) -> usize {
+        http_client::ReceiveSlots::in_use(self)
+    }
+
+    fn wait_available(&self) -> SlotWait<'_> {
+        Box::pin(http_client::ReceiveSlots::wait_available(self))
     }
 }
 
@@ -262,7 +283,7 @@ pub struct ReceiveControl<Slots: ReceiveSlotSource> {
 impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
     /// Creates a disabled control over `slots`.
     #[must_use]
-    pub fn new(slots: Slots) -> Self {
+    pub(crate) fn new(slots: Slots) -> Self {
         Self {
             slots,
             pending: RefCell::new(None),
@@ -356,7 +377,7 @@ impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
 ///
 /// Dropping it, as cancellation does, drops the running session and the
 /// lease and leaves the control reporting `idle`.
-pub fn receive_runtime<Slots, Channel>(
+pub(crate) fn receive_runtime<Slots, Channel>(
     control: Rc<ReceiveControl<Slots>>,
     channel: Rc<Channel>,
     timing: ReceiveTiming,

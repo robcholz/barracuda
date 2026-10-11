@@ -9,8 +9,9 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::vec;
 
-use barracuda_imessage_gateway_owners::{
+use crate::owners::{
     Classification, Owner, Owners, OwnersError, PairingEntropy, OWNERS_STORAGE_KEY,
 };
 use barracuda_platform::{Entropy, EntropyUnavailable};

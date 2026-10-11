@@ -8,20 +8,18 @@
 //! [`PAIRING_CODE_LIFETIME`], are compared in constant time, and rotate when
 //! used or on request.
 
-#![no_std]
-
-extern crate alloc;
-
 mod book;
 mod code;
 mod store;
 
-pub use book::{
-    Classification, Owner, OwnerBook, PairingView, MAX_OWNERS, MAX_PAIRING_ATTEMPTS, OWNER_ID_MAX,
-    OWNER_LABEL_MAX, PAIRING_CODE_LIFETIME,
-};
-pub use code::{PairingCode, PairingEntropy, PAIRING_CODE_DIGITS};
-pub use store::{Owners, OwnersError, OWNERS_STORAGE_KEY};
+#[cfg(test)]
+mod store_tests;
+
+pub use book::{Classification, Owner, PairingView};
+pub(crate) use code::PairingEntropy;
+#[cfg(test)]
+pub(crate) use store::OWNERS_STORAGE_KEY;
+pub use store::{Owners, OwnersError};
 
 /// Reply sent once to a sender that just paired, in both portal languages.
 pub const PAIRED_REPLY: &str = "已绑定，可以开始对话了\nPaired. You can start chatting.";

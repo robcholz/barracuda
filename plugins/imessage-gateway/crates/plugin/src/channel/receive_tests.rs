@@ -8,12 +8,14 @@
     missing_docs
 )]
 
+use std::boxed::Box;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{pending, Future};
 use std::rc::Rc;
+use std::vec::Vec;
 
-use barracuda_imessage_gateway_channel::{
+use crate::channel::{
     receive_runtime, NoSlot, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture,
     ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait,
 };

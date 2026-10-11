@@ -9,17 +9,22 @@
     missing_docs
 )]
 
+use std::boxed::Box;
 use std::cell::Cell;
+use std::format;
 use std::rc::Rc;
+use std::string::String;
+use std::vec::Vec;
 
-use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
-use barracuda_imessage_gateway_channel::{
-    entry_status, load_mode, receive_runtime, status_response, store_mode, sync_receive,
-    ChannelControl, ChannelEndpoint, ChannelMode, Classification, ModeEndpoint, ModeError,
-    ModeFuture, Owners, OwnersEndpoint, PairingEntropy, ReceiveChannel, ReceiveControl,
-    ReceiveError, ReceiveFuture, ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming,
-    MODE_STORAGE_KEY,
+use crate::channel::http::{mode_request, owners_request, status_response};
+use crate::channel::mode::MODE_STORAGE_KEY;
+use crate::channel::{
+    channel_status, load_mode, receive_runtime, store_mode, sync_receive, ChannelControl,
+    ChannelEndpoint, ChannelLevel, ChannelMode, ChannelStatus, ModeError, ModeFuture,
+    ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture, ReceiveSession, ReceiveSlotSource,
+    ReceiveState, ReceiveTiming,
 };
+use crate::owners::{Classification, Owners, PairingEntropy};
 use barracuda_platform::{Entropy, EntropyUnavailable};
 use barracuda_platform_test::memory_partition;
 use barracuda_plugin::manager::{
@@ -136,8 +141,6 @@ impl ReceiveChannel<Lease> for Closed {
 
 struct Harness<Storage> {
     channel: Rc<Mock<Storage>>,
-    mode: ModeEndpoint<Mock<Storage>>,
-    owners: OwnersEndpoint<Mock<Storage>>,
     taken: Rc<Cell<bool>>,
 }
 
@@ -158,12 +161,7 @@ impl<Storage: PluginStorage> Harness<Storage> {
                 taken: Rc::clone(&taken),
             })),
         });
-        Self {
-            mode: ModeEndpoint::new(Rc::clone(&channel)),
-            owners: OwnersEndpoint::new(Rc::clone(&channel)),
-            channel,
-            taken,
-        }
+        Self { channel, taken }
     }
 
     fn status(&self) -> String {
@@ -171,11 +169,13 @@ impl<Storage: PluginStorage> Harness<Storage> {
     }
 
     async fn post_mode(&self, body: &str) -> (u16, String) {
-        call(&self.mode, HttpMethod::Post, body).await
+        let request = HttpRequest::new(HttpMethod::Post, body.as_bytes().to_vec());
+        answer(mode_request(self.channel.as_ref(), &request).await)
     }
 
     async fn owners(&self, method: HttpMethod, body: &str) -> (u16, String) {
-        call(&self.owners, method, body).await
+        let request = HttpRequest::new(method, body.as_bytes().to_vec());
+        answer(owners_request(self.channel.as_ref(), &request).await)
     }
 
     async fn stored_mode(&self) -> String {
@@ -195,10 +195,7 @@ fn body(response: barracuda_webserver_plugin::HttpResponse) -> String {
     String::from_utf8(response.body().expect("buffered").to_vec()).expect("UTF-8")
 }
 
-async fn call(endpoint: &dyn HttpEndpoint, method: HttpMethod, body: &str) -> (u16, String) {
-    let response = endpoint
-        .handle(HttpRequest::new(method, body.as_bytes().to_vec()))
-        .await;
+fn answer(response: HttpResponse) -> (u16, String) {
     let status = response.status();
     let body = String::from_utf8(response.body().expect("buffered").to_vec()).expect("UTF-8");
     (status, body)
@@ -287,14 +284,12 @@ impl Scenario for StatusAndMode {
                 r#"{"configured":true,"mode":"send_receive","receive":{"state":"no_slot","capacity":1,"slots":{"in_use":1,"capacity":1}},"owners":{"count":0}}"#
             );
             assert_eq!(
-                entry_status(harness.channel.as_ref()),
-                EntryStatus::new(
-                    EntryState::Attention,
-                    WebText {
-                        zh: "名额已满",
-                        en: "No slot"
-                    }
-                )
+                channel_status(harness.channel.as_ref()),
+                ChannelStatus {
+                    level: ChannelLevel::Attention,
+                    zh: "名额已满",
+                    en: "No slot"
+                }
             );
 
             // An unconfigured channel saves the mode without receiving.
@@ -308,8 +303,12 @@ impl Scenario for StatusAndMode {
                 r#"{"configured":false,"mode":"send_receive","receive":{"state":"idle","slots":{"in_use":0,"capacity":1}},"owners":{"count":0}}"#
             );
             assert_eq!(
-                entry_status(harness.channel.as_ref()),
-                EntryStatus::configured(false)
+                channel_status(harness.channel.as_ref()),
+                ChannelStatus {
+                    level: ChannelLevel::Off,
+                    zh: "未配置",
+                    en: "Not set up"
+                }
             );
         });
     }
@@ -459,7 +458,13 @@ impl Scenario for ModeErrors {
             );
             assert!(!harness.taken.get(), "a failed mode change takes no slot");
             assert_eq!(
-                call(&harness.mode, HttpMethod::Get, "").await,
+                answer(
+                    mode_request(
+                        harness.channel.as_ref(),
+                        &HttpRequest::new(HttpMethod::Get, Vec::new())
+                    )
+                    .await
+                ),
                 (405, r#"{"error":"method_not_allowed"}"#.into())
             );
         });
@@ -494,14 +499,12 @@ impl Scenario for ErrorState {
                     r#"{"configured":true,"mode":"send_receive","receive":{"state":"error","message":"closed","slots":{"in_use":1,"capacity":1}},"owners":{"count":0}}"#
                 );
                 assert_eq!(
-                    entry_status(harness.channel.as_ref()),
-                    EntryStatus::new(
-                        EntryState::Attention,
-                        WebText {
-                            zh: "连接中断",
-                            en: "Disconnected"
-                        }
-                    )
+                    channel_status(harness.channel.as_ref()),
+                    ChannelStatus {
+                        level: ChannelLevel::Attention,
+                        zh: "连接中断",
+                        en: "Disconnected"
+                    }
                 );
             };
             match select(runtime, test).await {

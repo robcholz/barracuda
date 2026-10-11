@@ -8,6 +8,7 @@ use std::pin::pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_imessage_gateway_plugin::{
     GatewayInboundMessage, GatewayRoute, IMessageGateway, IMessageGatewayPlugin,
 };
@@ -16,7 +17,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
 };
-use barracuda_http_plugin::HttpPlugin;
+use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_workflow_plugin::{WorkflowPlugin, WorkflowService, EVENT_BACKLOG_LIMIT};
 use futures_lite::future::block_on;
 
@@ -85,6 +86,9 @@ fn scenario(test: impl AsyncFnOnce(&IMessageGateway, &WorkflowService)) {
     manager
         .register(HttpPlugin::new(&mut context))
         .expect("register HTTP Plugin");
+    manager
+        .register(WebServerPlugin::new(&mut context))
+        .expect("register WebServer");
     manager
         .register(IMessageGatewayPlugin::new(&mut context))
         .expect("register Gateway");

@@ -1,8 +1,4 @@
 //! HTTP request helpers owned by the IMessage Gateway.
-#![no_std]
-
-extern crate alloc;
-
 use alloc::{
     collections::VecDeque,
     format,
@@ -24,6 +20,64 @@ pub use reqwless::request::{Method, RequestBody};
 mod poll;
 pub use poll::{poll, PollEnd, PollLimits, PollRequest, Polled, Poller};
 
+/// HTTP helpers over the http Plugin's clients, for channel providers.
+#[derive(Clone)]
+pub struct GatewayHttp {
+    clients: http_client::ClientFactory<'static>,
+}
+
+impl GatewayHttp {
+    pub(crate) const fn new(clients: http_client::ClientFactory<'static>) -> Self {
+        Self { clients }
+    }
+
+    /// Sends one request on a fresh connection and buffers the whole
+    /// response; see [`send`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the exchange fails or misses [`SEND_TIMEOUT`].
+    pub async fn send<B: RequestBody>(
+        &self,
+        method: Method,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: B,
+    ) -> Result<Response, Error> {
+        send(&self.clients, method, url, headers, body).await
+    }
+
+    /// [`Self::send`] that fails with [`Error::BodyTooLarge`] once the
+    /// response body exceeds `limit` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the exchange fails, misses [`SEND_TIMEOUT`], or
+    /// the body is too large.
+    pub async fn send_limited<B: RequestBody>(
+        &self,
+        method: Method,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: B,
+        limit: usize,
+    ) -> Result<Response, Error> {
+        send_limited(&self.clients, method, url, headers, body, limit).await
+    }
+
+    /// Polls `origin` over the receive slot `lease` until a request fails or
+    /// the poller stops; see [`poll`].
+    pub async fn poll<P: Poller>(
+        &self,
+        lease: &http_client::ReceiveLease,
+        origin: &str,
+        limits: PollLimits,
+        poller: &mut P,
+    ) -> PollEnd<P::Error> {
+        poll(&lease.client_factory(), origin, limits, poller).await
+    }
+}
+
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
@@ -31,8 +85,10 @@ const READ_BUFFER_SIZE: usize = 8 * 1024;
 /// deadline.
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Failure of one [`GatewayHttp`] exchange.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An `https://` URL was given but the clients have no TLS.
     #[error("HTTPS requested without a TLS configuration")]
     TlsNotConfigured,
     /// The exchange missed its [`SEND_TIMEOUT`] deadline.
@@ -41,12 +97,16 @@ pub enum Error {
     /// The response body exceeded the limit given to [`send_limited`].
     #[error("HTTP response body is too large")]
     BodyTooLarge,
+    /// The HTTP client failed.
     #[error(transparent)]
     Reqwless(#[from] reqwless::Error),
 }
 
+/// A buffered response.
 pub struct Response {
+    /// Status code.
     pub status: u16,
+    /// Whole body.
     pub body: Vec<u8>,
 }
 
@@ -300,10 +360,13 @@ impl<W: embedded_io_async::Write> embedded_io_async::Write for PacedWriter<'_, W
     }
 }
 
+/// Failure building a [`Multipart`] body.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum MultipartError {
+    /// The boundary, a name, or a filename is not valid in a part header.
     #[error("invalid multipart metadata")]
     InvalidMetadata,
+    /// The total length does not fit in `usize`.
     #[error("multipart body is too large")]
     LengthOverflow,
 }
@@ -327,6 +390,7 @@ pub struct MultipartBody {
 }
 
 impl MultipartBody {
+    /// Why writing a streamed part failed, once it has.
     #[must_use]
     pub fn failure(&self) -> Option<String> {
         self.state.borrow().failure.clone()
@@ -381,12 +445,14 @@ enum Part {
     },
 }
 
+/// Builder of a `multipart/form-data` request body.
 pub struct Multipart {
     boundary: String,
     parts: Vec<Part>,
 }
 
 impl Multipart {
+    /// Starts a body delimited by `boundary`.
     #[must_use]
     pub fn new(boundary: impl Into<String>) -> Self {
         Self {
@@ -395,6 +461,7 @@ impl Multipart {
         }
     }
 
+    /// Appends a text field.
     #[must_use]
     pub fn text(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.parts.push(Part::Text {
@@ -404,6 +471,7 @@ impl Multipart {
         self
     }
 
+    /// Appends a file streamed from `body`.
     #[must_use]
     pub fn file(
         mut self,
@@ -421,6 +489,12 @@ impl Multipart {
         self
     }
 
+    /// Returns the `Content-Type` header value and the body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MultipartError`] for invalid metadata or an overflowing
+    /// length.
     pub fn finish(self) -> Result<(String, MultipartBody), MultipartError> {
         validate_boundary(&self.boundary)?;
         let content_type = format!("multipart/form-data; boundary={}", self.boundary);

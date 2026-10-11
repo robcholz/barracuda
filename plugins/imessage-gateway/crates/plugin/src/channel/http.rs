@@ -1,11 +1,11 @@
 //! Shared HTTP surface every channel exposes under its configuration path.
 //!
-//! A channel Plugin serves `/api/gateway/<channel>` and the `/status`, `/mode`
-//! and `/owners` below it from one prefix registration, [`ChannelEndpoint`],
-//! which hands the configuration path itself to the Plugin's own endpoint,
-//! answers `/status` with [`status_response`], and hands the other two to
-//! [`ModeEndpoint`] and [`OwnersEndpoint`]. One route per channel instead of
-//! four keeps the webserver's route table small.
+//! `IMessageGateway::serve_channel` serves a channel's configuration path and
+//! the `/status`, `/mode` and `/owners` below it from one prefix registration,
+//! [`ChannelEndpoint`], which hands the configuration path itself to the
+//! channel Plugin's own endpoint, answers `/status` with [`status_response`],
+//! and hands the other two to [`mode_request`] and [`owners_request`]. One
+//! route per channel instead of four keeps the webserver's route table small.
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -14,14 +14,14 @@ use alloc::vec::Vec;
 use core::future::Future;
 use core::pin::Pin;
 
-use barracuda_imessage_gateway_owners::{Owner, Owners};
+use crate::owners::{Owner, Owners};
 use barracuda_plugin::manager::PluginStorage;
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::mode::ChannelMode;
-use crate::receive::{NoSlot, ReceiveControl, ReceiveSlotSource, ReceiveState};
+use crate::channel::mode::ChannelMode;
+use crate::channel::receive::{NoSlot, ReceiveControl, ReceiveSlotSource, ReceiveState};
 
 /// Media type of every helper response.
 pub const JSON_CONTENT_TYPE: &str = "application/json";
@@ -58,7 +58,7 @@ pub trait ChannelControl: 'static {
         ChannelMode::ALL
     }
 
-    /// Stores `mode` (see [`crate::store_mode`]) and registers or
+    /// Stores `mode` (see [`crate::channel::store_mode`]) and registers or
     /// unregisters the channel with the Gateway so that a registration exists
     /// exactly when it is configured and `mode.registers()`. After success
     /// [`Self::mode`] returns `mode`. The caller then updates
@@ -69,7 +69,7 @@ pub trait ChannelControl: 'static {
     fn receive(&self) -> &ReceiveControl<Self::Slots>;
 
     /// The channel's owner book, which a channel loads once it is configured
-    /// (an [`crate::OnDemand`] keeps it); `None` before, so an unconfigured
+    /// (an [`crate::channel::OnDemand`] keeps it); `None` before, so an unconfigured
     /// channel holds and reads none.
     fn owners(&self) -> Option<&Owners<Self::Storage>>;
 
@@ -82,7 +82,7 @@ pub trait ChannelControl: 'static {
 
 /// Enables receiving exactly when `channel` is configured and in
 /// `send_receive`. Call it after loading the mode in `register` and after
-/// every configuration change; [`ModeEndpoint`] calls it after a mode change.
+/// every configuration change; [`mode_request`] calls it after a mode change.
 ///
 /// # Errors
 ///
@@ -168,23 +168,6 @@ pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse 
     )
 }
 
-/// `POST /api/gateway/<channel>/mode` with `{"mode":"disabled"|"send"|"send_receive"}`.
-///
-/// Answers 204 when applied, or 409 `{"error":"no_slot","capacity":n}` when
-/// `send_receive` finds every receive slot in use; the mode is saved anyway
-/// and the channel takes a slot once one frees. 400 `invalid_request` for a
-/// malformed body, 400 `unsupported_mode` for a mode the channel does not
-/// offer, 500 `storage`, 422 `registration_failed`, 405 for other methods.
-pub struct ModeEndpoint<C>(Rc<C>);
-
-impl<C> ModeEndpoint<C> {
-    /// Serves the mode endpoint of `channel`.
-    #[must_use]
-    pub const fn new(channel: Rc<C>) -> Self {
-        Self(channel)
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ModeBody {
@@ -221,36 +204,20 @@ async fn set_mode<C: ChannelControl>(channel: &C, body: &[u8]) -> HttpResponse {
     }
 }
 
-async fn mode_request<C: ChannelControl>(channel: &C, request: &HttpRequest) -> HttpResponse {
+/// `POST /api/gateway/<channel>/mode` with `{"mode":"disabled"|"send"|"send_receive"}`.
+///
+/// Answers 204 when applied, or 409 `{"error":"no_slot","capacity":n}` when
+/// `send_receive` finds every receive slot in use; the mode is saved anyway
+/// and the channel takes a slot once one frees. 400 `invalid_request` for a
+/// malformed body, 400 `unsupported_mode` for a mode the channel does not
+/// offer, 500 `storage`, 422 `registration_failed`, 405 for other methods.
+pub(crate) async fn mode_request<C: ChannelControl>(
+    channel: &C,
+    request: &HttpRequest,
+) -> HttpResponse {
     match request.method() {
         HttpMethod::Post => set_mode(channel, request.body()).await,
         _ => error(405, "method_not_allowed"),
-    }
-}
-
-impl<C: ChannelControl> HttpEndpoint for ModeEndpoint<C> {
-    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
-        Box::pin(async move { mode_request(self.0.as_ref(), &request).await })
-    }
-}
-
-/// `GET` and `POST` on `/api/gateway/<channel>/owners`.
-///
-/// `GET` answers
-/// `{"owners":[{"id":"…","label":"…"|null}],"pairing":{"code":"012345","expires_in":600}|null,"ignored":n}`,
-/// minting a pairing code when none is valid; `pairing` is `null` while the
-/// list is full or the Platform has no entropy. `POST` takes
-/// `{"remove":"<id>"}` or `{"rotate":true}` and answers 204; 400
-/// `invalid_request` for any other body, 500 `storage` when a removal cannot
-/// be stored, 503 `entropy_unavailable` when no code can be minted. Both
-/// answer 409 `not_configured` while the channel is not configured.
-pub struct OwnersEndpoint<C>(Rc<C>);
-
-impl<C> OwnersEndpoint<C> {
-    /// Serves the owners endpoint of `channel`.
-    #[must_use]
-    pub const fn new(channel: Rc<C>) -> Self {
-        Self(channel)
     }
 }
 
@@ -313,17 +280,24 @@ async fn owners_command<C: ChannelControl>(channel: &C, body: &[u8]) -> HttpResp
     }
 }
 
-async fn owners_request<C: ChannelControl>(channel: &C, request: &HttpRequest) -> HttpResponse {
+/// `GET` and `POST` on `/api/gateway/<channel>/owners`.
+///
+/// `GET` answers
+/// `{"owners":[{"id":"…","label":"…"|null}],"pairing":{"code":"012345","expires_in":600}|null,"ignored":n}`,
+/// minting a pairing code when none is valid; `pairing` is `null` while the
+/// list is full or the Platform has no entropy. `POST` takes
+/// `{"remove":"<id>"}` or `{"rotate":true}` and answers 204; 400
+/// `invalid_request` for any other body, 500 `storage` when a removal cannot
+/// be stored, 503 `entropy_unavailable` when no code can be minted. Both
+/// answer 409 `not_configured` while the channel is not configured.
+pub(crate) async fn owners_request<C: ChannelControl>(
+    channel: &C,
+    request: &HttpRequest,
+) -> HttpResponse {
     match request.method() {
         HttpMethod::Get => list_owners(channel),
         HttpMethod::Post => owners_command(channel, request.body()).await,
         _ => error(405, "method_not_allowed"),
-    }
-}
-
-impl<C: ChannelControl> HttpEndpoint for OwnersEndpoint<C> {
-    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
-        Box::pin(async move { owners_request(self.0.as_ref(), &request).await })
     }
 }
 
@@ -333,13 +307,13 @@ impl<C: ChannelControl> HttpEndpoint for OwnersEndpoint<C> {
 /// - `base` itself goes to the channel Plugin's own `config` endpoint, which
 ///   takes changes only;
 /// - `GET base/status` answers [`status_response`] (405 for other methods);
-/// - `base/mode` is [`ModeEndpoint`];
-/// - `base/owners` is [`OwnersEndpoint`];
+/// - `base/mode` is [`mode_request`];
+/// - `base/owners` is [`owners_request`];
 /// - any other path below `base` answers 404 `not_found`.
 ///
 /// Routes registered for exact paths below `base` (such as WeChat's
 /// `/login`) still take precedence over it.
-pub struct ChannelEndpoint<C, Config> {
+pub(crate) struct ChannelEndpoint<C, Config> {
     channel: Rc<C>,
     base: &'static str,
     config: Config,
@@ -348,7 +322,7 @@ pub struct ChannelEndpoint<C, Config> {
 impl<C, Config> ChannelEndpoint<C, Config> {
     /// Serves `channel`'s routes under `base`, with `config` on `base`.
     #[must_use]
-    pub const fn new(channel: Rc<C>, base: &'static str, config: Config) -> Self {
+    pub(crate) const fn new(channel: Rc<C>, base: &'static str, config: Config) -> Self {
         Self {
             channel,
             base,

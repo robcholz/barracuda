@@ -9,7 +9,6 @@ barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
 
 [dependencies]
 barracuda-captive-portal-plugin.workspace = true
-barracuda-imessage-gateway-channel = { path = "../../../imessage-gateway/crates/channel" }
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true

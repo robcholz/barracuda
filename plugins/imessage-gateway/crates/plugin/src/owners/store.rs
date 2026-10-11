@@ -8,8 +8,8 @@ use barracuda_plugin::manager::{PluginStorage, StorageError};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Instant;
 
-use crate::book::{Classification, Owner, OwnerBook, PairingView};
-use crate::code::PairingEntropy;
+use crate::owners::book::{Classification, Owner, OwnerBook, PairingView};
+use crate::owners::code::PairingEntropy;
 
 /// Plugin storage key holding the channel's owner list as a JSON array.
 pub const OWNERS_STORAGE_KEY: &str = "owners";
@@ -44,7 +44,10 @@ impl<Storage: PluginStorage> Owners<Storage> {
     ///
     /// Returns [`OwnersError`] when storage fails or the stored list is not
     /// valid.
-    pub async fn load(storage: Storage, entropy: PairingEntropy) -> Result<Self, OwnersError> {
+    pub(crate) async fn load(
+        storage: Storage,
+        entropy: PairingEntropy,
+    ) -> Result<Self, OwnersError> {
         let owners = match storage.get_bytes(OWNERS_STORAGE_KEY).await? {
             Some(bytes) => serde_json::from_slice::<Vec<Owner>>(&bytes)
                 .map_err(|_error| OwnersError::Invalid)?,

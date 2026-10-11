@@ -1203,7 +1203,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-http-plugin",
- "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1227,60 +1226,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-imessage-gateway-channel"
-version = "0.1.0"
-dependencies = [
- "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-owners",
- "barracuda-platform",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-webserver-plugin",
- "embassy-futures",
- "embassy-sync 0.7.2",
- "embassy-time",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-imessage-gateway-owners"
-version = "0.1.0"
-dependencies = [
- "barracuda-platform",
- "barracuda-platform-test",
- "barracuda-plugin",
- "embassy-sync 0.7.2",
- "embassy-time",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "barracuda-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "barracuda-http-plugin",
  "barracuda-imessage-gateway-runtime",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
  "barracuda-vfs",
+ "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "gateway",
- "gateway-http",
  "http-client",
  "log",
+ "reqwless",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1304,7 +1275,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-http-plugin",
- "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1332,7 +1302,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-http-plugin",
- "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1361,7 +1330,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-http-plugin",
- "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1403,7 +1371,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-http-plugin",
- "barracuda-imessage-gateway-channel",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
  "barracuda-plugin",
@@ -5248,23 +5215,6 @@ dependencies = [
  "futures-lite",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "gateway-http"
-version = "0.1.0"
-dependencies = [
- "barracuda-bulk-memory",
- "barracuda-platform-test",
- "embassy-sync 0.7.2",
- "embassy-time",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "futures-lite",
- "gateway",
- "http-client",
- "reqwless",
  "thiserror 2.0.18",
 ]
 

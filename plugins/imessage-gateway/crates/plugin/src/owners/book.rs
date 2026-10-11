@@ -7,7 +7,7 @@ use barracuda_platform::EntropyUnavailable;
 use embassy_time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
-use crate::code::{PairingCode, PairingEntropy};
+use crate::owners::code::{PairingCode, PairingEntropy};
 
 /// Most owners one channel keeps.
 pub const MAX_OWNERS: usize = 8;
@@ -85,7 +85,7 @@ pub enum Classification {
     /// The sender is an owner: publish the message.
     Owner,
     /// The message carried the current pairing code and its sender is now an
-    /// owner: reply once with [`crate::PAIRED_REPLY`] and do not publish it.
+    /// owner: reply once with [`crate::owners::PAIRED_REPLY`] and do not publish it.
     Paired,
     /// Anyone else: drop the message without a reply. It is counted.
     Ignored,
@@ -109,7 +109,7 @@ struct Pairing {
 
 /// Owner list, pairing code, and ignored-message counter of one channel.
 ///
-/// Pure logic: the caller supplies the time, and [`crate::Owners`] persists
+/// Pure logic: the caller supplies the time, and [`crate::owners::Owners`] persists
 /// the list.
 pub struct OwnerBook {
     owners: Vec<Owner>,
