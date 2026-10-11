@@ -4,19 +4,16 @@
 //! [`ClientFactory::create`]. A channel that holds a long poll or a push
 //! connection open must never take one of those connections, so receive loops
 //! lease a slot from [`ReceiveSlots`] instead. Each slot owns one TCP socket
-//! with its own static buffers and shares the System's DNS resolver and TLS
+//! with its own buffers and shares the request pool's DNS resolver and TLS
 //! engine; a lease holds at most one open connection at a time.
 //!
-//! The slots' socket buffers are static: the application declares one
-//! [`ReceiveBuffers`] sized at build time from the selected Platform's
-//! long-lived connection budget, so a Target without receive connections
-//! links no receive buffers at all. [`ReceiveSlots::capacity`] is the runtime
-//! limit System derives from the selected Board's memory; it never exceeds
-//! the static size.
+//! Each slot allocates its socket buffers once, on the heap, when the slots
+//! are created; a Target whose budget allows no receive connections
+//! allocates none.
 
 #[cfg(feature = "mbedtls")]
 use alloc::ffi::CString;
-use alloc::{rc::Rc, vec::Vec};
+use alloc::{rc::Rc, vec, vec::Vec};
 use core::{
     cell::{Cell, RefCell, RefMut},
     fmt,
@@ -34,7 +31,6 @@ use embassy_net::{
 use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use embedded_nal_async::{AddrType, Dns, TcpConnect};
-use static_cell::ConstStaticCell;
 
 use crate::{ClientFactory, Resolver};
 
@@ -51,67 +47,6 @@ const KEEP_ALIVE: Duration = Duration::from_secs(30);
 /// probe) after which a receive connection is dropped as dead.
 const DEAD_PEER_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Send and receive buffers of one receive slot: 1 KiB and 4 KiB.
-pub struct ReceiveSlotBuffers {
-    tx: [u8; RECEIVE_TX_BYTES],
-    rx: [u8; RECEIVE_RX_BYTES],
-}
-
-impl ReceiveSlotBuffers {
-    /// Zeroed buffers, for static storage.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            tx: [0; RECEIVE_TX_BYTES],
-            rx: [0; RECEIVE_RX_BYTES],
-        }
-    }
-}
-
-impl Default for ReceiveSlotBuffers {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Static socket buffers for `N` receive slots.
-///
-/// The application declares exactly one, sized from the selected Platform's
-/// long-lived connection budget, so the buffers are placed in `.bss` at link
-/// time and a Target that allows none links no buffers:
-///
-/// ```rust,ignore
-/// static RECEIVE_BUFFERS: ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }> =
-///     ReceiveBuffers::new();
-/// ```
-pub struct ReceiveBuffers<const N: usize> {
-    buffers: ConstStaticCell<[ReceiveSlotBuffers; N]>,
-}
-
-impl<const N: usize> ReceiveBuffers<N> {
-    /// Zeroed buffers for `N` slots.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            buffers: ConstStaticCell::new([const { ReceiveSlotBuffers::new() }; N]),
-        }
-    }
-
-    /// Hands out the buffers once; later calls get none.
-    pub fn take(&'static self) -> &'static mut [ReceiveSlotBuffers] {
-        match self.buffers.try_take() {
-            Some(buffers) => buffers.as_mut_slice(),
-            None => &mut [],
-        }
-    }
-}
-
-impl<const N: usize> Default for ReceiveBuffers<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// The TCP socket of one receive slot.
 ///
 /// It connects one remote endpoint at a time: a second connection attempt
@@ -121,8 +56,10 @@ pub struct ReceiveSocket {
 }
 
 impl ReceiveSocket {
-    fn new(stack: Stack<'static>, buffers: &'static mut ReceiveSlotBuffers) -> Self {
-        let ReceiveSlotBuffers { tx, rx } = buffers;
+    /// Allocates the socket's buffers for the life of the process.
+    fn new(stack: Stack<'static>) -> Self {
+        let rx = Vec::leak(vec![0; RECEIVE_RX_BYTES]);
+        let tx = Vec::leak(vec![0; RECEIVE_TX_BYTES]);
         let mut socket = TcpSocket::new(stack, rx, tx);
         socket.set_keep_alive(Some(KEEP_ALIVE));
         socket.set_timeout(Some(DEAD_PEER_TIMEOUT));
@@ -268,24 +205,18 @@ impl<C, D> Default for ReceiveSlots<C, D> {
 }
 
 impl ReceiveSlots {
-    /// Creates up to `limit` receive slots on `stack`, one per entry of
-    /// `buffers`, sharing the DNS resolver and TLS engine of `shared`.
+    /// Creates `count` receive slots on `stack`, sharing the DNS resolver and
+    /// TLS engine of `shared`.
     ///
-    /// Each slot registers one socket with the stack for the life of the
-    /// process, so the stack's socket table must have room for them.
+    /// Each slot allocates 5 KiB of socket buffers and registers one socket
+    /// with the stack, both for the life of the process, so the stack's
+    /// socket table must have room for them.
     #[must_use]
-    pub fn new(
-        stack: Stack<'static>,
-        shared: &ClientFactory<'static>,
-        buffers: &'static mut [ReceiveSlotBuffers],
-        limit: usize,
-    ) -> Self {
-        let slots = buffers
-            .iter_mut()
-            .take(limit)
-            .map(|buffers| {
+    pub fn new(stack: Stack<'static>, shared: &ClientFactory<'static>, count: usize) -> Self {
+        let slots = (0..count)
+            .map(|_| {
                 Rc::new(Slot {
-                    connector: ReceiveSocket::new(stack, buffers),
+                    connector: ReceiveSocket::new(stack),
                     resolver: shared.resolver,
                     #[cfg(feature = "mbedtls")]
                     tls: shared.tls.clone(),
@@ -797,17 +728,7 @@ impl<'a> Endpoint<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Endpoint, ReceiveBuffers, ReceiveSlotBuffers, StreamError};
-
-    #[test]
-    fn static_buffers_scale_with_the_slot_count() {
-        let slot = core::mem::size_of::<ReceiveSlotBuffers>();
-        assert_eq!(slot, 5 * 1024);
-        // A Target without receive connections keeps only the taken flag.
-        assert!(core::mem::size_of::<ReceiveBuffers<0>>() <= core::mem::align_of::<usize>());
-        let three = core::mem::size_of::<ReceiveBuffers<3>>();
-        assert!(three >= 3 * slot && three <= 3 * slot + core::mem::align_of::<usize>());
-    }
+    use super::{Endpoint, StreamError};
 
     #[test]
     fn stream_urls_name_a_host_port_and_security() {
