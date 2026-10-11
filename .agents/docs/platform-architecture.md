@@ -835,8 +835,10 @@ reads no environment variables or certificate files at run time. Only a host
 test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
 a test network that intercepts TLS); device firmware refuses it. It also owns
 the few C library functions mbedTLS calls on bare-metal targets, and exposes
-`aes_256_gcm_open` on the same mbedTLS build, so a consumer that must open a
-value a service sealed for the device carries no second AES implementation.
+`aes_256_gcm_open`, incremental AES-128-ECB with PKCS#7 padding
+(`Aes128EcbEncryptor`, `Aes128EcbDecryptor`) and MD5 (`Md5`) on the same
+mbedTLS build, so a consumer that must speak a service's encryption or digest
+carries no second implementation.
 
 HTTP is a library too:
 
