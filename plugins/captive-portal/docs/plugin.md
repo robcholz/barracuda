@@ -39,6 +39,10 @@ never queries a device or network, and must not call back into the portal. An
 `Attention` or `Off`; `label` is an optional `WebText`; `detail` an optional
 untranslated `String` such as a network name. `EntryStatus::configured(bool)`
 gives the shared `ready` 已配置/Configured or `off` 未配置/Not set up record.
+A Plugin that sends clients to the portal from routes of its own, such as
+captive-network detection paths, answers them with `CaptivePortal::landing()`,
+the portal's landing page; it never names the portal's paths.
+
 `AssetsProvider` is the existing WebServer `HttpProvider` trait, re-exported
 under the portal's resource role; no second reader or transport contract exists.
 The provider receives a validated relative path such as `chunks/main.js` and

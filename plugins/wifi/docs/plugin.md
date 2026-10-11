@@ -41,7 +41,8 @@ only (`PUT`, `DELETE`); other methods, including `GET`, answer `405`, as do
 methods other than `GET` on `/status` and `/scan`.
 
 The Portal registers a Wi-Fi module and exact captive-detection paths used by
-common Android, Apple, and Windows clients. The entry is registered with
+common Android, Apple, and Windows clients, which answer with
+`CaptivePortal::landing()`. The entry is registered with
 `CaptivePortal::register_with_status`; its `GET /portal/status` record maps the
 last state `WifiControl::status` observed, without a radio query:
 

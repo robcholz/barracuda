@@ -246,7 +246,7 @@ struct PortalLanding(Rc<CaptivePortal>);
 
 impl AssetsProvider for PortalLanding {
     async fn serve(&self, _path: &str) -> HttpResponse {
-        AssetsProvider::serve(self.0.as_ref(), "/portal/").await
+        self.0.landing().await
     }
 }
 

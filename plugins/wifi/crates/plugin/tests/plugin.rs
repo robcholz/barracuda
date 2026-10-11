@@ -9,9 +9,7 @@ use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::{HostWifiDevice, WifiCapabilities};
 use barracuda_platform_test::{loopback_network, memory_partition};
 use barracuda_plugin::{
-    api::{
-        Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity,
-    },
+    api::{Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity},
     manager::{Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult},
 };
 use barracuda_vfs::{MountOptions, Vfs};
