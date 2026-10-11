@@ -1,8 +1,7 @@
 //! AES-256-GCM decryption on the mbedTLS engine every Platform already links.
 //!
-//! Callers that receive a sealed value from a service (QQ's scan-to-bind
-//! returns the bot's App Secret this way) open it here rather than carry a
-//! second AES implementation.
+//! Callers that receive a sealed value from a service open it here rather
+//! than carry a second AES implementation.
 #![allow(unsafe_code)]
 
 use alloc::{vec, vec::Vec};

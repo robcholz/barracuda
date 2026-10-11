@@ -72,7 +72,7 @@ impl<Bus> SharedI2cBus<Bus> {
     }
 }
 
-/// Input bias selected while a VM-exposed GPIO operates as an input.
+/// Input bias selected while a exposed GPIO operates as an input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Pull {
     /// Leave the input electrically unbiased.
@@ -84,7 +84,7 @@ pub enum Pull {
     Down,
 }
 
-/// Electrical output driver selected for a VM-exposed GPIO.
+/// Electrical output driver selected for a exposed GPIO.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputDrive {
     /// Actively drive both high and low levels.
@@ -94,7 +94,7 @@ pub enum OutputDrive {
     OpenDrain,
 }
 
-/// Digital latch level used while changing a VM-exposed GPIO to output mode.
+/// Digital latch level used while changing a exposed GPIO to output mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DigitalLevel {
     /// Drive the logical low level.
@@ -104,14 +104,14 @@ pub enum DigitalLevel {
     High,
 }
 
-/// Runtime configuration for a VM-exposed digital input.
+/// Runtime configuration for a exposed digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputConfig {
     /// Input bias.
     pub pull: Pull,
 }
 
-/// Runtime configuration for a VM-exposed digital output.
+/// Runtime configuration for a exposed digital output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OutputConfig {
     /// Output latch installed before enabling the driver.
@@ -123,8 +123,9 @@ pub struct OutputConfig {
 /// An exposed GPIO whose runtime owner may change its digital mode.
 ///
 /// Reads and writes remain standard `embedded-hal` operations. This extension
-/// exists for the VM GPIO package because `embedded-hal` does not standardize
-/// runtime transitions between disabled, input, and output modes.
+/// exists for a runtime owner that switches a pin's mode, because
+/// `embedded-hal` does not standardize runtime transitions between disabled,
+/// input, and output modes.
 pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
     /// Configures the pin as a digital input.
     fn configure_input(&mut self, config: InputConfig) -> Result<(), Self::Error>;
@@ -159,7 +160,7 @@ pub trait CapacitiveTouchChannels {
     fn read(&mut self) -> Result<[u32; 2], Self::Error>;
 }
 
-/// Error family shared by one VM-exposed analog peripheral.
+/// Error family shared by one exposed analog peripheral.
 pub trait AnalogErrorType {
     /// Error returned by analog conversions.
     type Error: core::error::Error;

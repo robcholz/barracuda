@@ -22,11 +22,10 @@ selected Board pins + Platform controller pools
        +-------------------+
           |       |       |
           v       v       v
-       vm-gpio  vm-i2c  vm-spi  ...
-          |       |       |
-          `-------+-------'
+       digital   I2C     SPI   ...  concrete HAL values
+                  |
                   v
-            Lua HAL handles
+       the consumers' handles
 ```
 
 ## Physical resources and function claims
@@ -70,35 +69,35 @@ upstream HAL operations.
 
 The generated `RuntimeIo` is the single concrete owner. A Platform with runtime
 controller pools makes I2C and SPI construction available; a Platform with
-empty pools returns an explicit no-controller error. The VM packages therefore
-never pretend a controller exists merely because pins were exposed.
+empty pools returns an explicit no-controller error. A consumer therefore never
+sees a controller merely because pins were exposed.
 
-New function families add a focused provider beside their VM package. UART can
+New function families add a focused provider. UART can
 return an `embedded-io-async` stream, PWM can return
 `embedded-hal::pwm::SetDutyCycle`, and a domain without an upstream contract
 can define a narrow domain interface. Each provider extends the same move-only
 owner rather than creating a protocol-local resource map.
 
-## Application call path
+## Consumer call path
 
-System shares one exposed-I/O owner with every hardware VM Plugin. A Plugin
-opens a complete function and places the returned concrete value in a Lua
-userdata handle. Operations are methods on that handle, so capability lifetime
-and hardware lifetime are the same object.
+System shares one exposed-I/O owner with every consumer of exposed hardware. A
+consumer opens a complete function and keeps the returned concrete value in a
+handle of its own, so capability lifetime and hardware lifetime are the same
+object.
 
 ```text
-i2c.open(scl, sda, frequency)
-  -> validate Lua values
+open I2C(scl, sda, frequency)
+  -> consumer validates its arguments
   -> provider resolves pins and selects a compatible free controller
   -> atomically claim controller + SCL + SDA
   -> Platform configures pin mux and controller
-  -> return I2C handle implementing embedded-hal-async
-  -> handle:read/write/write_read
-  -> close, lexical <close>, GC, or VM teardown
+  -> return I2C value implementing embedded-hal-async
+  -> consumer reads and writes through the value
+  -> consumer closes its handle
   -> disable/drop the HAL value; raw tokens remain claimed until restart
 ```
 
-Lua packages validate protocol-independent facts such as positive frequencies,
+Consumers validate protocol-independent facts such as positive frequencies,
 distinct signal pins, transfer limits, address width, and SPI mode. Providers
 validate Board exposure, ownership, controller availability, and Platform
 hardware limits. Transaction failures are reported by the concrete HAL value.
@@ -107,10 +106,8 @@ vendor constructor itself rejects configuration after consuming its arguments,
 those move-only tokens remain claimed; the error tells the application to
 correct its configuration and restart.
 
-Package revocation rejects new opens and operations through existing handles.
-Explicit `close` and Lua's lexical `<close>` provide deterministic handle and
-hardware teardown; GC is the final cleanup path when application code loses a
-handle. None of these paths manufactures replacement vendor tokens.
+However a consumer ends its handle, dropping the HAL value is the hardware
+teardown, and no path manufactures replacement vendor tokens.
 
 ## Application pressure
 
@@ -129,21 +126,21 @@ The public shape is checked against several materially different consumers:
 
 Single-pin, multi-wire, optional-role, shared-bus, and DMA-backed cases all use
 the same atomic move-only claim primitive. Their different configuration and
-operation semantics stay in providers and VM packages. This is the test for
+operation semantics stay in providers and consumers. This is the test for
 both directions of abstraction: adding a protocol must not create an
-independent ownership universe, and a package must not reconstruct Platform
+independent ownership universe, and a consumer must not reconstruct Platform
 pin mux itself.
 
 ## Invariants
 
 - One generated exposed-I/O owner represents the complete runtime hardware
   surface of a selected Board.
-- Every hardware VM Plugin shares that owner rather than taking an independent
-  GPIO, I2C, or SPI collection.
+- Every consumer of exposed hardware shares that owner rather than taking an
+  independent GPIO, I2C, or SPI collection.
 - A physical token is consumed by at most one function during a boot.
 - Multi-resource acquisition either claims every role or none of them.
 - Platform routing and construction complete before a handle is returned.
 - Function handles operate through upstream HAL traits where those traits
   exist.
 - Closing or dropping a handle tears down the constructed HAL value without
-  recreating raw tokens; revocation immediately prevents later hardware access.
+  recreating raw tokens.

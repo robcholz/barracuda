@@ -801,9 +801,9 @@ mod tests {
     #[test]
     fn stream_urls_name_a_host_port_and_security() {
         assert_eq!(
-            Endpoint::parse("wss://api.sgroup.qq.com/websocket"),
+            Endpoint::parse("wss://stream.example.com/websocket"),
             Ok(Endpoint {
-                host: "api.sgroup.qq.com",
+                host: "stream.example.com",
                 port: 443,
                 tls: true
             })

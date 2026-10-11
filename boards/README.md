@@ -80,13 +80,12 @@ The Board HAL does not replace `embedded-hal`. It provides one shared runtime
 owner for exposed physical resources. Function providers atomically claim pins
 and an internally selected controller when required, ask the selected Platform
 to configure their mux, and return
-concrete `embedded-hal` or `embedded-hal-async` values to `vm-gpio`, `vm-i2c`,
-`vm-spi`, or another hardware Plugin. Its construction, GPIO-mode, and analog
+concrete `embedded-hal` or `embedded-hal-async` values to their consumer. Its construction, GPIO-mode, and analog
 extensions cover operations that embedded-hal 1.0 does not define.
 
 Generated device owners preserve vendor HAL move-only semantics. One function
 claim consumes its raw pin and controller tokens for the current boot; closing
-the VM handle stops access and drops the constructed HAL value but does not
+the consumer's handle stops access and drops the constructed HAL value but does not
 invent replacement singleton tokens. A conflicting or repeated open returns a
 runtime error, and a restart rebuilds the complete exposed surface.
 

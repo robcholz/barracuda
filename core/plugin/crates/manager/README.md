@@ -13,13 +13,13 @@ runtime API. The manager's lifecycle operations are internal assembly
 machinery, including rollback when one phase fails.
 
 ```text
-add(imessage-web, webserver, imessage-gateway, ...)
-                         |
-                         v
-register(webserver) -> register(imessage-gateway) -> register(imessage-web) -> ...
-                                                                       |
-                                                                       v
-start(webserver)    -> start(imessage-gateway)    -> start(imessage-web)    -> ...
+add(c, a, b, ...)        where c depends on b, and b on a
+         |
+         v
+register(a) -> register(b) -> register(c) -> ...
+                                   |
+                                   v
+start(a)    -> start(b)    -> start(c)    -> ...
 ```
 
 Both phases are synchronous. `register` atomically constructs the complete

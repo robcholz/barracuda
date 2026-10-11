@@ -270,7 +270,7 @@ impl core::error::Error for PartitionsInsertError {}
 pub struct PlatformResources<Partitions, Wifi, Entropy> {
     /// Embassy IP stack. Its device runner remains Platform-owned.
     pub ip_stack: Stack<'static>,
-    /// Platform Wi-Fi mechanism consumed by the Wi-Fi Plugin.
+    /// Platform Wi-Fi mechanism.
     pub wifi: Wifi,
     /// Platform entropy source.
     pub entropy: Entropy,

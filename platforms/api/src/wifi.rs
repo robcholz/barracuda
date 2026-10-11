@@ -135,10 +135,10 @@ pub enum AccessPointState {
     },
 }
 
-/// Platform mechanism used by the Wi-Fi Plugin to control AP and station modes.
+/// Platform mechanism that controls AP and station modes.
 ///
-/// The selected Platform provides one concrete implementation. The Wi-Fi Plugin
-/// owns connection policy, persistence, retries, and captive services.
+/// The selected Platform provides one concrete implementation. Its consumer
+/// owns connection policy, persistence, retries, and any service on the AP.
 pub trait WifiDevice: 'static {
     /// Platform-specific operation failure.
     type Error: core::error::Error;

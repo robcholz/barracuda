@@ -1,6 +1,7 @@
 # http-client
 
-The thin boundary between System networking and `reqwless`.
+The thin boundary between Embassy networking and `reqwless`. It is a library:
+the Plugin that owns HTTP builds the factory and hands clients to others.
 
 `ClientFactory` owns or borrows a TCP connector, DNS resolver, and optional
 `barracuda_tls::Tls`. Calling `ClientFactory::create()` creates a raw
@@ -8,11 +9,11 @@ The thin boundary between System networking and `reqwless`.
 buffer responses, manage persistent connections, stream bodies, retry
 requests, or expose an HTTP backend trait.
 
-System composition constructs the default Embassy-backed resources:
+The owner constructs the default Embassy-backed resources:
 
 ```rust,ignore
-let tls = barracuda_tls::Tls::new(platform.entropy.clone()).ok();
-let http_clients = http_client::ClientFactory::new(platform.ip_stack, tls);
+let tls = barracuda_tls::Tls::new(entropy).ok();
+let http_clients = http_client::ClientFactory::new(ip_stack, tls);
 ```
 
 Subsystems that already own another `embedded-nal-async` TCP/DNS pair use the
@@ -23,28 +24,23 @@ let http_clients = http_client::ClientFactory::from_network(&tcp, &dns);
 let (mut client, tls_configured) = http_clients.create();
 ```
 
-Protocol-specific policy belongs to its consumer. The Agent model API owns its
-persistent connection and streaming behavior; the IMessage Gateway owns its
-ordinary request and multipart helpers.
+Protocol-specific policy, such as a persistent connection, streaming, or
+multipart bodies, belongs to the consumer that needs it.
 
 ## Receive slots
 
 Long-lived receive loops use a separate pool so they never take a connection
 from the request pool. The slots' socket buffers are static and sized at build
-time: the application declares one `ReceiveBuffers` with the selected
-Platform's largest long-lived connection budget (`barracuda_target::RECEIVE_SLOTS`,
-generated from `platform.yml`), so a Target that allows none links no receive
-buffers. System builds the pool once from the request factory, which shares DNS
-and TLS, with the selected Board's runtime limit:
+time by their owner, which declares one `ReceiveBuffers` and builds the pool
+from the request factory, sharing its DNS and TLS:
 
 ```rust,ignore
-static RECEIVE_BUFFERS: http_client::ReceiveBuffers<{ barracuda_target::RECEIVE_SLOTS }> =
-    http_client::ReceiveBuffers::new();
-let receive_slots =
-    http_client::ReceiveSlots::new(stack, &http_clients, RECEIVE_BUFFERS.take(), limit);
+static RECEIVE_BUFFERS: http_client::ReceiveBuffers<SLOTS> = http_client::ReceiveBuffers::new();
+let slots = http_client::ReceiveSlots::new(stack, &http_clients, RECEIVE_BUFFERS.take());
 ```
 
-Plugins find it in `PluginContext::receive_slots`:
+An owner that needs no slots declares none and links no receive buffers. A
+receive loop leases a slot while it receives:
 
 ```rust,ignore
 let lease = slots.acquire().ok_or(NoSlot)?;      // or slots.acquire_when_free().await

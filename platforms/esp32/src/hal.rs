@@ -223,7 +223,7 @@ impl core::fmt::Display for ExposedAnalogError {
 
 impl core::error::Error for ExposedAnalogError {}
 
-/// Type-erased, typed-channel ADC input used by the synchronous Lua handle.
+/// Type-erased, typed-channel ADC input handed to a synchronous consumer.
 pub struct ExposedAnalogInput(Box<dyn AnalogInput<Error = ExposedAnalogError>>);
 
 impl AnalogErrorType for ExposedAnalogInput {
