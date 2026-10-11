@@ -27,8 +27,9 @@ are adapters over the same capability rather than a separate policy path.
 The Plugin owns Wi-Fi policy rather than a specific radio driver. On a managed
 embedded Platform it restores persisted station credentials during startup. A
 successful restore leaves the device in station mode. Missing or unusable
-credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`.
-The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
+credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`;
+the Plugin assigns that address to the radio's access-point stack, which the
+Platform creates unconfigured. The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
 the shared route table on AP port 80 with one connection worker.
 
 `GET /api/wifi/status` returns capabilities plus current station and
@@ -67,7 +68,8 @@ disconnected `UnavailableWifiDevice` instead of claiming host connectivity.
 
 The selected ESP32-S3 implementation owns the ESP radio controller and both
 Embassy network interfaces. Platform-owned runners drive station DHCP and the
-static AP stack. The Wi-Fi Plugin owns only policy and provisioning services.
+AP stack. The Wi-Fi Plugin owns policy, provisioning services and the AP
+address.
 Radio state, socket state, futures, locks, and atomics remain in internal RAM.
 WebServer TCP and HTTP byte buffers use `BulkBox<[u8]>`, allowing the selected
 Platform to place those POD buffers in PSRAM safely.

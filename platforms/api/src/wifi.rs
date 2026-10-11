@@ -147,6 +147,9 @@ pub trait WifiDevice: 'static {
     fn capabilities(&self) -> WifiCapabilities;
 
     /// Returns the IP stack serving the access-point side.
+    ///
+    /// A stack of the access point's own has no IPv4 configuration until its
+    /// consumer assigns one with `Stack::set_config_v4`.
     fn access_point_stack(&self) -> Stack<'static>;
 
     /// Returns the current station state.

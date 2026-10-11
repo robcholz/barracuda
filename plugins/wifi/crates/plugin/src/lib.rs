@@ -26,7 +26,7 @@ use barracuda_plugin::{
 use barracuda_webserver_plugin::{HttpResponse, WebServer};
 use control::RadioControl;
 use embassy_futures::select::select;
-use embassy_net::Stack;
+use embassy_net::{ConfigV4, Ipv4Cidr, Stack, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::Timer;
 use endpoint::{
@@ -39,6 +39,7 @@ pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatu
 const SETUP_AP_SSID: &str = "Barracuda Setup";
 const SETUP_AP_PASSWORD: &str = "";
 const SETUP_AP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 4, 1);
+const SETUP_AP_PREFIX: u8 = 24;
 const CAPTIVE_HTTP_PORT: u16 = 80;
 const CAPTIVE_DETECTION_PATHS: [&str; 8] = [
     "/",
@@ -178,6 +179,15 @@ impl Plugin for WifiPlugin {
             return Ok(());
         }
         let stack = self.access_point_stack;
+        if control.capabilities().access_point {
+            // The radio's access-point stack has no address until its owner
+            // gives it the setup network's.
+            stack.set_config_v4(ConfigV4::Static(StaticConfigV4 {
+                address: Ipv4Cidr::new(SETUP_AP_ADDRESS, SETUP_AP_PREFIX),
+                gateway: Some(SETUP_AP_ADDRESS),
+                dns_servers: Default::default(),
+            }));
+        }
         let access_point_shutdown = Rc::clone(&self.access_point_shutdown);
         let policy = cancellable(
             context.task_token(),
