@@ -68,8 +68,18 @@ pub(crate) struct EventSessions {
 }
 
 impl EventSessions {
-    fn remove(&self, session: &str) {
-        self.entries.borrow_mut().remove(session);
+    /// Removes `session`'s stream if it is still the one that owns
+    /// `terminal_sequence`. The Agent reuses one session ID for every turn,
+    /// so by the time a provider finishes delivering one turn, the next turn
+    /// may already have opened its own stream under the same ID.
+    fn remove(&self, session: &str, terminal_sequence: &Rc<RefCell<Option<u64>>>) {
+        let mut entries = self.entries.borrow_mut();
+        if entries
+            .get(session)
+            .is_some_and(|entry| Rc::ptr_eq(&entry.terminal_sequence, terminal_sequence))
+        {
+            entries.remove(session);
+        }
     }
 
     fn push(
@@ -242,6 +252,7 @@ pub(crate) async fn deliver_event_stream(
     job: EventJob,
 ) {
     let session = job.session;
+    let channel = job.target.channel.clone();
     let terminal_sequence = Rc::clone(&job.terminal_sequence);
     let request = SendStreamRequest {
         target: job.target,
@@ -249,7 +260,16 @@ pub(crate) async fn deliver_event_stream(
         reply_to: job.reply_to,
     };
     let result = gateway.send_stream(request).await;
-    sessions.remove(&session);
+    sessions.remove(&session, &terminal_sequence);
+    match &result {
+        Ok(_receipt) if terminal_sequence.borrow().is_none() => log::warn!(
+            "IMessage Gateway stream for `{session}` on `{channel}` ended before its turn did"
+        ),
+        Ok(_receipt) => {}
+        Err(error) => {
+            log::warn!("IMessage Gateway failed to deliver `{session}`: {error}");
+        }
+    }
     let sequence = terminal_sequence.borrow().unwrap_or_default();
     let terminal = match result {
         Ok(receipt) if terminal_sequence.borrow().is_some() => StreamTerminalEvent {
@@ -306,5 +326,64 @@ where
             }
         }
         Err(error) => log::error!("IMessage Gateway failed to serialize terminal Event: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use alloc::string::String;
+
+    use barracuda_workflow_plugin::JsonText;
+
+    use super::{accept_stream, EventSessions, GatewaySendStreamRequest};
+    use crate::json::GatewayOperationError;
+    use crate::route::GatewayRoute;
+
+    fn event(sequence: u64, event_type: &str, payload: &str) -> GatewaySendStreamRequest {
+        GatewaySendStreamRequest {
+            route: GatewayRoute::new("telegram", "42"),
+            reply_to: None,
+            session: String::from("session-3"),
+            sequence,
+            event_type: String::from(event_type),
+            payload: JsonText::parse(payload).expect("payload"),
+        }
+    }
+
+    #[test]
+    fn a_finished_delivery_keeps_the_next_turn_of_the_same_session() {
+        let sessions = EventSessions::default();
+        let (jobs, queued) = async_channel::bounded(4);
+        let turn = r#"{"turn":"1","origin":"user"}"#;
+
+        accept_stream(&sessions, &jobs, event(1, "turn_started", turn)).expect("first turn");
+        accept_stream(&sessions, &jobs, event(2, "turn_ended", r#"{"turn":"1"}"#))
+            .expect("first turn ends");
+        let first = queued.try_recv().expect("first job");
+        // The provider is still delivering the first turn when the next one starts.
+        accept_stream(&sessions, &jobs, event(3, "turn_started", turn)).expect("second turn");
+        let second = queued.try_recv().expect("second job");
+
+        sessions.remove(&first.session, &first.terminal_sequence);
+        accept_stream(
+            &sessions,
+            &jobs,
+            event(4, "output_delta", r#"{"text":"hi"}"#),
+        )
+        .expect("the second turn's stream is still open");
+
+        sessions.remove(&second.session, &second.terminal_sequence);
+        assert_eq!(
+            accept_stream(
+                &sessions,
+                &jobs,
+                event(5, "output_delta", r#"{"text":"x"}"#)
+            )
+            .map(|accepted| accepted.accepted_sequence),
+            Err(GatewayOperationError::UnknownStream),
+            "a delivery removes its own stream"
+        );
     }
 }
