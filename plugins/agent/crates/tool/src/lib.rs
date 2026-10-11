@@ -22,10 +22,11 @@ pub use background::{
     BackgroundTool, BackgroundToolCall, BackgroundToolControl, BackgroundToolFuture,
     BackgroundToolPool, ToolCompletionFuture, ToolProgressSender,
 };
+pub use barracuda_agent_message::{Attachment, MediaKind};
 pub use barracuda_agent_permission::{Action, Resource, RiskClass};
 pub use definition::{
-    BackgroundToolHandler, EmptyArgs, Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
+    BackgroundToolHandler, EmptyArgs, SessionId, Tool, ToolContext, ToolError, ToolFuture,
+    ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
 };
 pub use registry::{
     ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryVersion, ToolSetSource,

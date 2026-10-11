@@ -13,11 +13,8 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-bulk-memory.workspace = true
 barracuda-json-writer.workspace = true
-serde = { version = "1", default-features = false, features = ["alloc"] }
-serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
-
-[dev-dependencies]
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 
 [lints.rust]
 unreachable_pub = "deny"

@@ -591,7 +591,7 @@ backend:
 | --- | --- | --- |
 | `/resources` | FATFS or LittleFS selected by native partition metadata | Read-only image content. An upgrade may replace the complete filesystem. |
 | `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
-| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
+| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. MemFS keeps file pages in bulk memory, so its capacity is whatever bulk memory has free; a write that does not fit fails with `FsError::NoSpace` and leaves the file unchanged. |
 | `/media` | Target-selected installed filesystem; currently a System LittleFS subtree | Stable, durable, high-volume runtime content. Its physical medium may be soldered storage, installed storage, or FATFS on flash, but its namespace does not disappear while System is running. |
 | `/removable` | Read-only MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted read-write at `/removable/<slot-id>`; the anchor itself stores nothing. |
 
@@ -835,8 +835,10 @@ reads no environment variables or certificate files at run time. Only a host
 test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
 a test network that intercepts TLS); device firmware refuses it. It also owns
 the few C library functions mbedTLS calls on bare-metal targets, and exposes
-`aes_256_gcm_open` on the same mbedTLS build, so a consumer that must open a
-value a service sealed for the device carries no second AES implementation.
+`aes_256_gcm_open`, incremental AES-128-ECB with PKCS#7 padding
+(`Aes128EcbEncryptor`, `Aes128EcbDecryptor`) and MD5 (`Md5`) on the same
+mbedTLS build, so a consumer that must speak a service's encryption or digest
+carries no second implementation.
 
 HTTP is a library too:
 

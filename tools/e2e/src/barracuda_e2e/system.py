@@ -298,6 +298,8 @@ def configure_model(
                 'timeout_ms': 60_000,
                 'max_tokens': 2_048,
                 'image_max_bytes': 524_288,
+                'input_modalities': {'image': True, 'pdf': False},
+                'max_images_in_context': 2,
                 'backend': backend,
                 'purpose': 'root_agent',
                 'default': True,

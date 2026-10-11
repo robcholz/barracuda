@@ -86,13 +86,15 @@ awaits.
   - ignores other event types, unparsable bodies, and `isFromMe` messages;
   - drops a GUID that is already handled or queued;
   - queues the message.
-- The inbox holds at most 8 messages and 16 KiB of text. A delivery that does
-  not fit is counted as lost and asks for a catch-up.
+- The inbox holds at most 8 messages and 16 KiB of strings (text, addresses,
+  and attachment GUIDs, types and names). A delivery that does not fit is
+  counted as lost and asks for a catch-up.
 
 Only `type`, `data.guid`, `data.text`, `data.isFromMe`, `data.handle.address`,
-`data.chats[0].guid`, `data.dateCreated`, `data.itemType` and
-`data.associatedMessageType` are parsed. Everything else is skipped by serde
-without building a JSON tree.
+`data.chats[0].guid`, `data.dateCreated`, `data.itemType`,
+`data.associatedMessageType` and, of each `data.attachments[]`, `guid`,
+`mimeType`, `transferName` and `totalBytes` are parsed. Everything else is
+skipped by serde without building a JSON tree.
 
 **Receive task.** `bluebubbles_receive_task` is spawned once in `start`. It
 races the runtime from `receive_runtime(.., ReceiveTiming::DEVICE)` against
@@ -111,7 +113,7 @@ the Plugin's task token. Each session does the following:
    URL is missing. Another device's entries are left alone. Then it reports
    `receiving`.
 4. It catches up with `POST /api/v1/message/query`
-   `{"after":<cursor>,"sort":"ASC","with":["chat"],"limit":10,"offset":n}`.
+   `{"after":<cursor>,"sort":"ASC","with":["chat","attachment"],"limit":10,"offset":n}`.
    - Pages hold 10 messages. The limit is halved while a page exceeds 16 KiB.
      A single message over 16 KiB is skipped and counted as lost.
    - One catch-up handles at most 50 messages. When `metadata.total` reports
@@ -127,16 +129,41 @@ the Plugin's task token. Each session does the following:
 
 Handling a message:
 - It records the GUID and advances the cursor.
-- It skips `isFromMe`, and counts as skipped anything that is not plain text:
-  attachments (`U+FFFC`), tapbacks, group events, and messages without a
-  sender or chat.
-- It then calls `owners.classify(handle.address, None, text)`:
-  - `Owner`: publishes `GatewayInboundMessage` with route
-    `{channel:"bluebubbles", conversation_id:<chats[0].guid>}` and
-    `message_id` set to the message GUID. The chat GUID is the send path's
-    `chatGuid`, so replies land in the same chat.
+- Its text is `data.text` without the `U+FFFC` marks where attachments sit,
+  trimmed, and may be empty when the message has files.
+- It skips `isFromMe`, and counts as skipped tapbacks, group events,
+  messages with neither text nor files, and messages without a sender or
+  chat.
+- It then calls `owners.classify(handle.address, None, text)`, before any
+  file is fetched:
+  - `Owner`: downloads its files (below), then publishes
+    `GatewayInboundMessage` with route
+    `{channel:"bluebubbles", conversation_id:<chats[0].guid>}`,
+    `message_id` set to the message GUID, and the stored files as
+    `attachments`. The chat GUID is the send path's `chatGuid`, so replies
+    land in the same chat.
   - `Paired`: sends `PAIRED_REPLY` to that chat through the provider.
   - `Ignored`: drops the message; the owner book counts it.
+
+**Attachments.** An owner's message's `attachments[]` are fetched one at a
+time, in order, each with
+`GET /api/v1/attachment/<guid>/download?password=…` through
+`IMessageGateway::download_inbound`, on the shared request pool, into
+`/workspace/cache/gateway/bluebubbles/`.
+- The attachment's MIME type is `mimeType`, else the download's
+  `Content-Type`; its `filename` is `transferName`.
+- The kind is `image` for `image/jpeg`, `png`, `gif` and `webp`, `audio`
+  for `audio/*`, `video` for `video/*`, and `file` otherwise. HEIC and HEIF
+  photos stay `image/heic` files of kind `file`, since models do not take
+  them as images and the device asks the server for no conversion.
+- An entry whose `transferName` ends in `.pluginPayloadAttachment`, the
+  hidden payload of a link preview, is not a file of the sender's and is
+  left alone.
+- A `totalBytes` over the Gateway's `attachment_max_bytes()` is refused
+  without a request. A refused, oversized or failed download does not drop
+  the message: one line is appended to its text,
+  `[<kind> too large, not received]` or `[<kind> not received]`, and the
+  message is still published.
 
 Server errors map to the runtime's policy:
 - 401/403 halts with "BlueBubbles rejected the password" until the
@@ -152,11 +179,13 @@ that are still in it. The webhook and the catch-up dedup against the ring and
 the inbox.
 
 **Memory.**
-- The inbox holds at most 8 messages and 16 KiB of text.
+- The inbox holds at most 8 messages and 16 KiB of strings.
 - The ring holds 32 GUIDs, about 1.3 KiB.
 - A catch-up page holds at most 16 KiB of body, plus the Gateway HTTP
   helper's 16 KiB header and 8 KiB read buffers, all in bulk memory, only
-  while a request runs. A webhook list holds at most 8 KiB.
+  while a request runs. A webhook list holds at most 8 KiB. An attachment
+  streams to its file through the same Gateway buffers; no file is held in
+  RAM.
 - An `http://` server URL needs no TLS. An `https://` URL holds one TLS session
   per request from the shared request pool, never a receive lease.
 

@@ -2,14 +2,15 @@ use alloc::{boxed::Box, collections::BTreeSet, string::String, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind, Context};
 use barracuda_agent_memory::{
-    AssistantFragment, AssistantHandle, ChatMessage, Transcript, TurnHandle,
+    AssistantFragment, AssistantHandle, ChatMessage, Transcript, TurnError, TurnHandle,
 };
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::{BackgroundToolPool, ToolSet};
+use barracuda_agent_tool::{BackgroundToolPool, ToolContext, ToolSet};
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
+use barracuda_vfs::ScopedVfs;
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -45,6 +46,11 @@ pub(crate) struct AgentEngineConfig {
     pub(crate) effect_inbox: AgentEffectInbox,
     pub(crate) permission_policy: Arc<dyn PermissionPolicy>,
     pub(crate) retry_policy: RetryPolicy,
+    /// The filesystem the attachments of messages and Tool results are read
+    /// from when a request inlines them.
+    pub(crate) files: ScopedVfs,
+    /// Handed to every Tool call the Agent makes.
+    pub(crate) tool_context: ToolContext,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +108,8 @@ where
     background: BackgroundToolPool,
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
+    files: ScopedVfs,
+    tool_context: ToolContext,
     #[getset(get = "pub(crate)")]
     context: Context,
     run_state: RunState,
@@ -154,6 +162,8 @@ where
             background: config.background,
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
+            files: config.files,
+            tool_context: config.tool_context,
             context,
             run_state: RunState::Stopped(StopReason::Ready),
             iteration_id_allocator: IterationIdAllocator::new(),
@@ -189,10 +199,7 @@ where
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
         self.iteration_id_allocator = IterationIdAllocator::new();
         let turn = self.transcript.open_turn()?;
-        {
-            let mut user = turn.user()?;
-            user.append(message.as_str());
-        }
+        record_user_message(&turn, &message)?;
         self.active_turn = Some(turn);
         self.run_state = RunState::Running;
         Ok(())
@@ -293,8 +300,7 @@ where
             .as_mut()
             .ok_or(AgentError::StateInvariant)?;
         for message in continuations {
-            let mut user = turn.user()?;
-            user.append(message.as_str());
+            record_user_message(turn, &message)?;
         }
         Ok(true)
     }
@@ -353,6 +359,16 @@ where
             }
         }
     }
+}
+
+/// Appends `message` to `turn` as one user message with its attachments.
+fn record_user_message(turn: &TurnHandle, message: &Message) -> Result<(), TurnError> {
+    let mut user = turn.user()?;
+    user.append(message.as_str());
+    for attachment in message.attachments() {
+        user.attach(attachment);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -673,6 +689,8 @@ where
                         reminders: context.reminders(),
                         tools: &tools,
                         background: &self.agent.background,
+                        files: &self.agent.files,
+                        tool_context: self.agent.tool_context,
                     };
                     drop(render_span);
                     drop(prepare_span);
@@ -784,7 +802,12 @@ where
                                             break;
                                         }
                                         match consumer.turn.tool(&call.id, !output.ok) {
-                                            Ok(mut tool) => tool.append(&output.content),
+                                            Ok(mut tool) => {
+                                                tool.append(&output.content);
+                                                for attachment in &output.attachments {
+                                                    tool.attach(attachment);
+                                                }
+                                            }
                                             Err(error) => {
                                                 result = Some(Err(AgentError::from(error)));
                                                 break;

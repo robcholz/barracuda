@@ -391,6 +391,7 @@ impl<Storage: PluginStorage> InkboxState<Storage> {
                     route: GatewayRoute::new(inkbox::CHANNEL, conversation_id),
                     message_id: id,
                     text: text.into(),
+                    attachments: Vec::new(),
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish an Inkbox message: {error}");

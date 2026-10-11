@@ -71,6 +71,26 @@ Dependent Plugins may register native Agent `ToolGroup`s through
 `AgentToolRegistry` before startup. The Agent startup hook starts that complete
 Tool Registry before spawning the runtime task.
 
+## Attachments
+
+A message reaches an Agent as text plus `Attachment` references
+(`Message::with_attachments`, the `attachments` of `session.append`): a kind,
+a path in the shared filesystem view (typically `/workspace/cache/...` or
+`/workspace/media/...`), a MIME type, an optional filename and a size. The
+transcript stores a user message with attachments with array content: a
+`{"type":"text"}` part and one internal `{"type":"media",...}` part per file.
+Before each model request the Agent reads, through its `ScopedVfs`, the newest
+attachments the model configuration lets it inline (`input_modalities`,
+`max_images_in_context`, `image_max_bytes`; see `http.md`), recognizing
+images by their bytes, and the request base64-encodes them into the body.
+Every other attachment, and one whose file is gone (the Workspace cache does
+not survive a restart), becomes a text line naming it by path. Tool results
+carry attachments the same way (see below), and their images count toward
+`max_images_in_context` with the user's. History
+compaction and memory extraction read attachments as labels such as
+`[image: cat.jpg]`, and the context size estimate counts an image as 1600
+tokens.
+
 ## Tools and background Tools
 
 A Tool is either an ordinary Tool (`Tool::new` with a `ToolHandler`), whose call
@@ -78,6 +98,18 @@ settles inside the model turn, or a background Tool (`Tool::background` with a
 `BackgroundToolHandler`), whose call returns an accepted output and keeps
 running. Being a background Tool is part of the Tool's definition, not a choice
 made per call.
+
+Every invocation receives a `ToolContext` beside its arguments; its `session`
+is the `SessionId` of the Agent session the call belongs to, the same for the
+root Agent and its sub-agents. An adapter Plugin uses it to act for that
+session, such as answering in the conversation it is bound to. A
+`ToolOutput` is its `content`, `ok`, and `attachments`: references to files
+the result shows the model (`ToolOutput::with_attachments`), never their
+bytes. The transcript stores them as `media` parts of the tool message, and
+each request inlines the newest ones like a user's attachments; an
+OpenAI-compatible request keeps tool messages text and adds the images in one
+user message after the tool results. A background call's progress and result
+bring their attachments into the update message that delivers them.
 
 Every Agent owns one `BackgroundToolPool`. The pool is a lower layer than
 Tools: it is the generic `barracuda_runtime_utils::background::BackgroundPool`,
@@ -157,10 +189,11 @@ helper, not a runtime dependency on another contributor's files.
 The page is built on the portal UI kit: a header with the live `socket` figure
 (`resources/web/figure.js`, using the shell's global `HL`), radio cards for the
 API format (`backend`) and purpose, the 设为默认模型 switch (`default`),
-connection fields (`base_url`, `model`, `api_key`) and an open 高级 fold with
-`timeout_ms`, `max_tokens` and `image_max_bytes`. It sends every field the
-endpoint requires, as a one-element batch, and renders zh or en from the
-portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
+connection fields (`base_url`, `model`, `api_key`), the 输入 switches 图片 and
+PDF (`input_modalities.image`, `input_modalities.pdf`), and an open 高级 fold
+with `timeout_ms`, `max_tokens`, `image_max_bytes` and
+`max_images_in_context`. It sends every field the endpoint requires, as a
+one-element batch, and renders zh or en from the portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
 
 The page submits the existing POST configuration contract and, once the device
 accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and

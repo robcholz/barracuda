@@ -2,7 +2,8 @@ use alloc::string::ToString;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation,
+    ToolOutput, ToolSpec,
 };
 use portable_atomic_util::Arc;
 
@@ -32,12 +33,12 @@ impl ToolSpec for ListSubagentsTool {
 impl ToolHandler for ListSubagentsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            Ok(ToolOutput {
-                content: serde_json::json!({ "subagents": self.control.list() }).to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                serde_json::json!({ "subagents": self.control.list() }).to_string(),
+                true,
+            ))
         })
     }
 }

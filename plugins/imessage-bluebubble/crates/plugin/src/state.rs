@@ -23,7 +23,8 @@ pub(crate) const CURSOR_STORAGE_KEY: &str = "cursor";
 pub(crate) const SEEN_GUIDS: usize = 32;
 /// Messages the inbox holds before it drops deliveries.
 pub(crate) const INBOX_MESSAGES: usize = 8;
-/// Text bytes the inbox holds before it drops deliveries.
+/// String bytes (text, addresses, attachment names) the inbox holds before
+/// it drops deliveries.
 pub(crate) const INBOX_BYTES: usize = 16 * 1024;
 /// Random bytes in a webhook secret (128 bits).
 const SECRET_BYTES: usize = 16;
@@ -236,7 +237,7 @@ impl ReceiveBook {
         if self.is_seen(&message.guid) {
             return Offer::Duplicate;
         }
-        let size = footprint(&message);
+        let size = message.footprint();
         let mut inbox = self.inbox.borrow_mut();
         if inbox.len() >= INBOX_MESSAGES
             || self.inbox_bytes.get().saturating_add(size) > INBOX_BYTES
@@ -269,7 +270,7 @@ impl ReceiveBook {
     pub(crate) fn next(&self) -> Option<InboundMessage> {
         let message = self.inbox.borrow_mut().pop_front()?;
         self.inbox_bytes
-            .set(self.inbox_bytes.get().saturating_sub(footprint(&message)));
+            .set(self.inbox_bytes.get().saturating_sub(message.footprint()));
         Some(message)
     }
 
@@ -322,18 +323,6 @@ pub(crate) enum SecretError {
     Entropy,
     /// Storing the record failed.
     Storage(StorageError),
-}
-
-/// Bytes a queued message holds.
-fn footprint(message: &InboundMessage) -> usize {
-    [
-        message.guid.len(),
-        message.text.as_deref().map_or(0, str::len),
-        message.sender().map_or(0, str::len),
-        message.chat_guid().map_or(0, str::len),
-    ]
-    .iter()
-    .fold(0_usize, |total, size| total.saturating_add(*size))
 }
 
 async fn read_json<T, Storage>(storage: &Storage, key: &str) -> Result<Option<T>, StorageError>

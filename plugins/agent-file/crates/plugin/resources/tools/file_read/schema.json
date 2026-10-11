@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "file_read",
-    "description": "Read a bounded UTF-8 byte range from a file inside the scoped filesystem.",
+    "description": "Read a bounded UTF-8 byte range from a file inside the scoped filesystem, or attach an image or PDF below /workspace.",
     "parameters": {
       "type": "object",
       "properties": {

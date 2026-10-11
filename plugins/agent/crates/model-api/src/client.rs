@@ -6,7 +6,7 @@
 
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 
 use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::StreamExt as _;
@@ -23,7 +23,7 @@ use super::errors::{Error, InitError};
 use super::retry::{deadline_error, retry_call, sleep_or_cancel, timed, with_timeout, RetryState};
 use super::transport::Transport;
 use super::types::{
-    ChatJsonResponse, ChatRequest, LlmResponse, MediaRequest, ModelApiConfig, StaticOutputSchema,
+    ChatJsonResponse, ChatRequest, LlmResponse, ModelApiConfig, StaticOutputSchema,
 };
 
 /// LLM client backed by one Agent-owned persistent HTTP transport.
@@ -114,6 +114,7 @@ where
     Resolver: Dns,
 {
     yield_stream(|yielder| async move {
+        let media = backend.resolve_media(request).await;
         let mut retry = RetryState::new(request.retry);
         let mut emitted = false;
         let mut opened = false;
@@ -125,7 +126,7 @@ where
 
             let (error, phase) = 'attempt: {
                 let opened_stream = timed(
-                    backend.chat_stream(http, request),
+                    backend.chat_stream(http, request, &media),
                     backend.timeout_ms(),
                     cancel,
                 )
@@ -261,12 +262,13 @@ where
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, Error> {
         let backend = self.backend.as_ref().ok_or(Error::NotConfigured)?;
+        let media = backend.resolve_media(request).await;
         let mut retry = RetryState::new(request.retry);
         loop {
             let attempt = retry.attempt();
             let result = async {
                 let result = timed(
-                    backend.chat(&mut self.http, request),
+                    backend.chat(&mut self.http, request, &media),
                     backend.timeout_ms(),
                     cancel,
                 )
@@ -371,32 +373,15 @@ where
         let schema: Value = serde_json::from_str(output_schema.json)
             .map_err(|err| Error::InvalidStructuredOutput(format!("invalid schema json: {err}")))?;
 
+        let media = backend.resolve_media(request).await;
         retry_call(request.retry, cancel, async || {
             let response = timed(
-                backend.chat_json(&mut self.http, request, output_schema.name, &schema),
+                backend.chat_json(&mut self.http, request, &media, output_schema.name, &schema),
                 backend.timeout_ms(),
                 cancel,
             )
             .await?;
             parse_chat_json_response(response)
-        })
-        .await
-    }
-
-    /// Async one-shot image inference over the owned Agent HTTP client.
-    pub async fn infer_media(
-        &mut self,
-        request: &MediaRequest<'_>,
-        cancel: Cancel<'_>,
-    ) -> Result<String, Error> {
-        let backend = self.backend.as_ref().ok_or(Error::NotConfigured)?;
-        retry_call(request.retry, cancel, async || {
-            timed(
-                backend.infer_media(&mut self.http, request),
-                backend.timeout_ms(),
-                cancel,
-            )
-            .await
         })
         .await
     }

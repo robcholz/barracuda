@@ -5,7 +5,9 @@
 //! are parsed in two passes, first the envelope and then only the `d` this
 //! client uses, into small structs; no JSON tree is built.
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
+
+use barracuda_imessage_gateway_plugin::MediaKind;
 
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +102,7 @@ pub struct Ready {
 pub struct MessageEvent {
     /// Message id; the passive reply's `msg_id`.
     pub id: String,
-    /// Text content; empty for attachments and cards.
+    /// Text content; empty for a message of attachments only.
     #[serde(default)]
     pub content: String,
     /// The sender.
@@ -109,9 +111,155 @@ pub struct MessageEvent {
     /// Group of a group message.
     #[serde(default)]
     pub group_openid: Option<String>,
-    /// 0 for plain text; other values are cards, quotes, and forwards.
+    /// 0 for an ordinary message; other values are quotes, cards, and
+    /// forwards.
     #[serde(default)]
     pub message_type: Option<u32>,
+    /// Files sent with the message.
+    #[serde(default)]
+    pub attachments: Vec<RawAttachment>,
+}
+
+/// One entry of a message event's `attachments`.
+#[derive(Debug, Default, Deserialize)]
+pub struct RawAttachment {
+    /// MIME type, or `voice` for a voice message.
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// Download URL; QQ sometimes sends it without a scheme.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Name of the file.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Size of the file at `url` in bytes.
+    #[serde(default)]
+    pub size: Option<u64>,
+    /// The voice message converted to WAV by QQ.
+    #[serde(default)]
+    pub voice_wav_url: Option<String>,
+}
+
+/// Image types stored as images; any other image is stored as a file.
+const IMAGE_TYPES: &[&str] = &[
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+];
+
+/// Extensions of the voice formats QQ records, with their MIME types.
+const VOICE_EXTENSIONS: &[(&str, &str)] = &[
+    ("amr", "audio/amr"),
+    ("silk", "audio/silk"),
+    ("slk", "audio/silk"),
+];
+
+/// One file of an inbound message, ready to download.
+#[derive(Debug, PartialEq, Eq)]
+pub struct InboundMedia {
+    /// How the file is presented.
+    pub kind: MediaKind,
+    /// Absolute download URL; `None` when QQ sent none. It may carry an
+    /// access key: never log it.
+    pub url: Option<String>,
+    /// MIME type QQ reported; `None` leaves it to the download.
+    pub mime_type: Option<String>,
+    /// Name of the file.
+    pub filename: Option<String>,
+    /// Size QQ reported for the file at `url`.
+    pub size: Option<u64>,
+}
+
+impl RawAttachment {
+    /// Classifies the attachment: `image/jpeg`, `png`, `gif`, or `webp` as
+    /// an image; `voice`, `audio/*`, `.amr`, or `.silk` as audio (QQ's WAV
+    /// conversion when it sent one); `video/*` as video; anything else as a
+    /// file.
+    #[must_use]
+    pub fn into_media(self) -> InboundMedia {
+        let content_type = self
+            .content_type
+            .map(|kind| String::from(kind.trim()))
+            .filter(|kind| !kind.is_empty());
+        let essence = content_type
+            .as_deref()
+            .and_then(|kind| kind.split(';').next())
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let extension = self
+            .filename
+            .as_deref()
+            .and_then(|name| name.rsplit_once('.'))
+            .map(|(_stem, extension)| extension.to_ascii_lowercase());
+        let voice_type = extension.as_deref().and_then(|extension| {
+            VOICE_EXTENSIONS
+                .iter()
+                .find(|(known, _mime)| *known == extension)
+                .map(|(_extension, mime)| *mime)
+        });
+        let reported = content_type.filter(|kind| kind.contains('/'));
+        let filename = self.filename.filter(|name| !name.trim().is_empty());
+        if essence == "voice" || essence.starts_with("audio/") || voice_type.is_some() {
+            // QQ's own WAV conversion plays anywhere; its size is not the
+            // recording's.
+            if let Some(url) = self.voice_wav_url.as_deref().and_then(absolute_url) {
+                return InboundMedia {
+                    kind: MediaKind::Audio,
+                    url: Some(url),
+                    mime_type: Some("audio/wav".into()),
+                    filename: filename.map(|name| wav_name(&name)),
+                    size: None,
+                };
+            }
+            return InboundMedia {
+                kind: MediaKind::Audio,
+                url: self.url.as_deref().and_then(absolute_url),
+                mime_type: reported.or_else(|| voice_type.map(String::from)),
+                filename,
+                size: self.size,
+            };
+        }
+        let kind = if IMAGE_TYPES.contains(&essence.as_str()) {
+            MediaKind::Image
+        } else if essence.starts_with("video/") {
+            MediaKind::Video
+        } else {
+            MediaKind::File
+        };
+        InboundMedia {
+            kind,
+            url: self.url.as_deref().and_then(absolute_url),
+            mime_type: reported,
+            filename,
+            size: self.size,
+        }
+    }
+}
+
+/// `name` with its extension replaced by `.wav`.
+fn wav_name(name: &str) -> String {
+    let stem = name
+        .rsplit_once('.')
+        .map_or(name, |(stem, _extension)| stem);
+    alloc::format!("{stem}.wav")
+}
+
+/// `url` with a scheme: QQ sends some URLs as `//host/…` or `host/…`, which
+/// it serves over HTTPS.
+#[must_use]
+pub fn absolute_url(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return None;
+    }
+    if url.contains("://") {
+        return Some(url.into());
+    }
+    let host = url.trim_start_matches('/');
+    (!host.is_empty()).then(|| alloc::format!("https://{host}"))
 }
 
 /// The sender of a message event.
@@ -137,9 +285,9 @@ pub enum Scene {
     Group,
 }
 
-/// An inbound text message, ready for the owner check.
+/// An inbound message, ready for the owner check.
 #[derive(Debug, PartialEq, Eq)]
-pub struct InboundText {
+pub struct InboundMessage {
     /// Message id, for dedup and the passive reply.
     pub id: String,
     /// Conversation id the provider's send path accepts.
@@ -148,31 +296,36 @@ pub struct InboundText {
     pub sender: String,
     /// Sender's display name, when QQ sent one.
     pub label: Option<String>,
-    /// Trimmed text.
+    /// Trimmed text; empty for a message of attachments only.
     pub text: String,
     /// Direct or group.
     pub scene: Scene,
+    /// Files sent with the message, not downloaded yet.
+    pub attachments: Vec<InboundMedia>,
 }
 
-/// Why a message event is not an inbound text message.
+/// Why a message event is not an inbound message.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Skipped {
-    /// No text: an attachment, card, quote, or empty message.
-    NotText,
+    /// Neither text nor attachments, or a card, quote, or forward.
+    Empty,
     /// The event lacks the sender or group id its scene needs.
     MissingSender,
 }
 
 impl MessageEvent {
-    /// The conversation, sender, and trimmed text of a text message.
+    /// The conversation, sender, trimmed text, and attachments of a message.
     ///
     /// # Errors
     ///
-    /// [`Skipped`] when the event carries no text or no sender.
-    pub fn into_text(self, scene: Scene) -> Result<InboundText, Skipped> {
+    /// [`Skipped`] when the event carries neither text nor attachments, or
+    /// no sender.
+    pub fn into_message(self, scene: Scene) -> Result<InboundMessage, Skipped> {
         let text = self.content.trim();
-        if text.is_empty() || self.message_type.is_some_and(|kind| kind != 0) {
-            return Err(Skipped::NotText);
+        if (text.is_empty() && self.attachments.is_empty())
+            || self.message_type.is_some_and(|kind| kind != 0)
+        {
+            return Err(Skipped::Empty);
         }
         let (conversation_id, sender) = match scene {
             Scene::Direct => {
@@ -196,13 +349,18 @@ impl MessageEvent {
                 (alloc::format!("group:{group}"), sender)
             }
         };
-        Ok(InboundText {
+        Ok(InboundMessage {
             text: text.into(),
             id: self.id,
             conversation_id,
             sender,
             label: self.author.username.filter(|name| !name.trim().is_empty()),
             scene,
+            attachments: self
+                .attachments
+                .into_iter()
+                .map(RawAttachment::into_media)
+                .collect(),
         })
     }
 }

@@ -15,7 +15,7 @@
 //! one the user retracted, instead of only ever adding.
 
 use barracuda_agent_memory::{MemoryId, MemoryPatch};
-use barracuda_agent_tool::ToolInvokeError;
+use barracuda_agent_tool::{ToolContext, ToolInvokeError};
 use barracuda_model_api::Error as ModelError;
 use core::future::Future;
 use core::pin::Pin;
@@ -57,6 +57,8 @@ pub(crate) struct ExtractionInput<'a> {
     pub(super) transcript: &'a str,
     /// The facts already stored, so edits/removals can cite an existing id.
     pub(super) existing: &'a [MemorySnapshot],
+    /// The Tool context of the Agent whose conversation this is.
+    pub(super) context: ToolContext,
 }
 
 /// A single change an [`Extractor`] proposes against long-term memory.

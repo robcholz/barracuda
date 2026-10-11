@@ -4,15 +4,18 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
+use core::future::Future;
 
 use async_channel::{Receiver, Sender, TrySendError};
 use barracuda_workflow_plugin::{Event, WorkflowService};
 use futures_lite::stream;
 use gateway::{
-    BinaryBody, BinaryChunk, MediaKind, MessageGateway, MessageTarget, SendMediaRequest,
+    extension_mime, BinaryBody, BinaryChunk, MediaKind, MediaSource, MessageGateway, MessageTarget,
+    SendMediaRequest,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::gateway_send::GatewaySendResponse;
 use crate::json::{
     map_gateway_error, valid_required, valid_stream_id, GatewayAccepted, GatewayOperationError,
 };
@@ -20,32 +23,8 @@ use crate::runtime::STREAM_WORKERS;
 
 const CHUNK_QUEUE_CAPACITY: usize = 2;
 
-/// Media kind selected by a Gateway media stream.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GatewayMediaKind {
-    /// Generic file attachment.
-    File,
-    /// Image attachment.
-    Image,
-    /// Audio attachment.
-    Audio,
-    /// Video attachment.
-    Video,
-}
-
-impl From<GatewayMediaKind> for MediaKind {
-    fn from(kind: GatewayMediaKind) -> Self {
-        match kind {
-            GatewayMediaKind::File => Self::File,
-            GatewayMediaKind::Image => Self::Image,
-            GatewayMediaKind::Audio => Self::Audio,
-            GatewayMediaKind::Video => Self::Video,
-        }
-    }
-}
-
-/// One command for an outbound binary media stream.
+/// One outbound media command: a whole file by path, or one command of a
+/// binary media stream.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GatewaySendMediaRequest {
@@ -62,7 +41,7 @@ pub enum GatewaySendMediaRequest {
         /// Optional provider thread identifier.
         thread_id: Option<String>,
         /// Attachment presentation kind.
-        kind: GatewayMediaKind,
+        kind: MediaKind,
         /// Optional attachment filename.
         filename: Option<String>,
         /// Optional MIME type.
@@ -88,6 +67,119 @@ pub enum GatewaySendMediaRequest {
         /// Next expected stream sequence.
         sequence: u32,
     },
+    /// Sends one whole file the Gateway can open, and waits for delivery.
+    File {
+        /// Registered provider channel.
+        channel: String,
+        /// Provider conversation identifier.
+        conversation_id: String,
+        /// Optional provider thread identifier.
+        thread_id: Option<String>,
+        /// Attachment presentation kind.
+        kind: MediaKind,
+        /// Path of the file in the Gateway's filesystem view.
+        path: String,
+        /// Attachment filename; defaults to the path's last segment.
+        filename: Option<String>,
+        /// MIME type; defaults to the one the path's extension names.
+        mime_type: Option<String>,
+        /// Optional caption.
+        caption: Option<String>,
+        /// Optional provider message being replied to.
+        reply_to: Option<String>,
+    },
+}
+
+/// Answer to a [`GatewaySendMediaRequest`].
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum GatewaySendMediaResponse {
+    /// A stream command was accepted; the stream reports its outcome in
+    /// `gateway.send_media.finished`.
+    Accepted(GatewayAccepted),
+    /// A file was delivered.
+    Sent(GatewaySendResponse),
+}
+
+/// Opens the file a [`GatewaySendMediaRequest::File`] names.
+pub trait MediaOpener {
+    /// Opens `path` for sending.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable business error the request answers with, such as
+    /// [`GatewayOperationError::NotFound`] or
+    /// [`GatewayOperationError::TooLarge`].
+    fn open_media(
+        &self,
+        path: &str,
+    ) -> impl Future<Output = Result<Rc<dyn MediaSource>, GatewayOperationError>>;
+}
+
+/// Opens and sends one whole file, waiting for the provider's receipt.
+async fn send_file<Opener: MediaOpener>(
+    gateway: &MessageGateway,
+    opener: &Opener,
+    request: GatewaySendMediaRequest,
+) -> Result<GatewaySendResponse, GatewayOperationError> {
+    let GatewaySendMediaRequest::File {
+        channel,
+        conversation_id,
+        thread_id,
+        kind,
+        path,
+        filename,
+        mime_type,
+        caption,
+        reply_to,
+    } = request
+    else {
+        return Err(GatewayOperationError::InvalidRequest);
+    };
+    if !valid_required(&channel) || !valid_required(&conversation_id) || !valid_required(&path) {
+        return Err(GatewayOperationError::InvalidRequest);
+    }
+    if !gateway.has_channel(&channel) {
+        return Err(GatewayOperationError::UnknownChannel);
+    }
+    let source = opener.open_media(&path).await?;
+    let filename = filename.or_else(|| {
+        path.rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(String::from)
+    });
+    let mime_type = mime_type.or_else(|| extension_mime(&path).map(String::from));
+    let mut target = MessageTarget::new(channel, conversation_id);
+    target.thread_id = thread_id;
+    let request = SendMediaRequest {
+        target,
+        size: Some(source.len()),
+        body: BinaryBody::Source(source),
+        filename,
+        mime_type,
+        caption,
+        reply_to,
+    };
+    send_kind(gateway, kind, request)
+        .await
+        .map(|receipt| GatewaySendResponse {
+            message_id: receipt.message_id,
+        })
+        .map_err(|error| map_gateway_error(&error))
+}
+
+async fn send_kind(
+    gateway: &MessageGateway,
+    kind: MediaKind,
+    request: SendMediaRequest,
+) -> Result<gateway::SendReceipt, gateway::GatewayError> {
+    match kind {
+        MediaKind::File => gateway.send_file(request).await,
+        MediaKind::Image => gateway.send_image(request).await,
+        MediaKind::Audio => gateway.send_audio(request).await,
+        MediaKind::Video => gateway.send_video(request).await,
+    }
 }
 
 /// Terminal Workflow Event for one accepted outbound media stream.
@@ -142,13 +234,32 @@ impl MediaSessions {
     }
 }
 
-pub(crate) fn accept_media(
+pub(crate) async fn send_media<Opener: MediaOpener>(
+    gateway: &MessageGateway,
+    sessions: &MediaSessions,
+    jobs: &Sender<MediaJob>,
+    opener: &Opener,
+    request: GatewaySendMediaRequest,
+) -> Result<GatewaySendMediaResponse, GatewayOperationError> {
+    match request {
+        file @ GatewaySendMediaRequest::File { .. } => send_file(gateway, opener, file)
+            .await
+            .map(GatewaySendMediaResponse::Sent),
+        command => {
+            accept_media(gateway, sessions, jobs, command).map(GatewaySendMediaResponse::Accepted)
+        }
+    }
+}
+
+fn accept_media(
     gateway: &MessageGateway,
     sessions: &MediaSessions,
     jobs: &Sender<MediaJob>,
     request: GatewaySendMediaRequest,
 ) -> Result<GatewayAccepted, GatewayOperationError> {
     match request {
+        // `send_media` hands a file to `send_file` instead.
+        GatewaySendMediaRequest::File { .. } => Err(GatewayOperationError::InvalidRequest),
         GatewaySendMediaRequest::Start {
             stream_id,
             sequence,
@@ -186,6 +297,7 @@ pub(crate) fn accept_media(
             let request = SendMediaRequest {
                 target,
                 body: BinaryBody::Stream(binary_stream(receiver, Rc::clone(&terminal_sequence))),
+                size: None,
                 filename,
                 mime_type,
                 caption,
@@ -194,7 +306,7 @@ pub(crate) fn accept_media(
             jobs.try_send(MediaJob {
                 stream_id: stream_id.clone(),
                 terminal_sequence,
-                kind: kind.into(),
+                kind,
                 request,
             })
             .map_err(|_error| GatewayOperationError::Busy)?;
@@ -268,12 +380,7 @@ pub(crate) async fn deliver_media_stream(
         kind,
         request,
     } = job;
-    let result = match kind {
-        MediaKind::File => gateway.send_file(request).await,
-        MediaKind::Image => gateway.send_image(request).await,
-        MediaKind::Audio => gateway.send_audio(request).await,
-        MediaKind::Video => gateway.send_video(request).await,
-    };
+    let result = send_kind(gateway, kind, request).await;
     sessions.remove(&stream_id);
     let sequence = terminal_sequence.borrow().unwrap_or_default();
     let terminal = match result {

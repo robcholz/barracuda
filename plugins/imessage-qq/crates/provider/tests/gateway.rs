@@ -2,9 +2,12 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 
+use barracuda_imessage_gateway_plugin::MediaKind;
+use qq::gateway::absolute_url;
 use qq::gateway::{
     close_action, event, heartbeat, identify, op, parse_data, parse_envelope, resume, CloseAction,
-    Hello, InboundText, MessageEvent, Ready, Scene, Skipped, BANNED, DELISTED, INTENTS,
+    Hello, InboundMedia, InboundMessage, MessageEvent, Ready, Scene, Skipped, BANNED, DELISTED,
+    INTENTS,
 };
 use serde_json::{json, Value};
 
@@ -53,14 +56,15 @@ fn direct_and_group_messages_name_their_conversation_and_sender() {
         "timestamp": "2026-07-21T10:00:00+08:00"
     }));
     assert_eq!(
-        direct.into_text(Scene::Direct),
-        Ok(InboundText {
+        direct.into_message(Scene::Direct),
+        Ok(InboundMessage {
             id: "ROBOT1.0_a".into(),
             conversation_id: "c2c:A1".into(),
             sender: "A1".into(),
             label: None,
             text: "hello".into(),
             scene: Scene::Direct,
+            attachments: Vec::new(),
         })
     );
     let group = message(&json!({
@@ -71,7 +75,7 @@ fn direct_and_group_messages_name_their_conversation_and_sender() {
         "group_id": "G1",
         "timestamp": "2026-07-21T10:00:00+08:00"
     }));
-    let group = group.into_text(Scene::Group).unwrap();
+    let group = group.into_message(Scene::Group).unwrap();
     assert_eq!(group.conversation_id, "group:G1");
     assert_eq!(group.sender, "M1");
     assert_eq!(group.label.as_deref(), Some("Ann"));
@@ -79,24 +83,112 @@ fn direct_and_group_messages_name_their_conversation_and_sender() {
 }
 
 #[test]
-fn attachments_cards_and_sender_less_events_are_skipped() {
-    let image = message(&json!({
-        "id": "m", "author": {"user_openid": "A1"}, "content": "",
-        "attachments": [{"content_type": "image/png", "url": "https://x"}]
+fn a_message_of_attachments_only_is_kept_with_each_file_classified() {
+    let event = message(&json!({
+        "id": "m", "author": {"user_openid": "A1"}, "content": " ",
+        "attachments": [
+            {"content_type": "image/png", "url": "https://x/a.png", "filename": "a.png", "size": 10},
+            {"content_type": "image/jpeg", "url": "//gchat.qpic.cn/p", "size": 11},
+            {"content_type": "image/heic", "url": "https://x/h", "filename": "h.heic"},
+            {"content_type": "voice", "url": "https://x/v", "filename": "v.amr", "size": 3,
+             "voice_wav_url": "https://x/v.wav", "asr_refer_text": "hi"},
+            {"content_type": "voice", "url": "multimedia.nt.qq.com.cn/v", "filename": "v.silk", "size": 4},
+            {"content_type": "video/mp4", "url": "https://x/v.mp4", "filename": "v.mp4"},
+            {"content_type": "file", "url": "https://x/f", "filename": "doc.pdf", "size": 5},
+            {"content_type": "image/gif"}
+        ]
     }));
-    assert_eq!(image.into_text(Scene::Direct), Err(Skipped::NotText));
+    let inbound = event.into_message(Scene::Direct).unwrap();
+    assert_eq!(inbound.text, "");
+    let media =
+        |kind, url: Option<&str>, mime: Option<&str>, name: Option<&str>, size| InboundMedia {
+            kind,
+            url: url.map(String::from),
+            mime_type: mime.map(String::from),
+            filename: name.map(String::from),
+            size,
+        };
+    assert_eq!(
+        inbound.attachments,
+        [
+            media(
+                MediaKind::Image,
+                Some("https://x/a.png"),
+                Some("image/png"),
+                Some("a.png"),
+                Some(10)
+            ),
+            media(
+                MediaKind::Image,
+                Some("https://gchat.qpic.cn/p"),
+                Some("image/jpeg"),
+                None,
+                Some(11)
+            ),
+            media(
+                MediaKind::File,
+                Some("https://x/h"),
+                Some("image/heic"),
+                Some("h.heic"),
+                None
+            ),
+            // QQ's WAV conversion, whose size is not the recording's.
+            media(
+                MediaKind::Audio,
+                Some("https://x/v.wav"),
+                Some("audio/wav"),
+                Some("v.wav"),
+                None
+            ),
+            media(
+                MediaKind::Audio,
+                Some("https://multimedia.nt.qq.com.cn/v"),
+                Some("audio/silk"),
+                Some("v.silk"),
+                Some(4)
+            ),
+            media(
+                MediaKind::Video,
+                Some("https://x/v.mp4"),
+                Some("video/mp4"),
+                Some("v.mp4"),
+                None
+            ),
+            media(
+                MediaKind::File,
+                Some("https://x/f"),
+                None,
+                Some("doc.pdf"),
+                Some(5)
+            ),
+            media(MediaKind::Image, None, Some("image/gif"), None, None),
+        ]
+    );
+    assert_eq!(
+        absolute_url("http://10.0.0.1/a").as_deref(),
+        Some("http://10.0.0.1/a")
+    );
+    assert_eq!(absolute_url(" "), None);
+}
+
+#[test]
+fn empty_messages_cards_and_sender_less_events_are_skipped() {
+    let empty = message(&json!({
+        "id": "m", "author": {"user_openid": "A1"}, "content": "  ", "attachments": []
+    }));
+    assert_eq!(empty.into_message(Scene::Direct), Err(Skipped::Empty));
     let card = message(&json!({
         "id": "m", "author": {"user_openid": "A1"}, "content": "[卡片消息]", "message_type": 3
     }));
-    assert_eq!(card.into_text(Scene::Direct), Err(Skipped::NotText));
+    assert_eq!(card.into_message(Scene::Direct), Err(Skipped::Empty));
     let no_group = message(&json!({"id": "m", "author": {"member_openid": "M1"}, "content": "hi"}));
     assert_eq!(
-        no_group.into_text(Scene::Group),
+        no_group.into_message(Scene::Group),
         Err(Skipped::MissingSender)
     );
     let no_sender = message(&json!({"id": "m", "author": {}, "content": "hi"}));
     assert_eq!(
-        no_sender.into_text(Scene::Direct),
+        no_sender.into_message(Scene::Direct),
         Err(Skipped::MissingSender)
     );
 }

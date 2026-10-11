@@ -154,6 +154,10 @@ struct Setup {
     receive: Vec<ScriptStep>,
     /// Answers to `sendMessage`, in order.
     send: Vec<ScriptStep>,
+    /// Answers to `getFile`, in order.
+    files: Vec<ScriptStep>,
+    /// Answers to file downloads, in order.
+    downloads: Vec<ScriptStep>,
     /// Whether other receivers hold every Gateway slot.
     hold_slot: bool,
     occupied: bool,
@@ -176,6 +180,8 @@ impl Setup {
             stored: Vec::new(),
             receive: Vec::new(),
             send: Vec::new(),
+            files: Vec::new(),
+            downloads: Vec::new(),
             hold_slot: false,
             occupied: false,
             timing: TIMING,
@@ -190,6 +196,10 @@ struct Bench {
     polls: ScriptedServer,
     /// Answers `sendMessage`.
     sends: ScriptedRoute,
+    /// Answers `getFile`.
+    files: ScriptedRoute,
+    /// Answers file downloads.
+    downloads: ScriptedRoute,
     driver: RefCell<Pin<Box<dyn Future<Output = ()>>>>,
 }
 
@@ -198,13 +208,19 @@ impl Bench {
         let stack = network.stack();
         let polls = ScriptedServer::new(core::mem::take(&mut setup.receive));
         let sends = polls.route("/sendMessage", core::mem::take(&mut setup.send));
+        let files = polls.route("/getFile", core::mem::take(&mut setup.files));
+        let downloads = polls.route("/file/bot", core::mem::take(&mut setup.downloads));
         let serving = polls.clone();
+        // Enough listeners for the poll beside back-to-back `getFile`s and
+        // downloads, each on a fresh connection.
         let driver: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
-            let _stopped = join(network.run(), serving.run::<4>(stack, PORT)).await;
+            let _stopped = join(network.run(), serving.run::<8>(stack, PORT)).await;
         });
         Rc::new(Self {
             polls,
             sends,
+            files,
+            downloads,
             driver: RefCell::new(driver),
         })
     }
@@ -976,7 +992,7 @@ impl WorkflowActionHandler for Record {
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
         "test.record",
-        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"}}}"#,
+        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"},"attachments":{"type":"array"}}}"#,
         r#"{"type":"object"}"#
     );
 
@@ -986,14 +1002,11 @@ impl WorkflowActionHandler for Record {
     }
 }
 
+/// Hands the whole Event, attachments included, to `test.record`.
 const RECORD_WORKFLOW: &str = r#"{
     "id": "record-inbound",
     "match": {"event": "gateway.message.received"},
-    "steps": [{"call": "test.record", "arguments": {
-        "route": "$event.input.route",
-        "message_id": "$event.input.message_id",
-        "text": "$event.input.text"
-    }}]
+    "steps": [{"call": "test.record"}]
 }"#;
 
 struct Recorder(Rc<RefCell<Vec<Value>>>);
@@ -1091,10 +1104,89 @@ async fn run_bench(bench: Rc<Bench>) {
     driver.as_mut().await;
 }
 
+/// One end-to-end test's steps, run on the executor.
+type Steps = fn(Spawner) -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
+
 #[embassy_executor::task]
-async fn end_to_end(spawner: Spawner, done: SyncSender<Result<(), String>>) {
-    let outcome = end_to_end_steps(spawner).await;
+async fn end_to_end(spawner: Spawner, steps: Steps, done: SyncSender<Result<(), String>>) {
+    let outcome = steps(spawner).await;
     let _sent = done.send(outcome);
+}
+
+/// Runs `steps` on an executor thread of their own and fails the test with
+/// their error.
+fn on_executor(steps: Steps) {
+    let (done, result) = sync_channel(1);
+    std::thread::Builder::new()
+        .name("telegram-end-to-end".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let executor = Box::leak(Box::new(Executor::new()));
+            executor.run(|spawner| {
+                spawner.spawn(end_to_end(spawner, steps, done).expect("spawn the end-to-end test"));
+            });
+        })
+        .expect("spawn the executor thread");
+    result
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the end-to-end test timed out")
+        .expect("the end-to-end test failed");
+}
+
+/// Plugins running a receiving channel with `owner` stored, the messages
+/// Workflow published, and the scripted Bot API.
+struct Running {
+    manager: PluginManager<MemoryPartition>,
+    records: Rc<RefCell<Vec<Value>>>,
+    bench: Rc<Bench>,
+}
+
+/// Registers and starts every Plugin, with the channel receiving.
+async fn start_receiving(spawner: Spawner, mut setup: Setup) -> Result<Running, String> {
+    install_global_memory_vfs()
+        .await
+        .map_err(|error| error.to_string())?;
+    let partition = memory_partition(64 * 1024)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut manager = PluginManager::open(partition)
+        .await
+        .map_err(|error| error.to_string())?;
+    manager.install_vfs(barracuda_vfs::global_namespace().await);
+    manager.install_task_spawner(spawner);
+    let network = loopback_network();
+    let mut context = plugin_context(&network);
+    let records = Rc::new(RefCell::new(Vec::new()));
+    register_services(&mut manager, &mut context);
+    manager
+        .register(Recorder(Rc::clone(&records)))
+        .map_err(|error| error.to_string())?;
+    let bench = Bench::new(network, &mut setup);
+    spawner.spawn(run_bench(Rc::clone(&bench)).map_err(|error| format!("{error:?}"))?);
+    manager
+        .register(Probe {
+            setup: Some(setup),
+            bench: Rc::clone(&bench),
+            scenario: Receiving,
+            runtime: None,
+            completed: Rc::new(Cell::new(false)),
+        })
+        .map_err(|error| error.to_string())?;
+    manager.start().map_err(|error| error.to_string())?;
+    Ok(Running {
+        manager,
+        records,
+        bench,
+    })
+}
+
+/// Hands the receive runtime to the probe's task.
+struct Receiving;
+
+impl Scenario for Receiving {
+    fn run<Storage: PluginStorage>(&self, harness: Harness<Storage>) -> Option<ReceiveRuntime> {
+        harness.runtime.take()
+    }
 }
 
 async fn end_to_end_steps(spawner: Spawner) -> Result<(), String> {
@@ -1237,21 +1329,199 @@ rusty_fork_test! {
     /// static, so each test needs a fresh process to get them.
     #[test]
     fn owners_publish_codes_pair_strangers_are_ignored_and_redeliveries_dropped() {
-        let (done, result) = sync_channel(1);
-        std::thread::Builder::new()
-            .name("telegram-end-to-end".into())
-            .stack_size(8 * 1024 * 1024)
-            .spawn(move || {
-                let executor = Box::leak(Box::new(Executor::new()));
-                executor.run(|spawner| {
-                    spawner.spawn(end_to_end(spawner, done).expect("spawn the end-to-end test"));
-                });
-            })
-            .expect("spawn the executor thread");
-        result
-            .recv_timeout(std::time::Duration::from_secs(20))
-            .expect("the end-to-end test timed out")
-            .expect("the end-to-end test failed");
+        on_executor(|spawner| Box::pin(end_to_end_steps(spawner)));
+    }
+}
+
+// --- Media ---------------------------------------------------------------
+
+/// Larger than any `attachment-max-bytes`.
+const HUGE: u64 = 1 << 40;
+
+/// An update whose message from `sender` carries `fields`.
+fn media_update(update_id: i64, sender: i64, fields: Value) -> Value {
+    let mut update = json!({
+        "update_id": update_id,
+        "message": {
+            "message_id": update_id * 10,
+            "date": 1,
+            "from": {"id": sender, "is_bot": false, "first_name": "User"},
+            "chat": {"id": sender, "type": "private"},
+        }
+    });
+    for (key, value) in fields.as_object().expect("fields") {
+        update["message"][key] = value.clone();
+    }
+    update
+}
+
+fn file(path: &str) -> ScriptStep {
+    ok(json!({"file_id": "id", "file_unique_id": "u", "file_path": path}))
+}
+
+/// A response head declaring `length` body bytes, followed by none.
+fn declared(content_type: &str, length: u64) -> ScriptStep {
+    ScriptStep::Response {
+        bytes: format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+        )
+        .into_bytes(),
+        max_read: usize::MAX,
+        pending_after: false,
+    }
+}
+
+async fn media_steps(spawner: Spawner) -> Result<(), String> {
+    let setup = Setup {
+        stored: vec![("owners", br#"[{"id":"7","label":"Ann"}]"#.to_vec())],
+        receive: vec![
+            ok(json!([
+                media_update(
+                    20,
+                    7,
+                    json!({"caption": "look", "photo": [
+                        {"file_id": "small", "file_unique_id": "s", "width": 90, "height": 90, "file_size": 100},
+                        {"file_id": "big", "file_unique_id": "b", "width": 9000, "height": 9000, "file_size": HUGE},
+                    ]})
+                ),
+                media_update(
+                    21,
+                    8,
+                    json!({"caption": "hi", "photo": [{"file_id": "theirs", "file_size": 10}]})
+                ),
+                media_update(
+                    22,
+                    7,
+                    json!({"document": {"file_id": "zip", "file_name": "big.zip",
+                    "mime_type": "application/zip", "file_size": HUGE}})
+                ),
+                media_update(
+                    23,
+                    7,
+                    json!({"voice": {"file_id": "voice", "duration": 2,
+                    "mime_type": "audio/ogg", "file_size": 10}})
+                ),
+                media_update(
+                    24,
+                    7,
+                    json!({"caption": "scan", "document": {"file_id": "png",
+                    "file_name": "scan.png", "mime_type": "image/png"}})
+                ),
+                media_update(
+                    25,
+                    7,
+                    json!({"sticker": {"file_id": "sticker", "emoji": "👍"}})
+                ),
+            ])),
+            idle(),
+        ],
+        files: vec![
+            file("photos/file_1.jpg"),
+            file("voice/file_2.oga"),
+            file("documents/file_3.png"),
+        ],
+        downloads: vec![
+            ScriptStep::response(200, "image/jpeg", b"JPEGDATA", usize::MAX),
+            ScriptStep::json(
+                404,
+                r#"{"ok":false,"error_code":404,"description":"Not Found"}"#,
+            ),
+            declared("image/png", HUGE),
+        ],
+        ..Setup::configured("send_receive")
+    };
+    let running = start_receiving(spawner, setup).await?;
+    let records = &running.records;
+    let bench = &running.bench;
+    let finished = with_timeout(Duration::from_secs(5), async {
+        while records.borrow().len() < 4 || bench.polls.requests().len() < 2 {
+            Timer::after_millis(5).await;
+        }
+    })
+    .await;
+    Timer::after_millis(20).await;
+    let records = records.borrow().clone();
+    let files = targets(bench.files.requests());
+    let downloads = targets(bench.downloads.requests());
+    let check = |condition: bool, what: &str| {
+        if condition {
+            Ok(())
+        } else {
+            Err(format!(
+                "{what}: records {records:?}, getFile {files:?}, downloads {downloads:?}"
+            ))
+        }
+    };
+    check(finished.is_ok(), "timed out")?;
+    check(records.len() == 4, "four owner messages are published")?;
+
+    let photo = &records[0];
+    check(
+        photo["message_id"] == "200" && photo["text"] == "look",
+        "the caption is the photo's text",
+    )?;
+    let attachment = &photo["attachments"][0];
+    check(
+        photo["attachments"].as_array().map(Vec::len) == Some(1)
+            && attachment["kind"] == "image"
+            && attachment["mime_type"] == "image/jpeg"
+            && attachment["size"] == 8
+            && attachment.get("filename").is_none(),
+        "the photo is stored as an image",
+    )?;
+    let path = attachment["path"].as_str().unwrap_or_default();
+    check(
+        path.starts_with("/workspace/cache/gateway/telegram/") && path.ends_with(".jpg"),
+        "the photo lives in the channel's attachment directory",
+    )?;
+    check(
+        records[1]
+            == json!({"route": {"channel": "telegram", "conversation_id": "7"}, "message_id": "220",
+                      "text": "[file too large, not received]"}),
+        "a file over the limit is a note, fetched never",
+    )?;
+    check(
+        records[2]
+            == json!({"route": {"channel": "telegram", "conversation_id": "7"}, "message_id": "230",
+                      "text": "[audio not received]"}),
+        "a failed download is a note",
+    )?;
+    check(
+        records[3]
+            == json!({"route": {"channel": "telegram", "conversation_id": "7"}, "message_id": "240",
+                      "text": "scan\n[image too large, not received]"}),
+        "a download declaring too many bytes is a note under the caption",
+    )?;
+    // The smallest photo size fits; the stranger's photo and the
+    // oversized document are never asked for.
+    check(
+        files
+            == [
+                format!("/bot{TOKEN}/getFile?file_id=small"),
+                format!("/bot{TOKEN}/getFile?file_id=voice"),
+                format!("/bot{TOKEN}/getFile?file_id=png"),
+            ],
+        "getFile only for the owner's files within the limit",
+    )?;
+    check(
+        downloads
+            == [
+                format!("/file/bot{TOKEN}/photos/file_1.jpg"),
+                format!("/file/bot{TOKEN}/voice/file_2.oga"),
+                format!("/file/bot{TOKEN}/documents/file_3.png"),
+            ],
+        "each file is downloaded from its getFile path",
+    )?;
+    core::mem::forget(running.manager);
+    Ok(())
+}
+
+rusty_fork_test! {
+    /// Runs in a process of its own: the Gateway's receive buffers are
+    /// static, so each test needs a fresh process to get them.
+    #[test]
+    fn owners_media_is_stored_and_a_file_that_does_not_arrive_becomes_a_note() {
+        on_executor(|spawner| Box::pin(media_steps(spawner)));
     }
 }
 

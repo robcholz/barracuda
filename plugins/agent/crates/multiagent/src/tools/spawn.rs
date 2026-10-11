@@ -4,8 +4,8 @@ use core::num::NonZeroU32;
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, BackgroundTool, BackgroundToolControl, BackgroundToolFuture,
-    BackgroundToolHandler, Tool, ToolError, ToolFuture, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolSpec,
+    BackgroundToolHandler, Tool, ToolContext, ToolError, ToolFuture, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolSpec,
 };
 use portable_atomic_util::Arc;
 use serde::Deserialize;
@@ -38,7 +38,7 @@ impl ToolSpec for SpawnSubagentTool {
 impl BackgroundToolHandler for SpawnSubagentTool {
     type Args = SpawnArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> BackgroundToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> BackgroundToolFuture<'a> {
         Box::pin(async move { self.invoke_inner(args).await })
     }
 }
@@ -58,23 +58,17 @@ impl SpawnSubagentTool {
             .await
             .map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
         trace_subagent_bound(child);
-        let accepted = ToolOutput {
-            content: format!(
+        let accepted = ToolOutput::new(format!(
                 "Subagent {child} named '{name}' started with a {} ms timeout; its result will be delivered automatically.",
                 timeout.millis()
-            ),
-            ok: true,
-        };
+            ), true);
         let control = Arc::clone(&self.control);
         let completion = Box::pin(async move {
             let result = result.await.map_err(|_| {
                 ToolError::InvokeRejected("subagent result channel closed".to_owned())
             })?;
             control.acknowledge_delivery(child);
-            Ok(ToolOutput {
-                content: result.text(),
-                ok: result.ok(),
-            })
+            Ok(ToolOutput::new(result.text(), result.ok()))
         });
         Ok(
             BackgroundTool::new(accepted, completion).with_control(SpawnedSubagent {
@@ -109,14 +103,11 @@ impl BackgroundToolControl for SpawnedSubagent {
             let child = self.child;
             let message = Message::text(input.trim().to_owned());
             Ok(match self.control.followup(child, message).await {
-                Ok(()) => ToolOutput {
-                    content: format!("Subagent {child} interrupted and sent the new input."),
-                    ok: true,
-                },
-                Err(error) => ToolOutput {
-                    content: format!("Cannot interrupt {child}: {error}."),
-                    ok: false,
-                },
+                Ok(()) => ToolOutput::new(
+                    format!("Subagent {child} interrupted and sent the new input."),
+                    true,
+                ),
+                Err(error) => ToolOutput::new(format!("Cannot interrupt {child}: {error}."), false),
             })
         })
     }

@@ -5,28 +5,34 @@
 //! connection ends. The next poll's `offset` acknowledges every handled
 //! update; the cursor is kept in RAM and stored at most once per
 //! [`CURSOR_WRITE_INTERVAL`].
+//!
+//! An owner's photo, file, voice note, audio, or video is fetched with
+//! `getFile` and streamed into the Gateway's attachment storage on the
+//! shared request pool, never the receive slot; one that does not arrive
+//! becomes a note in the message's text.
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
 use barracuda_imessage_gateway_plugin::{
-    ChannelControl, Classification, Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute,
-    MessageChannel, MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller,
+    Attachment, AttachmentMeta, ChannelControl, Classification, DownloadRequest,
+    Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute, InboundDownloadError,
+    MediaKind, MessageTarget, Method, PollEnd, PollLimits, PollRequest, Polled, Poller,
     ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease, ReceiveSession, SendMessageRequest,
-    PAIRED_REPLY,
+    StoreError, PAIRED_REPLY,
 };
 use barracuda_plugin::manager::{PluginStorage, StorageError};
 use embassy_time::{Duration, Instant};
 use telegram::updates::{
-    delete_webhook_path, first_update_id, get_updates_path, parse_acknowledgement, parse_updates,
-    ApiError, Update, UpdatesError, POLL_TIMEOUT_SECS, UPDATE_BATCH,
+    delete_webhook_path, file_download_path, first_update_id, get_file_path, get_updates_path,
+    parse_acknowledgement, parse_file, parse_updates, ApiError, Media, Update, UpdatesError,
+    POLL_TIMEOUT_SECS, UPDATE_BATCH,
 };
 
-use crate::channel::TelegramChannel;
+use crate::channel::{Settings, TelegramChannel};
 use crate::CHANNEL;
 
 /// Plugin storage key of the receive cursor: the next `getUpdates` offset as
@@ -58,6 +64,9 @@ const LIMITS: PollLimits = PollLimits {
     max_tail: 0,
     max_head: HEADER_BYTES,
 };
+
+/// Largest `getFile` answer read; one is about 250 bytes.
+const FILE_INFO_BYTES: usize = 2 * 1024;
 
 /// Update ids remembered to drop a redelivered update.
 const RECENT_UPDATES: usize = 16;
@@ -217,7 +226,7 @@ struct TelegramPoller<'a, Storage> {
     channel: &'a TelegramChannel<Storage>,
     cursor: &'a Cursor,
     token: &'a str,
-    sender: &'a Rc<dyn MessageChannel>,
+    settings: &'a Settings,
     session: ReceiveSession<'a>,
     /// Updates the next poll asks for.
     limit: u8,
@@ -279,7 +288,7 @@ impl<Storage: PluginStorage> Poller for TelegramPoller<'_, Storage> {
                 self.healthy = true;
                 self.limit = UPDATE_BATCH;
                 for update in updates {
-                    channel.handle(update, self.cursor, self.sender).await;
+                    channel.handle(update, self.cursor, self.settings).await;
                 }
                 self.cursor.persist(&channel.storage).await;
                 Ok(())
@@ -319,7 +328,7 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
             channel: self,
             cursor,
             token: settings.config.token.as_str(),
-            sender: &settings.sender,
+            settings: &settings,
             session,
             limit: UPDATE_BATCH,
             healthy: false,
@@ -346,7 +355,7 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
     }
 
     /// Handles one update at most once.
-    async fn handle(&self, update: Update, cursor: &Cursor, sender: &Rc<dyn MessageChannel>) {
+    async fn handle(&self, update: Update, cursor: &Cursor, settings: &Settings) {
         let id = update.update_id;
         if cursor.is_duplicate(id) {
             log::debug!("dropped Telegram update {id}: already handled");
@@ -357,8 +366,14 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
             log::debug!("ignored Telegram update {id}: not a message");
             return;
         };
-        let (Some(text), Some(from)) = (message.text, message.from) else {
-            log::debug!("ignored Telegram update {id}: not a text message");
+        let media = message.media(self.gateway.attachment_max_bytes());
+        let text = message.body().unwrap_or_default();
+        let Some(from) = message
+            .from
+            .as_ref()
+            .filter(|_from| media.is_some() || !text.is_empty())
+        else {
+            log::debug!("ignored Telegram update {id}: not a text or media message");
             return;
         };
         // A receiving channel is configured, so its owner book is loaded.
@@ -366,15 +381,25 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
             return;
         };
         let conversation_id = message.chat.id.to_string();
+        // Classify first: a stranger's file is never fetched.
         match owners
-            .classify(&from.id.to_string(), Some(&from.label()), &text)
+            .classify(&from.id.to_string(), Some(&from.label()), text)
             .await
         {
             Classification::Owner => {
+                let mut text = String::from(text);
+                let mut attachments = Vec::new();
+                if let Some(media) = media {
+                    match self.download(settings, media).await {
+                        Ok(attachment) => attachments.push(attachment),
+                        Err(missed) => append_note(&mut text, media.kind, missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, conversation_id),
                     message_id: message.message_id.to_string(),
                     text,
+                    attachments,
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a Telegram message: {error}");
@@ -385,7 +410,7 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
                     MessageTarget::new(CHANNEL, conversation_id),
                     String::from(PAIRED_REPLY),
                 );
-                if let Err(error) = sender.send_message(reply).await {
+                if let Err(error) = settings.sender.send_message(reply).await {
                     log::warn!("failed to confirm a Telegram pairing: {error}");
                 }
             }
@@ -393,5 +418,89 @@ impl<Storage: PluginStorage> TelegramChannel<Storage> {
                 log::debug!("ignored Telegram update {id}: the sender is not an owner");
             }
         }
+    }
+
+    /// Stores a message's file: `getFile` for its path, then the download
+    /// streamed into the Gateway's attachment storage.
+    async fn download(&self, settings: &Settings, media: Media<'_>) -> Result<Attachment, Missed> {
+        let max_bytes = self.gateway.attachment_max_bytes();
+        if media.file_size.is_some_and(|size| size > max_bytes) {
+            return Err(Missed::TooLarge);
+        }
+        let config = &settings.config;
+        let origin = config.api_base.trim_end_matches('/');
+        // Both URLs carry the bot token: never log them.
+        let url = format!("{origin}{}", get_file_path(&config.token, media.file_id));
+        let http = self.gateway.http();
+        let response = http
+            .send_limited(Method::GET, &url, &[], &[][..], FILE_INFO_BYTES)
+            .await
+            .map_err(|error| {
+                log::warn!("Telegram getFile failed: {error}");
+                Missed::Failed
+            })?;
+        let file = parse_file(response.status, &response.body).map_err(|error| {
+            match error {
+                UpdatesError::Api(error) => {
+                    log::warn!("Telegram refused getFile: {}", error.description);
+                }
+                UpdatesError::Malformed { status } => {
+                    log::warn!("unreadable Telegram getFile answer (HTTP {status})");
+                }
+            }
+            Missed::Failed
+        })?;
+        drop(response);
+        if file.file_size.is_some_and(|size| size > max_bytes) {
+            return Err(Missed::TooLarge);
+        }
+        let Some(file_path) = file.file_path else {
+            log::warn!("Telegram getFile named no file path");
+            return Err(Missed::Failed);
+        };
+        let url = format!("{origin}{}", file_download_path(&config.token, &file_path));
+        let meta = AttachmentMeta {
+            kind: media.kind,
+            mime_type: media.mime_type.map(String::from),
+            filename: media.file_name.map(String::from),
+        };
+        match self
+            .gateway
+            .download_inbound(CHANNEL, DownloadRequest::get(&url), meta)
+            .await
+        {
+            Ok(attachment) => Ok(attachment),
+            Err(InboundDownloadError::Store(StoreError::TooLarge { .. })) => Err(Missed::TooLarge),
+            Err(error) => {
+                log::warn!("failed to download a Telegram file: {error}");
+                Err(Missed::Failed)
+            }
+        }
+    }
+}
+
+/// Why a message's file was not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Missed {
+    /// Over the Gateway's `attachment-max-bytes`.
+    TooLarge,
+    /// Telegram refused it, or the download or storing failed.
+    Failed,
+}
+
+/// Appends the line that tells the reader a file did not arrive.
+pub(crate) fn append_note(text: &mut String, kind: MediaKind, missed: Missed) {
+    let kind = match kind {
+        MediaKind::File => "file",
+        MediaKind::Image => "image",
+        MediaKind::Audio => "audio",
+        MediaKind::Video => "video",
+    };
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    match missed {
+        Missed::TooLarge => text.push_str(&format!("[{kind} too large, not received]")),
+        Missed::Failed => text.push_str(&format!("[{kind} not received]")),
     }
 }

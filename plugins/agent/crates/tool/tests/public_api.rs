@@ -7,12 +7,78 @@ use std::task::Waker;
 use anyhow::{anyhow, Result};
 use barracuda_agent_persistence::{Persistence, SharedPersistence};
 use barracuda_agent_tool::{
-    EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSetSource, ToolSpec,
+    Attachment, EmptyArgs, MediaKind, SessionId, Tool, ToolContext, ToolError, ToolFuture,
+    ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRegistryError,
+    ToolRunner, ToolSetHandle, ToolSetSource, ToolSpec,
 };
 use barracuda_platform_test::memory_vfs;
 use futures_lite::{future::block_on, StreamExt as _};
 use portable_atomic_util::Arc;
+
+/// Reports the session its call runs in, and returns a file.
+struct SessionTool;
+
+impl ToolSpec for SessionTool {
+    fn name(&self) -> &str {
+        "session"
+    }
+
+    fn schema(&self) -> &str {
+        r#"{"type":"function","function":{"name":"session"}}"#
+    }
+
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("tests/fixtures/object.json");
+        &VALIDATOR
+    }
+}
+
+impl ToolHandler for SessionTool {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async move {
+            Ok(
+                ToolOutput::new(context.session.to_wire(), true).with_attachments(vec![
+                    Attachment {
+                        kind: MediaKind::Image,
+                        path: "/workspace/cache/shot.png".into(),
+                        mime_type: "image/png".into(),
+                        filename: None,
+                        size: 4,
+                    },
+                ]),
+            )
+        })
+    }
+}
+
+#[test]
+fn every_call_runs_in_its_runner_context_and_keeps_its_attachments() -> Result<()> {
+    let registry = registry()?;
+    let mut tool_set = registry.tool_set();
+    tool_set.add_group(ToolGroup::new("local", true, [Tool::new(SessionTool)]))?;
+    let handle = tool_set.begin()?;
+    let call = invocation("session", "{}")?;
+
+    let mut join = ToolRunner::new(&handle, ToolContext::new(SessionId::new(7))).run(vec![call]);
+    let output = poll_ready(async move { join.next().await })?
+        .map(|(_, output)| output)
+        .ok_or_else(|| anyhow!("join stream ended without a result"))?;
+
+    assert_eq!(output.content, "session-7");
+    assert!(output.ok);
+    assert_eq!(
+        output
+            .attachments
+            .iter()
+            .map(|attachment| attachment.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/workspace/cache/shot.png"]
+    );
+    Ok(())
+}
 
 #[test]
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {
@@ -79,10 +145,10 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
         let outcome = execute_tool(&handle, &call)?;
         assert_eq!(
             outcome,
-            ToolOutput {
-                content: "tool invocation rejected: tool is temporarily unavailable: echo".into(),
-                ok: false,
-            }
+            ToolOutput::new(
+                "tool invocation rejected: tool is temporarily unavailable: echo",
+                false
+            )
         );
     }
 
@@ -93,13 +159,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
 
     let call = invocation("echo", "{}")?;
     let outcome = execute_tool(&handle, &call)?;
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "{}".into(),
-            ok: true,
-        }
-    );
+    assert_eq!(outcome, ToolOutput::new("{}", true));
     Ok(())
 }
 
@@ -115,13 +175,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 
         let call = invocation("echo", "{}")?;
         let outcome = execute_tool(&handle, &call)?;
-        assert_eq!(
-            outcome,
-            ToolOutput {
-                content: "tool not found: echo".into(),
-                ok: false,
-            }
-        );
+        assert_eq!(outcome, ToolOutput::new("tool not found: echo", false));
     }
 
     registry.start_all()?;
@@ -134,13 +188,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 
     let call = invocation("echo", "{}")?;
     let outcome = execute_tool(&handle, &call)?;
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "{}".into(),
-            ok: true,
-        }
-    );
+    assert_eq!(outcome, ToolOutput::new("{}", true));
     Ok(())
 }
 
@@ -185,22 +233,10 @@ fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let handle = tool_set.begin()?;
 
     let allowed = execute_tool(&handle, &invocation("echo", "{}")?)?;
-    assert_eq!(
-        allowed,
-        ToolOutput {
-            content: "{}".into(),
-            ok: true,
-        }
-    );
+    assert_eq!(allowed, ToolOutput::new("{}", true));
 
     let blocked = execute_tool(&handle, &invocation("other", "{}")?)?;
-    assert_eq!(
-        blocked,
-        ToolOutput {
-            content: "tool not found: other".into(),
-            ok: false,
-        }
-    );
+    assert_eq!(blocked, ToolOutput::new("tool not found: other", false));
     Ok(())
 }
 
@@ -223,10 +259,7 @@ fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
     ));
     assert_eq!(
         execute_tool(&handle, &invocation("other", "{}")?)?,
-        ToolOutput {
-            content: "tool not found: other".into(),
-            ok: false,
-        }
+        ToolOutput::new("tool not found: other", false)
     );
     Ok(())
 }
@@ -242,10 +275,7 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
     assert_eq!(handle.schemas(), "no schemas");
     assert_eq!(
         execute_tool(&handle, &invocation("echo", "{}")?)?,
-        ToolOutput {
-            content: "tool not found: echo".into(),
-            ok: false,
-        }
+        ToolOutput::new("tool not found: echo", false)
     );
     Ok(())
 }
@@ -287,13 +317,7 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
     let mut tool_set = registry.tool_set();
     let handle = tool_set.begin()?;
     let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "tool not found: echo".into(),
-            ok: false,
-        }
-    );
+    assert_eq!(outcome, ToolOutput::new("tool not found: echo", false));
     Ok(())
 }
 
@@ -317,13 +341,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
         );
         assert_eq!(handle.deferred_context(), "");
         let blocked = execute_tool(&handle, &invocation("echo", "{}")?)?;
-        assert_eq!(
-            blocked,
-            ToolOutput {
-                content: "tool not found: echo".into(),
-                ok: false,
-            }
-        );
+        assert_eq!(blocked, ToolOutput::new("tool not found: echo", false));
     }
 
     let catalog = discovery.catalog();
@@ -358,13 +376,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
         "Echoes the normalized arguments."
     );
     let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "{}".into(),
-            ok: true,
-        }
-    );
+    assert_eq!(outcome, ToolOutput::new("{}", true));
     // Once loaded, the group drops out of the catalog.
     assert!(discovery.catalog().is_empty());
     Ok(())
@@ -446,13 +458,13 @@ impl ToolSpec for EchoTool {
 impl ToolHandler for EchoTool {
     type Args = serde_json::Value;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            Ok(ToolOutput {
-                content: serde_json::to_string(&args)
+            Ok(ToolOutput::new(
+                serde_json::to_string(&args)
                     .map_err(|_| ToolError::InvokeRejected("failed to serialize args".into()))?,
-                ok: true,
-            })
+                true,
+            ))
         })
     }
 }
@@ -478,13 +490,8 @@ impl ToolSpec for OtherTool {
 impl ToolHandler for OtherTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-        Box::pin(async move {
-            Ok(ToolOutput {
-                content: "other".into(),
-                ok: true,
-            })
-        })
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async move { Ok(ToolOutput::new("other", true)) })
     }
 }
 
@@ -495,7 +502,7 @@ fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolIn
 fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<ToolOutput> {
     let call = ToolInvocation::try_new(call.id(), call.name(), call.arguments_json())
         .map_err(|error| anyhow!("{error:?}"))?;
-    let mut join = ToolRunner::new(handle).run(vec![call]);
+    let mut join = ToolRunner::new(handle, ToolContext::new(SessionId::new(1))).run(vec![call]);
     poll_ready(async move {
         join.next()
             .await

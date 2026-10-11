@@ -78,13 +78,16 @@ failures back off from 1 s to 30 s.
   once every 10 s. A new bot token clears it.
 - **Duplicates.** The last 16 handled `update_id`s are remembered; an update
   sent again, for example after a reconnect, is dropped.
-- **Text only.** Only `message.text` with a sender is handled; media, stickers,
+- **Messages.** A message with a sender and `text`, or with one of the media
+  below (its `caption` as the text, possibly empty), is handled. Stickers,
   service messages and anything else are skipped with a debug log.
 - **Allowed accounts.** The sender is `from.id`, labelled `@username` or the
-  first name. `Owners::classify` decides:
+  first name. `Owners::classify` decides, on the text or caption, before any
+  file is fetched:
   - an owner's message is published as a `GatewayInboundMessage` with route
     `{channel: "telegram", conversation_id: <chat.id>}` and `message_id`
-    `<message_id>`, so replies (and `reply_to`) land in the same chat;
+    `<message_id>`, so replies (and `reply_to`) land in the same chat, and
+    its file (below) as the one attachment;
   - a new sender whose text is the binding code, or `/start <code>`, becomes an
     owner and gets `PAIRED_REPLY` through the provider's ordinary
     `sendMessage`;
@@ -108,6 +111,47 @@ failures back off from 1 s to 30 s.
   - the slot's static 1 KiB transmit and 4 KiB receive socket buffers.
 
 Deadlines: 30 s to connect, 70 s per poll, 30 s for `deleteWebhook`.
+
+## Media
+
+An owner's message carries at most one file, which becomes its
+`GatewayInboundMessage::attachments` entry:
+
+| Field | Kind | MIME type |
+| --- | --- | --- |
+| `photo` | `image` | `image/jpeg` |
+| `voice` | `audio` | its `mime_type`, else `audio/ogg` |
+| `audio` | `audio` | its `mime_type` |
+| `video` | `video` | its `mime_type` |
+| `video_note` | `video` | `video/mp4` |
+| `animation` (Telegram also sets `document` beside it) | `video` | its `mime_type` |
+| `document` | `image` for `image/jpeg`, `png`, `gif` or `webp`; else `file` | its `mime_type` |
+
+A field without a MIME type leaves it to the download's `Content-Type`. The
+sender's `file_name` is the attachment's `filename`. Of a photo's sizes the
+largest whose `file_size` is within the Gateway's `attachment_max_bytes()` is
+taken, else the largest of all, which the size check below refuses.
+
+1. A `file_size` over `attachment_max_bytes()` is refused without a request.
+2. `GET <api_base>/bot<token>/getFile?file_id=<file_id>` on the shared request
+   pool (its answer read up to 2 KiB) names `file_path`; a `file_size` there
+   over the limit is refused too.
+3. `IMessageGateway::download_inbound` streams
+   `<api_base>/file/bot<token>/<file_path>` into
+   `/workspace/cache/gateway/telegram/`, also on the shared request pool.
+
+A file that is refused, over the limit, or fails (an API refusal, a non-2xx
+status, a transport or storage failure) does not drop the message: one line is
+appended to its text, `[<kind> too large, not received]` or
+`[<kind> not received]`, and the message is still published. Strangers' and
+pairing messages' files are never fetched. Downloads run one at a time inside
+the update's handling, while the next poll waits; their buffers are the
+Gateway's download buffers, held only during the download.
+
+Sending audio (`send_media` with `audio`) uses `sendVoice` (field `voice`,
+default name `voice.ogg`) when its MIME type is `audio/ogg` or its file name
+ends in `.oga` or `.opus`, so Telegram shows a voice note; other audio goes
+through `sendAudio`.
 
 ## Portal page
 

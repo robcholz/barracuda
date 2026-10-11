@@ -8,14 +8,17 @@
 //! storage for other large immutable strings such as rendered prompts.
 //!
 //! [`json`] holds the encoder that writes `serde_json`-identical output into
-//! exactly sized bulk buffers.
+//! exactly sized bulk buffers. [`Attachment`] references a file sent with a
+//! message; see [`attachment`] for how a transcript stores it.
 
 #![no_std]
 
 extern crate alloc;
 
+pub mod attachment;
 pub mod json;
 mod message;
 
+pub use attachment::{Attachment, MediaKind};
 pub use barracuda_bulk_memory::BulkText;
 pub use message::{ChatMessage, ChatMessageError};

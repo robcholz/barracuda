@@ -7,7 +7,8 @@ use alloc::{
 };
 
 use barracuda_agent_tool::{
-    BackgroundToolPool, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
+    BackgroundToolPool, ToolContext, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner,
+    ToolSetHandle,
 };
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
@@ -61,6 +62,7 @@ enum ToolBatchUpdate {
 struct ToolPhase<'a> {
     tools: &'a ToolSetHandle<'a>,
     background: &'a BackgroundToolPool,
+    context: ToolContext,
     joined: Option<ToolJoinHandle>,
     pending: VecDeque<PendingApproval<'a>>,
     active_permission: Option<PendingApproval<'a>>,
@@ -120,6 +122,7 @@ where
                 reminders: step.reminders,
                 tools_json: Some(step.tools.schemas()),
                 retry: loop_.retry,
+                files: Some(step.files),
             };
             let cancel = Cancel::new(loop_.control.cancel_flag());
             let max_attempts = 1_u64;
@@ -225,8 +228,13 @@ where
                 ))
                 .await;
 
-            let mut tools =
-                ToolPhase::new(tool_calls, step.tools, step.background, loop_.permission)?;
+            let mut tools = ToolPhase::new(
+                tool_calls,
+                step.tools,
+                step.background,
+                step.tool_context,
+                loop_.permission,
+            )?;
             while let Some(event) = tools.next(loop_.control).await? {
                 let terminal = matches!(
                     event,
@@ -247,6 +255,7 @@ impl<'a> ToolPhase<'a> {
         tool_calls: Vec<ToolCall>,
         tools: &'a ToolSetHandle<'a>,
         background: &'a BackgroundToolPool,
+        context: ToolContext,
         permission: &'a P,
     ) -> Result<Self, IterationLoopError>
     where
@@ -285,13 +294,7 @@ impl<'a> ToolPhase<'a> {
                         false,
                         Some("invalid_invocation"),
                     );
-                    ready_results.push_back((
-                        tool_call,
-                        ToolOutput {
-                            content: error.to_string(),
-                            ok: false,
-                        },
-                    ));
+                    ready_results.push_back((tool_call, ToolOutput::new(error.to_string(), false)));
                     continue;
                 }
             };
@@ -299,13 +302,7 @@ impl<'a> ToolPhase<'a> {
                 Ok(action) => action,
                 Err(error) => {
                     trace_immediate_tool_result(&tool_call, false, true, None);
-                    ready_results.push_back((
-                        tool_call,
-                        ToolOutput {
-                            content: error.to_string(),
-                            ok: false,
-                        },
-                    ));
+                    ready_results.push_back((tool_call, ToolOutput::new(error.to_string(), false)));
                     continue;
                 }
             };
@@ -319,13 +316,7 @@ impl<'a> ToolPhase<'a> {
                 ToolAuthorization::Deny(reason) => {
                     let tool_call = scheduled.tool_call();
                     trace_immediate_tool_result(&tool_call, false, true, None);
-                    ready_results.push_back((
-                        tool_call,
-                        ToolOutput {
-                            content: reason,
-                            ok: false,
-                        },
-                    ));
+                    ready_results.push_back((tool_call, ToolOutput::new(reason, false)));
                 }
                 ToolAuthorization::Pending {
                     reason,
@@ -340,11 +331,12 @@ impl<'a> ToolPhase<'a> {
                 }),
             }
         }
-        let joined = dispatch_scheduled_calls(tools, background, allowed);
+        let joined = dispatch_scheduled_calls(tools, background, context, allowed);
 
         Ok(Self {
             tools,
             background,
+            context,
             joined,
             pending,
             active_permission: None,
@@ -452,6 +444,7 @@ impl<'a> ToolPhase<'a> {
                             let joined = dispatch_scheduled_calls(
                                 self.tools,
                                 self.background,
+                                self.context,
                                 vec![waiting.call],
                             );
                             self.merge_joined(joined);
@@ -460,13 +453,7 @@ impl<'a> ToolPhase<'a> {
                             let tool_call = waiting.call.tool_call();
                             trace_immediate_tool_result(&tool_call, false, true, None);
                             return self
-                                .tool_result(
-                                    tool_call,
-                                    ToolOutput {
-                                        content: reason,
-                                        ok: false,
-                                    },
-                                )
+                                .tool_result(tool_call, ToolOutput::new(reason, false))
                                 .map(Some);
                         }
                         ToolPermission::Interrupted => {
@@ -511,6 +498,7 @@ impl<'a> ToolPhase<'a> {
 fn dispatch_scheduled_calls(
     tools: &ToolSetHandle<'_>,
     background: &BackgroundToolPool,
+    context: ToolContext,
     calls: Vec<ScheduledCall>,
 ) -> Option<ToolJoinHandle> {
     if calls.is_empty() {
@@ -521,7 +509,7 @@ fn dispatch_scheduled_calls(
         .map(|call| call.invocation)
         .collect::<Vec<_>>();
     Some(
-        ToolRunner::new(tools)
+        ToolRunner::new(tools, context)
             .with_background(background)
             .run(calls),
     )
@@ -570,13 +558,16 @@ mod tests {
 
     use barracuda_agent_permission::{AllowAll, RiskClass};
     use barracuda_agent_tool::{
-        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
+        Tool, ToolContext, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet,
+        ToolSpec,
     };
     use barracuda_model_api::Error as ModelError;
     use futures_lite::future::block_on;
 
     use super::*;
     use crate::engine::stream::AgentEngineStream;
+
+    const CONTEXT: ToolContext = ToolContext::new(barracuda_agent_tool::SessionId::new(1));
 
     struct CountingTool {
         name: &'static str,
@@ -606,13 +597,10 @@ mod tests {
     impl ToolHandler for CountingTool {
         type Args = barracuda_agent_tool::EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
             Box::pin(async move {
                 self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok(ToolOutput {
-                    content: self.name.to_owned(),
-                    ok: true,
-                })
+                Ok(ToolOutput::new(self.name.to_owned(), true))
             })
         }
     }
@@ -691,8 +679,8 @@ mod tests {
             ids: RefCell::new(Vec::new()),
         };
         let background = BackgroundToolPool::new();
-        let mut phase =
-            ToolPhase::new(tool_calls, &tools, &background, &permission).expect("phase prepares");
+        let mut phase = ToolPhase::new(tool_calls, &tools, &background, CONTEXT, &permission)
+            .expect("phase prepares");
 
         let events = block_on(async {
             let mut events = Vec::new();
@@ -732,19 +720,10 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                (
-                    "call-allow".to_owned(),
-                    ToolOutput {
-                        content: "allowed".to_owned(),
-                        ok: true,
-                    },
-                ),
+                ("call-allow".to_owned(), ToolOutput::new("allowed", true),),
                 (
                     "call-deny".to_owned(),
-                    ToolOutput {
-                        content: "policy denied".to_owned(),
-                        ok: false,
-                    },
+                    ToolOutput::new("policy denied", false),
                 ),
             ]
         );
@@ -768,9 +747,15 @@ mod tests {
             },
         ];
 
-        let error = ToolPhase::new(tool_calls, &tools, &BackgroundToolPool::new(), &AllowAll)
-            .err()
-            .expect("duplicate ids fail the iteration");
+        let error = ToolPhase::new(
+            tool_calls,
+            &tools,
+            &BackgroundToolPool::new(),
+            CONTEXT,
+            &AllowAll,
+        )
+        .err()
+        .expect("duplicate ids fail the iteration");
         assert!(matches!(
             error,
             IterationLoopError::DuplicateProviderToolCallId(id) if id == "duplicate"

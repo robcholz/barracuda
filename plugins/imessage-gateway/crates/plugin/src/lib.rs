@@ -9,6 +9,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+mod attachment;
 mod channel;
 mod http;
 mod owners;
@@ -23,7 +24,8 @@ use alloc::rc::Rc;
 use barracuda_imessage_gateway_runtime::{GatewayIngress, GatewayRuntime};
 use barracuda_plugin::api::{PluginContext, SharedEntropy, Stack};
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
+    Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
+    PluginStartContext, PluginTaskToken,
 };
 use barracuda_plugin::manager::{PluginStorage, StorageError};
 use barracuda_webserver_plugin::{HttpEndpoint, WebRouteRegistration, WebServer, WebServerError};
@@ -31,11 +33,12 @@ use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
 use http_client::{ClientFactory, ReceiveBuffers};
 
+pub use attachment::{AttachmentMeta, StoreError, INBOUND_ROOT};
 pub use barracuda_imessage_gateway_runtime::{
-    parse_command, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
-    GatewayInboundControl, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
-    GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
-    GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
+    parse_command, Attachment, GatewayAccepted, GatewayControlKind, GatewayControlReceived,
+    GatewayInboundControl, GatewayInboundMessage, GatewayIngressError, GatewayMessageReceived,
+    GatewayOperationError, GatewayRoute, GatewaySendMediaFinished, GatewaySendMediaRequest,
+    GatewaySendMediaResponse, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
     GatewaySendStreamRequest,
 };
 pub use channel::{
@@ -45,8 +48,9 @@ pub use channel::{
 };
 pub use gateway::*;
 pub use http::{
-    Error, GatewayHttp, Method, Multipart, MultipartBody, MultipartError, PollEnd, PollLimits,
-    PollRequest, Polled, Poller, RequestBody, Response, SEND_TIMEOUT,
+    DownloadError, DownloadHead, DownloadLimits, DownloadRequest, DownloadSink, Error, GatewayHttp,
+    Method, Multipart, MultipartBody, MultipartError, PollEnd, PollLimits, PollRequest, Polled,
+    Poller, RequestBody, Response, StreamBody, DOWNLOAD_IDLE_TIMEOUT, SEND_TIMEOUT,
 };
 pub use http_client::{ReceiveLease, ReceiveSlots};
 pub use owners::{Classification, Owner, Owners, OwnersError, PairingView, PAIRED_REPLY};
@@ -66,6 +70,125 @@ pub struct IMessageGateway {
     http: GatewayHttp,
     receive_slots: ReceiveSlots,
     entropy: owners::PairingEntropy,
+    attachments: attachment::Attachments,
+}
+
+/// Failure of [`IMessageGateway::download_inbound`].
+#[derive(Debug, thiserror::Error)]
+pub enum InboundDownloadError {
+    /// The exchange failed or a read idled past [`DOWNLOAD_IDLE_TIMEOUT`].
+    #[error(transparent)]
+    Http(Error),
+    /// The server answered with a status other than 2xx; nothing was stored.
+    #[error("download answered HTTP {0}")]
+    Status(u16),
+    /// Storing failed, or the body exceeds the `attachment-max-bytes`
+    /// setting ([`StoreError::TooLarge`]).
+    #[error(transparent)]
+    Store(StoreError),
+}
+
+/// Attachments: files users send through channels, and files sent by path.
+impl IMessageGateway {
+    /// The `attachment-max-bytes` setting: the largest attachment the
+    /// Gateway stores or sends.
+    #[must_use]
+    pub const fn attachment_max_bytes(&self) -> u64 {
+        self.attachments.max_bytes()
+    }
+
+    /// Stores `body` as a new attachment of `channel` under
+    /// `/workspace/cache/gateway/<channel>/`, returning its reference.
+    ///
+    /// The bytes go to a hidden `.<name>.part` file that is renamed into
+    /// place once `body` ends, and removed when anything fails. The MIME type
+    /// is `meta.mime_type`, else `application/octet-stream`, and names the
+    /// file's extension ([`mime_extension`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::TooLarge`] once `body` exceeds
+    /// [`Self::attachment_max_bytes`], [`StoreError::Stream`] when `body`
+    /// fails, and [`StoreError::Filesystem`] when the filesystem does.
+    pub async fn store_inbound(
+        &self,
+        channel: &str,
+        meta: AttachmentMeta,
+        body: BinaryStream,
+    ) -> Result<Attachment, StoreError> {
+        self.attachments.store(channel, meta, body).await
+    }
+
+    /// Downloads `request` straight into [`Self::store_inbound`].
+    ///
+    /// The MIME type is `meta.mime_type`, else the response's
+    /// `Content-Type`. Each wait for the server is bounded by
+    /// [`DOWNLOAD_IDLE_TIMEOUT`]. Classify the sender with
+    /// [`Owners::classify`] before calling this: a stranger's attachment is
+    /// never downloaded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InboundDownloadError`]; a body over
+    /// [`Self::attachment_max_bytes`], declared or received, is
+    /// [`StoreError::TooLarge`].
+    pub async fn download_inbound<B: RequestBody>(
+        &self,
+        channel: &str,
+        request: DownloadRequest<'_, B>,
+        meta: AttachmentMeta,
+    ) -> Result<Attachment, InboundDownloadError> {
+        let mut sink = attachment::InboundSink {
+            attachments: &self.attachments,
+            channel,
+            meta: Some(meta),
+            pending: None,
+        };
+        let limits = DownloadLimits {
+            max_bytes: self.attachments.max_bytes(),
+            idle_timeout: DOWNLOAD_IDLE_TIMEOUT,
+        };
+        let downloaded = self.http.download(request, limits, &mut sink).await;
+        let pending = sink.pending.take();
+        let failure = match downloaded {
+            Ok(_head) => match pending {
+                Some(pending) => {
+                    return pending.finish().await.map_err(InboundDownloadError::Store);
+                }
+                None => {
+                    InboundDownloadError::Store(StoreError::Filesystem(barracuda_vfs::FsError::Io))
+                }
+            },
+            Err(DownloadError::Http(Error::BodyTooLarge)) => {
+                InboundDownloadError::Store(StoreError::TooLarge {
+                    limit: self.attachments.max_bytes(),
+                })
+            }
+            Err(DownloadError::Http(error)) => InboundDownloadError::Http(error),
+            Err(DownloadError::Sink(attachment::SinkError::Status(status))) => {
+                InboundDownloadError::Status(status)
+            }
+            Err(DownloadError::Sink(attachment::SinkError::Store(error))) => {
+                InboundDownloadError::Store(error)
+            }
+        };
+        if let Some(pending) = pending {
+            pending.abort().await;
+        }
+        Err(failure)
+    }
+
+    /// Opens the file at `path` in the Gateway's view for sending, as a
+    /// [`BinaryBody::Source`] whose length comes from the file's metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Filesystem`] when `path` names no file, and
+    /// [`StoreError::TooLarge`] for a file over
+    /// [`Self::attachment_max_bytes`].
+    pub async fn open_source(&self, path: &str) -> Result<Rc<dyn MediaSource>, StoreError> {
+        self.attachments.open(path).await
+    }
 }
 
 /// Channel services: what every channel Plugin shares.
@@ -244,12 +367,14 @@ impl IMessageGateway {
         self.runtime.send_stream(request)
     }
 
-    /// Accepts one command for an outbound binary media stream.
-    pub fn send_media(
+    /// Accepts one command for an outbound binary media stream, or sends one
+    /// whole file by path ([`GatewaySendMediaRequest::File`], opened with
+    /// [`Self::open_source`]) and waits for its delivery.
+    pub async fn send_media(
         &self,
         request: GatewaySendMediaRequest,
-    ) -> Result<GatewayAccepted, GatewayOperationError> {
-        self.runtime.send_media(request)
+    ) -> Result<GatewaySendMediaResponse, GatewayOperationError> {
+        self.runtime.send_media(request, &self.attachments).await
     }
 }
 
@@ -276,6 +401,9 @@ impl IMessageGatewayPlugin {
 }
 
 impl Plugin for IMessageGatewayPlugin {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
@@ -287,6 +415,11 @@ impl Plugin for IMessageGatewayPlugin {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let http_clients = context.require::<ClientFactory<'static>>("http")?;
         let webserver = context.require::<WebServer>("webserver")?;
+        let attachments = attachment::Attachments::new(
+            context.filesystem()?.clone(),
+            self.entropy.clone(),
+            u64::from(config::ATTACHMENT_MAX_BYTES),
+        );
         let receive_slots = ReceiveSlots::new(self.ip_stack, &http_clients, RECEIVE_BUFFERS.take());
         log::info!("channel receive slots: {}", receive_slots.capacity());
         let gateway = Rc::new(MessageGateway::new());
@@ -300,6 +433,7 @@ impl Plugin for IMessageGatewayPlugin {
             http: GatewayHttp::new((*http_clients).clone()),
             receive_slots,
             entropy: owners::PairingEntropy::new(self.entropy.clone()),
+            attachments,
         });
         for registration in workflow::register_actions(&actions, Rc::clone(&capability))
             .map_err(PluginError::registration)?

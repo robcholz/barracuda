@@ -3,7 +3,7 @@
 use alloc::string::{String, ToString};
 
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 
@@ -36,16 +36,13 @@ impl ToolSpec for EndConversationTool {
 impl ToolHandler for EndConversationTool {
     type Args = EndConversationArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let final_message = args.final_message.trim();
             self.effects.emit(AgentEffect::Finish {
                 final_message: final_message.to_string(),
             });
-            Ok(ToolOutput {
-                content: "Conversation ended.".to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new("Conversation ended.", true))
         })
     }
 }
@@ -74,7 +71,11 @@ mod tests {
             .add_group(internal_tools(effects))
             .expect("internal tools register");
         let tools = tools.begin().expect("tool set begins");
-        let joined = ToolRunner::new(&tools).run(vec![call]);
+        let joined = ToolRunner::new(
+            &tools,
+            barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+        )
+        .run(vec![call]);
         let output = block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("tool result")

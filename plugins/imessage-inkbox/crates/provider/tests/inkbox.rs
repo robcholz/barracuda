@@ -263,6 +263,7 @@ fn uploads_media_then_sends_the_returned_url() {
             let request = SendMediaRequest {
                 target: target(),
                 body: BinaryBody::Bytes(vec![1, 2, 3]),
+                size: Some(3),
                 filename: Some("photo.jpg".to_owned()),
                 mime_type: Some("image/jpeg".to_owned()),
                 caption: Some("caption".to_owned()),
@@ -304,6 +305,7 @@ fn ignores_reply_to_for_text_and_media() {
             let media = SendMediaRequest {
                 target: target(),
                 body: BinaryBody::Bytes(vec![1, 2, 3]),
+                size: Some(3),
                 filename: None,
                 mime_type: None,
                 caption: None,

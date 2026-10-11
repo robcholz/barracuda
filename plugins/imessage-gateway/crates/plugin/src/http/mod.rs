@@ -12,12 +12,17 @@ use barracuda_bulk_memory::BulkBox;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use futures_lite::StreamExt as _;
-use gateway::BinaryBody;
+use gateway::{BinaryBody, MediaSource};
 use reqwless::request::RequestBuilder as _;
 
 pub use reqwless::request::{Method, RequestBody};
 
+mod download;
 mod poll;
+pub use download::{
+    download, DownloadError, DownloadHead, DownloadLimits, DownloadRequest, DownloadSink,
+    DOWNLOAD_IDLE_TIMEOUT,
+};
 pub use poll::{poll, PollEnd, PollLimits, PollRequest, Polled, Poller};
 
 /// HTTP helpers over the http Plugin's clients, for channel providers.
@@ -47,6 +52,24 @@ impl GatewayHttp {
         send(&self.clients, method, url, headers, body).await
     }
 
+    /// [`Self::send`] that also returns the values of the response headers
+    /// named in `names` (matched without regard to case), in their order;
+    /// `None` for one the response lacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the exchange fails or misses [`SEND_TIMEOUT`].
+    pub async fn send_reading_headers<B: RequestBody>(
+        &self,
+        method: Method,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: B,
+        names: &[&str],
+    ) -> Result<(Response, Vec<Option<String>>), Error> {
+        send_reading_headers(&self.clients, method, url, headers, body, names).await
+    }
+
     /// [`Self::send`] that fails with [`Error::BodyTooLarge`] once the
     /// response body exceeds `limit` bytes.
     ///
@@ -63,6 +86,23 @@ impl GatewayHttp {
         limit: usize,
     ) -> Result<Response, Error> {
         send_limited(&self.clients, method, url, headers, body, limit).await
+    }
+
+    /// Streams one response body into `sink` on a fresh connection; see
+    /// [`download`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DownloadError`] when the exchange fails, a read idles past
+    /// [`DownloadLimits::idle_timeout`], the body exceeds
+    /// [`DownloadLimits::max_bytes`], or `sink` fails.
+    pub async fn download<B: RequestBody, S: DownloadSink>(
+        &self,
+        request: DownloadRequest<'_, B>,
+        limits: DownloadLimits,
+        sink: &mut S,
+    ) -> Result<DownloadHead, DownloadError<S::Error>> {
+        download(&self.clients, request, limits, sink).await
     }
 
     /// Polls `origin` over the receive slot `lease` until a request fails or
@@ -94,7 +134,8 @@ pub enum Error {
     /// The exchange missed its [`SEND_TIMEOUT`] deadline.
     #[error("HTTP request timed out")]
     Timeout,
-    /// The response body exceeded the limit given to [`send_limited`].
+    /// The response body exceeded the limit given to [`send_limited`] or
+    /// [`download`].
     #[error("HTTP response body is too large")]
     BodyTooLarge,
     /// The HTTP client failed.
@@ -112,12 +153,12 @@ pub struct Response {
 
 /// Sends one request on a fresh connection and buffers the whole response.
 ///
-/// The exchange (DNS, connect, TLS handshake, request, and response) must
-/// finish within [`SEND_TIMEOUT`], otherwise it is dropped with
-/// [`Error::Timeout`], which providers report as a transport error. A body of
-/// unknown length is a caller-fed stream: time spent waiting for its next
-/// chunk does not count, but connecting, each write, and the response after
-/// the last chunk are each bounded by [`SEND_TIMEOUT`].
+/// Each step of the exchange must finish within [`SEND_TIMEOUT`], otherwise
+/// it is dropped with [`Error::Timeout`], which providers report as a
+/// transport error: connecting (DNS, connect, TLS handshake), each write of
+/// the request, and the response after the last write. Time the body spends
+/// producing its next bytes does not count, so a large upload is bounded per
+/// write rather than as a whole.
 pub async fn send<T, D, B>(
     http_clients: &http_client::ClientFactory<'_, T, D>,
     method: Method,
@@ -161,6 +202,37 @@ where
     .await
 }
 
+/// [`send`] that also returns the values of the response headers named in
+/// `names` (matched without regard to case), in their order; `None` for one
+/// the response lacks.
+pub async fn send_reading_headers<T, D, B>(
+    http_clients: &http_client::ClientFactory<'_, T, D>,
+    method: Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: B,
+    names: &[&str],
+) -> Result<(Response, Vec<Option<String>>), Error>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+    B: RequestBody,
+{
+    let deadline = Deadline::new(SEND_TIMEOUT);
+    let body = PacedBody {
+        body,
+        deadline: &deadline,
+    };
+    futures_lite::future::or(
+        exchange(http_clients, method, url, headers, body, usize::MAX, names),
+        async {
+            deadline.expired().await;
+            Err(Error::Timeout)
+        },
+    )
+    .await
+}
+
 async fn send_within<T, D, B>(
     timeout: Duration,
     http_clients: &http_client::ClientFactory<'_, T, D>,
@@ -200,13 +272,17 @@ where
     D: http_client::embedded_nal_async::Dns,
     B: RequestBody,
 {
-    let deadline = Deadline::new(timeout, body.len().is_none());
+    let deadline = Deadline::new(timeout);
     let body = PacedBody {
         body,
         deadline: &deadline,
     };
     futures_lite::future::or(
-        exchange(http_clients, method, url, headers, body, limit),
+        async {
+            exchange(http_clients, method, url, headers, body, limit, &[])
+                .await
+                .map(|(response, _headers)| response)
+        },
         async {
             deadline.expired().await;
             Err(Error::Timeout)
@@ -222,7 +298,8 @@ async fn exchange<T, D, B>(
     headers: &[(&str, &str)],
     body: B,
     limit: usize,
-) -> Result<Response, Error>
+    names: &[&str],
+) -> Result<(Response, Vec<Option<String>>), Error>
 where
     T: http_client::embedded_nal_async::TcpConnect,
     D: http_client::embedded_nal_async::Dns,
@@ -237,6 +314,16 @@ where
     let mut request = request.headers(headers).body(body);
     let response = request.send(&mut header_buffer[..]).await?;
     let status = response.status.0;
+    let read_headers = names
+        .iter()
+        .map(|name| {
+            response
+                .headers()
+                .find(|(header, _value)| header.eq_ignore_ascii_case(name))
+                .and_then(|(_header, value)| core::str::from_utf8(value).ok())
+                .map(|value| String::from(value.trim()))
+        })
+        .collect();
     let mut reader = response.body().reader();
     let mut read_buffer = BulkBox::<[u8]>::new_zeroed_slice(READ_BUFFER_SIZE);
     let mut bytes = Vec::new();
@@ -253,45 +340,41 @@ where
         }
         bytes.extend_from_slice(chunk);
     }
-    Ok(Response {
-        status,
-        body: bytes,
-    })
+    Ok((
+        Response {
+            status,
+            body: bytes,
+        },
+        read_headers,
+    ))
 }
 
-/// Expiry instant of one [`send`] exchange, paused while a streamed body waits
-/// for its caller.
+/// Expiry instant of the current step of one [`send`] exchange, paused while
+/// the body produces its next bytes.
 struct Deadline {
-    /// Instant the exchange expires at, or `None` while paused.
+    /// Instant the current step expires at, or `None` while paused.
     at: Cell<Option<Instant>>,
     timeout: Duration,
-    /// Whether the clock pauses between writes of a streamed body.
-    streamed: bool,
     changed: Signal<NoopRawMutex, ()>,
 }
 
 impl Deadline {
-    fn new(timeout: Duration, streamed: bool) -> Self {
+    fn new(timeout: Duration) -> Self {
         Self {
             at: Cell::new(Some(Instant::now().saturating_add(timeout))),
             timeout,
-            streamed,
             changed: Signal::new(),
         }
     }
 
-    /// Restarts the clock from now for a streamed body.
+    /// Starts a new step's clock from now.
     fn resume(&self) {
-        if self.streamed {
-            self.set(Some(Instant::now().saturating_add(self.timeout)));
-        }
+        self.set(Some(Instant::now().saturating_add(self.timeout)));
     }
 
-    /// Stops the clock while a streamed body waits for its next chunk.
+    /// Stops the clock while the body produces its next bytes.
     fn pause(&self) {
-        if self.streamed {
-            self.set(None);
-        }
+        self.set(None);
     }
 
     fn set(&self, at: Option<Instant>) {
@@ -374,6 +457,7 @@ pub enum MultipartError {
 enum Segment {
     Bytes(Vec<u8>),
     Stream(gateway::BinaryStream),
+    Source(Rc<dyn MediaSource>),
 }
 
 struct BodyState {
@@ -397,6 +481,15 @@ impl MultipartBody {
     }
 }
 
+impl MultipartBody {
+    /// Records why a part could not be written and ends the body.
+    fn fail(&self, message: String) {
+        let mut state = self.state.borrow_mut();
+        state.failure = Some(message);
+        state.completed = true;
+    }
+}
+
 impl RequestBody for MultipartBody {
     fn len(&self) -> Option<usize> {
         self.content_length
@@ -415,12 +508,44 @@ impl RequestBody for MultipartBody {
                         match chunk {
                             Ok(bytes) => writer.write_all(&bytes).await?,
                             Err(error) => {
-                                let mut state = self.state.borrow_mut();
-                                state.failure = Some(error.to_string());
-                                state.completed = true;
+                                self.fail(error.to_string());
                                 return Ok(());
                             }
                         }
+                    }
+                }
+                Some(Segment::Source(source)) => {
+                    let mut stream = match source.open().await {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            self.fail(error.to_string());
+                            return Ok(());
+                        }
+                    };
+                    // The declared length is part of `Content-Length`, so the
+                    // part never writes more than it.
+                    let mut remaining = source.len();
+                    while let Some(chunk) = stream.next().await {
+                        let bytes = match chunk {
+                            Ok(bytes) => bytes,
+                            Err(error) => {
+                                self.fail(error.to_string());
+                                return Ok(());
+                            }
+                        };
+                        let Some(rest) = u64::try_from(bytes.len())
+                            .ok()
+                            .and_then(|length| remaining.checked_sub(length))
+                        else {
+                            self.fail("media source is longer than its length".into());
+                            return Ok(());
+                        };
+                        writer.write_all(&bytes).await?;
+                        remaining = rest;
+                    }
+                    if remaining != 0 {
+                        self.fail("media source is shorter than its length".into());
+                        return Ok(());
                     }
                 }
                 None => {
@@ -429,6 +554,80 @@ impl RequestBody for MultipartBody {
                 }
             }
         }
+    }
+}
+
+struct StreamState {
+    stream: Option<gateway::BinaryStream>,
+    failure: Option<String>,
+}
+
+/// Request body read from one [`gateway::BinaryStream`] of known length, so it
+/// is sent with a `Content-Length` and never buffered whole.
+///
+/// The stream must yield exactly the declared number of bytes. When it fails
+/// or yields more or fewer, the body ends early (the server then sees a short
+/// request) and [`Self::failure`] says why; check it before trusting the
+/// response.
+#[derive(Clone)]
+pub struct StreamBody {
+    state: Rc<RefCell<StreamState>>,
+    len: usize,
+}
+
+impl StreamBody {
+    /// A body of exactly `len` bytes read from `stream`.
+    #[must_use]
+    pub fn new(stream: gateway::BinaryStream, len: usize) -> Self {
+        Self {
+            state: Rc::new(RefCell::new(StreamState {
+                stream: Some(stream),
+                failure: None,
+            })),
+            len,
+        }
+    }
+
+    /// Why writing the stream failed, once it has.
+    #[must_use]
+    pub fn failure(&self) -> Option<String> {
+        self.state.borrow().failure.clone()
+    }
+
+    fn fail(&self, message: String) {
+        self.state.borrow_mut().failure = Some(message);
+    }
+}
+
+impl RequestBody for StreamBody {
+    fn len(&self) -> Option<usize> {
+        Some(self.len)
+    }
+
+    async fn write<W: embedded_io_async::Write>(&self, writer: &mut W) -> Result<(), W::Error> {
+        let Some(mut stream) = self.state.borrow_mut().stream.take() else {
+            return Ok(());
+        };
+        let mut remaining = self.len;
+        while let Some(chunk) = stream.next().await {
+            let bytes = match chunk {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.fail(error.to_string());
+                    return Ok(());
+                }
+            };
+            let Some(rest) = remaining.checked_sub(bytes.len()) else {
+                self.fail("request body is longer than its length".into());
+                return Ok(());
+            };
+            writer.write_all(&bytes).await?;
+            remaining = rest;
+        }
+        if remaining != 0 {
+            self.fail("request body is shorter than its length".into());
+        }
+        Ok(())
     }
 }
 
@@ -471,7 +670,10 @@ impl Multipart {
         self
     }
 
-    /// Appends a file streamed from `body`.
+    /// Appends a file streamed from `body`. A body of known length
+    /// ([`BinaryBody::Bytes`] or [`BinaryBody::Source`]) keeps the whole
+    /// body's length known, so it is sent with a `Content-Length`; a
+    /// [`BinaryBody::Stream`] makes it unknown.
     #[must_use]
     pub fn file(
         mut self,
@@ -537,6 +739,15 @@ impl Multipart {
                         BinaryBody::Stream(stream) => {
                             length = None;
                             segments.push_back(Segment::Stream(stream));
+                        }
+                        BinaryBody::Source(source) => {
+                            if let Some(current) = &mut length {
+                                *current = usize::try_from(source.len())
+                                    .ok()
+                                    .and_then(|size| current.checked_add(size))
+                                    .ok_or(MultipartError::LengthOverflow)?;
+                            }
+                            segments.push_back(Segment::Source(source));
                         }
                     }
                     push_bytes(&mut segments, &mut length, b"\r\n".to_vec())?;

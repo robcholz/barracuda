@@ -10,6 +10,7 @@
 extern crate alloc;
 
 mod aead;
+mod block;
 #[cfg(target_os = "none")]
 mod c_runtime;
 mod memory;
@@ -25,6 +26,10 @@ use mbedtls_rs::{
 };
 
 pub use aead::{aes_256_gcm_open, OpenError, GCM_NONCE_LEN, GCM_TAG_LEN};
+pub use block::{
+    aes_128_ecb_decrypt, aes_128_ecb_encrypt, aes_128_ecb_padded_len, md5, Aes128EcbDecryptor,
+    Aes128EcbEncryptor, CryptoError, Md5, AES_128_KEY_LEN, AES_BLOCK_LEN, MD5_LEN,
+};
 pub use mbedtls_rs::{Certificate, Session, SessionError, Split, TlsReference, TlsVersion};
 
 /// The process-wide TLS engine and the roots it trusts.

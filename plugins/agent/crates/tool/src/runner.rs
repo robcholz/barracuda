@@ -13,8 +13,8 @@ use portable_atomic::{AtomicU32, Ordering};
 use tracing::Instrument as _;
 
 use super::{
-    background, BackgroundToolPool, Tool, ToolError, ToolInvocation, ToolOutput, ToolResult,
-    ToolSetHandle,
+    background, BackgroundToolPool, Tool, ToolContext, ToolError, ToolInvocation, ToolOutput,
+    ToolResult, ToolSetHandle,
 };
 
 type ToolRunFuture = Pin<Box<dyn Future<Output = (ToolInvocation, ToolOutput)> + 'static>>;
@@ -47,14 +47,16 @@ impl Stream for ToolJoinHandle {
 pub struct ToolRunner<'a> {
     tools: &'a ToolSetHandle<'a>,
     background: Option<&'a BackgroundToolPool>,
+    context: ToolContext,
 }
 
 impl<'a> ToolRunner<'a> {
-    /// A runner that rejects background Tools.
-    pub fn new(tools: &'a ToolSetHandle<'a>) -> Self {
+    /// A runner that hands every call `context` and rejects background Tools.
+    pub fn new(tools: &'a ToolSetHandle<'a>, context: ToolContext) -> Self {
         Self {
             tools,
             background: None,
+            context,
         }
     }
 
@@ -70,10 +72,14 @@ impl<'a> ToolRunner<'a> {
         for invocation in calls {
             let span = toolcall_span(&invocation);
             let run = match self.tools.runnable_tool(&invocation) {
-                Ok(tool) if tool.is_background() => {
-                    start_background(tool, invocation, self.background.cloned(), span)
-                }
-                Ok(tool) => run(tool, invocation, span),
+                Ok(tool) if tool.is_background() => start_background(
+                    tool,
+                    self.context,
+                    invocation,
+                    self.background.cloned(),
+                    span,
+                ),
+                Ok(tool) => run(tool, self.context, invocation, span),
                 Err(error) => blocked(invocation, error, span),
             };
             runs.push(run);
@@ -97,10 +103,15 @@ fn blocked(
     )
 }
 
-fn run(tool: Tool, invocation: ToolInvocation, span: tracing::Span) -> ToolRunFuture {
+fn run(
+    tool: Tool,
+    context: ToolContext,
+    invocation: ToolInvocation,
+    span: tracing::Span,
+) -> ToolRunFuture {
     Box::pin(
         async move {
-            let output = settle(tool.invoke(&invocation).await);
+            let output = settle(tool.invoke(context, &invocation).await);
             trace_result(&output, false);
             (invocation, output)
         }
@@ -110,6 +121,7 @@ fn run(tool: Tool, invocation: ToolInvocation, span: tracing::Span) -> ToolRunFu
 
 fn start_background(
     tool: Tool,
+    context: ToolContext,
     invocation: ToolInvocation,
     pool: Option<BackgroundToolPool>,
     span: tracing::Span,
@@ -119,7 +131,7 @@ fn start_background(
         async move {
             let started = match pool {
                 Some(pool) => tool
-                    .invoke_background(&invocation)
+                    .invoke_background(context, &invocation)
                     .await
                     .map(|background| (pool, background)),
                 None => Err(ToolError::InvokeRejected(
@@ -171,10 +183,7 @@ pub(crate) fn trace_result(output: &ToolOutput, blocked: bool) {
 pub(crate) fn settle(output: ToolResult<ToolOutput>) -> ToolOutput {
     match output {
         Ok(output) => output,
-        Err(error) => ToolOutput {
-            content: error.to_string(),
-            ok: false,
-        },
+        Err(error) => ToolOutput::new(error.to_string(), false),
     }
 }
 
@@ -192,6 +201,9 @@ mod tests {
         BackgroundToolHandler, EmptyArgs, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
         ToolSet, ToolSpec,
     };
+    use crate::{SessionId, ToolContext};
+
+    const CONTEXT: ToolContext = ToolContext::new(SessionId::new(1));
 
     macro_rules! object_spec {
         ($name:literal) => {
@@ -224,13 +236,8 @@ mod tests {
     impl ToolHandler for EchoTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-            Box::pin(async {
-                Ok(ToolOutput {
-                    content: "echo".to_owned(),
-                    ok: true,
-                })
-            })
+        fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+            Box::pin(async { Ok(ToolOutput::new("echo", true)) })
         }
     }
 
@@ -244,7 +251,11 @@ mod tests {
     impl BackgroundToolHandler for ProgressingTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> BackgroundToolFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            _context: ToolContext,
+            _args: Self::Args,
+        ) -> BackgroundToolFuture<'a> {
             Box::pin(async {
                 Ok(BackgroundTool::with_progress(
                     output("accepted"),
@@ -281,7 +292,11 @@ mod tests {
     impl BackgroundToolHandler for EndlessTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> BackgroundToolFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            _context: ToolContext,
+            _args: Self::Args,
+        ) -> BackgroundToolFuture<'a> {
             Box::pin(async {
                 Ok(
                     BackgroundTool::new(output("accepted"), Box::pin(core::future::pending()))
@@ -292,10 +307,7 @@ mod tests {
     }
 
     fn output(content: &str) -> ToolOutput {
-        ToolOutput {
-            content: content.to_owned(),
-            ok: true,
-        }
+        ToolOutput::new(content.to_owned(), true)
     }
 
     fn call(id: &str, name: &str) -> ToolInvocation {
@@ -323,7 +335,7 @@ mod tests {
         let mut tools = tool_set();
         let tools = tools.begin().expect("tool set begins");
         let pool = BackgroundToolPool::new();
-        let join = ToolRunner::new(&tools)
+        let join = ToolRunner::new(&tools, CONTEXT)
             .with_background(&pool)
             .run(vec![call("call-1", "echo"), call("call-2", "progressing")]);
         let results = block_on(join.collect::<Vec<_>>());
@@ -355,7 +367,7 @@ mod tests {
     fn runner_without_a_pool_rejects_background_tools() {
         let mut tools = tool_set();
         let tools = tools.begin().expect("tool set begins");
-        let join = ToolRunner::new(&tools).run(vec![call("call-1", "progressing")]);
+        let join = ToolRunner::new(&tools, CONTEXT).run(vec![call("call-1", "progressing")]);
         let results = block_on(join.collect::<Vec<_>>());
         assert!(matches!(results.first(), Some((_, output)) if !output.ok));
     }
@@ -365,10 +377,12 @@ mod tests {
         let mut tools = tool_set();
         let tools = tools.begin().expect("tool set begins");
         let pool = BackgroundToolPool::new();
-        let join = ToolRunner::new(&tools).with_background(&pool).run(vec![
-            call("call-1", "endless"),
-            call("call-2", "progressing"),
-        ]);
+        let join = ToolRunner::new(&tools, CONTEXT)
+            .with_background(&pool)
+            .run(vec![
+                call("call-1", "endless"),
+                call("call-2", "progressing"),
+            ]);
         let _ = block_on(join.collect::<Vec<_>>());
 
         let listed = pool.list();

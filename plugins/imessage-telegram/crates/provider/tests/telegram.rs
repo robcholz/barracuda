@@ -258,6 +258,7 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
             let request = SendMediaRequest {
                 target: target(),
                 body: BinaryBody::Stream(Box::pin(data)),
+                size: None,
                 filename: Some("photo.jpg".to_owned()),
                 mime_type: Some("image/jpeg".to_owned()),
                 caption: Some("caption".to_owned()),
@@ -280,6 +281,68 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
                 .headers
                 .iter()
                 .any(|header| { header.name == "Transfer-Encoding" && header.value == "chunked" }));
+        },
+    );
+}
+
+fn audio(filename: Option<&str>, mime_type: Option<&str>) -> SendMediaRequest {
+    SendMediaRequest {
+        target: target(),
+        body: BinaryBody::Stream(Box::pin(stream::iter([Ok(BinaryChunk::from(vec![1, 2]))]))),
+        size: None,
+        filename: filename.map(str::to_owned),
+        mime_type: mime_type.map(str::to_owned),
+        caption: None,
+        reply_to: None,
+    }
+}
+
+#[test]
+fn ogg_audio_is_sent_as_a_voice_note_and_other_audio_as_audio() {
+    let sent = r#"{"ok":true,"result":{"message_id":12}}"#;
+    bench(
+        [
+            response(sent),
+            response(sent),
+            response(sent),
+            response(sent),
+        ],
+        async |http, server| {
+            let channel = Telegram::new(http, config("token"));
+            for request in [
+                audio(None, Some("audio/ogg")),
+                audio(Some("reply.opus"), None),
+                audio(Some("song.mp3"), Some("audio/mpeg")),
+                audio(None, None),
+            ] {
+                let result = channel.send_media(MediaKind::Audio, request).await;
+                assert!(matches!(result, Ok(receipt) if receipt.message_id == "12"));
+            }
+            let requests = requests(server);
+            let urls: Vec<&str> = requests
+                .iter()
+                .map(|request| request.url.as_str())
+                .collect();
+            assert_eq!(
+                urls,
+                [
+                    "/bottoken/sendVoice",
+                    "/bottoken/sendVoice",
+                    "/bottoken/sendAudio",
+                    "/bottoken/sendAudio"
+                ]
+            );
+            let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+            assert!(
+                body.contains(r#"name="voice"; filename="voice.ogg""#),
+                "{body}"
+            );
+            assert!(body.contains("Content-Type: audio/ogg"), "{body}");
+            let body = String::from_utf8_lossy(&requests[2].body).into_owned();
+            assert!(
+                body.contains(r#"name="audio"; filename="song.mp3""#),
+                "{body}"
+            );
         },
     );
 }

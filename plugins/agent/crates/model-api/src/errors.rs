@@ -73,21 +73,6 @@ pub enum Error {
     #[error("structured chat requires an output schema")]
     #[strum(serialize = "missing_output_schema")]
     MissingOutputSchema,
-    #[error("media request is incomplete")]
-    #[strum(serialize = "incomplete_media_request")]
-    IncompleteMediaRequest,
-    #[error("media URL is empty")]
-    #[strum(serialize = "media_url_empty")]
-    MediaUrlEmpty,
-    #[error("media file is empty")]
-    #[strum(serialize = "media_file_empty")]
-    MediaFileEmpty,
-    #[error("media file is too large")]
-    #[strum(serialize = "media_too_large")]
-    MediaTooLarge,
-    #[error("backend requires local image data")]
-    #[strum(serialize = "requires_local_image")]
-    RequiresLocalImage,
 }
 
 impl Error {

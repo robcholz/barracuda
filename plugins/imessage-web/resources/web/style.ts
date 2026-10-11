@@ -1,7 +1,8 @@
 /**
  * Web chat's own rules, from the design system's Chat card: the one-row composer, the fresh
  * conversation, the pinned head, jump to the latest, the session rail, icon-button tooltips, the spinning mark's box,
- * and the live-state motion (a reply's Markdown brings its own, `MARKDOWN_CSS`).
+ * the live-state motion (a reply's Markdown brings its own, `MARKDOWN_CSS`), and the Attachment, Media and Viewer
+ * cards for files in the composer and the log.
  * They serve this page alone, so the page adds them on mount and removes them on unmount
  * rather than growing the shell's stylesheet; reduced motion stills every animation.
  */
@@ -51,4 +52,45 @@ export const CHAT_CSS = `
 .bc-turn--new{animation:bc-rise .15s ease-out both}
 @media (prefers-reduced-motion:reduce){.bc-caret,.bc-typing>i,.bc-spinner,.bc-turn--new,.bc-shimmer{animation:none}.bc-shimmer{color:var(--muted-foreground);background:none}}
 @media (max-width:719px){.bc-chat-head{padding:var(--space-3) var(--space-4) 0}.bc-chat-rail{display:none;position:fixed;inset:0 auto 0 0;height:100vh;z-index:40;box-shadow:var(--shadow-xs)}.bc-chat-rail--open{display:flex}.bc-chat-rail-toggle{display:inline-flex}}
+.bc-attachments{display:flex;flex-wrap:wrap;gap:8px;padding:8px 8px 0 12px}
+.bc-attachment{position:relative;flex:none;width:64px;height:64px;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--muted)}
+.bc-attachment>img{display:block;width:100%;height:100%;object-fit:cover}
+.bc-attachment--file{width:auto;max-width:240px;display:flex;align-items:center;gap:8px;padding:0 32px 0 12px}
+.bc-attachment--error{border-color:var(--destructive)}
+.bc-attachment--busy>img,.bc-attachment--error>img{opacity:.35}
+.bc-attachment__name{min-width:0;display:flex;flex-direction:column}
+.bc-attachment__name>.bc-small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bc-attachment__state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
+.bc-attachment__retry{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:var(--foreground)}
+.bc-attachment__remove{position:absolute;top:2px;right:2px;background:var(--background)}
+.bc-attachment__remove:hover{background:var(--muted-hover)}
+.bc-attachment__remove:active{background:var(--muted-active)}
+.bc-attachment--file>.bc-attachment__remove{top:50%;transform:translateY(-50%)}
+.bc-attachment__progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--border)}
+.bc-attachment__progress>i{display:block;height:100%;background:var(--signal)}
+.bc-composer--drop,.bc-composer--drop:hover{border-style:dashed;border-color:var(--ring)}
+.bc-drop{display:flex;align-items:center;justify-content:center;gap:8px;min-height:88px;margin:6px 6px 0;border-radius:var(--radius-sm);background:var(--muted)}
+.bc-media{position:relative;display:block;padding:0;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--muted);cursor:zoom-in;transition:border-color .1s}
+.bc-media>img,.bc-media>video{display:block;width:100%;height:100%;object-fit:cover}
+.bc-media:hover{border-color:var(--border-hover)}
+.bc-media:focus-visible{outline:none;border-color:var(--ring)}
+.bc-media-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--border)}
+.bc-media-grid>.bc-media{border:0;border-radius:0}
+.bc-media-grid>.bc-media:hover{outline:1px solid var(--border-hover);outline-offset:-1px}
+.bc-media-grid>.bc-media:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+.bc-media--more>img{opacity:.35}
+.bc-media__more{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
+.bc-media--video{cursor:default}
+.bc-media__play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.bc-track{position:relative;display:block;height:2px;background:var(--border)}
+.bc-track>i{position:absolute;left:0;top:0;bottom:0;background:var(--foreground)}
+.bc-card--progress{position:relative;overflow:hidden}
+.bc-card--progress::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:var(--progress,0%);background:var(--signal)}
+.bc-viewer{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;background:var(--background);color:var(--foreground)}
+.bc-viewer__bar{display:flex;align-items:center;gap:12px;height:var(--topbar-height);padding:0 var(--space-4);border-bottom:1px solid var(--border)}
+.bc-viewer__stage{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:var(--space-8) 96px}
+.bc-viewer__image{max-width:100%;max-height:100%;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.bc-viewer__image>img{display:block;max-width:100%;max-height:calc(100vh - 120px);object-fit:contain}
+.bc-viewer__nav{position:absolute;top:50%;transform:translateY(-50%)}
+@media (max-width:719px){.bc-viewer__stage{padding:var(--space-4)}.bc-viewer__nav{display:none}}
 `;

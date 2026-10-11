@@ -121,7 +121,7 @@ impl WorkflowActionHandler for Record {
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
         "test.record",
-        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"}}}"#,
+        r#"{"type":"object","properties":{"route":{"type":"object"},"message_id":{"type":"string"},"text":{"type":"string"},"attachments":{"type":"array"}}}"#,
         r#"{"type":"object"}"#
     );
 
@@ -131,14 +131,11 @@ impl WorkflowActionHandler for Record {
     }
 }
 
+/// Hands the whole Event, attachments included, to `test.record`.
 const RECORD_WORKFLOW: &str = r#"{
     "id": "record-inbound",
     "match": {"event": "gateway.message.received"},
-    "steps": [{"call": "test.record", "arguments": {
-        "route": "$event.input.route",
-        "message_id": "$event.input.message_id",
-        "text": "$event.input.text"
-    }}]
+    "steps": [{"call": "test.record"}]
 }"#;
 
 struct Recorder(Rc<RefCell<Vec<Value>>>);
@@ -632,7 +629,7 @@ impl Scenario for OwnerMessageIsPublished {
             );
             assert!(requests[3].2.contains(r#""after":1000"#));
             assert!(requests[3].2.contains(r#""sort":"ASC""#));
-            assert!(requests[3].2.contains(r#""with":["chat"]"#));
+            assert!(requests[3].2.contains(r#""with":["chat","attachment"]"#));
             assert_eq!(channel.book.hook().and_then(|hook| hook.url), Some(url));
         })
     }
@@ -642,6 +639,110 @@ rusty_fork_test! {
     #[test]
     fn an_owner_message_is_published_on_the_chat_route() {
         run(OwnerMessageIsPublished);
+    }
+}
+
+/// `message` with `attachments` (a JSON array) in place of none.
+fn with_attachments(message: &str, attachments: &str) -> String {
+    message.replace(
+        r#""attachments":[]"#,
+        &format!(r#""attachments":{attachments}"#),
+    )
+}
+
+struct AttachmentsAreDownloaded;
+
+impl Scenario for AttachmentsAreDownloaded {
+    fn run<S: PluginStorage>(self, h: Harness<S>) -> Steps {
+        Box::pin(async move {
+            store_configuration(&h.storage, Some("send_receive"), &[OWNER]).await;
+            h.script(fresh_start());
+            h.script([
+                ScriptStep::response(200, "image/jpeg", b"JPEGDATA", usize::MAX),
+                ScriptStep::json(
+                    404,
+                    r#"{"status":404,"message":"Attachment does not exist!"}"#,
+                ),
+            ]);
+            let loaded = h.load();
+            let channel = &loaded.channel;
+            loaded
+                .receiving(async {
+                    until("the catch-up", || h.server().remaining() == 2).await;
+                    let path = hook_path(channel);
+                    let theirs = with_attachments(
+                        &message("s1", STRANGER, Some("\u{fffc}"), false, 2_000),
+                        r#"[{"guid":"at_theirs","mimeType":"image/jpeg","transferName":"x.jpeg","totalBytes":8}]"#,
+                    );
+                    assert_eq!(
+                        h.post_hook(&path, event("new-message", &theirs)).await,
+                        204
+                    );
+                    until("the stranger to be ignored", || {
+                        channel.owners().expect("owners").ignored() == 1
+                    })
+                    .await;
+                    assert_eq!(h.requests().len(), 4, "a stranger's file is never fetched");
+
+                    let mine = with_attachments(
+                        &message("m1", OWNER, Some("\u{fffc}look\u{fffc}\u{fffc}"), false, 3_000),
+                        r#"[{"guid":"at_A","uti":"public.jpeg","mimeType":"image/jpeg","transferName":"IMG_1.jpeg","totalBytes":8},
+                            {"guid":"at_B","mimeType":"image/heic","transferName":"IMG_2.HEIC","totalBytes":10},
+                            {"guid":"at_C","mimeType":"video/quicktime","transferName":"clip.mov","totalBytes":1099511627776}]"#,
+                    );
+                    assert_eq!(h.post_hook(&path, event("new-message", &mine)).await, 204);
+                    until("the publish", || !h.published().is_empty()).await;
+                    settle().await;
+                })
+                .await;
+
+            let published = h.published();
+            assert_eq!(published.len(), 1);
+            let message = &published[0];
+            assert_eq!(message["message_id"], "m1");
+            assert_eq!(
+                message["text"], "look\n[file not received]\n[video too large, not received]",
+                "the marks are gone and each missing file is a note"
+            );
+            let attachments = message["attachments"].as_array().expect("attachments");
+            assert_eq!(attachments.len(), 1);
+            assert_eq!(attachments[0]["kind"], "image");
+            assert_eq!(attachments[0]["mime_type"], "image/jpeg");
+            assert_eq!(attachments[0]["filename"], "IMG_1.jpeg");
+            assert_eq!(attachments[0]["size"], 8);
+            let stored = attachments[0]["path"].as_str().expect("path");
+            assert!(
+                stored.starts_with("/workspace/cache/gateway/bluebubbles/")
+                    && stored.ends_with(".jpg"),
+                "{stored}"
+            );
+            // The oversized video is never asked for.
+            let downloads: Vec<_> = h
+                .requests_from(4)
+                .into_iter()
+                .map(|(method, path, _body)| (method, path))
+                .collect();
+            assert_eq!(
+                downloads,
+                [
+                    (
+                        "GET".to_string(),
+                        "/api/v1/attachment/at_A/download?password=pw".to_string()
+                    ),
+                    (
+                        "GET".to_string(),
+                        "/api/v1/attachment/at_B/download?password=pw".to_string()
+                    ),
+                ]
+            );
+        })
+    }
+}
+
+rusty_fork_test! {
+    #[test]
+    fn an_owners_attachments_are_downloaded_and_a_missing_one_is_a_note() {
+        run(AttachmentsAreDownloaded);
     }
 }
 

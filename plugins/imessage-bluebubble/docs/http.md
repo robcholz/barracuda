@@ -19,8 +19,8 @@ answer `405`.
   - `lost`: deliveries the device could not take. These are bodies over
     8 KiB, deliveries arriving while the inbox is full, and messages skipped
     because a catch-up found more than 50 waiting.
-  - `skipped`: messages that are not plain text, such as attachments,
-    tapbacks, and group events.
+  - `skipped`: messages with neither text nor files, such as tapbacks and
+    group events.
 
 ## `POST /api/gateway/bluebubbles`
 

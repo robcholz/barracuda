@@ -10,6 +10,7 @@ import {
   header,
   kv,
   page,
+  pick,
   settingsForm,
   type Text,
 } from "../../../captive-portal/resources/web/ui";
@@ -175,6 +176,32 @@ export const mount = definePage((context) => {
             { kind: "secret", name: "api_key", label: "API Key" },
           ],
         },
+        {
+          title: { zh: "输入", en: "Input" },
+          hint: {
+            zh: "模型能直接看的附件",
+            en: "Attachments the model reads directly",
+          },
+          fields: [
+            {
+              kind: "switch",
+              name: "input_image",
+              label: { zh: "图片", en: "Images" },
+              hint: { zh: "JPEG、PNG、GIF、WebP", en: "JPEG, PNG, GIF, WebP" },
+              value: true,
+            },
+            {
+              kind: "switch",
+              name: "input_pdf",
+              label: "PDF",
+              hint: {
+                zh: "作为文档发给模型",
+                en: "Sent to the model as a document",
+              },
+              value: false,
+            },
+          ],
+        },
       ],
       advanced: {
         hint: { zh: "超时与大小上限", en: "Timeouts and size limits" },
@@ -202,10 +229,20 @@ export const mount = definePage((context) => {
             value: 524288,
             unit: "bytes",
           },
+          {
+            kind: "number",
+            name: "max_images_in_context",
+            label: { zh: "上下文中的图片", en: "Images in context" },
+            value: 2,
+            unit: pick({ zh: "张", en: "images" }, context.lang),
+          },
         ],
       },
-      // the endpoint takes a batch; this page registers one model at a time
-      body: (values) => [values],
+      // the endpoint takes a batch; this page registers one model at a time,
+      // and the two input switches are its `input_modalities` object
+      body: ({ input_image, input_pdf, ...values }) => [
+        { ...values, input_modalities: { image: input_image, pdf: input_pdf } },
+      ],
       onSuccess: () => {
         void status.refresh();
         void load();

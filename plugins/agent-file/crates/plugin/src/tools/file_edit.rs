@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, format, string::String};
 
 use barracuda_agent_plugin::tools::{
-    Action, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
 };
 use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,7 @@ impl ToolSpec for FileEditTool {
 impl ToolHandler for FileEditTool {
     type Args = EditArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let path = args.path.as_str();
             if args.old_text.is_empty() {
@@ -134,7 +134,7 @@ mod tests {
     use embassy_futures::block_on;
 
     use super::{EditArgs, FileEditTool};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn requires_an_exact_unique_match_unless_replace_all_is_requested()
@@ -147,36 +147,45 @@ mod tests {
             };
 
             let ambiguous = tool
-                .invoke(EditArgs {
-                    path: "/code.rs".into(),
-                    old_text: "old".into(),
-                    new_text: "new".into(),
-                    replace_all: false,
-                })
+                .invoke(
+                    CONTEXT,
+                    EditArgs {
+                        path: "/code.rs".into(),
+                        old_text: "old".into(),
+                        new_text: "new".into(),
+                        replace_all: false,
+                    },
+                )
                 .await?;
             assert!(!ambiguous.ok);
             assert_eq!(json(&ambiguous.content)?["error"], "ambiguous_match");
             assert_eq!(filesystem.read("/code.rs").await?, b"old + old");
 
             let replaced = tool
-                .invoke(EditArgs {
-                    path: "/code.rs".into(),
-                    old_text: "old".into(),
-                    new_text: "new".into(),
-                    replace_all: true,
-                })
+                .invoke(
+                    CONTEXT,
+                    EditArgs {
+                        path: "/code.rs".into(),
+                        old_text: "old".into(),
+                        new_text: "new".into(),
+                        replace_all: true,
+                    },
+                )
                 .await?;
             assert!(replaced.ok);
             assert_eq!(json(&replaced.content)?["replacements"], 2);
             assert_eq!(filesystem.read("/code.rs").await?, b"new + new");
 
             let missing = tool
-                .invoke(EditArgs {
-                    path: "/code.rs".into(),
-                    old_text: "old".into(),
-                    new_text: "new".into(),
-                    replace_all: false,
-                })
+                .invoke(
+                    CONTEXT,
+                    EditArgs {
+                        path: "/code.rs".into(),
+                        old_text: "old".into(),
+                        new_text: "new".into(),
+                        replace_all: false,
+                    },
+                )
                 .await?;
             assert!(!missing.ok);
             assert_eq!(json(&missing.content)?["error"], "no_match");
@@ -192,12 +201,15 @@ mod tests {
             let edited = FileEditTool {
                 filesystem: filesystem.clone(),
             }
-            .invoke(EditArgs {
-                path: "/note".into(),
-                old_text: "abc".into(),
-                new_text: "xyz".into(),
-                replace_all: false,
-            })
+            .invoke(
+                CONTEXT,
+                EditArgs {
+                    path: "/note".into(),
+                    old_text: "abc".into(),
+                    new_text: "xyz".into(),
+                    replace_all: false,
+                },
+            )
             .await?;
 
             assert!(edited.ok);

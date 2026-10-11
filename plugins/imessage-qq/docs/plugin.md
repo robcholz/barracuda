@@ -1,8 +1,8 @@
 # IMessage QQ Plugin
 
 The IMessage QQ Plugin adds a QQ Bot as an iMessage Gateway channel: it binds
-the bot by scan or configuration, sends through the QQ OpenAPI, and receives
-over the QQ gateway WebSocket.
+the bot by scan or configuration, sends text and files through the QQ OpenAPI,
+and receives messages and their files over the QQ gateway WebSocket.
 
 - Plugin ID: `imessage-qq`
 - Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
@@ -110,18 +110,91 @@ changes.
 conversation ids the send path takes. The sender checked against the owner book
 is `author.user_openid` for direct messages and `author.member_openid` in
 groups (QQ scopes both to the bot, so a person has a different id in each
-scene). Text is trimmed; attachments, cards, and other non-text messages are
-ignored. The 16 most recent message ids are remembered in RAM, so a message QQ
-pushes again, also after a resume, is handled once. For each new message:
+scene). Text is trimmed. A message with text or `attachments` (below) is
+handled, one of attachments only with empty text; a `message_type` other than
+0 (quotes, cards, forwards) and an empty message are skipped. The 16 most
+recent message ids are remembered in RAM, so a message QQ pushes again, also
+after a resume, is handled once. For each new message, classified with
+`Owners::classify` on its text before any file is fetched:
 
 - an owner's message is published as `GatewayInboundMessage` with the QQ
-  message `id` as `message_id`;
+  message `id` as `message_id` and its files as `attachments`;
 - a pairing code from a new sender adds them and answers 「已绑定，可以开始对话了」
   as a passive reply to the code message;
 - anyone else is dropped and counted.
 
 Before reading the next payload the session awaits `IMessageGateway::ready()`,
 still heartbeating meanwhile.
+
+### Attachments
+
+Each entry of an owner's `attachments[]` (`content_type`, `url`, `filename`,
+`size`, and for voice `voice_wav_url`) becomes one
+`GatewayInboundMessage::attachments` entry:
+
+| `content_type` | Kind | MIME type |
+| --- | --- | --- |
+| `image/jpeg`, `image/png`, `image/gif`, `image/webp` | `image` | `content_type` |
+| `voice`, `audio/*`, or a name ending `.amr`, `.silk`, `.slk` | `audio` | `audio/wav` from `voice_wav_url` (QQ's conversion) when present; else `content_type`, or `audio/amr` / `audio/silk` by name |
+| `video/*` | `video` | `content_type` |
+| anything else, other images included | `file` | `content_type` when it is a MIME type |
+
+A type left open is the download's `Content-Type`. The sender's `filename` is
+the attachment's (`.wav` for the conversion). QQ sends some URLs without a
+scheme (`//host/…`), which get `https:`.
+
+1. A `size` over `IMessageGateway::attachment_max_bytes()` is refused without a
+   request (the WAV conversion's size is not known, so it is not checked).
+2. `IMessageGateway::download_inbound` streams the URL into
+   `/workspace/cache/gateway/qq/` on the shared request pool, never the
+   receive slot.
+
+Files are downloaded one after another inside the message's handling; the
+session keeps heartbeating meanwhile, and reads the next payload only after
+the message is published. A file that is refused, over the limit, has no URL,
+or fails (a non-2xx status, a transport or storage failure) does not drop the
+message: one line is appended to its text, `[<kind> too large, not received]`
+or `[<kind> not received]`. Strangers' and pairing messages' files are never
+fetched. The URLs may carry access keys and are never logged.
+
+### Sending files
+
+`send_media` uploads a file to a direct or group chat and sends it (see the
+`qq::media` module):
+
+1. `POST {api_base}/v2/users/<openid>/files` or
+   `/v2/groups/<group_openid>/files` with
+   `{"file_type","srv_send_msg":false,"file_name","file_data":"<base64>"}`.
+   A device has no public URL for QQ's `url` form, so the bytes go base64 in
+   `file_data`. The body is streamed (`StreamBody`) with a `Content-Length`
+   computed from the file's length (the JSON envelope plus
+   `4 * ceil(len / 3)`); the file is never buffered. QQ answers `file_info`.
+2. `POST …/messages` with `{"msg_type":7,"media":{"file_info"}}`, the caption
+   as `content`, and `msg_id`/`msg_seq` exactly as a text reply (below).
+
+`file_type` is 1 for an image (`image/jpeg`, `png`, `gif`, `webp`, `bmp`, or
+such a name), 2 for `video/mp4`, 3 for SILK audio (`audio/silk`, `.silk`,
+`.slk`), and 4 (file) for everything else: QQ plays voice only as SILK and
+video only as mp4, so other audio and video arrive as files. `file_name` is
+the sender's name, else `<kind>.<extension>`.
+
+Limits and errors: the file's length must be known (a source or bytes, or a
+stream with `size`); a stream without one is `InvalidRequest` and nothing is
+sent. QQ takes at most 5 MiB through `file_data` (`MAX_UPLOAD_BYTES`); larger
+files are `InvalidRequest` (QQ's URL and chunked uploads are not used). Guild
+channels (`channel:`) have no files endpoint: `Unsupported`. A 401 renews the
+token and uploads once more when the file can be read again; 401/403 are
+`Authentication`, 429 `RateLimited`, other refusals `Platform` with QQ's
+`code` and `message`, a failed read of the file `Stream`. Like every send,
+the upload must finish within the Gateway's 30 s `SEND_TIMEOUT`.
+
+Sources: the QQ Bot API pages on rich media
+(<https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html>,
+<https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html>:
+`file_type` 1–4, `file_data` within 5 MB with `file_name`, `file_info`, `ttl`)
+and Tencent's `@tencent-connect/qqbot-nodejs` SDK (`file_data` as base64,
+`msg_type` 7 with `media.file_info`, inbound `attachments` with
+`voice_wav_url`).
 
 ### Passive replies
 
@@ -143,6 +216,8 @@ frame grows it up to its size, at most 64 KiB plus the header, and it shrinks
 back once drained), a short-lived buffer per sent frame, the 2 KiB handshake
 limit, about 1.5 KiB of recent message ids, the provider's reply book (16
 entries), the cached gateway URL and session id, and the boxed session future.
+While a message's files download, the Gateway's download buffers on a request
+pool connection; an upload holds one pool connection and one file chunk.
 
 ## Configuration
 

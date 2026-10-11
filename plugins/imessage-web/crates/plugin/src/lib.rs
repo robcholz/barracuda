@@ -4,21 +4,24 @@
 
 extern crate alloc;
 
+mod api;
+
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
 use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
 use barracuda_imessage_gateway_plugin::{
-    GatewayControlKind, GatewayInboundControl, GatewayInboundMessage, GatewayRoute, IMessageGateway,
+    AttachmentMeta, BinaryStream, ChannelError, GatewayControlKind, GatewayInboundControl,
+    GatewayInboundMessage, GatewayRoute, IMessageGateway, MediaKind, StoreError,
 };
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::WebServer;
 use web::{
-    InboundControl, InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web,
-    WebBridge, WebControl,
+    InboundControl, InboundError, InboundFuture, InboundMessage, InboundMessageSink, MediaSpool,
+    SpoolFuture, Web, WebBridge, WebControl,
 };
 
 pub use web::WebClientFrame;
@@ -54,13 +57,18 @@ impl IMessageWebRoute {
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
 #[barracuda_plugin::macros::plugin]
-pub struct IMessageWebPlugin;
+pub struct IMessageWebPlugin {
+    entropy: SharedEntropy,
+}
 
 impl IMessageWebPlugin {
-    /// Creates the IMessage Web Plugin.
+    /// Creates the IMessage Web Plugin, minting media ids from the Platform's
+    /// entropy.
     #[must_use]
-    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self {
+            entropy: context.entropy.clone(),
+        }
     }
 }
 
@@ -106,28 +114,72 @@ impl Plugin for IMessageWebPlugin {
         let webserver = context.require::<WebServer>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
-        let web = Rc::new(WebChannel::new());
+        let spool: Rc<dyn MediaSpool> = Rc::new(GatewaySpool(Rc::clone(&gateway)));
+        let web = Rc::new(WebChannel::new(spool, self.entropy.clone()));
         let channel: Rc<dyn MessageChannel> = web.clone();
         let channel_registration: MessageChannelRegistration = gateway
             .register(channel)
             .map_err(PluginError::registration)?;
         let route = GatewayRoute::new(WEB_CHANNEL, WEB_CONVERSATION);
         let sink: Rc<dyn InboundMessageSink> = Rc::new(GatewayInboundSink {
-            gateway,
+            gateway: Rc::clone(&gateway),
             channel: route.channel.clone(),
         });
-        let bridge = WebBridge::new(web, sink, route.conversation_id.clone());
+        let bridge = WebBridge::new(Rc::clone(&web), sink, route.conversation_id.clone());
         let web_registration = webserver
             .serve_websocket("/ws/message", bridge)
             .map_err(PluginError::registration)?;
+        let api_registrations =
+            api::register(&webserver, web, gateway).map_err(PluginError::registration)?;
         log::info!(
             "registered IMessage Web channel `{WEB_CHANNEL}` for conversation `{WEB_CONVERSATION}` at WebSocket route `/ws/message`"
         );
 
         context.retain(channel_registration);
         context.retain(web_registration);
+        context.retain(api_registrations);
         context.provide(Rc::new(IMessageWebRoute::new(route)))?;
         Ok(())
+    }
+}
+
+/// Writes media sent as bytes or a stream to the Gateway's attachment
+/// storage, so the channel keeps only a file reference.
+struct GatewaySpool(Rc<IMessageGateway>);
+
+impl MediaSpool for GatewaySpool {
+    fn spool(
+        &self,
+        kind: MediaKind,
+        mime_type: String,
+        filename: Option<String>,
+        body: BinaryStream,
+    ) -> SpoolFuture<'_> {
+        Box::pin(async move {
+            let meta = AttachmentMeta {
+                kind,
+                mime_type: Some(mime_type),
+                filename,
+            };
+            let stored = self
+                .0
+                .store_inbound(WEB_CHANNEL, meta, body)
+                .await
+                .map_err(store_error)?;
+            self.0.open_source(&stored.path).await.map_err(store_error)
+        })
+    }
+}
+
+fn store_error(error: StoreError) -> ChannelError {
+    match error {
+        StoreError::TooLarge { .. } => ChannelError::InvalidRequest {
+            message: error.to_string(),
+        },
+        StoreError::Stream(error) => ChannelError::Stream(error),
+        error => ChannelError::Transport {
+            message: error.to_string(),
+        },
     }
 }
 
@@ -180,6 +232,7 @@ impl InboundMessageSink for GatewayInboundSink {
                 },
                 message_id: request.message_id,
                 text: request.text,
+                attachments: request.attachments,
             };
             self.gateway
                 .publish(message)

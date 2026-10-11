@@ -6,7 +6,7 @@ Gateway channel, bridged to the browser over a WebSocket.
 - Plugin ID: `imessage-web`
 - Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Settings: none
-- Context resources: none
+- Context resources: `entropy` (the per-boot prefix of media ids)
 - Provided capabilities: `IMessageWebRoute`
 - Required capabilities: `CaptivePortal` from `captive-portal`,
   `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
@@ -15,16 +15,115 @@ Gateway channel, bridged to the browser over a WebSocket.
 - Agent Tools: none
 - Lua packages: none
 - Web: portal entry `imessage-web`, without status; WebSocket route
-  `/ws/message`
+  `/ws/message`; `PUT /api/web/upload/<mime>/<filename>`;
+  `GET /api/web/media/<id>`
 - Tasks: none
-- Storage: none
+- Storage: none of its own; files are the Gateway's attachments, under
+  `/workspace/cache/gateway/web/`
 
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,
-mounts the WebSocket bridge, and publishes `IMessageWebRoute` for consumers of
-the built-in Web conversation. Its portal entry registers no status source:
-Web chat is built in rather than an external channel, so `imessage-web` is
-absent from `GET /portal/status`.
+mounts the WebSocket bridge and the two file routes, and publishes
+`IMessageWebRoute` for consumers of the built-in Web conversation. Its portal
+entry registers no status source: Web chat is built in rather than an external
+channel, so `imessage-web` is absent from `GET /portal/status`.
+
+## Files
+
+Files never travel through the WebSocket or the channel's event history. A
+page uploads a file first, then names it in a message frame; a file the
+channel sends is one event naming a URL the page fetches. The bytes live in
+the Gateway's attachment storage, `/workspace/cache/gateway/web/`, which may
+vanish at any time and is empty after a restart on boards that keep it in
+memory: an id from before a restart names nothing, because every id carries
+a prefix drawn from `entropy` at the first id of each boot (`1a2b3c4d-7`).
+
+### Upload: `PUT /api/web/upload/<mime>/<filename>`
+
+An upload endpoint (`WebServer::serve_upload`) sees the method, the path and
+the declared `Content-Length`, but no headers, so the MIME type and the file
+name are the path's two segments, each percent-encoded
+(`/api/web/upload/image%2Fjpeg/beach%20day.jpg`). The MIME type is
+`type/subtype` of MIME token characters without parameters, at most 127
+bytes, lower-cased; the name is UTF-8, 1 to 255 bytes, not `.` or `..`,
+without `/`, `\` or control characters. The kind follows the type: `image`
+for `image/jpeg`, `image/png`, `image/gif` and `image/webp`, `audio` for
+`audio/*`, `video` for `video/*`, and `file` for everything else (SVG and
+HEIC included).
+
+The body streams through a one-chunk pipe (2 KiB reads) into
+`IMessageGateway::store_inbound("web", …)`; nothing is collected in memory.
+The upload is then held under a new id until a message frame sends it.
+
+| Status | Body | When |
+| --- | --- | --- |
+| `201` | `{"id","kind","mime_type","filename","size"}` | stored |
+| `400` | `{"error":"invalid_path"}` | a segment is missing or invalid |
+| `400` | `{"error":"incomplete_body"}` | the body ended before its length |
+| `405` | `{"error":"method_not_allowed"}` | not `PUT` |
+| `411` | `{"error":"length_required"}` | no `Content-Length`, or `0` (the endpoint cannot tell them apart, and an empty file has nothing to send) |
+| `413` | `{"error":"too_large","limit":<bytes>}` | the declared length, or the bytes stored, pass the Gateway's `attachment-max-bytes` |
+| `507` | `{"error":"no_space"}` | the attachment cache is full (`StoreError::NoSpace`) |
+| `500` | `{"error":"io"}` | any other filesystem failure |
+
+At most 16 uploads (`MAX_UPLOADS`) wait to be sent; a seventeenth evicts the
+oldest, whose id then names nothing. An evicted or never-sent upload stays in
+the cache until the cache is cleared.
+
+### Message frames with files
+
+A message frame names uploads beside its text:
+`{"text":"look","attachments":["1a2b3c4d-0","1a2b3c4d-1"]}`, at most four
+(`MAX_ATTACHMENTS`); `text` may then be `""`. The bridge numbers every message
+frame `web-in-<n>`, accepted or not, and publishes an accepted one through
+`IMessageGateway::publish` as a `GatewayInboundMessage` carrying the uploads'
+`Attachment`s in the frame's order. Each id is consumed by the frame that sends
+it. A frame is refused whole, publishing nothing and consuming none of its
+ids, when it names more than four files, an id the channel does not hold
+(never uploaded, already sent, evicted, or from before a restart), the same id
+twice, or neither text nor a file. Only the client that sent it is told, with
+an SSE frame that is not part of the conversation's history:
+
+```text
+event: message.rejected
+data: {"error":"unknown_attachment","message_id":"web-in-3"}
+```
+
+`error` is `unknown_attachment`, `too_many_attachments` or `empty`. The
+text-only `WebClientFrame { text }` type stays the form command-line clients
+send.
+
+### Media messages and `GET /api/web/media/<id>`
+
+`MessageChannel::send_media` emits exactly one event per media message,
+`message.image`, `message.audio`, `message.video` or `message.file` after the
+kind, with keys in this order:
+
+```text
+event: message.image
+data: {"caption":null,"filename":"photo.jpg","message_id":"web-7","mime_type":"image/jpeg","reply_to":"web-in-2","size":48213,"url":"/api/web/media/1a2b3c4d-4"}
+```
+
+A `BinaryBody::Source` is kept as it is, without a copy; `Bytes` and `Stream`
+bodies are first written to the Gateway's storage with `store_inbound("web",
+…)` and opened again with `open_source`. A missing MIME type comes from the
+file name's extension, else `application/octet-stream`. A failed spool sends
+no event and returns the failure (`TooLarge` as an invalid request). The
+64-event history and every subscriber hold only that small event, never the
+bytes.
+
+`GET /api/web/media/<id>` streams the file with `HttpResponse::stream`, its
+length from the source. Files are served under the portal's origin, so only
+types a browser shows without running anything keep their type: `image/jpeg`,
+`image/png`, `image/gif`, `image/webp`, the audio types `audio/mpeg`,
+`audio/mp4`, `audio/aac`, `audio/ogg` (also for `audio/opus` and
+`application/ogg`), `audio/wav`, `audio/webm`, `audio/flac`, and the video
+types `video/mp4`, `video/webm`, `video/quicktime`, `video/ogg`. Everything
+else, HTML and SVG included, is `application/octet-stream`. An id the channel
+no longer keeps, or a file that left the cache, answers `404
+{"error":"not_found"}`. At most 32 sent files (`MAX_KEPT`) are kept; a
+thirty-third evicts the oldest. The route has no `Range` support, so a
+browser plays a video from its start and cannot seek ahead of what it loaded.
 
 ## Portal page
 
@@ -32,8 +131,8 @@ Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-web`, group `WebGroup::Channel`, order 10, title `Web 聊天` / `Web
 chat`, a bilingual summary, icon `icon.svg`, figure `figure.js`, module
-`entry.js`, and a `ResourceFiles` provider. Unload removes the navigation entry
-and resource provider; no extra HTTP route is registered.
+`entry.js`, and a `ResourceFiles` provider. Unload removes the navigation entry,
+the resource provider and the file routes.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-web`
@@ -47,7 +146,8 @@ page is bundled into the portal shell. The shared UI source is a build-time
 helper, not a runtime dependency on another contributor's files.
 
 The page (`resources/web/entry.ts`, built on the portal UI kit) connects to
-WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`; replies
+WebSocket `/ws/message`, sends `WebClientFrame` JSON (`{ "text" }`, with
+`"attachments"` when it sends uploaded files; replies
 exist only in the page, so a reply to an Agent message puts the quoted message
 ahead of the user's words as `<quote>…</quote>` XML, escaped and cut to 512
 UTF-8 bytes, inside `text`), or a control frame for the running turn:
@@ -66,10 +166,39 @@ reaction and end (an end error marks the message incomplete), the Agent's
 semantic events inside `message.event` (reasoning, tool results, output and
 effect output, turn and session errors; steps and token usage stay off the
 page), permission requests (Allow and Deny send a text answer; any message
-answers the pending request), typing, `stream.lagged`, and attachments, which
-become downloads once complete (at most 8 MiB is kept per attachment). It
-receives live events only, retains at most 100 log items with 65,536 UTF-16
-code units per text part, and closes the socket when unmounted.
+answers the pending request), typing, `stream.lagged`, media messages and
+refused frames. It receives live events only, retains at most 100 log items
+with 65,536 UTF-16 code units per text part, and closes the socket when
+unmounted.
+
+Files follow the design system's Attachment, Media and Viewer cards. The
+composer's paperclip (「添加附件」, the first of its actions) opens the file
+picker; a pasted picture or a drop anywhere on the page adds files too, and
+while files are dragged over the page the composer turns dashed and says
+「松开以添加附件」. It holds at most four, and the paperclip rests at four or
+offline. JPEG, PNG and WebP pictures are drawn again at most 1568 px on their
+long side and encoded at 0.85 (JPEG as JPEG, the others as WebP, which also
+drops their metadata) before upload. Each file uploads at once with
+`XMLHttpRequest`, its progress a 2px line under a spinner; a failed one dims
+under a retry button and one sentence says so, and a file over the device's
+limit names the limit in MB. Send is enabled with files and no text, and
+disabled while a file uploads or failed. A queued message keeps its files (its
+bar counts them after a paperclip), an edited one puts them back as they are,
+and a rewound one uploads them again, since the device took them with the
+message. A refused frame marks its message 「附件已失效，这条消息没有发出」.
+In the log, a user turn's files sit above its bubble (none when it has no
+text), shown from the page's own copies; an Agent's media follows its reading
+order. One picture is a button opening the Viewer, at most 320 px wide in a
+user turn and 440 px in an Agent's; pictures in a row of a turn share a
+two-column grid of square cells, the fourth dimmed under 「+N」 past four.
+Audio is a card with play and pause, `0:12 / 0:48` and a 2px position line;
+video shows its first frame under a play button, then the native controls; any
+other file is a card with its type, size and a download link. A picture whose
+URL fails (evicted, or cleared by a restart) becomes a card saying 「已不可用」.
+The Viewer covers the page on the dark ground with the picture's name, type
+and size, its place among several, download and close; arrows and swipes page,
+and Escape, close or a click beside the picture closes it, giving focus back to
+the picture that opened it.
 
 The page follows the design system's Chat card. Connected, it asks for the
 conversation's sessions and shows them in a rail at its left (a sheet opened

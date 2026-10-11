@@ -24,7 +24,9 @@ thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
+barracuda-http-plugin.workspace = true
 barracuda-platform-test.workspace = true
+barracuda-webserver-plugin.workspace = true
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"

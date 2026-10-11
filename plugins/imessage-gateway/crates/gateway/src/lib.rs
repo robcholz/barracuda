@@ -6,17 +6,19 @@ extern crate alloc;
 mod channel;
 mod error;
 mod facade;
+mod media;
 mod model;
 mod sessions;
 
 pub use channel::{ChannelFuture, MessageChannel};
 pub use error::{ChannelError, GatewayError, StreamError};
 pub use facade::{MessageChannelRegistration, MessageGateway};
+pub use media::{extension_mime, mime_extension, DEFAULT_EXTENSION};
 pub use model::{
     BinaryBody, BinaryChunk, BinaryStream, DeleteMessageRequest, EditMessageRequest, JsonContent,
-    MediaKind, MessageKind, MessageTarget, Operation, ReactRequest, SendMediaRequest,
-    SendMessageRequest, SendReceipt, SendStream, SendStreamEvent, SendStreamRequest,
-    SetTypingRequest, TextBody, TextChunk, TextStream,
+    MediaKind, MediaOpenFuture, MediaSource, MessageKind, MessageTarget, Operation, ReactRequest,
+    SendMediaRequest, SendMessageRequest, SendReceipt, SendStream, SendStreamEvent,
+    SendStreamRequest, SetTypingRequest, TextBody, TextChunk, TextStream,
 };
 pub use sessions::{
     sessions_text, SendSessionsRequest, SessionEntry, SessionNotice, SESSION_COMMANDS,

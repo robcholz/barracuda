@@ -52,4 +52,4 @@ pub use instance::Agent;
 pub use manager::{
     AgentCreateError, AgentId, AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig,
 };
-pub use message::Message;
+pub use message::{sniff_media_type, Attachment, MediaKind, Message, SNIFF_BYTES};

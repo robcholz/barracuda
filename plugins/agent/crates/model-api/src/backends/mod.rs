@@ -17,10 +17,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use strum::{Display, EnumString, IntoStaticStr};
 
+use super::attachments::{self, MediaPolicy, RequestMedia};
 use super::chat_stream::ProviderStream;
 use super::errors::Error;
 use super::transport::Transport;
-use super::types::{ChatRequest, LlmResponse, MediaRequest, ModelApiConfig};
+use super::types::{ChatRequest, LlmResponse, ModelApiConfig};
 
 /// Failed to parse a string backend id into [`BackendKind`].
 ///
@@ -71,7 +72,7 @@ pub(crate) struct Backend {
     #[getset(get_copy = "pub(crate)")]
     timeout_ms: u32,
     max_tokens: u32,
-    image_max_bytes: usize,
+    media: MediaPolicy,
 }
 
 impl Backend {
@@ -83,6 +84,8 @@ impl Backend {
             timeout_ms,
             max_tokens,
             image_max_bytes,
+            input_modalities,
+            max_images_in_context,
             ..
         } = config;
         let (path, headers) = match kind {
@@ -108,8 +111,18 @@ impl Backend {
             headers,
             timeout_ms,
             max_tokens,
-            image_max_bytes,
+            media: MediaPolicy {
+                modalities: input_modalities,
+                documents: kind == BackendKind::AnthropicCompatible,
+                max_inline: max_images_in_context,
+                max_bytes: image_max_bytes,
+            },
         }
+    }
+
+    /// Reads the attachments `request` inlines under this backend's policy.
+    pub(crate) async fn resolve_media(&self, request: &ChatRequest<'_>) -> RequestMedia {
+        attachments::resolve(self.media, request).await
     }
 
     pub(super) fn request_body(&self) -> Map<String, Value> {
@@ -123,10 +136,13 @@ impl Backend {
         &self,
         http: &mut Transport<'_, impl TcpConnect, impl Dns>,
         request: &ChatRequest<'_>,
+        media: &RequestMedia,
     ) -> Result<LlmResponse, Error> {
         match self.kind {
-            BackendKind::OpenAiCompatible => openai_compatible::chat(self, http, request).await,
-            BackendKind::AnthropicCompatible => anthropic::chat(self, http, request).await,
+            BackendKind::OpenAiCompatible => {
+                openai_compatible::chat(self, http, request, media).await
+            }
+            BackendKind::AnthropicCompatible => anthropic::chat(self, http, request, media).await,
         }
     }
 
@@ -134,29 +150,17 @@ impl Backend {
         &self,
         http: &mut Transport<'_, impl TcpConnect, impl Dns>,
         request: &ChatRequest<'_>,
+        media: &RequestMedia,
         schema_name: &str,
         schema: &Value,
     ) -> Result<LlmResponse, Error> {
         match self.kind {
             BackendKind::OpenAiCompatible => {
-                openai_compatible::chat_json(self, http, request, schema_name, schema).await
+                openai_compatible::chat_json(self, http, request, media, schema_name, schema).await
             }
             BackendKind::AnthropicCompatible => {
-                anthropic::chat_json(self, http, request, schema_name, schema).await
+                anthropic::chat_json(self, http, request, media, schema_name, schema).await
             }
-        }
-    }
-
-    pub(crate) async fn infer_media(
-        &self,
-        http: &mut Transport<'_, impl TcpConnect, impl Dns>,
-        request: &MediaRequest<'_>,
-    ) -> Result<String, Error> {
-        match self.kind {
-            BackendKind::OpenAiCompatible => {
-                openai_compatible::infer_media(self, http, request).await
-            }
-            BackendKind::AnthropicCompatible => anthropic::infer_media(self, http, request).await,
         }
     }
 
@@ -164,12 +168,15 @@ impl Backend {
         &self,
         http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
         request: &ChatRequest<'_>,
+        media: &RequestMedia,
     ) -> Result<ProviderStream<'h>, Error> {
         match self.kind {
             BackendKind::OpenAiCompatible => {
-                openai_compatible::chat_stream(self, http, request).await
+                openai_compatible::chat_stream(self, http, request, media).await
             }
-            BackendKind::AnthropicCompatible => anthropic::chat_stream(self, http, request).await,
+            BackendKind::AnthropicCompatible => {
+                anthropic::chat_stream(self, http, request, media).await
+            }
         }
     }
 }

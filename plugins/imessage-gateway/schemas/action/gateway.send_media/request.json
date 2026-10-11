@@ -39,6 +39,23 @@
       },
       "required": ["action", "stream_id", "sequence"],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "file" },
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" },
+        "kind": { "enum": ["file", "image", "audio", "video"] },
+        "path": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string" },
+        "mime_type": { "type": "string" },
+        "caption": { "type": "string" },
+        "reply_to": { "type": "string" }
+      },
+      "required": ["action", "channel", "conversation_id", "kind", "path"],
+      "additionalProperties": false
     }
   ]
 }

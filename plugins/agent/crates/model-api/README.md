@@ -1,7 +1,8 @@
 # barracuda-model-api
 
-LLM client: OpenAI- and Anthropic-compatible chat, structured JSON output, and
-image inference over an Agent-owned persistent HTTP transport.
+LLM client: OpenAI- and Anthropic-compatible chat and structured JSON output
+over an Agent-owned persistent HTTP transport, with the image and PDF
+attachments a conversation references inlined into each request.
 
 The standalone LLM surface can be reused independently of agent execution.
 
@@ -13,12 +14,24 @@ The standalone LLM surface can be reused independently of agent execution.
 |---|---|---|
 | `ModelApi::chat` | `ChatRequest` | `LlmResponse` (text + reasoning + tool calls) |
 | `ModelApi::chat_json` | `ChatRequest` + `StaticOutputSchema` | `ChatJsonResponse` (parsed `T` + tool calls) |
-| `ModelApi::infer_media` | `MediaRequest` | `String` (model text about the image) |
 | `ModelApi::chat_stream` | `ChatRequest` | `ChatStream` of `ChatStreamEvent` values containing `barracuda_runtime_utils::stream::StreamPart`; the stream exclusively borrows the HTTP transport until Drop |
 
 Both `openai_compatible` and `anthropic_compatible` backends are supported; the
 crate converts the unified request shape (and tool definitions, tool-call /
 tool-result roles, structured-output config) into each provider's wire format.
+
+## Attachments
+
+User and tool messages reference files by `media` content parts
+(`barracuda_agent_message::attachment`), never by bytes. Each call reads, once
+before its first attempt, the newest attachments it may inline from
+`ChatRequest::files`: JPEG, PNG, GIF and WebP images (recognized by their
+bytes) while `input_modalities.image` is on, and PDFs on the
+Anthropic-compatible backend while `input_modalities.pdf` is on, at most
+`max_images_in_context` files of at most `image_max_bytes` each. The body
+encoder base64-encodes them into the request body in place. Every other
+attachment is sent as a text placeholder naming the file, its type, size and
+path (`… no longer available` once the file is gone).
 
 ## HTTP is injected
 
@@ -47,14 +60,14 @@ classification.
 
 ## Public API
 
-Curated re-exports (implementation modules — backend registry, media-prep
-pipeline, retry loop — are private):
+Curated re-exports (implementation modules — backend registry, attachment
+resolution, retry loop — are private):
 
 - Client: `ModelApi`, `ModelApiFactory`
-- Config / requests: `ModelApiConfig`, `BackendKind`, `ChatRequest`,
-  `MediaRequest`, `RetryPolicy`, `StaticOutputSchema`
+- Config / requests: `ModelApiConfig`, `InputModalities`, `BackendKind`,
+  `ChatRequest`, `RetryPolicy`, `StaticOutputSchema`
 - Responses / values: `LlmResponse`, `ChatJsonResponse`, `ChatStream`,
-  `ChatStreamEvent`, `ToolCall`, `MediaAsset`
+  `ChatStreamEvent`, `ToolCall`
 - Errors: `Error`, `InitError`, `ParseBackendKindError`
 
 ## Example
@@ -69,5 +82,6 @@ chat.
 ## Where it fits
 
 A no_std core crate depending on `http-client`, `embassy-time`,
-`barracuda-runtime-utils`, `serde`/`serde_json`, `base64`, and `thiserror`. It is
+`barracuda-runtime-utils`, `barracuda-vfs`, `serde`/`serde_json`, `base64`, and
+`thiserror`. It is
 consumed by `barracuda-agent-runtime` and the memory-side LLM providers.

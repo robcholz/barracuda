@@ -1,6 +1,7 @@
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation,
+    ToolOutput, ToolSpec,
 };
 
 use super::super::policy::SpawnPolicy;
@@ -29,7 +30,7 @@ impl ToolSpec for ListSpawnableAgentsTool {
 impl ToolHandler for ListSpawnableAgentsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let kinds: Vec<serde_json::Value> = self
                 .policy
@@ -39,10 +40,10 @@ impl ToolHandler for ListSpawnableAgentsTool {
                     serde_json::json!({ "kind": kind.as_str(), "description": description })
                 })
                 .collect();
-            Ok(ToolOutput {
-                content: serde_json::json!({ "spawnable_agents": kinds }).to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                serde_json::json!({ "spawnable_agents": kinds }).to_string(),
+                true,
+            ))
         })
     }
 }

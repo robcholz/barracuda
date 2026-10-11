@@ -3,8 +3,9 @@
 //!
 //! One session holds one kept-alive connection and long-polls on it until
 //! the server closes it, a poll misses its deadline (an empty success: the
-//! connection is reopened at once), or a poll fails. Text messages from
-//! allowed accounts are published to the Gateway; a pairing message adds its
+//! connection is reopened at once), or a poll fails. Messages from allowed
+//! accounts are published to the Gateway, their files fetched from the CDN
+//! and decrypted first (see [`crate::media`]); a pairing message adds its
 //! sender and is answered once; everything else is dropped. A batch too large
 //! to buffer is skipped: its cursor is read from the reply's end and the loss
 //! is counted.
@@ -26,7 +27,7 @@ use barracuda_plugin::manager::PluginStorage;
 use embassy_time::{Duration, Instant};
 use wechat::{
     authorization, parse_oversized_updates, parse_updates, updates_body, updates_headers,
-    wechat_uin, ContextTokens, InboundText, Updates, UpdatesError, Wechat, WechatConfig,
+    wechat_uin, ContextTokens, InboundMessage, Updates, UpdatesError, Wechat, WechatConfig,
     DEFAULT_LONG_POLL_MS, MAX_UPDATES_BYTES, MAX_UPDATES_TAIL_BYTES, UPDATES_HEADER_BYTES,
     UPDATES_PATH,
 };
@@ -107,7 +108,7 @@ pub(crate) struct InboundState {
     /// Bumped when the linked bot changes, so a session of the old bot
     /// writes nothing more.
     epoch: Cell<u32>,
-    /// Non-text, bot, and group messages dropped since boot.
+    /// Empty, bot, and group messages dropped since boot.
     skipped: Cell<u32>,
     /// Batches skipped since boot because they exceeded
     /// [`MAX_UPDATES_BYTES`]; their messages are lost.
@@ -453,7 +454,7 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
             self.inbound
                 .skipped
                 .set(self.inbound.skipped.get().saturating_add(skipped));
-            log::debug!("skipped {skipped} WeChat messages without user text");
+            log::debug!("skipped {skipped} WeChat messages without user text or files");
         }
         self.inbound.adopt_long_poll(longpolling_timeout_ms);
         let had_messages = oversized || !messages.is_empty();
@@ -476,17 +477,19 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
     }
 
     /// Classifies one message; returns whether a context token changed.
-    async fn deliver_one(&self, provider: &Rc<Wechat>, message: InboundText) -> bool {
-        let InboundText {
+    async fn deliver_one(&self, provider: &Rc<Wechat>, message: InboundMessage) -> bool {
+        let InboundMessage {
             message_id,
             from_user_id,
             context_token,
             text,
+            media,
         } = message;
         // A receiving channel is linked, so its owner book is loaded.
         let Some(owners) = self.owners.get() else {
             return false;
         };
+        // Classify first: a stranger's file is never fetched.
         let classification = owners.classify(&from_user_id, None, &text).await;
         if classification == Classification::Ignored {
             return false;
@@ -497,10 +500,20 @@ impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
             .is_some_and(|token| self.inbound.context_tokens.remember(&from_user_id, &token));
         match classification {
             Classification::Owner => {
+                let mut text = text;
+                let mut attachments = Vec::new();
+                for file in media {
+                    let kind = file.kind;
+                    match crate::media::fetch(&self.gateway, provider, file).await {
+                        Ok(attachment) => attachments.push(attachment),
+                        Err(missed) => crate::media::append_note(&mut text, kind, missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, from_user_id),
                     message_id,
                     text,
+                    attachments,
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a WeChat message: {error}");

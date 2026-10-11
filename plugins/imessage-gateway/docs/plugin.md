@@ -2,13 +2,13 @@
 
 The IMessage Gateway Plugin routes messages between channel Plugins and
 Workflow, and owns what every channel Plugin shares: mode, owners, receive
-loops and slots, their HTTP routes and status, and HTTP helpers.
+loops and slots, their HTTP routes and status, HTTP helpers, and the files
+users send.
 
 - Plugin ID: `imessage-gateway`
 - Dependencies: `workflow`, `http`, `webserver`
-- Settings: `receive-slots` (`usize`, default `1`): connections reserved for
-  channel receive loops, each with its own statically allocated socket
-  buffers
+- Settings: `receive-slots` (`usize`, default `1`), `attachment-max-bytes`
+  (`u32`, default `8388608`)
 - Context resources: `ip_stack`, `entropy`
 - Provided capabilities: `IMessageGateway`
 - Required capabilities: `WorkflowService` from `workflow`,
@@ -24,12 +24,20 @@ loops and slots, their HTTP routes and status, and HTTP helpers.
   Plugin's prefix route on the `WebServer` for that Plugin
 - Tasks: four text stream workers (`gateway_event_worker`, pool size 4) and
   four media workers (`gateway_media_worker`, pool size 4)
-- Storage: none of its own; `load_mode`, `store_mode`, and `load_owners`
-  read and write the `mode` and `owners` keys in the calling channel
-  Plugin's storage
+- Storage: a private filesystem (`PluginFilesystem::Private`); inbound
+  attachments as files in `/workspace/cache/gateway/<channel>/`, written as
+  `.<name>.part` and renamed into place; no KV keys of its own:
+  `load_mode`, `store_mode`, and `load_owners` read and write the `mode` and
+  `owners` keys in the calling channel Plugin's storage
+
+`receive-slots` is the number of connections reserved for channel receive
+loops, each with its own statically allocated socket buffers.
+`attachment-max-bytes` is the largest single attachment the Gateway stores
+or sends; there is no total quota.
 
 The Plugin keeps its Workflow Action registrations alive for its lifetime.
-Pairing codes for channel owner books come from the Platform's entropy.
+Pairing codes for channel owner books, and the per-boot prefix of attachment
+names, come from the Platform's entropy.
 
 `IMessageGateway` is the shared typed API. Provider Plugins register channels
 and publish inbound messages through it; Workflow Actions and the separate
@@ -62,6 +70,125 @@ turn runs, what the command did, and the device's clock).
 `MessageChannel::send_sessions` defaults to one plain English message
 (`sessions_text`); the Web channel overrides it to push the list to every
 open page.
+
+## Attachments
+
+Files travel as references, never as bytes in Workflow JSON, Events, or
+transcripts. `GatewayInboundMessage::attachments` holds them, and the
+`file` command of `gateway.send_media` sends one by path.
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum MediaKind { File, Image, Audio, Video }
+pub struct Attachment {                        // {"kind","path","mime_type","filename"?,"size"}
+    pub kind: MediaKind,
+    pub path: String,                          // /workspace/cache/gateway/<channel>/<name>.<ext>
+    pub mime_type: String,
+    pub filename: Option<String>,
+    pub size: u64,
+}
+pub struct AttachmentMeta { pub kind: MediaKind, pub mime_type: Option<String>,
+    pub filename: Option<String> }
+pub enum StoreError { TooLarge { limit: u64 }, NoSpace, Filesystem(FsError), Stream(StreamError) }
+pub fn mime_extension(mime_type: &str) -> &'static str;   // "image/jpeg" -> "jpg", else "bin"
+pub fn extension_mime(path: &str) -> Option<&'static str>; // "a.png" -> "image/png"
+impl IMessageGateway {
+    pub const fn attachment_max_bytes(&self) -> u64;
+    pub async fn store_inbound(&self, channel: &str, meta: AttachmentMeta, body: BinaryStream)
+        -> Result<Attachment, StoreError>;
+    pub async fn download_inbound<B: RequestBody>(&self, channel: &str,
+        request: DownloadRequest<'_, B>, meta: AttachmentMeta)
+        -> Result<Attachment, InboundDownloadError>;   // Http, Status(u16), Store
+    pub async fn open_source(&self, path: &str) -> Result<Rc<dyn MediaSource>, StoreError>;
+}
+```
+
+- `store_inbound` writes `body` to
+  `/workspace/cache/gateway/<channel>/.<name>.part` and renames it to
+  `<name>` once the stream ends. `<channel>` keeps ASCII letters, digits,
+  `-` and `_` and turns everything else into `_`, at most 32 bytes. `<name>`
+  is a per-boot random prefix and a counter, `1a2b3c4d-0.jpg`, never one a
+  file already holds. The extension comes from the MIME type through
+  `mime_extension` (`jpg`, `png`, `gif`, `webp`, `heic`, `mp4`, `mov`, `ogg`,
+  `opus`, `mp3`, `m4a`, `wav`, `pdf`, `txt`, else `bin`); a missing type is
+  `application/octet-stream`.
+- A body over `attachment-max-bytes` fails with `StoreError::TooLarge`, a
+  failed stream with `StoreError::Stream`, a full cache with
+  `StoreError::NoSpace`, and any other filesystem failure with
+  `StoreError::Filesystem`; every failure removes the partial file. A future
+  that is dropped mid-write leaves its `.part` file in the cache.
+- `download_inbound` streams one `GatewayHttp::download` straight into
+  `store_inbound`'s file: the MIME type is `meta.mime_type`, else the
+  response's `Content-Type` without parameters. A non-2xx status stores
+  nothing (`InboundDownloadError::Status`). A `Content-Length` or body over
+  `attachment-max-bytes` is `StoreError::TooLarge`. Each wait for the server
+  is bounded by `DOWNLOAD_IDLE_TIMEOUT` (30 s), not the whole download.
+- `open_source` opens any file in the Gateway's view (`/workspace/...`, its
+  own `/data`, `/cache`, `/media`) as a `MediaSource`: its `len()` is the
+  file's size from metadata, and every `open()` reads it again from the
+  start, exactly that many bytes. A file over `attachment-max-bytes` is
+  `StoreError::TooLarge`. Senders pass it as `BinaryBody::Source`, with
+  `SendMediaRequest::size` set to its length; `Multipart::file` then keeps
+  the request's `Content-Length` known.
+- The files live in `/workspace/cache`, which may vanish at any time; on
+  boards where it is in memory they are gone after a restart.
+
+**Classify the owner before downloading.** A channel calls
+`owners.classify(sender, label, text)` first and stores or downloads a
+message's files only for `Owner`. A paired or ignored sender's files are
+never fetched or written, so a stranger cannot fill the cache.
+
+### Streaming downloads
+
+```rust
+pub struct DownloadRequest<'a, B = ()> { pub method: Method, pub url: &'a str,
+    pub headers: &'a [(&'a str, &'a str)], pub body: B }
+impl<'a> DownloadRequest<'a> { pub const fn get(url: &'a str) -> Self; }
+impl<'a, B> DownloadRequest<'a, B> { pub fn with_headers(self, headers: &'a [(&'a str, &'a str)]) -> Self; }
+pub struct DownloadLimits { pub max_bytes: u64, pub idle_timeout: Duration }
+pub struct DownloadHead { pub status: u16, pub content_type: Option<String>,
+    pub content_length: Option<u64> }
+pub trait DownloadSink {
+    type Error;
+    async fn head(&mut self, head: &DownloadHead) -> Result<(), Self::Error>;
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+impl GatewayHttp {
+    pub async fn download<B: RequestBody, S: DownloadSink>(&self, request: DownloadRequest<'_, B>,
+        limits: DownloadLimits, sink: &mut S) -> Result<DownloadHead, DownloadError<S::Error>>;
+}
+```
+
+`download` opens a fresh connection and hands the sink the head, then each
+read of the body. A `Content-Length` over `max_bytes` fails before any of the
+body, and a longer body once it passes `max_bytes`, both with
+`Error::BodyTooLarge`. `idle_timeout` bounds connecting through the response
+head, each request write, and each body read; time in the sink does not
+count. A missed wait is `Error::Timeout`.
+
+### Uploads of known length
+
+```rust
+pub struct StreamBody;                         // RequestBody, Clone
+impl StreamBody {
+    pub fn new(stream: BinaryStream, len: usize) -> Self;
+    pub fn failure(&self) -> Option<String>;
+}
+impl GatewayHttp {
+    pub async fn send_reading_headers<B: RequestBody>(&self, method: Method, url: &str,
+        headers: &[(&str, &str)], body: B, names: &[&str])
+        -> Result<(Response, Vec<Option<String>>), Error>;
+}
+```
+
+`StreamBody` sends a body a provider builds as a stream (an encoded or
+encrypted file) with a `Content-Length` of `len`, never buffering it. A stream
+that fails, or yields more or fewer than `len` bytes, ends the body early and
+`failure()` says why, so the provider checks it before trusting the answer.
+`send_reading_headers` is `send` that also returns the values of the response
+headers named in `names` (any case), `None` for a missing one. Like `send`,
+each step (connecting, each write, the response after the last write) is
+bounded by `SEND_TIMEOUT`, not the whole upload.
 
 ## Ingress backpressure
 

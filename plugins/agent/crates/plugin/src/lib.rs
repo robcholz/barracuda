@@ -28,9 +28,9 @@ use http_client::ClientFactory;
 use workflow::AgentWorkflowAdapter;
 
 pub use barracuda_agent_runtime::{
-    stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
-    SessionDeleteError, SessionEvent, SessionId, SessionInfo, SessionPersistence,
-    SessionRenameError, TurnEvent, WallClock,
+    sniff_media_type, stream, tools, AgentRuntime, AgentToolRegistry, Attachment, IterationEvent,
+    MediaKind, Message, PermissionLevel, SessionDeleteError, SessionEvent, SessionId, SessionInfo,
+    SessionPersistence, SessionRenameError, TurnEvent, WallClock, SNIFF_BYTES,
 };
 pub use model_api_http::{SET_API_PATH, STATUS_API_PATH};
 

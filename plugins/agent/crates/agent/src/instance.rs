@@ -289,8 +289,8 @@ where
                                 let _ = run.resolve_approval(tool_call_id, decision);
                             }
                             ActiveWake::Background(update) => {
-                                run.continue_with(Message::text(render_notifications(
-                                    core::slice::from_ref(&update),
+                                run.continue_with(notification_message(core::slice::from_ref(
+                                    &update,
                                 )));
                                 pending_updates.push(update);
                             }
@@ -417,7 +417,7 @@ where
 fn background_turn(notifications: &mut VecDeque<BackgroundNotification>) -> Option<PendingTurn> {
     let first = notifications.front()?.call.clone();
     let notifications = notifications.drain(..).collect::<Vec<_>>();
-    let message = Message::text(render_notifications(&notifications));
+    let message = notification_message(&notifications);
     let applied_completions = notifications
         .into_iter()
         .filter(BackgroundNotification::is_completion)
@@ -427,6 +427,20 @@ fn background_turn(notifications: &mut VecDeque<BackgroundNotification>) -> Opti
         message,
         applied_completions,
     })
+}
+
+/// The message that delivers `notifications`: their rendering, with the files
+/// their outputs returned.
+fn notification_message(notifications: &[BackgroundNotification]) -> Message {
+    let attachments = notifications
+        .iter()
+        .flat_map(|notification| match &notification.update {
+            BackgroundUpdate::Progress(output) | BackgroundUpdate::Completed(output) => {
+                output.attachments.iter().cloned()
+            }
+        })
+        .collect();
+    Message::text(render_notifications(notifications)).with_attachments(attachments)
 }
 
 fn render_notifications(notifications: &[BackgroundNotification]) -> String {
@@ -470,11 +484,9 @@ mod tests {
 
     #[test]
     fn progress_is_rendered_as_non_terminal_update() {
-        let rendered =
-            render_notifications(&[notification(BackgroundUpdate::Progress(ToolOutput {
-                content: "input_required".to_string(),
-                ok: true,
-            }))]);
+        let rendered = render_notifications(&[notification(BackgroundUpdate::Progress(
+            ToolOutput::new("input_required", true),
+        ))]);
 
         assert!(rendered.contains("[background:progress]\nid: 7\ntool: background"));
         assert!(rendered.contains("update:\ninput_required"));
@@ -484,14 +496,8 @@ mod tests {
     #[test]
     fn background_turn_tracks_only_terminal_updates_as_applied_completions() {
         let mut notifications = VecDeque::from(vec![
-            notification(BackgroundUpdate::Progress(ToolOutput {
-                content: "working".to_string(),
-                ok: true,
-            })),
-            notification(BackgroundUpdate::Completed(ToolOutput {
-                content: "done".to_string(),
-                ok: true,
-            })),
+            notification(BackgroundUpdate::Progress(ToolOutput::new("working", true))),
+            notification(BackgroundUpdate::Completed(ToolOutput::new("done", true))),
         ]);
 
         let Some(turn) = background_turn(&mut notifications) else {
@@ -500,5 +506,25 @@ mod tests {
         assert_eq!(turn.applied_completions.len(), 1);
         assert!(turn.message.as_str().contains("[background:progress]"));
         assert!(turn.message.as_str().contains("[background:completed]"));
+    }
+
+    #[test]
+    fn delivered_results_bring_the_files_they_returned() {
+        let photo = crate::Attachment {
+            kind: crate::MediaKind::Image,
+            path: "/workspace/cache/shot.png".to_string(),
+            mime_type: "image/png".to_string(),
+            filename: None,
+            size: 4,
+        };
+        let mut notifications = VecDeque::from(vec![notification(BackgroundUpdate::Completed(
+            ToolOutput::new("done", true).with_attachments(vec![photo.clone()]),
+        ))]);
+
+        let turn = background_turn(&mut notifications);
+        assert_eq!(
+            turn.as_ref().map(|turn| turn.message.attachments()),
+            Some(&[photo][..])
+        );
     }
 }

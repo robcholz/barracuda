@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
@@ -45,15 +46,27 @@ pub struct WebClientControl {
     pub confirm: bool,
 }
 
-/// A frame sent from a Web client to the server.
+/// A text message frame sent from a Web client to the server.
 ///
 /// The client supplies only content; the server assigns each message a stable
 /// id within the connection. Replies are the client's concern: a client that
-/// quotes an earlier message puts the quote in `text`.
+/// quotes an earlier message puts the quote in `text`. A client that uploaded
+/// files first adds `"attachments": ["<id>", …]` (at most
+/// [`crate::MAX_ATTACHMENTS`]) beside `text`, which may then be empty; this
+/// type is the text-only form.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WebClientFrame {
     /// Message text.
     pub text: String,
+}
+
+/// A message frame as the bridge reads it: text and the ids of uploads.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(not(any(test, feature = "server")), allow(dead_code))]
+pub(crate) struct MessageFrame {
+    pub(crate) text: String,
+    #[serde(default)]
+    pub(crate) attachments: Vec<String>,
 }
 
 /// A client frame: a control for the running turn, or a message.
@@ -62,7 +75,7 @@ pub struct WebClientFrame {
 #[cfg_attr(not(any(test, feature = "server")), allow(dead_code))]
 pub(crate) enum ClientFrame {
     Control(WebClientControl),
-    Message(WebClientFrame),
+    Message(MessageFrame),
 }
 
 #[cfg(test)]
@@ -88,6 +101,13 @@ mod tests {
             serde_json::from_str(r#"{"text":"hi","reply_to":"web-1"}"#),
             Ok(ClientFrame::Message(frame)) if frame.text == "hi"
         ));
+        assert!(matches!(
+            serde_json::from_str(r#"{"text":"","attachments":["1a2b3c4d-0","1a2b3c4d-1"]}"#),
+            Ok(ClientFrame::Message(frame))
+                if frame.text.is_empty() && frame.attachments == ["1a2b3c4d-0", "1a2b3c4d-1"]
+        ));
+        assert!(serde_json::from_str::<ClientFrame>(r#"{"attachments":["a"]}"#).is_err());
+        assert!(serde_json::from_str::<ClientFrame>(r#"{"text":"hi","attachments":[1]}"#).is_err());
         assert!(matches!(
             serde_json::from_str(r#"{"control":"switch","session":"session-3"}"#),
             Ok(ClientFrame::Control(frame))

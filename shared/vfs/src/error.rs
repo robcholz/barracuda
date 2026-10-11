@@ -34,6 +34,8 @@ pub enum FsError {
     Unsupported,
     /// The supplied open options or operation arguments are inconsistent.
     InvalidInput,
+    /// The filesystem has no room for the data being written.
+    NoSpace,
     /// The backend reported an I/O failure without a more precise mapping.
     Io,
 }
@@ -56,6 +58,7 @@ impl fmt::Display for FsError {
             Self::DirectoryNotEmpty => "directory is not empty",
             Self::Unsupported => "operation is not supported",
             Self::InvalidInput => "invalid filesystem input",
+            Self::NoSpace => "filesystem is out of space",
             Self::Io => "filesystem I/O failure",
         })
     }
@@ -71,6 +74,7 @@ impl embedded_io::Error for FsError {
             Self::PermissionDenied | Self::ReadOnly => embedded_io::ErrorKind::PermissionDenied,
             Self::InvalidPath | Self::InvalidInput => embedded_io::ErrorKind::InvalidInput,
             Self::MediaRemoved => embedded_io::ErrorKind::NotConnected,
+            Self::NoSpace => embedded_io::ErrorKind::OutOfMemory,
             _ => embedded_io::ErrorKind::Other,
         }
     }

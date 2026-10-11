@@ -108,7 +108,7 @@ where
             .map_err(ExtractError::from)?;
 
             extraction_tools
-                .run(response.tool_calls)
+                .run(response.tool_calls, input.context)
                 .await
                 .map_err(ExtractError::from)
         })
@@ -231,6 +231,11 @@ mod tests {
         calls: Vec<ToolCall>,
     ) -> Result<Vec<MemoryOp>, barracuda_agent_tool::ToolInvokeError> {
         let mut tools = super::ExtractionTools::new()?;
-        tools.run(calls).await
+        tools
+            .run(
+                calls,
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+            )
+            .await
     }
 }

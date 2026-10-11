@@ -4,7 +4,7 @@ authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "OpenAI-/Anthropic-compatible LLM client chat + media"
+description = "OpenAI-/Anthropic-compatible LLM client chat with file attachments"
 
 [lib]
 name = "barracuda_model_api"
@@ -17,6 +17,8 @@ cache_profile = []
 barracuda-agent-message = { path = "../message" }
 barracuda-bulk-memory.workspace = true
 barracuda-runtime-utils.workspace = true
+# Attachments a request inlines are read from the caller's filesystem view.
+barracuda-vfs.workspace = true
 http-client.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"

@@ -6,8 +6,8 @@ use core::str::FromStr;
 use barracuda_agent_memory::{ProfileDocument, ProfileStore};
 use barracuda_agent_permission::{Action, Resource, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
-    ToolSpec,
+    tool_metadata, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 
@@ -46,26 +46,26 @@ impl ToolSpec for ProfileReadTool {
 impl ToolHandler for ProfileReadTool {
     type Args = DocumentArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.read(document).await {
-                Ok(Some(content)) => Ok(ToolOutput {
-                    content: if content.trim().is_empty() {
+                Ok(Some(content)) => Ok(ToolOutput::new(
+                    if content.trim().is_empty() {
                         format!("Profile document {document} is empty.")
                     } else {
                         format!("Profile document {document}:\n{content}")
                     },
-                    ok: true,
-                }),
-                Ok(None) => Ok(ToolOutput {
-                    content: format!("Profile document {document} does not exist."),
-                    ok: true,
-                }),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Could not read profile document {document}: {error}."),
-                    ok: false,
-                }),
+                    true,
+                )),
+                Ok(None) => Ok(ToolOutput::new(
+                    format!("Profile document {document} does not exist."),
+                    true,
+                )),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Could not read profile document {document}: {error}."),
+                    false,
+                )),
             }
         })
     }
@@ -86,18 +86,18 @@ impl ToolSpec for ProfileReplaceTool {
 impl ToolHandler for ProfileReplaceTool {
     type Args = ReplaceArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.replace(document, &args.content).await {
-                Ok(()) => Ok(ToolOutput {
-                    content: format!("Replaced profile document {document}."),
-                    ok: true,
-                }),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Could not replace profile document {document}: {error}."),
-                    ok: false,
-                }),
+                Ok(()) => Ok(ToolOutput::new(
+                    format!("Replaced profile document {document}."),
+                    true,
+                )),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Could not replace profile document {document}: {error}."),
+                    false,
+                )),
             }
         })
     }
@@ -118,18 +118,18 @@ impl ToolSpec for ProfileClearTool {
 impl ToolHandler for ProfileClearTool {
     type Args = DocumentArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.clear(document).await {
-                Ok(()) => Ok(ToolOutput {
-                    content: format!("Cleared profile document {document}."),
-                    ok: true,
-                }),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Could not clear profile document {document}: {error}."),
-                    ok: false,
-                }),
+                Ok(()) => Ok(ToolOutput::new(
+                    format!("Cleared profile document {document}."),
+                    true,
+                )),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Could not clear profile document {document}: {error}."),
+                    false,
+                )),
             }
         })
     }

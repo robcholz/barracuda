@@ -34,7 +34,8 @@ use super::{SessionEvent, SessionStream};
 
 pub(super) type SharedAgentManager<Tcp, Resolver> = Rc<AgentManager<Tcp, Resolver>>;
 
-barracuda_runtime_utils::define_prefixed_id!(SessionId, "session-", "session");
+/// A session's id: the Tool layer defines it, since every Tool call runs in one.
+pub use barracuda_agent_tool::SessionId;
 
 /// Whether a session survives a runtime restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

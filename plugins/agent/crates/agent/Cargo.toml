@@ -50,6 +50,8 @@ getset = "0.1.7"
 # The runtime is exposed as an ordinary Future. The application chooses Embassy,
 # Tokio, or another executor and spawns that future at its own boundary.
 barracuda-agent-memory = { path = "../memory" }
+# File references carried by messages and Tool results.
+barracuda-agent-message = { path = "../message" }
 barracuda-agent-skill = { path = "../skill" }
 barracuda-agent-context = { path = "../context" }
 barracuda-agent-permission = { path = "../permission" }
