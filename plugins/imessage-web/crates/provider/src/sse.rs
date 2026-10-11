@@ -1,11 +1,9 @@
 use barracuda_bulk_memory::{BulkAllocError, BulkText};
-use barracuda_json_writer::{
-    write_base64_str, write_compact, write_str, write_value, Object, Sink,
-};
+use barracuda_json_writer::{write_compact, write_str, write_value, Object, Sink};
 use serde::de::IgnoredAny;
 use serde_json::Value;
 
-use crate::{MediaPhase, WebDelivery, WebEventData};
+use crate::{WebDelivery, WebEventData};
 
 /// Failure while serializing a Web event as an SSE frame.
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +30,14 @@ impl WebDelivery {
                 object.end();
                 sink.put(b"\n\n");
             })?),
+            Self::Rejected { message_id, error } => Ok(BulkText::try_encode(|sink| {
+                sink.put(b"event: message.rejected\ndata: ");
+                let mut object = Object::begin(sink);
+                object.str("error", error.code());
+                object.str("message_id", message_id);
+                object.end();
+                sink.put(b"\n\n");
+            })?),
             Self::Event(event) => {
                 let scalars = Scalars::of(&event.data)?;
                 let id = Value::from(event.id);
@@ -51,20 +57,22 @@ impl WebDelivery {
 
 /// Non-string field values encoded once before the frame is measured.
 struct Scalars {
-    kind: Value,
+    /// A message start's kind, or a media message's size.
+    value: Value,
 }
 
 impl Scalars {
     fn of(data: &WebEventData) -> Result<Self, serde_json::Error> {
-        let kind = match data {
+        let value = match data {
             WebEventData::MessageStart { kind, .. } => serde_json::to_value(kind)?,
+            WebEventData::Media { size, .. } => Value::from(*size),
             WebEventData::MessageEvent { event, .. } => {
                 serde_json::from_str::<IgnoredAny>(event.payload.as_str())?;
                 Value::Null
             }
             _ => Value::Null,
         };
-        Ok(Self { kind })
+        Ok(Self { value })
     }
 }
 
@@ -79,7 +87,7 @@ fn write_payload(sink: &mut dyn Sink, data: &WebEventData, scalars: &Scalars) {
             reply_to,
             ..
         } => {
-            object.value("kind", &scalars.kind);
+            object.value("kind", &scalars.value);
             object.str("message_id", message_id);
             optional_str(object.field("reply_to"), reply_to.as_deref());
         }
@@ -99,32 +107,22 @@ fn write_payload(sink: &mut dyn Sink, data: &WebEventData, scalars: &Scalars) {
             object.str("message_id", message_id);
         }
         WebEventData::Media {
-            message_id, phase, ..
-        } => match phase {
-            MediaPhase::Start {
-                filename,
-                mime_type,
-                caption,
-                reply_to,
-            } => {
-                optional_str(object.field("caption"), caption.as_deref());
-                optional_str(object.field("filename"), filename.as_deref());
-                object.str("message_id", message_id);
-                optional_str(object.field("mime_type"), mime_type.as_deref());
-                object.str("phase", "start");
-                optional_str(object.field("reply_to"), reply_to.as_deref());
-            }
-            MediaPhase::Delta { bytes } => {
-                write_base64_str(object.field("data"), "", bytes);
-                object.str("message_id", message_id);
-                object.str("phase", "delta");
-            }
-            MediaPhase::End { error } => {
-                optional_str(object.field("error"), error.as_deref());
-                object.str("message_id", message_id);
-                object.str("phase", "end");
-            }
-        },
+            message_id,
+            url,
+            mime_type,
+            filename,
+            caption,
+            reply_to,
+            ..
+        } => {
+            optional_str(object.field("caption"), caption.as_deref());
+            optional_str(object.field("filename"), filename.as_deref());
+            object.str("message_id", message_id);
+            object.str("mime_type", mime_type);
+            optional_str(object.field("reply_to"), reply_to.as_deref());
+            object.value("size", &scalars.value);
+            object.str("url", url);
+        }
         WebEventData::MessageEdit { message_id, text } => {
             object.str("message_id", message_id);
             object.str("text", text);
@@ -156,12 +154,11 @@ fn optional_str(sink: &mut dyn Sink, text: Option<&str>) {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use alloc::format;
     use alloc::rc::Rc;
     use alloc::string::String;
-    use alloc::{format, vec};
 
     use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
-    use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::json;
 
     use super::*;
@@ -189,24 +186,18 @@ mod tests {
                 json!({ "message_id": message_id, "error": error })
             }
             WebEventData::Media {
-                message_id, phase, ..
-            } => match phase {
-                MediaPhase::Start {
-                    filename,
-                    mime_type,
-                    caption,
-                    reply_to,
-                } => json!({
-                    "message_id": message_id, "phase": "start", "filename": filename,
-                    "mime_type": mime_type, "caption": caption, "reply_to": reply_to,
-                }),
-                MediaPhase::Delta { bytes } => json!({
-                    "message_id": message_id, "phase": "delta", "data": STANDARD.encode(bytes),
-                }),
-                MediaPhase::End { error } => {
-                    json!({ "message_id": message_id, "phase": "end", "error": error })
-                }
-            },
+                message_id,
+                url,
+                mime_type,
+                filename,
+                size,
+                caption,
+                reply_to,
+                ..
+            } => json!({
+                "message_id": message_id, "url": url, "mime_type": mime_type,
+                "filename": filename, "size": size, "caption": caption, "reply_to": reply_to,
+            }),
             WebEventData::MessageEdit { message_id, text } => {
                 json!({ "message_id": message_id, "text": text })
             }
@@ -270,24 +261,22 @@ mod tests {
             WebEventData::Media {
                 message_id: "m".into(),
                 kind: MediaKind::Image,
-                phase: MediaPhase::Start {
-                    filename: Some("a.png".into()),
-                    mime_type: None,
-                    caption: Some(tricky.clone()),
-                    reply_to: None,
-                },
-            },
-            WebEventData::Media {
-                message_id: "m".into(),
-                kind: MediaKind::File,
-                phase: MediaPhase::Delta {
-                    bytes: vec![0, 1, 2, 250, 251],
-                },
+                url: "/api/web/media/1a2b3c4d-0".into(),
+                mime_type: "image/png".into(),
+                filename: Some(tricky.clone()),
+                size: u64::MAX,
+                caption: Some(tricky.clone()),
+                reply_to: None,
             },
             WebEventData::Media {
                 message_id: "m".into(),
                 kind: MediaKind::Audio,
-                phase: MediaPhase::End { error: None },
+                url: "/api/web/media/1a2b3c4d-1".into(),
+                mime_type: "audio/ogg".into(),
+                filename: None,
+                size: 0,
+                caption: None,
+                reply_to: Some("web-in-1".into()),
             },
             WebEventData::MessageEdit {
                 message_id: "m".into(),
@@ -315,6 +304,16 @@ mod tests {
         assert_eq!(
             lagged.as_str(),
             "event: stream.lagged\ndata: {\"missed\":7}\n\n"
+        );
+        let rejected = WebDelivery::Rejected {
+            message_id: "web-in-3".into(),
+            error: crate::Rejection::UnknownAttachment,
+        }
+        .to_sse()
+        .unwrap();
+        assert_eq!(
+            rejected.as_str(),
+            "event: message.rejected\ndata: {\"error\":\"unknown_attachment\",\"message_id\":\"web-in-3\"}\n\n"
         );
     }
 

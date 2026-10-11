@@ -817,7 +817,7 @@ test("a permission request is answered by the next message", () => {
   expect(input.placeholder).toBe("给设备发一条消息");
 });
 
-test("shows lag, turn errors, interrupted messages and attachments", async () => {
+test("shows lag, turn errors, interrupted messages and attachments", () => {
   const { root, socket } = open();
   const ws = socket();
   ws.open();
@@ -842,29 +842,26 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
       ?.firstElementChild?.textContent,
   ).toBe("这一轮出错");
 
+  // a file is one event naming where the device keeps it
   ws.emit("message.file", {
     caption: "路线",
     filename: "ride.gpx",
     message_id: "web-4",
     mime_type: "application/gpx+xml",
-    phase: "start",
     reply_to: null,
+    size: 5,
+    url: "/api/web/media/1a2b3c4d-0",
   });
-  expect(root.textContent).toContain("接收中");
-  ws.emit("message.file", {
-    data: btoa("hello"),
-    message_id: "web-4",
-    phase: "delta",
-  });
-  ws.emit("message.file", { error: null, message_id: "web-4", phase: "end" });
   const file = root.querySelector(".bc-card > .bc-card__row")!;
+  expect(file.querySelector(".bc-option-icon svg")).not.toBeNull();
   expect(file.querySelector(".bc-option-title")?.textContent).toBe("ride.gpx");
   expect(file.querySelector(".bc-caption.bc-muted")?.textContent).toBe(
     "application/gpx+xml · 5 B · 已接收",
   );
   const link = root.querySelector<HTMLAnchorElement>("a[download]")!;
   expect(link.getAttribute("download")).toBe("ride.gpx");
-  expect(await (await fetch(link.href)).text()).toBe("hello");
+  expect(link.getAttribute("href")).toBe("/api/web/media/1a2b3c4d-0");
+  expect(link.textContent).toBe("下载");
   expect(root.textContent).toContain("路线");
 });
 

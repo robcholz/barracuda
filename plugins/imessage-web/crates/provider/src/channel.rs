@@ -13,18 +13,21 @@ use core::{
 };
 
 use barracuda_imessage_gateway_plugin::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
-    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendSessionsRequest, SendStreamRequest, SetTypingRequest, TextBody, TextChunk,
+    BinaryBody, BinaryChunk, BinaryStream, ChannelError, ChannelFuture, DeleteMessageRequest,
+    EditMessageRequest, MediaKind, MessageChannel, MessageKind, MessageTarget, ReactRequest,
+    SendMediaRequest, SendMessageRequest, SendReceipt, SendSessionsRequest, SendStreamRequest,
+    SetTypingRequest, TextBody, TextChunk,
 };
+use barracuda_plugin::api::SharedEntropy;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     pubsub::{PubSubChannel, Subscriber, WaitResult},
 };
 use futures_core::Stream;
-use futures_lite::StreamExt;
+use futures_lite::{stream, StreamExt};
 
-use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
+use crate::media::mime_or_default;
+use crate::{KeptMedia, MediaSpool, WebDelivery, WebEvent, WebEventData, WebMedia, MEDIA_PATH};
 
 // Events are shared between the live bus and replay history, so each slot is
 // one pointer instead of an inline event.
@@ -34,19 +37,35 @@ type LiveSubscriber<'a, const CAP: usize, const SUBS: usize> =
     Subscriber<'a, NoopRawMutex, Rc<WebEvent>, CAP, SUBS, 0>;
 
 /// Web channel with bounded replay history and subscriber slots.
+///
+/// History holds events only: a media message is one event naming its URL,
+/// while the file stays in storage behind [`WebMedia`].
 pub struct Web<const CAP: usize = 32, const SUBS: usize = 4> {
     bus: Bus<CAP, SUBS>,
     history: core::cell::RefCell<VecDeque<Rc<WebEvent>>>,
     next_id: Cell<u64>,
+    media: WebMedia,
+    spool: Rc<dyn MediaSpool>,
 }
 
 impl<const CAP: usize, const SUBS: usize> Web<CAP, SUBS> {
-    pub const fn new() -> Self {
+    /// A channel that spools media sent as bytes or a stream to `spool`, and
+    /// mints media ids from `entropy`.
+    #[must_use]
+    pub fn new(spool: Rc<dyn MediaSpool>, entropy: SharedEntropy) -> Self {
         Self {
             bus: PubSubChannel::new(),
             history: core::cell::RefCell::new(VecDeque::new()),
             next_id: Cell::new(1),
+            media: WebMedia::new(entropy),
+            spool,
         }
+    }
+
+    /// The uploads waiting to be sent and the files kept for download.
+    #[must_use]
+    pub const fn media(&self) -> &WebMedia {
+        &self.media
     }
 
     pub fn subscribe(
@@ -129,12 +148,6 @@ impl<const CAP: usize, const SUBS: usize> Web<CAP, SUBS> {
 
     fn message_id(id: u64) -> String {
         format!("web-{id}")
-    }
-}
-
-impl<const CAP: usize, const SUBS: usize> Default for Web<CAP, SUBS> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -286,78 +299,54 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
         request: SendMediaRequest,
     ) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
-            let message_id = Self::message_id(self.next_id.get());
-            self.publish(
-                &request.target,
-                WebEventData::Media {
-                    message_id: message_id.clone(),
-                    kind,
-                    phase: MediaPhase::Start {
-                        filename: request.filename,
-                        mime_type: request.mime_type,
-                        caption: request.caption,
-                        reply_to: request.reply_to,
-                    },
-                },
-            )?;
-            let opened = match request.body {
+            let SendMediaRequest {
+                target,
+                body,
+                filename,
+                mime_type,
+                caption,
+                reply_to,
+                ..
+            } = request;
+            let mime_type = mime_or_default(mime_type.as_deref(), filename.as_deref());
+            // a source is kept as it is; anything else is written to storage
+            // first, so no media byte stays in memory or in the history
+            let source = match body {
+                BinaryBody::Source(source) => source,
                 BinaryBody::Bytes(bytes) => {
-                    self.publish(
-                        &request.target,
-                        WebEventData::Media {
-                            message_id: message_id.clone(),
-                            kind,
-                            phase: MediaPhase::Delta { bytes },
-                        },
-                    )?;
-                    None
+                    let chunk: BinaryStream = Box::pin(stream::once(Ok(BinaryChunk::from(bytes))));
+                    self.spool
+                        .spool(kind, mime_type.clone(), filename.clone(), chunk)
+                        .await?
                 }
-                BinaryBody::Stream(stream) => Some(Ok(stream)),
-                BinaryBody::Source(source) => Some(source.open().await),
+                BinaryBody::Stream(body) => {
+                    self.spool
+                        .spool(kind, mime_type.clone(), filename.clone(), body)
+                        .await?
+                }
             };
-            if let Some(opened) = opened {
-                let failed = match opened {
-                    Ok(mut stream) => loop {
-                        match stream.next().await {
-                            Some(Ok(bytes)) if bytes.is_empty() => {}
-                            Some(Ok(bytes)) => {
-                                self.publish(
-                                    &request.target,
-                                    WebEventData::Media {
-                                        message_id: message_id.clone(),
-                                        kind,
-                                        phase: MediaPhase::Delta {
-                                            bytes: bytes.into_vec(),
-                                        },
-                                    },
-                                )?;
-                            }
-                            Some(Err(error)) => break Some(error),
-                            None => break None,
-                        }
-                    },
-                    Err(error) => Some(error),
-                };
-                if let Some(error) = failed {
-                    self.publish(
-                        &request.target,
-                        WebEventData::Media {
-                            message_id: message_id.clone(),
-                            kind,
-                            phase: MediaPhase::End {
-                                error: Some(stream_error_message(&error)),
-                            },
-                        },
-                    )?;
-                    return Err(error.into());
-                }
-            }
+            let size = source.len();
+            let id = self.media.keep(KeptMedia {
+                source,
+                mime_type: mime_type.clone(),
+                filename: filename.clone(),
+            });
+            let message_id = Self::message_id(self.next_id.get());
+            log::info!(
+                "IMessage Web sending {kind:?} `{message_id}` ({size} bytes) as media `{id}` for conversation `{}`",
+                target.conversation_id
+            );
             self.publish(
-                &request.target,
+                &target,
                 WebEventData::Media {
                     message_id: message_id.clone(),
                     kind,
-                    phase: MediaPhase::End { error: None },
+                    url: format!("{MEDIA_PATH}{id}"),
+                    mime_type,
+                    filename,
+                    size,
+                    caption,
+                    reply_to,
                 },
             )?;
             Ok(SendReceipt::new(message_id))
