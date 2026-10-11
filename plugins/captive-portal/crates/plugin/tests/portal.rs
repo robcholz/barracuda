@@ -332,7 +332,10 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
                 id: "channel-one",
                 group: WebGroup::Channel,
                 order: 40,
-                title: WebText { zh: "Bravo", en: "Bravo" },
+                title: WebText {
+                    zh: "Bravo",
+                    en: "Bravo",
+                },
                 summary: WebText {
                     zh: "Bravo 消息通道",
                     en: "Bravo message channel",
@@ -487,10 +490,7 @@ fn icon_and_figure_are_served_by_the_entry_provider() {
     for (path, expected) in [
         ("/portal/assets/wifi/icon.svg", &b"wifi:icon.svg"[..]),
         ("/portal/assets/wifi/figure.js", b"wifi:figure.js"),
-        (
-            "/portal/assets/channel-four/icon.png",
-            b"inkbox:icon.png",
-        ),
+        ("/portal/assets/channel-four/icon.png", b"inkbox:icon.png"),
     ] {
         let response = block_on(portal.serve(path));
         assert_eq!(response.status(), 200, "{path}");
