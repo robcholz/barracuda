@@ -17,9 +17,8 @@ use barracuda_imessage_gateway_plugin::{
     MessageChannel, MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest,
     SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Multipart, RequestBody, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
 
@@ -56,20 +55,17 @@ impl BlueBubblesConfig {
 }
 
 /// Outbound iMessage provider backed by a BlueBubbles server.
-pub struct BlueBubbles<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct BlueBubbles {
+    http: GatewayHttp,
     config: BlueBubblesConfig,
     next_local_id: Cell<u64>,
 }
 
-impl<'net, T, D> BlueBubbles<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: BlueBubblesConfig) -> Self {
+impl BlueBubbles {
+    /// Sends through the Gateway's HTTP helpers.
+    pub fn new(http: GatewayHttp, config: BlueBubblesConfig) -> Self {
         Self {
-            http_clients,
+            http,
             config,
             next_local_id: Cell::new(0),
         }
@@ -107,12 +103,13 @@ where
         headers: &[(&str, &str)],
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response =
-            barracuda_imessage_gateway_plugin::send(&self.http_clients, method, url, headers, body)
-                .await
-                .map_err(|error| ChannelError::Transport {
-                    message: error.to_string(),
-                })?;
+        let response = self
+            .http
+            .send(method, url, headers, body)
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)
     }
 
@@ -305,11 +302,7 @@ where
     }
 }
 
-impl<T, D> MessageChannel for BlueBubbles<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for BlueBubbles {
     fn channel(&self) -> &str {
         CHANNEL
     }

@@ -8,7 +8,8 @@
   (`PluginContext::ip_stack`)
 - Owned task: `bluebubbles_receive_task`, one receive runtime (below)
 - Receive slots: none. The webhook is served by the device's own webserver, so
-  the channel uses `UnlimitedSlots` and never reports `no_slot`.
+  the channel uses the Gateway's `webhook_receive_control()` and never reports
+  `no_slot`. Sends and webhook requests go through `IMessageGateway::http()`.
 - Storage (Plugin-scoped KV):
   - `configuration`: the provider configuration;
   - `mode`: the channel mode;
@@ -42,7 +43,8 @@ The channel follows the shared plumbing in the Gateway's `docs/plugin.md`
 Leaving `send_receive` stops the receive session and then deletes the webhook
 from the server, waiting at most 10 s. A failure is logged and keeps the
 record, so the next registration deletes the stale entry. The portal status
-comes from `entry_status`: 仅发送, 收发中, 连接中, 连接中断 or 已停用.
+comes from `IMessageGateway::channel_status`: 仅发送, 收发中, 连接中, 连接中断 or
+已停用.
 
 ## Receiving
 
@@ -147,10 +149,10 @@ Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-bluebubble`, group `WebGroup::Channel`, order 50, title `BlueBubbles`,
 a bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
-`ResourceFiles` provider whose status is `entry_status` of the channel. Unload
-removes the navigation entry, the resource provider, and the two HTTP routes:
+`ResourceFiles` provider whose status is the Gateway's `channel_status` of the
+channel. Unload removes the navigation entry, the resource provider, and the two HTTP routes:
 the configuration prefix, which also serves `/mode` and `/owners`
-(`ChannelEndpoint`), and the `/hook` prefix.
+(`IMessageGateway::serve_channel`), and the `/hook` prefix.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-bluebubble`

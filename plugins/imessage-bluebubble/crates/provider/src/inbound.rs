@@ -252,11 +252,7 @@ struct QueryMetadata {
     total: Option<u64>,
 }
 
-impl<'net, T, D> BlueBubbles<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
+impl BlueBubbles {
     /// Lists the server's webhooks (`GET /api/v1/webhook`).
     ///
     /// # Errors
@@ -373,24 +369,19 @@ where
         body: B,
         limit: usize,
     ) -> Result<Response, ChannelError> {
-        let response = barracuda_imessage_gateway_plugin::send_limited(
-            &self.http_clients,
-            method,
-            url,
-            headers,
-            body,
-            limit,
-        )
-        .await
-        .map_err(|error| match error {
-            barracuda_imessage_gateway_plugin::Error::BodyTooLarge => ChannelError::Platform {
-                code: Some(BODY_TOO_LARGE.into()),
-                message: "BlueBubbles response is too large".into(),
-            },
-            other => ChannelError::Transport {
-                message: format!("{other}"),
-            },
-        })?;
+        let response = self
+            .http
+            .send_limited(method, url, headers, body, limit)
+            .await
+            .map_err(|error| match error {
+                barracuda_imessage_gateway_plugin::Error::BodyTooLarge => ChannelError::Platform {
+                    code: Some(BODY_TOO_LARGE.into()),
+                    message: "BlueBubbles response is too large".into(),
+                },
+                other => ChannelError::Transport {
+                    message: format!("{other}"),
+                },
+            })?;
         if (200..300).contains(&response.status) {
             return Ok(response);
         }

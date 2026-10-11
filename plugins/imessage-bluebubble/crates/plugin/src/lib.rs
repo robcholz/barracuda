@@ -4,8 +4,11 @@
 //! a webhook the BlueBubbles server posts to the device's own webserver.
 
 #![no_std]
+#![recursion_limit = "256"]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod channel;
 mod receive;
@@ -20,40 +23,36 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
-use barracuda_imessage_gateway_channel::{
-    entry_status, receive_runtime, sync_receive, ChannelControl, ChannelEndpoint, ReceiveRuntime,
-    ReceiveTiming, JSON_CONTENT_TYPE,
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
-use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_plugin::api::{PluginContext, SharedEntropy};
+use barracuda_imessage_gateway_plugin::{
+    ChannelControl, ChannelLevel, ChannelStatus, IMessageGateway, ReceiveRuntime, ReceiveTiming,
+};
+use barracuda_plugin::api::{PluginContext, SharedEntropy, Stack};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
     PluginTaskToken,
 };
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer, WEB_SERVER_PORT,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebRouteRegistration,
+    WebServer, WebServerError,
 };
 use embassy_futures::select::select;
-use embassy_net::Stack;
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::ClientFactory;
 
 use crate::channel::{
-    BlueBubblesChannel, ChannelSetup, ConfigRequest, ConfigureError, InboundSink, LocalAddress,
+    build_channel, BlueBubblesChannel, ConfigRequest, ConfigureError, LocalAddress,
 };
-use crate::receive::Receiver;
 use crate::state::HOOK_PATH;
 use crate::webhook::WebhookEndpoint;
 
-/// HTTP path accepting BlueBubbles configuration.
+/// HTTP path accepting BlueBubbles configuration; the Gateway serves the
+/// channel's `/status`, `/mode`, and `/owners` below it.
 pub const CONFIG_API_PATH: &str = "/api/gateway/bluebubbles";
-/// HTTP path of the channel mode.
-pub const MODE_API_PATH: &str = "/api/gateway/bluebubbles/mode";
-/// HTTP path of the allowed accounts and the pairing code.
-pub const OWNERS_API_PATH: &str = "/api/gateway/bluebubbles/owners";
 /// HTTP path prefix of the webhook; the secret follows it.
 pub const WEBHOOK_API_PATH: &str = HOOK_PATH;
+
+const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes BlueBubbles configuration, registers the resulting
 /// channel, and receives its messages by webhook.
@@ -65,8 +64,9 @@ pub struct IMessageBlueBubblePlugin {
 }
 
 impl IMessageBlueBubblePlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources, the
-    /// IP stack whose address the webhook names, and the Platform entropy.
+    /// Creates the unregistered BlueBubbles channel Plugin on the IP stack
+    /// whose address the webhook names, minting webhook secrets from the
+    /// Platform entropy.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
@@ -89,19 +89,44 @@ impl Plugin for IMessageBlueBubblePlugin {
     where
         Storage: PluginStorage,
     {
-        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
-        let stack = self.stack;
-        let address: LocalAddress = Box::new(move || {
-            stack
-                .config_v4()
-                .map(|config| format!("{}", config.address.address()))
-        });
-        let runtime = register_channel(
-            context,
-            http_clients.clone(),
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+        let webserver = context.require::<WebServer>("webserver")?;
+        let (channel, runtime) = build_channel(
+            context.storage().clone(),
+            gateway,
             self.entropy.clone(),
-            address,
+            lan_address(self.stack),
+            ReceiveTiming::DEVICE,
         )?;
+        let status = Rc::clone(&channel);
+        context.retain(
+            portal
+                .register_with_status(
+                    WebEntry {
+                        id: "imessage-bluebubble",
+                        group: WebGroup::Channel,
+                        order: 50,
+                        title: WebText {
+                            zh: "BlueBubbles",
+                            en: "BlueBubbles",
+                        },
+                        summary: WebText {
+                            zh: "经 BlueBubbles 接入 iMessage",
+                            en: "iMessage through BlueBubbles",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: None,
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(status.gateway.channel_status(&*status)),
+                )
+                .map_err(PluginError::registration)?,
+        );
+        for route in serve_routes(&webserver, channel).map_err(PluginError::registration)? {
+            context.retain(route);
+        }
         self.runtime = Some(runtime);
         Ok(())
     }
@@ -121,83 +146,43 @@ impl Plugin for IMessageBlueBubblePlugin {
     }
 }
 
-/// Builds the channel and registers its portal entry and endpoints;
-/// returns the receive runtime for the Plugin's task.
-fn register_channel<Storage, T, D>(
-    context: &mut PluginRegisterContext<'_, Storage>,
-    http_clients: ClientFactory<'static, T, D>,
-    entropy: SharedEntropy,
-    address: LocalAddress,
-) -> PluginResult<ReceiveRuntime>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
-    let portal = context.require::<CaptivePortal>("captive-portal")?;
-    let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
-    let webserver = context.require::<WebServer>("webserver")?;
-    let inbound: Rc<dyn InboundSink> = gateway.clone();
-    let channel = Rc::new(embassy_futures::block_on(BlueBubblesChannel::load(
-        ChannelSetup {
-            gateway,
-            inbound,
-            http_clients,
-            storage: context.storage().clone(),
-            entropy,
-            address,
-            port: WEB_SERVER_PORT,
+/// The station IPv4 address of `stack`, which the webhook URL names.
+fn lan_address(stack: Stack<'static>) -> LocalAddress {
+    Box::new(move || {
+        stack
+            .config_v4()
+            .map(|config| format!("{}", config.address.address()))
+    })
+}
+
+/// Serves the channel's routes: the configuration path with the Gateway's
+/// shared `/status`, `/mode`, and `/owners` below it, and the webhook, whose
+/// longer prefix takes its own requests.
+fn serve_routes<Storage: PluginStorage>(
+    webserver: &WebServer,
+    channel: Rc<BlueBubblesChannel<Storage>>,
+) -> Result<[WebRouteRegistration; 2], WebServerError> {
+    let config = ConfigEndpoint(Rc::clone(&channel));
+    let gateway = Rc::clone(&channel.gateway);
+    let shared = gateway.serve_channel(CONFIG_API_PATH, Rc::clone(&channel), config)?;
+    let webhook = webserver.serve_http_prefix(WEBHOOK_API_PATH, WebhookEndpoint(channel))?;
+    Ok([shared, webhook])
+}
+
+/// The channel's portal card status.
+fn entry_status(status: ChannelStatus) -> EntryStatus {
+    let state = match status.level {
+        ChannelLevel::Off => EntryState::Off,
+        ChannelLevel::Ready => EntryState::Ready,
+        ChannelLevel::Attention => EntryState::Attention,
+    };
+    EntryStatus::new(
+        state,
+        WebText {
+            zh: status.zh,
+            en: status.en,
         },
-    ))?);
-    let status = Rc::clone(&channel);
-    context.retain(
-        portal
-            .register_with_status(
-                WebEntry {
-                    id: "imessage-bluebubble",
-                    group: WebGroup::Channel,
-                    order: 50,
-                    title: WebText {
-                        zh: "BlueBubbles",
-                        en: "BlueBubbles",
-                    },
-                    summary: WebText {
-                        zh: "经 BlueBubbles 接入 iMessage",
-                        en: "iMessage through BlueBubbles",
-                    },
-                    icon: Some("icon.svg"),
-                    figure: None,
-                    module: "entry.js",
-                },
-                ResourceFiles::from(context.filesystem()?.clone()),
-                move || entry_status(&*status),
-            )
-            .map_err(PluginError::registration)?,
-    );
-    let runtime = receive_runtime(
-        channel.receive_control(),
-        Rc::new(Receiver(Rc::clone(&channel))),
-        ReceiveTiming::DEVICE,
-    );
-    // Webhook receiving holds no slot, so this never reports `no_slot`.
-    sync_receive(&*channel).ok();
-    // One route serves the configuration path and its `/mode` and `/owners`;
-    // the longer webhook prefix takes its own requests.
-    let routes = [
-        webserver.serve_http_prefix(
-            CONFIG_API_PATH,
-            ChannelEndpoint::new(
-                Rc::clone(&channel),
-                CONFIG_API_PATH,
-                ConfigEndpoint(Rc::clone(&channel)),
-            ),
-        ),
-        webserver.serve_http_prefix(WEBHOOK_API_PATH, WebhookEndpoint(channel)),
-    ];
-    for route in routes {
-        context.retain(route.map_err(PluginError::registration)?);
-    }
-    Ok(runtime)
+    )
 }
 
 #[embassy_executor::task]
@@ -210,50 +195,42 @@ async fn bluebubbles_receive_task(runtime: ReceiveRuntime, cancellation: PluginT
 #[error("BlueBubbles receive runtime was not prepared during Plugin registration")]
 struct ReceiveRuntimeUnavailable;
 
-/// `POST` on [`CONFIG_API_PATH`]; the channel status is under `/status`.
-struct ConfigEndpoint<Storage, T: 'static, D: 'static>(Rc<BlueBubblesChannel<Storage, T, D>>);
+/// `POST` on [`CONFIG_API_PATH`] stores a configuration; the channel
+/// status is under `/status`.
+struct ConfigEndpoint<Storage>(Rc<BlueBubblesChannel<Storage>>);
 
-impl<Storage, T, D> ConfigEndpoint<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
-    fn response(status: u16, body: &'static [u8]) -> HttpResponse {
-        HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
-    }
+fn response(status: u16, body: &'static [u8]) -> HttpResponse {
+    HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+}
 
+impl<Storage: PluginStorage> ConfigEndpoint<Storage> {
     async fn configure(&self, body: &[u8]) -> HttpResponse {
         let Ok(config) = serde_json::from_slice::<ConfigRequest>(body) else {
             log::warn!("rejected invalid BlueBubbles gateway configuration");
-            return Self::response(400, br#"{"error":"invalid_request"}"#);
+            return response(400, br#"{"error":"invalid_request"}"#);
         };
-        match self.0.configure(config).await {
+        let channel = &*self.0;
+        match channel.configure(config).await {
             Ok(()) => {
-                sync_receive(&*self.0).ok();
-                self.0.receive().restart();
-                HttpResponse::new(204, JSON_CONTENT_TYPE, Vec::new())
+                channel.gateway.sync_receive(channel).ok();
+                channel.receive().restart();
+                response(204, b"")
             }
-            Err(ConfigureError::Storage) => Self::response(500, br#"{"error":"storage"}"#),
+            Err(ConfigureError::Storage) => response(500, br#"{"error":"storage"}"#),
             Err(ConfigureError::Registration) => {
-                sync_receive(&*self.0).ok();
-                Self::response(422, br#"{"error":"registration_failed"}"#)
+                channel.gateway.sync_receive(channel).ok();
+                response(422, br#"{"error":"registration_failed"}"#)
             }
         }
     }
 }
 
-impl<Storage, T, D> HttpEndpoint for ConfigEndpoint<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {
                 HttpMethod::Post => self.configure(request.body()).await,
-                _ => Self::response(405, br#"{"error":"method_not_allowed"}"#),
+                _ => response(405, br#"{"error":"method_not_allowed"}"#),
             }
         })
     }
