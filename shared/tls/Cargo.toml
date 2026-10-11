@@ -4,15 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "TLS client engine and compact trust-root bundle shared by every Barracuda Platform"
 
-[features]
-# The 4 KiB outgoing record buffer below is not the prebuilt device libraries'
-# configuration, so every device Platform compiles mbedTLS's C sources and
-# selects the compiler for its chip with one of these.
-# ESP32-P4, ESP32-C3 and ESP32-C6: Espressif's RISC-V GCC.
-force-esp-riscv-gcc = ["mbedtls-rs/force-esp-riscv-gcc"]
-# ESP32 and ESP32-S3: the chip's Xtensa GCC instead of a Clang without Xtensa.
-use-gcc = ["mbedtls-rs/use-gcc"]
-
 [dependencies]
 barracuda-bulk-memory.workspace = true
 barracuda-platform.workspace = true
@@ -26,6 +17,17 @@ mbedtls-rs = { version = "0.1.0", default-features = false, features = [
     "ssl-out-content-len-4096",
 ] }
 thiserror = { version = "2", default-features = false }
+
+# The 4 KiB outgoing record buffer is not the prebuilt device libraries'
+# configuration, so device builds compile mbedTLS's C sources, each with its
+# chip's compiler: the ESP chips' own GCC, since Clang has no Xtensa target and
+# Espressif's RISC-V GCC carries the ESP C library headers. Every bare-metal
+# RISC-V target in this workspace is an ESP chip.
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+mbedtls-rs = { version = "0.1.0", default-features = false, features = ["use-gcc"] }
+
+[target.'cfg(all(target_arch = "riscv32", target_os = "none"))'.dependencies]
+mbedtls-rs = { version = "0.1.0", default-features = false, features = ["force-esp-riscv-gcc"] }
 
 [dev-dependencies]
 allocator-api2 = { version = "0.3.1", default-features = false, features = ["alloc"] }

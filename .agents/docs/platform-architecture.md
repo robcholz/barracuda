@@ -823,9 +823,9 @@ only the matching root's key is parsed, so no Platform keeps parsed roots in
 RAM. Each connection's record buffers, 16 KiB for incoming records (servers
 send full-size records) and 4 KiB for outgoing ones, come from bulk memory (see
 "Bulk memory"), which is external RAM on Boards that have it. That outgoing
-size is not the prebuilt device libraries' configuration, so every device
-Platform compiles mbedTLS and selects the C compiler for its chip through a
-`barracuda-tls` feature. mbedTLS checks no certificate dates, so expired roots are left out of the
+size is not the prebuilt device libraries' configuration, so a device build
+compiles mbedTLS, and `barracuda-tls` selects the C compiler for the chip from
+the compilation target; no Platform depends on it. mbedTLS checks no certificate dates, so expired roots are left out of the
 bundle when it is generated. `mbedtls-rs` is vendored in
 `shared/tls/mbedtls-rs` with the verify callback and a fallible random source
 added.
