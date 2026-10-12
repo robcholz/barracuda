@@ -33,10 +33,10 @@ depend on it names it or carries code, configuration, or text for it.
 - A `shared/` library is a library: it holds no process-wide service, and the
   Plugin that needs the service builds it (the `http` Plugin builds the
   request pool from `http-client`; the TLS engine from `barracuda-tls`).
-- The only places that name every Plugin are generated: System's registration
-  list and the image selection, both written by `cargo plugin sync`, and a
-  Board's `plugins.<id>` settings, which `cargo plugin sync --check` validates
-  against each Plugin's declaration.
+- The only places outside Plugins that name Plugins are the Board profiles
+  in `boards/profiles/` and a Board's `plugins.<id>` section, which
+  `cargo plugin sync --check` validates against each Plugin's declaration,
+  and the generated selection package that registers the enabled set.
 
 **Plugins meet only through capabilities.** A Plugin uses another Plugin
 only through that Plugin's published capability types, and only after
@@ -54,7 +54,9 @@ feature belongs in a Plugin and the hook in that Plugin's capability.
 | --- | --- |
 | Construction | `pub fn new(context: &mut PluginContext<Builtins, Io>) -> Self`, nothing else |
 | Platform and Board resources | Fields of `PluginContext`, assigned by System |
+| Which Plugins a Board builds | A profile in `boards/profiles/`, overridden by a Board's `plugins.<id>.enabled` |
 | Per-Board settings | `[config.<name>]` in `plugin.toml`, set in a Board's `plugins.<id>` |
+| Board peripherals | Slots under `[peripherals.<kind>]` in `plugin.toml`, taken by their `config::peripherals` constant |
 | Plugin-to-Plugin calls | A typed capability: `provide` in the provider, `require` in the consumer |
 | HTTP clients | `http_client::ClientFactory` required from `http` |
 | Workflow integration | A Workflow Action or Event, with its schema under `schemas/` |
@@ -77,7 +79,7 @@ plugins/<id>/
 ├── plugin.toml                    # identity, dependencies, settings, host tasks
 ├── crates/
 │   ├── plugin/                    # package barracuda-<id>-plugin, the entry point
-│   │   └── build.rs               # only with settings or a build task
+│   │   └── build.rs               # only with settings, peripheral slots, or a build task
 │   └── <crate>/                   # optional runtime or domain crates
 │       └── resources/tools/<tool>/
 │           ├── schema.json        # Agent Tool input schema
@@ -151,6 +153,10 @@ plugins:
     receive-slots: 3
 ```
 
+`enabled` and `peripherals` are reserved keys of `plugins.<id>` (see
+[Enablement per Board](#enablement-per-board) and
+[Peripherals](#peripherals)); a setting never uses those names.
+
 `cargo plugin sync --check` rejects a Board that sets a setting its Plugin
 does not declare, or a value of the wrong type. The Plugin's `build.rs` calls
 `barracuda_plugin_build::build()`, and the crate includes the resolved values
@@ -166,6 +172,57 @@ static BUFFERS: ReceiveBuffers<{ config::RECEIVE_SLOTS }> = ReceiveBuffers::new(
 
 A setting is never a Platform or Board field, and System never reads it. A
 value the user changes at run time is not a setting; it lives in KV storage.
+
+### Peripherals
+
+A Plugin that drives a Board peripheral declares a slot for it, one table per
+peripheral kind, with slot names chosen by the Plugin:
+
+```toml
+[peripherals.display]
+main = "primary"                               # the Board's primary display
+
+[peripherals.touch]
+main = { fill = "primary", optional = true }   # starts without touch
+```
+
+| Fill | The slot receives |
+| --- | --- |
+| `"primary"` | the device the Board marks primary for that kind |
+| `"any"` | the only device of that kind no other slot takes |
+| `"*"` | every device of that kind no other slot takes, as a list |
+
+A slot is required unless it says `optional = true`; a `"*"` slot is always
+optional. A Plugin may declare several slots of one kind. Kinds are the
+`peripheral:` names of `peripherals/impl/`: `display`, `touch`, `buttons`,
+`indicator`, `led-strip`, `camera`, `audio-codec`, `inertial-measurement`,
+`power-monitor`, and `real-time-clock`. Removable storage is System-owned and
+never claimed.
+
+The Board supplies named devices under `peripherals.devices`, marking one
+`primary: true` when it has several of a kind, and wires a slot only to
+override the default or resolve an ambiguity:
+
+```yaml
+plugins:
+  example:
+    peripherals:
+      display.main: back-eink
+```
+
+Each Board resolves every slot of every enabled Plugin at build time: a wired
+slot takes its device, then `"primary"` slots, then `"any"` slots, then the
+one `"*"` slot of a kind takes what is left in device-name order. A device
+taken twice, two `"*"` slots of one kind, an `"any"` slot with several
+candidates, a required slot left empty, or wiring naming an unknown device,
+a device of another kind, or an undeclared slot fails the build, and the
+error prints the `plugins.<id>.peripherals` lines that would resolve it.
+
+The Plugin's `build.rs` calls `barracuda_plugin_build::build()`, and
+`config!()` defines one constant per slot in `config::peripherals`, named
+`<KIND>_<SLOT>`: an `Option<Instance>` for one device, or a
+`&[(&str, Instance)]` of device names and instances for `"*"`. The Plugin
+takes its devices by those constants; it never names a Board device.
 
 ### Host tasks
 
@@ -196,6 +253,42 @@ TypeScript configuration, formatter, and linter (`bun run format`, `lint`,
 Plugin's `resources/web/`; shared builders and test helpers live in
 `tools/web/`.
 
+## Enablement per Board
+
+Which Plugins a firmware contains is a property of its Board. A profile in
+`boards/profiles/<name>.yml` names a Plugin set and may extend one other
+profile:
+
+```yaml
+# boards/profiles/gateway.yml
+extends: minimal
+enable: [agent, imessage-gateway, imessage-telegram]
+```
+
+A Board names its profile (`base` when it names none) and overrides single
+Plugins in `plugins.<id>`:
+
+```yaml
+profile: gateway
+plugins:
+  imessage-telegram:
+    enabled: false
+  camera:
+    enabled: true
+```
+
+The enabled set is the profile chain, then the Board's overrides, then every
+Plugin an enabled Plugin depends on, transitively. A Board that disables a
+dependency of a Plugin it enables fails, as does an enabled Plugin whose
+required peripheral slot the Board cannot fill. The ignored
+`.barracuda/disabled-plugins` file disables Plugins on one developer's
+machine only; it disables their dependents too, and sync says so.
+
+`cargo board select` writes the enabled set into the local selection package
+under `.barracuda/selection/plugins`, which System depends on to register
+exactly those Plugins. Every Plugin stays in `Cargo.lock`, so switching
+Boards changes no committed file.
+
 ## Construction
 
 Every Plugin has exactly this constructor, and System calls it as
@@ -205,7 +298,9 @@ Every Plugin has exactly this constructor, and System calls it as
 impl ExamplePlugin {
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self { clock: context.hal.peripherals.take_clock() }
+        let clock = config::peripherals::REAL_TIME_CLOCK_MAIN
+            .and_then(|instance| context.hal.peripherals.take_real_time_clock(instance));
+        Self { clock }
     }
 }
 ```
@@ -229,7 +324,7 @@ exist whether or not any Plugin uses them:
 | `ip_stack` | Copy |
 | `entropy` | Clone the `SharedEntropy` |
 | `wifi` | `take()` by the one Plugin that owns Wi-Fi policy |
-| `hal.peripherals` | `take_<peripheral>()` by the one Plugin that owns the peripheral |
+| `hal.peripherals` | `take_<peripheral>(instance)` with the Plugin's `config::peripherals` constants |
 | `hal.exposed_io` | Clone the `Arc` |
 
 A new field is a Plugin API change and needs a raw Platform or Board
@@ -447,7 +542,7 @@ Every Plugin has `docs/plugin.md` in this form:
 - Plugin ID: `<id>`
 - Dependencies: `<id>`, `<id>`
 - Settings: `<name>` (`<type>`, default `<value>`)
-- Context resources: `<field>`, `hal.peripherals.take_<peripheral>()`
+- Context resources: `<field>`, peripheral slot `<kind>.<slot>` (`<fill>`)
 - Provided capabilities: `<Type>`
 - Required capabilities: `<Type>` from `<id>`
 - Workflow: Actions `<address>`, see `action.md`; Events `<event-id>`, see `event.md`
@@ -485,7 +580,10 @@ payload, schema path, Topic, emission condition, and bounds.
 - a Plugin crate that depends on another Plugin's crate without listing that
   Plugin in `depends-on` (a test may use the Plugins it depends on
   transitively);
-- a Board setting its Plugin does not declare, or of the wrong type.
+- a Board setting its Plugin does not declare, or of the wrong type;
+- a profile or Board naming an unknown profile or Plugin, a Board that
+  disables a dependency of a Plugin it enables, and any Board whose
+  peripheral slots fail to resolve.
 
 The generated registration constructs every Plugin with
 `new(&mut plugin_context)`, so another constructor fails to compile. The

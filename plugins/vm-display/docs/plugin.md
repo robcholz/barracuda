@@ -1,12 +1,12 @@
 # Display Plugin
 
-The Display Plugin owns the Board's primary built-in display and exposes
+The Display Plugin owns every Board display no other Plugin claims and exposes
 drawing and panel control to Lua code as the `display` Lua package.
 
 - Plugin ID: `display`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_display()`
+- Context resources: peripheral slot `display.rest` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -16,15 +16,21 @@ drawing and panel control to Lua code as the `display` Lua package.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary built-in `Display` capability exactly
-once and installs the `display` Lua package. Panel buses and control pins stay
-inside the selected implementation. Portable RGB888 input is converted by the implementation
-to its native LCD or e-paper pixel representation.
+Its `display.rest` slot receives, at build time, every display of the Board
+that no other enabled Plugin's slot takes, under the Board's device names.
+When another Plugin claims the primary display, Lua drives the others;
+otherwise Lua gets the primary display too. Panel buses and
+control pins stay inside the selected implementation. Portable RGB888 input is
+converted by the implementation to its native LCD or e-paper pixel
+representation.
 
 Lua API:
 
-- `display.available() -> boolean`
-- `display.open() -> handle`
+- `display.available([name]) -> boolean`: whether the named display, or any
+  display when no name is given, can still be opened
+- `display.list() -> { name, ... }`: the Board names of the Plugin's displays
+- `display.open([name]) -> handle`: opens the named display, or the first one
+  still available
 - `handle:descriptor() -> width, height, pixel_format, technology`
 - `handle:draw_rgb888(x, y, width, height, rgb_bytes)`
 - `handle:flush(mode)` where mode is `automatic`, `full`, `partial`, or `fast`
@@ -35,6 +41,15 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-Boards without a display report unavailable. Region dimensions and payload
-lengths are checked before the implementation is called. The optional peripheral is
-move-only, so one handle may be opened per boot.
+```lua
+local display = require('display')
+for _, name in ipairs(display.list()) do
+  print(name, display.available(name))
+end
+local status <close> = display.open('status')
+```
+
+Boards that leave the Plugin no display report unavailable and return an empty
+list. Region dimensions and payload lengths are checked before the
+implementation is called. Each display is move-only, so it may be opened once
+per boot.

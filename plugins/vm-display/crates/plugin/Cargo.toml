@@ -5,6 +5,9 @@ edition = "2024"
 description = "Barracuda Plugin exposing the built-in display to Lua"
 license = "Apache-2.0"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
 portable-atomic-util.workspace = true
 portable-atomic.workspace = true

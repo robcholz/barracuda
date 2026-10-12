@@ -18,7 +18,7 @@ use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
     Bytes, Context, Error, Function, Lua, MetaMethod, Package, Result, Table, UserData,
-    UserDataHandle, UserDataMethods,
+    UserDataHandle, UserDataMethods, Variadic,
 };
 pub use barracuda_vm_package_api::{
     LuaPackage, LuaPackageRegistry, LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES,

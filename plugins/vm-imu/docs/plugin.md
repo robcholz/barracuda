@@ -1,11 +1,11 @@
 # IMU Plugin
 
-Installs the `imu` Lua package over the Board's primary built-in IMU.
+Installs the `imu` Lua package over the Board's primary IMU.
 
 - Plugin ID: `imu`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_imu()`
+- Context resources: peripheral slot `inertial-measurement.device` (`primary`, optional)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -15,7 +15,7 @@ Installs the `imu` Lua package over the Board's primary built-in IMU.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary built-in `Imu` capability exactly once
+This Plugin takes the Board's primary `Imu` capability exactly once
 and installs the `imu` Lua package. I2C ownership, chip initialization, integer
 unit conversion, and Board-relative axis mapping remain owned by the selected
 implementation and generated Board HAL.

@@ -1,5 +1,7 @@
 //! Host-only Plugin task execution shared by Cargo build scripts and the CLI.
 
+pub mod selection;
+
 use barracuda_board_config::{BoardDefinition, PluginSetting};
 use barracuda_plugin_manifest::{parse, ConfigValue, PluginManifest, PluginTask};
 use sha2::{Digest, Sha256};
@@ -339,8 +341,69 @@ pub fn render_config(
     Ok(rendered)
 }
 
-/// Writes the settings for the selected Board, or the defaults when no Board
-/// is selected, to `OUT_DIR`.
+/// Renders the devices a Plugin's peripheral slots receive as a `peripherals`
+/// module of constants: `Option<Instance>` for one-device slots and a list of
+/// named instances for `"*"` slots. Slots receive nothing when no Board is
+/// selected or the Plugin is not enabled.
+#[must_use]
+pub fn render_claims(
+    manifest: &PluginManifest,
+    selection: Option<&selection::Selection>,
+) -> String {
+    if manifest.peripherals.is_empty() {
+        return String::new();
+    }
+    const INSTANCE: &str = "::barracuda_board_hal::Instance";
+    let mut rendered = String::from(
+        "/// The devices this Plugin's peripheral slots receive on the selected Board.\npub mod peripherals {\n",
+    );
+    for (kind, slots) in &manifest.peripherals {
+        for (slot, claim) in slots {
+            let filled = selection.and_then(|selection| {
+                selection
+                    .claims(manifest.id())
+                    .find(|(claimed_kind, claimed_slot, _)| {
+                        claimed_kind == kind && claimed_slot == slot
+                    })
+                    .map(|(_, _, filled)| filled.clone())
+            });
+            let name = format!("{kind}_{slot}").to_uppercase().replace('-', "_");
+            rendered.push_str(&format!(
+                "    /// Slot `{kind}.{slot}` (`{}`).\n",
+                claim.fill.as_str()
+            ));
+            if claim.fill == barracuda_plugin_manifest::PeripheralFill::Rest {
+                let devices = match filled {
+                    Some(selection::Filled::Many(devices)) => devices,
+                    _ => Vec::new(),
+                };
+                let items = devices
+                    .iter()
+                    .map(|device| format!("({:?}, {INSTANCE}::new({}))", device.name, device.index))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                rendered.push_str(&format!(
+                    "    pub const {name}: &[(&str, {INSTANCE})] = &[{items}];\n"
+                ));
+            } else {
+                let value = match filled {
+                    Some(selection::Filled::One(Some(device))) => {
+                        format!("Some({INSTANCE}::new({}))", device.index)
+                    }
+                    _ => String::from("None"),
+                };
+                rendered.push_str(&format!(
+                    "    pub const {name}: Option<{INSTANCE}> = {value};\n"
+                ));
+            }
+        }
+    }
+    rendered.push_str("}\n");
+    rendered
+}
+
+/// Writes the settings and peripheral claims for the selected Board, or the
+/// defaults when no Board is selected, to `OUT_DIR`.
 fn write_config(root: &Path, manifest: &PluginManifest) -> Result<(), TaskError> {
     let output = env::var_os("OUT_DIR").ok_or_else(|| TaskError::Task("missing OUT_DIR".into()))?;
     let workspace = root.join("../..");
@@ -368,7 +431,25 @@ fn write_config(root: &Path, manifest: &PluginManifest) -> Result<(), TaskError>
         }
         None => None,
     };
-    let rendered = render_config(manifest, board.as_ref())?;
+    let mut rendered = render_config(manifest, board.as_ref())?;
+    if !manifest.peripherals.is_empty() {
+        let plugins = selection::discover(&workspace)?;
+        for input in selection::inputs(&workspace, &plugins) {
+            println!("cargo:rerun-if-changed={}", input.display());
+        }
+        let resolved = board
+            .as_ref()
+            .map(|board| {
+                selection::select(
+                    &workspace,
+                    board,
+                    &plugins,
+                    &selection::local_disabled(&workspace)?,
+                )
+            })
+            .transpose()?;
+        rendered.push_str(&render_claims(manifest, resolved.as_ref()));
+    }
     let path = PathBuf::from(output).join(CONFIG_FILE);
     fs::write(&path, rendered)
         .map_err(|error| TaskError::Task(format!("{}: {error}", path.display())))

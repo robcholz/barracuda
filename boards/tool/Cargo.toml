@@ -16,6 +16,7 @@ barracuda-peripheral-config.workspace = true
 barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
 barracuda-platform-tool.workspace = true
+barracuda-plugin-tool.workspace = true
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false, features = ["fuzzy-select"] }

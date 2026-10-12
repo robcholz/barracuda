@@ -103,7 +103,21 @@ pub struct BoardDefinition {
     #[serde(default, rename = "exposed-io")]
     exposed_io: ExposedIoDefinition,
     #[serde(default)]
-    plugins: BTreeMap<String, BTreeMap<String, PluginSetting>>,
+    profile: Option<String>,
+    #[serde(default)]
+    plugins: BTreeMap<String, PluginSection>,
+}
+
+/// One Board's `plugins.<id>` section: whether the Board enables the Plugin,
+/// how its peripheral slots are wired, and its settings.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+struct PluginSection {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    peripherals: BTreeMap<String, String>,
+    #[serde(flatten)]
+    settings: BTreeMap<String, PluginSetting>,
 }
 
 impl BoardDefinition {
@@ -183,8 +197,31 @@ impl BoardDefinition {
         self.plugins
             .get(plugin)
             .into_iter()
-            .flatten()
+            .flat_map(|section| section.settings.iter())
             .map(|(name, setting)| (name.as_str(), setting))
+    }
+
+    /// Returns the Plugin profile this Board starts from, if it names one.
+    #[must_use]
+    pub fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
+    }
+
+    /// Returns whether the Board explicitly enables (`Some(true)`) or disables
+    /// (`Some(false)`) one Plugin, overriding its profile.
+    #[must_use]
+    pub fn plugin_enabled(&self, plugin: &str) -> Option<bool> {
+        self.plugins.get(plugin).and_then(|section| section.enabled)
+    }
+
+    /// Returns the peripheral wiring this Board gives one Plugin: slot
+    /// (`<kind>.<slot>`) to device name, in slot order.
+    pub fn plugin_peripherals(&self, plugin: &str) -> impl Iterator<Item = (&str, &str)> {
+        self.plugins
+            .get(plugin)
+            .into_iter()
+            .flat_map(|section| section.peripherals.iter())
+            .map(|(slot, device)| (slot.as_str(), device.as_str()))
     }
 
     /// Iterates the identities of Plugins this Board configures.
@@ -226,6 +263,9 @@ impl BoardDefinition {
                 .any(|component| !matches!(component, Component::Normal(_)))
         {
             return Err(ConfigError::InvalidNativeLayoutArtifact);
+        }
+        if let Some(profile) = &self.profile {
+            validate_resource_name("profile", profile)?;
         }
         self.peripherals.io.validate()?;
         self.exposed_io.validate()?;
@@ -1236,6 +1276,8 @@ impl SpiDefinition {
 pub struct PeripheralDefinition {
     implementation: String,
     #[serde(default)]
+    primary: bool,
+    #[serde(default)]
     bindings: BTreeMap<String, String>,
     #[serde(default)]
     parameters: BTreeMap<String, PeripheralParameter>,
@@ -1246,6 +1288,13 @@ impl PeripheralDefinition {
     #[must_use]
     pub fn implementation(&self) -> &str {
         &self.implementation
+    }
+
+    /// Returns whether the Board marks this device as the primary one of its
+    /// kind. A kind with one device has that device as primary without a mark.
+    #[must_use]
+    pub const fn primary(&self) -> bool {
+        self.primary
     }
 
     /// Finds one chip-native binding by its implementation-defined role.
@@ -1558,6 +1607,56 @@ pub fn parse(yaml: &str) -> Result<BoardDefinition, ConfigError> {
     let board = documents.pop().ok_or(ConfigError::DocumentCount(0))?;
     board.validate()?;
     Ok(board)
+}
+
+/// Directory holding the Plugin profiles Boards start from, relative to the
+/// workspace root.
+pub const PROFILES_PATH: &str = "boards/profiles";
+
+/// Profile used by a Board that names none.
+pub const DEFAULT_PROFILE: &str = "base";
+
+/// A named Plugin set Boards start from, optionally extending one other.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileDefinition {
+    #[serde(default)]
+    extends: Option<String>,
+    #[serde(default)]
+    enable: Vec<String>,
+}
+
+impl ProfileDefinition {
+    /// Returns the profile this one extends, if any.
+    #[must_use]
+    pub fn extends(&self) -> Option<&str> {
+        self.extends.as_deref()
+    }
+
+    /// Returns the Plugin identities this profile enables on top of the one
+    /// it extends.
+    #[must_use]
+    pub fn enable(&self) -> &[String] {
+        &self.enable
+    }
+}
+
+/// Parses one Plugin profile document.
+///
+/// # Errors
+///
+/// Returns an error when the YAML does not match the profile schema.
+pub fn parse_profile(yaml: &str) -> Result<ProfileDefinition, ConfigError> {
+    let mut documents = yaml_peg::serde::from_str::<ProfileDefinition>(yaml)
+        .map_err(|error| ConfigError::Yaml(error.to_string()))?;
+    if documents.len() != 1 {
+        return Err(ConfigError::DocumentCount(documents.len()));
+    }
+    let profile = documents.pop().ok_or(ConfigError::DocumentCount(0))?;
+    if let Some(parent) = &profile.extends {
+        validate_resource_name("profile", parent)?;
+    }
+    Ok(profile)
 }
 
 /// Renders a validated Board definition as a static `barracuda-board` value.

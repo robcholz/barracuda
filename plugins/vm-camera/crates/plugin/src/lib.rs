@@ -4,6 +4,10 @@
 
 extern crate alloc;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::string::String;
 use barracuda_board_hal::camera::{Camera, CameraDescriptor, CameraPeripheral, CameraPixelFormat};
 use barracuda_plugin::api::PluginContext;
@@ -34,7 +38,8 @@ impl<Device> CameraPlugin<Device> {
         Builtins: CameraPeripheral<Camera = Device>,
     {
         Self {
-            camera: context.hal.peripherals.take_camera(),
+            camera: config::peripherals::CAMERA_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_camera(instance)),
         }
     }
 }

@@ -14,6 +14,7 @@ barracuda-board-config.workspace = true
 barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
 barracuda-plugin = { workspace = true, features = ["manifest"] }
+barracuda-plugin-build = { path = "../../core/plugin/crates/build" }
 barracuda-vfs.workspace = true
 barracuda-vfs-fat.workspace = true
 clap = { version = "4", features = ["derive"] }

@@ -27,6 +27,34 @@ pub trait PeripheralImplementation: Sized + 'static {
     ) -> impl Future<Output = Result<Self::Peripheral, Self::Error>>;
 }
 
+/// One claimed device of a peripheral kind on the selected Board.
+///
+/// A Plugin's build resolves its `plugin.toml` peripheral slots against the
+/// Board and receives each claimed device as an `Instance` constant: the
+/// device's position among the Board's devices of that kind, in name order.
+/// Taking an instance moves that device out once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Instance(u8);
+
+impl Instance {
+    /// Names the device at `index` among the Board's devices of one kind.
+    #[must_use]
+    pub const fn new(index: u8) -> Self {
+        Self(index)
+    }
+
+    /// Returns the device's position among the Board's devices of its kind.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
+
+#[doc(hidden)]
+pub mod __private {
+    pub use embedded_graphics_core;
+}
+
 /// Stable removable-filesystem peripheral API.
 pub mod removable_storage {
     use core::future::Future;
@@ -108,13 +136,14 @@ pub mod power {
         fn measure(&mut self) -> Result<PowerMeasurement, Self::Error>;
     }
 
-    /// Move-only access to the Board's primary attached power monitor.
+    /// Move-only access to the Board's attached power monitor.
     pub trait PowerMonitorPeripheral {
         /// Concrete, statically dispatched power-monitor peripheral.
         type PowerMonitor: PowerMonitor;
 
-        /// Transfers the primary power monitor to its sole consumer once.
-        fn take_power_monitor(&mut self) -> Option<Self::PowerMonitor>;
+        /// Transfers the claimed power monitor `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_power_monitor(&mut self, instance: crate::Instance) -> Option<Self::PowerMonitor>;
     }
 }
 
@@ -159,8 +188,12 @@ pub mod real_time_clock {
         /// Concrete, statically dispatched clock implementation.
         type RealTimeClock: RealTimeClock;
 
-        /// Transfers the clock to its sole consumer when one is present.
-        fn take_real_time_clock(&mut self) -> Option<Self::RealTimeClock>;
+        /// Transfers the claimed real-time clock `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_real_time_clock(
+            &mut self,
+            instance: crate::Instance,
+        ) -> Option<Self::RealTimeClock>;
     }
 }
 
@@ -267,8 +300,9 @@ pub mod touch {
         /// Concrete, statically dispatched touch implementation.
         type Touch: Touch;
 
-        /// Transfers the touch input to its sole consumer when one is present.
-        fn take_touch(&mut self) -> Option<Self::Touch>;
+        /// Transfers the claimed touch input `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_touch(&mut self, instance: crate::Instance) -> Option<Self::Touch>;
     }
 }
 
@@ -333,8 +367,9 @@ pub mod buttons {
         /// Concrete, statically dispatched button implementation.
         type Buttons: Buttons;
 
-        /// Transfers the button peripheral to its sole consumer once.
-        fn take_buttons(&mut self) -> Option<Self::Buttons>;
+        /// Transfers the claimed button peripheral `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_buttons(&mut self, instance: crate::Instance) -> Option<Self::Buttons>;
     }
 }
 
@@ -666,7 +701,7 @@ pub mod display {
         fn wait_ready(&mut self) -> impl Future<Output = Result<(), Self::ControlError>>;
     }
 
-    /// Move-only access to the Board's primary attached display.
+    /// Move-only access to the Board's attached display.
     ///
     /// Generated Board HALs implement this trait when `board.yml` declares a
     /// attached peripheral whose peripheral is `display`.
@@ -674,9 +709,180 @@ pub mod display {
         /// Concrete, statically dispatched display peripheral.
         type Display: Display;
 
-        /// Transfers the primary display to its sole consumer once.
-        fn take_display(&mut self) -> Option<Self::Display>;
+        /// Transfers the claimed display `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_display(&mut self, instance: crate::Instance) -> Option<Self::Display>;
     }
+}
+
+/// Declares one Board's displays as a single statically dispatched type.
+///
+/// Generated Board HALs use this when a Board declares several displays: the
+/// enum holds whichever concrete display a claimed instance names, and
+/// implements [`display::Display`] by forwarding to it. Drawing through
+/// [`DrawTarget`](embedded_graphics_core::draw_target::DrawTarget) takes
+/// portable RGB888 pixels and converts them through
+/// [`display::Display::draw_rgb888`], so displays with different native color
+/// types share one type.
+///
+/// ```ignore
+/// barracuda_peripheral::display_set! {
+///     pub enum BoardDisplay, BoardDisplayControlError, BoardDisplayRenderError {
+///         Front(FrontPeripheral),
+///         BackEink(BackEinkPeripheral),
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! display_set {
+    (
+        $vis:vis enum $name:ident, $control:ident, $render:ident {
+            $($variant:ident($display:ty)),+ $(,)?
+        }
+    ) => {
+        /// One of the Board's displays.
+        $vis enum $name {
+            $(
+                #[doc = concat!("The `", stringify!($variant), "` display.")]
+                $variant($display),
+            )+
+        }
+
+        /// A lifecycle or presentation failure of one of the Board's displays.
+        #[derive(Debug)]
+        $vis enum $control {
+            $(
+                #[doc = concat!("The `", stringify!($variant), "` display failed.")]
+                $variant(<$display as $crate::display::Display>::ControlError),
+            )+
+        }
+
+        /// A drawing failure of one of the Board's displays.
+        #[derive(Debug)]
+        $vis enum $render {
+            $(
+                #[doc = concat!("The `", stringify!($variant), "` display failed.")]
+                $variant(<$display as $crate::display::Display>::RenderError),
+            )+
+        }
+
+        impl $crate::__private::embedded_graphics_core::geometry::OriginDimensions for $name {
+            fn size(&self) -> $crate::__private::embedded_graphics_core::geometry::Size {
+                match self {
+                    $(Self::$variant(display) => display.size(),)+
+                }
+            }
+        }
+
+        impl $crate::__private::embedded_graphics_core::draw_target::DrawTarget for $name {
+            type Color = $crate::__private::embedded_graphics_core::pixelcolor::Rgb888;
+            type Error = $render;
+
+            fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+            where
+                I: IntoIterator<
+                    Item = $crate::__private::embedded_graphics_core::Pixel<Self::Color>,
+                >,
+            {
+                use $crate::__private::embedded_graphics_core::{
+                    geometry::Size, primitives::Rectangle, Pixel,
+                };
+                for Pixel(point, color) in pixels {
+                    let area = Rectangle::new(point, Size::new(1, 1));
+                    match self {
+                        $(Self::$variant(display) => {
+                            $crate::display::Display::draw_rgb888(display, area, &[color])
+                                .map_err($render::$variant)?;
+                        })+
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        impl $crate::display::Display for $name {
+            type ControlError = $control;
+            type RenderError = $render;
+
+            fn descriptor(&self) -> $crate::display::DisplayDescriptor {
+                match self {
+                    $(Self::$variant(display) => $crate::display::Display::descriptor(display),)+
+                }
+            }
+
+            fn draw_rgb888(
+                &mut self,
+                area: $crate::__private::embedded_graphics_core::primitives::Rectangle,
+                pixels: &[$crate::__private::embedded_graphics_core::pixelcolor::Rgb888],
+            ) -> Result<(), Self::RenderError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::draw_rgb888(display, area, pixels)
+                            .map_err($render::$variant)
+                    })+
+                }
+            }
+
+            async fn flush(
+                &mut self,
+                request: $crate::display::RefreshRequest,
+            ) -> Result<(), Self::ControlError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::flush(display, request)
+                            .await
+                            .map_err($control::$variant)
+                    })+
+                }
+            }
+
+            async fn set_power(
+                &mut self,
+                power: $crate::display::DisplayPower,
+            ) -> Result<(), Self::ControlError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::set_power(display, power)
+                            .await
+                            .map_err($control::$variant)
+                    })+
+                }
+            }
+
+            async fn set_brightness(&mut self, brightness: u8) -> Result<(), Self::ControlError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::set_brightness(display, brightness)
+                            .await
+                            .map_err($control::$variant)
+                    })+
+                }
+            }
+
+            async fn set_orientation(
+                &mut self,
+                orientation: $crate::display::DisplayOrientation,
+            ) -> Result<(), Self::ControlError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::set_orientation(display, orientation)
+                            .await
+                            .map_err($control::$variant)
+                    })+
+                }
+            }
+
+            async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
+                match self {
+                    $(Self::$variant(display) => {
+                        $crate::display::Display::wait_ready(display)
+                            .await
+                            .map_err($control::$variant)
+                    })+
+                }
+            }
+        }
+    };
 }
 
 /// Stable indicator peripheral API.
@@ -732,13 +938,14 @@ pub mod indicator {
         }
     }
 
-    /// Move-only access to the Board's primary attached indicator.
+    /// Move-only access to the Board's attached indicator.
     pub trait IndicatorPeripheral {
         /// Concrete, statically dispatched indicator peripheral.
         type Indicator: Indicator;
 
-        /// Transfers the primary indicator to its sole consumer once.
-        fn take_indicator(&mut self) -> Option<Self::Indicator>;
+        /// Transfers the claimed indicator `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_indicator(&mut self, instance: crate::Instance) -> Option<Self::Indicator>;
     }
 }
 
@@ -785,13 +992,14 @@ pub mod led_strip {
         }
     }
 
-    /// Move-only access to the Board's primary attached LED strip.
+    /// Move-only access to the Board's attached LED strip.
     pub trait LedStripPeripheral {
         /// Concrete, statically dispatched LED-strip peripheral.
         type LedStrip: LedStrip;
 
-        /// Transfers the primary LED strip to its sole consumer once.
-        fn take_led_strip(&mut self) -> Option<Self::LedStrip>;
+        /// Transfers the claimed LED strip `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_led_strip(&mut self, instance: crate::Instance) -> Option<Self::LedStrip>;
     }
 }
 
@@ -936,13 +1144,14 @@ pub mod camera {
         ) -> impl Future<Output = Result<CapturedFrame, Self::Error>> + 'a;
     }
 
-    /// Move-only access to the Board's primary attached camera.
+    /// Move-only access to the Board's attached camera.
     pub trait CameraPeripheral {
         /// Concrete, statically dispatched camera peripheral.
         type Camera: Camera;
 
-        /// Transfers the primary camera to its sole consumer once.
-        fn take_camera(&mut self) -> Option<Self::Camera>;
+        /// Transfers the claimed camera `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_camera(&mut self, instance: crate::Instance) -> Option<Self::Camera>;
     }
 }
 
@@ -1051,13 +1260,14 @@ pub mod audio {
         ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
     }
 
-    /// Move-only access to the Board's primary attached audio codec.
+    /// Move-only access to the Board's attached audio codec.
     pub trait AudioCodecPeripheral {
         /// Concrete, statically dispatched codec peripheral.
         type AudioCodec: AudioCodec;
 
-        /// Transfers the primary codec to its sole consumer once.
-        fn take_audio_codec(&mut self) -> Option<Self::AudioCodec>;
+        /// Transfers the claimed audio codec `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_audio_codec(&mut self, instance: crate::Instance) -> Option<Self::AudioCodec>;
     }
 }
 
@@ -1267,12 +1477,13 @@ pub mod imu {
         fn read_sample(&mut self) -> impl Future<Output = Result<ImuSample, Self::Error>> + '_;
     }
 
-    /// Move-only access to the Board's primary attached IMU.
+    /// Move-only access to the Board's attached IMU.
     pub trait ImuPeripheral {
         /// Concrete, statically dispatched inertial peripheral.
         type Imu: Imu;
 
-        /// Transfers the primary IMU to its sole consumer once.
-        fn take_imu(&mut self) -> Option<Self::Imu>;
+        /// Transfers the claimed IMU `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_imu(&mut self, instance: crate::Instance) -> Option<Self::Imu>;
     }
 }

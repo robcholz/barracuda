@@ -4,6 +4,10 @@
 
 extern crate alloc;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::string::String;
 use barracuda_board_hal::imu::{Imu, ImuDescriptor, ImuPeripheral, ImuSample};
 use barracuda_plugin::api::PluginContext;
@@ -30,7 +34,8 @@ impl<Device> ImuPlugin<Device> {
         Builtins: ImuPeripheral<Imu = Device>,
     {
         Self {
-            imu: context.hal.peripherals.take_imu(),
+            imu: config::peripherals::INERTIAL_MEASUREMENT_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_imu(instance)),
         }
     }
 }

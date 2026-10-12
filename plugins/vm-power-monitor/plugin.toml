@@ -1,3 +1,6 @@
 id = "power-monitor"
 depends-on = ["vm"]
 description = "Registers the built-in power-monitor Lua package."
+
+[peripherals.power-monitor]
+device = { fill = "primary", optional = true }

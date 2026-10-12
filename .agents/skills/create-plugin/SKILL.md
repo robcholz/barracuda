@@ -18,15 +18,17 @@ its real callers before changing an existing contract.
   `depends-on`. Do not depend on a Plugin to reach its internals.
 - If the feature needs something another Plugin owns, use or extend that
   Plugin's capability. If it needs a raw Platform or Board resource, take it
-  from `PluginContext`. If it needs a value that differs by Board, declare a
-  setting.
+  from `PluginContext`. If it needs a Board peripheral, declare a slot. If it
+  needs a value that differs by Board, declare a setting.
 
 ## 2. Lay out the directory
 
 Create `plugins/<id>/plugin.toml` with `id`, `depends-on`, and a one-sentence
 `description`, and `crates/plugin` with package `barracuda-<id>-plugin`. Add
 only the layout entries the Plugin needs: `schemas/`, `resources/`,
-`filesystem/`, `docs/`, further crates. Run `cargo plugin sync`.
+`filesystem/`, `docs/`, further crates. Enable it for the Boards that ship it,
+in a profile under `boards/profiles/` or a Board's `plugins.<id>.enabled`.
+Run `cargo plugin sync`.
 
 ## 3. Construct
 
@@ -38,6 +40,14 @@ register nothing and spawn nothing.
 For a setting, add `[config.<name>]` to `plugin.toml`, a `build.rs` calling
 `barracuda_plugin_build::build()`, and `mod config { barracuda_plugin::config!(); }`;
 set non-default values in Boards' `plugins.<id>` sections.
+
+For a peripheral, declare its slot under `[peripherals.<kind>]` in
+`plugin.toml` (`"primary"`, `"any"`, `"*"`, or `{ fill, optional = true }`),
+add the same `build.rs` and `config` module, and take the device with
+`config::peripherals::<KIND>_<SLOT>` and
+`context.hal.peripherals.take_<peripheral>(instance)`. Never name a Board
+device in the Plugin; a Board that needs another device wires the slot in
+`plugins.<id>.peripherals`.
 
 ## 4. Register and start
 

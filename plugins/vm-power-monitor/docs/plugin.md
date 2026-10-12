@@ -1,12 +1,12 @@
 # Power Monitor Plugin
 
-Installs the `power_monitor` Lua package over the Board's primary attached
+Installs the `power_monitor` Lua package over the Board's primary
 power monitor.
 
 - Plugin ID: `power-monitor`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_power_monitor()`
+- Context resources: peripheral slot `power-monitor.device` (`primary`, optional)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -16,7 +16,7 @@ power monitor.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary attached `PowerMonitor` capability
+This Plugin takes the Board's primary `PowerMonitor` capability
 exactly once and installs the `power_monitor` Lua package. I2C ownership, chip
 initialization, calibration, and conversion to integer SI subunits remain owned
 by the selected implementation and generated Board HAL.

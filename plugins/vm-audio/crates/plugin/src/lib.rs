@@ -4,6 +4,10 @@
 
 extern crate alloc;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::format;
 use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
@@ -36,7 +40,8 @@ impl<Device> AudioPlugin<Device> {
         Builtins: AudioCodecPeripheral<AudioCodec = Device>,
     {
         Self {
-            codec: context.hal.peripherals.take_audio_codec(),
+            codec: config::peripherals::AUDIO_CODEC_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_audio_codec(instance)),
         }
     }
 }

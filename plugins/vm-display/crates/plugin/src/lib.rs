@@ -1,10 +1,14 @@
-//! Lua package for the Board's primary built-in display.
+//! Lua package for the Board displays the `display` Plugin claims.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::string::String;
+mod config {
+    barracuda_plugin::config!();
+}
+
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::display::{
     Display, DisplayDescriptor, DisplayOrientation, DisplayPeripheral, DisplayPower,
     DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
@@ -13,7 +17,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
     Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    UserDataHandle, UserDataMethods, Variadic,
 };
 use core::cell::RefCell;
 use embedded_graphics_core::{
@@ -30,21 +34,31 @@ const MAX_DRAW_BYTES: usize = 512 * 1024;
 /// Pixels converted per implementation call, staged on the stack.
 const DRAW_CHUNK_PIXELS: usize = 512;
 
-/// Owns the Board's primary display capability and publishes it to Lua.
+/// Owns the Board displays no other Plugin claims and publishes them to Lua
+/// by their Board names.
 #[barracuda_plugin::macros::plugin]
 pub struct DisplayPlugin<Device> {
-    display: Option<Device>,
+    displays: Vec<(&'static str, Device)>,
 }
 
 impl<Device> DisplayPlugin<Device> {
-    /// Takes the built-in display from the generated Board capability set.
+    /// Takes every claimed display from the generated Board capability set.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: DisplayPeripheral<Display = Device>,
     {
         Self {
-            display: context.hal.peripherals.take_display(),
+            displays: config::peripherals::DISPLAY_REST
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_display(*instance)
+                        .map(|display| (*name, display))
+                })
+                .collect(),
         }
     }
 }
@@ -66,22 +80,30 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(DisplayPackage::new(self.display.take()))
+            .register(DisplayPackage::new(core::mem::take(&mut self.displays)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
+/// The claimed displays by Board name; a display moves out when Lua opens it.
+type Displays<Device> = Vec<(&'static str, Option<Device>)>;
+
 struct DisplayPackage<Device> {
-    display: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    displays: Arc<critical_section::Mutex<RefCell<Displays<Device>>>>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> DisplayPackage<Device> {
-    fn new(display: Option<Device>) -> Self {
+    fn new(displays: Vec<(&'static str, Device)>) -> Self {
         Self {
-            display: Arc::new(critical_section::Mutex::new(RefCell::new(display))),
+            displays: Arc::new(critical_section::Mutex::new(RefCell::new(
+                displays
+                    .into_iter()
+                    .map(|(name, display)| (name, Some(display)))
+                    .collect(),
+            ))),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -94,31 +116,69 @@ where
     Device::RenderError: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_display = Arc::clone(&self.display);
+        let available_displays = Arc::clone(&self.displays);
         let available_active = Arc::clone(&self.active);
-        let open_display = Arc::clone(&self.display);
+        let list_displays = Arc::clone(&self.displays);
+        let open_displays = Arc::clone(&self.displays);
         let open_active = Arc::clone(&self.active);
         lua.register_lib("display", move |package| {
-            package.register("available", move |(): ()| {
+            package.register("available", move |name: Variadic<String>| {
+                let name = name.first().cloned();
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
-                        available_display.borrow(section).borrow().is_some()
+                        available_displays.borrow(section).borrow().iter().any(
+                            |(display, device)| {
+                                device.is_some()
+                                    && name.as_deref().is_none_or(|name| name == *display)
+                            },
+                        )
                     })))
             })?;
-            package.register_with("open", move |lua, (): ()| {
+            package.register_with("list", move |lua, (): ()| {
+                let names = critical_section::with(|section| {
+                    list_displays
+                        .borrow(section)
+                        .borrow()
+                        .iter()
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
+                });
+                let table = match lua.create_table() {
+                    Ok(table) => table,
+                    Err(error) => return Some(Err(error)),
+                };
+                for (index, name) in (1_i64..).zip(names) {
+                    if let Err(error) = table.set(index, name) {
+                        return Some(Err(error));
+                    }
+                }
+                Some(Ok(table))
+            })?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let name = name.first().cloned();
                 if !open_active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("display package has been revoked")));
                 }
                 let display = critical_section::with(|section| {
-                    open_display.borrow(section).borrow_mut().take()
+                    open_displays
+                        .borrow(section)
+                        .borrow_mut()
+                        .iter_mut()
+                        .find(|(display, device)| {
+                            device.is_some() && name.as_deref().is_none_or(|name| name == *display)
+                        })
+                        .and_then(|(_, device)| device.take())
                 });
                 Some(match display {
                     Some(display) => {
                         lua.create_userdata(DisplayHandle::new(display, Arc::clone(&open_active)))
                     }
-                    None => Err(Error::runtime(
-                        "built-in display is unavailable or already open",
-                    )),
+                    None => Err(Error::runtime(match name {
+                        Some(name) => {
+                            alloc::format!("display `{name}` is unavailable or already open")
+                        }
+                        None => String::from("no display is available"),
+                    })),
                 })
             })
         })
@@ -590,12 +650,43 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lua_draws_and_flushes_the_builtin_display() {
-        let package = DisplayPackage::new(Some(TestDisplay {
+    fn test_display() -> TestDisplay {
+        TestDisplay {
             drawn: 0,
             areas: std::vec::Vec::new(),
-        }));
+        }
+    }
+
+    #[test]
+    fn lua_opens_claimed_displays_by_name() {
+        let package = DisplayPackage::new(std::vec![
+            ("back-eink", test_display()),
+            ("status", test_display()),
+        ]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load(
+                "local displays = require('display')\n\
+                 local names = displays.list()\n\
+                 local status = displays.open('status')\n\
+                 local reopened = pcall(displays.open, 'status')\n\
+                 local first = displays.open()\n\
+                 return #names == 2 and names[1] == 'back-eink' and names[2] == 'status'\n\
+                     and status:is_open() and first:is_open()\n\
+                     and not displays.available() and not displays.available('status')\n\
+                     and displays.open() == nil",
+            )
+            .eval_async(),
+        )
+        .expect("use displays");
+        assert!(result);
+    }
+
+    #[test]
+    fn lua_draws_and_flushes_the_builtin_display() {
+        let package = DisplayPackage::new(std::vec![("panel", test_display())]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -654,10 +745,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = DisplayPackage::new(Some(TestDisplay {
-            drawn: 0,
-            areas: std::vec::Vec::new(),
-        }));
+        let package = DisplayPackage::new(std::vec![("panel", test_display())]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

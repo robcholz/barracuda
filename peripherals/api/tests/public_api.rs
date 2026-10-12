@@ -1,11 +1,11 @@
 //! External implementation tests for the stable implementation API.
 
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use std::convert::Infallible;
 
 use barracuda_peripheral::{
-    PeripheralImplementation,
+    Instance, PeripheralImplementation,
     display::{
         Display, DisplayDescriptor, DisplayFeatures, DisplayOrientation, DisplayPeripheral,
         DisplayPower, DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
@@ -126,8 +126,10 @@ struct TestPeripherals {
 impl DisplayPeripheral for TestPeripherals {
     type Display = CustomDisplay;
 
-    fn take_display(&mut self) -> Option<Self::Display> {
-        self.display.take()
+    fn take_display(&mut self, instance: Instance) -> Option<Self::Display> {
+        (instance.index() == 0)
+            .then(|| self.display.take())
+            .flatten()
     }
 }
 
@@ -142,7 +144,11 @@ fn custom_implementation_can_implement_the_stable_display_api() {
     let mut peripherals = TestPeripherals {
         display: Some(display),
     };
-    let mut display = peripherals.take_display().expect("one display owner");
+    assert!(peripherals.take_display(Instance::new(1)).is_none());
+    let mut display = peripherals
+        .take_display(Instance::new(0))
+        .expect("one display owner");
+    assert!(peripherals.take_display(Instance::new(0)).is_none());
 
     let descriptor = display.descriptor();
     assert_eq!(descriptor.size(), Size::new(320, 240));
@@ -207,7 +213,7 @@ struct ImuPeripherals(Option<CustomImu>);
 impl ImuPeripheral for ImuPeripherals {
     type Imu = CustomImu;
 
-    fn take_imu(&mut self) -> Option<Self::Imu> {
+    fn take_imu(&mut self, _instance: Instance) -> Option<Self::Imu> {
         self.0.take()
     }
 }
@@ -226,8 +232,10 @@ fn custom_implementation_can_implement_the_stable_imu_api() {
     assert_eq!(transform.apply(Vector3::new(0, i32::MIN, 0)).x, i32::MAX);
 
     let mut peripherals = ImuPeripherals(Some(CustomImu));
-    let mut imu = peripherals.take_imu().expect("one IMU owner");
-    assert!(peripherals.take_imu().is_none());
+    let mut imu = peripherals
+        .take_imu(Instance::new(0))
+        .expect("one IMU owner");
+    assert!(peripherals.take_imu(Instance::new(0)).is_none());
     assert_eq!(imu.descriptor().accelerometer_range_mg(), 4_000);
     let _sample = imu.read_sample();
 }
@@ -252,7 +260,7 @@ struct PowerPeripherals(Option<CustomPowerMonitor>);
 impl PowerMonitorPeripheral for PowerPeripherals {
     type PowerMonitor = CustomPowerMonitor;
 
-    fn take_power_monitor(&mut self) -> Option<Self::PowerMonitor> {
+    fn take_power_monitor(&mut self, _instance: Instance) -> Option<Self::PowerMonitor> {
         self.0.take()
     }
 }
@@ -261,10 +269,55 @@ impl PowerMonitorPeripheral for PowerPeripherals {
 fn custom_implementation_can_implement_the_stable_power_monitor_api() {
     let mut peripherals = PowerPeripherals(Some(CustomPowerMonitor));
     let mut monitor = peripherals
-        .take_power_monitor()
+        .take_power_monitor(Instance::new(0))
         .expect("one power monitor owner");
-    assert!(peripherals.take_power_monitor().is_none());
+    assert!(peripherals.take_power_monitor(Instance::new(0)).is_none());
     let sample = monitor.measure().expect("power sample");
     assert_eq!(sample.bus_microvolts, 5_000_000);
     assert_eq!(sample.current_microamps, 500);
+}
+
+barracuda_peripheral::display_set! {
+    pub enum TwoDisplays, TwoDisplaysControlError, TwoDisplaysRenderError {
+        Front(CustomDisplay),
+        Back(CustomDisplay),
+    }
+}
+
+fn ready<F: core::future::Future>(future: F) -> F::Output {
+    let mut future = core::pin::pin!(future);
+    let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+    match future.as_mut().poll(&mut context) {
+        core::task::Poll::Ready(output) => output,
+        core::task::Poll::Pending => panic!("the test display never waits"),
+    }
+}
+
+#[test]
+fn a_display_set_forwards_to_the_display_it_holds() {
+    let mut displays = [
+        TwoDisplays::Front(CustomDisplay::default()),
+        TwoDisplays::Back(CustomDisplay {
+            brightness: 9,
+            ..CustomDisplay::default()
+        }),
+    ];
+    for display in &mut displays {
+        assert_eq!(display.size(), Size::new(320, 240));
+        assert_eq!(display.descriptor().pixel_format(), PixelFormat::Rgb565);
+        // Portable RGB888 pixels reach displays of any native color type.
+        display
+            .draw_iter([Pixel(
+                embedded_graphics_core::geometry::Point::new(1, 2),
+                Rgb888::new(1, 2, 3),
+            )])
+            .expect("draw");
+        ready(display.set_brightness(200)).expect("brightness");
+        ready(display.flush(RefreshRequest::new(None, RefreshMode::Full))).expect("flush");
+    }
+    let [TwoDisplays::Front(front), TwoDisplays::Back(back)] = displays else {
+        panic!("variants keep their displays");
+    };
+    assert!(front.flushed && back.flushed);
+    assert_eq!((front.brightness, back.brightness), (200, 200));
 }
