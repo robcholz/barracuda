@@ -30,6 +30,83 @@ pub struct PluginManifest {
     /// setting name.
     #[serde(default)]
     pub config: BTreeMap<String, ConfigSetting>,
+    /// Peripheral slots the Plugin claims, keyed by peripheral kind and then
+    /// by the Plugin's own slot name.
+    #[serde(default)]
+    pub peripherals: BTreeMap<String, BTreeMap<String, PeripheralClaim>>,
+}
+
+/// What fills one peripheral slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PeripheralFill {
+    /// The device the Board marks primary for the slot's kind.
+    Primary,
+    /// The only device of the slot's kind that nothing else takes.
+    Any,
+    /// Every device of the slot's kind that nothing else takes.
+    Rest,
+}
+
+impl PeripheralFill {
+    /// Returns the `plugin.toml` spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Any => "any",
+            Self::Rest => "*",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "primary" => Some(Self::Primary),
+            "any" => Some(Self::Any),
+            "*" => Some(Self::Rest),
+            _ => None,
+        }
+    }
+}
+
+/// One peripheral slot a Plugin claims.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PeripheralClaim {
+    /// What fills the slot.
+    pub fill: PeripheralFill,
+    /// Whether the Plugin starts without the slot filled. A `"*"` slot is
+    /// always optional: it may receive no device.
+    pub optional: bool,
+}
+
+impl<'de> Deserialize<'de> for PeripheralClaim {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Detailed {
+            fill: String,
+            #[serde(default)]
+            optional: bool,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Fill(String),
+            Detailed(Detailed),
+        }
+        let (fill, optional) = match Raw::deserialize(deserializer)? {
+            Raw::Fill(fill) => (fill, false),
+            Raw::Detailed(Detailed { fill, optional }) => (fill, optional),
+        };
+        let fill = PeripheralFill::parse(&fill).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "peripheral slot fill `{fill}` must be \"primary\", \"any\" or \"*\""
+            ))
+        })?;
+        Ok(Self {
+            fill,
+            optional: optional || fill == PeripheralFill::Rest,
+        })
+    }
 }
 
 /// One Board-configurable Plugin setting, generated into a constant.
@@ -215,6 +292,9 @@ pub enum ManifestError {
         "invalid Plugin setting `{0}`: expected a lowercase name, a description and a default of its type"
     )]
     InvalidSetting(String),
+    /// A peripheral kind or slot name is not a lowercase name.
+    #[error("invalid peripheral slot `{0}`: expected lowercase kind and slot names")]
+    InvalidPeripheralSlot(String),
     /// The Plugin description exceeds [`MAX_DESCRIPTION_CHARS`].
     #[error("Plugin description is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}")]
     DescriptionTooLong {
@@ -258,6 +338,15 @@ pub fn parse(contents: &str) -> Result<PluginManifest, ManifestError> {
             || !setting.kind.accepts(&setting.default)
         {
             return Err(ManifestError::InvalidSetting(name.clone()));
+        }
+    }
+    for (kind, slots) in &manifest.peripherals {
+        for slot in slots.keys() {
+            if !matches_plugin_id_pattern(kind) || !matches_plugin_id_pattern(slot) {
+                return Err(ManifestError::InvalidPeripheralSlot(format!(
+                    "{kind}.{slot}"
+                )));
+            }
         }
     }
     validate_identity(&manifest.id)?;

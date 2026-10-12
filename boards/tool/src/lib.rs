@@ -712,6 +712,8 @@ where
     }
 
     write_selected_build(workspace_root, &board, &platform)?;
+    barracuda_plugin_tool::select_board(workspace_root, name)
+        .map_err(|error| CommandError::Generated(error.to_string()))?;
     write_selected_board(workspace_root, name)?;
     writeln!(
         output,

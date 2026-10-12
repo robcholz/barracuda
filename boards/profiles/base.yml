@@ -1,0 +1,49 @@
+# The Plugins a Board builds unless it names another profile. It covers every
+# Plugin, matching the builds before per-Board selection; Boards and narrower
+# profiles turn Plugins off with `plugins.<id>.enabled: false`.
+enable:
+  - agent
+  - agent-file
+  - agent-http
+  - agent-imessage-gateway
+  - agent-scheduler
+  - agent-time
+  - agent-vm
+  - agent-websearch
+  - agent-workflow
+  - analog
+  - audio
+  - camera
+  - captive-portal
+  - display
+  - files
+  - gpio
+  - http
+  - i2c
+  - i2s
+  - imessage-bluebubble
+  - imessage-gateway
+  - imessage-inkbox
+  - imessage-qq
+  - imessage-telegram
+  - imessage-web
+  - imessage-wechat
+  - imu
+  - led-strip
+  - message-queue
+  - power-monitor
+  - pwm
+  - scheduler
+  - spi
+  - time
+  - uart
+  - vm
+  - vm-agent
+  - vm-filesystem
+  - vm-http
+  - vm-systeminfo
+  - vm-time
+  - vm-webserver
+  - webserver
+  - wifi
+  - workflow

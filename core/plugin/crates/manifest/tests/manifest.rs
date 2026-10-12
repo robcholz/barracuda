@@ -3,7 +3,8 @@
 #![allow(clippy::expect_used)]
 
 use barracuda_plugin_manifest::{
-    parse, ConfigType, ConfigValue, ManifestError, MAX_DESCRIPTION_CHARS, PLUGIN_ID_PATTERN,
+    parse, ConfigType, ConfigValue, ManifestError, PeripheralClaim, PeripheralFill,
+    MAX_DESCRIPTION_CHARS, PLUGIN_ID_PATTERN,
 };
 
 const VALID: &str = r#"
@@ -148,4 +149,38 @@ fn rejects_unknown_fields() {
     let manifest = format!("{VALID}\nplatform = \"linux\"\n");
 
     assert!(parse(&manifest).is_err());
+}
+
+#[test]
+fn parses_peripheral_claims() {
+    let source = format!(
+        "{VALID}\n[peripherals.display]\nmain = \"primary\"\nside = {{ fill = \"any\", optional = true }}\nrest = \"*\"\n"
+    );
+    let manifest = parse(&source).expect("claims");
+    let display = &manifest.peripherals["display"];
+    assert_eq!(
+        display["main"],
+        PeripheralClaim {
+            fill: PeripheralFill::Primary,
+            optional: false
+        }
+    );
+    assert_eq!(
+        display["side"],
+        PeripheralClaim {
+            fill: PeripheralFill::Any,
+            optional: true
+        }
+    );
+    // Rest slots may receive nothing, so they are always optional.
+    assert!(display["rest"].optional);
+
+    for invalid in [
+        "[peripherals.display]\nmain = \"first\"\n",
+        "[peripherals.Display]\nmain = \"primary\"\n",
+        "[peripherals.display]\nMain = \"primary\"\n",
+        "[peripherals.display]\nmain = { fill = \"primary\", extra = true }\n",
+    ] {
+        assert!(parse(&format!("{VALID}\n{invalid}")).is_err(), "{invalid}");
+    }
 }
