@@ -2,13 +2,14 @@
 name = "barracuda-ui-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Barracuda Plugin that runs compiled MicroTS views and binds them to Lua"
+description = "Barracuda Plugin that runs compiled MicroTS views"
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic.workspace = true
+portable-atomic-util.workspace = true
 barracuda-plugin.workspace = true
 barracuda-ui-runtime = { path = "../runtime" }
-barracuda-vm-plugin.workspace = true
 critical-section = "1"
 embassy-executor.workspace = true
 embassy-futures.workspace = true
@@ -16,7 +17,6 @@ embassy-sync.workspace = true
 log.workspace = true
 
 [dev-dependencies]
-barracuda-lua = { path = "../../../vm/crates/lua", features = ["vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

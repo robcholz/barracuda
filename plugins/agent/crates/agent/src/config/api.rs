@@ -5,10 +5,11 @@
 //! against an [`ApiPurpose`] and resolves the right one per purpose, falling
 //! back to a registered default.
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_model_api::{InitError, ModelApiConfig};
+use portable_atomic_util::Arc;
 
 /// What an LLM API config is used for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,6 +24,19 @@ pub enum ApiPurpose {
     Compaction,
 }
 
+impl ApiPurpose {
+    const COUNT: usize = 4;
+
+    const fn slot(self) -> usize {
+        match self {
+            Self::RootAgent => 0,
+            Self::SubAgent => 1,
+            Self::Memory => 2,
+            Self::Compaction => 3,
+        }
+    }
+}
+
 pub type SharedApiManager = Arc<RefCell<ModelApiManager>>;
 
 /// Registers LLM API configs per [`ApiPurpose`], de-duplicated by model, with a
@@ -33,12 +47,12 @@ pub type SharedApiManager = Arc<RefCell<ModelApiManager>>;
 /// every purpose bound to that model then resolves to the updated config.
 #[derive(Clone, Debug, Default)]
 pub struct ModelApiManager {
-    /// Configs by model name (one per model).
-    by_model: BTreeMap<String, ModelApiConfig>,
-    /// Purpose → the model name it resolves to.
-    by_purpose: BTreeMap<ApiPurpose, String>,
-    /// Model resolved for a purpose that has no explicit binding.
-    default_model: Option<String>,
+    /// Registered configs, one per model.
+    configs: Vec<ModelApiConfig>,
+    /// Index into `configs` bound to each purpose, by [`ApiPurpose::slot`].
+    by_purpose: [Option<usize>; ApiPurpose::COUNT],
+    /// Index into `configs` resolved for a purpose without a binding.
+    default: Option<usize>,
 }
 
 impl ModelApiManager {
@@ -59,38 +73,59 @@ impl ModelApiManager {
         default: bool,
     ) -> Result<(), InitError> {
         api.validate()?;
-        let model = api.model.clone();
-        self.by_model.insert(model.clone(), api);
-        self.by_purpose.insert(purpose, model.clone());
+        let index = self.store(api);
+        if let Some(binding) = self.by_purpose.get_mut(purpose.slot()) {
+            *binding = Some(index);
+        }
         if default {
-            self.default_model = Some(model);
+            self.default = Some(index);
         }
         Ok(())
+    }
+
+    /// Stores `api`, replacing the config of the same model, and returns its
+    /// index.
+    fn store(&mut self, api: ModelApiConfig) -> usize {
+        if let Some(index) = self
+            .configs
+            .iter()
+            .position(|stored| stored.model == api.model)
+        {
+            if let Some(stored) = self.configs.get_mut(index) {
+                *stored = api;
+            }
+            return index;
+        }
+        self.configs.reserve_exact(1);
+        self.configs.push(api);
+        self.configs.len().saturating_sub(1)
+    }
+
+    fn config(&self, index: Option<usize>) -> Option<ModelApiConfig> {
+        self.configs.get(index?).cloned()
+    }
+
+    fn binding(&self, purpose: ApiPurpose) -> Option<usize> {
+        self.by_purpose.get(purpose.slot()).copied().flatten()
     }
 
     /// Resolve the config for `purpose`: its explicit binding if present,
     /// otherwise the default, otherwise `None`.
     #[must_use]
     pub fn get_api(&self, purpose: ApiPurpose) -> Option<ModelApiConfig> {
-        let model = self
-            .by_purpose
-            .get(&purpose)
-            .or(self.default_model.as_ref())?;
-        self.by_model.get(model).cloned()
+        self.config(self.binding(purpose).or(self.default))
     }
 
     /// Returns the API explicitly bound to `purpose`, excluding default fallback.
     #[must_use]
     pub fn get_explicit_api(&self, purpose: ApiPurpose) -> Option<ModelApiConfig> {
-        let model = self.by_purpose.get(&purpose)?;
-        self.by_model.get(model).cloned()
+        self.config(self.binding(purpose))
     }
 
     /// Returns the configured default API.
     #[must_use]
     pub fn get_default_api(&self) -> Option<ModelApiConfig> {
-        let model = self.default_model.as_ref()?;
-        self.by_model.get(model).cloned()
+        self.config(self.default)
     }
 
     /// Installs an API as the fallback without changing any purpose binding.
@@ -100,9 +135,7 @@ impl ModelApiManager {
     /// Returns [`InitError`] without changing the manager when `api` is invalid.
     pub fn set_default_api(&mut self, api: ModelApiConfig) -> Result<(), InitError> {
         api.validate()?;
-        let model = api.model.clone();
-        self.by_model.insert(model.clone(), api);
-        self.default_model = Some(model);
+        self.default = Some(self.store(api));
         Ok(())
     }
 }

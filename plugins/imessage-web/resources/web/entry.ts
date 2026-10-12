@@ -1,58 +1,2170 @@
-import { element, panel } from "../../../captive-portal/resources/web/ui/form";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_UP,
+  ICON_CHECK,
+  ICON_CHEVRON_LEFT,
+  ICON_CHEVRON_RIGHT,
+  ICON_CIRCLE_ALERT,
+  ICON_CIRCLE_STOP,
+  ICON_CIRCLE_X,
+  ICON_CLOCK,
+  ICON_COPY,
+  ICON_DOWNLOAD,
+  ICON_FILE,
+  ICON_FILE_IMAGE,
+  ICON_LIGHTBULB,
+  ICON_LOADER,
+  ICON_MESSAGE_SQUARE_DASHED,
+  ICON_PANEL,
+  ICON_PAPERCLIP,
+  ICON_PAUSE,
+  ICON_PENCIL,
+  ICON_PLAY,
+  ICON_REFRESH,
+  ICON_REPLY,
+  ICON_SHIELD_ALERT,
+  ICON_UPLOAD,
+  ICON_WIFI_OFF,
+  ICON_WRENCH,
+  ICON_X,
+  MARK_TILE,
+  copyText,
+  definePage,
+  h,
+  icon,
+  mark,
+  term,
+  type PortalContext,
+} from "../../../captive-portal/resources/web/ui";
+import { spinningMark } from "./mark";
+import {
+  MARKDOWN_CSS,
+  markdownSource,
+  renderMarkdown,
+  trailing,
+} from "./markdown";
+import {
+  sessionRail,
+  type SessionCommand,
+  type SessionsState,
+} from "./sessions";
+import { CHAT_CSS } from "./style";
 
-export function mount(root: HTMLElement, { signal }: { signal: AbortSignal }) {
-  if (signal.aborted) return;
-  const page = panel(
-    root,
-    "Web 聊天",
-    "连接设备的 Web 消息通道。只接收连接后的消息；断线不会自动重发。当前支持文本，附件仅提示。页面不持久保存聊天记录。",
+/**
+ * Web chat over the bridge's WebSocket `/ws/message`. The page sends `WebClientFrame` JSON
+ * (`{ text }`; a reply carries its quote inside the text, see {@link withQuote}; files go first to
+ * `PUT /api/web/upload/<mime>/<name>` and the frame names their ids in `attachments`) and renders
+ * the SSE-formatted frames the bridge pushes: message lifecycle
+ * (`message.start`/`delta`/`end`/`edit`/`delete`/`reaction`), the Agent's semantic events inside
+ * `message.event`, media (`message.image`/`audio`/`video`/`file`, each one event naming a URL on
+ * the device), a refused frame (`message.rejected`), typing and `stream.lagged`. Live events only.
+ *
+ * The device runs one turn at a time. A message written while a turn runs waits in the page's
+ * queue, where it can still be edited or removed, and goes out when the turn ends. Stop sends
+ * `{ control: "interrupt" }`, and the turn ends 「已停止」; rewind on the running message sends
+ * `{ control: "cancel" }`, takes the message and its turn out of the log and puts the text back in
+ * the composer. Neither control is a message: the bridge gives it no id.
+ */
+
+const STRINGS = {
+  zh: {
+    log: "聊天记录",
+    sent: "已发送",
+    reasoning: "思考过程",
+    thinking: "思考中",
+    /** 「思考了 `3` 秒」: the number is mono. */
+    thoughtA: "思考了 ",
+    thoughtB: " 秒",
+    ok: "成功",
+    failed: "失败",
+    running: "运行中",
+    args: "参数",
+    output: "输出",
+    reply: "回复",
+    copy: "复制",
+    copied: "已复制",
+    edited: "已编辑",
+    approvalTitle: "需要你的允许",
+    approvalTool: "工具",
+    approvalArgs: "参数",
+    approvalReason: "理由",
+    allow: "允许",
+    deny: "拒绝",
+    approvalHint: "或直接回复",
+    answering: "正在答复",
+    answerPh: "回复这次请求…",
+    newTitle: "新会话",
+    newLead: "会话保存在设备上，随时可以从左侧回来。",
+    tempTitle: "临时会话",
+    tempLead: "不会保存在设备上；离开这个会话后删除。",
+    continueLead: "之前的消息保存在设备上；从这里接着聊。",
+    showSessions: "会话",
+    sessionGone: "找不到这个会话",
+    badTitle: "会话名称不能为空",
+    sessionFailed: "设备没能完成这个操作",
+    suggestions: [
+      "今天适合骑车吗？",
+      "总结一下我今天的日程",
+      "提醒我 6 点下班",
+    ],
+    incomplete: "未完成 · 连接中断",
+    lagged: "错过 {n} 个事件",
+    turnError: "这一轮出错",
+    offline: "连接已中断",
+    live: "已连接",
+    lost: "已断开",
+    /** After the count in mono: 「`1` 条消息未确认，重新连接后再发送」. */
+    unconfirmed: (_n: number) => " 条消息未确认，重新连接后再发送",
+    reconnect: "重新连接",
+    reconnected: "已重新连接",
+    label: "消息",
+    placeholder: "给设备发一条消息",
+    send: "发送",
+    enqueue: "加入队列",
+    stop: "停止",
+    stopped: "已停止",
+    rewind: "撤回",
+    queued: "排队中",
+    editQueued: "编辑",
+    removeQueued: "移除",
+    jump: "回到最新",
+    replying: "回复 Barracuda",
+    cancelReply: "取消回复",
+    session: "临时会话",
+    sessionTip: "不会保存；离开这个会话后删除",
+    download: "下载",
+    received: "已接收",
+    attach: "添加附件",
+    drop: "松开以添加附件",
+    removeAttachment: "移除附件",
+    uploading: "上传中",
+    retryUpload: "重试上传",
+    imageFailed: "一张图片没有上传成功，点它重试或移除后再发送。",
+    fileFailed: "一个文件没有上传成功，点它重试或移除后再发送。",
+    tooBig: (name: string, mb: number) =>
+      `「${name}」超过 ${mb} MB，请换一个更小的文件。`,
+    rejected: "附件已失效，这条消息没有发出",
+    viewImage: (name: string) => `查看图片 ${name}`,
+    moreImages: (n: number) => `查看另外 ${n} 张图片`,
+    play: "播放",
+    pause: "暂停",
+    playVideo: "播放视频",
+    unavailable: "已不可用",
+    unavailableTip: "设备重启时清空了缓存中的附件",
+    prev: "上一张",
+    next: "下一张",
+    close: "关闭",
+    reaction: "回应",
+    tooLong: "消息太长，请缩短后发送。",
+    notSent: "消息未发出",
+    busy: "发送队列繁忙，请稍后再试。",
+    unreadable: "收到无法识别的消息",
+  },
+  en: {
+    log: "Conversation",
+    sent: "Sent",
+    reasoning: "Reasoning",
+    thinking: "Thinking",
+    thoughtA: "Thought for ",
+    thoughtB: "s",
+    ok: "Succeeded",
+    failed: "Failed",
+    running: "Running",
+    args: "Arguments",
+    output: "Output",
+    reply: "Reply",
+    copy: "Copy",
+    copied: "Copied",
+    edited: "Edited",
+    approvalTitle: "Needs your permission",
+    approvalTool: "Tool",
+    approvalArgs: "Arguments",
+    approvalReason: "Reason",
+    allow: "Allow",
+    deny: "Deny",
+    approvalHint: "Or reply in your own words",
+    answering: "Answering",
+    answerPh: "Reply to this request…",
+    newTitle: "New session",
+    newLead:
+      "Sessions are saved on the device; come back to one from the left any time.",
+    tempTitle: "Temporary chat",
+    tempLead: "Not saved on the device; deleted when you leave it.",
+    continueLead: "Earlier messages stay on the device; carry on from here.",
+    showSessions: "Sessions",
+    sessionGone: "That session is gone",
+    badTitle: "A session needs a name",
+    sessionFailed: "The device couldn't do that",
+    suggestions: [
+      "Is it a good day for a ride?",
+      "Summarize today's schedule",
+      "Remind me to leave at 6",
+    ],
+    incomplete: "Incomplete · connection lost",
+    lagged: "Missed {n} events",
+    turnError: "This turn failed",
+    offline: "Disconnected",
+    live: "Connected",
+    lost: "Disconnected",
+    unconfirmed: (n: number) =>
+      ` ${n === 1 ? "message" : "messages"} unconfirmed; send again after reconnecting`,
+    reconnect: "Reconnect",
+    reconnected: "Reconnected",
+    label: "Message",
+    placeholder: "Message the device",
+    send: "Send",
+    enqueue: "Add to queue",
+    stop: "Stop",
+    stopped: "Stopped",
+    rewind: "Rewind",
+    queued: "Queued",
+    editQueued: "Edit",
+    removeQueued: "Remove",
+    jump: "Jump to latest",
+    replying: "Replying to Barracuda",
+    cancelReply: "Cancel reply",
+    session: "Temporary chat",
+    sessionTip: "Not saved; deleted when you leave it",
+    download: "Download",
+    received: "received",
+    attach: "Attach files",
+    drop: "Drop to attach",
+    removeAttachment: "Remove attachment",
+    uploading: "Uploading",
+    retryUpload: "Retry upload",
+    imageFailed:
+      "An image didn't upload; select it to retry, or remove it before sending.",
+    fileFailed:
+      "A file didn't upload; select it to retry, or remove it before sending.",
+    tooBig: (name: string, mb: number) =>
+      `“${name}” is over ${mb} MB; choose a smaller file.`,
+    rejected: "Its attachments expired; this message wasn't sent",
+    viewImage: (name: string) => `View image ${name}`,
+    moreImages: (n: number) => `View ${n} more images`,
+    play: "Play",
+    pause: "Pause",
+    playVideo: "Play video",
+    unavailable: "Unavailable",
+    unavailableTip: "The device cleared cached attachments when it restarted",
+    prev: "Previous",
+    next: "Next",
+    close: "Close",
+    reaction: "Reaction",
+    tooLong: "This message is too long; shorten it to send.",
+    notSent: "Message not sent",
+    busy: "The send queue is full; try again shortly.",
+    unreadable: "Received a message this page can't read",
+  },
+};
+
+/** The bridge's limits as the previous page enforced them. */
+const MAX_BYTES = 1024;
+/** A reply carries at most this many UTF-8 bytes of the message it quotes, on top of its own text. */
+const MAX_QUOTE = 512;
+const MAX_ITEMS = 100;
+const MAX_TEXT = 65536;
+const MAX_FRAME = 262144;
+/** Files one message carries, as the bridge allows. */
+const MAX_FILES = 4;
+/** Pictures are drawn again at most this long on their long side before upload. */
+const MAX_SIDE = 1568;
+/** The pictures the log shows (and the device serves) as pictures. */
+const PICTURES = /^image\/(jpeg|png|gif|webp)$/;
+/** A user turn's pictures stay narrower than an Agent's. */
+const USER_MEDIA = 320;
+const AGENT_MEDIA = 440;
+/** The composer grows with its text up to this height, then scrolls. */
+const MAX_INPUT = 200;
+/**
+ * A sent message whose turn has not started after this long, with nothing else heard, no longer
+ * holds the queue: the device queues it anyway, so the page stops waiting on a turn it may miss.
+ */
+const STALL_MS = 30000;
+/** Lucide `undo-2`: rewind. The chat alone uses it, so it stays out of the shell's icon set. */
+const ICON_UNDO =
+  '<path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path>';
+
+const fill = (text: string, map: Record<string, string | number>) =>
+  text.replace(/\{(\w+)\}/g, (_, key: string) => String(map[key]));
+const clip = (text: string) =>
+  text.length > MAX_TEXT ? text.slice(-MAX_TEXT) : text;
+const pad = (n: number) => String(n).padStart(2, "0");
+
+type Data = Record<string, unknown>;
+const str = (value: unknown) => (typeof value === "string" ? value : "");
+
+/** `18 KB`, `1.2 MB`. */
+function formatSize(size: number) {
+  return size < 1024
+    ? `${size} B`
+    : size < 1024 * 1024
+      ? `${Math.round(size / 1024)} KB`
+      : `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** A file's type in a word: its extension, else its MIME subtype, in capitals. */
+function typeLabel(name: string, mime: string) {
+  const dot = name.lastIndexOf(".");
+  return (
+    dot > 0 ? name.slice(dot + 1) : (mime.split("/")[1] ?? "")
+  ).toUpperCase();
+}
+
+/** `0:12`. */
+function clock(seconds: number) {
+  const whole = Number.isFinite(seconds) ? Math.floor(seconds) : 0;
+  return `${Math.floor(whole / 60)}:${pad(whole % 60)}`;
+}
+
+/**
+ * A JPEG, PNG or WebP drawn again at most {@link MAX_SIDE} long and encoded at 0.85 (JPEG stays
+ * JPEG, the others become WebP), which also drops its metadata. Anything else, or a browser that
+ * cannot, keeps the file as it is.
+ */
+async function shrink(file: File): Promise<File> {
+  if (
+    !/^image\/(jpeg|png|webp)$/.test(file.type) ||
+    typeof createImageBitmap !== "function"
+  )
+    return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas
+      .getContext("2d")!
+      .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const type = file.type === "image/jpeg" ? file.type : "image/webp";
+    const blob = await new Promise<Blob | null>((done) =>
+      canvas.toBlob(done, type, 0.85),
+    );
+    if (!blob || blob.type !== type) return file;
+    const name =
+      type === file.type
+        ? file.name
+        : file.name.replace(/\.\w+$/, "") + ".webp";
+    return new File([blob], name, { type });
+  } catch {
+    return file;
+  }
+}
+
+/** Shows or hides a node, whatever display its inline style or class gives it. */
+function show(node: HTMLElement, on: boolean) {
+  node.hidden = !on;
+  // showing undoes only what hiding did, so a node's own inline display survives
+  if (on) {
+    if (node.style.display === "none")
+      node.style.display = node.dataset.display ?? "";
+  } else {
+    if (node.style.display !== "none")
+      node.dataset.display = node.style.display;
+    node.style.display = "none";
+  }
+}
+
+/**
+ * One fold (reasoning or a tool card): a button that shows and hides `panel`. Its trailing chevron
+ * turns with `aria-expanded`, in the design system's CSS.
+ */
+function fold(button: HTMLButtonElement, panel: HTMLElement, open: boolean) {
+  const set = (value: boolean) => {
+    button.setAttribute("aria-expanded", String(value));
+    show(panel, value);
+  };
+  button.addEventListener("click", () =>
+    set(button.getAttribute("aria-expanded") !== "true"),
   );
-  const status = element("p", "正在连接…");
-  page.append(
-    element(
-      "style",
-      ".chat-history{max-height:48vh;min-height:160px;overflow-y:auto;margin:24px 0;border-block:1px solid #dce4e0}.chat-history p{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px 18px;border-radius:12px;background:#edf6f1}.chat-history small{display:block;color:#9f302e}",
+  set(open);
+  return set;
+}
+
+/** An icon-only button named by its tooltip, as the design system's Button card asks. */
+function iconButton(
+  label: string,
+  paths: string,
+  onclick: () => void,
+  className = "bc-icon-button",
+  type: "button" | "submit" = "button",
+) {
+  const tip = h("span", { class: "bc-tooltip", "aria-hidden": "true" }, label);
+  const button = h(
+    "button",
+    { class: className, type, "aria-label": label, onclick },
+    icon(paths),
+    tip,
+  );
+  return {
+    button,
+    /** Renames the button (its label and tooltip) and swaps its icon. */
+    set(next: string, nextPaths = paths) {
+      button.setAttribute("aria-label", next);
+      tip.textContent = next;
+      button.firstElementChild!.replaceWith(icon(nextPaths));
+    },
+  };
+}
+
+interface Tool {
+  card: HTMLElement;
+  name: HTMLElement;
+  summary: HTMLElement;
+  args: HTMLElement;
+  out: HTMLElement;
+  status: HTMLElement;
+  open: (value: boolean) => void;
+}
+
+interface Request {
+  card: HTMLElement;
+  tool: HTMLElement;
+  args: HTMLElement;
+  reason: HTMLElement;
+  actions: HTMLElement;
+  owner: Agent;
+}
+
+/**
+ * One open text run. Text the device sends lands in `pending` and flows into the run a few
+ * characters a frame, so a reply streams in smoothly rather than in bursts; `done` runs when the
+ * run closes. A reply's output is Markdown: it gathers in `source` and is painted into `node` again
+ * as it grows; any other run is plain `text`.
+ */
+interface Run {
+  stream: string;
+  text: Text | null;
+  source: string;
+  node: HTMLElement;
+  pending: string;
+  /** The reply is still streaming here: the caret follows its last line. */
+  caret?: boolean;
+  done?: () => void;
+}
+
+/** A turn of Agent messages under one author line, whose mark spins while any of them runs. */
+interface Group {
+  node: HTMLElement;
+  author: HTMLElement;
+  spin: { canvas: HTMLCanvasElement; stop(): void } | null;
+}
+
+interface Agent {
+  id: string;
+  kind: string;
+  root: HTMLElement;
+  group: Group;
+  run: Run | null;
+  tool: Tool | null;
+  request: Request | null;
+  footer: HTMLElement | null;
+  reaction: HTMLElement;
+  ended: boolean;
+  /** The sent message this one answers, from its start. */
+  replyTo: string;
+}
+
+/** A file the log shows: its URL (on the device, or the page's own copy), name, type and size. */
+interface Shown {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/** Pictures in a row of the log: one picture, or a grid of them, opening the Viewer. */
+interface Gallery {
+  node: HTMLElement;
+  items: Shown[];
+  max: number;
+  /** The last message whose picture joined it; a picture right after it joins too. */
+  last: HTMLElement;
+}
+
+/** A file in the composer, then in the message that sends it. */
+interface Upload {
+  file: File;
+  /** The page's own copy, shown in the composer and in the sent message. */
+  url: string;
+  picture: boolean;
+  shrunk: boolean;
+  /** The device's id once uploaded. */
+  id: string;
+  state: "busy" | "ready" | "error" | "refused";
+  /** The device's limit, when it refused the file as too large. */
+  limit: number;
+  progress: number;
+  request: XMLHttpRequest | null;
+  node: HTMLElement;
+}
+
+interface Sent {
+  root: HTMLElement;
+  reaction: HTMLElement;
+  confirmed: boolean;
+  text: string;
+  quoted: { id: string; text: string } | null;
+  /** 「撤回」, shown while the message's turn has not ended. */
+  rewind: HTMLElement;
+  uploads: Upload[];
+}
+
+/** A message waiting in the page for the running turn to end. */
+interface Queued {
+  text: string;
+  replyTo: { id: string; text: string } | null;
+  uploads: Upload[];
+}
+
+/**
+ * The text a reply sends: the quoted message as XML ahead of the user's own words, so the device
+ * needs no notion of replies. The quote is escaped so it cannot close its element early, and cut
+ * to {@link MAX_QUOTE} bytes.
+ */
+function withQuote(text: string, quoted: string) {
+  let body = "";
+  let kept = "";
+  let size = 0;
+  for (const char of quoted) {
+    const part =
+      char === "&"
+        ? "&amp;"
+        : char === "<"
+          ? "&lt;"
+          : char === ">"
+            ? "&gt;"
+            : char;
+    const point = char.codePointAt(0)!;
+    size +=
+      part.length > 1 || point < 0x80
+        ? part.length
+        : point < 0x800
+          ? 2
+          : point < 0x10000
+            ? 3
+            : 4;
+    // a cut quote ends in an ellipsis, so it keeps what fits beside one
+    if (size > MAX_QUOTE) return `<quote>${kept}…</quote>\n${text}`;
+    body += part;
+    if (size <= MAX_QUOTE - 3) kept = body;
+  }
+  return `<quote>${body}</quote>\n${text}`;
+}
+
+export const mount = definePage((context: PortalContext) => {
+  const { lang, signal } = context;
+  const t = STRINGS[lang];
+  const doc = document;
+  // the page's own rules, for as long as it is mounted
+  const style = h("style", null, CHAT_CSS + MARKDOWN_CSS);
+  doc.head.append(style);
+
+  // ---- layout
+  const column = h("div", {
+    style:
+      "flex:1 1 auto;width:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:var(--space-6)",
+  });
+  const log = h(
+    "div",
+    {
+      class: "bc-chat-log",
+      role: "log",
+      "aria-label": t.log,
+      "aria-live": "polite",
+      // a column, so the conversation fills the height and centres the empty state
+      style: "display:flex;flex-direction:column",
+    },
+    column,
+  );
+  // the device's sessions, at the page's left once the device lists them
+  const rail = sessionRail(lang, (command) => control(command), signal);
+  show(rail.node, false);
+  // a temporary chat says so at the conversation's head, pinned while the history scrolls
+  const tempBadge = h(
+    "span",
+    {
+      class: "bc-badge",
+      tabindex: 0,
+      "aria-describedby": "imessage-web-session-tip",
+    },
+    icon(ICON_MESSAGE_SQUARE_DASHED),
+    t.session,
+    h(
+      "span",
+      {
+        class: "bc-tooltip",
+        role: "tooltip",
+        id: "imessage-web-session-tip",
+      },
+      t.sessionTip,
     ),
   );
-  status.setAttribute("role", "status");
-  const reconnect = element("button", "重新连接");
-  reconnect.type = "button";
-  const history = element("div");
-  history.className = "chat-history";
-  history.setAttribute("role", "log");
-  history.setAttribute("aria-label", "聊天记录");
-  const form = element("form");
-  const label = element("label", "消息（最多 1024 UTF-8 字节）");
-  const input = element("textarea");
-  input.required = true;
-  input.rows = 3;
-  input.maxLength = 1024;
-  label.append(input);
-  const send = element("button", "发送");
-  send.type = "submit";
-  send.disabled = true;
-  form.append(label, send);
-  page.append(status, reconnect, history, form);
-  const lifecycle = new AbortController();
-  const messages = new Map<string, HTMLElement>();
-  let socket: WebSocket | undefined;
-  let localId = 0;
-  function message(id: string) {
-    let node = messages.get(id);
-    if (!node) {
-      node = element("p");
-      messages.set(id, node);
-      history.append(node);
-      if (messages.size > 100) {
-        const first = messages.keys().next().value!;
-        messages.get(first)?.remove();
-        messages.delete(first);
-      }
-    }
-    return node;
+  show(tempBadge, false);
+  // on a phone the rail is a sheet, opened from the head
+  const railToggle = iconButton(
+    t.showSessions,
+    ICON_PANEL,
+    () => rail.toggle(),
+    "bc-icon-button bc-chat-rail-toggle",
+  ).button;
+  railToggle.style.cssText = "position:absolute;left:var(--space-4)";
+  show(railToggle, false);
+  const head = h("div", { class: "bc-chat-head" }, railToggle, tempBadge);
+  // the fresh conversation: the EmptyState with the page's laptop figure, over a mid-page composer
+  const empty = h(
+    "div",
+    { class: "bc-empty", style: "gap:12px" },
+    h("hl-figure", {
+      name: "imessage-web",
+      "aria-hidden": "true",
+      style: "width:200px;max-width:100%",
+    }),
+    h("h2", { class: "bc-title" }),
+    h("p", {
+      class: "bc-small bc-muted",
+      style: "margin:0;max-width:420px",
+    }),
+  );
+  const suggestions = h(
+    "div",
+    {
+      style:
+        "display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding-top:8px",
+    },
+    t.suggestions.map((text) =>
+      h(
+        "button",
+        {
+          class: "bc-button bc-button--outline bc-button--sm",
+          type: "button",
+          onclick: () => {
+            input.value = text;
+            changed();
+            submit();
+          },
+        },
+        text,
+      ),
+    ),
+  );
+  // what the device is doing while nothing streams: 「思考中」, after a spinning author line
+  const thinking = h(
+    "span",
+    {
+      class: "bc-small bc-muted",
+      style: "display:flex;align-items:center;gap:8px",
+    },
+    h("span", { class: "bc-shimmer" }, t.thinking),
+  );
+  const dots = h(
+    "span",
+    { class: "bc-typing", "aria-hidden": "true" },
+    h("i"),
+    h("i"),
+    h("i"),
+  );
+  const caret = h("span", { class: "bc-caret", "aria-hidden": "true" });
+
+  const input = h("textarea", {
+    id: "imessage-web-message",
+    rows: 1,
+    placeholder: t.placeholder,
+  });
+  const sendButton = iconButton(
+    t.send,
+    ICON_ARROW_UP,
+    () => {},
+    "bc-button bc-button--icon",
+    "submit",
+  );
+  sendButton.button.disabled = true;
+  // while a turn runs, stop is the primary; once the reader types, it steps back to outline
+  const stopButton = iconButton(
+    t.stop,
+    ICON_CIRCLE_STOP,
+    () => stop(),
+    "bc-button bc-button--icon",
+  );
+  show(stopButton.button, false);
+  // a ruled bar: the icon carries the warning colour, the text stays foreground
+  const answeringText = h("span");
+  const answering = h(
+    "div",
+    { class: "bc-composer__bar bc-composer__bar--rule" },
+    icon(ICON_SHIELD_ALERT, undefined, "bc-warning"),
+    answeringText,
+  );
+  show(answering, false);
+  // the queue: a counting bar, then one bar per waiting message with its edit and remove actions
+  const queueList = h("div", { role: "list", "aria-label": t.queued });
+  show(queueList, false);
+  const quote = h("span", { class: "bc-composer__text" });
+  const replyBar = h(
+    "div",
+    { class: "bc-composer__bar" },
+    icon(ICON_REPLY, undefined, "bc-muted"),
+    h("span", { class: "bc-muted", style: "flex:none" }, t.replying),
+    quote,
+    iconButton(t.cancelReply, ICON_X, () => setReply(null)).button,
+  );
+  show(replyBar, false);
+  // files: the paperclip's picker, a pasted picture, or a drop anywhere on the page
+  const picker = h("input", {
+    type: "file",
+    multiple: true,
+    hidden: true,
+    onchange: () => {
+      void addFiles([...(picker.files ?? [])]);
+      picker.value = "";
+    },
+  });
+  const attach = iconButton(
+    t.attach,
+    ICON_PAPERCLIP,
+    () => picker.click(),
+    "bc-button bc-button--ghost bc-button--icon",
+  ).button;
+  const attachments = h("div", { class: "bc-attachments" });
+  show(attachments, false);
+  const dropZone = h(
+    "div",
+    { class: "bc-drop" },
+    icon(ICON_UPLOAD, undefined, "bc-muted"),
+    h("span", { class: "bc-small" }, t.drop),
+  );
+  show(dropZone, false);
+  const composer = h(
+    "div",
+    { class: "bc-composer" },
+    answering,
+    queueList,
+    replyBar,
+    attachments,
+    dropZone,
+    h(
+      "label",
+      {
+        for: "imessage-web-message",
+        style:
+          "position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)",
+      },
+      t.label,
+    ),
+    h(
+      "div",
+      { class: "bc-composer__row" },
+      input,
+      h(
+        "div",
+        { class: "bc-composer__actions" },
+        attach,
+        stopButton.button,
+        sendButton.button,
+      ),
+    ),
+    picker,
+  );
+  const invalid = h("span", {
+    class: "bc-hint bc-hint--error",
+    role: "alert",
+    id: "imessage-web-message-error",
+  });
+  show(invalid, false);
+  // one sentence per problem with the composer's files
+  const fileHints = h("div", {
+    role: "alert",
+    style: "display:flex;flex-direction:column;gap:4px",
+  });
+  show(fileHints, false);
+  const offlineCount = h("span");
+  const offline = h(
+    "div",
+    { class: "bc-alert bc-alert--error bc-alert--compact", role: "alert" },
+    icon(ICON_WIFI_OFF),
+    h(
+      "span",
+      { class: "bc-small", style: "flex:1 1 auto" },
+      h("span", { class: "bc-alert__title" }, t.offline),
+      offlineCount,
+    ),
+    h(
+      "button",
+      {
+        class: "bc-button bc-button--outline bc-button--sm",
+        type: "button",
+        onclick: () => connect(true),
+      },
+      icon(ICON_REFRESH),
+      t.reconnect,
+    ),
+  );
+  show(offline, false);
+  const jump = iconButton(
+    t.jump,
+    ICON_ARROW_DOWN,
+    () => {
+      stuck = true;
+      follow();
+    },
+    "bc-button bc-button--outline bc-button--icon bc-chat-jump",
+  ).button;
+  show(jump, false);
+  const form = h(
+    "form",
+    {
+      class: "bc-chat-dock",
+      onsubmit: (event: Event) => {
+        event.preventDefault();
+        submit();
+      },
+    },
+    h(
+      "div",
+      {
+        style:
+          "position:relative;width:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px",
+      },
+      jump,
+      offline,
+      composer,
+      invalid,
+      fileHints,
+      suggestions,
+    ),
+  );
+  const page = h(
+    "div",
+    { style: "flex:1 1 auto;display:flex;min-width:0" },
+    rail.node,
+    h(
+      "div",
+      {
+        style: "flex:1 1 auto;display:flex;flex-direction:column;min-width:0",
+      },
+      head,
+      log,
+      form,
+    ),
+  );
+
+  /** The device's latest session list; `null` until it answers. */
+  let sessions: SessionsState | null = null;
+
+  /** The fresh conversation holds the composer mid-page; once it has messages, the head says what it is. */
+  function setFresh(on: boolean) {
+    page.classList.toggle("bc-chat--fresh", on);
+    column.style.flex = on ? "0 0 auto" : "1 1 auto";
+    show(suggestions, on);
+    label();
   }
+
+  /** What the fresh conversation and the head say: a new session, a temporary chat, or the session continued. */
+  function label() {
+    const temporary = !!sessions?.temporary;
+    const continued = sessions?.sessions.find(
+      (item) => item.session === sessions?.current,
+    );
+    const [title, lead] = empty.querySelectorAll<HTMLElement>("h2, p");
+    title.textContent = temporary
+      ? t.tempTitle
+      : (continued?.title ?? t.newTitle);
+    lead.textContent = temporary
+      ? t.tempLead
+      : continued
+        ? t.continueLead
+        : t.newLead;
+    show(tempBadge, temporary && !page.classList.contains("bc-chat--fresh"));
+  }
+
+  // ---- conversation state
+  const items: { node: HTMLElement; forget(): void }[] = [];
+  const agents = new Map<string, Agent>();
+  let sent = new Map<string, Sent>();
+  const urls = new Set<string>();
+  const groups = new Set<Group>();
+  let group: Group | null = null;
+  let request: Request | null = null;
+  /** The message that answered a permission request, until the asking turn goes on. */
+  let answered: { owner: Agent; entry: Sent } | null = null;
+  let replyTo: { id: string; text: string } | null = null;
+  /** Messages the device is running or streaming (started, not ended). */
+  const active = new Set<Agent>();
+  /** Sent messages whose turn has not started yet. */
+  const awaiting = new Set<string>();
+  const queue: Queued[] = [];
+  /** The composer's files, in the order added. */
+  let uploads: Upload[] = [];
+  /** The Agent's latest pictures, which the next picture of its turn joins. */
+  let gallery: Gallery | null = null;
+  let closeViewer: (() => void) | null = null;
+  /** Rewound messages: their turns' messages are dropped as they arrive. */
+  const withdrawn = new Set<string>();
+  /** Agent messages of a rewound turn, or of a session left, ignored until they end. */
+  const dropped = new Set<string>();
+  /** Sent messages of a conversation cleared for another session. */
+  const stale = new Set<string>();
+  /** A rewound message waits in the composer: the queue holds until it is sent. */
+  let held = false;
+  /** Stop was asked for; the turn has not ended yet. */
+  let stopping = false;
+  let typingOn = false;
+  let stall: ReturnType<typeof setTimeout> | undefined;
+  /** The turn the device has been asked for and not yet begun: an author line over 「思考中」. */
+  const pending: Group = {
+    node: h("div", { class: "bc-turn bc-turn--new" }),
+    author: author(),
+    spin: null,
+  };
+  pending.node.append(pending.author);
+
+  function add(node: HTMLElement, forget = () => {}, into?: HTMLElement) {
+    (into ?? column).append(node);
+    if (!into) group = null;
+    items.push({ node, forget });
+    while (items.length > MAX_ITEMS) {
+      const old = items.shift()!;
+      const parent = old.node.parentElement;
+      old.node.remove();
+      old.forget();
+      if (parent && parent !== column && parent.childElementCount <= 1)
+        parent.remove();
+    }
+    if (empty.isConnected) {
+      empty.remove();
+      setFresh(false);
+    }
+  }
+
+  function author() {
+    return h(
+      "span",
+      { class: "bc-meta bc-meta--author" },
+      mark(MARK_TILE, 16),
+      "Barracuda",
+    );
+  }
+
+  /** Spins a turn's mark while it runs, and rests it when it ends; without WebGL it stays still. */
+  function spin(target: Group, on: boolean) {
+    if (on === !!target.spin) return;
+    if (on) {
+      const spinning = spinningMark();
+      if (!spinning) return;
+      target.spin = spinning;
+      target.author.firstElementChild!.replaceWith(
+        h("span", { class: "bc-mark-tile" }, spinning.canvas),
+      );
+    } else {
+      target.spin!.stop();
+      target.spin = null;
+      target.author.firstElementChild!.replaceWith(mark(MARK_TILE, 16));
+    }
+  }
+
+  function reactionBadge() {
+    const badge = h("span", { class: "bc-badge", "aria-label": t.reaction });
+    show(badge, false);
+    return badge;
+  }
+
+  function addUser(
+    text: string,
+    id: string,
+    quoted: { id: string; text: string } | null,
+    files: Upload[] = [],
+  ) {
+    const reaction = reactionBadge();
+    const rewind = iconButton(t.rewind, ICON_UNDO, () => rewindTo(id)).button;
+    show(rewind, false);
+    // the files sit above the bubble, shown from the page's own copies
+    const shown = files.map((upload) => ({
+      url: upload.url,
+      name: upload.file.name,
+      mime: upload.file.type,
+      size: upload.file.size,
+    }));
+    const pictures = shown.filter((item) => PICTURES.test(item.mime));
+    const node = h(
+      "div",
+      { class: "bc-turn bc-turn--user bc-turn--new" },
+      quoted === null
+        ? null
+        : h(
+            "span",
+            {
+              class: "bc-quote",
+              style: "display:flex;align-items:center;gap:8px;max-width:100%",
+            },
+            icon(ICON_REPLY),
+            h("span", { class: "bc-composer__text" }, quoted.text),
+          ),
+      pictures.length ? galleryOf(pictures, USER_MEDIA).node : null,
+      shown
+        .filter((item) => !pictures.includes(item))
+        .map((item) => block(item, USER_MEDIA, t.sent)),
+      text.trim() ? h("p", { class: "bc-bubble" }, text) : null,
+      h(
+        "span",
+        { class: "bc-meta", style: "gap:4px" },
+        rewind,
+        reaction,
+        t.sent,
+      ),
+    );
+    const record: Sent = {
+      root: node,
+      reaction,
+      confirmed: false,
+      text,
+      quoted,
+      rewind,
+      uploads: files,
+    };
+    const map = sent;
+    map.set(id, record);
+    add(node, () => {
+      map.delete(id);
+      for (const upload of files) release(upload);
+    });
+    return record;
+  }
+
+  // ---- media in the log
+  /** One picture or a grid of them, `max` wide at most. */
+  function galleryOf(
+    items: Shown[],
+    max: number,
+    last: HTMLElement = column,
+  ): Gallery {
+    const made: Gallery = { node: h("div"), items, max, last };
+    drawGallery(made);
+    return made;
+  }
+
+  function drawGallery(target: Gallery) {
+    const { items } = target;
+    if (!items.length) return target.node.remove();
+    const next =
+      items.length === 1
+        ? picture(target, 0, false)
+        : h(
+            "div",
+            {
+              class: "bc-media-grid",
+              style: `width:100%;max-width:${USER_MEDIA}px`,
+            },
+            items.slice(0, 4).map((_, index) => picture(target, index, true)),
+          );
+    target.node.replaceWith(next);
+    target.node = next;
+  }
+
+  /**
+   * A picture as a button that opens the Viewer: alone at its own ratio, or a square grid cell;
+   * past four, the fourth cell dims under 「+N」.
+   */
+  function picture(target: Gallery, index: number, cell: boolean) {
+    const item = target.items[index];
+    const more =
+      cell && index === 3 && target.items.length > 4
+        ? target.items.length - 3
+        : 0;
+    const image = h("img", { src: item.url, alt: "", loading: "lazy" });
+    const button = h(
+      "button",
+      {
+        class: `bc-media${more ? " bc-media--more" : ""}`,
+        type: "button",
+        "aria-label": more ? t.moreImages(more) : t.viewImage(item.name),
+        style: cell
+          ? "aspect-ratio:1"
+          : `width:100%;max-width:${target.max}px;aspect-ratio:4/3`,
+        onclick: () => viewer(target.items, index, button),
+      },
+      image,
+      more
+        ? h(
+            "span",
+            { class: "bc-media__more" },
+            h("span", { class: "bc-title bc-mono" }, `+${more}`),
+          )
+        : null,
+    );
+    image.addEventListener("load", () => {
+      if (cell || !image.naturalWidth) return;
+      button.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+      button.style.maxWidth = `${Math.min(target.max, image.naturalWidth)}px`;
+    });
+    // gone from the device (evicted, or cleared by a restart): a card says so in its place
+    image.addEventListener("error", () => {
+      const at = target.items.indexOf(item);
+      if (at < 0) return;
+      target.node.after(unavailable(item));
+      target.items.splice(at, 1);
+      drawGallery(target);
+    });
+    return button;
+  }
+
+  function unavailable(item: Shown) {
+    return fileRow(
+      ICON_FILE_IMAGE,
+      h(
+        "span",
+        { class: "bc-option-title bc-muted", style: "overflow-wrap:anywhere" },
+        item.name || "—",
+      ),
+      h(
+        "span",
+        { class: "bc-caption bc-muted" },
+        term(t.unavailable, t.unavailableTip, lang, { start: true }),
+      ),
+    );
+  }
+
+  /** A file card's row: the type's tile, the name over its caption, then `end`. */
+  function fileRow(
+    paths: string,
+    name: HTMLElement,
+    caption: HTMLElement,
+    end?: HTMLElement,
+  ) {
+    return h(
+      "div",
+      { class: "bc-card" },
+      h(
+        "div",
+        { class: "bc-card__row" },
+        h("span", { class: "bc-option-icon" }, icon(paths)),
+        h(
+          "span",
+          {
+            style:
+              "flex:1 1 auto;min-width:0;display:flex;flex-direction:column",
+          },
+          name,
+          caption,
+        ),
+        end,
+      ),
+    );
+  }
+
+  /** Audio, video or any other file, as its card; `status` ends a file's caption. */
+  function block(item: Shown, max: number, status: string): HTMLElement {
+    if (item.mime.startsWith("audio/")) return audioCard(item);
+    if (item.mime.startsWith("video/")) return videoBox(item, max);
+    // 「`application/gpx+xml · 18 KB` · 已接收」: the machine values mono, the state in words
+    return fileRow(
+      ICON_FILE,
+      h(
+        "span",
+        { class: "bc-option-title", style: "overflow-wrap:anywhere" },
+        item.name || "—",
+      ),
+      h(
+        "span",
+        { class: "bc-caption bc-muted" },
+        h(
+          "span",
+          { class: "bc-mono" },
+          [item.mime, formatSize(item.size)].filter(Boolean).join(" · "),
+        ),
+        ` · ${status}`,
+      ),
+      h(
+        "a",
+        {
+          class: "bc-button bc-button--outline bc-button--sm",
+          href: item.url,
+          download: item.name || "attachment",
+          style: "flex:none",
+        },
+        icon(ICON_DOWNLOAD),
+        t.download,
+      ),
+    );
+  }
+
+  /** Audio: play and pause, its name over `0:12 / 0:48`, and a 2px line at the position. */
+  function audioCard(item: Shown) {
+    const audio = h("audio", { src: item.url, preload: "metadata" });
+    show(audio, false);
+    const line = h("i", { style: "width:0%" });
+    const time = h(
+      "span",
+      { class: "bc-caption bc-mono bc-muted" },
+      "0:00 / 0:00",
+    );
+    const toggle = iconButton(
+      t.play,
+      ICON_PLAY,
+      () => (audio.paused ? playMedia(audio) : audio.pause()),
+      "bc-button bc-button--outline bc-button--icon bc-button--sm",
+    );
+    const sync = () => {
+      const length = audio.duration;
+      time.textContent = `${clock(audio.currentTime)} / ${clock(length)}`;
+      line.style.width = `${length > 0 ? Math.min(100, (audio.currentTime / length) * 100) : 0}%`;
+    };
+    for (const name of ["timeupdate", "loadedmetadata", "durationchange"])
+      audio.addEventListener(name, sync);
+    audio.addEventListener("play", () => toggle.set(t.pause, ICON_PAUSE));
+    for (const name of ["pause", "ended"])
+      audio.addEventListener(name, () => toggle.set(t.play, ICON_PLAY));
+    const card = h(
+      "div",
+      { class: "bc-card" },
+      h(
+        "div",
+        { class: "bc-card__row" },
+        toggle.button,
+        h(
+          "span",
+          {
+            style:
+              "flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px",
+          },
+          h(
+            "span",
+            {
+              class: "bc-small",
+              style:
+                "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+            },
+            item.name || "—",
+          ),
+          time,
+          h("span", { class: "bc-track" }, line, audio),
+        ),
+      ),
+    );
+    audio.addEventListener("error", () => card.replaceWith(unavailable(item)));
+    return card;
+  }
+
+  /** Video: its first frame under a centred play button; once playing, the native controls. */
+  function videoBox(item: Shown, max: number) {
+    const video = h("video", {
+      src: `${item.url}#t=0.1`,
+      preload: "metadata",
+      playsinline: true,
+    });
+    const box = h(
+      "div",
+      {
+        class: "bc-media bc-media--video",
+        style: `width:100%;max-width:${max}px;aspect-ratio:16/9`,
+      },
+      video,
+    );
+    const play = iconButton(
+      t.playVideo,
+      ICON_PLAY,
+      () => {
+        play.button.remove();
+        video.controls = true;
+        playMedia(video);
+      },
+      "bc-button bc-button--outline bc-button--icon bc-media__play",
+    );
+    box.append(play.button);
+    video.addEventListener("loadedmetadata", () => {
+      if (video.videoWidth)
+        box.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    });
+    video.addEventListener("error", () => box.replaceWith(unavailable(item)));
+    return box;
+  }
+
+  function playMedia(element: HTMLMediaElement) {
+    try {
+      void Promise.resolve(element.play()).catch(() => {});
+    } catch {
+      // nothing to play here
+    }
+  }
+
+  /** An Agent's media message: pictures join the turn's latest pictures, the rest are cards. */
+  function media(kind: string, id: string, value: Data) {
+    const record = agent(id, "media");
+    record.ended = true;
+    const target = sent.get(str(value.reply_to));
+    if (target) target.confirmed = true;
+    const item: Shown = {
+      url: str(value.url),
+      name: str(value.filename),
+      mime: str(value.mime_type),
+      size: Number(value.size) || 0,
+    };
+    if (kind === "image" && PICTURES.test(item.mime)) {
+      const joined =
+        gallery &&
+        record.root.previousElementSibling === gallery.last &&
+        gallery.node.parentElement?.lastElementChild === gallery.node;
+      if (joined) {
+        gallery!.items.push(item);
+        gallery!.last = record.root;
+        drawGallery(gallery!);
+        show(record.root, false);
+      } else {
+        gallery = galleryOf([item], AGENT_MEDIA, record.root);
+        put(record, gallery.node);
+      }
+    } else put(record, block(item, AGENT_MEDIA, t.received));
+    const caption = str(value.caption);
+    if (caption) put(record, h("p", { class: "bc-reply" }, clip(caption)));
+  }
+
+  // ---- the Viewer: one picture over the page, on the dark ground
+  function viewer(items: Shown[], start: number, opener: HTMLElement) {
+    closeViewer?.();
+    let index = start;
+    const several = items.length > 1;
+    const name = h("span", {
+      class: "bc-small",
+      style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+    });
+    const meta = h("span", { class: "bc-caption bc-mono bc-muted" });
+    const count = h("span", { class: "bc-caption bc-mono bc-muted" });
+    const image = h("img", { alt: "" });
+    const download = h(
+      "a",
+      {
+        class: "bc-button bc-button--ghost bc-button--icon bc-button--sm",
+        "aria-label": t.download,
+      },
+      icon(ICON_DOWNLOAD),
+      h("span", { class: "bc-tooltip", "aria-hidden": "true" }, t.download),
+    );
+    const close = iconButton(
+      t.close,
+      ICON_X,
+      () => done(),
+      "bc-button bc-button--ghost bc-button--icon bc-button--sm",
+    ).button;
+    const nav = (label: string, paths: string, step: number, side: string) => {
+      const button = iconButton(
+        label,
+        paths,
+        () => go(step),
+        "bc-button bc-button--outline bc-button--icon bc-viewer__nav",
+      ).button;
+      button.style.cssText = `${side}:var(--space-6)`;
+      return button;
+    };
+    const stage = h(
+      "div",
+      {
+        class: "bc-viewer__stage",
+        // a click beside the picture closes
+        onclick: (event: Event) => {
+          if (event.target === stage) done();
+        },
+      },
+      several ? nav(t.prev, ICON_CHEVRON_LEFT, -1, "left") : null,
+      h("div", { class: "bc-viewer__image" }, image),
+      several ? nav(t.next, ICON_CHEVRON_RIGHT, 1, "right") : null,
+    );
+    const node = h(
+      "div",
+      {
+        class: "bc-viewer",
+        "data-theme": "dark",
+        role: "dialog",
+        "aria-modal": "true",
+        onkeydown: (raw: Event) => {
+          const event = raw as KeyboardEvent;
+          if (event.key === "Escape") done();
+          else if (several && event.key === "ArrowLeft") go(-1);
+          else if (several && event.key === "ArrowRight") go(1);
+          else if (event.key === "Tab") {
+            // focus stays in the dialog
+            const stops = [...node.querySelectorAll<HTMLElement>("a,button")];
+            const edge = event.shiftKey ? stops[0] : stops.at(-1);
+            if (doc.activeElement === edge) {
+              event.preventDefault();
+              (event.shiftKey ? stops.at(-1) : stops[0])!.focus();
+            }
+          } else return;
+          if (event.key !== "Tab") event.preventDefault();
+        },
+      },
+      h(
+        "div",
+        { class: "bc-viewer__bar" },
+        h(
+          "span",
+          { style: "min-width:0;display:flex;flex-direction:column" },
+          name,
+          meta,
+        ),
+        h("span", { style: "flex:1 1 auto" }),
+        several ? count : null,
+        download,
+        close,
+      ),
+      stage,
+    );
+    // on a phone, a swipe pages
+    let from: number | null = null;
+    stage.addEventListener("pointerdown", (event) => (from = event.clientX));
+    stage.addEventListener("pointerup", (event) => {
+      const moved = from === null ? 0 : event.clientX - from;
+      from = null;
+      if (several && Math.abs(moved) > 40) go(moved < 0 ? 1 : -1);
+    });
+    function draw() {
+      const item = items[index];
+      node.setAttribute("aria-label", item.name || t.viewImage("").trim());
+      name.textContent = item.name;
+      meta.textContent = [
+        typeLabel(item.name, item.mime),
+        formatSize(item.size),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      count.textContent = `${pad(index + 1)} / ${pad(items.length)}`;
+      image.src = item.url;
+      image.alt = item.name;
+      download.setAttribute("href", item.url);
+      download.setAttribute("download", item.name || "image");
+    }
+    function go(step: number) {
+      index = (index + step + items.length) % items.length;
+      draw();
+    }
+    function done() {
+      node.remove();
+      closeViewer = null;
+      if (opener.isConnected) opener.focus();
+    }
+    draw();
+    doc.body.append(node);
+    closeViewer = done;
+    close.focus();
+  }
+
+  // ---- the composer's files
+  /** Adds files to the composer, up to {@link MAX_FILES}, and starts their uploads. */
+  function addFiles(files: File[]) {
+    for (const file of files) {
+      if (uploads.length >= MAX_FILES || !online()) break;
+      // an empty file has nothing to send
+      if (!file.size) continue;
+      const url = URL.createObjectURL(file);
+      urls.add(url);
+      const upload: Upload = {
+        file,
+        url,
+        picture: PICTURES.test(file.type),
+        shrunk: false,
+        id: "",
+        state: "busy",
+        limit: 0,
+        progress: 0,
+        request: null,
+        node: h("div"),
+      };
+      uploads.push(upload);
+      attachments.append(upload.node);
+      void begin(upload);
+    }
+    filesChanged();
+  }
+
+  /** Uploads one file, drawn smaller first when it is a picture, reporting its progress. */
+  async function begin(upload: Upload) {
+    upload.state = "busy";
+    upload.progress = 0;
+    drawUpload(upload);
+    filesChanged();
+    if (upload.picture && !upload.shrunk) {
+      upload.file = await shrink(upload.file);
+      upload.shrunk = true;
+    }
+    if (!uploads.includes(upload) || signal.aborted) return;
+    const request = new XMLHttpRequest();
+    upload.request = request;
+    const mime = upload.file.type || "application/octet-stream";
+    request.open(
+      "PUT",
+      new URL(
+        `/api/web/upload/${encodeURIComponent(mime)}/${encodeURIComponent(upload.file.name)}`,
+        doc.baseURI,
+      ),
+    );
+    request.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable || !event.total) return;
+      upload.progress = (event.loaded / event.total) * 100;
+      const line = upload.node.querySelector<HTMLElement>(
+        ".bc-attachment__progress > i",
+      );
+      if (line) line.style.width = `${upload.progress}%`;
+    });
+    const finished = (state: Upload["state"]) => {
+      if (upload.request !== request) return;
+      upload.request = null;
+      upload.state = state;
+      drawUpload(upload);
+      filesChanged();
+    };
+    request.addEventListener("load", () => {
+      let answer: Data = {};
+      try {
+        answer = JSON.parse(request.responseText) as Data;
+      } catch {
+        // an answer without a body says only its status
+      }
+      if (request.status === 201 && str(answer.id)) {
+        upload.id = str(answer.id);
+        return finished("ready");
+      }
+      if (request.status === 413) {
+        upload.limit = Number(answer.limit) || 0;
+        return finished("refused");
+      }
+      finished("error");
+    });
+    request.addEventListener("error", () => finished("error"));
+    request.send(upload.file);
+  }
+
+  /** The composer's chip for one file: a thumbnail or the file's name and type, then its state. */
+  function drawUpload(upload: Upload) {
+    const { state, file } = upload;
+    const busyNow = state === "busy";
+    const failed = state === "error" || state === "refused";
+    const spinner = icon(ICON_LOADER, undefined, "bc-spinner");
+    spinner.removeAttribute("aria-hidden");
+    spinner.setAttribute("role", "img");
+    spinner.setAttribute("aria-label", t.uploading);
+    const node = h(
+      "div",
+      {
+        class: `bc-attachment${upload.picture ? "" : " bc-attachment--file"}${busyNow ? " bc-attachment--busy" : ""}${failed ? " bc-attachment--error" : ""}`,
+      },
+      upload.picture
+        ? h("img", { src: upload.url, alt: file.name })
+        : [
+            icon(ICON_FILE, undefined, "bc-muted"),
+            h(
+              "span",
+              { class: "bc-attachment__name" },
+              h("span", { class: "bc-small" }, file.name),
+              h(
+                "span",
+                { class: "bc-caption bc-mono bc-muted" },
+                [typeLabel(file.name, file.type), formatSize(file.size)]
+                  .filter(Boolean)
+                  .join(" · "),
+              ),
+            ),
+          ],
+      busyNow
+        ? [
+            h("span", { class: "bc-attachment__state" }, spinner),
+            h(
+              "span",
+              { class: "bc-attachment__progress" },
+              h("i", { style: `width:${upload.progress}%` }),
+            ),
+          ]
+        : null,
+      state === "error"
+        ? iconButton(
+            t.retryUpload,
+            ICON_REFRESH,
+            () => void begin(upload),
+            "bc-icon-button bc-attachment__retry",
+          ).button
+        : null,
+      iconButton(
+        t.removeAttachment,
+        ICON_X,
+        () => {
+          uploads = uploads.filter((each) => each !== upload);
+          release(upload);
+          filesChanged();
+          input.focus();
+        },
+        "bc-icon-button bc-attachment__remove",
+      ).button,
+    );
+    upload.node.replaceWith(node);
+    upload.node = node;
+  }
+
+  /** Lets a file go: its upload stops, its chip leaves and its copy is freed. */
+  function release(upload: Upload) {
+    const request = upload.request;
+    upload.request = null;
+    request?.abort();
+    upload.node.remove();
+    URL.revokeObjectURL(upload.url);
+    urls.delete(upload.url);
+  }
+
+  /**
+   * Puts files back in the composer, as many as fit: a queued message's as they are, a rewound
+   * message's uploaded again, since the device took them with the message.
+   */
+  function restore(files: Upload[], again: boolean) {
+    const room = Math.max(0, MAX_FILES - uploads.length);
+    for (const upload of files.slice(room)) release(upload);
+    const kept = files.slice(0, room);
+    if (again) {
+      addFiles(kept.map((upload) => upload.file));
+      for (const upload of kept) release(upload);
+      return;
+    }
+    for (const upload of kept) {
+      uploads.push(upload);
+      attachments.append(upload.node);
+    }
+    filesChanged();
+  }
+
+  /** The files' row, the paperclip and the sentences on what failed. */
+  function filesChanged() {
+    show(attachments, uploads.length > 0);
+    const failed = uploads.find((upload) => upload.state === "error");
+    const lines = [
+      failed ? (failed.picture ? t.imageFailed : t.fileFailed) : "",
+      ...uploads
+        .filter((upload) => upload.state === "refused")
+        .map((upload) =>
+          t.tooBig(upload.file.name, Math.floor(upload.limit / 1048576)),
+        ),
+    ].filter(Boolean);
+    fileHints.replaceChildren(
+      ...lines.map((line) =>
+        h("span", { class: "bc-hint bc-hint--error" }, line),
+      ),
+    );
+    show(fileHints, lines.length > 0);
+    refresh();
+  }
+
+  function agent(id: string, kind = "reply"): Agent {
+    const known = agents.get(id);
+    if (known) return known;
+    if (!group || !group.node.isConnected) {
+      const opened: Group = {
+        node: h("div", { class: "bc-turn bc-turn--new" }),
+        author: author(),
+        spin: null,
+      };
+      opened.node.append(opened.author);
+      groups.add(opened);
+      column.append(opened.node);
+      group = opened;
+    }
+    // one message of the turn: its parts on the turn's own 8px rhythm
+    const root = h("div", {
+      style: "display:flex;flex-direction:column;gap:8px",
+    });
+    const record: Agent = {
+      id,
+      kind,
+      root,
+      group,
+      run: null,
+      tool: null,
+      request: null,
+      footer: null,
+      reaction: reactionBadge(),
+      ended: false,
+      replyTo: "",
+    };
+    agents.set(id, record);
+    // a message first heard mid-stream is running too, until its end
+    if (kind !== "media") active.add(record);
+    const owner = group;
+    add(root, () => forget(record), owner.node);
+    group = owner;
+    return record;
+  }
+
+  function forget(record: Agent) {
+    agents.delete(record.id);
+    active.delete(record);
+    if (record.run) close(record);
+    if (request?.owner === record) setRequest(null);
+    if (replyTo?.id === record.id) setReply(null);
+  }
+
+  // ---- smooth streaming
+  const flowing = new Set<Run>();
+  /** A reply's code blocks carry their own Copy button. */
+  const markdown = { codeActions: copyButton, keep: caret };
+  let frame = 0;
+
+  /** Whether text should land at once: reduced motion, or a hidden tab whose frames pause. */
+  function instant() {
+    return (
+      !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+      doc.hidden
+    );
+  }
+
+  function flow(run: Run, text: string) {
+    run.pending += text;
+    if (instant() || run.pending.length > MAX_TEXT) return settle(run);
+    flowing.add(run);
+    if (!frame) frame = requestAnimationFrame(tick);
+  }
+
+  /** Reveals a share of each run's backlog: steady when it is short, catching up when it is long. */
+  function tick() {
+    frame = 0;
+    for (const run of flowing) {
+      let n = Math.min(
+        run.pending.length,
+        Math.max(2, Math.ceil(run.pending.length / 10)),
+      );
+      // never split a surrogate pair across frames
+      const code = run.pending.charCodeAt(n - 1);
+      if (code >= 0xd800 && code <= 0xdbff) n += 1;
+      grow(run, run.pending.slice(0, n));
+      run.pending = run.pending.slice(n);
+      if (!run.pending) flowing.delete(run);
+    }
+    if (flowing.size) frame = requestAnimationFrame(tick);
+    follow();
+  }
+
+  function settle(run: Run) {
+    if (run.pending) grow(run, run.pending);
+    run.pending = "";
+    flowing.delete(run);
+  }
+
+  /** Adds text to a run: plain text lands as it is, Markdown is painted again with the caret kept at its end. */
+  function grow(run: Run, text: string) {
+    if (run.text) {
+      run.text.data = clip(run.text.data + text);
+      return;
+    }
+    run.source = clip(run.source + text);
+    paint(run, true);
+  }
+
+  /** Paints a Markdown run: provisionally while it streams, as written once it is whole. */
+  function paint(run: Run, streaming: boolean) {
+    renderMarkdown(run.node, run.source, { ...markdown, streaming });
+    if (streaming && run.caret) placeCaret(run.node);
+  }
+
+  /**
+   * Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move
+   * restarts its blink). After a code block or a table, which have no last line, it hides, as
+   * Streamdown's does.
+   */
+  function placeCaret(node: HTMLElement) {
+    const end = trailing(node, caret);
+    const ended = [...node.children].some((child) => child !== caret);
+    if (end === node && ended) caret.remove();
+    else if (end.lastChild !== caret) end.append(caret);
+  }
+
+  /** Lands a run's text in full; a Markdown run is painted as written, its provisional tail gone. */
+  function finish(run: Run) {
+    settle(run);
+    if (!run.text) paint(run, false);
+  }
+
+  /** Closes the message's open run: its text lands in full and its `done` runs. */
+  function close(record: Agent) {
+    const run = record.run;
+    if (!run) return;
+    finish(run);
+    record.run = null;
+    run.done?.();
+  }
+
+  /** Appends text to the message's run for `stream`, opening a new run when the stream changes. */
+  function write(record: Agent, stream: string, text: string) {
+    if (!text) return;
+    if (record.run?.stream !== stream) {
+      close(record);
+      let done: (() => void) | undefined;
+      let node: HTMLElement;
+      let content: Text | null = null;
+      if (stream === "output") node = h("div", { class: "bc-reply bc-md" });
+      else {
+        if (stream === "reasoning") ({ node, done } = reasoning(record));
+        else {
+          node = h("p", { class: "bc-small bc-muted", style: "margin:0" });
+          if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+        }
+        content = doc.createTextNode("");
+        node.append(content);
+      }
+      if (stream !== "reasoning") put(record, node);
+      record.run = {
+        stream,
+        text: content,
+        source: "",
+        node,
+        pending: "",
+        done,
+      };
+    }
+    const run = record.run!;
+    flow(run, text);
+    if (stream === "output" && !record.ended) {
+      run.caret = true;
+      placeCaret(run.node);
+    }
+  }
+
+  /** Adds a part to a message, above its footer. */
+  function put(record: Agent, node: HTMLElement) {
+    record.root.insertBefore(
+      node,
+      record.footer?.parentElement ? record.footer : null,
+    );
+  }
+
+  /**
+   * Reasoning: open under a shimmering 「思考中」 while it streams, then folded away under
+   * 「思考了 N 秒」 unless the reader opened or closed it meanwhile.
+   */
+  function reasoning(record: Agent) {
+    const panel = h("p", {
+      class: "bc-quote",
+      style: "margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere",
+    });
+    const label = h("span", { class: "bc-shimmer" }, t.thinking);
+    const button = h(
+      "button",
+      { class: "bc-fold-link", type: "button" },
+      icon(ICON_LIGHTBULB),
+      label,
+      icon(ICON_CHEVRON_RIGHT),
+    );
+    const set = fold(button, panel, true);
+    let touched = false;
+    button.addEventListener("click", () => (touched = true));
+    const started = Date.now();
+    put(record, h("div", null, button, panel));
+    const done = () => {
+      const seconds = Math.round((Date.now() - started) / 1000);
+      label.removeAttribute("class");
+      label.replaceChildren(
+        ...(seconds >= 1
+          ? [
+              t.thoughtA,
+              h("span", { class: "bc-mono" }, String(seconds)),
+              t.thoughtB,
+            ]
+          : [t.reasoning]),
+      );
+      if (!touched) set(false);
+    };
+    return { node: panel, done };
+  }
+
+  /**
+   * A tool-call record (Card): the fold names the tool and its arguments in one line; open, a dense
+   * key-value body holds them in full. It spins 「运行中」 until its result ends.
+   */
+  function tool(record: Agent): Tool {
+    const name = h("span", { class: "bc-tool__name" });
+    const summary = h("span", { class: "bc-tool__args" });
+    const status = h(
+      "span",
+      { class: "bc-status bc-muted", style: "flex:none;white-space:nowrap" },
+      icon(ICON_LOADER, undefined, "bc-spinner"),
+      t.running,
+    );
+    const button = h(
+      "button",
+      { class: "bc-fold", type: "button" },
+      icon(ICON_WRENCH, undefined, "bc-muted"),
+      name,
+      summary,
+      status,
+      icon(ICON_CHEVRON_RIGHT, undefined, "bc-muted"),
+    );
+    // the values keep the device's line breaks
+    const args = h("dd", { class: "bc-mono", style: "white-space:pre-wrap" });
+    const out = h("dd", { class: "bc-mono", style: "white-space:pre-wrap" });
+    const panel = h(
+      "dl",
+      { class: "bc-card__body bc-kv bc-kv--dense" },
+      h("dt", null, t.args),
+      args,
+      h("dt", null, t.output),
+      out,
+    );
+    const open = fold(button, panel, false);
+    const card = h("div", { class: "bc-card" }, button, panel);
+    close(record);
+    put(record, card);
+    return { card, name, summary, args, out, status, open };
+  }
+
+  /** A permission request (Card): head, the tool, arguments and reason, then the answers in the foot. */
+  function approval(record: Agent): Request {
+    const tool = h("dd", { class: "bc-tool__name" });
+    const args = h("code", { class: "bc-code" });
+    const reason = h("dd");
+    const actions = h(
+      "div",
+      { class: "bc-card__foot" },
+      h(
+        "button",
+        {
+          class: "bc-button bc-button--sm",
+          type: "button",
+          onclick: () => answer(t.allow),
+        },
+        icon(ICON_CHECK),
+        t.allow,
+      ),
+      h(
+        "button",
+        {
+          class: "bc-button bc-button--outline bc-button--sm",
+          type: "button",
+          onclick: () => answer(t.deny),
+        },
+        icon(ICON_X),
+        t.deny,
+      ),
+      h(
+        "span",
+        { class: "bc-small bc-muted", style: "flex:1 1 240px" },
+        t.approvalHint,
+      ),
+    );
+    const title = `imessage-web-approval-${record.id}`;
+    const card = h(
+      "section",
+      { class: "bc-card", "aria-labelledby": title },
+      h(
+        "div",
+        { class: "bc-card__head" },
+        icon(ICON_SHIELD_ALERT, undefined, "bc-warning"),
+        h("h3", { id: title, class: "bc-title" }, t.approvalTitle),
+      ),
+      h(
+        "dl",
+        { class: "bc-card__body bc-kv bc-kv--dense" },
+        h("dt", null, t.approvalTool),
+        tool,
+        h("dt", null, t.approvalArgs),
+        h("dd", null, args),
+        h("dt", null, t.approvalReason),
+        reason,
+      ),
+      actions,
+    );
+    show(actions, false);
+    close(record);
+    put(record, card);
+    return { card, tool, args, reason, actions, owner: record };
+  }
+
+  /** Shows the message's footer (its reaction, then Copy and Reply as icon buttons): at its end or while it asks. */
+  function showFooter(record: Agent) {
+    if (record.kind !== "reply") return;
+    if (!record.footer) {
+      record.footer = h(
+        "div",
+        { class: "bc-meta", style: "gap:4px" },
+        record.reaction,
+        copyButton(() => textOf(record)),
+        iconButton(t.reply, ICON_REPLY, () =>
+          setReply({ id: record.id, text: textOf(record) }),
+        ).button,
+      );
+    }
+    record.root.append(record.footer);
+  }
+
+  /** A Copy icon button for what `read` returns; it says 「已复制」 for a moment once it copied. */
+  function copyButton(read: () => string) {
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    const copy = iconButton(t.copy, ICON_COPY, async () => {
+      if (!(await copyText(read())) || signal.aborted) return;
+      copy.set(t.copied, ICON_CHECK);
+      clearTimeout(reset);
+      reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
+    });
+    return copy.button;
+  }
+
+  /** The message's reply text (its Markdown source), as Copy and Reply take it. */
+  function textOf(record: Agent) {
+    return [...record.root.querySelectorAll(".bc-reply")]
+      .map((node) => markdownSource(node) ?? node.firstChild?.textContent ?? "")
+      .join("\n")
+      .trim();
+  }
+
+  function setReply(target: { id: string; text: string } | null) {
+    replyTo = target;
+    show(replyBar, !!target);
+    quote.textContent = target?.text ?? "";
+    if (target) input.focus();
+  }
+
+  function setRequest(next: Request | null) {
+    if (request && request !== next) {
+      show(request.actions, false);
+      for (const button of request.actions.querySelectorAll("button"))
+        button.disabled = true;
+    }
+    request = next;
+    show(answering, !!next);
+    // 「正在答复 · `fs.remove`」: the tool's name is a machine value
+    answeringText.replaceChildren(
+      ...(next
+        ? [
+            `${t.answering} · `,
+            h("span", { class: "bc-mono" }, next.tool.textContent),
+          ]
+        : []),
+    );
+    input.placeholder = next ? t.answerPh : t.placeholder;
+  }
+
+  /** A failed turn: an error alert written into the conversation, a record in the log rather than a page alert. */
+  function errorRecord(title: string, text: string) {
+    add(
+      h(
+        "div",
+        { class: "bc-alert bc-alert--error bc-turn--new", role: "alert" },
+        icon(ICON_CIRCLE_ALERT),
+        h(
+          "span",
+          { class: "bc-alert__body" },
+          h("span", { class: "bc-alert__title" }, title),
+          text
+            ? h(
+                "span",
+                { class: "bc-small", style: "overflow-wrap:anywhere" },
+                text,
+              )
+            : null,
+        ),
+      ),
+    );
+  }
+
+  function separator(text: string) {
+    add(h("div", { role: "separator", class: "bc-separator" }, text));
+  }
+
+  // ---- semantic Agent events inside one reply message
+  function semantic(record: Agent, type: string, payload: Data) {
+    const text = str(payload.text);
+    if (answered?.owner === record) {
+      // the asking turn went on after the answer, so the device received it
+      answered.entry.confirmed = true;
+      answered = null;
+    }
+    switch (type) {
+      case "reasoning_delta":
+        return write(record, "reasoning", text);
+      case "output_delta":
+      case "effect_output_delta":
+        return write(record, "output", text);
+      case "reasoning_ended":
+      case "output_ended":
+      case "effect_output_ended":
+        caret.remove();
+        return close(record);
+      case "tool_result_started":
+        record.tool = tool(record);
+        return;
+      case "tool_name_delta":
+      case "tool_arguments_delta":
+      case "tool_output_delta": {
+        const card = record.tool;
+        if (!card) return;
+        const target =
+          type === "tool_name_delta"
+            ? card.name
+            : type === "tool_arguments_delta"
+              ? card.args
+              : card.out;
+        target.textContent = clip((target.textContent ?? "") + text);
+        card.summary.textContent = card.args.textContent;
+        return;
+      }
+      case "tool_result_ended": {
+        const card = record.tool;
+        if (!card) return;
+        const ok = payload.ok === true;
+        card.status.className = `bc-status ${ok ? "bc-success" : "bc-destructive"}`;
+        card.status.replaceChildren(
+          icon(ok ? ICON_CHECK : ICON_CIRCLE_X),
+          ok ? t.ok : t.failed,
+        );
+        if (!ok) card.out.classList.add("bc-destructive");
+        card.open(!ok);
+        record.tool = null;
+        return;
+      }
+      case "input_request_started":
+        record.request = approval(record);
+        return;
+      case "input_request_tool_name_delta":
+      case "input_request_arguments_delta":
+      case "input_request_reason_delta": {
+        const card = record.request;
+        if (!card) return;
+        const target =
+          type === "input_request_tool_name_delta"
+            ? card.tool
+            : type === "input_request_arguments_delta"
+              ? card.args
+              : card.reason;
+        target.textContent = clip((target.textContent ?? "") + text);
+        return;
+      }
+      case "input_requested":
+        if (!record.request) return;
+        show(record.request.actions, true);
+        setRequest(record.request);
+        return showFooter(record);
+      case "turn_error":
+      case "session_error":
+        caret.remove();
+        close(record);
+        return errorRecord(t.turnError, str(payload.message));
+      case "turn_ended":
+        stopping = false;
+        // a turn cut short keeps what it wrote and says so; a completed one needs no word
+        if (
+          payload.outcome === "interrupted" ||
+          payload.outcome === "cancelled"
+        ) {
+          caret.remove();
+          close(record);
+          put(
+            record,
+            h(
+              "span",
+              { class: "bc-status bc-muted" },
+              icon(ICON_CIRCLE_STOP),
+              t.stopped,
+            ),
+          );
+        }
+        return;
+    }
+  }
+
+  // ---- bridge frames
   function receive(frame: unknown) {
-    if (typeof frame !== "string" || frame.length > 262144)
+    if (typeof frame !== "string" || frame.length > MAX_FRAME)
       throw new Error("invalid frame");
     for (const block of frame.replaceAll("\r\n", "\n").split("\n\n")) {
       if (!block.trim()) continue;
@@ -68,125 +2180,737 @@ export function mount(root: HTMLElement, { signal }: { signal: AbortSignal }) {
           .join("\n"),
       );
       if (!data || typeof data !== "object") throw new Error("invalid data");
-      const value = data as Record<string, unknown>;
-      if (event === "stream.lagged") {
-        status.textContent = "消息有遗漏，历史不完整。";
-        continue;
-      }
-      if (event === "conversation.typing") {
-        status.textContent = value.typing ? "对方正在输入…" : "已连接";
-        continue;
-      }
-      if (typeof value.message_id !== "string") continue;
-      const id = `remote:${value.message_id}`;
-      if (event === "message.delete") {
-        messages.get(id)?.remove();
-        messages.delete(id);
-        continue;
-      }
-      const node = message(id);
-      if (event === "message.delta" && typeof value.delta === "string")
-        node.textContent = (node.textContent + value.delta).slice(-65536);
-      if (event === "message.edit" && typeof value.text === "string")
-        node.textContent = value.text.slice(-65536);
-      if (event === "message.event" && value.type === "output_delta") {
-        const payload = value.payload as Record<string, unknown> | null;
-        if (payload && typeof payload.text === "string")
-          node.textContent = (node.textContent + payload.text).slice(-65536);
-      }
-      if (event === "message.end" && value.error)
-        node.append(element("small", "消息传输未完成"));
-      if (
-        [
-          "message.file",
-          "message.image",
-          "message.audio",
-          "message.video",
-        ].includes(event ?? "") &&
-        value.phase === "start"
-      )
-        node.textContent = "[收到附件，此页面暂不展示]";
+      handle(event ?? "", data as Data);
     }
-    history.scrollTop = history.scrollHeight;
   }
-  function connect() {
+
+  function handle(event: string, value: Data) {
+    if (event === "stream.lagged")
+      return separator(fill(t.lagged, { n: Number(value.missed) || 0 }));
+    if (event === "conversation.typing") {
+      typingOn = value.typing === true;
+      return;
+    }
+    if (event === "conversation.sessions")
+      return applySessions(value as unknown as SessionsState);
+    const id = str(value.message_id);
+    if (!id) return;
+    if (event === "message.rejected") {
+      // the device refused the frame (its files expired): no turn starts for it
+      const entry = sent.get(id);
+      if (!entry) return;
+      awaiting.delete(id);
+      arm();
+      entry.confirmed = true;
+      entry.root.lastElementChild!.before(
+        h(
+          "span",
+          { class: "bc-status bc-destructive" },
+          icon(ICON_CIRCLE_ALERT),
+          t.rejected,
+        ),
+      );
+      return;
+    }
+    if (event === "message.start" && stale.has(str(value.reply_to))) {
+      // the reply a left session still owes this page: it belongs to the conversation cleared
+      dropped.add(id);
+      return;
+    }
+    if (event === "message.start" && withdrawn.has(str(value.reply_to))) {
+      // the rewound message's turn began after all: cancel it again and keep it off the page
+      dropped.add(id);
+      awaiting.delete(str(value.reply_to));
+      control({ control: "cancel" });
+      return;
+    }
+    if (dropped.has(id)) {
+      if (event === "message.end") dropped.delete(id);
+      return;
+    }
+    const known = agents.get(id);
+    switch (event) {
+      case "message.start": {
+        const started = agent(id, str(value.kind) || "reply");
+        const replied = str(value.reply_to);
+        started.replyTo = replied;
+        // stop asked before the turn began reached no turn: ask again now that one runs
+        if (stopping) control({ control: "interrupt" });
+        // the oldest waiting message's turn has started
+        awaiting.delete(replied);
+        const target = sent.get(replied);
+        if (target) target.confirmed = true;
+        return;
+      }
+      case "message.delta": {
+        const record = agent(id);
+        const stream =
+          record.kind === "reasoning" ||
+          record.kind === "tool" ||
+          record.kind === "notice"
+            ? record.kind
+            : "output";
+        return write(record, stream, str(value.delta));
+      }
+      case "message.event": {
+        const payload = value.payload;
+        return semantic(
+          agent(id),
+          str(value.type),
+          payload && typeof payload === "object" ? (payload as Data) : {},
+        );
+      }
+      case "message.end": {
+        if (!known) return;
+        known.ended = true;
+        active.delete(known);
+        // a finished turn may have named or started a session: ask for the list again
+        if (sessions && !active.size) control({ control: "sessions" });
+        caret.remove();
+        close(known);
+        if (request?.owner === known) setRequest(null);
+        // the device's reason is internal (no plumbing on screen): the line says what happened
+        if (str(value.error))
+          put(
+            known,
+            h(
+              "span",
+              { class: "bc-status bc-destructive" },
+              icon(ICON_CIRCLE_ALERT),
+              t.incomplete,
+            ),
+          );
+        return showFooter(known);
+      }
+      case "message.edit": {
+        if (!known) return;
+        close(known);
+        for (const node of known.root.querySelectorAll(".bc-reply"))
+          node.remove();
+        write(known, "output", str(value.text) || " ");
+        caret.remove();
+        const run = known.run!;
+        finish(run);
+        trailing(run.node).append(
+          h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
+        );
+        known.run = null;
+        return;
+      }
+      case "message.delete": {
+        const user = sent.get(id);
+        const node = known?.root ?? user?.root;
+        const index = items.findIndex((item) => item.node === node);
+        if (index < 0) return;
+        const [item] = items.splice(index, 1);
+        const parent = item.node.parentElement;
+        item.node.remove();
+        item.forget();
+        if (parent && parent !== column && parent.childElementCount <= 1) {
+          if (parent === group?.node) group = null;
+          parent.remove();
+        }
+        if (!items.length) {
+          column.prepend(empty);
+          setFresh(true);
+        }
+        return;
+      }
+      case "message.reaction": {
+        const badge = known?.reaction ?? sent.get(id)?.reaction;
+        if (!badge) return;
+        const reaction = str(value.reaction);
+        badge.textContent = reaction;
+        show(badge, !!reaction);
+        if (known) showFooter(known);
+        return;
+      }
+      case "message.file":
+      case "message.image":
+      case "message.audio":
+      case "message.video":
+        return media(event.slice(8), id, value);
+    }
+  }
+
+  // ---- turn state: the spinning marks, 「思考中」, the send button, and when the queue moves
+  function busy() {
+    return active.size > 0 || awaiting.size > 0;
+  }
+
+  function refresh() {
+    const working = busy() || typingOn;
+    // something visibly moving already speaks for the device: streaming text, a running tool,
+    // or a question waiting on the reader
+    const moving =
+      !!request || [...active].some((record) => record.run || record.tool);
+    for (const each of groups) {
+      if (!each.node.isConnected) {
+        spin(each, false);
+        groups.delete(each);
+        continue;
+      }
+      spin(
+        each,
+        [...active].some((record) => record.group === each),
+      );
+    }
+    // 「思考中」 follows the running turn, or a turn of its own while the device has not begun
+    thinking.remove();
+    pending.node.remove();
+    const last = group?.node.isConnected ? group : null;
+    const running =
+      !!last && [...active].some((record) => record.group === last);
+    let host: Group | null = null;
+    if (working && !moving) {
+      if (running && column.lastElementChild === last!.node) host = last;
+      else if (!running) {
+        host = pending;
+        column.append(pending.node);
+      }
+    }
+    dots.remove();
+    if (host) {
+      if (host === pending) spin(pending, true);
+      // without a spinning mark, the dots show the device is at work
+      if (!host.spin) thinking.prepend(dots);
+      host.node.append(thinking);
+    }
+    if (host !== pending) spin(pending, false);
+    const queueing = busy() && !request;
+    const label = queueing ? t.enqueue : t.send;
+    if (sendButton.button.getAttribute("aria-label") !== label)
+      sendButton.set(label);
+    sendButton.button.disabled = !canSend();
+    attach.disabled = uploads.length >= MAX_FILES || !online();
+    // stop stands in for send while a turn runs; typed text brings send back as the primary
+    const typed = !!input.value.trim();
+    show(stopButton.button, busy() && online());
+    stopButton.button.disabled = stopping;
+    stopButton.button.classList.toggle("bc-button--outline", typed);
+    show(sendButton.button, !busy() || typed || !online());
+    // rewind sits on the message whose turn has not ended
+    for (const [id, entry] of sent)
+      show(
+        entry.rewind,
+        online() &&
+          (awaiting.has(id) ||
+            [...active].some((record) => record.replyTo === id)),
+      );
+    pump();
+  }
+
+  /** Text or files, within the limit, and no file still uploading or failed. */
+  function canSend() {
+    return (
+      online() &&
+      (!!input.value.trim() || uploads.length > 0) &&
+      !over() &&
+      uploads.every((upload) => upload.state === "ready")
+    );
+  }
+
+  /** Sends the oldest queued message once the device is free. */
+  function pump() {
+    if (!queue.length || held || busy() || !online()) return;
+    const next = queue.shift()!;
+    if (!send(next.text, next.replyTo, next.uploads)) queue.unshift(next);
+    renderQueue();
+  }
+
+  /** Stops waiting on sent messages once nothing has been heard for `STALL_MS`. */
+  function arm() {
+    clearTimeout(stall);
+    stall = awaiting.size
+      ? setTimeout(() => {
+          awaiting.clear();
+          refresh();
+        }, STALL_MS)
+      : undefined;
+  }
+
+  function renderQueue() {
+    const bars = queue.map((item, index) =>
+      h(
+        "div",
+        {
+          class: `bc-composer__bar${index === queue.length - 1 ? " bc-composer__bar--rule" : ""}`,
+          role: "listitem",
+        },
+        h(
+          "span",
+          { class: "bc-mono bc-muted", style: "flex:none" },
+          pad(index + 1),
+        ),
+        // a message with files says how many before its text
+        item.uploads.length
+          ? [
+              icon(ICON_PAPERCLIP, undefined, "bc-muted"),
+              h(
+                "span",
+                { class: "bc-mono bc-muted", style: "flex:none" },
+                String(item.uploads.length),
+              ),
+            ]
+          : null,
+        h("span", { class: "bc-composer__text" }, item.text),
+        iconButton(t.editQueued, ICON_PENCIL, () => {
+          const [taken] = queue.splice(queue.indexOf(item), 1);
+          input.value = input.value
+            ? `${taken.text}\n${input.value}`
+            : taken.text;
+          if (taken.replyTo) setReply(taken.replyTo);
+          restore(taken.uploads, false);
+          renderQueue();
+          changed();
+          input.focus();
+        }).button,
+        iconButton(t.removeQueued, ICON_X, () => {
+          const [taken] = queue.splice(queue.indexOf(item), 1);
+          for (const upload of taken.uploads) release(upload);
+          renderQueue();
+        }).button,
+      ),
+    );
+    queueList.replaceChildren(
+      ...(queue.length
+        ? [
+            h(
+              "div",
+              { class: "bc-composer__bar" },
+              icon(ICON_CLOCK, undefined, "bc-muted"),
+              h(
+                "span",
+                { class: "bc-muted" },
+                `${t.queued} · `,
+                h("span", { class: "bc-mono" }, pad(queue.length)),
+              ),
+            ),
+            ...bars,
+          ]
+        : []),
+    );
+    show(queueList, queue.length > 0);
+  }
+
+  // ---- composer
+  const encoder = new TextEncoder();
+  // where the browser cannot size the textarea to its text, the page does
+  const fits = !!globalThis.CSS?.supports?.("field-sizing", "content");
+  function over() {
+    return encoder.encode(input.value).byteLength > MAX_BYTES;
+  }
+  function changed() {
+    // past the limit nothing counts: send turns grey and one sentence says why
+    showInvalid(over() ? t.tooLong : "");
+    if (!fits) {
+      input.style.height = "auto";
+      if (input.scrollHeight)
+        input.style.height = `${Math.min(input.scrollHeight, MAX_INPUT)}px`;
+    }
+    refresh();
+  }
+  function showInvalid(message: string) {
+    invalid.textContent = message;
+    show(invalid, !!message);
+    if (message) {
+      input.setAttribute("aria-invalid", "true");
+      input.setAttribute("aria-describedby", invalid.id);
+    } else {
+      input.removeAttribute("aria-invalid");
+      input.removeAttribute("aria-describedby");
+    }
+  }
+
+  function answer(text: string) {
+    send(text, null);
+  }
+
+  function submit() {
+    const files = uploads;
+    const text = input.value.trim() || !files.length ? input.value : "";
+    if (!canSend()) return input.focus();
+    // a rewound message goes ahead of the queue it held
+    const first = held;
+    held = false;
+    // a pending question takes the message as its answer at once; otherwise a running turn
+    // queues it, files and all
+    if (!request && (busy() || (queue.length && !first))) {
+      queue.push({ text, replyTo, uploads: files });
+      renderQueue();
+    } else if (!send(text, replyTo, files)) return;
+    // the files go with the message: their chips leave, their copies stay
+    for (const upload of files) upload.node.remove();
+    uploads = [];
+    input.value = "";
+    setReply(null);
+    changed();
+    filesChanged();
+  }
+
+  function send(
+    text: string,
+    target: { id: string; text: string } | null,
+    files: Upload[] = [],
+  ) {
+    const connection = socket;
+    if (!connection || connection.readyState !== WebSocket.OPEN) return false;
+    if (connection.bufferedAmount > 4096) {
+      context.toast({ kind: "error", title: t.notSent, body: t.busy });
+      return false;
+    }
+    const body = target ? withQuote(text, target.text) : text;
+    try {
+      connection.send(
+        JSON.stringify(
+          files.length
+            ? { text: body, attachments: files.map((upload) => upload.id) }
+            : { text: body },
+        ),
+      );
+    } catch {
+      context.toast({ kind: "error", title: t.notSent });
+      return false;
+    }
+    // the bridge numbers each message frame on this connection: web-in-1, web-in-2, …
+    const id = `web-in-${++inbound}`;
+    const entry = addUser(text, id, target, files);
+    if (request) {
+      // an answer goes on the asking turn; no turn of its own starts
+      answered = { owner: request.owner, entry };
+      setRequest(null);
+    } else {
+      awaiting.add(id);
+      arm();
+    }
+    stuck = true;
+    follow();
+    refresh();
+    return true;
+  }
+
+  /**
+   * Sends a control frame: `interrupt` (stop) or `cancel` (rewind) for the running turn, or a
+   * session command, which the device answers with `conversation.sessions`.
+   */
+  function control(
+    frame: SessionCommand | { control: "interrupt" | "cancel" },
+  ) {
+    try {
+      if (online()) socket!.send(JSON.stringify(frame));
+    } catch {
+      // the socket is going away; its close says so
+    }
+  }
+
+  function stop() {
+    if (!busy() || stopping) return;
+    stopping = true;
+    control({ control: "interrupt" });
+    refresh();
+  }
+
+  /**
+   * Takes the device's session list. A switch or a new session (from this page, another tab, or
+   * a deletion of the current one) starts the conversation view over: the device keeps the
+   * history, the page shows only what comes next.
+   */
+  function applySessions(next: SessionsState) {
+    const before = sessions;
+    sessions = next;
+    show(rail.node, true);
+    show(railToggle, true);
+    rail.update(next);
+    const kind = next.notice?.kind;
+    if (
+      kind === "switched" ||
+      kind === "created" ||
+      (!!before?.current && next.current !== before.current)
+    )
+      startOver();
+    const problem =
+      kind === "unknown_session"
+        ? t.sessionGone
+        : kind === "invalid_title"
+          ? t.badTitle
+          : kind === "failed"
+            ? t.sessionFailed
+            : "";
+    if (problem) context.toast({ kind: "error", title: problem });
+    label();
+  }
+
+  /** Clears the conversation view for another session; what the left one still sends is dropped. */
+  function startOver() {
+    for (const id of agents.keys()) dropped.add(id);
+    for (const id of sent.keys()) stale.add(id);
+    for (const item of items.splice(0)) item.forget();
+    column.replaceChildren();
+    group = null;
+    caret.remove();
+    active.clear();
+    awaiting.clear();
+    clearTimeout(stall);
+    withdrawn.clear();
+    held = false;
+    stopping = false;
+    answered = null;
+    setRequest(null);
+    setReply(null);
+    queue.length = 0;
+    renderQueue();
+    column.prepend(empty);
+    setFresh(true);
+    refresh();
+  }
+
+  /**
+   * Withdraws `id` while its turn runs: the turn is cancelled, the message and everything after it
+   * leave the log, and its text goes back into the composer ahead of anything typed. The device
+   * keeps the message in its history; the page only stops showing it. The queue waits for the
+   * withdrawn text to be sent again.
+   */
+  function rewindTo(id: string) {
+    const entry = sent.get(id);
+    if (!entry) return;
+    withdrawn.add(id);
+    awaiting.delete(id);
+    arm();
+    control({ control: "cancel" });
+    for (const record of active)
+      if (record.replyTo === id) dropped.add(record.id);
+    const from = items.findIndex((item) => item.node === entry.root);
+    for (const item of from < 0 ? [] : items.splice(from)) {
+      const parent = item.node.parentElement;
+      item.node.remove();
+      item.forget();
+      if (parent && parent !== column && !parent.querySelector("div")) {
+        if (parent === group?.node) group = null;
+        parent.remove();
+      }
+    }
+    caret.remove();
+    stopping = false;
+    if (!items.length) {
+      column.prepend(empty);
+      setFresh(true);
+    }
+    held = queue.length > 0;
+    input.value = input.value.trim()
+      ? `${entry.text}\n${input.value}`
+      : entry.text;
+    if (entry.quoted) setReply(entry.quoted);
+    // the device took its files with it: they go up again
+    restore(entry.uploads, true);
+    changed();
+    input.focus();
+  }
+
+  input.addEventListener("input", changed);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  });
+  // a pasted picture joins the composer's files
+  input.addEventListener("paste", (event) => {
+    const pictures = [...(event.clipboardData?.files ?? [])].filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (!pictures.length) return;
+    event.preventDefault();
+    addFiles(pictures);
+  });
+  // files dragged anywhere over the page drop into the composer, which says so meanwhile
+  let dragging = 0;
+  const carriesFiles = (event: DragEvent) =>
+    [...(event.dataTransfer?.types ?? [])].includes("Files");
+  const setDrop = (on: boolean) => {
+    composer.classList.toggle("bc-composer--drop", on);
+    show(dropZone, on);
+  };
+  const listen = (name: string, handler: (event: DragEvent) => void) =>
+    window.addEventListener(name, handler as EventListener, { signal });
+  listen("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragging += 1;
+    setDrop(true);
+  });
+  listen("dragover", (event) => {
+    if (carriesFiles(event)) event.preventDefault();
+  });
+  listen("dragleave", () => {
+    if (dragging && !--dragging) setDrop(false);
+  });
+  listen("drop", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragging = 0;
+    setDrop(false);
+    addFiles([...(event.dataTransfer?.files ?? [])]);
+  });
+
+  // ---- scrolling: follow the conversation while the reader is at its foot
+  let stuck = true;
+
+  function nearBottom() {
+    const scroller = doc.scrollingElement;
+    return (
+      !scroller ||
+      scroller.scrollHeight - scroller.scrollTop - window.innerHeight < 120
+    );
+  }
+  function follow() {
+    const scroller = doc.scrollingElement;
+    if (scroller && stuck) scroller.scrollTop = scroller.scrollHeight;
+    show(jump, !stuck && items.length > 0);
+  }
+  window.addEventListener(
+    "scroll",
+    () => {
+      stuck = nearBottom();
+      show(jump, !stuck && items.length > 0);
+    },
+    { signal, passive: true },
+  );
+  // a hidden tab pauses frames: what is still flowing lands at once
+  doc.addEventListener(
+    "visibilitychange",
+    () => {
+      for (const run of [...flowing]) settle(run);
+    },
+    { signal },
+  );
+
+  // ---- connection
+  let socket: WebSocket | undefined;
+  let inbound = 0;
+  let warned = false;
+
+  function online() {
+    return socket?.readyState === WebSocket.OPEN;
+  }
+
+  // the top bar carries the connection state, as the design's chat boards show it
+  function setLink(state: "connecting" | "live" | "lost") {
+    context.badge?.(
+      state === "connecting"
+        ? null
+        : { label: state === "live" ? t.live : t.lost, tone: state },
+    );
+  }
+
+  function connect(byUser: boolean) {
     socket?.close();
-    send.disabled = true;
-    reconnect.disabled = true;
-    status.textContent = "正在连接…";
+    socket = undefined;
+    input.disabled = false;
+    show(offline, false);
+    sent = new Map();
+    inbound = 0;
+    // message ids restart with the connection, so old rewinds name nothing now
+    withdrawn.clear();
+    dropped.clear();
+    stale.clear();
+    warned = false;
+    refresh();
     const url = new URL("/ws/message", document.baseURI);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    let connection: WebSocket;
     try {
-      const connection = new WebSocket(url);
-      socket = connection;
-      const active = () => socket === connection && !lifecycle.signal.aborted;
-      connection.addEventListener("open", () => {
-        if (active()) {
-          send.disabled = false;
-          status.textContent = "已连接";
-        }
-      });
-      connection.addEventListener("message", (event) => {
-        if (!active()) return;
-        try {
-          receive(event.data);
-        } catch {
-          status.textContent = "收到无法识别的消息。";
-        }
-      });
-      const disconnected = () => {
-        if (active()) {
-          send.disabled = true;
-          reconnect.disabled = false;
-          status.textContent = "连接已中断；未确认的消息不会自动重发。";
-        }
-      };
-      connection.addEventListener("error", disconnected);
-      connection.addEventListener("close", disconnected);
+      connection = new WebSocket(url);
     } catch {
-      reconnect.disabled = false;
-      status.textContent = "无法建立连接。";
+      return disconnected();
     }
-  }
-  form.addEventListener(
-    "submit",
-    (event) => {
-      event.preventDefault();
-      if (
-        send.disabled ||
-        socket?.readyState !== WebSocket.OPEN ||
-        !input.value.trim()
-      )
-        return;
-      if (new TextEncoder().encode(input.value).byteLength > 1024) {
-        status.textContent = "消息超过 1024 字节，请缩短后发送。";
-        return;
-      }
-      if (socket.bufferedAmount > 4096) {
-        status.textContent = "发送队列繁忙，请稍后再试。";
-        return;
-      }
+    socket = connection;
+    const live = () => socket === connection && !signal.aborted;
+    connection.addEventListener("open", () => {
+      if (!live()) return;
+      setLink("live");
+      if (byUser) context.toast({ kind: "success", title: t.reconnected });
+      control({ control: "sessions" });
+      refresh();
+    });
+    connection.addEventListener("message", (event) => {
+      if (!live()) return;
+      if (stuck) stuck = nearBottom();
       try {
-        socket.send(JSON.stringify({ text: input.value }));
-        message(`local:${++localId}`).textContent =
-          `你（已发送，未提供回执）：${input.value}`;
-        input.value = "";
+        receive(event.data);
       } catch {
-        status.textContent = "发送失败，请检查连接。";
+        if (!warned) context.toast({ kind: "error", title: t.unreadable });
+        warned = true;
       }
+      // anything heard means the device is alive: keep waiting on its queue
+      if (awaiting.size) arm();
+      refresh();
+      follow();
+    });
+    const lost = () => {
+      if (live()) disconnected();
+    };
+    connection.addEventListener("error", lost);
+    connection.addEventListener("close", lost);
+  }
+
+  function disconnected() {
+    socket = undefined;
+    setLink("lost");
+    input.disabled = true;
+    typingOn = false;
+    caret.remove();
+    for (const record of agents.values()) close(record);
+    // live events only: a turn cut off here is not heard ending, so the page stops waiting on it;
+    // queued messages stay and go out after reconnecting
+    active.clear();
+    awaiting.clear();
+    dropped.clear();
+    stopping = false;
+    clearTimeout(stall);
+    const count = [...sent.values()].filter((entry) => !entry.confirmed).length;
+    // what to do with them is the reader's action, so it is said, not hidden behind a term
+    offlineCount.replaceChildren(
+      count
+        ? h(
+            "span",
+            null,
+            " · ",
+            h("span", { class: "bc-mono" }, String(count)),
+            t.unconfirmed(count),
+          )
+        : "",
+    );
+    show(offline, true);
+    refresh();
+  }
+
+  signal.addEventListener(
+    "abort",
+    () => {
+      const connection = socket;
+      socket = undefined;
+      connection?.close();
+      cancelAnimationFrame(frame);
+      clearTimeout(stall);
+      flowing.clear();
+      for (const each of [...groups, pending]) each.spin?.stop();
+      closeViewer?.();
+      for (const upload of uploads) upload.request?.abort();
+      uploads = [];
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+      agents.clear();
+      sent.clear();
+      queue.length = 0;
+      input.value = "";
+      style.remove();
     },
-    { signal: lifecycle.signal },
+    { once: true },
   );
-  reconnect.addEventListener("click", connect, { signal: lifecycle.signal });
-  const cleanup = () => {
-    lifecycle.abort();
-    socket?.close();
-    messages.clear();
-    input.value = "";
-    page.remove();
-    signal.removeEventListener("abort", cleanup);
-  };
-  signal.addEventListener("abort", cleanup, { once: true });
-  connect();
-  return cleanup;
-}
+
+  column.append(empty);
+  setFresh(true);
+  changed();
+  connect(false);
+  return page;
+});

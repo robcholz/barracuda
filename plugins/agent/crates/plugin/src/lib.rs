@@ -5,19 +5,22 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use core::cell::Cell;
 
-mod bundled_workflows;
 mod model_api_http;
 mod workflow;
 
 use barracuda_agent_runtime::{ModelApiFactory, RuntimeService, RuntimeStorageConfig};
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
     PluginStartContext, PluginTaskToken,
 };
+use barracuda_time_plugin::UtcClock;
 use barracuda_webserver_plugin::WebServer;
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
@@ -25,13 +28,16 @@ use http_client::ClientFactory;
 use workflow::AgentWorkflowAdapter;
 
 pub use barracuda_agent_runtime::{
-    stream, tools, AgentRuntime, AgentToolRegistry, IterationEvent, Message, PermissionLevel,
-    SessionEvent, SessionPersistence, TurnEvent,
+    sniff_media_type, stream, tools, AgentRuntime, AgentToolRegistry, Attachment, IterationEvent,
+    MediaKind, Message, PermissionLevel, SessionDeleteError, SessionEvent, SessionId, SessionInfo,
+    SessionPersistence, SessionRenameError, TurnEvent, WallClock, SNIFF_BYTES,
 };
-pub use model_api_http::SET_API_PATH;
+pub use model_api_http::{SET_API_PATH, STATUS_API_PATH};
 
 const PERSISTENCE_ROOT: &str = "/data";
-const USER_SKILLS_ROOT: &str = "/data/skills";
+/// Skills a user or another Plugin installs. The shared durable Workspace
+/// keeps them reachable by every Plugin that writes files.
+const USER_SKILLS_ROOT: &str = "/workspace/media/skills";
 const BUNDLED_SKILLS_ROOT: &str = "/workspace/resources/skills";
 
 fn runtime_storage_config() -> RuntimeStorageConfig {
@@ -47,7 +53,6 @@ fn runtime_storage_config() -> RuntimeStorageConfig {
 /// Plugin that constructs the Agent runtime and registers its Workflow Actions.
 #[barracuda_plugin::macros::plugin]
 pub struct AgentPlugin {
-    http_clients: ClientFactory<'static>,
     runtime: Option<Rc<AgentRuntime>>,
     runtime_service: Option<RuntimeService>,
     workflow_adapter: Option<AgentWorkflowAdapter>,
@@ -57,9 +62,8 @@ pub struct AgentPlugin {
 impl AgentPlugin {
     /// Creates the unregistered Agent Plugin.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            http_clients: context.http_clients.clone(),
             runtime: None,
             runtime_service: None,
             workflow_adapter: None,
@@ -80,15 +84,29 @@ impl Plugin for AgentPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let configured = Rc::new(Cell::new(false));
+        let status = Rc::clone(&configured);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "agent",
-                        title: "模型配置",
+                        group: WebGroup::Agent,
+                        order: 10,
+                        title: WebText {
+                            zh: "模型配置",
+                            en: "Models",
+                        },
+                        summary: WebText {
+                            zh: "为主 Agent、子 Agent、记忆与压缩注册模型",
+                            en: "Register models for the main agent, sub-agents, memory and compaction",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || EntryStatus::configured(status.get()),
                 )
                 .map_err(PluginError::registration)?,
         );
@@ -96,12 +114,14 @@ impl Plugin for AgentPlugin {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let workflow_service = context.require::<WorkflowService>("workflow")?;
         let filesystem = context.filesystem()?.clone();
-        let http_clients = self.http_clients.clone();
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
         let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
         let storage = runtime_storage_config();
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
             .map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
+        let clock = context.require::<UtcClock>("time")?;
+        runtime.set_wall_clock(Rc::new(move || clock.now().ok().map(u64::from)));
         let api_configuration =
             embassy_futures::block_on(model_api_http::load_configuration(context.storage()))?;
         runtime.replace_api_configuration(api_configuration.clone());
@@ -113,15 +133,18 @@ impl Plugin for AgentPlugin {
         context.retain(action_registrations);
         context.provide(Rc::clone(&runtime))?;
         context.provide(Rc::new(runtime.tool_registry()))?;
+        let set_api = model_api_http::SetApiEndpoint::new(
+            Rc::clone(&runtime),
+            context.storage().clone(),
+            api_configuration,
+            configured,
+        );
+        let status_registration = webserver
+            .serve_http(STATUS_API_PATH, set_api.status_endpoint())
+            .map_err(PluginError::registration)?;
+        context.retain(status_registration);
         let route_registration = webserver
-            .serve_http(
-                SET_API_PATH,
-                model_api_http::SetApiEndpoint::new(
-                    Rc::clone(&runtime),
-                    context.storage().clone(),
-                    api_configuration,
-                ),
-            )
+            .serve_http(SET_API_PATH, set_api)
             .map_err(PluginError::registration)?;
         context.retain(route_registration);
 
@@ -154,12 +177,10 @@ impl Plugin for AgentPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
         let cancellation = context.task_token();
-        let filesystem = context.filesystem()?.clone();
         let task = agent_task(
             runtime_service,
             workflow_adapter,
             workflow_service,
-            filesystem,
             cancellation,
         )
         .map_err(PluginError::registration)?;
@@ -173,14 +194,9 @@ async fn agent_task(
     runtime_service: RuntimeService,
     workflow_adapter: AgentWorkflowAdapter,
     workflow_service: Rc<WorkflowService>,
-    filesystem: barracuda_vfs::ScopedVfs,
     cancellation: PluginTaskToken,
 ) {
     let running = async move {
-        if let Err(error) = bundled_workflows::load(&filesystem, &workflow_service).await {
-            log::error!("failed to load Agent bundled workflows: {error}");
-            return;
-        }
         let runtime = async move {
             runtime_service.await;
             log::info!("Agent runtime service stopped");
@@ -216,7 +232,7 @@ mod tests {
         assert_eq!(
             roots,
             [
-                String::from("/data/skills"),
+                String::from("/workspace/media/skills"),
                 String::from("/workspace/resources/skills"),
             ]
         );

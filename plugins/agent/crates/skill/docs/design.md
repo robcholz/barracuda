@@ -9,7 +9,7 @@ mounting, persistence, and image composition remain outside the subsystem.
 
 ~~~text
 System-owned VFS
-  +-- /data/skills ---------------------+
+  +-- /workspace/media/skills ----------+
   `-- /workspace/resources/skills ------+--> Skill Registry
                                                 |
                                                 +--> catalog metadata
@@ -20,7 +20,7 @@ System-owned VFS
                                                    Agent skill Tools
 ~~~
 
-The writable data root contains user-installed packages. The shared resources
+The writable shared media root contains user-installed packages. The shared resources
 root contains immutable packages contributed by the selected Plugin set. Both
 roots supply one catalog and retain their existing filesystem lifecycle.
 
@@ -32,8 +32,8 @@ immutable, versioned catalog snapshots sorted by skill name.
 
 A skill name identifies exactly one complete package across every configured
 root. Root order has no selection meaning. Discovering the same name in two
-locations is a catalog error that identifies both directories. Initial
-discovery fails on that error; reload preserves the previous valid snapshot.
+locations leaves every copy out of the catalog and records the conflict with
+both directories, so a user package can never shadow a bundled one.
 
 The catalog retains discovery metadata and the resolved package directory.
 Prompt context contains only the name and description. Filesystem directories
@@ -61,9 +61,11 @@ bounded.
 
 Reload scans all configured roots and constructs a complete replacement
 snapshot before publication. Successful reload atomically advances the catalog
-version. Any malformed package, duplicate name, or filesystem failure leaves
-the active snapshot unchanged so existing Agents continue to observe one
-coherent catalog.
+version. A malformed package or duplicate name is left out of the new snapshot
+on its own and recorded with its reason, because user packages live in a
+shared writable directory and one bad package must not hide the rest or stop
+the Agent. A root that cannot be listed leaves the active snapshot unchanged so
+existing Agents continue to observe one coherent catalog.
 
 ## Invariants
 

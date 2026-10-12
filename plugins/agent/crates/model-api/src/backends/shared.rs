@@ -1,9 +1,10 @@
 //! Helpers shared by the LLM backends.
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
+use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -21,7 +22,7 @@ use super::Backend;
 const STATUS_REQUEST_TIMEOUT: u16 = 408;
 const MAX_ERROR_BODY_BYTES: usize = 1024;
 
-fn map_status_error(status: u16, body: String) -> Error {
+pub(super) fn map_status_error(status: u16, body: String) -> Error {
     let body = truncated_error_body(body);
     if status_is_transient(status) {
         Error::TransientHttpStatus { status, body }
@@ -30,7 +31,7 @@ fn map_status_error(status: u16, body: String) -> Error {
     }
 }
 
-fn truncated_error_body(mut body: String) -> String {
+pub(super) fn truncated_error_body(mut body: String) -> String {
     if body.len() <= MAX_ERROR_BODY_BYTES {
         return body;
     }
@@ -50,7 +51,7 @@ fn status_is_transient(status: u16) -> bool {
 pub(super) async fn post_json(
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     backend: &Backend,
-    body: &str,
+    body: &[u8],
 ) -> Result<Response, Error> {
     let header_refs = backend
         .headers
@@ -70,7 +71,7 @@ pub(super) async fn post_json(
 pub(super) async fn post_stream<'h>(
     http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
     backend: &Backend,
-    body: String,
+    body: BulkVec<u8>,
     sse: ProviderSse,
 ) -> Result<ProviderStream<'h>, Error> {
     let mut stream = http.post_json_stream(backend.endpoint.clone(), body, backend.headers.clone());
@@ -86,14 +87,6 @@ pub(super) async fn post_stream<'h>(
         return Err(map_status_error(status, body));
     }
     Ok(ProviderStream::new(stream, sse))
-}
-
-/// Extract the required non-empty assistant text from a media inference reply.
-pub(super) fn media_text(parsed: LlmResponse) -> Result<String, Error> {
-    match parsed.text {
-        Some(text) if !text.is_empty() => Ok(text),
-        _ => Err(Error::EmptyResponse),
-    }
 }
 
 /// Join `base_url` and `path` with exactly one slash between them.
@@ -273,22 +266,4 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Erro
         #[cfg(feature = "cache_profile")]
         usage: response.usage.and_then(OpenAiUsage::profile),
     })
-}
-
-/// Insert OpenAI-style `tools` into a chat request body map.
-pub(super) fn insert_tools_into_body(
-    body: &mut Map<String, Value>,
-    tools_json: &str,
-) -> Result<(), Error> {
-    let tools: Value = serde_json::from_str(tools_json).map_err(|_| Error::InvalidToolsJson)?;
-    if !tools.is_array() {
-        return Err(Error::InvalidToolsJson);
-    }
-    body.insert("tools".to_string(), tools);
-    Ok(())
-}
-
-pub(super) fn serialize_chat_body(body: Map<String, Value>) -> Result<String, Error> {
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| Error::Api("out of memory serializing request"))
 }

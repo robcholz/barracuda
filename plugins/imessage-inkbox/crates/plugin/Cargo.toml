@@ -13,13 +13,30 @@ barracuda-captive-portal-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
-http-client.workspace = true
+embassy-time.workspace = true
 inkbox = { path = "../provider" }
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+embedded-io-async = "0.7"
+picoserve = { version = "0.19.0", default-features = false, features = ["alloc", "embassy"] }
+portable-atomic = { workspace = true, features = ["std"] }
+portable-atomic-util.workspace = true
+rusty-fork = "0.3"
+barracuda-platform.workspace = true
+barracuda-platform-test.workspace = true
+barracuda-vfs.workspace = true
+barracuda-http-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+serde_json = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,7 +1,8 @@
 //! Typed effects emitted by model-callable tools and reduced by AgentEngine.
 
-use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, string::String, vec::Vec};
 use core::cell::RefCell;
+use portable_atomic_util::Arc;
 
 /// A tool-level request that changes the current task boundary.
 ///

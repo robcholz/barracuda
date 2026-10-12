@@ -1,14 +1,13 @@
-//! The only state shared between Lua runs and the UI task.
+//! The only state shared between view owners and the UI task.
 //!
-//! Lua writes values and waits for events here; the UI task applies the writes
+//! Owners write values and wait for events here; the UI task applies the writes
 //! to the view and posts events. Everything inside is `Send`, guarded by a
-//! critical section, so view channels stay `Send + Sync` for Lua packages.
+//! critical section, so view channels stay `Send + Sync` for owners on any task.
 
-use crate::datum::{Datum, Shape};
+use crate::datum::{ViewType, ViewValue};
 use alloc::{
     collections::{BTreeMap, VecDeque},
     string::String,
-    sync::Arc,
     vec::Vec,
 };
 use core::{
@@ -18,26 +17,27 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use portable_atomic_util::Arc;
 
-/// Events a view may queue for Lua before older ones are dropped.
+/// Events a view may queue for its owner before older ones are dropped.
 pub const MAX_EVENTS: usize = 16;
 
-/// The view contract Lua needs to convert its values.
+/// The view contract owners write against.
 #[derive(Debug)]
 pub(crate) struct Schema {
-    pub(crate) slots: Vec<(String, Shape)>,
+    pub(crate) slots: Vec<(String, ViewType)>,
 }
 
-/// A handler call waiting for Lua.
+/// A handler call waiting for the owner.
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct Event {
     pub(crate) handler: String,
-    pub(crate) args: Vec<Datum>,
+    pub(crate) args: Vec<ViewValue>,
 }
 
 struct Entry {
     closed: bool,
-    writes: Vec<Option<Datum>>,
+    writes: Vec<Option<ViewValue>>,
     events: VecDeque<Event>,
     waker: Option<Waker>,
 }
@@ -88,7 +88,7 @@ impl Mailbox {
         });
     }
 
-    pub(crate) fn write(&self, id: u32, slot: usize, datum: Datum) -> Result<(), MailboxError> {
+    pub(crate) fn write(&self, id: u32, slot: usize, datum: ViewValue) -> Result<(), MailboxError> {
         self.with(|entries| {
             let entry = entries
                 .get_mut(&id)
@@ -105,7 +105,7 @@ impl Mailbox {
     }
 
     /// Takes the latest write to every slot of view `id`.
-    pub(crate) fn take_writes(&self, id: u32) -> Vec<(usize, Datum)> {
+    pub(crate) fn take_writes(&self, id: u32) -> Vec<(usize, ViewValue)> {
         self.with(|entries| {
             entries
                 .get_mut(&id)
@@ -121,7 +121,7 @@ impl Mailbox {
         })
     }
 
-    /// Queues an event for Lua; returns `false` when the view is closed or full.
+    /// Queues an event for the owner; returns `false` when the view is closed or full.
     pub(crate) fn post(&self, id: u32, event: Event) -> bool {
         self.with(|entries| {
             let Some(entry) = entries.get_mut(&id).filter(|entry| !entry.closed) else {
@@ -138,7 +138,7 @@ impl Mailbox {
         })
     }
 
-    /// Drops queued events, so nothing reaches Lua after its view stops taking input.
+    /// Drops queued events, so nothing reaches the owner after its view stops taking input.
     pub(crate) fn clear_events(&self, id: u32) {
         self.with(|entries| {
             if let Some(entry) = entries.get_mut(&id) {
@@ -164,9 +164,9 @@ impl Mailbox {
     }
 
     /// Waits for the next event of view `id`; `None` once it is closed and drained.
-    pub(crate) fn next(self: &Arc<Self>, id: u32) -> NextEvent {
+    pub(crate) fn next(mailbox: &Arc<Self>, id: u32) -> NextEvent {
         NextEvent {
-            mailbox: Arc::clone(self),
+            mailbox: Arc::clone(mailbox),
             id,
         }
     }
@@ -175,7 +175,7 @@ impl Mailbox {
         self.with(|entries| entries.get(&id).is_none_or(|entry| entry.closed))
     }
 
-    /// Ends view `id` for Lua: writes fail and waiting `next` calls return `None`.
+    /// Ends view `id` for its owner: writes fail and waiting `next` calls return `None`.
     pub(crate) fn close(&self, id: u32) {
         self.with(|entries| {
             if let Some(entry) = entries.get_mut(&id) {
@@ -193,7 +193,7 @@ impl Mailbox {
         self.with(|entries| entries.remove(&id));
     }
 
-    /// Closes every view; used when the package is revoked.
+    /// Closes every view; used when the Plugin stops.
     pub(crate) fn close_all(&self) {
         let ids: Vec<u32> = self.with(|entries| entries.keys().copied().collect());
         for id in ids {

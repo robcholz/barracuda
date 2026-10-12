@@ -18,6 +18,7 @@ from .headers import (
     stored_request_headers,
     to_multidict,
 )
+from .keys import conversation_key
 from .tape import TapeWriter
 
 CONTROL_PATH = '/_llm_tape/health'
@@ -82,6 +83,7 @@ async def _record_request(request: web.Request) -> web.StreamResponse:
         headers=stored_request_headers(request.raw_headers),
         body_sha256=body_hash,
         body_size=len(body),
+        match_key=conversation_key(body),
     )
     logger.info(
         'record request_started interaction={} call_index={} method={} path={} '

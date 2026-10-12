@@ -1,0 +1,94 @@
+import { describe, expect, it } from "bun:test";
+import { heal as remend } from "../../markdown/heal";
+
+describe("inline code formatting (`)", () => {
+  it("should complete incomplete inline code", () => {
+    expect(remend("Text with `code")).toBe("Text with `code`");
+    expect(remend("`incomplete")).toBe("`incomplete`");
+  });
+
+  it("should keep complete inline code unchanged", () => {
+    const text = "Text with `inline code`";
+    expect(remend(text)).toBe(text);
+  });
+
+  it("should handle multiple inline code sections", () => {
+    const text = "`code1` and `code2`";
+    expect(remend(text)).toBe(text);
+  });
+
+  it("should not complete backticks inside code blocks", () => {
+    const text = "```\ncode block with `backtick\n```";
+    expect(remend(text)).toBe(text);
+  });
+
+  it("should handle incomplete code blocks correctly", () => {
+    const text = "```javascript\nconst x = `template";
+    expect(remend(text)).toBe(text);
+  });
+
+  it("should handle inline triple backticks correctly", () => {
+    const text = '```python print("Hello, Sunnyvale!")```';
+    expect(remend(text)).toBe(text);
+  });
+
+  it("should handle incomplete inline triple backticks", () => {
+    const text = '```python print("Hello, Sunnyvale!")``';
+    expect(remend(text)).toBe('```python print("Hello, Sunnyvale!")```');
+  });
+
+  it("should not modify text with complete triple backticks at the end", () => {
+    const text = "```code```";
+    expect(remend(text)).toBe(text);
+
+    const text2 = "```code```\n";
+    expect(remend(text2)).toBe(text2);
+
+    // Even number of triple backticks with newlines are complete
+    const text3 = "```\ncode\n```";
+    expect(remend(text3)).toBe(text3);
+
+    // Test the special case (lines 41-47) where text ends with ``` and has even count
+    // This case is for inline triple backticks without newlines
+    const text4 = "``````";
+    expect(remend(text4)).toBe(text4);
+
+    const text5 = "text``````";
+    expect(remend(text5)).toBe(text5);
+  });
+
+  it("should handle code block with incomplete inline code after (#302)", () => {
+    expect(remend("```\nblock\n```\n`inline")).toBe(
+      "```\nblock\n```\n`inline`",
+    );
+  });
+});
+
+describe("escaped backticks in inline code", () => {
+  it("should not treat escaped backticks as code delimiters", () => {
+    // \` is not a real backtick delimiter, so **bold should still be completed
+    expect(remend("\\`not code\\` **bold")).toBe("\\`not code\\` **bold**");
+  });
+
+  it("should complete emphasis when only escaped backticks are present", () => {
+    expect(remend("\\` *italic")).toBe("\\` *italic*");
+  });
+});
+
+describe("emphasis markers inside inline code spans should not leak", () => {
+  it("should not complete bold/italic/strikethrough if they are inside inline code", () => {
+    expect(remend("`**bold`")).toBe("`**bold`");
+    expect(remend("`*italic`")).toBe("`*italic`");
+    expect(remend("`~~strikethrough`")).toBe("`~~strikethrough`");
+  });
+
+  it("should still complete emphasis markers outside inline code", () => {
+    expect(remend("**bold")).toBe("**bold**");
+    expect(remend("*italic")).toBe("*italic*");
+    expect(remend("~~strike")).toBe("~~strike~~");
+  });
+
+  it("should complete emphasis after a closed inline code span", () => {
+    expect(remend("`code` **bold")).toBe("`code` **bold**");
+  });
+});

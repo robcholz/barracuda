@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+pub mod inbound;
+
 use alloc::{
     boxed::Box,
     format,
@@ -15,11 +17,13 @@ use barracuda_imessage_gateway_plugin::{
     MessageChannel, MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest,
     SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Multipart, RequestBody, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
+
+/// Gateway channel name this provider registers.
+pub const CHANNEL: &str = "bluebubbles";
 
 const URL_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -51,23 +55,26 @@ impl BlueBubblesConfig {
 }
 
 /// Outbound iMessage provider backed by a BlueBubbles server.
-pub struct BlueBubbles<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct BlueBubbles {
+    http: GatewayHttp,
     config: BlueBubblesConfig,
     next_local_id: Cell<u64>,
 }
 
-impl<'net, T, D> BlueBubbles<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: BlueBubblesConfig) -> Self {
+impl BlueBubbles {
+    /// Sends through the Gateway's HTTP helpers.
+    pub fn new(http: GatewayHttp, config: BlueBubblesConfig) -> Self {
         Self {
-            http_clients,
+            http,
             config,
             next_local_id: Cell::new(0),
         }
+    }
+
+    /// The server URL from the configuration.
+    #[must_use]
+    pub fn server_url(&self) -> &str {
+        &self.config.server_url
     }
 
     fn next_id(&self) -> u64 {
@@ -96,12 +103,13 @@ where
         headers: &[(&str, &str)],
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response =
-            barracuda_imessage_gateway_plugin::send(&self.http_clients, method, url, headers, body)
-                .await
-                .map_err(|error| ChannelError::Transport {
-                    message: error.to_string(),
-                })?;
+        let response = self
+            .http
+            .send(method, url, headers, body)
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)
     }
 
@@ -116,6 +124,14 @@ where
             bytes.as_slice(),
         )
         .await
+    }
+
+    /// Keeps `reply_to` only when the Private API can thread it.
+    ///
+    /// AppleScript sends cannot quote a message, so replies to inbound
+    /// messages degrade to plain sends instead of failing.
+    fn thread_reply(&self, reply_to: Option<String>) -> Option<String> {
+        reply_to.filter(|_| self.config.use_private_api)
     }
 
     fn require_private_api(&self, operation: Operation) -> Result<(), ChannelError> {
@@ -137,9 +153,6 @@ where
                 message: "message text is empty".into(),
             });
         }
-        if reply_to.is_some() && !self.config.use_private_api {
-            return Err(ChannelError::unsupported(Operation::SendMessage));
-        }
         let temp_guid = self.temp_guid();
         let mut payload = json!({
             "chatGuid": target.conversation_id,
@@ -147,7 +160,7 @@ where
             "message": text,
             "method": self.send_method(),
         });
-        if let Some(reply_to) = reply_to {
+        if let Some(reply_to) = self.thread_reply(reply_to) {
             insert_json_field(&mut payload, "selectedMessageGuid", Value::String(reply_to))?;
         }
         let root = self.call_json("message/text", payload).await?;
@@ -224,9 +237,6 @@ where
         kind: MediaKind,
         request: SendMediaRequest,
     ) -> Result<SendReceipt, ChannelError> {
-        if request.reply_to.is_some() && !self.config.use_private_api {
-            return Err(ChannelError::unsupported(kind.operation()));
-        }
         if request.caption.is_some() && !self.config.use_private_api {
             return Err(ChannelError::InvalidRequest {
                 message: "BlueBubbles attachment captions require the Private API".into(),
@@ -258,7 +268,7 @@ where
         if let Some(caption) = request.caption {
             multipart = multipart.text("subject", caption);
         }
-        if let Some(reply_to) = request.reply_to {
+        if let Some(reply_to) = self.thread_reply(request.reply_to) {
             multipart = multipart.text("selectedMessageGuid", reply_to);
         }
         multipart = multipart.file("attachment", filename, mime_type, request.body);
@@ -292,13 +302,9 @@ where
     }
 }
 
-impl<T, D> MessageChannel for BlueBubbles<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for BlueBubbles {
     fn channel(&self) -> &str {
-        "imessage"
+        CHANNEL
     }
 
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {

@@ -1,3 +1,22 @@
 # Agent Scheduler Plugin
 
-`agent-scheduler` depends on `agent` and `scheduler`. During registration it adds the awaited `scheduler_schedule` and `scheduler_cancel` Tools to `AgentToolRegistry`. It owns no schedules, storage, clock, or background task.
+Exposes the `scheduler` Plugin's `Scheduler` capability to Agents as native
+Tools.
+
+- Plugin ID: `agent-scheduler`
+- Dependencies: `agent`, `scheduler`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`, `Scheduler` from
+  `scheduler`
+- Workflow: none
+- Agent Tools: `scheduler_schedule`, `scheduler_cancel`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
+
+During registration the Plugin adds the awaited `scheduler_schedule` and
+`scheduler_cancel` Tools to `AgentToolRegistry`. It owns no schedules,
+storage, clock, or background task.

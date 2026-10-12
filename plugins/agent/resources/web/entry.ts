@@ -1,58 +1,287 @@
-import { configuration } from "../../../captive-portal/resources/web/ui/form";
+import {
+  ICON_BOT,
+  ICON_BRAIN,
+  ICON_FOLD_VERTICAL,
+  ICON_NETWORK,
+  callDevice,
+  definePage,
+  entryStatus,
+  h,
+  header,
+  kv,
+  page,
+  pick,
+  settingsForm,
+  type Text,
+} from "../../../captive-portal/resources/web/ui";
+import { MARK_ANTHROPIC, MARK_OPENAI } from "./marks";
 
-export const mount = configuration({
-  title: "模型配置",
-  endpoint: "/api/model-api",
-  description: "为指定 Agent 用途注册模型。每次提交一个模型配置。",
-  fields: [
+type Purpose = "root_agent" | "sub_agent" | "memory" | "compaction";
+
+/** One model in `GET /api/model-api/status`; the key is never reported. */
+interface Model {
+  backend: string;
+  model: string;
+  base_url: string;
+}
+
+/** `GET /api/model-api/status`: a purpose is `null` when it uses the default model. */
+interface ModelsStatus {
+  configured: boolean;
+  default: Model | null;
+  purposes: Record<Purpose, Model | null>;
+}
+
+const PURPOSES: readonly (readonly [Purpose, Text])[] = [
+  ["root_agent", { zh: "主 Agent", en: "Main agent" }],
+  ["sub_agent", { zh: "子 Agent", en: "Sub-agent" }],
+  ["memory", { zh: "记忆", en: "Memory" }],
+  ["compaction", { zh: "压缩", en: "Compaction" }],
+];
+
+/**
+ * The model configuration page: one model per submission, for one Agent purpose
+ * (`POST /api/model-api`). The header shows the model each purpose uses (`GET /api/model-api/status`).
+ */
+export const mount = definePage((context) => {
+  const status = entryStatus(context);
+  const models = PURPOSES.map(() => h("span", { class: "bc-mono" }, "—"));
+  const load = async () => {
+    const result = await callDevice<ModelsStatus>(
+      context,
+      "/api/model-api/status",
+    );
+    const data = result.kind === "ok" ? result.data : null;
+    if (!data?.purposes) return;
+    PURPOSES.forEach(([purpose], index) => {
+      const model = data.purposes[purpose] ?? data.default;
+      models[index]!.textContent = model?.model ?? "—";
+    });
+  };
+  void load();
+  const form = settingsForm(
     {
-      name: "backend",
-      label: "接口协议",
-      options: ["openai_compatible", "anthropic_compatible"],
+      endpoint: "/api/model-api",
+      submit: { zh: "注册模型", en: "Register model" },
+      rows: [
+        {
+          title: { zh: "接口协议", en: "API format" },
+          hint: {
+            zh: "服务商 API 的请求格式",
+            en: "The request format of the provider's API",
+          },
+          fields: [
+            {
+              kind: "radio",
+              name: "backend",
+              label: { zh: "接口协议", en: "API format" },
+              value: "openai_compatible",
+              options: [
+                {
+                  value: "openai_compatible",
+                  label: { zh: "OpenAI 兼容", en: "OpenAI-compatible" },
+                  hint: {
+                    zh: "Chat Completions，适用于多数服务商",
+                    en: "Chat Completions; works with most providers",
+                  },
+                  icon: MARK_OPENAI,
+                },
+                {
+                  value: "anthropic_compatible",
+                  label: { zh: "Anthropic 兼容", en: "Anthropic-compatible" },
+                  hint: { zh: "Messages 接口", en: "Messages API" },
+                  icon: MARK_ANTHROPIC,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          title: { zh: "用途", en: "Purpose" },
+          hint: {
+            zh: "这个模型替哪类 Agent 工作",
+            en: "Which agent this model works for",
+          },
+          fields: [
+            {
+              kind: "radio",
+              name: "purpose",
+              label: { zh: "用途", en: "Purpose" },
+              value: "root_agent",
+              options: [
+                {
+                  value: "root_agent",
+                  label: { zh: "主 Agent", en: "Main agent" },
+                  hint: { zh: "直接回复用户", en: "Replies to the user" },
+                  icon: ICON_BOT,
+                },
+                {
+                  value: "sub_agent",
+                  label: { zh: "子 Agent", en: "Sub-agent" },
+                  hint: { zh: "执行委派的任务", en: "Runs delegated tasks" },
+                  icon: ICON_NETWORK,
+                },
+                {
+                  value: "memory",
+                  label: { zh: "记忆", en: "Memory" },
+                  hint: {
+                    zh: "整理长期记忆",
+                    en: "Organizes long-term memory",
+                  },
+                  icon: ICON_BRAIN,
+                },
+                {
+                  value: "compaction",
+                  label: { zh: "压缩", en: "Compaction" },
+                  hint: {
+                    zh: "压缩对话上下文",
+                    en: "Compacts the conversation context",
+                  },
+                  icon: ICON_FOLD_VERTICAL,
+                },
+              ],
+            },
+            {
+              kind: "switch",
+              name: "default",
+              label: { zh: "设为默认模型", en: "Make default" },
+              hint: {
+                zh: "该用途优先使用这个模型",
+                en: "Used first for this purpose",
+              },
+              value: true,
+            },
+          ],
+        },
+        {
+          title: { zh: "连接", en: "Connection" },
+          hint: {
+            zh: "服务商提供的地址、模型 ID 与密钥",
+            en: "The provider's address, model ID and key",
+          },
+          fields: [
+            {
+              kind: "url",
+              name: "base_url",
+              label: "API Base URL",
+              placeholder: "https://api.example.com/v1",
+            },
+            {
+              kind: "text",
+              name: "model",
+              label: { zh: "模型名称", en: "Model" },
+              // an example ID: the field is mono, so its placeholder is a machine value too
+              placeholder: "gpt-4o-mini",
+            },
+            { kind: "secret", name: "api_key", label: "API Key" },
+          ],
+        },
+        {
+          title: { zh: "输入", en: "Input" },
+          hint: {
+            zh: "模型能直接看的附件",
+            en: "Attachments the model reads directly",
+          },
+          fields: [
+            {
+              kind: "switch",
+              name: "input_image",
+              label: { zh: "图片", en: "Images" },
+              hint: { zh: "JPEG、PNG、GIF、WebP", en: "JPEG, PNG, GIF, WebP" },
+              value: true,
+            },
+            {
+              kind: "switch",
+              name: "input_pdf",
+              label: "PDF",
+              hint: {
+                zh: "作为文档发给模型",
+                en: "Sent to the model as a document",
+              },
+              value: false,
+            },
+          ],
+        },
+      ],
+      advanced: {
+        hint: { zh: "超时与大小上限", en: "Timeouts and size limits" },
+        open: true,
+        columns: 3,
+        fields: [
+          {
+            kind: "number",
+            name: "timeout_ms",
+            label: { zh: "请求超时", en: "Request timeout" },
+            value: 120000,
+            unit: "ms",
+          },
+          {
+            kind: "number",
+            name: "max_tokens",
+            label: { zh: "最大输出", en: "Max output" },
+            value: 8192,
+            unit: "tokens",
+          },
+          {
+            kind: "number",
+            name: "image_max_bytes",
+            label: { zh: "图片上限", en: "Image limit" },
+            value: 524288,
+            unit: "bytes",
+          },
+          {
+            kind: "number",
+            name: "max_images_in_context",
+            label: { zh: "上下文中的图片", en: "Images in context" },
+            value: 2,
+            unit: pick({ zh: "张", en: "images" }, context.lang),
+          },
+        ],
+      },
+      // the endpoint takes a batch; this page registers one model at a time,
+      // and the two input switches are its `input_modalities` object
+      body: ({ input_image, input_pdf, ...values }) => [
+        { ...values, input_modalities: { image: input_image, pdf: input_pdf } },
+      ],
+      onSuccess: () => {
+        void status.refresh();
+        void load();
+      },
+      // Web chat is another plugin: offer the way there only while its entry is listed
+      success: context.has("imessage-web")
+        ? {
+            action: {
+              label: { zh: "去 Web 聊天试试", en: "Try it in Web chat" },
+              run: () => context.navigate("imessage-web"),
+            },
+          }
+        : undefined,
     },
-    {
-      name: "purpose",
-      label: "用途",
-      options: ["root_agent", "sub_agent", "memory", "compaction"],
-    },
-    {
-      name: "default",
-      label: "设为该用途默认模型",
-      type: "checkbox",
-      value: true,
-    },
-    {
-      name: "base_url",
-      label: "API Base URL",
-      type: "url",
-    },
-    {
-      name: "model",
-      label: "模型名称",
-    },
-    {
-      name: "api_key",
-      label: "API Key",
-      type: "password",
-    },
-    {
-      name: "timeout_ms",
-      label: "请求超时（毫秒）",
-      type: "number",
-      value: 120000,
-    },
-    {
-      name: "max_tokens",
-      label: "最大输出 tokens",
-      type: "number",
-      value: 8192,
-    },
-    {
-      name: "image_max_bytes",
-      label: "图片大小上限（字节）",
-      type: "number",
-      value: 524288,
-    },
-  ],
-  batch: true,
+    context,
+  );
+  return page(
+    header(
+      {
+        title: { zh: "模型配置", en: "Models" },
+        lead: {
+          zh: "为每种 Agent 用途注册模型。",
+          en: "Register a model for each agent purpose.",
+        },
+        extra: kv(
+          [
+            [{ zh: "状态", en: "Status" }, status.slot],
+            ...PURPOSES.map(
+              ([, label], index) => [label, models[index]!] as const,
+            ),
+          ],
+          context.lang,
+          { live: true },
+        ),
+        figure: "agent",
+        figureWidth: 300,
+      },
+      context.lang,
+    ),
+    form.element,
+  );
 });

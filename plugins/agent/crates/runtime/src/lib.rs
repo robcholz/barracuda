@@ -5,6 +5,9 @@
 //! adapter crates above this layer.
 
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 // Public subsystem handles share ownership inside one RuntimeService task.
 #![allow(clippy::arc_with_non_send_sync)]
 
@@ -13,22 +16,24 @@ extern crate alloc;
 mod service;
 mod worker;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::cell::{Cell, RefCell};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
-    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, IterationId, IterationLoopError,
-    Message, ModelApiManager, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
+    sniff_media_type, AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, Attachment,
+    IterationId, IterationLoopError, MediaKind, Message, ModelApiManager, PermissionLevel,
+    ReasoningEffort, ToolCall, ToolCallId, ToolOutput, SNIFF_BYTES,
 };
 use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
-    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
-    SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
-    TurnEventError, TurnId, TurnOrigin,
+    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId, SessionInfo,
+    SessionInputError, SessionPersistence, SessionRenameError, SessionStream, SessionTurnError,
+    TurnEvent, TurnEventError, TurnId, TurnOrigin, TurnOutcome, WallClock,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
 use barracuda_model_api::InitError;
@@ -42,9 +47,10 @@ pub use service::{RuntimeBuildError, RuntimeService};
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs,
-        Resource, RiskClass, Tool, ToolConfig, ToolError, ToolFuture, ToolGroup, ToolHandler,
-        ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
+        tool_metadata, Action, Attachment, BackgroundTool, BackgroundToolControl,
+        BackgroundToolFuture, BackgroundToolHandler, EmptyArgs, MediaKind, Resource, RiskClass,
+        SessionId, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+        ToolInvocation, ToolInvokeError, ToolOutput, ToolProgressSender, ToolResult, ToolSpec,
     };
 }
 
@@ -155,7 +161,7 @@ impl ToolLifecycle {
 ///
 /// Groups registered before the runtime service loads durable state are installed
 /// into the same [`ToolRegistry`] that backs every Agent as soon as it is ready.
-/// The capability preserves each [`tools::Tool`]'s native awaited or detached
+/// The capability preserves each [`tools::Tool`]'s native ordinary or background
 /// execution semantics because it accepts the original [`ToolGroup`] directly.
 #[derive(Clone)]
 pub struct AgentToolRegistry {
@@ -276,18 +282,6 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// Registers one tool group discovered during Plugin startup.
-    ///
-    /// If durable runtime state is still loading, the group is installed into
-    /// the Tool Registry as soon as it becomes available.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuntimeError::Tool`] when the Tool Registry rejects the group.
-    pub fn register_tool_group(&self, group: ToolGroup) -> RuntimeResult<()> {
-        self.tool_registry.register_group(group)
-    }
-
     /// Start every registered tool.
     ///
     /// # Errors
@@ -365,6 +359,39 @@ impl AgentRuntime {
         self.control.list_sessions().await
     }
 
+    /// Describe the live conversation sessions, sorted by id.
+    ///
+    /// Returns an empty list once the runtime has stopped.
+    pub async fn describe_sessions(&self) -> Vec<SessionInfo> {
+        self.control.describe_sessions().await
+    }
+
+    /// Replace a live conversation session's title.
+    ///
+    /// The title keeps its first non-empty line, trimmed and capped at 64
+    /// characters with a trailing ellipsis when cut.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionRenameError`] when the session is missing, the title
+    /// has no visible text, or the runtime has stopped.
+    pub async fn rename_session(
+        &self,
+        session: SessionId,
+        title: &str,
+    ) -> Result<(), SessionRenameError> {
+        self.control.rename_session(session, title.into()).await
+    }
+
+    /// Install the wall clock that stamps each session's last-used time.
+    ///
+    /// The clock returns Unix milliseconds, or `None` while unsynchronized.
+    /// It may be installed before or after the runtime service starts, and
+    /// it reaches sessions that are already running.
+    pub fn set_wall_clock(&self, clock: WallClock) {
+        self.control.set_wall_clock(clock);
+    }
+
     /// Delete a live conversation session.
     ///
     /// If the session is currently open, its event stream receives
@@ -385,15 +412,19 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tool_registry_capability_tests {
-    use alloc::{boxed::Box, sync::Arc, vec};
+    use alloc::{boxed::Box, vec};
 
     use barracuda_agent_persistence::Persistence;
     use barracuda_agent_tool::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolDetachUpdate,
-        ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner, ToolSpec,
+        BackgroundTool, BackgroundToolFuture, BackgroundToolHandler, BackgroundToolPool, EmptyArgs,
+        Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry, ToolRunner,
+        ToolSpec,
     };
+    use barracuda_agent_tool::{SessionId, ToolContext, ToolSetSource};
     use barracuda_platform_test::memory_vfs;
+    use barracuda_runtime_utils::background::BackgroundUpdate;
     use futures_lite::{future::block_on, StreamExt as _};
+    use portable_atomic_util::Arc;
 
     use super::{AgentToolRegistry, ToolGroup, ToolLifecycle};
 
@@ -426,19 +457,14 @@ mod tool_registry_capability_tests {
     impl ToolHandler for JoinedTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-            Box::pin(async {
-                Ok(ToolOutput {
-                    content: "joined".into(),
-                    ok: true,
-                })
-            })
+        fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+            Box::pin(async { Ok(ToolOutput::new("joined", true)) })
         }
     }
 
-    struct BackgroundTool;
+    struct EchoBackgroundTool;
 
-    impl ToolSpec for BackgroundTool {
+    impl ToolSpec for EchoBackgroundTool {
         fn name(&self) -> &str {
             "background"
         }
@@ -452,22 +478,18 @@ mod tool_registry_capability_tests {
         }
     }
 
-    impl DetachedToolHandler for BackgroundTool {
+    impl BackgroundToolHandler for EchoBackgroundTool {
         type Args = EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> DetachedToolFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            _context: ToolContext,
+            _args: Self::Args,
+        ) -> BackgroundToolFuture<'a> {
             Box::pin(async {
-                Ok(DetachedTool::new(
-                    ToolOutput {
-                        content: "accepted".into(),
-                        ok: true,
-                    },
-                    Box::pin(async {
-                        Ok(ToolOutput {
-                            content: "completed".into(),
-                            ok: true,
-                        })
-                    }),
+                Ok(BackgroundTool::new(
+                    ToolOutput::new("accepted", true),
+                    Box::pin(async { Ok(ToolOutput::new("completed", true)) }),
                 ))
             })
         }
@@ -482,7 +504,7 @@ mod tool_registry_capability_tests {
                 .register_group(ToolGroup::new(
                     "dependent-plugin",
                     true,
-                    [Tool::new(JoinedTool), Tool::from_detached(BackgroundTool)],
+                    [Tool::new(JoinedTool), Tool::background(EchoBackgroundTool)],
                 ))
                 .expect("startup Tool group registers");
             lifecycle.start_all().expect("Tool Registry starts");
@@ -507,18 +529,20 @@ mod tool_registry_capability_tests {
                 ToolInvocation::try_new(None, "joined", "{}").expect("joined invocation"),
                 ToolInvocation::try_new(None, "background", "{}").expect("background invocation"),
             ];
-            let (mut joined, detached) = ToolRunner::new(&handle).run(calls);
-            let mut detached = detached.expect("detached Tool keeps detached execution");
+            let pool = BackgroundToolPool::new();
+            let mut joined = ToolRunner::new(&handle, ToolContext::new(SessionId::new(1)))
+                .with_background(&pool)
+                .run(calls);
 
             let first = joined.next().await.expect("first acceptance").1;
             let second = joined.next().await.expect("second acceptance").1;
             assert!(first.ok);
             assert!(second.ok);
-            let update = detached.next().await.expect("detached completion").1;
-            let ToolDetachUpdate::Completed(output) = update else {
-                return;
-            };
-            assert_eq!(output.content, "completed");
+            let event = futures_lite::future::poll_fn(|context| pool.poll_next(context)).await;
+            assert_eq!(
+                event.update,
+                BackgroundUpdate::Completed(ToolOutput::new("completed", true))
+            );
         });
     }
 }

@@ -1,0 +1,24 @@
+name = "Conversation end argument errors"
+description = "conversation_end with a blank, missing, or non-string final_message fails schema validation before the handler runs, so no Finish effect is emitted and the turn continues to an ordinary reply."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''We are testing argument validation of the conversation_end tool; the calls below are expected to fail, which is fine. Call conversation_end with the arguments {"final_message": "   "} (three spaces). After it fails, reply with one short sentence.'''
+tool_contains = ['invalid arguments: JSON schema validation failed at $.final_message: TrimmedEmpty']
+request_contains = ['"content":"invalid arguments: JSON schema validation failed at $.final_message: TrimmedEmpty","is_error":true']
+tool_errors_allowed = true
+kinds = ["reply"]
+
+[[steps]]
+send = '''Now call conversation_end with no arguments at all, {}. After it fails, reply with one short sentence.'''
+tool_contains = ['conversation_end{}invalid arguments: JSON schema validation failed at $.final_message: Required']
+tool_errors_allowed = true
+kinds = ["reply"]
+
+[[steps]]
+send = '''Now call conversation_end with the arguments {"final_message": 42}, where 42 is a JSON number, not a string. After it fails, reply with one short sentence.'''
+tool_contains = ['invalid arguments: JSON schema validation failed at $.final_message: Type { expected: String }']
+tool_errors_allowed = true
+kinds = ["reply"]

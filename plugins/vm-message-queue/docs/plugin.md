@@ -1,10 +1,20 @@
 # Message Queue Plugin
 
+Installs the require-only `message_queue` Lua package: bounded, shared FIFO
+queues that independent Lua executions use to exchange messages.
+
 - Plugin ID: `message-queue`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Owned tasks: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `message_queue`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This VM Lua package Plugin registers the require-only `message_queue` package
 for every Lua execution. Its package owns one shared queue map, so independent

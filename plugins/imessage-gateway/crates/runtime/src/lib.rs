@@ -4,6 +4,8 @@
 
 extern crate alloc;
 
+/// Normalized inbound control request.
+pub mod gateway_control_received;
 /// Normalized inbound Gateway event.
 pub mod gateway_message_received;
 /// Complete outbound message contract.
@@ -17,9 +19,14 @@ mod json;
 pub mod route;
 mod runtime;
 
-pub use gateway_message_received::{GatewayInboundMessage, GatewayMessageReceived};
+pub use gateway_control_received::{
+    parse_command, GatewayControlKind, GatewayControlReceived, GatewayInboundControl,
+};
+pub use gateway_message_received::{Attachment, GatewayInboundMessage, GatewayMessageReceived};
 pub use gateway_send::{GatewaySendRequest, GatewaySendResponse};
-pub use gateway_send_media::{GatewayMediaKind, GatewaySendMediaFinished, GatewaySendMediaRequest};
+pub use gateway_send_media::{
+    GatewaySendMediaFinished, GatewaySendMediaRequest, GatewaySendMediaResponse, MediaOpener,
+};
 pub use gateway_send_stream::{GatewaySendStreamFinished, GatewaySendStreamRequest};
 pub use json::{GatewayAccepted, GatewayOperationError};
 pub use route::GatewayRoute;

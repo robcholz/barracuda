@@ -3,6 +3,7 @@
 
 use barracuda_lua::{Lua, Package, Result};
 use barracuda_vm_builtin_packages::BuiltinPackages;
+use barracuda_vm_builtin_packages::math::SeedSource;
 
 struct Marker;
 
@@ -16,7 +17,9 @@ impl Package for Marker {
 fn io_exposes_the_standard_message_io_surface() -> Result<()> {
     let mut lua = Lua::new()?;
     Marker.install(&mut lua)?;
-    let (input, mut output) = BuiltinPackages::all().install(&mut lua)?.into_io();
+    let (input, mut output) = BuiltinPackages::new(SeedSource::unavailable())
+        .install(&mut lua)?
+        .into_io();
 
     assert!(
         lua.load(
@@ -80,7 +83,9 @@ fn io_exposes_the_standard_message_io_surface() -> Result<()> {
 #[test]
 fn io_read_supports_standard_message_stream_formats() -> Result<()> {
     let mut lua = Lua::new()?;
-    let (input, mut output) = BuiltinPackages::all().install(&mut lua)?.into_io();
+    let (input, mut output) = BuiltinPackages::new(SeedSource::unavailable())
+        .install(&mut lua)?
+        .into_io();
     let execution = lua.run(
         "local first = io.read(3) \
          local rest = io.read('*L') \
@@ -113,7 +118,9 @@ fn io_read_supports_standard_message_stream_formats() -> Result<()> {
 #[test]
 fn io_lines_iterates_input_messages_until_eof() -> Result<()> {
     let mut lua = Lua::new()?;
-    let (input, mut output) = BuiltinPackages::all().install(&mut lua)?.into_io();
+    let (input, mut output) = BuiltinPackages::new(SeedSource::unavailable())
+        .install(&mut lua)?
+        .into_io();
     let execution = lua.run(
         "local values = {} \
          for value in io.lines(nil, '*L') do \

@@ -9,20 +9,24 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use barracuda_bulk_memory::BulkVec;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use super::super::attachments::{write_object_with_media, Inline, RequestMedia};
 use super::super::chat_stream::ProviderStream;
 use super::super::errors::Error;
-use super::super::media::{prepare_asset, Prepared};
 use super::super::transport::Transport;
-use super::super::types::{ChatRequest, LlmResponse, MediaRequest, ToolCall};
+use super::super::types::{ChatRequest, LlmResponse, ToolCall};
+use super::body::{encode, write_base64_str, Object};
 #[cfg(feature = "cache_profile")]
 use super::shared::AnthropicUsage;
-use super::shared::{media_text, post_json, post_stream, serialize_chat_body};
+use super::shared::{post_json, post_stream};
 use super::sse::{AnthropicSse, ProviderSse};
 use super::Backend;
+use barracuda_agent_message::json::Sink;
+use barracuda_agent_message::{Attachment, ChatMessage};
 
 pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub(super) const CHAT_PATH: &str = "/messages";
@@ -56,14 +60,27 @@ fn make_tool_use_block(tool_call: &Value) -> Result<Value, Error> {
 }
 
 /// Converts the persisted `messages` history followed by the ephemeral
-/// `reminders` (a two-segment tail) into the Anthropic message shape. The two
-/// segments are viewed as one sequence of references (no `Value` is cloned to
-/// fuse them) so consecutive-tool-message merging still works across the seam.
-fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Result<Value, Error> {
+/// `reminders` (a two-segment tail) into the Anthropic message shape, viewed
+/// as one sequence so consecutive-tool-message merging works across the seam.
+///
+/// A `media` part becomes a marker for the image or document the request
+/// inlines, or a text block with its placeholder.
+fn convert_messages_to_anthropic(
+    messages: &[ChatMessage],
+    reminders: &[ChatMessage],
+    media: &RequestMedia,
+) -> Result<Value, Error> {
+    // The Anthropic shape regroups content blocks, so decode each message for
+    // the duration of this request only.
+    let decoded: Vec<Value> = messages
+        .iter()
+        .chain(reminders)
+        .map(ChatMessage::to_value)
+        .collect();
     let mut out: Vec<Value> = Vec::new();
-    let mut iter = messages.iter().chain(reminders.iter()).peekable();
+    let mut iter = decoded.iter().enumerate().peekable();
 
-    while let Some(msg) = iter.next() {
+    while let Some((index, msg)) = iter.next() {
         let role = match str_field(msg, "role") {
             Some(r) if !r.is_empty() => r,
             _ => continue,
@@ -72,17 +89,17 @@ fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Res
         // Merge consecutive "tool"-role messages into one "user" message.
         if role == "tool" {
             let mut tool_blocks: Vec<Value> = Vec::new();
-            if let Some(block) = make_tool_result_block(msg) {
+            if let Some(block) = make_tool_result_block(msg, index, media) {
                 tool_blocks.push(block);
             }
             while iter
                 .peek()
-                .is_some_and(|next| str_field(next, "role") == Some("tool"))
+                .is_some_and(|(_, next)| str_field(next, "role") == Some("tool"))
             {
-                let Some(inner) = iter.next() else {
+                let Some((inner_index, inner)) = iter.next() else {
                     break;
                 };
-                if let Some(block) = make_tool_result_block(inner) {
+                if let Some(block) = make_tool_result_block(inner, inner_index, media) {
                     tool_blocks.push(block);
                 }
             }
@@ -104,9 +121,12 @@ fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Res
                 blocks.push(json!({"type": "text", "text": s}));
             }
             Some(Value::Array(items)) => {
-                for block in items {
-                    if let Some(
-                        "text" | "tool_use" | "tool_result" | "thinking" | "redacted_thinking",
+                for (part, block) in items.iter().enumerate() {
+                    if let Some(attachment) = Attachment::from_part(block) {
+                        blocks.push(media.part(index, part, &attachment, |_inline| true));
+                    } else if let Some(
+                        "text" | "image" | "document" | "tool_use" | "tool_result" | "thinking"
+                        | "redacted_thinking",
                     ) = str_field(block, "type")
                     {
                         blocks.push(block.clone());
@@ -117,8 +137,23 @@ fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Res
         }
 
         if role == "assistant" {
-            if let Some(reasoning) = str_field(msg, "reasoning_content").filter(|s| !s.is_empty()) {
-                blocks.insert(0, json!({"type": "thinking", "thinking": reasoning}));
+            // Anthropic verifies replayed thinking against its signature, so
+            // reasoning without one (another provider's, or a response with
+            // several thinking blocks) is left out rather than rejected.
+            let has_thinking = blocks.iter().any(|block| {
+                matches!(
+                    str_field(block, "type"),
+                    Some("thinking" | "redacted_thinking")
+                )
+            });
+            let reasoning = str_field(msg, "reasoning_content").filter(|s| !s.is_empty());
+            let signature = str_field(msg, "reasoning_signature").filter(|s| !s.is_empty());
+            if let (false, Some(reasoning), Some(signature)) = (has_thinking, reasoning, signature)
+            {
+                blocks.insert(
+                    0,
+                    json!({"type": "thinking", "thinking": reasoning, "signature": signature}),
+                );
             }
             if let Some(tool_calls) = msg.get("tool_calls").and_then(|t| t.as_array()) {
                 for tc in tool_calls {
@@ -137,9 +172,24 @@ fn convert_messages_to_anthropic(messages: &[Value], reminders: &[Value]) -> Res
     Ok(Value::Array(out))
 }
 
-fn make_tool_result_block(message: &Value) -> Option<Value> {
+/// A `tool_result` block. A result that returned files has array content: its
+/// text and, for each file, the inlined image or document or a placeholder.
+fn make_tool_result_block(message: &Value, index: usize, media: &RequestMedia) -> Option<Value> {
     let tid = str_field(message, "tool_call_id").filter(|id| !id.is_empty())?;
-    let content = str_field(message, "content")?;
+    let content = match message.get("content")? {
+        Value::String(text) => Value::String(text.clone()),
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .enumerate()
+                .filter_map(|(part, block)| match Attachment::from_part(block) {
+                    Some(attachment) => Some(media.part(index, part, &attachment, |_inline| true)),
+                    None => (str_field(block, "type") == Some("text")).then(|| block.clone()),
+                })
+                .collect(),
+        ),
+        _ => return None,
+    };
     let is_error = message.get("is_error").and_then(|v| v.as_bool()) == Some(true);
     Some(json!({
         "type": "tool_result",
@@ -299,16 +349,43 @@ fn parse_chat_response(body: &str) -> Result<LlmResponse, Error> {
     })
 }
 
+/// Writes an inlined file as a base64 `image` or `document` block.
+fn write_media_block(sink: &mut dyn Sink, inline: &Inline) {
+    let (kind, media_type, bytes) = match inline {
+        Inline::Image { media_type, bytes } => ("image", *media_type, bytes),
+        Inline::Pdf(bytes) => ("document", "application/pdf", bytes),
+    };
+    let mut block = Object::begin(sink);
+    let source = block.field("source");
+    let mut source = Object::begin(source);
+    write_base64_str(source.field("data"), "", bytes);
+    source.str("media_type", media_type);
+    source.str("type", "base64");
+    source.end();
+    block.str("type", kind);
+    block.end();
+}
+
+/// Encodes a body object, base64-encoding the files it inlines in place.
+fn encode_body(body: &Map<String, Value>, media: &RequestMedia) -> Result<BulkVec<u8>, Error> {
+    encode(|sink| write_object_with_media(sink, body, media, write_media_block))
+}
+
 /// The shared request body object, without the transport-only `stream` flag.
 fn chat_body_object(
     backend: &Backend,
-    system_prompt: &str,
-    messages: &[Value],
-    reminders: &[Value],
-    tools_json: Option<&str>,
+    request: &ChatRequest<'_>,
+    media: &RequestMedia,
     strict_tools: bool,
 ) -> Result<Map<String, Value>, Error> {
-    let messages = convert_messages_to_anthropic(messages, reminders)?;
+    let ChatRequest {
+        system_prompt,
+        messages,
+        reminders,
+        tools_json,
+        ..
+    } = *request;
+    let messages = convert_messages_to_anthropic(messages, reminders, media)?;
 
     let mut body = backend.request_body();
     if !system_prompt.is_empty() {
@@ -320,44 +397,32 @@ fn chat_body_object(
     Ok(body)
 }
 
-fn build_chat_body(backend: &Backend, request: &ChatRequest) -> Result<String, Error> {
-    serialize_chat_body(chat_body_object(
-        backend,
-        request.system_prompt,
-        request.messages,
-        request.reminders,
-        request.tools_json,
-        false,
-    )?)
+fn build_chat_body(
+    backend: &Backend,
+    request: &ChatRequest,
+    media: &RequestMedia,
+) -> Result<BulkVec<u8>, Error> {
+    encode_body(&chat_body_object(backend, request, media, false)?, media)
 }
 
-/// Like [`build_chat_body`](Self::build_chat_body) but sets `stream: true`.
-fn build_stream_body(backend: &Backend, request: &ChatRequest) -> Result<String, Error> {
-    let mut body = chat_body_object(
-        backend,
-        request.system_prompt,
-        request.messages,
-        request.reminders,
-        request.tools_json,
-        false,
-    )?;
+/// Like [`build_chat_body`] but sets `stream: true`.
+fn build_stream_body(
+    backend: &Backend,
+    request: &ChatRequest,
+    media: &RequestMedia,
+) -> Result<BulkVec<u8>, Error> {
+    let mut body = chat_body_object(backend, request, media, false)?;
     body.insert("stream".to_string(), json!(true));
-    serialize_chat_body(body)
+    encode_body(&body, media)
 }
 
 fn build_chat_json_body(
     backend: &Backend,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
     schema: &Value,
-) -> Result<String, Error> {
-    let mut body = chat_body_object(
-        backend,
-        request.system_prompt,
-        request.messages,
-        request.reminders,
-        request.tools_json,
-        true,
-    )?;
+) -> Result<BulkVec<u8>, Error> {
+    let mut body = chat_body_object(backend, request, media, true)?;
     body.insert(
         "output_config".to_string(),
         json!({
@@ -368,7 +433,7 @@ fn build_chat_json_body(
         }),
     );
 
-    serialize_chat_body(body)
+    encode_body(&body, media)
 }
 
 fn insert_tools_into_body(
@@ -385,41 +450,13 @@ fn insert_tools_into_body(
     Ok(())
 }
 
-/// Serialize the media inference request body (no transport).
-fn build_media_body(backend: &Backend, request: &MediaRequest<'_>) -> Result<String, Error> {
-    let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
-        return Err(Error::IncompleteMediaRequest);
-    };
-    let Prepared::Inline { mime_type, base64 } =
-        prepare_asset(request.media, backend.image_max_bytes)?
-    else {
-        return Err(Error::RequiresLocalImage);
-    };
-
-    let mut body = backend.request_body();
-    if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
-        body.insert("system".to_string(), json!(system));
-    }
-    body.insert(
-            "messages".to_string(),
-            json!([{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": base64}}
-                ]
-            }]),
-        );
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| Error::Api("out of memory serializing media request"))
-}
-
 pub(super) async fn chat(
     backend: &Backend,
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
 ) -> Result<LlmResponse, Error> {
-    let body = build_chat_body(backend, request)?;
+    let body = build_chat_body(backend, request, media)?;
     let response = post_json(http, backend, &body).await?;
     parse_chat_response(&response.body)
 }
@@ -428,30 +465,22 @@ pub(super) async fn chat_json(
     backend: &Backend,
     http: &mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &ChatRequest<'_>,
+    media: &RequestMedia,
     _schema_name: &str,
     schema: &Value,
 ) -> Result<LlmResponse, Error> {
-    let body = build_chat_json_body(backend, request, schema)?;
+    let body = build_chat_json_body(backend, request, media, schema)?;
     let response = post_json(http, backend, &body).await?;
     parse_chat_response(&response.body)
-}
-
-pub(super) async fn infer_media(
-    backend: &Backend,
-    http: &mut Transport<'_, impl TcpConnect, impl Dns>,
-    request: &MediaRequest<'_>,
-) -> Result<String, Error> {
-    let body = build_media_body(backend, request)?;
-    let response = post_json(http, backend, &body).await?;
-    media_text(parse_chat_response(&response.body)?)
 }
 
 pub(super) async fn chat_stream<'h, 'r>(
     backend: &Backend,
     http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
     request: &'r ChatRequest<'r>,
+    media: &RequestMedia,
 ) -> Result<ProviderStream<'h>, Error> {
-    let body = build_stream_body(backend, request)?;
+    let body = build_stream_body(backend, request, media)?;
     post_stream(
         http,
         backend,
@@ -459,4 +488,44 @@ pub(super) async fn chat_stream<'h, 'r>(
         ProviderSse::Anthropic(AnthropicSse::new()),
     )
     .await
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn assistant(fields: Value) -> ChatMessage {
+        ChatMessage::new(&fields)
+    }
+
+    fn first_block(message: ChatMessage) -> Value {
+        let converted = convert_messages_to_anthropic(&[message], &[], &RequestMedia::default())
+            .expect("converted");
+        converted[0]["content"][0].clone()
+    }
+
+    #[test]
+    fn signed_reasoning_is_replayed_as_a_thinking_block() {
+        let block = first_block(assistant(json!({
+            "role": "assistant",
+            "content": "ok",
+            "reasoning_content": "think",
+            "reasoning_signature": "sig",
+        })));
+        assert_eq!(
+            block,
+            json!({"type": "thinking", "thinking": "think", "signature": "sig"})
+        );
+    }
+
+    #[test]
+    fn unsigned_reasoning_is_left_out() {
+        let block = first_block(assistant(json!({
+            "role": "assistant",
+            "content": "ok",
+            "reasoning_content": "think",
+        })));
+        assert_eq!(block, json!({"type": "text", "text": "ok"}));
+    }
 }

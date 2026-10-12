@@ -1,13 +1,14 @@
+use alloc::borrow::Cow;
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use embedded_io_async::{Read, Write};
+use portable_atomic::{AtomicUsize, Ordering};
+use portable_atomic_util::Arc;
 
-use crate::path::{backend_path, matches_mount, normalize};
+use crate::path::{backend_path, matches_mount, normalize, normalize_retained};
 use crate::{
     Backend, DirEntry, File, FileType, FsError, Metadata, MountOptions, OpenOptions, ReadDir,
 };
@@ -49,7 +50,11 @@ impl Vfs {
         let root = normalize(root)?;
         Ok(crate::ScopedVfs::with_mounts(
             self.clone(),
-            alloc::vec![crate::scoped::ScopedMount::new(String::from("/"), root)],
+            alloc::vec![crate::scoped::ScopedMount::new(
+                Cow::Borrowed("/"),
+                Cow::Owned(root),
+                MountOptions::read_write(),
+            )],
         ))
     }
 
@@ -60,23 +65,52 @@ impl Vfs {
     /// Returns [`FsError::InvalidPath`] for an invalid logical mount point or
     /// source root, and [`FsError::MountConflict`] when normalized logical
     /// mount points collide.
+    ///
+    /// The view keeps its paths for its whole lifetime: static paths that are
+    /// already normalized are kept borrowed instead of copied.
     pub fn scoped_mounts<I, Point, Source>(&self, mounts: I) -> Result<crate::ScopedVfs, FsError>
     where
         I: IntoIterator<Item = (Point, Source)>,
-        Point: AsRef<str>,
-        Source: AsRef<str>,
+        Point: Into<Cow<'static, str>>,
+        Source: Into<Cow<'static, str>>,
     {
-        let mut scoped_mounts = Vec::new();
-        for (point, source_root) in mounts {
-            let point = normalize(point.as_ref())?;
+        self.scoped_mounts_with(
+            mounts
+                .into_iter()
+                .map(|(point, source)| (point, source, MountOptions::read_write())),
+        )
+    }
+
+    /// Creates a mount-management-free view whose logical roots each carry
+    /// their own access policy.
+    ///
+    /// A read-only mount refuses every change through the view with
+    /// [`FsError::ReadOnly`], even when its source is writable.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::scoped_mounts`].
+    pub fn scoped_mounts_with<I, Point, Source>(
+        &self,
+        mounts: I,
+    ) -> Result<crate::ScopedVfs, FsError>
+    where
+        I: IntoIterator<Item = (Point, Source, MountOptions)>,
+        Point: Into<Cow<'static, str>>,
+        Source: Into<Cow<'static, str>>,
+    {
+        let mounts = mounts.into_iter();
+        let mut scoped_mounts = Vec::with_capacity(mounts.size_hint().0);
+        for (point, source_root, options) in mounts {
+            let point = normalize_retained(point.into())?;
             if scoped_mounts
                 .iter()
                 .any(|mount: &crate::scoped::ScopedMount| mount.point == point)
             {
                 return Err(FsError::MountConflict);
             }
-            let source_root = normalize(source_root.as_ref())?;
-            scoped_mounts.push(crate::scoped::ScopedMount::new(point, source_root));
+            let source_root = normalize_retained(source_root.into())?;
+            scoped_mounts.push(crate::scoped::ScopedMount::new(point, source_root, options));
         }
         Ok(crate::ScopedVfs::with_mounts(self.clone(), scoped_mounts))
     }
@@ -298,6 +332,15 @@ impl Vfs {
         }
         from.ensure_writable(true)?;
         to.ensure_writable(true)?;
+        // A directory cannot become its own descendant: backends detach the
+        // source before they look up the destination's parent inside it.
+        if to
+            .path
+            .strip_prefix(from.path.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+        {
+            return Err(FsError::InvalidInput);
+        }
         from.mount.backend.inner.rename(&from.path, &to.path).await
     }
 
@@ -356,6 +399,3 @@ impl Resolved {
         }
     }
 }
-
-#[allow(dead_code)]
-fn _keep_dir_entry_documented(_: DirEntry) {}

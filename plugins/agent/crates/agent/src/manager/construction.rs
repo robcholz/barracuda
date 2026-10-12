@@ -1,5 +1,6 @@
-use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
+use portable_atomic_util::Arc;
 
 use crate::config::SharedApiManager;
 use barracuda_agent_memory::ProfileStore;
@@ -122,12 +123,14 @@ where
 
 /// Build the shared, globally unique skill catalog from `skill_roots`.
 ///
-/// A missing root is skipped so the agent still starts; a real scan failure
-/// (e.g. a malformed `SKILL.md`) aborts construction.
+/// A missing root scans as empty but stays registered, so skills installed
+/// there later appear on `skill_reload`. A malformed or duplicated package is
+/// left out with a warning; only a root that cannot be listed aborts
+/// construction, since user skills share a writable Workspace directory.
 async fn build_fs_skill_registry(
     filesystem: ScopedVfs,
     skill_roots: Vec<String>,
-) -> Result<Arc<FsSkillRegistry>, SkillError> {
+) -> Result<Arc<dyn SkillRegistry>, SkillError> {
     let span = tracing::info_span!("skill.catalog");
     let _enter = span.enter();
     let mut registry = FsSkillRegistry::new(filesystem.clone());
@@ -137,9 +140,8 @@ async fn build_fs_skill_registry(
             .await
             .map_err(|error| SkillError::ScanFailed(root.clone(), error))?
         {
-            log::warn!("skill catalog root is missing: {root}");
-            tracing::warn!(name: "root_missing", "");
-            continue;
+            log::info!("skill catalog root {root} is empty until it is created");
+            tracing::info!(name: "root_missing", "");
         }
         match registry.add_root(root).await {
             Ok(next) => registry = next,
@@ -150,5 +152,9 @@ async fn build_fs_skill_registry(
             }
         }
     }
-    Ok(Arc::new(registry))
+    for rejected in registry.catalog().rejected() {
+        log::warn!("skill package left out of the catalog: {rejected}");
+        tracing::warn!(name: "skill_rejected", "");
+    }
+    Ok(Arc::from(Box::new(registry) as Box<dyn SkillRegistry>))
 }

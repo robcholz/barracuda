@@ -1,0 +1,100 @@
+name = "Edge: model HTTP and stream faults"
+description = "Model-side failures a real provider cannot produce on demand: transient statuses are retried until a response arrives, a permanent status fails the turn, a truncated stream and a provider error event are retried, a connection abort after streamed text keeps that text and fails the turn, malformed SSE JSON fails it, and exhausted retries report the last status."
+
+[model]
+mode = "scripted"
+
+# Step 0: two transient statuses (503, 500), then success on the last retry.
+[[model.responses]]
+status = 503
+raw = '{"error":{"message":"overloaded"}}'
+
+[[model.responses]]
+status = 500
+raw = 'server error'
+
+[[model.responses]]
+text = "Recovered."
+
+# Step 1: a permanent status is not retried.
+[[model.responses]]
+status = 400
+raw = '{"error":{"message":"bad request"}}'
+
+# Step 2: a stream that ends before the provider finishes is retried.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+
+[[model.responses]]
+text = "After truncation."
+
+# Step 3: an abort after streamed text is not replay-safe, so not retried.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"
+abort = true
+
+# Step 4: malformed SSE JSON.
+[[model.responses]]
+raw = "data: {not json\n\n"
+
+# Step 5: a provider error event in the stream is classified by its code like
+# an HTTP status; 502 is transient, so the request is retried.
+[[model.responses]]
+raw = "data: {\"error\":{\"message\":\"provider failed\",\"code\":502}}\n\n"
+
+[[model.responses]]
+text = "After the provider error."
+
+# Step 6: 429 on every attempt exhausts the two retries.
+[[model.responses]]
+status = 429
+raw = '{"error":{"message":"rate limited"}}'
+
+[[model.responses]]
+status = 429
+raw = '{"error":{"message":"rate limited"}}'
+
+[[model.responses]]
+status = 429
+raw = '{"error":{"message":"rate limited, last"}}'
+
+# Step 7: a provider error event with a permanent code is reported, not retried.
+[[model.responses]]
+raw = "data: {\"error\":{\"message\":\"bad key\",\"code\":401}}\n\n"
+
+[[steps]]
+send = "Hello."
+reply_contains = ["Recovered."]
+
+[[steps]]
+send = "Hello again."
+notice_contains = ['HTTP 400: {"error":{"message":"bad request"}}']
+
+[[steps]]
+send = "Try once more."
+reply_contains = ["After truncation."]
+
+[[steps]]
+send = "Stream something."
+reply_contains = ["partial"]
+notice_contains = ["ConnectionAborted"]
+
+[[steps]]
+send = "And again."
+notice_contains = ["failed to parse LLM JSON response"]
+
+[[steps]]
+send = "One more."
+reply_contains = ["After the provider error."]
+
+[[steps]]
+send = "Last one."
+notice_contains = ['transient HTTP 429: {"error":{"message":"rate limited, last"}}']
+
+[[steps]]
+send = "After the key change."
+notice_contains = ['HTTP 401: {"error":{"message":"bad key","code":401}}']
+
+[logs]
+expect = ["Agent run failed: failed to initialize LLM chat: HTTP 400"]
+allow = ['Agent run failed: ']

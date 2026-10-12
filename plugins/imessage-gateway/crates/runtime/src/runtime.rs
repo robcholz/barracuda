@@ -4,12 +4,16 @@ use async_channel::{Receiver, Sender};
 use barracuda_workflow_plugin::WorkflowService;
 use gateway::MessageGateway;
 
+use crate::gateway_control_received::{
+    parse_command, valid_control, GatewayControlReceived, GatewayInboundControl,
+};
 use crate::gateway_message_received::{
     valid_inbound, GatewayInboundMessage, GatewayMessageReceived,
 };
 use crate::gateway_send::{send, GatewaySendRequest, GatewaySendResponse};
 use crate::gateway_send_media::{
-    accept_media, deliver_media_stream, GatewaySendMediaRequest, MediaJob, MediaSessions,
+    deliver_media_stream, send_media, GatewaySendMediaRequest, GatewaySendMediaResponse, MediaJob,
+    MediaOpener, MediaSessions,
 };
 use crate::gateway_send_stream::{
     accept_stream, deliver_event_stream, EventJob, EventSessions, GatewaySendStreamRequest,
@@ -36,15 +40,50 @@ pub struct GatewayIngress {
 }
 
 impl GatewayIngress {
+    /// Waits until Workflow can take another `gateway.message.received`.
+    ///
+    /// Resolves once fewer than the Workflow Runtime's backlog limit of
+    /// executions started by that Event are queued or running. Receive loops
+    /// await it before fetching the next batch so a burst of inbound messages
+    /// waits upstream instead of in RAM.
+    pub async fn ready(&self) {
+        self.workflow.ready_for::<GatewayMessageReceived>().await;
+    }
+
     /// Publishes one normalized inbound message as a Workflow Event.
+    ///
+    /// A session text command (`/sessions`, `/new`, `/switch N`, ...) is not a
+    /// message for the Agent: it is published as `gateway.control.received`
+    /// instead, so every channel can manage its sessions as text.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         if !valid_inbound(&message) {
             return Err(GatewayIngressError::InvalidMessage);
+        }
+        if let Some(control) = parse_command(&message.route, &message.text) {
+            return self.publish_control(control);
         }
         let input =
             serde_json::to_value(message).map_err(|_error| GatewayIngressError::Delivery)?;
         self.workflow
             .emit::<GatewayMessageReceived>(input)
+            .map_err(|_error| GatewayIngressError::Delivery)
+    }
+
+    /// Publishes one normalized control request as a Workflow Event.
+    ///
+    /// Controls skip [`Self::ready`]: one stands for a user's click on the
+    /// running turn and must not wait behind queued messages.
+    pub fn publish_control(
+        &self,
+        control: GatewayInboundControl,
+    ) -> Result<(), GatewayIngressError> {
+        if !valid_control(&control) {
+            return Err(GatewayIngressError::InvalidMessage);
+        }
+        let input =
+            serde_json::to_value(control).map_err(|_error| GatewayIngressError::Delivery)?;
+        self.workflow
+            .emit::<GatewayControlReceived>(input)
             .map_err(|_error| GatewayIngressError::Delivery)
     }
 }
@@ -104,12 +143,21 @@ impl GatewayRuntime {
         accept_stream(&self.event_sessions, &self.event_jobs, request)
     }
 
-    /// Accepts one command for an outbound binary media stream.
-    pub fn send_media(
+    /// Accepts one command for an outbound binary media stream, or sends
+    /// one whole file that `opener` opens and waits for its delivery.
+    pub async fn send_media<Opener: MediaOpener>(
         &self,
         request: GatewaySendMediaRequest,
-    ) -> Result<GatewayAccepted, GatewayOperationError> {
-        accept_media(&self.media_sessions, &self.media_jobs, request)
+        opener: &Opener,
+    ) -> Result<GatewaySendMediaResponse, GatewayOperationError> {
+        send_media(
+            &self.gateway,
+            &self.media_sessions,
+            &self.media_jobs,
+            opener,
+            request,
+        )
+        .await
     }
 
     /// Runs one of the fixed outbound semantic-stream workers.

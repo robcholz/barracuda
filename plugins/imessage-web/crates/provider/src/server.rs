@@ -8,13 +8,19 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
 
+use barracuda_imessage_gateway_plugin::Attachment;
 use barracuda_webserver_plugin::{
     WebSocketConnection, WebSocketEndpoint, WebSocketFuture, WebSocketMessage,
 };
 use futures_lite::future;
 
-use crate::{InboundMessage, InboundMessageSink, Web, WebClientFrame, WebDelivery};
+use crate::client_frame::{ClientFrame, MessageFrame};
+use crate::{
+    InboundControl, InboundMessage, InboundMessageSink, Rejection, Web, WebDelivery,
+    MAX_ATTACHMENTS,
+};
 
 #[allow(clippy::large_enum_variant)] // Keeps the lane-bounded outgoing event inline.
 enum NextMessage {
@@ -73,20 +79,63 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                 .await;
                 match next {
                     NextMessage::Incoming(Ok(WebSocketMessage::Text(text))) => {
-                        match serde_json::from_str::<WebClientFrame>(&text) {
-                            Ok(frame) => {
+                        match serde_json::from_str::<ClientFrame>(&text) {
+                            Ok(ClientFrame::Control(frame)) => {
+                                log::info!(
+                                    "IMessage Web received {:?} control for conversation `{}`",
+                                    frame.control,
+                                    self.conversation_id
+                                );
+                                let control = InboundControl {
+                                    conversation_id: self.conversation_id.clone(),
+                                    thread_id: None,
+                                    control: frame.control,
+                                    temporary: frame.temporary,
+                                    session: frame.session,
+                                    title: frame.title,
+                                    confirm: frame.confirm,
+                                };
+                                // a rejected control leaves the socket open: the turn just runs on
+                                if let Err(error) = self.sink.receive_control(control).await {
+                                    log::warn!(
+                                        "IMessage Web failed to deliver {:?} control for conversation `{}`: {error}",
+                                        frame.control,
+                                        self.conversation_id
+                                    );
+                                }
+                            }
+                            Ok(ClientFrame::Message(frame)) => {
+                                // every message frame takes the next number, so a
+                                // refused one still matches the client's count
                                 let message_id = format!("web-in-{next_message}");
                                 next_message = next_message.saturating_add(1);
                                 log::info!(
-                                    "IMessage Web received message `{message_id}` for conversation `{}`",
+                                    "IMessage Web received message `{message_id}` with {} attachment(s) for conversation `{}`",
+                                    frame.attachments.len(),
                                     self.conversation_id
                                 );
+                                let attachments = match self.attachments(&frame) {
+                                    Ok(attachments) => attachments,
+                                    Err(error) => {
+                                        log::warn!(
+                                            "IMessage Web refused message `{message_id}` for conversation `{}`: {}",
+                                            self.conversation_id,
+                                            error.code()
+                                        );
+                                        let refusal = WebDelivery::Rejected { message_id, error };
+                                        if !send(&connection, &refusal, &self.conversation_id).await
+                                        {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                };
                                 let message = InboundMessage {
                                     conversation_id: self.conversation_id.clone(),
                                     message_id: message_id.clone(),
                                     thread_id: None,
                                     text: frame.text,
-                                    reply_to: frame.reply_to,
+                                    attachments,
                                 };
                                 if let Err(error) = self.sink.receive_message(message).await {
                                     log::warn!(
@@ -142,22 +191,9 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                                 "IMessage Web client missed {missed} event(s) for conversation `{}`",
                                 self.conversation_id
                             ),
+                            WebDelivery::Rejected { .. } => {}
                         }
-                        let frame = match delivery.to_sse() {
-                            Ok(frame) => frame,
-                            Err(error) => {
-                                log::warn!(
-                                    "IMessage Web failed to serialize an event for conversation `{}`: {error}",
-                                    self.conversation_id
-                                );
-                                continue;
-                            }
-                        };
-                        if let Err(error) = connection.send_text(frame).await {
-                            log::warn!(
-                                "IMessage Web failed to send an event for conversation `{}`: {error}",
-                                self.conversation_id
-                            );
+                        if !send(&connection, &delivery, &self.conversation_id).await {
                             break;
                         }
                     }
@@ -169,4 +205,49 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
             );
         })
     }
+}
+
+impl<const CAP: usize, const SUBS: usize> WebBridge<CAP, SUBS> {
+    /// Takes the uploads `frame` names, refusing a frame with nothing in it,
+    /// too many attachments, or an id the channel does not hold.
+    fn attachments(&self, frame: &MessageFrame) -> Result<Vec<Attachment>, Rejection> {
+        if frame.attachments.len() > MAX_ATTACHMENTS {
+            return Err(Rejection::TooManyAttachments);
+        }
+        if frame.attachments.is_empty() {
+            return if frame.text.is_empty() {
+                Err(Rejection::Empty)
+            } else {
+                Ok(Vec::new())
+            };
+        }
+        self.web
+            .media()
+            .take(&frame.attachments)
+            .ok_or(Rejection::UnknownAttachment)
+    }
+}
+
+/// Writes one delivery to the client; `false` once the socket failed.
+async fn send(
+    connection: &WebSocketConnection,
+    delivery: &WebDelivery,
+    conversation_id: &str,
+) -> bool {
+    let frame = match delivery.to_sse() {
+        Ok(frame) => frame,
+        Err(error) => {
+            log::warn!(
+                "IMessage Web failed to serialize an event for conversation `{conversation_id}`: {error}"
+            );
+            return true;
+        }
+    };
+    if let Err(error) = connection.send_text(frame).await {
+        log::warn!(
+            "IMessage Web failed to send an event for conversation `{conversation_id}`: {error}"
+        );
+        return false;
+    }
+    true
 }

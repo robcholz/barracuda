@@ -170,7 +170,7 @@ span-name: `session.delete`
 span-name: `turn`
 
 A turn is the root-visible unit initiated by either a public user message or a
-detached tool result delivered after the previous turn ended. Ordinary joined
+background tool update delivered after the previous turn ended. Ordinary
 tool calls, Agent iterations, and subagent work inherit the active turn; they do
 not open turns of their own.
 
@@ -180,7 +180,7 @@ not open turns of their own.
 
 ### Span Fields
 
-`cause`: `user` or `detached_tool`.
+`cause`: `user` or `background_tool`.
 
 ### Events
 
@@ -488,17 +488,18 @@ span-name: `skill.catalog`
 
 span-name: `toolcall`
 
-Joined and detached calls are traced at the `barracuda-agent-tool` runner boundary after
-authorization. Each runner-owned call opens a unique `trace.task` logical lane
-because calls in one batch may overlap and detached work may outlive the
-originating `iteration_loop`. Opening the lane repeats the complete inherited
+Ordinary and background calls are traced at the `barracuda-agent-tool` runner
+boundary after authorization. Each runner-owned call opens a unique `trace.task`
+logical lane because calls in one batch may overlap and background work may
+outlive the originating `iteration_loop`. Opening the lane repeats the complete inherited
 `run` context, including the originating iteration.
 
-The span begins when the authorized call is dispatched. For a joined call it
-ends with the model-facing result. For a detached call it remains open until
-the real background completion; the immediate accepted result does not close
-the span or emit `result`. Calls rejected before dispatch use a synchronous
-`toolcall` span on the agent lane.
+The span begins when the authorized call is dispatched. For an ordinary call it
+ends with the model-facing result. For a background call it remains open while
+the call is in the Agent's background pool: the accepted result does not close
+the span or emit `result`; the real completion emits `result`, and
+`background_cancel` emits `cancelled` instead. Calls rejected before dispatch
+use a synchronous `toolcall` span on the agent lane.
 
 ### Span Fields
 
@@ -509,6 +510,7 @@ the span or emit `result`. Calls rejected before dispatch use a synchronous
 `arguments`: Tool argument metadata was recorded.
 `parse_failed`: Tool invocation could not be parsed from the model call.
 `result`: Tool completed or was rejected before execution.
+`cancelled`: `background_cancel` dropped a running background call.
 `flow_link`: A subagent creation tool used the generic `barracuda-agent-trace` cross-task
 flow protocol to link this tool call to the created child's initial `agent`
 span. The domain-specific child id is carried as an exported flow argument.
@@ -520,6 +522,7 @@ span. The domain-specific child id is carried as an exported flow argument.
 `arguments`: `argument_bytes`.
 `parse_failed`: `kind`.
 `result`: `ok`, `blocked`.
+`cancelled`: `checkpoint`, always `background_cancel`.
 `flow_link`: `flow.name`, `flow.target_task`, `flow.target_span`,
 `flow.arg.child_agent`.
 `spawn_kind_rejected`: `kind`.

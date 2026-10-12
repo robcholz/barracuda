@@ -10,9 +10,6 @@ barracuda-driver-rx8130ce.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true
 
-[dev-dependencies]
-embassy-futures.workspace = true
-
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

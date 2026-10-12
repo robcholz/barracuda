@@ -4,23 +4,22 @@
 
 extern crate alloc;
 
-use alloc::{format, rc::Rc, string::String, sync::Arc};
-use core::{
-    fmt::Write as _,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use alloc::{format, rc::Rc, string::String};
+use core::fmt::Write as _;
 
 use async_channel::{Receiver, Sender};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_runtime_utils::oneshot;
 use barracuda_time_plugin::{ClockError, UtcClock};
 use barracuda_vm_plugin::{
     Context, Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result, Table,
 };
 use embassy_futures::select::{Either, select};
-use futures_channel::oneshot;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 const REQUEST_QUEUE_DEPTH: usize = 4;
@@ -175,12 +174,6 @@ impl TimePackage {
         });
         (Self { state }, receiver)
     }
-}
-
-/// Creates the package without its clock bridge for cross-Plugin memory tests.
-#[cfg(feature = "test-fixture")]
-pub fn package_for_test() -> impl LuaPackage {
-    TimePackage::new().0
 }
 
 impl Package for TimePackage {
@@ -555,8 +548,10 @@ mod tests {
             let (package, requests) = TimePackage::new();
             let mut fixed = FixedMemoryLua::new(64 * 1024)
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package.install(fixed.lua_mut())?;
 
             let execution = fixed
@@ -596,8 +591,10 @@ mod tests {
             let (package, _requests) = TimePackage::new();
             let mut fixed = FixedMemoryLua::new(64 * 1024)
                 .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io =
-                barracuda_vm_builtin_packages::BuiltinPackages::all().install(fixed.lua_mut())?;
+            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+            )
+            .install(fixed.lua_mut())?;
             package.install(fixed.lua_mut())?;
             package.revoke();
             fixed
@@ -606,5 +603,11 @@ mod tests {
                 .exec_async()
                 .await
         })
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let (package, _requests) = TimePackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

@@ -4,10 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{string::String, string::ToString};
 use barracuda_board_hal::{AnalogInput, AnalogOutput, AnalogProvider, ExposedIo};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -15,7 +12,8 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Shares the unified exposed-I/O owner with the `analog` Lua package.
 #[barracuda_plugin::macros::plugin]
@@ -385,5 +383,11 @@ mod tests {
         package.install(&mut lua).expect("install package");
         let result: bool = lua.load("local analog = require('analog')\nlocal input <close> = analog.open_input('A0')\nlocal output <close> = analog.open_output('A1')\noutput:write(42)\nreturn input:read() == 1234 and input:max_value() == 4095 and output:max_value() == 255").eval().expect("use analog");
         assert!(result);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = AnalogPackage::new(Arc::new(Provider));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

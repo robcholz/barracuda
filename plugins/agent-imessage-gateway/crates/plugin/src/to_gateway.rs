@@ -5,7 +5,7 @@ use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionSchema, workflow_action_schema,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::{
     bridge::{BridgeControl, BridgeShared},
@@ -19,13 +19,35 @@ pub(crate) struct ToGatewayRequest {
     sequence: u64,
     #[serde(rename = "type")]
     event_type: String,
-    payload: Value,
+    payload: TurnStart,
 }
 
 #[derive(Deserialize)]
 struct TurnStartedPayload {
     turn: String,
     origin: String,
+}
+
+#[derive(Deserialize)]
+struct InputRequestedPayload {
+    request: String,
+}
+
+/// The only payloads this Action reads: `turn_started` and `input_requested`.
+/// Any other shape reads as neither.
+///
+/// The payload is inspected where it lies in the request text, so a large
+/// text or tool-output payload is skipped without being copied.
+struct TurnStart(Option<TurnStartedPayload>, Option<InputRequestedPayload>);
+
+impl<'de> Deserialize<'de> for TurnStart {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <&'de RawValue>::deserialize(deserializer)?;
+        Ok(Self(
+            serde_json::from_str(raw.get()).ok(),
+            serde_json::from_str(raw.get()).ok(),
+        ))
+    }
 }
 
 #[derive(Serialize)]
@@ -52,8 +74,11 @@ pub(crate) enum ToGatewayResponse {
 fn gateway_event(request: &ToGatewayRequest) -> Result<GatewayEvent, BridgeError> {
     match request.event_type.as_str() {
         "turn_started" => {
-            let payload = serde_json::from_value::<TurnStartedPayload>(request.payload.clone())
-                .map_err(|_error| BridgeError::InvalidRequest)?;
+            let payload = request
+                .payload
+                .0
+                .as_ref()
+                .ok_or(BridgeError::InvalidRequest)?;
             if payload.turn.is_empty() {
                 return Err(BridgeError::InvalidRequest);
             }
@@ -85,7 +110,7 @@ fn response(target: Option<GatewayTarget>) -> ToGatewayResponse {
 
 async fn invoke<Storage>(
     shared: &BridgeShared<Storage>,
-    request: ToGatewayRequest,
+    mut request: ToGatewayRequest,
 ) -> ToGatewayResponse
 where
     Storage: PluginStorage,
@@ -97,11 +122,16 @@ where
         request.sequence
     );
     let result = match gateway_event(&request) {
-        Ok(event) => shared
-            .book
-            .lock()
-            .await
-            .gateway_target(&request.session, event),
+        Ok(event) => {
+            let mut book = shared.book.lock().await;
+            let target = book.gateway_target(&request.session, event);
+            if request.event_type == "input_requested"
+                && let Some(input) = request.payload.1.take()
+            {
+                book.input_requested(&request.session, input.request);
+            }
+            target
+        }
         Err(error) => Err(error),
     };
     match &result {

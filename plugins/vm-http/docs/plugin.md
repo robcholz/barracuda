@@ -1,10 +1,21 @@
 # VM HTTP Plugin
 
+The VM HTTP Plugin exposes the HTTP Plugin's bounded outbound requests to Lua
+code as the require-only `http` Lua package.
+
 - Plugin ID: `vm-http`
-- Direct Plugin dependencies: `http`, `vm`
-- Required typed capabilities: `barracuda_http_plugin::Http` from `http`, `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Owned tasks: one cancellable bridge managing at most two active requests
+- Dependencies: `http`, `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `Http` from `http`, `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `http`
+- Web: none
+- Tasks: one cancellable bridge task fed by a two-entry request queue; the
+  `Http` capability's two workspaces bound how many requests run at once
+- Storage: none
 
 This Plugin exposes the HTTP Plugin's bounded high-level operation as the
 require-only Lua `http` package. Lua never receives the Platform IP stack, DNS

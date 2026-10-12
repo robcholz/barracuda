@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 
@@ -32,7 +32,7 @@ impl ToolSpec for TodoUpdateTool {
 impl ToolHandler for TodoUpdateTool {
     type Args = TodoUpdateArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let todos = match normalize(args.todos) {
                 Ok(todos) => todos,
@@ -65,8 +65,5 @@ fn normalize(mut items: Vec<TodoItem>) -> Result<TodoList, &'static str> {
 }
 
 fn output(content: &str, ok: bool) -> ToolOutput {
-    ToolOutput {
-        content: content.to_string(),
-        ok,
-    }
+    ToolOutput::new(content.to_string(), ok)
 }

@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String};
 
 use barracuda_agent_plugin::tools::{
-    Action, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
 };
 use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ impl ToolSpec for FileDeleteTool {
 impl ToolHandler for FileDeleteTool {
     type Args = DeleteArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let path = args.path.as_str();
             let metadata = match self.filesystem.metadata(path).await {
@@ -68,7 +68,7 @@ mod tests {
     use embassy_futures::block_on;
 
     use super::{DeleteArgs, FileDeleteTool};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn removes_files_and_empty_directories_and_delegates_root_policy()
@@ -82,22 +82,30 @@ mod tests {
             };
 
             assert!(
-                tool.invoke(DeleteArgs {
-                    path: "/tmp/file".into()
-                })
+                tool.invoke(
+                    CONTEXT,
+                    DeleteArgs {
+                        path: "/tmp/file".into()
+                    }
+                )
                 .await?
                 .ok
             );
             assert!(
-                tool.invoke(DeleteArgs {
-                    path: "/empty".into()
-                })
+                tool.invoke(
+                    CONTEXT,
+                    DeleteArgs {
+                        path: "/empty".into()
+                    }
+                )
                 .await?
                 .ok
             );
-            let root = tool.invoke(DeleteArgs { path: "/".into() }).await?;
+            let root = tool
+                .invoke(CONTEXT, DeleteArgs { path: "/".into() })
+                .await?;
             assert!(!root.ok);
-            assert_eq!(json(&root.content)?["error"], "directory_not_empty");
+            assert_eq!(json(&root.content)?["error"], "permission_denied");
             Ok::<_, Box<dyn core::error::Error>>(())
         })
     }

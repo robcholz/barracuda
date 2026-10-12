@@ -18,7 +18,6 @@ log.workspace = true
 barracuda-board-hal.workspace = true
 barracuda-bulk-memory.workspace = true
 barracuda-peripheral.workspace = true
-barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net = { workspace = true, features = ["dhcpv4"] }

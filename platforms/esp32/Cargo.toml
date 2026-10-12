@@ -17,18 +17,24 @@ log.workspace = true
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 barracuda-board-hal.workspace = true
-barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
-embassy-net.workspace = true
+embassy-net = { workspace = true, features = ["dhcpv4"] }
+embassy-net-driver = "0.2.0"
 embassy-sync = { version = "0.8.0", default-features = false }
+embassy-time.workspace = true
 embedded-hal.workspace = true
 embedded-hal-bus.workspace = true
 embedded-hal-async = "1.0"
 embedded-io = "0.7"
 embedded-io-async = "0.7"
-esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32", "unstable"] }
+esp-alloc = { version = "0.11.0", features = ["esp32"] }
+esp-backtrace = { version = "0.20.0", features = ["esp32", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32"] }
+esp-hal = { version = "1.2.0", default-features = false, features = ["critical-section", "esp32", "exception-handler", "rt", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32", "uart", "log-04"] }
+esp-radio = { version = "1.0.0-beta.1", default-features = false, features = ["esp-alloc", "esp32", "log-04", "wifi"] }
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32", "embedded-storage"] }
 static_cell.workspace = true
 nb = "1"
@@ -38,7 +44,7 @@ barracuda-board-config.workspace = true
 esp-idf-part = "0.6.0"
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]

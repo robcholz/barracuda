@@ -10,9 +10,9 @@ mod action {
     use alloc::vec::Vec;
 
     use barracuda_agent_runtime::{
-        AgentRuntime, InputRequestId, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
-        RuntimeError, SessionControlError, SessionCreateError, SessionDeleteError, SessionId,
-        SessionPersistence,
+        AgentRuntime, Attachment, InputRequestId, Message, OpenSessionError, PermissionLevel,
+        ReasoningEffort, RuntimeError, SessionControlError, SessionCreateError, SessionDeleteError,
+        SessionId, SessionInfo, SessionPersistence, SessionRenameError,
     };
     use barracuda_workflow_plugin::{
         workflow_action_schema, WorkflowActionFuture, WorkflowActionHandler,
@@ -49,6 +49,8 @@ mod action {
         NotAwaitingInput,
         /// The response targets a different input request.
         InputRequestMismatch,
+        /// The requested session title has no visible text.
+        InvalidTitle,
     }
 
     impl AgentActionError {
@@ -65,6 +67,7 @@ mod action {
                 Self::SessionClosed => "session_closed",
                 Self::NotAwaitingInput => "not_awaiting_input",
                 Self::InputRequestMismatch => "input_request_mismatch",
+                Self::InvalidTitle => "invalid_title",
             }
         }
     }
@@ -189,8 +192,27 @@ mod action {
     }
 
     #[derive(Serialize)]
+    struct SessionListEntry {
+        session: String,
+        persistent: bool,
+        title: Option<String>,
+        updated_at: Option<u64>,
+    }
+
+    impl From<SessionInfo> for SessionListEntry {
+        fn from(info: SessionInfo) -> Self {
+            Self {
+                session: format!("{}", info.session),
+                persistent: info.persistence == SessionPersistence::Persistent,
+                title: info.title,
+                updated_at: info.updated_at,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
     struct SessionListPage {
-        sessions: Vec<String>,
+        sessions: Vec<SessionListEntry>,
         next_offset: Option<usize>,
     }
 
@@ -222,15 +244,18 @@ mod action {
                         error: AgentActionError::InvalidRequest,
                     }));
                 }
-                let sessions = runtime.list_sessions().await;
-                let end = request
-                    .offset
-                    .saturating_add(request.limit)
-                    .min(sessions.len());
-                let page = sessions.get(request.offset..end).unwrap_or(&[]);
+                let sessions = runtime.describe_sessions().await;
+                let total = sessions.len();
+                let end = request.offset.saturating_add(request.limit).min(total);
+                let page = sessions
+                    .into_iter()
+                    .take(end)
+                    .skip(request.offset)
+                    .map(SessionListEntry::from)
+                    .collect();
                 Ok(ListSessionsResponse::Success(SessionListPage {
-                    sessions: page.iter().map(|session| format!("{session}")).collect(),
-                    next_offset: (end < sessions.len()).then_some(end),
+                    sessions: page,
+                    next_offset: (end < total).then_some(end),
                 }))
             })
         }
@@ -341,9 +366,47 @@ mod action {
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
+    struct RenameSessionRequest {
+        session: String,
+        title: String,
+    }
+
+    struct RenameSessionAction {
+        runtime: Rc<AgentRuntime>,
+    }
+
+    impl WorkflowActionHandler for RenameSessionAction {
+        type Request = RenameSessionRequest;
+        type Response = EmptyOrErrorResponse;
+
+        const SCHEMA: WorkflowActionSchema = workflow_action_schema!("session.rename");
+
+        fn invoke(
+            &self,
+            request: RenameSessionRequest,
+        ) -> WorkflowActionFuture<'_, EmptyOrErrorResponse> {
+            let runtime = Rc::clone(&self.runtime);
+            Box::pin(async move {
+                let session = match parse_session(&request.session) {
+                    Ok(session) => session,
+                    Err(error) => return Ok(EmptyOrErrorResponse::error(error)),
+                };
+                let response = match runtime.rename_session(session, &request.title).await {
+                    Ok(()) => EmptyOrErrorResponse::success(),
+                    Err(error) => EmptyOrErrorResponse::error(map_rename_error(error)),
+                };
+                Ok(response)
+            })
+        }
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct AppendRequest {
         session: String,
         text: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
     }
 
     struct AppendAction {
@@ -368,7 +431,10 @@ mod action {
                         AgentActionError::SessionNotOpen,
                     ));
                 };
-                let response = match control.append(Message::text(request.text)).await {
+                let response = match control
+                    .append(Message::text(request.text).with_attachments(request.attachments))
+                    .await
+                {
                     Ok(()) => EmptyOrErrorResponse::success(),
                     Err(error) => EmptyOrErrorResponse::error(map_control_error(error)),
                 };
@@ -383,6 +449,8 @@ mod action {
         session: String,
         request: String,
         text: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
     }
 
     struct RespondAction {
@@ -414,7 +482,13 @@ mod action {
                         AgentActionError::SessionNotOpen,
                     ));
                 };
-                let response = match control.respond(input, Message::text(request.text)).await {
+                let response = match control
+                    .respond(
+                        input,
+                        Message::text(request.text).with_attachments(request.attachments),
+                    )
+                    .await
+                {
                     Ok(()) => EmptyOrErrorResponse::success(),
                     Err(error) => EmptyOrErrorResponse::error(map_control_error(error)),
                 };
@@ -644,7 +718,10 @@ mod action {
                 runtime: Rc::clone(&runtime),
                 sessions: sessions.clone(),
             })?,
-            actions.add_action(DeleteSessionAction { runtime })?,
+            actions.add_action(DeleteSessionAction {
+                runtime: Rc::clone(&runtime),
+            })?,
+            actions.add_action(RenameSessionAction { runtime })?,
             actions.add_action(AppendAction {
                 sessions: sessions.clone(),
             })?,
@@ -699,6 +776,14 @@ mod action {
         }
     }
 
+    fn map_rename_error(error: SessionRenameError) -> AgentActionError {
+        match error {
+            SessionRenameError::SessionNotFound(_) => AgentActionError::SessionNotFound,
+            SessionRenameError::InvalidTitle => AgentActionError::InvalidTitle,
+            SessionRenameError::WorkerStopped => AgentActionError::WorkerStopped,
+        }
+    }
+
     fn map_control_error(error: SessionControlError) -> AgentActionError {
         match error {
             SessionControlError::SessionClosed(_) => AgentActionError::SessionClosed,
@@ -714,15 +799,20 @@ mod action {
     mod tests {
         #![allow(clippy::expect_used)]
 
+        use alloc::vec;
+
+        use barracuda_agent_runtime::{SessionId, SessionInfo, SessionPersistence};
         use barracuda_workflow_plugin::WorkflowActionHandler;
         use serde_json::json;
 
         use super::{
-            parse_input_request, parse_session, AgentActionError, AppendAction, CancelAction,
-            CloseAction, DeleteSessionAction, EmptyOrErrorResponse, InterruptAction,
-            ListSessionsAction, NewSessionAction, OpenSessionAction, RespondAction,
+            map_rename_error, parse_input_request, parse_session, AgentActionError, AppendAction,
+            CancelAction, CloseAction, DeleteSessionAction, EmptyOrErrorResponse, InterruptAction,
+            ListSessionsAction, ListSessionsResponse, NewSessionAction, OpenSessionAction,
+            RenameSessionAction, RespondAction, SessionListEntry, SessionListPage,
             SetPermissionLevelAction, SetReasoningEffortAction,
         };
+        use barracuda_agent_runtime::SessionRenameError;
 
         #[test]
         fn parses_public_identifiers() {
@@ -742,6 +832,7 @@ mod action {
                     ListSessionsAction::SCHEMA.address(),
                     OpenSessionAction::SCHEMA.address(),
                     DeleteSessionAction::SCHEMA.address(),
+                    RenameSessionAction::SCHEMA.address(),
                     AppendAction::SCHEMA.address(),
                     RespondAction::SCHEMA.address(),
                     SetReasoningEffortAction::SCHEMA.address(),
@@ -755,6 +846,7 @@ mod action {
                     "session.list",
                     "session.open",
                     "session.delete",
+                    "session.rename",
                     "session.append",
                     "session.respond",
                     "session.set_reasoning_effort",
@@ -782,6 +874,141 @@ mod action {
         }
 
         #[test]
+        fn append_and_respond_take_optional_attachment_references() {
+            let attachment = json!({
+                "kind": "image",
+                "path": "/workspace/cache/gateway/web/1.jpg",
+                "mime_type": "image/jpeg",
+                "filename": "cat.jpg",
+                "size": 3
+            });
+            let append = json!({
+                "session": "session-1",
+                "text": "",
+                "attachments": [attachment]
+            });
+            let respond = json!({
+                "session": "session-1",
+                "request": "input-1",
+                "text": "yes",
+                "attachments": [attachment]
+            });
+            assert!(AppendAction::SCHEMA.request().validate(&append).is_ok());
+            assert!(RespondAction::SCHEMA.request().validate(&respond).is_ok());
+            let decoded: super::AppendRequest =
+                serde_json::from_value(append).expect("append request decodes");
+            assert_eq!(decoded.attachments.len(), 1);
+            assert_eq!(decoded.attachments[0].name(), "cat.jpg");
+            let without: super::AppendRequest =
+                serde_json::from_value(json!({ "session": "session-1", "text": "hi" }))
+                    .expect("append request decodes");
+            assert!(without.attachments.is_empty());
+            for invalid in [
+                json!({ "kind": "sticker", "path": "/a", "mime_type": "x/y", "size": 1 }),
+                json!({ "kind": "image", "path": "/a", "mime_type": "x/y" }),
+                json!({ "kind": "image", "path": "/a", "mime_type": "x/y", "size": 1, "url": "x" }),
+            ] {
+                assert!(AppendAction::SCHEMA
+                    .request()
+                    .validate(&json!({
+                        "session": "session-1",
+                        "text": "",
+                        "attachments": [invalid]
+                    }))
+                    .is_err());
+            }
+        }
+
+        #[test]
+        fn session_list_entries_carry_metadata_and_match_the_response_schema() {
+            let page = ListSessionsResponse::Success(SessionListPage {
+                sessions: vec![
+                    SessionListEntry::from(SessionInfo {
+                        session: SessionId::new(1),
+                        persistence: SessionPersistence::Persistent,
+                        title: Some("Trip plan".into()),
+                        updated_at: Some(1_700_000_000_000),
+                    }),
+                    SessionListEntry::from(SessionInfo {
+                        session: SessionId::new(2),
+                        persistence: SessionPersistence::Ephemeral,
+                        title: None,
+                        updated_at: None,
+                    }),
+                ],
+                next_offset: None,
+            });
+            let response = serde_json::to_value(page).expect("serialize response");
+            assert_eq!(
+                response,
+                json!({
+                    "sessions": [
+                        {
+                            "session": "session-1",
+                            "persistent": true,
+                            "title": "Trip plan",
+                            "updated_at": 1_700_000_000_000_u64
+                        },
+                        {
+                            "session": "session-2",
+                            "persistent": false,
+                            "title": null,
+                            "updated_at": null
+                        }
+                    ],
+                    "next_offset": null
+                })
+            );
+            assert!(ListSessionsAction::SCHEMA
+                .response()
+                .validate(&response)
+                .is_ok());
+            assert!(ListSessionsAction::SCHEMA
+                .response()
+                .validate(&json!({ "sessions": ["session-1"], "next_offset": null }))
+                .is_err());
+        }
+
+        #[test]
+        fn session_rename_schemas_and_errors_match_the_contract() {
+            assert!(RenameSessionAction::SCHEMA
+                .request()
+                .validate(&json!({ "session": "session-1", "title": "Trip plan" }))
+                .is_ok());
+            assert!(RenameSessionAction::SCHEMA
+                .request()
+                .validate(&json!({ "session": "session-1" }))
+                .is_err());
+            for error in [
+                SessionRenameError::SessionNotFound(SessionId::new(1)),
+                SessionRenameError::InvalidTitle,
+                SessionRenameError::WorkerStopped,
+            ] {
+                let response =
+                    serde_json::to_value(EmptyOrErrorResponse::error(map_rename_error(error)))
+                        .expect("serialize response");
+                assert!(RenameSessionAction::SCHEMA
+                    .response()
+                    .validate(&response)
+                    .is_ok());
+            }
+            for response in [
+                json!({}),
+                json!({ "error": "invalid_request" }),
+                json!({ "error": "invalid_title" }),
+            ] {
+                assert!(RenameSessionAction::SCHEMA
+                    .response()
+                    .validate(&response)
+                    .is_ok());
+            }
+            assert!(RenameSessionAction::SCHEMA
+                .response()
+                .validate(&json!({ "error": "storage" }))
+                .is_err());
+        }
+
+        #[test]
         fn keeps_business_errors_in_the_workflow_response_document() {
             let response = serde_json::to_value(EmptyOrErrorResponse::error(
                 AgentActionError::SessionNotOpen,
@@ -801,16 +1028,18 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestKind, IterationEvent, ProviderUsage,
     SessionCloseReason, SessionControl, SessionEvent, SessionId, SessionStream, TurnEvent,
     TurnOrigin,
 };
+use barracuda_json_writer::{write_value, Object, Sink};
 use barracuda_workflow_plugin::{
-    EmitError, Event, WorkflowActionRegistration, WorkflowActionRegistry,
+    EmitError, Event, JsonText, WorkflowActionRegistration, WorkflowActionRegistry,
     WorkflowActionRegistryError, WorkflowService,
 };
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use futures_lite::{future, future::poll_fn, Stream};
 use serde_json::{json, Map, Value};
 
@@ -835,8 +1064,8 @@ struct RegistryState {
 
 struct RegistryInner {
     state: RefCell<RegistryState>,
-    changed: Sender<()>,
-    changes: Receiver<()>,
+    /// Wakes the event loop when a session is added.
+    changed: Signal<NoopRawMutex, ()>,
 }
 
 #[derive(Clone)]
@@ -844,14 +1073,12 @@ pub(crate) struct SessionRegistry(Rc<RegistryInner>);
 
 impl Default for SessionRegistry {
     fn default() -> Self {
-        let (changed, changes) = async_channel::bounded(1);
         Self(Rc::new(RegistryInner {
             state: RefCell::new(RegistryState {
                 next_run: 1,
                 sessions: BTreeMap::new(),
             }),
-            changed,
-            changes,
+            changed: Signal::new(),
         }))
     }
 }
@@ -879,7 +1106,7 @@ impl SessionRegistry {
             .sessions
             .insert(session, OpenedSession { control, events });
         drop(state);
-        let _ignored = self.0.changed.try_send(());
+        self.0.changed.signal(());
         run
     }
 
@@ -887,7 +1114,7 @@ impl SessionRegistry {
         loop {
             let event = poll_fn(|context| self.poll_event(context));
             let changed = async {
-                let _ignored = self.0.changes.recv().await;
+                self.0.changed.wait().await;
                 None
             };
             if let Some(event) = future::or(event, changed).await {
@@ -984,6 +1211,9 @@ async fn emit_session_events(
 ) -> Result<(), AgentWorkflowError> {
     let mut sequence = 0_u64;
     loop {
+        // Every text delta becomes an Event, so pause while earlier ones are
+        // still being handled instead of queuing the whole stream.
+        workflow.ready_for::<SessionOutputEvent>().await;
         let pending = sessions.next_event().await;
         sequence = emit_session_event(&workflow, pending.session, sequence, pending.event)?;
     }
@@ -997,6 +1227,7 @@ fn emit_session_event(
 ) -> Result<u64, AgentWorkflowError> {
     let mut emitter = SessionEmitter {
         workflow,
+        listening: workflow.has_listener::<SessionOutputEvent>(),
         session,
         sequence,
     };
@@ -1018,6 +1249,9 @@ fn emit_session_event(
 
 struct SessionEmitter<'a> {
     workflow: &'a WorkflowService,
+    /// Whether any Workflow runs for session output; Events nobody would
+    /// handle are not built, though they still consume a sequence number.
+    listening: bool,
     session: SessionId,
     sequence: u64,
 }
@@ -1073,8 +1307,12 @@ impl SessionEmitter<'_> {
                 "turn_error",
                 json!({ "message": error.to_string(), "message_truncated": false }),
             )?,
-            TurnEvent::Ended { turn } => {
-                self.emit("turn_ended", json!({ "turn": format!("{turn}") }))?;
+            TurnEvent::Ended { turn, outcome } => {
+                let outcome: &'static str = outcome.into();
+                self.emit(
+                    "turn_ended",
+                    json!({ "turn": format!("{turn}"), "outcome": outcome }),
+                )?;
             }
         }
         Ok(())
@@ -1118,16 +1356,41 @@ impl SessionEmitter<'_> {
     }
 
     fn emit_text(&mut self, event_type: &str, text: String) -> Result<(), AgentWorkflowError> {
-        self.emit(event_type, json!({ "text": text }))
+        self.emit_with(event_type, |sink| {
+            let mut payload = Object::begin(sink);
+            payload.str("text", &text);
+            payload.end();
+        })
     }
 
     fn emit(&mut self, event_type: &str, payload: Value) -> Result<(), AgentWorkflowError> {
-        self.workflow.emit::<SessionOutputEvent>(json!({
-            "session": format!("{}", self.session),
-            "sequence": self.sequence,
-            "type": event_type,
-            "payload": payload,
-        }))?;
+        self.emit_with(event_type, |sink| write_value(sink, &payload))
+    }
+
+    /// Emits one Event written straight into shared bulk JSON.
+    fn emit_with(
+        &mut self,
+        event_type: &str,
+        payload: impl Fn(&mut dyn Sink),
+    ) -> Result<(), AgentWorkflowError> {
+        if self.listening {
+            let session = format!("{}", self.session);
+            let sequence = Value::from(self.sequence);
+            let event = JsonText::try_encode_object(|object| {
+                payload(object.field("payload"));
+                object.value("sequence", &sequence);
+                object.str("session", &session);
+                object.str("type", event_type);
+            });
+            match event {
+                Ok(event) => self.workflow.emit::<SessionOutputEvent>(event)?,
+                Err(_error) => log::warn!(
+                    "Agent session {} Event {} does not fit in bulk memory",
+                    self.session,
+                    self.sequence
+                ),
+            }
+        }
         self.sequence = self
             .sequence
             .checked_add(1)

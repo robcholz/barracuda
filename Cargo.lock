@@ -18,41 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aead"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0"
-dependencies = [
- "crypto-common 0.1.7",
- "generic-array",
-]
-
-[[package]]
-name = "aes"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
-dependencies = [
- "cfg-if",
- "cipher",
- "cpufeatures 0.2.17",
-]
-
-[[package]]
-name = "aes-gcm"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
-dependencies = [
- "aead",
- "aes",
- "cipher",
- "ctr",
- "ghash",
- "subtle",
-]
-
-[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -189,6 +154,8 @@ dependencies = [
  "event-listener-strategy",
  "futures-core",
  "pin-project-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -317,20 +284,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "bare-vfs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8b435285f9068d2ec4c708f7992521dd84807cdae9724b76b31b1c1479b5212"
-
-[[package]]
 name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "async-stream",
  "barracuda-agent-context",
  "barracuda-agent-memory",
+ "barracuda-agent-message",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-agent-skill",
@@ -338,10 +299,10 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -349,13 +310,14 @@ dependencies = [
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic",
+ "portable-atomic-util",
  "proc-macro2",
  "quote",
  "serde",
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -363,6 +325,7 @@ name = "barracuda-agent-context"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "barracuda-agent-message",
  "futures-util",
  "getset",
  "serde",
@@ -402,11 +365,19 @@ name = "barracuda-agent-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-time-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
  "json-validator",
  "log",
  "serde",
@@ -420,11 +391,14 @@ name = "barracuda-agent-memory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-agent-message",
+ "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "futures-lite",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -432,24 +406,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent-message"
+version = "0.1.0"
+dependencies = [
+ "barracuda-bulk-memory",
+ "barracuda-json-writer",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-agent-multiagent"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-permission",
  "barracuda-agent-tool",
- "futures-channel",
+ "barracuda-runtime-utils",
+ "barracuda-tracing",
  "futures-core",
  "futures-lite",
  "getset",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -458,7 +442,6 @@ version = "0.1.0"
 dependencies = [
  "getset",
  "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -468,6 +451,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-vfs",
  "futures-lite",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -477,31 +461,27 @@ dependencies = [
 name = "barracuda-agent-plugin"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent-runtime",
  "barracuda-captive-portal-plugin",
+ "barracuda-json-writer",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-time-plugin",
  "barracuda-vfs",
  "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
- "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
- "json-validator",
  "log",
- "picoserve",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -525,7 +505,6 @@ name = "barracuda-agent-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-memory",
  "barracuda-agent-persistence",
@@ -536,20 +515,20 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
+ "base64 0.22.1",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde_json",
  "static_cell",
- "tempdir",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -568,7 +547,6 @@ dependencies = [
 name = "barracuda-agent-session"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-agent",
  "barracuda-agent-multiagent",
  "barracuda-agent-permission",
@@ -577,19 +555,19 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
  "barracuda-vfs",
  "embassy-time",
- "futures-channel",
  "futures-core",
  "futures-lite",
  "http-client",
  "json-validator",
  "log",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -602,6 +580,8 @@ dependencies = [
  "barracuda-vfs",
  "futures-lite",
  "getset",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -623,19 +603,22 @@ name = "barracuda-agent-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-agent-message",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-platform-test",
- "futures-channel",
+ "barracuda-runtime-utils",
+ "barracuda-tracing",
  "futures-core",
  "futures-lite",
  "futures-util",
  "getset",
  "json-validator",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -656,6 +639,7 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-agent-tool",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-executor",
@@ -690,6 +674,7 @@ name = "barracuda-agent-workflow-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-json-writer",
  "barracuda-plugin",
  "barracuda-workflow-plugin",
  "json-validator",
@@ -703,8 +688,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -715,25 +704,31 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+ "portable-atomic",
 ]
 
 [[package]]
-name = "barracuda-app-manager-plugin"
+name = "barracuda-app-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-lua",
  "barracuda-plugin",
  "barracuda-ui-plugin",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "futures-lite",
  "json-validator",
  "log",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "serde_json",
 ]
@@ -744,9 +739,14 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -843,6 +843,7 @@ dependencies = [
  "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-tool",
+ "barracuda-plugin-tool",
  "clap",
  "ctrlc",
  "dialoguer",
@@ -865,6 +866,7 @@ version = "0.1.0"
 dependencies = [
  "allocator-api2",
  "bytemuck",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -873,9 +875,14 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -925,12 +932,9 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustyline",
- "serde",
  "serde_json",
- "strum 0.28.0",
  "tempfile",
  "terminal_size",
- "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "unicode-width",
@@ -959,10 +963,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-graphics-core",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -984,6 +993,21 @@ name = "barracuda-driver-cst816t"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-datasheet-tests"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-bq27220",
+ "barracuda-driver-es7210",
+ "barracuda-driver-es8311",
+ "barracuda-driver-es8389",
+ "barracuda-driver-ina226",
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-rx8130ce",
+ "barracuda-driver-ws2812-spi",
+ "barracuda-platform-virtual-io",
 ]
 
 [[package]]
@@ -1086,6 +1110,7 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -1121,6 +1146,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-files-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-captive-portal-plugin",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-webserver-plugin",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "log",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-gdeh0154d67-display"
 version = "0.1.0"
 dependencies = [
@@ -1136,10 +1183,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
- "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1148,10 +1198,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-bulk-memory",
  "barracuda-plugin",
+ "barracuda-tls",
  "barracuda-workflow-plugin",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "http-client",
+ "log",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1162,11 +1214,15 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1175,9 +1231,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1185,7 +1245,9 @@ name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1197,25 +1259,44 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "log",
+ "picoserve",
+ "rusty-fork",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "barracuda-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-runtime",
+ "barracuda-platform",
+ "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "gateway",
- "gateway-http",
+ "http-client",
+ "log",
+ "reqwless",
+ "rusty-fork",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1227,6 +1308,7 @@ dependencies = [
  "barracuda-workflow-plugin",
  "futures-lite",
  "gateway",
+ "json-validator",
  "log",
  "serde",
  "serde_json",
@@ -1238,15 +1320,27 @@ name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
- "http-client",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "inkbox",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
 ]
@@ -1256,17 +1350,31 @@ name = "barracuda-imessage-qq-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
+ "embassy-net",
  "embassy-sync 0.7.2",
- "http-client",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
  "qq",
+ "rusty-fork",
  "serde",
  "serde_json",
+ "ws-client",
 ]
 
 [[package]]
@@ -1274,17 +1382,30 @@ name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
- "http-client",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
  "telegram",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1292,11 +1413,25 @@ name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "log",
+ "picoserve",
+ "rusty-fork",
+ "serde",
+ "serde_json",
  "web",
 ]
 
@@ -1305,16 +1440,31 @@ name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-tls",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "base64 0.22.1",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
- "http-client",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "wechat",
 ]
 
@@ -1324,9 +1474,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1335,7 +1489,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-ina226",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -1348,13 +1501,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-json-writer"
+version = "0.1.0"
+dependencies = [
+ "barracuda-bulk-memory",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-kv"
 version = "0.1.0"
 dependencies = [
  "barracuda-platform-test",
  "ekv",
  "embassy-sync 0.6.2",
- "embassy-sync 0.7.2",
  "embedded-storage-async",
  "futures-lite",
  "thiserror 2.0.18",
@@ -1367,8 +1530,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1376,10 +1543,12 @@ name = "barracuda-lua"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "barracuda-bulk-memory",
+ "cc",
  "futures-lite",
  "getset",
- "lunka",
- "lunka-src",
+ "libm",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -1387,11 +1556,15 @@ name = "barracuda-message-queue-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embassy-sync 0.7.2",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -1415,10 +1588,12 @@ name = "barracuda-model-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-agent-trace",
+ "barracuda-agent-message",
  "barracuda-bulk-memory",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-tracing",
+ "barracuda-vfs",
  "base64 0.22.1",
  "embassy-futures",
  "embassy-time",
@@ -1435,9 +1610,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.28.0",
- "tempdir",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -1487,6 +1660,7 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
 ]
 
 [[package]]
@@ -1507,19 +1681,25 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1535,19 +1715,25 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1563,19 +1749,25 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
+ "esp-radio",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1591,47 +1783,23 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-idf-part",
  "esp-println",
- "esp-storage",
- "log",
- "nb 1.1.0",
- "static_cell",
-]
-
-[[package]]
-name = "barracuda-platform-esp32s2"
-version = "0.1.0"
-dependencies = [
- "barracuda-board",
- "barracuda-board-config",
- "barracuda-board-hal",
- "barracuda-bulk-memory",
- "barracuda-platform",
- "barracuda-tls",
- "embassy-embedded-hal 0.6.0",
- "embassy-executor",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "embedded-hal-bus",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "esp-hal",
- "esp-idf-part",
- "esp-println",
+ "esp-rtos",
  "esp-storage",
  "log",
  "nb 1.1.0",
@@ -1648,7 +1816,6 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-peripheral",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1679,11 +1846,13 @@ dependencies = [
 name = "barracuda-platform-linux"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
+ "barracuda-platform-virtual-io",
+ "cap",
  "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
@@ -1709,6 +1878,7 @@ dependencies = [
 name = "barracuda-platform-macos"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "barracuda-board",
  "barracuda-board-config",
@@ -1716,8 +1886,9 @@ dependencies = [
  "barracuda-platform",
  "barracuda-platform-macos-network-gateway",
  "barracuda-platform-macos-network-gateway-protocol",
+ "barracuda-platform-virtual-io",
  "barracuda-system-image",
- "barracuda-tls",
+ "cap",
  "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
@@ -1787,7 +1958,6 @@ dependencies = [
  "barracuda-platform-esp32c3",
  "barracuda-platform-esp32c6",
  "barracuda-platform-esp32p4",
- "barracuda-platform-esp32s2",
  "barracuda-platform-esp32s3",
  "barracuda-platform-linux",
  "barracuda-platform-macos",
@@ -1803,13 +1973,14 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
+ "cortex-m",
  "cortex-m-rt",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
  "embassy-stm32",
  "embassy-sync 0.8.0",
+ "embedded-alloc",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
@@ -1825,7 +1996,6 @@ dependencies = [
 name = "barracuda-platform-test"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "embassy-embedded-hal 0.5.0",
@@ -1833,11 +2003,13 @@ dependencies = [
  "embassy-net",
  "embassy-net-driver-channel",
  "embassy-sync 0.7.2",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "embedded-storage-async",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -1849,6 +2021,23 @@ dependencies = [
  "barracuda-platform-config",
  "clap",
  "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-platform-virtual-io"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "critical-section",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-hal-bus",
+ "log",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1867,17 +2056,20 @@ name = "barracuda-plugin-api"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-target-api",
  "embassy-net",
  "embassy-time",
- "http-client",
+ "portable-atomic-util",
 ]
 
 [[package]]
 name = "barracuda-plugin-build"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-config",
+ "barracuda-peripheral-config",
  "barracuda-plugin-manifest",
  "sha2 0.10.9",
  "tempfile",
@@ -1907,6 +2099,7 @@ dependencies = [
  "futures-lite",
  "getset",
  "log",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -1921,11 +2114,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-selection"
+version = "0.0.0"
+dependencies = [
+ "barracuda-agent-file-plugin",
+ "barracuda-agent-http-plugin",
+ "barracuda-agent-imessage-gateway-plugin",
+ "barracuda-agent-plugin",
+ "barracuda-agent-scheduler-plugin",
+ "barracuda-agent-time-plugin",
+ "barracuda-agent-vm-plugin",
+ "barracuda-agent-websearch-plugin",
+ "barracuda-agent-workflow-plugin",
+ "barracuda-analog-plugin",
+ "barracuda-app-plugin",
+ "barracuda-audio-plugin",
+ "barracuda-camera-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-display-plugin",
+ "barracuda-files-plugin",
+ "barracuda-gpio-plugin",
+ "barracuda-http-plugin",
+ "barracuda-i2c-plugin",
+ "barracuda-i2s-plugin",
+ "barracuda-imessage-bluebubble-plugin",
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
+ "barracuda-imessage-telegram-plugin",
+ "barracuda-imessage-web-plugin",
+ "barracuda-imessage-wechat-plugin",
+ "barracuda-imu-plugin",
+ "barracuda-led-strip-plugin",
+ "barracuda-message-queue-plugin",
+ "barracuda-power-monitor-plugin",
+ "barracuda-pwm-plugin",
+ "barracuda-scheduler-plugin",
+ "barracuda-spi-plugin",
+ "barracuda-time-plugin",
+ "barracuda-uart-plugin",
+ "barracuda-ui-plugin",
+ "barracuda-vm-agent-plugin",
+ "barracuda-vm-filesystem-plugin",
+ "barracuda-vm-http-plugin",
+ "barracuda-vm-plugin",
+ "barracuda-vm-systeminfo-plugin",
+ "barracuda-vm-time-plugin",
+ "barracuda-vm-webserver-plugin",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "barracuda-workflow-plugin",
+]
+
+[[package]]
 name = "barracuda-plugin-tool"
 version = "0.1.0"
 dependencies = [
  "anstream",
- "anstyle",
+ "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -1935,6 +2181,21 @@ dependencies = [
  "syn 2.0.118",
  "tempfile",
  "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "barracuda-power-monitor-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1951,18 +2212,24 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
- "futures-channel",
+ "critical-section",
+ "event-listener",
  "futures-core",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1973,7 +2240,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-rx8130ce",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -1981,7 +2247,6 @@ dependencies = [
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-time-plugin",
  "barracuda-workflow-plugin",
@@ -1989,7 +2254,6 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-lite",
  "getset",
  "log",
  "serde",
@@ -2007,12 +2271,13 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "critical-section",
- "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2022,10 +2287,13 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2043,62 +2311,17 @@ dependencies = [
 name = "barracuda-system"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-file-plugin",
- "barracuda-agent-http-plugin",
- "barracuda-agent-imessage-gateway-plugin",
- "barracuda-agent-plugin",
- "barracuda-agent-scheduler-plugin",
- "barracuda-agent-time-plugin",
- "barracuda-agent-vm-plugin",
- "barracuda-agent-websearch-plugin",
- "barracuda-agent-workflow-plugin",
- "barracuda-analog-plugin",
- "barracuda-app-manager-plugin",
- "barracuda-audio-plugin",
  "barracuda-board-hal",
- "barracuda-camera-plugin",
- "barracuda-captive-portal-plugin",
- "barracuda-display-plugin",
- "barracuda-gpio-plugin",
- "barracuda-http-plugin",
- "barracuda-i2c-plugin",
- "barracuda-i2s-plugin",
- "barracuda-imessage-bluebubble-plugin",
- "barracuda-imessage-gateway-plugin",
- "barracuda-imessage-inkbox-plugin",
- "barracuda-imessage-qq-plugin",
- "barracuda-imessage-telegram-plugin",
- "barracuda-imessage-web-plugin",
- "barracuda-imessage-wechat-plugin",
- "barracuda-imu-plugin",
- "barracuda-led-strip-plugin",
- "barracuda-message-queue-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-selection",
  "barracuda-plugin-tool",
- "barracuda-pwm-plugin",
- "barracuda-scheduler-plugin",
- "barracuda-spi-plugin",
  "barracuda-target-api",
- "barracuda-time-plugin",
- "barracuda-tls",
- "barracuda-uart-plugin",
- "barracuda-ui-plugin",
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "barracuda-vfs-memfs",
- "barracuda-vm-agent-plugin",
- "barracuda-vm-filesystem-plugin",
- "barracuda-vm-http-plugin",
- "barracuda-vm-plugin",
- "barracuda-vm-systeminfo-plugin",
- "barracuda-vm-time-plugin",
- "barracuda-vm-webserver-plugin",
- "barracuda-webserver-plugin",
- "barracuda-wifi-plugin",
- "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-futures",
@@ -2106,13 +2329,12 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-hal 1.0.0",
- "embedded-hal-async",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "futures-lite",
- "http-client",
  "log",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -2135,6 +2357,7 @@ dependencies = [
  "barracuda-cli-style",
  "barracuda-platform-config",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
@@ -2183,7 +2406,6 @@ dependencies = [
  "barracuda-driver-pi4ioe5v6408",
  "barracuda-driver-st712x",
  "barracuda-peripheral",
- "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -2210,18 +2432,15 @@ dependencies = [
 name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
  "barracuda-plugin",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-lite",
  "getset",
  "log",
  "sntpc",
- "static_cell",
  "thiserror 2.0.18",
 ]
 
@@ -2229,10 +2448,22 @@ dependencies = [
 name = "barracuda-tls"
 version = "0.1.0"
 dependencies = [
- "http-client",
+ "allocator-api2",
+ "barracuda-bulk-memory",
+ "barracuda-platform",
+ "cc",
+ "critical-section",
+ "embedded-io-async 0.7.0",
+ "log",
  "mbedtls-rs",
- "rand_core 0.10.1",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-tracing"
+version = "0.1.0"
+dependencies = [
+ "tracing",
 ]
 
 [[package]]
@@ -2242,26 +2473,29 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
 name = "barracuda-ui-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-lua",
  "barracuda-plugin",
  "barracuda-ui-runtime",
- "barracuda-vm-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "futures-lite",
  "log",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2281,6 +2515,8 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2295,6 +2531,8 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "hadris-fat",
  "hadris-io",
+ "portable-atomic-util",
+ "spin 0.12.3",
 ]
 
 [[package]]
@@ -2303,11 +2541,14 @@ version = "0.1.0"
 dependencies = [
  "barracuda-vfs",
  "critical-section",
+ "delog",
  "embassy-futures",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "generic-array",
  "littlefs2",
+ "littlefs2-sys",
+ "portable-atomic-util",
  "spin 0.10.1",
  "typenum",
 ]
@@ -2316,11 +2557,12 @@ dependencies = [
 name = "barracuda-vfs-memfs"
 version = "0.1.0"
 dependencies = [
- "bare-vfs",
+ "barracuda-bulk-memory",
  "barracuda-vfs",
  "critical-section",
  "embassy-futures",
  "embedded-io-async 0.7.0",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -2331,12 +2573,17 @@ dependencies = [
  "async-channel",
  "barracuda-agent-plugin",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
  "thiserror 2.0.18",
 ]
@@ -2348,6 +2595,7 @@ dependencies = [
  "async-channel",
  "barracuda-lua",
  "futures-lite",
+ "libm",
 ]
 
 [[package]]
@@ -2364,6 +2612,8 @@ dependencies = [
  "critical-section",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2373,19 +2623,17 @@ dependencies = [
  "async-channel",
  "barracuda-http-plugin",
  "barracuda-plugin",
- "barracuda-vfs",
- "barracuda-vfs-memfs",
+ "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
- "barracuda-vm-filesystem-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
- "barracuda-vm-time-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
  "futures-util",
+ "portable-atomic",
+ "portable-atomic-util",
  "thiserror 2.0.18",
 ]
 
@@ -2394,6 +2642,8 @@ name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
  "thiserror 2.0.18",
 ]
@@ -2404,7 +2654,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-lua",
  "barracuda-plugin",
- "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
@@ -2420,15 +2669,17 @@ dependencies = [
 name = "barracuda-vm-runtime"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "barracuda-lua",
+ "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
- "futures-channel",
  "getset",
+ "log",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -2439,6 +2690,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
 ]
 
 [[package]]
@@ -2447,6 +2700,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-time-plugin",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
@@ -2454,8 +2708,9 @@ dependencies = [
  "critical-section",
  "embassy-executor",
  "embassy-futures",
- "futures-channel",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
  "thiserror 2.0.18",
  "time",
 ]
@@ -2465,19 +2720,24 @@ name = "barracuda-vm-webserver-plugin"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vfs",
- "barracuda-vfs-memfs",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "critical-section",
+ "embassy-executor",
  "embassy-time",
  "embedded-io-async 0.7.0",
- "futures-channel",
  "futures-lite",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
  "spin 0.10.1",
 ]
 
@@ -2526,7 +2786,6 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.7.0",
- "futures-lite",
  "log",
  "picoserve",
  "serde",
@@ -2558,6 +2817,7 @@ dependencies = [
 name = "barracuda-workflow-runtime"
 version = "0.1.0"
 dependencies = [
+ "barracuda-json-writer",
  "futures-lite",
  "getset",
  "json-validator",
@@ -2764,11 +3024,19 @@ dependencies = [
 name = "bluebubbles"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
  "futures-lite",
- "http-client",
  "percent-encoding",
+ "serde",
  "serde_json",
 ]
 
@@ -2863,6 +3131,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cap"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f125eb85b84a24c36b02ed1d22c9dd8632f53b3cde6e4d23512f94021030003"
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2925,16 +3199,6 @@ dependencies = [
  "iana-time-zone",
  "num-traits",
  "windows-link",
-]
-
-[[package]]
-name = "cipher"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
-dependencies = [
- "crypto-common 0.1.7",
- "inout",
 ]
 
 [[package]]
@@ -3019,6 +3283,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -3044,12 +3309,6 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
-
-[[package]]
-name = "const-oid"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "const-sha1"
@@ -3242,15 +3501,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctr"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
-dependencies = [
- "cipher",
-]
-
-[[package]]
 name = "ctrlc"
 version = "3.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3260,12 +3510,6 @@ dependencies = [
  "nix 0.31.3",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "current_platform"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a74858bcfe44b22016cb49337d7b6f04618c58e5dbfdef61b06b8c434324a0bc"
 
 [[package]]
 name = "cvt"
@@ -3468,6 +3712,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed991f9823b19e8a0380e198dcbb6aa6ac82727b40bfecd2c6cc634f46b7e01c"
 dependencies = [
  "log",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -3476,31 +3721,8 @@ version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
- "const-oid 0.9.6",
+ "const-oid",
  "zeroize",
-]
-
-[[package]]
-name = "der"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a69dedd701da44b0536442edf09c81a64b0ab97a7a4a5e3d1971f00027cbc63d"
-dependencies = [
- "const-oid 0.10.2",
- "der_derive",
- "heapless 0.9.3",
- "time",
-]
-
-[[package]]
-name = "der_derive"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -3544,7 +3766,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
- "const-oid 0.9.6",
+ "const-oid",
  "crypto-common 0.1.7",
  "subtle",
 ]
@@ -3629,7 +3851,7 @@ version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
 dependencies = [
- "der 0.7.10",
+ "der",
  "digest 0.10.7",
  "elliptic-curve",
  "rfc6979",
@@ -3752,6 +3974,7 @@ dependencies = [
  "embassy-futures",
  "embassy-hal-internal 0.4.0",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -3767,6 +3990,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0d3b15c9d7dc4fec1d8cb77112472fb008b3b28c51ad23838d83587a6d2f1e"
 dependencies = [
  "cordyceps",
+ "cortex-m",
  "critical-section",
  "document-features",
  "embassy-executor-macros",
@@ -3880,6 +4104,9 @@ dependencies = [
  "embassy-hal-internal 0.5.0",
  "embassy-net-driver",
  "embassy-sync 0.8.0",
+ "embassy-time",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embassy-usb-driver",
  "embassy-usb-synopsys-otg 0.3.3",
  "embedded-can",
@@ -4162,31 +4389,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-tls"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff3c16c9cedcab3ef5c79fd46349152adbb98f997b937cb1ead7655f5c07e43"
-dependencies = [
- "aes-gcm",
- "const-oid 0.10.2",
- "der 0.8.1",
- "digest 0.10.7",
- "ecdsa",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "generic-array",
- "heapless 0.9.3",
- "hkdf",
- "hmac",
- "p256",
- "portable-atomic",
- "rand_core 0.6.4",
- "sha2 0.10.9",
- "signature",
- "typenum",
-]
-
-[[package]]
 name = "embuild"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4201,7 +4403,7 @@ dependencies = [
  "home",
  "log",
  "regex",
- "remove_dir_all 0.8.4",
+ "remove_dir_all",
  "serde",
  "serde_json",
  "shlex 1.3.0",
@@ -4398,11 +4600,11 @@ dependencies = [
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
- "esp32",
+ "esp32 0.41.0",
  "esp32c2",
- "esp32c3",
+ "esp32c3 0.33.0",
  "esp32c5",
- "esp32c6",
+ "esp32c6 0.24.0",
  "esp32c61",
  "esp32h2",
  "esp32p4",
@@ -4501,7 +4703,13 @@ dependencies = [
  "esp-hal",
  "esp-metadata-generated",
  "esp-sync",
+ "esp-wifi-sys-esp32",
+ "esp-wifi-sys-esp32c3",
+ "esp-wifi-sys-esp32c6",
  "esp-wifi-sys-esp32s3",
+ "esp32 0.42.0",
+ "esp32c3 0.34.0",
+ "esp32c6 0.25.0",
  "esp32s3 0.37.0",
  "log",
 ]
@@ -4548,6 +4756,9 @@ dependencies = [
  "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
  "esp-wifi-sys-esp32s31",
+ "esp32 0.42.0",
+ "esp32c3 0.34.0",
+ "esp32c6 0.25.0",
  "esp32s3 0.37.0",
  "heapless 0.9.3",
  "instability",
@@ -4589,11 +4800,10 @@ checksum = "e933ff78374b763b65998b64ad671b4890ed4ba13a80deff9f53afe95ede289d"
 dependencies = [
  "document-features",
  "esp-metadata-generated",
- "esp32",
- "esp32c3",
- "esp32c6",
+ "esp32 0.41.0",
+ "esp32c3 0.33.0",
+ "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2",
  "esp32s3 0.36.0",
 ]
 
@@ -4636,11 +4846,10 @@ dependencies = [
  "esp-metadata-generated",
  "esp-rom-sys",
  "esp-sync",
- "esp32",
- "esp32c3",
- "esp32c6",
+ "esp32 0.41.0",
+ "esp32c3 0.33.0",
+ "esp32c6 0.24.0",
  "esp32p4",
- "esp32s2",
  "esp32s3 0.36.0",
 ]
 
@@ -4741,6 +4950,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e31e10b4c4f5fc2445896b46a7dabd689572d1e52dada21703659d97a373aa4"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c2"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4759,6 +4977,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c3"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "569e03d871eac998bc62ef95a9a6d31a91fc0aaef0e0017a6b5a6a9c4759768a"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c5"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4772,6 +4999,15 @@ name = "esp32c6"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a207a5d6886ca89b4f220606dcf3779ca869803df192508314939186ae8de1ee"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c6"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f90472d3e6a752e5d20533796f649760103ea449319f14d2a26b2fdff95633bb"
 dependencies = [
  "vcell",
 ]
@@ -4857,8 +5093,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
 dependencies = [
  "concurrent-queue",
+ "critical-section",
  "parking",
  "pin-project-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -4967,12 +5206,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
-name = "fuchsia-cprng"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
-
-[[package]]
 name = "fugit"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5017,6 +5250,9 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "futures-executor"
@@ -5101,24 +5337,11 @@ dependencies = [
 name = "gateway"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "futures-core",
  "futures-lite",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "gateway-http"
-version = "0.1.0"
-dependencies = [
- "barracuda-bulk-memory",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "futures-lite",
- "gateway",
- "http-client",
- "reqwless",
  "thiserror 2.0.18",
 ]
 
@@ -5186,7 +5409,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
- "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -5198,16 +5420,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
-]
-
-[[package]]
-name = "ghash"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
-dependencies = [
- "opaque-debug",
- "polyval",
 ]
 
 [[package]]
@@ -5459,9 +5671,13 @@ dependencies = [
 name = "http-client"
 version = "0.1.0"
 dependencies = [
+ "barracuda-tls",
  "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "reqwless",
+ "static_cell",
 ]
 
 [[package]]
@@ -5590,20 +5806,19 @@ dependencies = [
 name = "inkbox"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
  "futures-lite",
- "http-client",
+ "serde",
  "serde_json",
-]
-
-[[package]]
-name = "inout"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
-dependencies = [
- "generic-array",
 ]
 
 [[package]]
@@ -5827,6 +6042,7 @@ checksum = "999d08bb7fae46d63ecb98d2474d28f7af1a6c928a51b4dfe5f1804abf9afc46"
 dependencies = [
  "bindgen 0.70.1",
  "cc",
+ "tinyrlibc",
 ]
 
 [[package]]
@@ -5858,21 +6074,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lunka"
-version = "0.14.0"
-source = "git+https://github.com/robcholz/lunka.git?rev=820b3d89a6ccfcdae3286f9b4548831dc568cf54#820b3d89a6ccfcdae3286f9b4548831dc568cf54"
-
-[[package]]
-name = "lunka-src"
-version = "54.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59eb06a054a60c04c7ca44aee6b2b197feaff6364907ed7f43d68580adfc02b2"
-dependencies = [
- "cc",
- "current_platform",
-]
-
-[[package]]
 name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5896,8 +6097,6 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 [[package]]
 name = "mbedtls-rs"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f164d9b6133a4a07ffdd96416c0898d728009df55a86456378f21b78d36c98c"
 dependencies = [
  "critical-section",
  "embedded-io 0.7.1",
@@ -5927,7 +6126,6 @@ dependencies = [
  "log",
  "sha1 0.10.7",
  "sha2 0.10.9",
- "time",
 ]
 
 [[package]]
@@ -6212,12 +6410,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "opaque-debug"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
-
-[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6387,7 +6579,7 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
- "der 0.7.10",
+ "der",
  "spki",
 ]
 
@@ -6396,18 +6588,6 @@ name = "pocketjs-core"
 version = "0.1.0"
 dependencies = [
  "taffy",
-]
-
-[[package]]
-name = "polyval"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "opaque-debug",
- "universal-hash",
 ]
 
 [[package]]
@@ -6518,12 +6698,30 @@ dependencies = [
 name = "qq"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-tls",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io 0.7.1",
  "futures-lite",
- "http-client",
+ "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
@@ -6551,19 +6749,6 @@ name = "radium"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
-
-[[package]]
-name = "rand"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293"
-dependencies = [
- "fuchsia-cprng",
- "libc",
- "rand_core 0.3.1",
- "rdrand",
- "winapi",
-]
 
 [[package]]
 name = "rand"
@@ -6608,21 +6793,6 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a6fdeb83b075e8266dcc8762c22776f6877a63111121f5f8c7411e5be7eed4b"
-dependencies = [
- "rand_core 0.4.2",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c33a3c44ca05fa6f1807d8e6743f3824e8509beca625669633be0acbdf509dc"
-
-[[package]]
-name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
@@ -6644,15 +6814,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "rdrand"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
-dependencies = [
- "rand_core 0.3.1",
-]
 
 [[package]]
 name = "redox_syscall"
@@ -6694,15 +6855,6 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remove_dir_all"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
-dependencies = [
- "winapi",
-]
-
-[[package]]
-name = "remove_dir_all"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a694f9e0eb3104451127f6cc1e5de55f59d3b1fc8c5ddfaeb6f1e716479ceb4a"
@@ -6725,7 +6877,6 @@ dependencies = [
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
- "embedded-tls",
  "heapless 0.9.3",
  "hex",
  "httparse",
@@ -6902,10 +7053,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "rusty-fork"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "rustyline"
 version = "18.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f6a737db68eb1a8ccff86b584b2fc13eca6a7bb6f78ebc7c529547e3ab9684"
 dependencies = [
  "bitflags 2.13.0",
  "cfg-if",
@@ -6978,7 +7139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
 dependencies = [
  "base16ct",
- "der 0.7.10",
+ "der",
  "generic-array",
  "subtle",
  "zeroize",
@@ -7318,6 +7479,9 @@ name = "spin"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "spin"
@@ -7326,6 +7490,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
 dependencies = [
  "lock_api",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -7334,7 +7499,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
- "der 0.7.10",
+ "der",
 ]
 
 [[package]]
@@ -7374,6 +7539,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e74b78632cea498cfb28386a29f8bfae7476d6570a78733eb5fecbee66c2f4ce"
 dependencies = [
  "cortex-m",
+ "cortex-m-rt",
 ]
 
 [[package]]
@@ -7512,21 +7678,19 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "telegram"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
  "futures-lite",
- "http-client",
+ "serde",
  "serde_json",
-]
-
-[[package]]
-name = "tempdir"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8"
-dependencies = [
- "rand 0.4.6",
- "remove_dir_all 0.5.3",
 ]
 
 [[package]]
@@ -7633,6 +7797,15 @@ name = "time-core"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
+
+[[package]]
+name = "tinyrlibc"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9af8adde15cc59c61328c5d709b41b8464522a733033584d33def687b26bd009"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "tokio"
@@ -7928,16 +8101,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
-name = "universal-hash"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
-dependencies = [
- "crypto-common 0.1.7",
- "subtle",
-]
-
-[[package]]
 name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7991,6 +8154,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de437e2a6208b014ab52972a27e59b33fa2920d3e00fe05026167a1c509d19cc"
 dependencies = [
  "vcell",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -8076,9 +8248,12 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-json-writer",
+ "barracuda-platform",
+ "barracuda-plugin",
  "barracuda-webserver-plugin",
- "base64 0.22.1",
  "embassy-sync 0.7.2",
  "futures-core",
  "futures-lite",
@@ -8092,10 +8267,23 @@ dependencies = [
 name = "wechat"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-tls",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
+ "serde",
  "serde_json",
 ]
 
@@ -8112,22 +8300,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winapi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
-dependencies = [
- "winapi-i686-pc-windows-gnu",
- "winapi-x86_64-pc-windows-gnu",
-]
-
-[[package]]
-name = "winapi-i686-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8135,12 +8307,6 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "winapi-x86_64-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"
@@ -8326,6 +8492,16 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "ws-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "sha1 0.10.7",
+]
 
 [[package]]
 name = "wyz"

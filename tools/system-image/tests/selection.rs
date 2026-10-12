@@ -78,7 +78,7 @@ fn resolves_resources_region_from_selected_stm32_linker_layout() {
     select_board(
         root.path(),
         "stm-test",
-        "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
+        "name: stm-test\nhardware:\n  chip: stm32u5a5zj\ntoolchain:\n  target: thumbv8m.main-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
         "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = 0x08120000, LENGTH = 256K\n  RESOURCES (r) : ORIGIN = 0x08160000, LENGTH = 256K /* filesystem: fatfs */\n}\n",
     );
@@ -255,7 +255,7 @@ fn rejects_invalid_stm32_resources_values() {
     select_board(
         root.path(),
         "stm-test",
-        "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
+        "name: stm-test\nhardware:\n  chip: stm32u5a5zj\ntoolchain:\n  target: thumbv8m.main-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
         "MEMORY\n{\n  RESOURCES (r) : ORIGIN = nope, LENGTH = 256K /* filesystem: fatfs */\n}\n",
     );

@@ -74,6 +74,11 @@ cargo board select
 cargo run
 ```
 
+A host Board (`local-linux`, `local-macos`) also needs the loopback address of
+its virtual peripherals manager:
+`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run` (see
+[`platforms/virtual-io`](platforms/virtual-io/README.md)).
+
 The first command opens a colored Board list. Use the arrow keys to move, type
 to fuzzy-search, and press Enter to select. It validates the Board bundle and
 records the selection in ignored local state. It resolves the matching
@@ -85,7 +90,7 @@ installation prompt used when that toolchain is unavailable. Selection
 activates the toolchain as a workspace override and imports its environment,
 so ordinary `cargo build` and `cargo run` operate directly on the standalone
 System application through native Cargo; there is no Board-aware build wrapper
-or shell setup step. System, Platform, Core, and Plugin logs remain in that
+or shell setup step. Device Boards build firmware with `--release`. System, Platform, Core, and Plugin logs remain in that
 terminal.
 
 Run the external terminal Channel separately. This command is always compiled
@@ -239,11 +244,10 @@ request never reconstructs its client. The shared crate owns reqwless client
 construction; Model API owns the LLM-specific request, response, connection,
 and stream behavior.
 
-TLS is initialized by the selected Platform and returned beside `ip_stack` in
-`PlatformResources`. Linux and macOS load the Host certificate bundle; device
-Platforms initialize the same capability from their RNG and DER trust roots.
-System passes that capability into Agent construction. No Plugin loads system
-certificates or selects a Host-only TLS feature.
+System initializes TLS from the selected Platform's `entropy` and the Mozilla
+trust roots compiled in by `shared/tls`, the same roots on every Platform, and
+passes it to the shared HTTP client factory. No Platform or Plugin loads system
+certificates or selects a TLS feature.
 
 Host tests and `barracuda-cli` remain normal `std` consumers. The former C ABI and
 prebuilt static archives are no longer part of this workspace.

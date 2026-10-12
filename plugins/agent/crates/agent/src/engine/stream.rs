@@ -7,7 +7,7 @@ use core::{
 };
 
 use barracuda_agent_memory::TurnError;
-use barracuda_agent_tool::{ToolDetachHandle, ToolOutput};
+use barracuda_agent_tool::ToolOutput;
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::ToolCall;
@@ -57,8 +57,6 @@ pub enum AgentError {
     Transcript(#[from] TurnError),
     #[error("transcript persistence failed: {0}")]
     TranscriptStorage(#[from] FsError),
-    #[error("multiple task effects were emitted in one tool round: {count}")]
-    ConflictingEffects { count: usize },
     #[error("LLM assistant message cannot be reconstructed from streamed deltas")]
     MalformedAssistantMessage,
     #[error("agent run-state invariant violated")]
@@ -68,7 +66,6 @@ pub enum AgentError {
 /// One event produced by the single-task AgentEngine execution core.
 pub(crate) enum AgentEngineEvent {
     Iteration(StreamPart<AgentIterationEvent>),
-    Detached(ToolDetachHandle),
     InputRequired(AgentInputRequest),
     Finished(AgentOutcome),
 }

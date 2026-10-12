@@ -36,7 +36,9 @@ Turn and iteration lifecycle records are:
   turn, followed by `turn_origin_ended` with `{}`.
 - `iteration_started`: `{ "iteration" }`.
 - `iteration_ended`: `{}`.
-- `turn_ended`: `{ "turn" }`.
+- `turn_ended`: `{ "turn", "outcome" }`, where outcome is `completed`,
+  `interrupted` (`session.interrupt`), `cancelled` (`session.cancel`, or the
+  session stopped while the turn ran) or `failed` (a `turn_error` came first).
 
 Model and effect output records are:
 
@@ -71,7 +73,7 @@ does not split text to fit a transport frame and does not truncate error text.
 Consumers still concatenate consecutive semantic delta records because the
 model runtime itself may produce output incrementally.
 
-The authoritative schema is `schemas/event/session_event.json`. It fixes the
+The authoritative schema is `schemas/event/session.event.json`. It fixes the
 four envelope properties while intentionally leaving each payload's contents
 to its event type, so adding a new semantic event does not require changing
 Workflow wiring.

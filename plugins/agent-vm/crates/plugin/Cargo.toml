@@ -15,6 +15,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 barracuda-agent-tool = { path = "../../../agent/crates/tool" }
+barracuda-runtime-utils.workspace = true
 critical-section = { version = "1", features = ["std"] }
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

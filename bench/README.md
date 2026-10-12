@@ -72,17 +72,3 @@ CLIPPY_CONF_DIR=bench cargo clippy -p barracuda-agent-profile --all-targets -- \
 
 Clippy reports functions estimated to exceed the threshold. These estimates are
 useful for regression checks but may differ from optimized runtime stack usage.
-
-## Bounded runtime stack
-
-Run agent initialization with the runtime worker stack size requested by
-`barracuda-agent-runtime` (currently 64 KiB):
-
-```bash
-cargo run --profile profiling -p barracuda-agent-profile --bin barracuda-agent-stack
-```
-
-The command exits successfully only if the `agent-init` workload completes
-within that worker stack. This binary does not link DHAT, so allocator
-backtraces do not inflate its stack use. It is a host smoke test; device
-high-water-mark measurements remain authoritative.

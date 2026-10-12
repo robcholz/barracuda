@@ -1,0 +1,75 @@
+name = "Edge: malformed model streams"
+description = "Model-side stream faults: malformed tool-call argument JSON reaches the model as a tool error, two turn-ending calls in one response merge into one reply, an empty stream fails the turn, a JSON body on a streaming request yields no events and is retried, and reasoning without an answer, a tool call without an id, and duplicate tool-call ids each fail the turn."
+
+[model]
+mode = "scripted"
+
+# Step 0: tool-call arguments that are not JSON.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"tool_search\",\"arguments\":\"{bad\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+
+[[model.responses]]
+request_contains = ['invalid arguments json: key must be a string']
+text = "After bad arguments."
+
+# Step 1: two turn-ending calls in one response end the turn together.
+[[model.responses]]
+tool_calls = [{ name = "conversation_end", arguments = { final_message = "Bye." } }, { name = "plan_clarify", arguments = { question = "Which one?" } }]
+
+# Step 2: a stream that only says [DONE].
+[[model.responses]]
+raw = "data: [DONE]\n\n"
+
+# Step 3: a JSON body on a streaming request carries no SSE events, so it is
+# retried like a truncated stream.
+[[model.responses]]
+raw = '{"choices":[{"index":0,"message":{"role":"assistant","content":"Plain JSON."},"finish_reason":"stop"}]}'
+
+[[model.responses]]
+text = "After JSON."
+
+# Step 4: reasoning and a stop, but no answer.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+
+# Step 5: a tool call without a provider id.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\",\"function\":{\"name\":\"tool_search\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+
+# Step 6: two tool calls with the same provider id.
+[[model.responses]]
+raw = "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"dup\",\"type\":\"function\",\"function\":{\"name\":\"tool_search\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":\"dup\",\"type\":\"function\",\"function\":{\"name\":\"tool_search\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+
+[[steps]]
+send = "One."
+tool_errors_allowed = true
+tool_contains = ['tool_search{badinvalid arguments json: key must be a string']
+reply_contains = ["After bad arguments."]
+
+[[steps]]
+send = "Two."
+reply_matches = ['^Bye\.\n\nWhich one\?$']
+
+[[steps]]
+send = "Three."
+notice_contains = ["LLM returned an empty response"]
+
+[[steps]]
+send = "Four."
+reply_contains = ["After JSON."]
+
+[[steps]]
+send = "Five."
+notice_contains = ["LLM assistant message cannot be reconstructed from streamed deltas"]
+
+[[steps]]
+send = "Six."
+notice_contains = ["LLM tool call is missing its provider id"]
+
+[[steps]]
+send = "Seven."
+notice_contains = ["LLM returned duplicate provider tool call id dup"]
+
+[logs]
+expect = ["Agent merged 2 turn-ending effects from one tool round"]
+allow = ['Agent run failed: ']

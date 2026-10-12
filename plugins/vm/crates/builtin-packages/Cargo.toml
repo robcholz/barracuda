@@ -11,8 +11,9 @@ default = []
 vendored = ["barracuda-lua/vendored"]
 
 [dependencies]
-async-channel = { version = "2.5", default-features = false }
+async-channel.workspace = true
 barracuda-lua = { path = "../lua" }
+libm = "0.2"
 [dev-dependencies]
 futures-lite = "2"
 

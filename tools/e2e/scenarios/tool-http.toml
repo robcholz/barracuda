@@ -1,0 +1,26 @@
+name = "HTTP tool"
+description = "http_request reaches a host service through the Platform IP stack."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+text = "The service is healthy."
+
+[[steps]]
+send = "Check the service."
+reply_contains = ["The service is healthy."]
+
+[memory]
+# Host ordinary-heap peak was 215 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 229376

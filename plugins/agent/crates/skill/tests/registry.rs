@@ -1,10 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::arc_with_non_send_sync)]
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use portable_atomic_util::Arc;
+use std::{future::Future, pin::Pin};
 
 use barracuda_agent_skill::{
     CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry,
-    SkillResourcePage,
+    SkillResourcePage, SkillSetSource,
 };
 use barracuda_platform_test::memory_vfs;
 use barracuda_vfs::ScopedVfs;
@@ -69,9 +70,9 @@ fn public_registry_trait_drives_skill_set() {
             "External backend. Use for external operations.".to_owned(),
         )
         .unwrap();
-        let registry: Arc<dyn SkillRegistry> = Arc::new(ExternalRegistry {
+        let registry: Arc<dyn SkillRegistry> = Arc::from(Box::new(ExternalRegistry {
             catalog: Arc::new(CatalogSnapshot::from_skills(1, vec![skill])),
-        });
+        }) as Box<dyn SkillRegistry>);
         let mut skills = registry.skill_set();
 
         assert!(skills.catalog_context().contains("External backend"));
@@ -165,39 +166,40 @@ fn unknown_frontmatter_subtrees_are_ignored() {
 }
 
 #[test]
-fn duplicate_skill_names_across_roots_are_rejected_regardless_of_root_order() {
+fn duplicate_skill_names_across_roots_are_left_out_regardless_of_root_order() {
     block_on(async {
         for roots in [["data", "system"], ["system", "data"]] {
             let filesystem = memory_vfs().await.unwrap();
-            write_skill_at(
-                &filesystem,
-                roots[0],
-                "example-skill",
-                &skill_md("example-skill"),
-            )
-            .await;
+            for root in roots {
+                write_skill_at(
+                    &filesystem,
+                    root,
+                    "example-skill",
+                    &skill_md("example-skill"),
+                )
+                .await;
+            }
             write_skill_at(
                 &filesystem,
                 roots[1],
-                "example-skill",
-                &skill_md("example-skill"),
+                "other-skill",
+                &skill_md("other-skill"),
             )
             .await;
 
-            let error = match FsSkillRegistry::new(filesystem)
+            let registry = FsSkillRegistry::new(filesystem)
                 .add_root(roots[0])
                 .await
                 .unwrap()
                 .add_root(roots[1])
                 .await
-            {
-                Ok(_) => panic!("duplicate skill should fail"),
-                Err(error) => error,
-            };
+                .unwrap();
+            let catalog = registry.catalog();
+            assert!(catalog.get(&SkillName::new("example-skill")).is_none());
+            assert!(catalog.get(&SkillName::new("other-skill")).is_some());
             assert!(matches!(
-                error,
-                SkillError::DuplicateSkill { ref name, .. }
-                    if name.as_str() == "example-skill"
+                catalog.rejected(),
+                [SkillError::DuplicateSkill { name, .. }] if name.as_str() == "example-skill"
             ));
         }
     });
@@ -394,7 +396,7 @@ fn resource_pages_end_on_utf8_boundaries() {
 }
 
 #[test]
-fn failed_reload_keeps_the_previous_unique_catalog() {
+fn a_bad_package_is_left_out_without_hiding_the_others() {
     block_on(async {
         let filesystem = memory_vfs().await.unwrap();
         write_skill_at(&filesystem, "data", "notes", &skill_md("notes")).await;
@@ -410,14 +412,48 @@ fn failed_reload_keeps_the_previous_unique_catalog() {
         );
         let version = registry.catalog().version();
 
-        write_skill_at(&filesystem, "system", "notes", &skill_md("notes")).await;
+        write_skill_at(&filesystem, "data", "broken", "no frontmatter").await;
+        write_skill_at(&filesystem, "data", "fresh", &skill_md("fresh")).await;
+        registry.reload().await.unwrap();
+        let catalog = registry.catalog();
+        assert_ne!(catalog.version(), version);
+        for name in ["notes", "time", "fresh"] {
+            assert!(catalog.get(&SkillName::new(name)).is_some(), "{name}");
+        }
+        assert!(catalog.get(&SkillName::new("broken")).is_none());
+        assert!(matches!(
+            catalog.rejected(),
+            [SkillError::MissingOpeningFence(name)] if name.as_str() == "broken"
+        ));
+    });
+}
+
+#[test]
+fn an_unlistable_root_keeps_the_previous_catalog() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill_at(&filesystem, "data", "notes", &skill_md("notes")).await;
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem.clone())
+                .add_root("data")
+                .await
+                .unwrap(),
+        );
+        let version = registry.catalog().version();
+
+        filesystem.remove_file("data/notes/SKILL.md").await.unwrap();
+        filesystem.remove_dir("data/notes").await.unwrap();
+        filesystem.remove_dir("data").await.unwrap();
+        filesystem
+            .write_atomic("data", b"not a directory")
+            .await
+            .unwrap();
         assert!(matches!(
             registry.reload().await,
-            Err(SkillError::DuplicateSkill { .. })
+            Err(SkillError::ScanFailed(..))
         ));
         assert_eq!(registry.catalog().version(), version);
         assert!(registry.catalog().get(&SkillName::new("notes")).is_some());
-        assert!(registry.catalog().get(&SkillName::new("time")).is_some());
     });
 }
 
@@ -573,10 +609,17 @@ async fn write_skill_at(filesystem: &ScopedVfs, root: &str, name: &str, document
         .unwrap();
 }
 
+/// The one reason the only skill package was left out of the catalog.
 async fn registry_error(filesystem: ScopedVfs) -> SkillError {
-    match FsSkillRegistry::new(filesystem).add_root("skills").await {
-        Ok(_) => panic!("registry load should fail"),
-        Err(error) => error,
+    let registry = FsSkillRegistry::new(filesystem)
+        .add_root("skills")
+        .await
+        .unwrap();
+    let catalog = registry.catalog();
+    assert!(catalog.skills().is_empty());
+    match catalog.rejected() {
+        [error] => error.clone(),
+        rejected => panic!("expected one rejected package, got {rejected:?}"),
     }
 }
 

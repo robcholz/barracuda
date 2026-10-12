@@ -17,10 +17,10 @@ pub use registry::{Collection, Persistence, PersistenceError, Singleton};
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::string::String;
-use alloc::sync::{Arc, Weak};
 use core::cell::{Ref, RefCell, RefMut};
 use core::error::Error;
 use core::ops::{Deref, DerefMut};
+use portable_atomic_util::{Arc, Weak};
 
 type Shared<T> = Arc<RefCell<T>>;
 

@@ -1,9 +1,20 @@
 # Analog Plugin
 
+The Analog Plugin exposes analog input and output on the Board's exposed pins
+to Lua code as the `analog` Lua package.
+
 - Plugin ID: `analog`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `analog`
+- Web: none
+- Tasks: none
+- Storage: none
 
 This Plugin shares the Board's unified exposed-I/O owner and installs the
 `analog` Lua package. `embedded-hal` 1.0 does not define ADC or DAC contracts,

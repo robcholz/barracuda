@@ -13,12 +13,13 @@
 //! crate depends on a scoped VFS namespace and never on its backend.
 
 use alloc::{boxed::Box, vec::Vec};
+use barracuda_agent_message::ChatMessage;
 use core::{error::Error, future::Future, pin::Pin};
-use serde_json::Value;
 use strum::IntoStaticStr;
 
 /// Future returned by [`Compactor::compact`].
-pub type CompactFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<Value>, CompactError>> + 'a>>;
+pub type CompactFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Vec<ChatMessage>, CompactError>> + 'a>>;
 
 /// Failure from a [`Compactor`].
 ///
@@ -67,30 +68,30 @@ impl CompactError {
 /// A trivial compactor that records how many messages it folded:
 ///
 /// ```
-/// use barracuda_agent_memory::{CompactError, Compactor};
+/// use barracuda_agent_memory::{CompactError, Compactor, ChatMessage};
 /// use futures_lite::future::block_on;
-/// use serde_json::{json, Value};
+/// use serde_json::json;
 ///
 /// struct CountingCompactor;
 ///
 /// impl Compactor for CountingCompactor {
-///     fn compact<'a>(&'a self, window: &'a [Value]) -> barracuda_agent_memory::CompactFuture<'a> {
-///         Box::pin(async move { Ok(vec![json!({
+///     fn compact<'a>(&'a self, window: &'a [ChatMessage]) -> barracuda_agent_memory::CompactFuture<'a> {
+///         Box::pin(async move { Ok(vec![ChatMessage::new(&json!({
 ///             "role": "system",
 ///             "content": format!("summary of {} earlier messages", window.len()),
-///         })]) })
+///         }))]) })
 ///     }
 /// }
 ///
 /// let summary = block_on(CountingCompactor
-///     .compact(&[json!({ "role": "user", "content": "hi" })]))?;
-/// assert_eq!(summary[0]["content"], "summary of 1 earlier messages");
+///     .compact(&[ChatMessage::new(&json!({ "role": "user", "content": "hi" }))]))?;
+/// assert_eq!(summary[0].to_value()["content"], "summary of 1 earlier messages");
 /// # Ok::<(), CompactError>(())
 /// ```
 pub trait Compactor {
     /// Summarize one chunk of aged messages into the messages of a single
     /// compact segment.
-    fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a>;
+    fn compact<'a>(&'a self, window: &'a [ChatMessage]) -> CompactFuture<'a>;
 }
 
 #[cfg(test)]

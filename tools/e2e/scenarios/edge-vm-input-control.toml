@@ -1,0 +1,108 @@
+name = "VM input control errors and loop cancel"
+description = "A CPU-bound run without io.read rejects a second queued input (input_backpressure), rejects input after EOF (input_closed), accepts a repeated EOF, is cancelled out of its infinite loop through background_cancel without delivering a result, and then leaves the pool; malformed control arguments fail schema validation."
+
+# Cancelling drops the call from the background pool, so no completion reaches
+# the model; the VM still logs the cancelled run.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: one queued input is held; a second is rejected.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "print('looping') while true do end" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "a" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "b" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "The second input was refused."
+
+# Step 1: EOF closes input; later input fails; a second EOF is accepted.
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, eof = true } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "c" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, eof = true } }]
+
+[[model.responses]]
+text = "Input is closed."
+
+# Step 2: cancel the infinite loop.
+[[model.responses]]
+tool_calls = [{ name = "background_cancel", arguments = { id = 1 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "The loop was cancelled."
+
+# Step 3: the cancelled call is gone; malformed arguments never reach the pool.
+[[model.responses]]
+tool_calls = [{ name = "background_cancel", arguments = { id = 1 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_input", arguments = { id = 1, input = "x", eof = true } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_cancel", arguments = { id = 0 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "Nothing is running."
+
+[[steps]]
+send = "Start a busy loop and queue two inputs."
+reply_contains = ["The second input was refused."]
+tool_contains = [
+    '{"run_id":1}',
+    'background_input{"id": 1, "input": "a"}{}',
+    'background_input{"id": 1, "input": "b"}{"error":"input_backpressure"}',
+    'background_list{}{"calls":[{"id":1,"status":"running","tool":"vm_run"}]}',
+]
+tool_errors_allowed = true
+
+[[steps]]
+send = "Close its input and try again."
+reply_contains = ["Input is closed."]
+tool_contains = [
+    'background_input{"id": 1, "eof": true}{}',
+    'background_input{"id": 1, "input": "c"}{"error":"input_closed"}',
+]
+tool_errors_allowed = true
+
+[[steps]]
+send = "Cancel the loop."
+reply_contains = ["The loop was cancelled."]
+tool_contains = [
+    'background_cancel{"id": 1}Background call 1 cancelled.',
+    'background_list{}{"calls":[]}',
+]
+
+[[steps]]
+send = "Try to control it again with bad arguments."
+reply_contains = ["Nothing is running."]
+tool_contains = [
+    'background_cancel{"id": 1}tool invocation rejected: no running background call 1',
+    'background_input{"id": 1, "input": "x", "eof": true}invalid arguments: JSON schema validation failed at $: OneOf',
+    'background_cancel{"id": 0}invalid arguments: JSON schema validation failed at $.id: Minimum',
+    'background_list{}{"calls":[]}',
+]
+tool_errors_allowed = true
+
+[logs]
+expect = ["VM run 1 finished: Cancelled, 1 output line"]

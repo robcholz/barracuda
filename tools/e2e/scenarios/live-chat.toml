@@ -1,0 +1,13 @@
+name = "Live chat"
+description = "A plain two-turn conversation recorded from a real model."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Reply with the single word: pong"
+reply_matches = ['(?i)\bpong\b']
+
+[[steps]]
+send = "What word did you just reply with? Answer in one word."
+reply_matches = ['(?i)\bpong\b']

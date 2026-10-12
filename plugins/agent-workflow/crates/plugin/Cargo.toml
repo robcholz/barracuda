@@ -10,6 +10,7 @@ barracuda-agent-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 json-validator.workspace = true
+barracuda-json-writer.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 

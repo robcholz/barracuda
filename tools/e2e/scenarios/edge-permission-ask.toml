@@ -1,0 +1,94 @@
+name = "Edge: permission ask with an unresolvable reply"
+description = "At the ask level an invalid call fails before any prompt, a Safe call runs, and a Moderate file_write parks for approval. The reply is classified by the non-streaming resolver call; a scripted (SSE) body cannot be parsed there, so the request is rejected with the resolver error and the file is never written."
+
+[model]
+mode = "scripted"
+
+# ---- Step 0 (allow_all): install the ask switch ----------------------------
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "workflow" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "workflow_load", arguments = { id = "perm-ask", match = { event = "gateway.message.received" }, steps = [{ call = "session.set_permission_level", arguments = { session = "session-1", level = "ask" } }] } }]
+
+[[model.responses]]
+text = "Ask switch installed."
+
+[[steps]]
+send = "Install the ask switch."
+reply_contains = ["Ask switch installed."]
+tool_contains = ["perm-ask"]
+
+# ---- Step 1 (ask) ----------------------------------------------------------
+
+# Safe calls run without a prompt (AskAtOrAbove(Low), level.rs:37); this one
+# also lets the Workflow triggered by this message settle.
+[[model.responses]]
+tool_calls = [{ name = "subagent_watch", arguments = { agent = "agent-9" } }]
+
+# run.rs:288-301: classify() validates the schema first, so a malformed call
+# fails immediately and is never offered for approval.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/ask.txt" } }]
+
+# Moderate: parks for approval (policy.rs:135-149) and the CLI renders the
+# input request (barracuda-cli client.rs:225-238). The turn settles on it.
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/data/ask.txt", content = "x" } }]
+
+[[steps]]
+send = "Write the ask file."
+tool_errors_allowed = true
+tool_contains = [
+  "No subagent agent-9 in your subtree (unknown id, or not one of yours).",
+  "invalid arguments: JSON schema validation failed at $.content: Required",
+]
+notice_contains = [
+  'permission needed for file_write {"path": "/data/ask.txt", "content": "x"}',
+  "'file_write' is a Moderate-risk action and needs approval. Reply to approve or refuse.",
+]
+
+# ---- Step 2: the reply goes to the resolver --------------------------------
+
+# The resolver call (session/src/approval/llm.rs:165-203): system prompt
+# resources/prompt/approval/resolver_system.md, one user message, only the
+# permission_resolve_reply tool, NO "stream" key (llm.chat, not chat_stream).
+# A real provider answers with a JSON chat.completion whose single tool call is
+# permission_resolve_reply {"decision": "yes"|"no"|"other", "reason"?}. The
+# scripted tape always answers with SSE frames, which parse_openai_chat_response
+# (model-api backends/shared.rs:224-225) rejects as Error::Parse.
+[[model.responses]]
+request_contains = [
+  "You resolve a user's natural-language reply to one pending permission request.",
+  'Pending tool call:\nID: call_0\nName: file_write\nArguments JSON: {\"path\": \"/data/ask.txt\", \"content\": \"x\"}',
+  "Permission reason:\\n'file_write' is a Moderate-risk action and needs approval.",
+  'User reply:\nNo, do not write it.',
+  '"tools":[{"type":"function","function":{"name":"permission_resolve_reply"',
+]
+tool_calls = [{ name = "permission_resolve_reply", arguments = { decision = "no" } }]
+
+# actor.rs:916-924: a resolver error becomes Rejected("approval resolution
+# failed: ...") for the parked call, plus a turn_error for input-1.
+[[model.responses]]
+request_contains = ["approval resolution failed: failed to parse LLM JSON response"]
+tool_calls = [{ name = "file_read", arguments = { path = "/data/ask.txt" } }]
+
+[[model.responses]]
+text = "The file was not written."
+
+[[steps]]
+send = "No, do not write it."
+tool_errors_allowed = true
+reply_contains = ["The file was not written."]
+tool_contains = [
+  "approval resolution failed: failed to parse LLM JSON response",
+  '{"error":"not_found","message":"path not found"}',
+]
+notice_contains = ["input request input-1 could not be resolved: failed to parse LLM JSON response"]
+
+[logs]
+expect = ["routed `web-in-3` as the answer to `session-1` input-1"]

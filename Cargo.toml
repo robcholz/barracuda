@@ -7,6 +7,7 @@ members = [
     "peripherals/config",
     "peripherals/impl/*/*",
     "drivers/chips/*",
+    "drivers/datasheet-tests",
     "boards/tool",
     "bench/crates/*",
     "composition/*",
@@ -26,15 +27,25 @@ members = [
 default-members = [
     "apps/barracuda-system",
 ]
+exclude = [
+    # Vendored third-party crate, patched below.
+    "shared/tls/mbedtls-rs",
+    "apps/barracuda-cli/rustyline",
+]
 
 [workspace.dependencies]
+portable-atomic = { version = "1.15", default-features = false }
+async-channel = { version = "2", default-features = false, features = ["portable-atomic"] }
+event-listener = { version = "5", default-features = false, features = ["critical-section", "portable-atomic"] }
+futures-core = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+futures-util = { version = "0.3", default-features = false, features = ["portable-atomic"] }
+portable-atomic-util = { version = "0.2.7", default-features = false, features = ["alloc"] }
 # Workspace crates
 # BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
 barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
 barracuda-platform-esp32p4 = { path = "platforms/esp32p4" }
-barracuda-platform-esp32s2 = { path = "platforms/esp32s2" }
 barracuda-platform-esp32s3 = { path = "platforms/esp32s3" }
 barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
@@ -74,8 +85,8 @@ barracuda-agent-time-plugin = { path = "plugins/agent-time/crates/plugin" }
 barracuda-agent-vm-plugin = { path = "plugins/agent-vm/crates/plugin" }
 barracuda-agent-websearch-plugin = { path = "plugins/agent-websearch/crates/plugin" }
 barracuda-agent-workflow-plugin = { path = "plugins/agent-workflow/crates/plugin" }
-barracuda-app-manager-plugin = { path = "plugins/app-manager/crates/plugin" }
 barracuda-captive-portal-plugin = { path = "plugins/captive-portal/crates/plugin" }
+barracuda-files-plugin = { path = "plugins/files/crates/plugin" }
 barracuda-http-plugin = { path = "plugins/http/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "plugins/imessage-bluebubble/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "plugins/imessage-gateway/crates/plugin" }
@@ -90,6 +101,7 @@ barracuda-ui-plugin = { path = "plugins/ui/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-analog-plugin = { path = "plugins/vm-analog/crates/plugin" }
+barracuda-app-plugin = { path = "plugins/vm-app/crates/plugin" }
 barracuda-audio-plugin = { path = "plugins/vm-audio/crates/plugin" }
 barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-display-plugin = { path = "plugins/vm-display/crates/plugin" }
@@ -101,6 +113,7 @@ barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
 barracuda-imu-plugin = { path = "plugins/vm-imu/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
+barracuda-power-monitor-plugin = { path = "plugins/vm-power-monitor/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
@@ -119,6 +132,7 @@ barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-bulk-memory = { path = "shared/bulk-memory" }
 barracuda-cli-style = { path = "shared/cli-style" }
+barracuda-json-writer = { path = "shared/json-writer" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
@@ -150,6 +164,7 @@ barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
 barracuda-runtime-utils = { path = "shared/runtime-utils" }
+barracuda-platform-virtual-io = { path = "platforms/virtual-io" }
 barracuda-system = { path = "core/system" }
 barracuda-target = { path = "composition/selected" }
 barracuda-target-api = { path = "composition/api" }
@@ -159,6 +174,7 @@ barracuda-vfs-fat = { path = "shared/vfs-fat" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }
 barracuda-vfs-memfs = { path = "shared/vfs-memfs" }
 http-client = { path = "shared/http-client" }
+ws-client = { path = "shared/ws-client" }
 json-validator = { path = "shared/json-validator" }
 json-validator-macros = { path = "shared/json-validator-macros" }
 
@@ -180,19 +196,25 @@ log = { version = "0.4", default-features = false }
 static_cell = "2"
 
 [patch.crates-io]
+# mbedtls-rs 0.1.0 with a verify callback and a fallible RNG; see
+# shared/tls/mbedtls-rs/BARRACUDA.md.
+mbedtls-rs = { path = "shared/tls/mbedtls-rs" }
+# rustyline 18.0.1 that reads buffered input before waiting; see
+# apps/barracuda-cli/rustyline/BARRACUDA.md.
+rustyline = { path = "apps/barracuda-cli/rustyline" }
 # picoserve 0.19.0 gates core Error implementations on its `std` feature,
 # which breaks when another workspace crate enables serde/std. This upstream
 # commit keeps the same release API and derives portable Error implementations.
 picoserve = { git = "https://github.com/sammhicks/picoserve.git", rev = "dbe0513e21e6e28a04446e4027e1d337d83d8b24" }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
-# the std crates can be unit-tested on the host. LTO remains disabled so final
-# applications can select the link strategy appropriate to their target.
+# the std crates can be unit-tested on the host. Release builds optimize for
+# size with whole-program LTO so the firmware fits its 4 MiB application slot.
 [profile.release]
 panic = "abort"
-opt-level = "s"
+opt-level = "z"
 codegen-units = 1
-lto = false
+lto = "fat"
 
 # Host profiling keeps the same size-oriented optimization as firmware while
 # retaining source locations for allocation backtraces.

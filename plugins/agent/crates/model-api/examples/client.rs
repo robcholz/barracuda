@@ -1,4 +1,4 @@
-use barracuda_model_api::{BackendKind, ChatRequest, ModelApi, ModelApiConfig};
+use barracuda_model_api::{BackendKind, ChatMessage, ChatRequest, ModelApi, ModelApiConfig};
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
         "model",
         "http://llm.test/v1",
     ))?;
-    let messages = [json!({"role":"user","content":"hi"})];
+    let messages = [ChatMessage::new(&json!({"role":"user","content":"hi"}))];
     let response = block_on(api.chat(&ChatRequest::new("be concise", &messages), Cancel::never()))?;
     println!("{:?}", response.text);
     Ok(())

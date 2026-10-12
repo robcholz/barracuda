@@ -5,6 +5,7 @@
 - Event ID: `scheduler.triggered`
 - Topic: the schedule's `id`
 - Emission: once after the `UtcClock` reports that a live occurrence is due
+- Schema: `schemas/event/scheduler.triggered.json`
 
 The Event input is a JSON object:
 

@@ -1,0 +1,24 @@
+name = "Tool load timing"
+description = "A Tool called in the same model response as the tool_load that reveals it is not found; it becomes callable on the next model call of the same turn, a repeated load reports already_loaded, and the group stays loaded for the next user turn."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''This is a tool loading test. First, in one single response, make two parallel tool calls together: tool_load {"group_id": "gateway"} and gateway_send {"channel": "web", "conversation_id": "conversation", "text": "Too early."}. Then, in the next response, call gateway_send {"channel": "web", "conversation_id": "conversation", "text": "Now loaded."}. Then call tool_load {"group_id": "gateway"} once more. Then reply with only the words Loaded once.'''
+tool_contains = [
+  '{"available_next_turn":true,"group_id":"gateway","loaded":true}',
+  '"text": "Too early."}tool not found: gateway_send',
+  '"text": "Now loaded."}{"message_id":"web-',
+  '{"already_loaded":true,"group_id":"gateway","loaded":true}',
+]
+request_contains = [
+  '"content":"tool not found: gateway_send","is_error":true',
+  'Use `gateway_send` for one complete text message.',
+  '"content":"{\"already_loaded\":true,\"group_id\":\"gateway\",\"loaded\":true}","is_error":false',
+]
+tool_errors_allowed = true
+
+[[steps]]
+send = '''Without loading anything, call gateway_send {"channel": "web", "conversation_id": "conversation", "text": "Still loaded."}, then reply with only the words Done again.'''
+tool_contains = ['"text": "Still loaded."}{"message_id":"web-']

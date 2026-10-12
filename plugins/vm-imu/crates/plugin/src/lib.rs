@@ -4,7 +4,11 @@
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc};
+mod config {
+    barracuda_plugin::config!();
+}
+
+use alloc::string::String;
 use barracuda_board_hal::imu::{Imu, ImuDescriptor, ImuPeripheral, ImuSample};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -12,10 +16,9 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Owns the Board's primary IMU capability and publishes it to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -31,7 +34,8 @@ impl<Device> ImuPlugin<Device> {
         Builtins: ImuPeripheral<Imu = Device>,
     {
         Self {
-            imu: context.hal.peripherals.take_imu(),
+            imu: config::peripherals::INERTIAL_MEASUREMENT_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_imu(instance)),
         }
     }
 }
@@ -275,5 +279,11 @@ mod tests {
         )
         .expect("read IMU sample");
         assert!(result);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = ImuPackage::new(Some(TestImu));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

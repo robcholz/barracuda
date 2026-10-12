@@ -195,6 +195,8 @@ pub enum ImageBuildError {
     },
     /// Two bundled Plugin directories declare the same stable identity.
     DuplicatePluginId(String),
+    /// The selected Board's Plugin selection could not be resolved.
+    PluginSelection(String),
     /// Two Plugins contribute incompatible entries at one shared Workspace path.
     DuplicateWorkspaceResource(String),
     /// A source path cannot be represented by the image path contract.
@@ -237,6 +239,9 @@ impl fmt::Display for ImageBuildError {
                     "invalid Plugin manifest `{}`: {source}",
                     path.display()
                 )
+            }
+            Self::PluginSelection(message) => {
+                write!(formatter, "cannot resolve the Board's Plugins: {message}")
             }
             Self::DuplicatePluginId(id) => {
                 write!(formatter, "more than one bundled Plugin declares ID `{id}`")
@@ -778,7 +783,7 @@ fn collect_plugin_resources(
         }
     }
 
-    let disabled = disabled_plugins(workspace)?;
+    let selected = selected_plugins(workspace)?;
     let mut ids = BTreeSet::new();
     let mut has_plugins_root = false;
     let mut has_workspace_root = false;
@@ -797,7 +802,7 @@ fn collect_plugin_resources(
             .file_name()
             .into_string()
             .map_err(|_name| ImageBuildError::InvalidPath(plugin.path()))?;
-        if disabled.contains(&directory) {
+        if !selected.includes_directory(&directory) {
             continue;
         }
         if read_directory(&plugin.path())?.is_empty() {
@@ -817,6 +822,9 @@ fn collect_plugin_resources(
             }
         })?;
         let id = manifest.id();
+        if !selected.includes_id(id) {
+            continue;
+        }
         if id == "." || id == ".." || id.contains('/') || id.as_bytes().contains(&0) {
             return Err(ImageBuildError::InvalidPath(plugin.path()));
         }
@@ -942,19 +950,48 @@ fn read_directory(directory: &Path) -> Result<Vec<fs::DirEntry>, ImageBuildError
     Ok(entries)
 }
 
-fn disabled_plugins(workspace: &Path) -> Result<BTreeSet<String>, ImageBuildError> {
-    let path = workspace.join(".barracuda/disabled-plugins");
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(source) => return Err(ImageBuildError::SourceRead { path, source }),
+/// The Plugins whose resources the image carries.
+enum SelectedPlugins {
+    /// The selected Board's enabled Plugins, by identity.
+    Board(BTreeSet<String>),
+    /// Without a selected Board, every Plugin not disabled locally, by
+    /// identity or directory.
+    AllExcept(BTreeSet<String>),
+}
+
+impl SelectedPlugins {
+    fn includes_directory(&self, directory: &str) -> bool {
+        match self {
+            Self::Board(_) => true,
+            Self::AllExcept(disabled) => !disabled.contains(directory),
+        }
+    }
+
+    fn includes_id(&self, id: &str) -> bool {
+        match self {
+            Self::Board(enabled) => enabled.contains(id),
+            Self::AllExcept(disabled) => !disabled.contains(id),
+        }
+    }
+}
+
+fn selected_plugins(workspace: &Path) -> Result<SelectedPlugins, ImageBuildError> {
+    use barracuda_plugin_build::selection;
+    let select = || -> Result<SelectedPlugins, barracuda_plugin_build::TaskError> {
+        let local = selection::local_disabled(workspace)?;
+        let plugins = selection::discover(workspace)?;
+        Ok(match selection::selected_board(workspace)? {
+            Some(board) if !plugins.is_empty() => SelectedPlugins::Board(
+                selection::select(workspace, &board, &plugins, &local)?
+                    .enabled()
+                    .iter()
+                    .cloned()
+                    .collect(),
+            ),
+            _ => SelectedPlugins::AllExcept(local.into_iter().collect()),
+        })
     };
-    Ok(contents
-        .lines()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(String::from)
-        .collect())
+    select().map_err(|error| ImageBuildError::PluginSelection(error.to_string()))
 }
 
 fn image_path(host: &Path, root: &str, relative: &Path) -> Result<String, ImageBuildError> {

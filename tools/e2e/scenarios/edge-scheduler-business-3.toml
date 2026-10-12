@@ -1,0 +1,94 @@
+# Scheduler::schedule order (plugins/scheduler/crates/plugin/src/scheduler.rs:237-269):
+# id -> clock -> trigger.parts() (calendar) -> past check -> book.add (duplicate) -> persist.
+# Errors are {"error":"<code>"} from plugins/agent-scheduler/crates/plugin/src/lib.rs:94-109.
+name = "Scheduler tool business rules (3)"
+description = "Calendar validation, past and pre-epoch triggers, check ordering, duplicate and unknown IDs, cancel idempotence, and maximal intervals."
+
+[model]
+mode = "scripted"
+
+# Case 1: trigger in the past (scheduler.rs:249-250)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "leap", trigger = { type = "once", at = "2028-02-29T12:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"leap\"}']
+text = "Case 15 checked."
+
+# Case 16: ids are case-sensitive: create CaseId
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "CaseId", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"CaseId\"}']
+text = "Case 16 checked."
+
+# Case 17: ids are case-sensitive: caseid is unknown
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "caseid" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"not_found\"}']
+text = "Case 17 checked."
+
+# Case 18: maximal interval: every_seconds u64::MAX and count u32::MAX are accepted
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "max-int", trigger = { type = "interval", at = "2099-01-01T00:00:00.000Z", every_seconds = 18446744073709551615, count = 4294967295 } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"max-int\"}']
+text = "Case 18 checked."
+
+# Case 19: every_seconds u64::MAX+1 rounds to the schema maximum as f64 and passes the schema, then fails DTO deserialization (definition.rs:180-181)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "overflow", trigger = { type = "interval", at = "2099-01-01T00:00:00.000Z", every_seconds = 18446744073709551616, count = 2 } } }]
+
+[[model.responses]]
+request_contains = ['expected u64']
+text = "Case 19 checked."
+
+# Case 20: placeholder-relative future time is accepted
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "in-an-hour", trigger = { type = "once", at = "${now+3600s}" } } }]
+
+[[model.responses]]
+request_contains = ['{\"id\":\"in-an-hour\"}']
+text = "Case 20 checked."
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 15 checked."]
+tool_contains = ['{"id":"leap"}']
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 16 checked."]
+tool_contains = ['{"id":"CaseId"}']
+
+[[steps]]
+send = "Cancel case."
+reply_contains = ["Case 17 checked."]
+tool_contains = ['{"error":"not_found"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 18 checked."]
+tool_contains = ['{"id":"max-int"}']
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 19 checked."]
+tool_contains = ['invalid arguments: ', 'expected u64']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 20 checked."]
+tool_contains = ['{"id":"in-an-hour"}']
+
+[logs]
+ready = ['UTC clock synchronized from network time']

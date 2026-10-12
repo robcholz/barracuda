@@ -3,10 +3,10 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::task::{Poll, Waker};
 
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use embassy_executor::Spawner;
-use futures_channel::oneshot;
 
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
 use crate::run::{ExecutionJob, execute_run};
@@ -17,8 +17,15 @@ use crate::{VmLimits, VmRun, VmRunInfo, VmRunState};
 pub(crate) const VM_TASK_SLOTS: usize = 4;
 /// Delay applied by the VM Embassy task after every instruction-hook yield.
 pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
-/// Default fixed Lua heap size owned by each VM memory-pool slot.
-pub(crate) const VM_MEMORY_BYTES_PER_SLOT: usize = 96 * 1024;
+/// Lua heap allocated from bulk memory for each execution while it runs.
+///
+/// One MiB holds a full 360x360 RGB565 frame or a 256 KiB PCM transfer as a
+/// Lua string with room for the script that produces or consumes it.
+pub(crate) const VM_MEMORY_BYTES_PER_RUN: usize = 1024 * 1024;
+/// Part of a run's heap kept for the script itself, with the built-ins and
+/// every package the registry can hold installed.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const SCRIPT_HEAP_RESERVE_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);
@@ -55,6 +62,8 @@ struct RunSlot {
     cancelled: Cell<bool>,
     input: RefCell<Option<InputMessage>>,
     waiter: RefCell<Option<Waker>>,
+    // Wakes an execution parked in an async native call so it sees cancellation.
+    execution_waiter: RefCell<Option<Waker>>,
 }
 
 impl RunSlot {
@@ -67,6 +76,7 @@ impl RunSlot {
             cancelled: Cell::new(false),
             input: RefCell::new(None),
             waiter: RefCell::new(None),
+            execution_waiter: RefCell::new(None),
         }
     }
 
@@ -77,11 +87,15 @@ impl RunSlot {
         self.cancelled.set(false);
         *self.input.borrow_mut() = None;
         *self.waiter.borrow_mut() = None;
+        *self.execution_waiter.borrow_mut() = None;
         self.active.set(true);
     }
 
     fn wake(&self) {
         if let Some(waker) = self.waiter.borrow_mut().take() {
+            waker.wake();
+        }
+        if let Some(waker) = self.execution_waiter.borrow_mut().take() {
             waker.wake();
         }
     }
@@ -100,6 +114,7 @@ impl RunSlot {
             self.waiting_for_input.set(false);
             *self.input.borrow_mut() = None;
             *self.waiter.borrow_mut() = None;
+            *self.execution_waiter.borrow_mut() = None;
             self.id.set(0);
             self.active.set(false);
         }
@@ -120,28 +135,19 @@ pub struct VmRuntime {
 }
 
 impl VmRuntime {
-    /// Creates an unstarted VM runtime with the default per-VM Lua heap size.
+    /// Creates an unstarted VM runtime; each execution allocates its Lua heap on start.
     ///
     /// # Errors
     ///
-    /// Returns an error when backing storage for the memory pool cannot be reserved.
+    /// Returns an error when the fixed execution-slot configuration is invalid.
     pub fn new() -> Result<Self, VmMemoryPoolError> {
-        Self::with_memory_bytes(VM_MEMORY_BYTES_PER_SLOT)
-    }
-
-    /// Creates an unstarted VM runtime with an explicit fixed Lua heap size per slot.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the size is invalid or backing storage cannot be reserved.
-    pub fn with_memory_bytes(bytes: usize) -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
             state: Rc::new(RuntimeState {
                 spawner: Cell::new(None),
                 slots: core::array::from_fn(|_index| RunSlot::new()),
                 next_run_id: Cell::new(1),
             }),
-            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, bytes)?,
+            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, VM_MEMORY_BYTES_PER_RUN)?,
         })
     }
 
@@ -198,6 +204,7 @@ impl VmRuntime {
         })
         .map_err(|_error| DispatchError::Busy)?;
         spawner.spawn(task);
+        log::info!("VM run {run_id} started");
         Ok(VmRun::new(run_id, updates, result, cancellation))
     }
 
@@ -325,6 +332,20 @@ impl RunControl {
 
     pub(crate) fn is_cancelled(&self) -> bool {
         self.slot().is_none_or(|slot| slot.cancelled.get())
+    }
+
+    /// Registers the waker of an execution poll, so cancelling the run wakes
+    /// an execution parked in an async native call.
+    pub(crate) fn register_execution_waker(&self, waker: &Waker) {
+        if let Some(slot) = self.slot() {
+            let mut waiter = slot.execution_waiter.borrow_mut();
+            if waiter
+                .as_ref()
+                .is_none_or(|registered| !registered.will_wake(waker))
+            {
+                *waiter = Some(waker.clone());
+            }
+        }
     }
 
     pub(crate) async fn next_input(&self) -> Option<InputMessage> {

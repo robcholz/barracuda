@@ -46,7 +46,7 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
     let content = serde_json::to_string(response).map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode file Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }
 
 fn fs_error_code(error: FsError) -> &'static str {
@@ -65,6 +65,7 @@ fn fs_error_code(error: FsError) -> &'static str {
         FsError::DirectoryNotEmpty => "directory_not_empty",
         FsError::Unsupported => "unsupported",
         FsError::InvalidInput => "invalid_input",
+        FsError::NoSpace => "no_space",
         FsError::Io => "io",
         _ => "filesystem",
     }
@@ -96,6 +97,11 @@ pub(super) async fn filesystem()
         .await?;
     Ok(vfs.scoped("/workspace")?)
 }
+
+/// The context the Tools run in under test.
+#[cfg(test)]
+pub(super) const CONTEXT: barracuda_agent_plugin::tools::ToolContext =
+    barracuda_agent_plugin::tools::ToolContext::new(barracuda_agent_plugin::SessionId::new(1));
 
 #[cfg(test)]
 pub(super) fn json(content: &str) -> Result<serde_json::Value, serde_json::Error> {

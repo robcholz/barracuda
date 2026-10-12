@@ -1,0 +1,83 @@
+name = "VM slot exhaustion"
+description = "Four concurrent infinite loops fill every VM slot; a fifth vm_run is rejected as busy without consuming a run ID or a background id; cancelling one frees its slot for a new run that receives the next IDs."
+
+# The four loops never finish on their own and background_cancel delivers no
+# result, so no background update reaches the model. Concurrent acceptance
+# assigns run IDs and background ids in the same order, so they match.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
+
+# Step 0: fill all four VM_TASK_SLOTS, then try a fifth run.
+[[model.responses]]
+tool_calls = [
+    { name = "vm_run", arguments = { source = "while true do end" } },
+    { name = "vm_run", arguments = { source = "while true do end" } },
+    { name = "vm_run", arguments = { source = "while true do end" } },
+    { name = "vm_run", arguments = { source = "while true do end" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "print('fifth')" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "Every slot is busy."
+
+# Step 1: cancel run 4.
+[[model.responses]]
+tool_calls = [{ name = "background_cancel", arguments = { id = 4 } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "Run 4 was cancelled."
+
+# Step 2: the freed slot accepts a new run with the next IDs.
+[[model.responses]]
+tool_calls = [{ name = "vm_run", arguments = { source = "while true do end" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_list", arguments = {} }]
+
+[[model.responses]]
+text = "Run 5 took the free slot."
+
+[[steps]]
+send = "Start four busy loops and then one more script."
+reply_contains = ["Every slot is busy."]
+tool_contains = [
+    "id: 1\n{\"run_id\":1}",
+    "id: 2\n{\"run_id\":2}",
+    "id: 3\n{\"run_id\":3}",
+    "id: 4\n{\"run_id\":4}",
+    '''vm_run{"source": "print('fifth')"}tool invocation rejected: VM runtime is busy''',
+    'background_list{}{"calls":[{"id":1,"status":"running","tool":"vm_run"},{"id":2,"status":"running","tool":"vm_run"},{"id":3,"status":"running","tool":"vm_run"},{"id":4,"status":"running","tool":"vm_run"}]}',
+]
+tool_errors_allowed = true
+
+[[steps]]
+send = "Cancel run 4."
+reply_contains = ["Run 4 was cancelled."]
+tool_contains = [
+    'background_cancel{"id": 4}Background call 4 cancelled.',
+    'background_list{}{"calls":[{"id":1,"status":"running","tool":"vm_run"},{"id":2,"status":"running","tool":"vm_run"},{"id":3,"status":"running","tool":"vm_run"}]}',
+]
+
+[[steps]]
+send = "Start another busy loop."
+reply_contains = ["Run 5 took the free slot."]
+tool_contains = [
+    "id: 5\n{\"run_id\":5}",
+    'background_list{}{"calls":[{"id":1,"status":"running","tool":"vm_run"},{"id":2,"status":"running","tool":"vm_run"},{"id":3,"status":"running","tool":"vm_run"},{"id":5,"status":"running","tool":"vm_run"}]}',
+]
+
+[logs]
+expect = ["VM run 4 finished: Cancelled, 0 output line", "VM run 5 started"]
+forbid = ['\bERROR\b', 'panicked at', 'VM run 6 started']

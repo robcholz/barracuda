@@ -23,11 +23,8 @@ anstyle = "1"
 ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false, features = ["password"] }
 rustyline = { version = "18.0.1", default-features = false }
-strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
-thiserror = "2"
-serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]

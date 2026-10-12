@@ -4,7 +4,11 @@
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+mod config {
+    barracuda_plugin::config!();
+}
+
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::led_strip::{LedStrip, LedStripPeripheral, Rgb8};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -12,10 +16,9 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Owns the Board's primary LED-strip capability and publishes it to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -31,7 +34,8 @@ impl<Strip> LedStripPlugin<Strip> {
         Builtins: LedStripPeripheral<LedStrip = Strip>,
     {
         Self {
-            strip: context.hal.peripherals.take_led_strip(),
+            strip: config::peripherals::LED_STRIP_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_led_strip(instance)),
         }
     }
 }
@@ -280,5 +284,11 @@ mod tests {
             .eval()
             .expect("query strip");
         assert!(result);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = LedStripPackage::new(Some(TestStrip { pixels: 2 }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

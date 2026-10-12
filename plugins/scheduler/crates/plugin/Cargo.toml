@@ -22,10 +22,8 @@ time = { version = "0.3.55", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
-barracuda-platform-test.workspace = true
 embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

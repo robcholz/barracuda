@@ -115,11 +115,6 @@ impl ChatLineEditor {
     /// Completed physical rows are committed to terminal history immediately.
     /// Only the unfinished final row is redrawn, so the live render area is
     /// always exactly one row above the readline input area.
-    ///
-    /// Retained live-streaming render API: the external-IM client delivers whole
-    /// messages via [`Self::print`], but this powers token-level rendering when a
-    /// client streams deltas.
-    #[allow(dead_code)]
     pub(super) fn print_stream_fragment(&mut self, fragment: &str) -> Result<()> {
         if fragment.is_empty() {
             return Ok(());
@@ -142,7 +137,6 @@ impl ChatLineEditor {
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn finish_stream_line(&mut self) -> Result<()> {
         if self.stream.current().is_empty() {
             return Ok(());
@@ -224,7 +218,6 @@ struct LiveStream {
     column: usize,
 }
 
-#[allow(dead_code)]
 impl LiveStream {
     fn current(&self) -> &str {
         &self.current
@@ -297,7 +290,6 @@ impl LiveStream {
     }
 }
 
-#[allow(dead_code)]
 fn ansi_sequence_end(bytes: &[u8], start: usize) -> usize {
     let Some(next) = start.checked_add(1) else {
         return bytes.len();
@@ -316,7 +308,6 @@ fn ansi_sequence_end(bytes: &[u8], start: usize) -> usize {
     end
 }
 
-#[allow(dead_code)]
 fn render_columns() -> usize {
     terminal_columns().saturating_sub(1).max(1)
 }

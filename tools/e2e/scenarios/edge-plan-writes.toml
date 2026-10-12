@@ -1,0 +1,44 @@
+name = "Edge: writes during plan mode"
+description = "Plan Mode changes only the prompt: file, memory, and profile writes still run while the plan reminder is active."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "plan_enter", arguments = {} }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+request_contains = ['<system-reminder>\nplan\n</system-reminder>']
+tool_calls = [{ name = "file_write", arguments = { path = "/data/edge-plan.txt", content = "written-in-plan" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "memory_store", arguments = { content = "Plan Mode did not block this write." } }]
+
+[[model.responses]]
+tool_calls = [{ name = "profile_replace", arguments = { document = "user_profile", content = "Edited during Plan Mode." } }]
+
+[[model.responses]]
+request_contains = [
+  '<system-reminder>\nplan\n</system-reminder>',
+  '</mode_policy>\n\nEdited during Plan Mode.',
+]
+tool_calls = [{ name = "file_read", arguments = { path = "/data/edge-plan.txt" } }]
+
+[[model.responses]]
+request_contains = ['<system-reminder>\nplan\n</system-reminder>']
+text = "Wrote during planning."
+
+[[steps]]
+send = "Plan the change, but write the file anyway."
+reply_contains = ["Wrote during planning."]
+tool_contains = [
+  "plan_enter{}Plan Mode entered.",
+  '"loaded":true',
+  'file_write{"path": "/data/edge-plan.txt", "content": "written-in-plan"}{"path":"/data/edge-plan.txt","bytes":15}',
+  'Stored memory a-0.',
+  'Replaced profile document user_profile.',
+  '"content":"written-in-plan"',
+]

@@ -56,6 +56,30 @@ fn recall_filters_by_label_and_query_newest_first() {
 }
 
 #[test]
+fn recall_labels_ignore_ascii_case_and_duplicates_are_findable() {
+    block_on(async {
+        let memory = memory().await;
+        memory.store(draft("Likes tea", &["Preference"])).await;
+
+        assert_eq!(
+            memory.recall(&["preference".to_string()], None, 10).len(),
+            1
+        );
+        assert_eq!(
+            memory.recall(&["PREFERENCE".to_string()], None, 10).len(),
+            1
+        );
+        assert_eq!(
+            memory
+                .find_duplicate("  likes   TEA ")
+                .map(|item| item.content),
+            Some("Likes tea".to_string())
+        );
+        assert!(memory.find_duplicate("Likes coffee").is_none());
+    });
+}
+
+#[test]
 fn update_replaces_only_supplied_fields() {
     block_on(async {
         let memory = memory().await;

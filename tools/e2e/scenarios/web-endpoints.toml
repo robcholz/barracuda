@@ -1,0 +1,67 @@
+name = "WebServer, portal, and configuration endpoints"
+description = "Direct HTTP checks against the System WebServer: the portal shell and manifest, Plugin assets, Wi-Fi status on a host-managed network, model API request validation and status, and an unconfigured channel's routes."
+
+[model]
+mode = "none"
+
+[[http]]
+path = "/portal/"
+body_contains = ["<html"]
+
+[[http]]
+path = "/portal/entries.json"
+body_contains = ['"id":"imessage-web"', '"id":"agent"', '"id":"wifi"']
+
+[[http]]
+path = "/portal/assets/imessage-web/entry.js"
+body_contains = ["/ws/message"]
+
+[[http]]
+path = "/portal/assets/missing/entry.js"
+status = 404
+
+[[http]]
+path = "/api/wifi/status"
+body_contains = ['"station_configuration":false', '"station":{"state":"connected"}']
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = "[]"
+status = 400
+
+[[http]]
+method = "PUT"
+path = "/api/model-api"
+status = 405
+
+[[http]]
+method = "POST"
+path = "/api/model-api"
+body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2}]'
+status = 204
+
+[[http]]
+path = "/api/model-api/status"
+body_contains = ['"configured":true', '"root_agent":{"backend":"openai_compatible","model":"m","base_url":"http://10.42.0.1:9/v1"}']
+
+[[http]]
+path = "/api/gateway/telegram/status"
+body_contains = ['"configured":false', '"mode":"send_receive"', '"owners":{"count":0}']
+
+[[http]]
+path = "/api/gateway/telegram/owners"
+status = 409
+body_contains = ['"error":"not_configured"']
+
+[[http]]
+path = "/api/gateway/telegram/unknown"
+status = 404
+
+[memory]
+# Host ordinary-heap peak was 197 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 208896

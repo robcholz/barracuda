@@ -9,10 +9,11 @@ description = "Construction context shared by Barracuda Plugins"
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
 barracuda-board-hal.workspace = true
+barracuda-platform.workspace = true
 barracuda-target-api.workspace = true
 embassy-net.workspace = true
-http-client.workspace = true
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true

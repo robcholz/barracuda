@@ -231,7 +231,7 @@ fn central_resolver_contains_no_concrete_platform_registry() -> Result<(), std::
     let selected = fs::read_to_string(root.join("platforms/selected/build.rs"))?;
 
     for concrete in [
-        "macos", "linux", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s2", "esp32s3", "stm32",
+        "macos", "linux", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3", "stm32",
     ] {
         assert!(!resolver.contains(&format!("\"{concrete}\"")));
         assert!(!selected.contains(&format!("\"{concrete}\"")));
@@ -250,7 +250,7 @@ fn esp32p4_does_not_advertise_an_unimplemented_ledc_pool() {
 
     assert!(esp32p4.hal().runtime_pwm_controllers().is_empty());
 
-    for name in ["esp32", "esp32c3", "esp32c6", "esp32s2", "esp32s3"] {
+    for name in ["esp32", "esp32c3", "esp32c6", "esp32s3"] {
         let platform = platforms
             .iter()
             .find(|platform| platform.name() == name)

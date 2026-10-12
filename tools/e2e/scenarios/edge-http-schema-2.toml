@@ -1,0 +1,69 @@
+# Errors come from json-validator (shared/json-validator/src/lib.rs:820,
+# "JSON schema validation failed at {path}: {kind:?}") wrapped by ToolError::ArgumentsSchema
+# ("invalid arguments: {0}", plugins/agent/crates/tool/src/definition.rs:321) and returned as
+# the tool content by the engine's classify path (plugins/agent/crates/agent/src/engine/iteration_loop/run.rs:289-301).
+# No case reaches the network.
+name = "HTTP tool argument schema (2)"
+description = "http_request rejects malformed arguments at the static schema before the HTTP capability runs."
+
+[model]
+mode = "scripted"
+
+# Case 1: blank URL fails trimmedNonEmpty (http_request/schema.json url)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X-A", value = "1", extra = "y" }] } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].extra: AdditionalProperty']
+text = "Case 8 checked."
+
+# Case 9: 33 headers exceed maxItems 32
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X-0", value = "v" }, { name = "X-1", value = "v" }, { name = "X-2", value = "v" }, { name = "X-3", value = "v" }, { name = "X-4", value = "v" }, { name = "X-5", value = "v" }, { name = "X-6", value = "v" }, { name = "X-7", value = "v" }, { name = "X-8", value = "v" }, { name = "X-9", value = "v" }, { name = "X-10", value = "v" }, { name = "X-11", value = "v" }, { name = "X-12", value = "v" }, { name = "X-13", value = "v" }, { name = "X-14", value = "v" }, { name = "X-15", value = "v" }, { name = "X-16", value = "v" }, { name = "X-17", value = "v" }, { name = "X-18", value = "v" }, { name = "X-19", value = "v" }, { name = "X-20", value = "v" }, { name = "X-21", value = "v" }, { name = "X-22", value = "v" }, { name = "X-23", value = "v" }, { name = "X-24", value = "v" }, { name = "X-25", value = "v" }, { name = "X-26", value = "v" }, { name = "X-27", value = "v" }, { name = "X-28", value = "v" }, { name = "X-29", value = "v" }, { name = "X-30", value = "v" }, { name = "X-31", value = "v" }, { name = "X-32", value = "v" }] } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.headers: MaxItems']
+text = "Case 9 checked."
+
+# Case 10: non-string body
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "POST", url = "http://10.42.0.1:18787/_llm_tape/health", body = 5 } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.body: Type { expected: String }']
+text = "Case 10 checked."
+
+# Case 11: 2049-character URL exceeds maxLength 2048
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.url: MaxLength']
+text = "Case 11 checked."
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 8 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].extra: AdditionalProperty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 9 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.headers: MaxItems']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 10 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.body: Type { expected: String }']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 11 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.url: MaxLength']
+tool_errors_allowed = true

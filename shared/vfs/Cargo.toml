@@ -12,9 +12,11 @@ std = ["critical-section/std"]
 crate-type = ["rlib"]
 
 [dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
-embassy-sync = { workspace = true }
+embassy-sync.workspace = true
 critical-section = { version = "1", optional = true }
 
 [dev-dependencies]

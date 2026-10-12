@@ -1,6 +1,6 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{rc::Rc, string::String};
 
-use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
+use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent, TextChunk};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,7 +13,6 @@ pub struct WebEvent {
 
 /// Message operation represented by a Web event.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps each lane-bounded semantic payload inline.
 pub enum WebEventData {
     MessageStart {
         message_id: String,
@@ -22,21 +21,31 @@ pub enum WebEventData {
     },
     MessageDelta {
         message_id: String,
-        delta: String,
+        /// Shares the Gateway chunk's bulk allocation.
+        delta: TextChunk,
     },
     /// One complete semantic Agent event carried by the message stream.
     MessageEvent {
         message_id: String,
+        /// Shares the Gateway event's bulk payload.
         event: SendStreamEvent,
     },
     MessageEnd {
         message_id: String,
         error: Option<String>,
     },
+    /// One whole file, image, audio or video message. The bytes stay on the
+    /// device; a page fetches them from `url`.
     Media {
         message_id: String,
         kind: MediaKind,
-        phase: MediaPhase,
+        /// `/api/web/media/<id>`, served while the file stays kept.
+        url: String,
+        mime_type: String,
+        filename: Option<String>,
+        size: u64,
+        caption: Option<String>,
+        reply_to: Option<String>,
     },
     MessageEdit {
         message_id: String,
@@ -52,31 +61,53 @@ pub enum WebEventData {
     ConversationTyping {
         typing: bool,
     },
-}
-
-/// Lifecycle of a streamed binary message.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MediaPhase {
-    Start {
-        filename: Option<String>,
-        mime_type: Option<String>,
-        caption: Option<String>,
-        reply_to: Option<String>,
-    },
-    Delta {
-        bytes: Vec<u8>,
-    },
-    End {
-        error: Option<String>,
+    /// The conversation's sessions after a session command, as the compact
+    /// JSON of a `SendSessionsRequest`. Every open page of the conversation
+    /// gets it, so a switch made in one tab reaches the others.
+    ConversationSessions {
+        json: String,
     },
 }
 
-/// A normal event or an explicit notification that replay history was lost.
+/// A normal event, an explicit notification that replay history was lost, or
+/// the refusal of one client's message frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::large_enum_variant)] // Keeps replayed semantic events allocation-free.
 pub enum WebDelivery {
-    Event(WebEvent),
-    Lagged { missed: u64 },
+    /// Shared with the replay history and every other subscriber.
+    Event(Rc<WebEvent>),
+    Lagged {
+        missed: u64,
+    },
+    /// A message frame the bridge refused, told only to the client that sent
+    /// it: nothing was published and none of its attachments was consumed.
+    Rejected {
+        /// The id the bridge numbered the frame with (`web-in-<n>`).
+        message_id: String,
+        error: Rejection,
+    },
+}
+
+/// Why the bridge refused a message frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Rejection {
+    /// The frame carried neither text nor an attachment.
+    Empty,
+    /// The frame named more than [`crate::MAX_ATTACHMENTS`] attachments.
+    TooManyAttachments,
+    /// An attachment id was never uploaded, was already sent, or was evicted.
+    UnknownAttachment,
+}
+
+impl Rejection {
+    /// The stable code a page reads.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::TooManyAttachments => "too_many_attachments",
+            Self::UnknownAttachment => "unknown_attachment",
+        }
+    }
 }
 
 impl WebEventData {
@@ -96,6 +127,7 @@ impl WebEventData {
             Self::MessageDelete { .. } => "message.delete",
             Self::MessageReaction { .. } => "message.reaction",
             Self::ConversationTyping { .. } => "conversation.typing",
+            Self::ConversationSessions { .. } => "conversation.sessions",
         }
     }
 }

@@ -39,13 +39,6 @@ impl SntpConfig {
             minimum_unix_seconds,
         }
     }
-
-    /// Overrides the request timeout.
-    #[must_use]
-    pub const fn with_timeout_millis(mut self, timeout_millis: u64) -> Self {
-        self.timeout_millis = timeout_millis;
-        self
-    }
 }
 
 #[derive(Clone, Copy)]

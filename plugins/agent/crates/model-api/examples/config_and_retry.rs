@@ -51,8 +51,11 @@ fn main() -> anyhow::Result<()> {
     config.timeout_ms = 30_000;
     config.max_tokens = 2_048;
     config.image_max_bytes = 256 * 1024;
+    config.input_modalities.pdf = true;
+    config.max_images_in_context = 4;
     println!(
-        "config     -> backend={} key={} model={} url={} timeout={}ms max_tokens={} img_max={}B",
+        "config     -> backend={} key={} model={} url={} timeout={}ms max_tokens={} img_max={}B \
+         modalities={:?} images_in_context={}",
         config.backend.as_str(),
         config.api_key,
         config.model,
@@ -60,6 +63,8 @@ fn main() -> anyhow::Result<()> {
         config.timeout_ms,
         config.max_tokens,
         config.image_max_bytes,
+        config.input_modalities,
+        config.max_images_in_context,
     );
 
     // ---- RetryPolicy: constructors, builders, computed backoff, fields -----

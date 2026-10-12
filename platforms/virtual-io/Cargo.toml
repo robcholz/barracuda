@@ -1,0 +1,32 @@
+[package]
+name = "barracuda-platform-virtual-io"
+version = "0.1.0"
+edition = "2021"
+description = "Host-only virtual GPIO and I2C hardware shared by the Linux and macOS Platforms"
+
+[dependencies]
+barracuda-board-hal.workspace = true
+critical-section = { version = "1", features = ["std"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
+embedded-hal-bus.workspace = true
+log.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

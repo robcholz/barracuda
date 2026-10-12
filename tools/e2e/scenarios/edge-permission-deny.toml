@@ -1,0 +1,17 @@
+name = "Edge: permission level deny"
+description = "A Workflow switches session-1 to the deny level on each inbound message; Safe Tools still run while every Tool above Safe is refused with the policy reason and never executes."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = 'Install the deny switch. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "workflow"} 2. tool_load {"group_id": "file"} 3. workflow_load {"id": "perm-deny", "match": {"event": "gateway.message.received"}, "steps": [{"call": "session.set_permission_level", "arguments": {"session": "session-1", "level": "deny"}}]}. Then reply with only: Deny switch installed.'
+reply_contains = ['Deny switch installed.']
+tool_contains = ['perm-deny']
+
+[[steps]]
+send = 'Try to change things. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. subagent_watch {"agent": "agent-9"} 2. file_write {"path": "/data/denied.txt", "content": "x"} 3. skill_list {} 4. subagent_run {"kind": "worker", "name": "w", "goal": "g", "timeout_ms": 1000} 5. file_read {"path": "/data/denied.txt"}. Then reply with only: Side effects are denied.'
+reply_contains = ['Side effects are denied.']
+tool_contains = ['No subagent agent-9 in your subtree (unknown id, or not one of yours).', "'file_write' is a Moderate-risk action and this session denies side effects.", 'skill_list{}[]', "'subagent_run' is a Moderate-risk action and this session denies side effects.", '{"error":"not_found","message":"path not found"}']
+request_contains = ["'subagent_run' is a Moderate-risk action and this session denies side effects."]
+tool_errors_allowed = true

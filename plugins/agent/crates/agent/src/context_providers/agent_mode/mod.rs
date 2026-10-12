@@ -122,7 +122,14 @@ mod tests {
             sink.into_history()
         };
         let request = context.request(&history);
-        (request.system().to_owned(), request.reminders().to_vec())
+        (
+            request.system().to_owned(),
+            request
+                .reminders()
+                .iter()
+                .map(barracuda_agent_memory::ChatMessage::to_value)
+                .collect(),
+        )
     }
 
     #[test]

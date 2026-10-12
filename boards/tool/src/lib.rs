@@ -235,6 +235,18 @@ pub enum CommandError {
         /// Platform-owned installation guidance.
         prompt: String,
     },
+    /// The installed toolchain is not the release the Platform builds with.
+    #[error("toolchain `{toolchain}` is `{found}`, but this Platform builds with {required}\n\n{prompt}")]
+    ToolchainVersion {
+        /// rustup toolchain selected by the Platform.
+        toolchain: String,
+        /// Release the Platform requires.
+        required: String,
+        /// What `rustc --version` reported.
+        found: String,
+        /// Platform-owned installation guidance.
+        prompt: String,
+    },
     /// rustup could not be started while applying the Platform build policy.
     #[error("failed to run rustup for toolchain `{toolchain}`: {source}\n\n{prompt}")]
     ToolchainStart {
@@ -654,6 +666,13 @@ fn select_board<W: Write>(
     )
 }
 
+/// The toolchain a Platform's build policy asks for.
+struct ToolchainPolicy<'a> {
+    name: &'a str,
+    version: Option<&'a str>,
+    prompt: &'a str,
+}
+
 fn select_board_with_toolchain<W, F>(
     workspace_root: &Path,
     name: &str,
@@ -663,7 +682,7 @@ fn select_board_with_toolchain<W, F>(
 ) -> Result<(), CommandError>
 where
     W: Write,
-    F: FnOnce(&Path, &str, &str) -> Result<(), CommandError>,
+    F: FnOnce(&Path, &ToolchainPolicy<'_>) -> Result<(), CommandError>,
 {
     let bundle = workspace_root.join("boards/configs").join(name);
     let board = read_board(workspace_root, name)?;
@@ -684,10 +703,17 @@ where
             .build()
             .missing_toolchain_prompt()
             .unwrap_or_default();
-        activate_toolchain(workspace_root, toolchain, prompt)?;
+        let policy = ToolchainPolicy {
+            name: toolchain,
+            version: platform.build().rustup_toolchain_version(),
+            prompt,
+        };
+        activate_toolchain(workspace_root, &policy)?;
     }
 
     write_selected_build(workspace_root, &board, &platform)?;
+    barracuda_plugin_tool::select_board(workspace_root, name)
+        .map_err(|error| CommandError::Generated(error.to_string()))?;
     write_selected_board(workspace_root, name)?;
     writeln!(
         output,
@@ -710,9 +736,9 @@ where
 
 fn activate_rustup_toolchain(
     workspace_root: &Path,
-    toolchain: &str,
-    prompt: &str,
+    policy: &ToolchainPolicy<'_>,
 ) -> Result<(), CommandError> {
+    let (toolchain, prompt) = (policy.name, policy.prompt);
     let workspace_root = workspace_root
         .canonicalize()
         .map_err(|source| CommandError::Read {
@@ -721,19 +747,29 @@ fn activate_rustup_toolchain(
         })?;
     let available = ProcessCommand::new("rustup")
         .args(["run", toolchain, "rustc", "--version"])
-        .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .output()
         .map_err(|source| CommandError::ToolchainStart {
             toolchain: toolchain.to_owned(),
             prompt: prompt.to_owned(),
             source,
         })?;
-    if !available.success() {
+    if !available.status.success() {
         return Err(CommandError::ToolchainMissing {
             toolchain: toolchain.to_owned(),
             prompt: prompt.to_owned(),
         });
+    }
+    if let Some(required) = policy.version {
+        let found = String::from_utf8_lossy(&available.stdout).trim().to_owned();
+        if !reports_release(&found, required) {
+            return Err(CommandError::ToolchainVersion {
+                toolchain: toolchain.to_owned(),
+                required: required.to_owned(),
+                found,
+                prompt: prompt.to_owned(),
+            });
+        }
     }
     let activated = ProcessCommand::new("rustup")
         .args(["override", "set", toolchain, "--path"])
@@ -754,6 +790,19 @@ fn activate_rustup_toolchain(
             path: workspace_root,
         })
     }
+}
+
+/// Whether a `rustc --version` line names `release`: as the compiler version
+/// (`rustc 1.98.1 (…)`, `rustc 1.98.1-nightly (…)`) or as a vendor release in
+/// parentheses (`… (1.98.1.0)`, how espup toolchains report themselves).
+fn reports_release(version_line: &str, release: &str) -> bool {
+    version_line.split_whitespace().any(|word| {
+        word == release
+            || word.trim_start_matches('(').trim_end_matches(')') == release
+            || word
+                .strip_prefix(release)
+                .is_some_and(|rest| rest.starts_with('-'))
+    })
 }
 
 fn write_selected_build(
@@ -819,45 +868,50 @@ fn write_selected_build(
             );
         }
     }
-    if target == "riscv32imafc-unknown-none-elf" {
-        for (name, value) in [
+    if is_esp_riscv(target) {
+        // espup's riscv32-esp-elf GCC, on PATH through the Platform's
+        // environment file, compiles C dependencies. Rust's own linker links
+        // the image, as in esp-generate's projects.
+        let environment_suffix = target.replace('-', "_");
+        let mut environment = vec![
             (
-                "CC_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-gcc\", relative = true }",
+                format!("CC_{environment_suffix}"),
+                String::from("riscv32-esp-elf-gcc"),
             ),
             (
-                "CXX_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-g++\", relative = true }",
+                format!("CXX_{environment_suffix}"),
+                String::from("riscv32-esp-elf-g++"),
             ),
             (
-                "AR_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true }",
+                format!("AR_{environment_suffix}"),
+                String::from("riscv32-esp-elf-ar"),
             ),
+            // Bindgen parses C headers as a bare-metal translation unit, so
+            // Clang's own scalar headers apply whichever libclang espup
+            // exported.
             (
-                "AR",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ar\", relative = true, force = true }",
+                format!("BINDGEN_EXTRA_CLANG_ARGS_{environment_suffix}"),
+                String::from("-ffreestanding"),
             ),
-            (
-                "RANLIB",
-                "{ value = \"boards/tool/assets/riscv32-esp-elf-ranlib\", relative = true, force = true }",
-            ),
-            (
-                "CMAKE_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/esp32p4-cmake\", relative = true }",
-            ),
-            (
-                "CMAKE_TOOLCHAIN_FILE_riscv32imafc_unknown_none_elf",
-                "{ value = \"boards/tool/assets/esp32p4-toolchain.cmake\", relative = true }",
-            ),
-            (
-                "CFLAGS_riscv32imafc_unknown_none_elf",
-                "\"-march=rv32imafc -mabi=ilp32f -DBARRACUDA_ESP32P4_HARD_FLOAT=4\"",
-            ),
-        ] {
-            append_cargo_environment(&mut cargo, &mut has_environment, name, value);
+        ];
+        if target == "riscv32imafc-unknown-none-elf" {
+            // cc-rs passes the soft-float ABI for every bare-metal RISC-V
+            // target; the Rust target uses the single-float ABI.
+            environment.push((
+                format!("CFLAGS_{environment_suffix}"),
+                String::from("-march=rv32imafc -mabi=ilp32f"),
+            ));
+        }
+        for (name, value) in environment {
+            append_cargo_environment(
+                &mut cargo,
+                &mut has_environment,
+                &name,
+                &format!("{value:?}"),
+            );
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nlinker = \"boards/tool/assets/esp32p4-linker\"\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
+            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
         ));
     }
     if let Some(tool_prefix) = target
@@ -895,20 +949,28 @@ fn write_selected_build(
             );
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-Wl,--allow-multiple-definition\", \"-C\", \"link-arg=-Wl,--start-group\", \"-C\", \"link-arg=-lc\", \"-C\", \"link-arg=-lm\", \"-C\", \"link-arg=-lgcc\", \"-C\", \"link-arg=-Wl,--end-group\"]\n"
+            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\"]\n"
         ));
     }
     if platform.application().launcher().is_some() {
         let runner = install_runner(workspace_root, &host)?;
-        if target != "riscv32imafc-unknown-none-elf" && !target.starts_with("xtensa-esp32") {
+        let esp_target = is_esp_riscv(target) || target.starts_with("xtensa-esp32");
+        if !esp_target {
             cargo.push_str(&format!("\n[target.{target}]\n"));
+            if target.starts_with("thumb") {
+                // cortex-m-rt's link script, as in embassy-stm32's examples;
+                // it includes the Platform's `memory.x`.
+                cargo.push_str(
+                    "rustflags = [\"-C\", \"link-arg=--nmagic\", \"-C\", \"link-arg=-Tlink.x\"]\n",
+                );
+            }
         }
         let mut runner_arguments = format!(
             "{:?}, \"__run\", {:?}",
             runner.to_string_lossy(),
             platform.name()
         );
-        if target == "riscv32imafc-unknown-none-elf" || target.starts_with("xtensa-esp32") {
+        if esp_target {
             if let Some(flash_size) = board.hardware().flash_size() {
                 append_launcher_argument(&mut runner_arguments, "--flash-size");
                 append_launcher_argument(&mut runner_arguments, flash_size);
@@ -927,6 +989,16 @@ fn write_selected_build(
     write_file(
         &workspace_root.join(".barracuda/selected-platform"),
         &format!("{}\n", platform.name()),
+    )
+}
+
+/// Whether `target` is an ESP RISC-V target that builds C with espup's GCC.
+fn is_esp_riscv(target: &str) -> bool {
+    matches!(
+        target,
+        "riscv32imc-unknown-none-elf"
+            | "riscv32imac-unknown-none-elf"
+            | "riscv32imafc-unknown-none-elf"
     )
 }
 
@@ -996,7 +1068,12 @@ fn read_environment_file(
                     .and_then(|value| value.strip_suffix('\''))
             })
             .unwrap_or(value);
-        environment.push((name.to_owned(), expand_environment_value(value)));
+        // A later export replaces an earlier one, and its `$NAME` sees the
+        // earlier value, as when the shell sources the file: espup exports
+        // PATH once per installed toolchain.
+        let value = expand_environment_value(value, &environment);
+        environment.retain(|(existing, _)| existing != name);
+        environment.push((name.to_owned(), value));
     }
     Ok(environment)
 }
@@ -1016,7 +1093,7 @@ fn expand_environment_path(workspace_root: &Path, configured_path: &Path) -> Pat
     }
 }
 
-fn expand_environment_value(value: &str) -> String {
+fn expand_environment_value(value: &str, exported: &[(String, String)]) -> String {
     let mut expanded = String::new();
     let mut characters = value.chars().peekable();
     while let Some(character) = characters.next() {
@@ -1046,7 +1123,9 @@ fn expand_environment_value(value: &str) -> String {
             }
             continue;
         }
-        if let Some(current) = env::var_os(&name) {
+        if let Some((_, current)) = exported.iter().find(|(exported, _)| *exported == name) {
+            expanded.push_str(current);
+        } else if let Some(current) = env::var_os(&name) {
             expanded.push_str(&current.to_string_lossy());
         }
     }
@@ -1115,9 +1194,31 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        requires_platform_launcher, run_with_selector, select_board_with_toolchain,
-        sync_with_report, CommandError, SyncStatus,
+        read_environment_file, reports_release, requires_platform_launcher, run_with_selector,
+        select_board_with_toolchain, sync_with_report, CommandError, SyncStatus,
     };
+
+    #[test]
+    fn repeated_exports_extend_the_earlier_value_like_a_shell() {
+        let root = tempdir().expect("temporary workspace");
+        fs::write(
+            root.path().join("export-esp.sh"),
+            "export PATH=\"/riscv/bin:$PATH\"\nexport LIBCLANG_PATH=\"/clang\"\nexport PATH=\"/xtensa/bin:$PATH\"\n",
+        )
+        .expect("environment file");
+        let environment =
+            read_environment_file(root.path(), Path::new("export-esp.sh")).expect("environment");
+        let paths = environment
+            .iter()
+            .filter(|(name, _)| name == "PATH")
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].starts_with("/xtensa/bin:/riscv/bin:"));
+        assert!(environment
+            .iter()
+            .any(|(name, value)| name == "LIBCLANG_PATH" && value == "/clang"));
+    }
 
     #[test]
     fn target_runner_launches_only_the_system_application_through_platform() {
@@ -1195,10 +1296,11 @@ mod tests {
             "device",
             &mut Vec::new(),
             false,
-            |workspace, toolchain, prompt| {
+            |workspace, policy| {
                 assert_eq!(workspace, root.path());
-                assert_eq!(toolchain, "vendor");
-                assert_eq!(prompt, "Install the vendor toolchain.\n");
+                assert_eq!(policy.name, "vendor");
+                assert_eq!(policy.version, None);
+                assert_eq!(policy.prompt, "Install the vendor toolchain.\n");
                 activated.set(true);
                 Ok(())
             },
@@ -1235,10 +1337,10 @@ mod tests {
             "device",
             &mut Vec::new(),
             false,
-            |_workspace, toolchain, prompt| {
+            |_workspace, policy| {
                 Err(CommandError::ToolchainMissing {
-                    toolchain: toolchain.to_owned(),
-                    prompt: prompt.to_owned(),
+                    toolchain: policy.name.to_owned(),
+                    prompt: policy.prompt.to_owned(),
                 })
             },
         )
@@ -1250,6 +1352,66 @@ mod tests {
             None
         );
         assert!(!root.path().join(".barracuda/cargo.toml").exists());
+    }
+
+    #[test]
+    fn toolchain_release_is_read_from_the_version_line() {
+        let esp = "rustc 1.98.1-nightly (183f762d6 2026-09-08) (1.98.1.0)";
+        assert!(reports_release(esp, "1.98.1.0"));
+        assert!(reports_release(esp, "1.98.1"));
+        assert!(!reports_release(
+            "rustc 1.99.0-nightly (4e103d068 2026-10-01) (1.99.0.0)",
+            "1.98.1.0"
+        ));
+        assert!(reports_release(
+            "rustc 1.98.1 (e1fd8ff58 2026-08-20)",
+            "1.98.1"
+        ));
+        assert!(!reports_release(
+            "rustc 1.98.10 (e1fd8ff58 2026-08-20)",
+            "1.98.1"
+        ));
+    }
+
+    #[test]
+    fn a_required_toolchain_release_reaches_activation() {
+        let root = tempdir().expect("temporary workspace");
+        add_board(root.path(), "device");
+        let manifest = root.path().join("platforms/test/platform.yml");
+        let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+        fs::write(
+            &manifest,
+            yaml.replace(
+                "selection:\n",
+                "build:\n  rustup-toolchain: vendor\n  rustup-toolchain-version: 1.98.1.0\n  missing-toolchain-prompt: |\n    Install vendor 1.98.1.0.\nselection:\n",
+            ),
+        )
+        .expect("Platform build policy");
+
+        let error = select_board_with_toolchain(
+            root.path(),
+            "device",
+            &mut Vec::new(),
+            false,
+            |_workspace, policy| {
+                assert_eq!(policy.version, Some("1.98.1.0"));
+                Err(CommandError::ToolchainVersion {
+                    toolchain: policy.name.to_owned(),
+                    required: "1.98.1.0".into(),
+                    found: "rustc 1.99.0-nightly (4e103d068 2026-10-01) (1.99.0.0)".into(),
+                    prompt: policy.prompt.to_owned(),
+                })
+            },
+        )
+        .expect_err("a different toolchain release must stop selection");
+
+        let message = error.to_string();
+        assert!(message.contains("builds with 1.98.1.0"));
+        assert!(message.contains("Install vendor 1.98.1.0."));
+        assert_eq!(
+            read_selected_board(root.path()).expect("read selection"),
+            None
+        );
     }
 
     fn add_catalog_board(root: &Path, name: &str) {
@@ -1377,14 +1539,14 @@ mod tests {
     #[test]
     fn interactive_select_lists_boards_in_name_order_and_persists_the_choice() {
         let root = tempdir().expect("temporary workspace");
-        add_board(root.path(), "stm32f429zi-nucleo");
+        add_board(root.path(), "nucleo-u5a5zj-q");
         add_board(root.path(), "esp32c6-devkitc-1");
         fs::write(root.path().join("boards/configs/README.txt"), "not a Board")
             .expect("non-Board file");
         let mut output = Vec::new();
 
         run_with_selector(["select"], root.path(), &mut output, |boards, default| {
-            assert_eq!(boards, ["esp32c6-devkitc-1", "stm32f429zi-nucleo"]);
+            assert_eq!(boards, ["esp32c6-devkitc-1", "nucleo-u5a5zj-q"]);
             assert_eq!(default, None);
             Ok(Some(1))
         })
@@ -1392,7 +1554,7 @@ mod tests {
 
         assert_eq!(
             read_selected_board(root.path()).expect("read selection"),
-            Some(String::from("stm32f429zi-nucleo"))
+            Some(String::from("nucleo-u5a5zj-q"))
         );
     }
 

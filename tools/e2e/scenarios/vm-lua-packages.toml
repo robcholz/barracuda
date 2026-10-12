@@ -1,0 +1,13 @@
+name = "Lua http and message queue packages"
+description = "A real model runs a Lua script that checks the vm-http request shapes, methods, headers, and errors, and the message_queue key, size, and key-count limits."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character as one single line without any change. Then reply with only the word started. Lua source: local http, mq = require('http'), require('message_queue') local function fails(fn, ...) local ok, r = pcall(fn, ...) return not ok or r == nil end local health = 'http://10.42.0.1:18787/_llm_tape/health' local r = assert(http.request({method = 'GET', url = health, headers = {{name = 'accept', value = 'application/json'}, {name = 'x-probe', value = '1'}}, body = ''})) assert(r.status == 200 and r.body:find('ok')) for _, m in ipairs({'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'}) do local res, err = http.request({method = m, url = 'http://10.42.0.1:9/', body = 'x'}) assert(res == nil and err == 'transport') end local res, err = http.request({method = 'GET', url = 'ftp://10.42.0.1/file'}) assert(res == nil and err == 'invalid_url') assert(fails(http.request, {method = 'TRACE', url = health})) assert(fails(http.request, {method = 'GET', url = health, headers = {5}})) assert(fails(http.request, {})) assert(fails(http.request, 5)) assert(fails(mq.push, '', 'x')) assert(fails(mq.push, string.rep('k', 65), 'x')) assert(fails(mq.push, 'big', string.rep('m', 5000))) for i = 1, 16 do mq.push('key' .. i, 'v' .. i) end assert(fails(mq.push, 'key17', 'x')) for i = 1, 16 do assert(mq.receive('key' .. i) == 'v' .. i) end print('packages ok')'''
+tool_contains = ['"run_id":1']
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

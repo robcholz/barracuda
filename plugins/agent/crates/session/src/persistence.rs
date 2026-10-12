@@ -94,6 +94,8 @@ mod tests {
             reasoning_effort: ReasoningEffort::Medium,
             permission_level: PermissionLevel::Ask,
             root_agent: Some(AgentId::new(7)),
+            title: Some("Trip plan".into()),
+            updated_at: Some(1_700_000_000_000),
         };
 
         let encoded = state.encode_state().unwrap().into_owned();
@@ -101,6 +103,8 @@ mod tests {
         assert_eq!(json["reasoning_effort"], "medium");
         assert_eq!(json["permission_level"], "ask");
         assert_eq!(json["root_agent"], "agent-7");
+        assert_eq!(json["title"], "Trip plan");
+        assert_eq!(json["updated_at"], 1_700_000_000_000_u64);
         assert!(json.get("root_inflight_toolcalls").is_none());
 
         let restored = SessionPersistentState::decode_state(
@@ -111,5 +115,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(restored, state);
+    }
+
+    #[test]
+    fn session_payload_without_metadata_still_decodes() {
+        let legacy =
+            br#"{"reasoning_effort":"medium","permission_level":"ask","root_agent":"agent-3"}"#;
+
+        let restored = SessionPersistentState::decode_state(
+            SessionPersistentState::SCHEMA_VERSION,
+            StateSlice { bytes: legacy },
+        )
+        .unwrap();
+        assert_eq!(restored.root_agent, Some(AgentId::new(3)));
+        assert_eq!(restored.title, None);
+        assert_eq!(restored.updated_at, None);
+
+        let encoded = restored.encode_state().unwrap().into_owned();
+        let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
+        assert!(json.get("title").is_none());
+        assert!(json.get("updated_at").is_none());
     }
 }

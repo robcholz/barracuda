@@ -9,7 +9,7 @@ use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::{HostWifiDevice, WifiCapabilities};
 use barracuda_platform_test::{loopback_network, memory_partition};
 use barracuda_plugin::{
-    api::{ClientFactory, Hardware, PlatformInfo, PluginContext, TargetIdentity},
+    api::{Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity},
     manager::{Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult},
 };
 use barracuda_vfs::{MountOptions, Vfs};
@@ -50,7 +50,8 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
         barracuda_plugin::api::BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
-    let mut context = PluginContext::new(identity, stack, ClientFactory::plaintext(stack));
+    let mut context = PluginContext::new(identity, stack);
+    context.wifi = Some(PlatformWifi::new(HostWifiDevice::new(stack)));
     let resources = MemFs::new();
     resources
         .create_dir_all("/plugins/captive-portal")
@@ -91,7 +92,7 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         .register(CaptivePortalPlugin::new(&mut context))
         .expect("portal");
     manager
-        .register(WifiPlugin::new(&mut context, HostWifiDevice::new(stack)))
+        .register(WifiPlugin::new(&mut context))
         .expect("wifi");
     let observed = Rc::new(RefCell::new(None));
     let observed_wifi = Rc::new(RefCell::new(None));
@@ -133,8 +134,22 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
             .any(|bytes| bytes == b"\"id\":\"wifi\"")
     );
 
+    // A Platform-managed network reports the connection the host made.
+    let network = loopback_network();
+    let response = request(Rc::clone(&server), network, "GET", "/portal/status", b"").await;
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert_eq!(
+        body(&response),
+        r#"{"entries":{"wifi":{"state":"ready","label":{"zh":"已连接","en":"Connected"}}}}"#
+            .as_bytes()
+    );
+
     let network = loopback_network();
     let response = request(Rc::clone(&server), network, "GET", "/api/wifi", b"").await;
+    assert!(response.starts_with(b"HTTP/1.1 405"));
+
+    let network = loopback_network();
+    let response = request(Rc::clone(&server), network, "GET", "/api/wifi/status", b"").await;
     assert!(response.starts_with(b"HTTP/1.1 200"));
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(body(&response)).expect("status JSON"),

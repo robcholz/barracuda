@@ -7,6 +7,8 @@ publish = false
 description = "no_std filesystem runtime for standard Agent Skills"
 
 [dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
 barracuda-minimal-yaml.workspace = true
 barracuda-vfs.workspace = true
 getset = "0.1.7"

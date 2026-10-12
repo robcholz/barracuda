@@ -1,0 +1,22 @@
+name = "Conversation end then continue"
+description = "conversation_end trims its final message, ends the turn after the whole Tool batch without another model call, and does not close the Session: the next user message continues the same Session with the final message in its history."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''This is a test of the conversation_end tool. In one single response, make two parallel tool calls together: tool_search {} and conversation_end {"final_message": "  Goodbye for now.  "} with the final message exactly as written, including the spaces.'''
+reply_matches = ['^Goodbye for now\.$']
+tool_contains = [
+  'Goodbye for now."}Conversation ended.',
+  'tool_search{}{"tool_groups":[',
+]
+
+[[steps]]
+send = "Are you still there? Answer in a few words without calling tools."
+kinds = ["reply"]
+request_contains = ['"content":"Goodbye for now."', '"content":"Are you still there?']
+
+[logs]
+expect = ["Agent created session `session-1`"]
+forbid = ['\bERROR\b', 'panicked at', "created session `session-2`"]

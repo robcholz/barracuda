@@ -1,12 +1,25 @@
 # Agent File Plugin
 
+Exposes the Plugin filesystem to Agents as bounded native file Tools.
+
 - Plugin ID: `agent-file`
-- Direct Plugin dependencies: `agent`
-- Provided typed capabilities: none
-- Required typed capabilities: `AgentToolRegistry`
-- Agent Tools: `file_read`, `file_list`, `file_write`, `file_edit`, `file_move`, `file_delete`
-- Owned tasks: none
-- Filesystem: required; Plugin-private mounts and shared Workspace mounts
+- Dependencies: `agent`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AgentToolRegistry` from `agent`
+- Workflow: none
+- Agent Tools: `file_read`, `file_list`, `file_write`, `file_edit`, `file_move`,
+  `file_delete`
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: no KV keys; the Tools read and write caller-supplied paths in the
+  Plugin's `ScopedVfs` (`/resources`, `/data`, `/cache`, `/media`,
+  `/workspace/resources`, `/workspace/cache`, `/workspace/media`)
+
+The Plugin requires a private filesystem (`PluginFilesystem::Private`), which
+gives it the Plugin-private mounts and the shared Workspace mounts.
 
 The Plugin declares filesystem access and receives its ordinary `ScopedVfs`
 from `PluginRegisterContext`. During registration it gives that same scope to
@@ -20,7 +33,13 @@ The scope exposes the Plugin-private `/resources`, `/data`, `/cache`, and
 other filesystem-enabled Plugins through the shared Workspace while private
 Plugin paths remain isolated.
 
-Reads and directory listings are bounded and paginated. Writes and edits are
+Reads and directory listings are bounded and paginated. `file_read` of a
+JPEG, PNG, GIF, WebP or PDF file, recognized by its first bytes, answers
+`{"path","mime_type","size"}` and returns the file as a Tool result
+attachment, which the Agent may show the model directly. Only a path below
+`/workspace` is attached, since the Agent opens the same path in its own view
+and a private path names a different file there; another path answers
+`not_shared`. Writes and edits are
 bounded to 32 KiB and use `ScopedVfs::write_atomic`. A create does not replace
 an existing path unless the caller explicitly opts in. Exact-text editing
 rejects missing or ambiguous matches before writing. Moves do not replace a

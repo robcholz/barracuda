@@ -6,6 +6,7 @@ description = "APA102 and SK9822 LED-strip implementation over embedded-hal SPI"
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic.workspace = true
 barracuda-driver-apa102.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true

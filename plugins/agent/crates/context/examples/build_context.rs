@@ -15,7 +15,7 @@
 
 use std::borrow::Cow;
 
-use barracuda_agent_context::{Band, Block, BlockKind, Context, Scope};
+use barracuda_agent_context::{Band, Block, BlockKind, ChatMessage, Context, Scope};
 use serde_json::json;
 
 fn main() {
@@ -66,7 +66,9 @@ fn main() {
         // A reminder is the ephemeral tail, never persisted, after the history.
         .reminder(Some("Only the blink_led skill is permitted this phase."));
 
-    let history = [json!({ "role": "user", "content": "Make the LED blink." })];
+    let history = [ChatMessage::new(
+        &json!({ "role": "user", "content": "Make the LED blink." }),
+    )];
 
     let version_before = context.version();
     let request = context.request(&history);
@@ -76,7 +78,11 @@ fn main() {
     );
     println!("===== reminders (ephemeral tail) =====");
     for reminder in request.reminders() {
-        if let Some(text) = reminder.get("content").and_then(serde_json::Value::as_str) {
+        if let Some(text) = reminder
+            .to_value()
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+        {
             println!("{text}");
         }
     }

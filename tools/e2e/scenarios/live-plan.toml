@@ -1,0 +1,13 @@
+name = "Live plan mode"
+description = "A real model enters Plan Mode, asks one clarifying question, then exits to execute the approved plan."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "I want a file /data/plan.txt. Before doing anything, call plan_enter, then use plan_clarify to ask me what text the file should contain."
+reply_matches = ['(?i)text|content|contain']
+
+[[steps]]
+send = "It should contain exactly: hello-plan. I approve; call plan_exit with outcome execute and the full plan, then write the file with the file tools."
+tool_contains = ['hello-plan']

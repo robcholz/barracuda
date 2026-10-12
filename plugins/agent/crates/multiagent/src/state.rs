@@ -140,6 +140,14 @@ impl MultiagentState {
         self.nodes.get(&id).map(NodeMeta::parent)
     }
 
+    /// Every live subagent in the Session, at any depth.
+    pub(crate) fn subagent_count(&self) -> usize {
+        self.nodes
+            .values()
+            .filter(|meta| meta.parent.is_some())
+            .count()
+    }
+
     pub(crate) fn has_children(&self, parent: AgentId) -> bool {
         self.nodes.values().any(|meta| meta.parent == Some(parent))
     }

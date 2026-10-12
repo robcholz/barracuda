@@ -9,7 +9,8 @@ use alloc::{boxed::Box, rc::Rc, string::String};
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
+        Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
+        ToolOutput, ToolSpec,
     },
 };
 use barracuda_http_plugin::{Http, HttpError, HttpRequest};
@@ -60,7 +61,7 @@ impl ToolSpec for HttpRequestTool {
 impl ToolHandler for HttpRequestTool {
     type Args = HttpRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             match self.http.request(request).await {
                 Ok(response) => encode(&response, true),
@@ -79,5 +80,5 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
     let content = serde_json::to_string(response).map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode HTTP Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }

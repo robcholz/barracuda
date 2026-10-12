@@ -1,0 +1,95 @@
+name = "File tools: argument validation"
+description = "Malformed file Tool arguments are rejected by the framework schema check before the handler runs, and the model sees the error."
+
+# Tool::classify/invoke validate the arguments against the Tool's schema.json
+# first (plugins/agent/crates/tool/src/definition.rs:586-596). A failure is
+# ToolError::ArgumentsSchema, rendered as "invalid arguments: JSON schema
+# validation failed at <path>: <kind:?>" (definition.rs:319-322,
+# shared/json-validator/src/lib.rs:820-822) and returned to the model as the
+# plain-text tool content with is_error = true
+# (plugins/agent/crates/agent/src/engine/iteration_loop/run.rs:289-300).
+# The handlers' own "limit must be between ..." and "old_text cannot be empty"
+# checks are therefore unreachable through the Agent.
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_read", arguments = {} },
+  { name = "file_read", arguments = { path = 42 } },
+  { name = "file_read", arguments = { path = "/data/x.txt", limit = 0 } },
+  { name = "file_read", arguments = { path = "/data/x.txt", limit = 16385 } },
+  { name = "file_read", arguments = { path = "/data/x.txt", offset = -1 } },
+  { name = "file_read", arguments = { path = "/data/x.txt", limit = 1.5 } },
+  { name = "file_read", arguments = { path = "/data/x.txt", limit = "10" } },
+]
+
+[[model.responses]]
+request_contains = [
+  '"content":"invalid arguments: JSON schema validation failed at $.path: Required","is_error":true',
+]
+tool_calls = [
+  { name = "file_list", arguments = { path = "/data", recursive = true } },
+  { name = "file_list", arguments = { path = "/data", limit = 0 } },
+  { name = "file_list", arguments = { path = "/data", limit = 257 } },
+  { name = "file_write", arguments = { path = "/data/x.txt" } },
+  { name = "file_write", arguments = { path = "/data/x.txt", content = 5 } },
+  { name = "file_write", arguments = { path = "/data/x.txt", content = "x", overwrite = "yes" } },
+]
+
+[[model.responses]]
+tool_calls = [
+  { name = "file_edit", arguments = { path = "/data/x.txt", old_text = "", new_text = "y" } },
+  { name = "file_edit", arguments = { path = "/data/x.txt", old_text = "a" } },
+  { name = "file_move", arguments = { from = "/data/x.txt" } },
+  { name = "file_delete", arguments = { path = ["/data/x.txt"] } },
+  { name = "file_delete", arguments = { pth = "/data/x.txt" } },
+  { name = "file_copy", arguments = { from = "/data/a", to = "/data/b" } },
+]
+
+[[model.responses]]
+tool_calls = [{ name = "file_list", arguments = { path = "/data" } }]
+
+[[model.responses]]
+request_contains = [
+  '"content":"tool not found: file_copy","is_error":true',
+]
+text = "Arguments checked."
+
+[[steps]]
+send = "Send malformed file Tool arguments."
+reply_contains = ["Arguments checked."]
+kinds = ["tool"]
+tool_errors_allowed = true
+tool_contains = [
+  'file_read{}invalid arguments: JSON schema validation failed at $.path: Required',
+  'file_read{"path": 42}invalid arguments: JSON schema validation failed at $.path: Type { expected: String }',
+  '"limit": 0}invalid arguments: JSON schema validation failed at $.limit: Minimum',
+  '"limit": 16385}invalid arguments: JSON schema validation failed at $.limit: Maximum',
+  '"offset": -1}invalid arguments: JSON schema validation failed at $.offset: Minimum',
+  # Integer type is checked on the raw token: any "." or exponent fails.
+  '"limit": 1.5}invalid arguments: JSON schema validation failed at $.limit: Type { expected: Integer }',
+  '"limit": "10"}invalid arguments: JSON schema validation failed at $.limit: Type { expected: Integer }',
+  '"recursive": true}invalid arguments: JSON schema validation failed at $.recursive: AdditionalProperty',
+  'file_list{"path": "/data", "limit": 0}invalid arguments: JSON schema validation failed at $.limit: Minimum',
+  'file_list{"path": "/data", "limit": 257}invalid arguments: JSON schema validation failed at $.limit: Maximum',
+  'file_write{"path": "/data/x.txt"}invalid arguments: JSON schema validation failed at $.content: Required',
+  '"content": 5}invalid arguments: JSON schema validation failed at $.content: Type { expected: String }',
+  '"overwrite": "yes"}invalid arguments: JSON schema validation failed at $.overwrite: Type { expected: Boolean }',
+  # schema.json minLength 1; file_edit.rs:45-47 never sees it.
+  '"old_text": "", "new_text": "y"}invalid arguments: JSON schema validation failed at $.old_text: MinLength',
+  '"old_text": "a"}invalid arguments: JSON schema validation failed at $.new_text: Required',
+  'file_move{"from": "/data/x.txt"}invalid arguments: JSON schema validation failed at $.to: Required',
+  'file_delete{"path": ["/data/x.txt"]}invalid arguments: JSON schema validation failed at $.path: Type { expected: String }',
+  # An unknown key is reported before the missing required key
+  # (shared/json-validator/src/lib.rs:345-363).
+  'file_delete{"pth": "/data/x.txt"}invalid arguments: JSON schema validation failed at $.pth: AdditionalProperty',
+  # There is no copy Tool (plugins/agent/crates/tool/src/set.rs:698-712).
+  'file_copy{"from": "/data/a", "to": "/data/b"}tool not found: file_copy',
+  # None of the rejected calls reached the filesystem: /data was never created.
+  'file_list{"path": "/data"}{"path":"/data","entries":[],"next_offset":null}',
+]

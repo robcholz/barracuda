@@ -6,7 +6,7 @@ publish = false
 description = "Typed operation runtime for the IMessage Gateway"
 
 [dependencies]
-async-channel = { version = "2", default-features = false }
+async-channel.workspace = true
 barracuda-workflow-plugin.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway = { path = "../gateway" }
@@ -17,6 +17,7 @@ thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 futures-lite = "2"
+json-validator.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

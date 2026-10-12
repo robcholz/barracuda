@@ -45,7 +45,7 @@ fn reqwless_is_owned_only_by_transport_crates() -> Result<(), std::io::Error> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let owner = root.join("shared/http-client");
     let agent_transport = root.join("plugins/agent/crates/model-api");
-    let gateway_transport = root.join("plugins/imessage-gateway/crates/http");
+    let gateway_transport = root.join("plugins/imessage-gateway/crates/plugin");
     let mut files = Vec::new();
     collect_source_and_manifests(&root, &owner, &mut files)?;
 

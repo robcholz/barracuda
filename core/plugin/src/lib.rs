@@ -22,3 +22,15 @@ pub mod macros {
 pub mod manifest {
     pub use barracuda_plugin_manifest::*;
 }
+
+/// Includes the constants generated from the Plugin's `[config]` settings and
+/// the selected Board's `plugins.<id>` section.
+///
+/// Invoke it inside a module of a Plugin crate whose `build.rs` calls
+/// `barracuda_plugin_build::build()`.
+#[macro_export]
+macro_rules! config {
+    () => {
+        include!(concat!(env!("OUT_DIR"), "/plugin_config.rs"));
+    };
+}

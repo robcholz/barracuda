@@ -1,17 +1,19 @@
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use core::{future::Future, pin::Pin};
+use core::{cell::Cell, future::Future, pin::Pin};
 
 use barracuda_agent_runtime::{AgentRuntime, ApiPurpose, ModelApiManager};
-use barracuda_model_api::{BackendKind, InitError, ModelApiConfig};
+use barracuda_model_api::{BackendKind, InitError, InputModalities, ModelApiConfig};
 use barracuda_plugin::manager::{
     PluginError, PluginResult, PluginStorage, PluginWriteTransaction, StorageError,
 };
 use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// HTTP path accepting Agent model API configurations.
 pub const SET_API_PATH: &str = "/api/model-api";
+/// HTTP path reporting the active model API configuration without keys.
+pub const STATUS_API_PATH: &str = "/api/model-api/status";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_STORAGE_KEY: &str = "default";
@@ -22,8 +24,22 @@ const SUB_AGENT_STORAGE_KEY: &str = "purpose.sub_agent";
 
 pub(crate) struct SetApiEndpoint {
     set_api: Box<SetApiHandler>,
-    configuration: Mutex<NoopRawMutex, ModelApiManager>,
+    configuration: Rc<Mutex<NoopRawMutex, ModelApiManager>>,
     persistence: Box<dyn ConfigurationPersistence>,
+    /// Whether the active configuration has at least one model, for the portal status.
+    configured: Rc<Cell<bool>>,
+}
+
+/// Returns whether `configuration` resolves a model for any purpose.
+pub(crate) fn has_model(configuration: &ModelApiManager) -> bool {
+    [
+        ApiPurpose::RootAgent,
+        ApiPurpose::SubAgent,
+        ApiPurpose::Memory,
+        ApiPurpose::Compaction,
+    ]
+    .into_iter()
+    .any(|purpose| configuration.get_api(purpose).is_some())
 }
 
 type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
@@ -33,11 +49,14 @@ impl SetApiEndpoint {
         runtime: Rc<AgentRuntime>,
         storage: Storage,
         configuration: ModelApiManager,
+        configured: Rc<Cell<bool>>,
     ) -> Self {
+        configured.set(has_model(&configuration));
         Self {
             set_api: Box::new(move |api, purpose, default| runtime.set_api(api, purpose, default)),
-            configuration: Mutex::new(configuration),
+            configuration: Rc::new(Mutex::new(configuration)),
             persistence: Box::new(PluginConfigurationPersistence(storage)),
+            configured,
         }
     }
 
@@ -60,13 +79,97 @@ impl SetApiEndpoint {
     ) -> Self {
         Self {
             set_api: Box::new(handler),
-            configuration: Mutex::new(configuration),
+            configuration: Rc::new(Mutex::new(configuration)),
             persistence: Box::new(persistence),
+            configured: Rc::new(Cell::new(false)),
         }
     }
 
     fn response(status: u16, body: &'static [u8]) -> HttpResponse {
         HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
+    }
+
+    /// The [`STATUS_API_PATH`] endpoint over this endpoint's configuration.
+    pub(crate) fn status_endpoint(&self) -> StatusEndpoint {
+        StatusEndpoint(Rc::clone(&self.configuration))
+    }
+}
+
+/// `GET` [`STATUS_API_PATH`]:
+/// `{"configured":bool,"default":Model|null,"purposes":{"root_agent":Model|null,"sub_agent":…,"memory":…,"compaction":…}}`
+/// with `Model` = `{"backend":"openai_compatible"|"anthropic_compatible","model":"…","base_url":"…"}`.
+/// A purpose is `null` when it has no model of its own and uses the default.
+/// API keys are never reported.
+pub(crate) struct StatusEndpoint(Rc<Mutex<NoopRawMutex, ModelApiManager>>);
+
+#[derive(Serialize)]
+struct StatusBody {
+    configured: bool,
+    default: Option<StatusModel>,
+    purposes: StatusPurposes,
+}
+
+#[derive(Serialize)]
+struct StatusPurposes {
+    root_agent: Option<StatusModel>,
+    sub_agent: Option<StatusModel>,
+    memory: Option<StatusModel>,
+    compaction: Option<StatusModel>,
+}
+
+#[derive(Serialize)]
+struct StatusModel {
+    backend: BackendKind,
+    model: alloc::string::String,
+    base_url: alloc::string::String,
+}
+
+impl StatusModel {
+    /// The reported fields of `api`; its key and limits are left out.
+    fn from_api(api: ModelApiConfig) -> Self {
+        Self {
+            backend: api.backend,
+            model: api.model,
+            base_url: api.base_url,
+        }
+    }
+}
+
+impl StatusBody {
+    fn from_configuration(configuration: &ModelApiManager) -> Self {
+        let explicit = |purpose| {
+            configuration
+                .get_explicit_api(purpose)
+                .map(StatusModel::from_api)
+        };
+        Self {
+            configured: has_model(configuration),
+            default: configuration.get_default_api().map(StatusModel::from_api),
+            purposes: StatusPurposes {
+                root_agent: explicit(ApiPurpose::RootAgent),
+                sub_agent: explicit(ApiPurpose::SubAgent),
+                memory: explicit(ApiPurpose::Memory),
+                compaction: explicit(ApiPurpose::Compaction),
+            },
+        }
+    }
+}
+
+impl HttpEndpoint for StatusEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if request.method() != HttpMethod::Get {
+                return SetApiEndpoint::response(405, br#"{"error":"method_not_allowed"}"#);
+            }
+            let body = StatusBody::from_configuration(&*self.0.lock().await);
+            match serde_json::to_vec(&body) {
+                Ok(body) => HttpResponse::new(200, JSON_CONTENT_TYPE, body),
+                Err(error) => {
+                    log::error!("failed to encode the model API status: {error}");
+                    SetApiEndpoint::response(500, br#"{"error":"encoding"}"#)
+                }
+            }
+        })
     }
 }
 
@@ -106,6 +209,7 @@ impl HttpEndpoint for SetApiEndpoint {
                 }
                 log::info!("configured model API for {purpose:?}, default={default}");
             }
+            self.configured.set(has_model(&configuration));
             *current = configuration;
             Self::response(204, b"")
         })
@@ -118,6 +222,8 @@ struct SetApiRequest {
     timeout_ms: u32,
     max_tokens: u32,
     image_max_bytes: usize,
+    input_modalities: InputModalities,
+    max_images_in_context: usize,
     backend: SetApiBackend,
     purpose: SetApiPurpose,
     default: bool,
@@ -234,6 +340,8 @@ impl SetApiRequest {
         api.timeout_ms = self.timeout_ms;
         api.max_tokens = self.max_tokens;
         api.image_max_bytes = self.image_max_bytes;
+        api.input_modalities = self.input_modalities;
+        api.max_images_in_context = self.max_images_in_context;
         (api, self.purpose.into(), self.default)
     }
 }
@@ -362,6 +470,8 @@ mod tests {
             "timeout_ms": 30000,
             "max_tokens": 4096,
             "image_max_bytes": 1048576,
+            "input_modalities": {"image": true, "pdf": false},
+            "max_images_in_context": 2,
             "backend": "openai_compatible",
             "purpose": "root_agent",
             "default": true,
@@ -373,6 +483,8 @@ mod tests {
             "timeout_ms": 30000,
             "max_tokens": 2048,
             "image_max_bytes": 1048576,
+            "input_modalities": {"image": true, "pdf": true},
+            "max_images_in_context": 3,
             "backend": "anthropic_compatible",
             "purpose": "memory",
             "default": false,
@@ -397,6 +509,7 @@ mod tests {
 
         assert_eq!(response.status(), 204);
         assert_eq!(response.body(), Some(&b""[..]));
+        assert!(endpoint.configured.get());
         let requests = observed.borrow();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].0.model, "root-model");
@@ -406,6 +519,41 @@ mod tests {
         assert_eq!(requests[1].0.model, "memory-model");
         assert_eq!(requests[1].1, ApiPurpose::Memory);
         assert!(!requests[1].2);
+        assert_eq!(
+            requests[0].0.input_modalities,
+            barracuda_model_api::InputModalities {
+                image: true,
+                pdf: false
+            }
+        );
+        assert_eq!(requests[0].0.max_images_in_context, 2);
+        assert!(requests[1].0.input_modalities.pdf);
+        assert_eq!(requests[1].0.max_images_in_context, 3);
+    }
+
+    #[test]
+    fn a_stored_model_without_attachment_settings_loads_with_their_defaults() {
+        let stored = br#"{"backend":"openai_compatible","api_key":"key","model":"m","base_url":"https://example.invalid/v1","timeout_ms":1,"max_tokens":2,"image_max_bytes":3}"#;
+        let api: barracuda_model_api::ModelApiConfig =
+            serde_json::from_slice(stored).expect("stored model decodes");
+        assert_eq!(
+            api.input_modalities,
+            barracuda_model_api::InputModalities::default()
+        );
+        assert!(api.input_modalities.image && !api.input_modalities.pdf);
+        assert_eq!(api.max_images_in_context, 2);
+    }
+
+    #[test]
+    fn requests_without_attachment_settings_are_rejected() {
+        let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1"}]"#;
+
+        let response = futures_lite::future::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
+        );
+
+        assert_eq!(response.status(), 400);
     }
 
     #[test]
@@ -416,8 +564,8 @@ mod tests {
             RecordingPersistence(Rc::clone(&persisted)),
             barracuda_agent_runtime::ModelApiManager::default(),
         );
-        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
-        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
+        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
+        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
 
         for body in [first.as_slice(), second.as_slice()] {
             let response = futures_lite::future::block_on(
@@ -470,6 +618,7 @@ mod tests {
         assert_eq!(response.status(), 500);
         assert_eq!(response.body(), Some(&br#"{"error":"storage"}"#[..]));
         assert!(!*called.borrow());
+        assert!(!endpoint.configured.get());
     }
 
     #[test]
@@ -545,7 +694,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
-        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
 
         let response = futures_lite::future::block_on(
             endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
@@ -572,6 +721,89 @@ mod tests {
             response.body(),
             Some(&br#"{"error":"invalid_configuration"}"#[..])
         );
+        assert!(!endpoint.configured.get());
+    }
+
+    #[test]
+    fn has_model_counts_explicit_and_default_bindings() {
+        let api = |model: &str| {
+            barracuda_model_api::ModelApiConfig::new(
+                barracuda_model_api::BackendKind::OpenAiCompatible,
+                "key",
+                model,
+                "https://example.invalid/v1",
+            )
+        };
+        let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
+        assert!(!super::has_model(&configuration));
+        configuration
+            .set_api(api("memory"), ApiPurpose::Memory, false)
+            .expect("set memory API");
+        assert!(super::has_model(&configuration));
+        let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
+        configuration
+            .set_default_api(api("default"))
+            .expect("set default API");
+        assert!(super::has_model(&configuration));
+    }
+
+    #[test]
+    fn a_base_url_that_is_not_an_http_url_is_rejected_before_it_is_used() {
+        let called = Rc::new(RefCell::new(false));
+        let target = Rc::clone(&called);
+        let endpoint = SetApiEndpoint::with_handler(move |_api, _purpose, _default| {
+            *target.borrow_mut() = true;
+            Ok(())
+        });
+
+        for base_url in ["not a url", "ftp://example.invalid/v1", "https://"] {
+            let body = alloc::format!(
+                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{{"image":true,"pdf":false}},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
+            );
+            let response = futures_lite::future::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())),
+            );
+            assert_eq!(response.status(), 422, "{base_url}");
+        }
+        assert!(!*called.borrow());
+    }
+
+    #[test]
+    fn status_reports_the_models_without_keys() {
+        let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
+        let status = endpoint.status_endpoint();
+        let get = || {
+            let response = futures_lite::future::block_on(
+                status.handle(HttpRequest::new(HttpMethod::Get, Vec::new())),
+            );
+            assert_eq!(response.status(), 200);
+            alloc::string::String::from_utf8(response.body().expect("buffered").to_vec())
+                .expect("UTF-8")
+        };
+        assert_eq!(
+            get(),
+            r#"{"configured":false,"default":null,"purposes":{"root_agent":null,"sub_agent":null,"memory":null,"compaction":null}}"#
+        );
+
+        let response = futures_lite::future::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, VALID_JSON.to_vec())),
+        );
+        assert_eq!(response.status(), 204);
+        let root = r#"{"backend":"openai_compatible","model":"root-model","base_url":"https://example.invalid/v1"}"#;
+        let memory = r#"{"backend":"anthropic_compatible","model":"memory-model","base_url":"https://example.invalid/v1"}"#;
+        let reported = get();
+        assert_eq!(
+            reported,
+            alloc::format!(
+                r#"{{"configured":true,"default":{root},"purposes":{{"root_agent":{root},"sub_agent":null,"memory":{memory},"compaction":null}}}}"#
+            )
+        );
+        assert!(!reported.contains("secret"));
+
+        let response = futures_lite::future::block_on(
+            status.handle(HttpRequest::new(HttpMethod::Post, Vec::new())),
+        );
+        assert_eq!(response.status(), 405);
     }
 
     #[test]

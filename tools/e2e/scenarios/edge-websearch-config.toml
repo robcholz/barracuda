@@ -1,0 +1,74 @@
+name = "Web search provider configuration"
+description = "POST /api/tavily validates its body; once configured, an unreachable provider surfaces as a transport error."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = 'Search the web. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. tool_load {"group_id": "websearch"} 2. web_search {"query": "barracuda", "max_results": 3}. Then reply with only: Case 1 checked.'
+reply_contains = ['Case 1 checked.']
+tool_contains = ['{"error":"transport"}']
+request_contains = ['{\"error\":\"transport\"}']
+tool_errors_allowed = true
+
+[[http]]
+method = 'GET'
+path = '/api/tavily'
+status = 405
+body_contains = ['{"error":"method_not_allowed"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = 'not json'
+status = 400
+body_contains = ['{"error":"invalid_request"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k","region":"us"}'
+status = 400
+body_contains = ['{"error":"invalid_request"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{}'
+status = 400
+body_contains = ['{"error":"invalid_request"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"   "}'
+status = 422
+body_contains = ['{"error":"invalid_configuration"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k k"}'
+status = 422
+body_contains = ['{"error":"invalid_configuration"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"k","api_base":"ftp://10.42.0.1"}'
+status = 422
+body_contains = ['{"error":"invalid_configuration"}']
+
+[[http]]
+method = 'POST'
+path = '/api/tavily'
+body = '{"api_key":"e2e-key","api_base":"http://10.42.0.1:9/"}'
+status = 204
+
+[[http]]
+method = 'GET'
+path = '/api/tavily/status'
+body_contains = ['{"configured":true,"config":{"api_base":"http://10.42.0.1:9"}}']
+
+[logs]
+expect = ['configured Tavily provider for web search']

@@ -132,7 +132,7 @@ mod tests {
     use barracuda_agent_context::Context;
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::{
-        Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSet, ToolSpec,
+        Tool, ToolContext, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSet, ToolSpec,
     };
 
     #[test]
@@ -145,7 +145,7 @@ mod tests {
             .add_group(provider.tools(&storage).expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
-        let schemas = tools.static_schemas();
+        let schemas = tools.schemas();
         assert!(schemas.contains("tool_search"));
         assert!(schemas.contains("tool_load"));
     }
@@ -164,7 +164,7 @@ mod tests {
             .add_group(provider.tools(&storage).expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
-        assert!(!tools.static_schemas().contains("hidden_test"));
+        assert!(!tools.schemas().contains("hidden_test"));
 
         let mut context = Context::new();
         let history = {
@@ -206,13 +206,8 @@ mod tests {
     impl ToolHandler for HiddenTool {
         type Args = barracuda_agent_tool::EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-            alloc::boxed::Box::pin(async {
-                Ok(ToolOutput {
-                    content: "ok".to_owned(),
-                    ok: true,
-                })
-            })
+        fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+            alloc::boxed::Box::pin(async { Ok(ToolOutput::new("ok", true)) })
         }
     }
 }

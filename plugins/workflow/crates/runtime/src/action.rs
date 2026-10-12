@@ -12,10 +12,10 @@ use core::pin::Pin;
 
 use getset::{CopyGetters, Getters};
 use json_validator::JsonSchema;
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::Serialize;
 
-use crate::WorkflowValue;
+use crate::{JsonText, WorkflowValue};
 
 /// Stable address of one Workflow Action.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -150,35 +150,34 @@ pub struct WorkflowActionDescriptor {
     /// Static response JSON Schema and validator.
     #[getset(get_copy = "pub")]
     response_schema: JsonSchema,
-    request_shape: WorkflowValue,
-    response_shape: WorkflowValue,
 }
 
 impl WorkflowActionDescriptor {
     fn try_from_schema(schema: WorkflowActionSchema) -> Result<Self, WorkflowActionRegistryError> {
         let address = WorkflowActionAddress::try_from(schema.address())
             .map_err(WorkflowActionRegistryError::InvalidAddress)?;
-        let request_shape = serde_json::from_str(schema.request().as_str())
+        // Check the static schemas once without keeping a parsed copy; link
+        // validation parses them again only while it runs.
+        serde_json::from_str::<IgnoredAny>(schema.request().as_str())
             .map_err(|_error| WorkflowActionRegistryError::InvalidRequestSchema(address.clone()))?;
-        let response_shape =
-            serde_json::from_str(schema.response().as_str()).map_err(|_error| {
-                WorkflowActionRegistryError::InvalidResponseSchema(address.clone())
-            })?;
+        serde_json::from_str::<IgnoredAny>(schema.response().as_str()).map_err(|_error| {
+            WorkflowActionRegistryError::InvalidResponseSchema(address.clone())
+        })?;
         Ok(Self {
             address,
             request_schema: schema.request(),
             response_schema: schema.response(),
-            request_shape,
-            response_shape,
         })
     }
 
-    pub(crate) fn request_shape(&self) -> &WorkflowValue {
-        &self.request_shape
+    /// Parses the request schema for link validation.
+    pub(crate) fn request_shape(&self) -> Result<WorkflowValue, serde_json::Error> {
+        serde_json::from_str(self.request_schema.as_str())
     }
 
-    pub(crate) fn response_shape(&self) -> &WorkflowValue {
-        &self.response_shape
+    /// Parses the response schema for link validation.
+    pub(crate) fn response_shape(&self) -> Result<WorkflowValue, serde_json::Error> {
+        serde_json::from_str(self.response_schema.as_str())
     }
 }
 
@@ -202,7 +201,7 @@ pub trait WorkflowActionHandler: 'static {
 
 pub(crate) trait ErasedWorkflowAction {
     fn descriptor(&self) -> &WorkflowActionDescriptor;
-    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue>;
+    fn invoke_erased(&self, input: JsonText) -> WorkflowActionFuture<'_, JsonText>;
 }
 
 struct TypedWorkflowAction<Handler> {
@@ -218,28 +217,31 @@ where
         &self.descriptor
     }
 
-    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue> {
+    fn invoke_erased(&self, input: JsonText) -> WorkflowActionFuture<'_, JsonText> {
         Box::pin(async move {
+            // Validation and decoding read the shared text; no value tree is
+            // built for the request.
             Handler::SCHEMA
                 .request()
-                .validate(&input)
+                .validate_str(input.as_str())
                 .map_err(|error| {
                     WorkflowActionError::new(format!("invalid Workflow Action request: {error}"))
                 })?;
-            let request = serde_json::from_value::<Handler::Request>(input).map_err(|error| {
+            let request = input.parse_as::<Handler::Request>().map_err(|error| {
                 WorkflowActionError::new(format!(
                     "failed to decode Workflow Action request: {error}"
                 ))
             })?;
+            drop(input);
             let response = self.handler.invoke(request).await?;
-            let response = serde_json::to_value(response).map_err(|error| {
+            let response = JsonText::from_serialize(&response).map_err(|error| {
                 WorkflowActionError::new(format!(
                     "failed to encode Workflow Action response: {error}"
                 ))
             })?;
             Handler::SCHEMA
                 .response()
-                .validate(&response)
+                .validate_str(response.as_str())
                 .map_err(|error| {
                     WorkflowActionError::new(format!("invalid Workflow Action response: {error}"))
                 })?;
@@ -411,8 +413,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        WorkflowActionAddress, WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler,
-        WorkflowActionRegistry, WorkflowActionSchema,
+        WorkflowActionAddress, WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry,
+        WorkflowActionSchema,
     };
     #[derive(Deserialize)]
     struct EchoRequest {
@@ -454,21 +456,16 @@ mod tests {
             let action = registry.resolve(&address).expect("resolve typed Action");
 
             let response = action
-                .invoke_erased(json!({ "message": "hello" }))
+                .invoke_erased(json!({ "message": "hello" }).into())
                 .await
                 .expect("invoke typed Action");
             assert_eq!(response, json!({ "message": "hello" }));
 
             let error = action
-                .invoke_erased(json!({ "message": 7 }))
+                .invoke_erased(json!({ "message": 7 }).into())
                 .await
                 .expect_err("reject request before Serde conversion");
             assert!(error.message().contains("invalid Workflow Action request"));
         });
-    }
-
-    #[allow(dead_code)]
-    fn action_error_is_public() -> WorkflowActionError {
-        WorkflowActionError::new("failed")
     }
 }

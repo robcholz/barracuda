@@ -1,0 +1,19 @@
+name = "Live restart from flash"
+description = "A real model stores a memory, a profile, a file, a skill, a schedule-free Workflow, and conversation history; the System restarts from the same flash, and the restored Session, model API configuration, memory, profile, files, skills, and Workflows are all still there."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Do these steps, one tool call at a time: 1. memory_store {"content": "The user's favourite colour is green.", "tags": ["preference"]} 2. profile_replace {"document": "user_profile", "content": "Name: Rob."} 3. load the file tools and file_write {"path": "/data/restart.txt", "content": "survives restarts"} 4. file_write {"path": "/workspace/media/skills/restart-skill/SKILL.md", "content": "---\nname: restart-skill\ndescription: Use restart-skill to check restarts.\n---\n\n# Restart\n\nBody.\n"} 5. skill_reload {} 6. load the workflow tools and workflow_load {"id": "restart-flow", "match": {"event": "e2e.never"}, "steps": [{"call": "session.list", "arguments": {"limit": 1}}]} 7. load the scheduler tools and scheduler_schedule {"id": "restart-once", "trigger": {"type": "once", "at": "2099-01-01T00:00:00.000Z"}} 8. scheduler_schedule {"id": "restart-every", "trigger": {"type": "interval", "at": "2099-01-01T00:00:00.000Z", "every_seconds": 3600, "count": 3}}. Then reply with only the word saved.'''
+tool_contains = ['Stored memory', 'restart.txt', 'restart-flow']
+
+[[steps]]
+restart = true
+send = '''Without guessing, call memory_recall {"query": "colour"}, profile_read {"document": "user_profile"}, load the file tools and file_read {"path": "/data/restart.txt"}, skill_list {}, load the workflow tools and workflow_list {}, and load the scheduler tools and scheduler_cancel {"id": "restart-once"}. Then tell me in one short sentence what my first message to you asked for.'''
+tool_contains = ['green', 'Name: Rob.', 'survives restarts', 'restart-skill', 'restart-flow', 'restart-once']
+request_contains = ['restart-skill']
+tool_errors_allowed = true
+
+[logs]
+await_seconds = 60

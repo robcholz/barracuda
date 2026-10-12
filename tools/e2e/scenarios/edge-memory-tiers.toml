@@ -1,0 +1,11 @@
+name = "Edge: memory tiers"
+description = "Tag-based global/agent routing, cross-tier dedup, case-insensitive label recall, global-first listing, and updates that keep an item in its original tier."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = 'Store a few facts in different tiers. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. memory_store {"content": "Prefers metric units.", "tags": ["Preference"]} 2. memory_store {"content": "Deploy step needs sudo.", "tags": ["task"]} 3. memory_store {"content": "PREFERS metric UNITS.", "tags": ["task"]} 4. memory_list {"limit": 1} 5. memory_recall {"labels": ["preference"]} 6. memory_recall {"labels": ["Preference"]} 7. memory_recall {"query": "metric", "limit": 1} 8. memory_update {"id": "a-0", "tags": ["user"]} 9. memory_recall {"labels": []}. Then reply with only: Tiers checked.'
+reply_contains = ['Tiers checked.']
+tool_contains = ['memory_store{"content": "Prefers metric units.", "tags": ["Preference"]}Stored memory g-0.', 'memory_store{"content": "Deploy step needs sudo.", "tags": ["task"]}Stored memory a-0.', 'memory_store{"content": "PREFERS metric UNITS.", "tags": ["task"]}Already remembered (as g-0); nothing changed.', "memory_list{\"limit\": 1}All memories:\n- [g-0] (Preference) Prefers metric units.\n", "memory_recall{\"labels\": [\"preference\"]}Recalled memories:\n- [g-0] (Preference) Prefers metric units.\n", "memory_recall{\"labels\": [\"Preference\"]}Recalled memories:\n- [g-0] (Preference) Prefers metric units.\n", "memory_recall{\"query\": \"metric\", \"limit\": 1}Recalled memories:\n- [g-0] (Preference) Prefers metric units.\n", 'memory_update{"id": "a-0", "tags": ["user"]}Updated memory a-0.', "memory_recall{\"labels\": []}Recalled memories:\n- [g-0] (Preference) Prefers metric units.\n- [a-0] (user) Deploy step needs sudo.\n"]
+request_contains = ['Shared long-term memory topics: Preference', 'Your long-term memory topics: user']

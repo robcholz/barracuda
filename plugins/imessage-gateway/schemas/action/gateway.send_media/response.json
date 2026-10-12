@@ -11,9 +11,28 @@
     },
     {
       "type": "object",
+      "properties": { "message_id": { "type": "string" } },
+      "required": ["message_id"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "error": {
-          "enum": ["invalid_request", "duplicate_stream", "unknown_stream", "out_of_order", "busy"]
+          "enum": [
+            "invalid_request",
+            "unknown_channel",
+            "duplicate_stream",
+            "unknown_stream",
+            "out_of_order",
+            "busy",
+            "not_found",
+            "too_large",
+            "unsupported",
+            "authentication",
+            "rate_limited",
+            "delivery"
+          ]
         }
       },
       "required": ["error"],

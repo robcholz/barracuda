@@ -14,7 +14,6 @@ mod resources;
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::sync::Arc;
 use core::future::Future;
 use core::pin::Pin;
 
@@ -32,12 +31,11 @@ use barracuda_board_hal::{
     PwmProvider, SpiProvider, UartProvider,
 };
 use barracuda_platform::{Partitions, PlatformResources, WifiDevice};
-use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::api::{PlatformWifi, PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
 use barracuda_target_api::{TargetIdentity, TargetResources};
-use barracuda_tls::ClientTls;
 use barracuda_vfs::{
     create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
 };
@@ -49,16 +47,8 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
+use portable_atomic_util::Arc;
 use read_only_flash::mount_resources_partition;
-
-macro_rules! register_plugins {
-    ($manager:ident; $($plugin:expr),* $(,)?) => {
-        $(
-            $manager.add($plugin)?;
-        )*
-        $manager.register_all()?;
-    };
-}
 
 type BoxedSystemTask = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
@@ -175,6 +165,12 @@ where
 
 pub use resources::SystemResourceError;
 
+/// The selected Target's Platform and Board resources, as System consumes them.
+type SelectedResources<Region, Wifi, Entropy, Peripherals, Io, const P: usize> = TargetResources<
+    PlatformResources<Partitions<Region, P>, Wifi, Entropy>,
+    BoardResources<Peripherals, Io>,
+>;
+
 /// Fully assembled portable Barracuda system.
 ///
 /// Platform owns the executor-facing runners and concrete implementations;
@@ -235,6 +231,7 @@ where
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
+    Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RemovableStorage: Send + 'static,
     Io: ExposedIo
         + AnalogProvider
@@ -270,18 +267,15 @@ where
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
     /// The caller supplies resources from the selected-target resource
-    /// factory and the current Embassy executor spawner. System consumes them,
-    /// owns the complete Plugin registration order, and exposes the spawner
-    /// only to Plugin startup hooks.
+    /// factory and the current Embassy executor spawner. System consumes
+    /// them, owns the complete Plugin registration order, and exposes the
+    /// spawner only to Plugin startup hooks.
     ///
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Plugin registration or startup fails.
-    pub async fn new<Tls: ClientTls, Wifi: WifiDevice>(
-        resources: TargetResources<
-            PlatformResources<Tls, Partitions<Region, P>, Wifi>,
-            BoardResources<Peripherals, Io>,
-        >,
+    pub async fn new<Wifi: WifiDevice, Entropy: barracuda_platform::Entropy + Send + Sync>(
+        resources: SelectedResources<Region, Wifi, Entropy, Peripherals, Io, P>,
         target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
@@ -306,13 +300,11 @@ where
         let cache = MemFs::new().into_backend();
         mount("/cache", cache, MountOptions::read_write()).await?;
         log::info!("mounted System cache filesystem");
+        // Only inserted media, mounted below it, are writable: a write to the
+        // empty namespace itself would land in RAM and could later be hidden
+        // by a slot mount of the same name.
         let removable_namespace = MemFs::new().into_backend();
-        mount(
-            "/removable",
-            removable_namespace,
-            MountOptions::read_write(),
-        )
-        .await?;
+        mount("/removable", removable_namespace, MountOptions::read_only()).await?;
         log::info!("mounted removable-filesystem namespace");
         let removable_storage = prepared.board_hal.peripherals.take_removable_storage();
         let mut plugins =
@@ -321,64 +313,12 @@ where
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
-        let http_clients =
-            http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
-        let mut plugin_context = PluginContext::from_hal(
-            target_identity,
-            prepared.ip_stack,
-            http_clients,
-            prepared.board_hal,
-        );
+        let mut plugin_context =
+            PluginContext::from_hal(target_identity, prepared.ip_stack, prepared.board_hal);
+        plugin_context.entropy = SharedEntropy::new(prepared.entropy);
+        plugin_context.wifi = Some(PlatformWifi::new(prepared.wifi));
 
-        // BEGIN GENERATED PLUGINS
-        register_plugins!(plugins;
-            barracuda_agent_plugin::AgentPlugin::new(&mut plugin_context),
-            barracuda_agent_file_plugin::AgentFilePlugin::new(&mut plugin_context),
-            barracuda_agent_http_plugin::AgentHttpPlugin::new(&mut plugin_context),
-            barracuda_agent_imessage_gateway_plugin::AgentIMessageGatewayPlugin::new(&mut plugin_context),
-            barracuda_agent_scheduler_plugin::AgentSchedulerPlugin::new(&mut plugin_context),
-            barracuda_agent_time_plugin::AgentTimePlugin::new(&mut plugin_context),
-            barracuda_agent_vm_plugin::AgentVmPlugin::new(&mut plugin_context),
-            barracuda_agent_websearch_plugin::AgentWebsearchPlugin::new(&mut plugin_context),
-            barracuda_agent_workflow_plugin::AgentWorkflowPlugin::new(&mut plugin_context),
-            barracuda_app_manager_plugin::AppManagerPlugin::new(&mut plugin_context),
-            barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&mut plugin_context),
-            barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
-            barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&mut plugin_context),
-            barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&mut plugin_context),
-            barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&mut plugin_context),
-            barracuda_imessage_qq_plugin::IMessageQQPlugin::new(&mut plugin_context),
-            barracuda_imessage_telegram_plugin::IMessageTelegramPlugin::new(&mut plugin_context),
-            barracuda_imessage_web_plugin::IMessageWebPlugin::new(&mut plugin_context),
-            barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
-            barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
-            barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
-            barracuda_ui_plugin::UiPlugin::new(&mut plugin_context),
-            barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
-            barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
-            barracuda_analog_plugin::AnalogPlugin::new(&mut plugin_context),
-            barracuda_audio_plugin::AudioPlugin::new(&mut plugin_context),
-            barracuda_camera_plugin::CameraPlugin::new(&mut plugin_context),
-            barracuda_display_plugin::DisplayPlugin::new(&mut plugin_context),
-            barracuda_vm_filesystem_plugin::VmFilesystemPlugin::new(&mut plugin_context),
-            barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
-            barracuda_vm_http_plugin::VmHttpPlugin::new(&mut plugin_context),
-            barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
-            barracuda_i2s_plugin::I2sPlugin::new(&mut plugin_context),
-            barracuda_imu_plugin::ImuPlugin::new(&mut plugin_context),
-            barracuda_led_strip_plugin::LedStripPlugin::new(&mut plugin_context),
-            barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
-            barracuda_pwm_plugin::PwmPlugin::new(&mut plugin_context),
-            barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
-            barracuda_vm_systeminfo_plugin::VmSystemInfoPlugin::new(&mut plugin_context),
-            barracuda_vm_time_plugin::VmTimePlugin::new(&mut plugin_context),
-            barracuda_uart_plugin::UartPlugin::new(&mut plugin_context),
-            barracuda_vm_webserver_plugin::VmWebServerPlugin::new(&mut plugin_context),
-            barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
-            barracuda_wifi_plugin::WifiPlugin::new(&mut plugin_context, prepared.wifi),
-            barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
-        );
-        // END GENERATED PLUGINS
+        barracuda_plugin_selection::register_plugins!(plugins, plugin_context);
         let mut removable_storage_task = removable_storage
             .map(|storage| start_removable_storage_task(storage, spawner))
             .transpose()

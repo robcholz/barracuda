@@ -1,0 +1,113 @@
+# Errors come from json-validator (shared/json-validator/src/lib.rs:820,
+# "JSON schema validation failed at {path}: {kind:?}") wrapped by ToolError::ArgumentsSchema
+# ("invalid arguments: {0}", plugins/agent/crates/tool/src/definition.rs:321) and returned as
+# the tool content by the engine's classify path (plugins/agent/crates/agent/src/engine/iteration_loop/run.rs:289-301).
+# No case reaches the network.
+name = "HTTP tool argument schema (1)"
+description = "http_request rejects malformed arguments at the static schema before the HTTP capability runs."
+
+[model]
+mode = "scripted"
+
+# Case 1: blank URL fails trimmedNonEmpty (http_request/schema.json url)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "   " } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.url: TrimmedEmpty']
+text = "Case 1 checked."
+
+# Case 2: lowercase method is not in the enum
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "get", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.method: Enum']
+text = "Case 2 checked."
+
+# Case 3: OPTIONS is not a supported method
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "OPTIONS", url = "http://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.method: Enum']
+text = "Case 3 checked."
+
+# Case 4: url is required
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.url: Required']
+text = "Case 4 checked."
+
+# Case 5: unknown top-level field is rejected
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", timeout_ms = 1000 } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.timeout_ms: AdditionalProperty']
+text = "Case 5 checked."
+
+# Case 6: empty header name fails trimmedNonEmpty
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "", value = "x" }] } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].name: TrimmedEmpty']
+text = "Case 6 checked."
+
+# Case 7: header value is required
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X-A" }] } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].value: Required']
+text = "Case 7 checked."
+
+# Case 8: unknown header field is rejected
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.url: TrimmedEmpty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.method: Enum']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.method: Enum']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.url: Required']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.timeout_ms: AdditionalProperty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 6 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].name: TrimmedEmpty']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP schema case."
+reply_contains = ["Case 7 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.headers[0].value: Required']
+tool_errors_allowed = true
+

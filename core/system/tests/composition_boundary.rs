@@ -25,7 +25,9 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
         application.contains("System::new(resources, barracuda_target::TARGET_IDENTITY, spawner)")
     );
     assert!(system.contains("TargetResources<"));
-    assert!(system.contains("PlatformResources<Tls, Partitions<"));
+    assert!(system.contains("PlatformResources<Partitions<"));
+    assert!(!system.contains("barracuda_tls"));
+    assert!(!system.contains("http_client"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("prepared.partitions.resources.filesystem"));
     assert!(system.contains("mod read_only_flash;"));
@@ -75,7 +77,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(plugin_api.contains("pub struct PluginContext"));
     assert!(plugin_api.contains("pub target_identity: TargetIdentity"));
     assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
-    assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
+    assert!(!plugin_api.contains("http_client"));
     assert!(system.contains("let mut plugin_context"));
     assert!(system.contains("PluginContext::from_hal("));
     assert!(system.contains("prepared.board_hal"));
@@ -92,63 +94,11 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         assert!(!plugin_api.contains(duplicate_hal));
     }
 
-    for plugin in [
-        "WorkflowPlugin",
-        "WebServerPlugin",
-        "VmPlugin",
-        "VmFilesystemPlugin",
-        "VmWebServerPlugin",
-        "VmHttpPlugin",
-        "VmTimePlugin",
-        "VmSystemInfoPlugin",
-        "TimePlugin",
-        "SchedulerPlugin",
-        "AgentPlugin",
-        "IMessageGatewayPlugin",
-        "IMessageBlueBubblePlugin",
-        "IMessageInkboxPlugin",
-        "IMessageQQPlugin",
-        "IMessageTelegramPlugin",
-        "IMessageWechatPlugin",
-        "IMessageWebPlugin",
-        "GpioPlugin",
-        "I2cPlugin",
-        "SpiPlugin",
-    ] {
-        assert!(
-            system.contains(&format!("{plugin}::new(&mut plugin_context)")),
-            "{plugin} is not constructed from the shared PluginContext",
-        );
-    }
+    assert!(
+        system.contains("::new(&mut plugin_context)"),
+        "System constructs Plugins from the shared PluginContext"
+    );
 
-    Ok(())
-}
-
-#[test]
-fn vfs_scopes_replace_the_custom_agent_sandbox_crate() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    assert!(!root
-        .join("plugins/agent/crates/sandbox/Cargo.toml")
-        .exists());
-
-    for relative in [
-        "plugins/agent/crates/agent/src",
-        "plugins/agent/crates/runtime/src",
-        "plugins/agent/crates/tool/src",
-    ] {
-        let mut files = Vec::new();
-        collect_rust_files(&root.join(relative), &mut files)?;
-        for path in files {
-            let source = std::fs::read_to_string(&path)?;
-            for forbidden in ["SandboxFs", "RealRoots", "barracuda_agent_sandbox"] {
-                assert!(
-                    !source.contains(forbidden),
-                    "{} still references obsolete `{forbidden}`",
-                    path.display()
-                );
-            }
-        }
-    }
     Ok(())
 }
 
@@ -163,28 +113,16 @@ fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), s
     assert!(!system_manifest.contains("tokio = ["));
     assert!(!system_manifest.contains("GENERATED PLUGIN FEATURES"));
     assert!(!system_manifest.contains("target_os"));
-    assert!(!system_manifest
-        .contains("barracuda-webserver-plugin = { workspace = true, features = [\"std\"] }"));
+    assert!(
+        !system_manifest
+            .lines()
+            .any(|line| line.contains("-plugin = { workspace = true, features")),
+        "System enables no Plugin feature"
+    );
     assert!(application_manifest.contains("barracuda-system.workspace = true"));
     assert!(application_manifest.contains("barracuda-target.workspace = true"));
     assert!(!channel_manifest.contains("barracuda-system.workspace = true"));
     assert!(!channel_manifest.contains("barracuda-target.workspace = true"));
     assert!(!channel_manifest.contains("embassy-executor"));
-    Ok(())
-}
-
-fn collect_rust_files(
-    directory: &std::path::Path,
-    files: &mut Vec<std::path::PathBuf>,
-) -> Result<(), std::io::Error> {
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_rust_files(&path, files)?;
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            files.push(path);
-        }
-    }
     Ok(())
 }

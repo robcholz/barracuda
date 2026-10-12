@@ -70,6 +70,7 @@ pub mod long_term_memory;
 pub mod profile;
 pub mod transcript_store;
 
+pub use barracuda_agent_message::ChatMessage;
 pub use compaction::{CompactError, CompactFuture, Compactor};
 pub use long_term_memory::{
     LongTermError, LongTermInitError, LongTermMemory, MemoryDraft, MemoryId, MemoryItem,

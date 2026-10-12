@@ -7,20 +7,20 @@ publish = false
 description = "Multiagent graph, policy, tools, and semantic effects"
 
 [dependencies]
+barracuda-runtime-utils.workspace = true
+portable-atomic-util.workspace = true
 json-validator.workspace = true
 barracuda-agent = { path = "../agent", features = ["multiagent"] }
 barracuda-agent-permission = { path = "../permission" }
 barracuda-agent-tool = { path = "../tool" }
-async-channel = { version = "2", default-features = false }
-futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-core = { version = "0.3", default-features = false }
+futures-core.workspace = true
 getset = "0.1.7"
 log = { version = "0.4", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing = { package = "barracuda-tracing", path = "../../../../shared/tracing", features = ["attributes"] }
 
 [dev-dependencies]
 futures-lite = "2"

@@ -12,7 +12,9 @@ use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{Tool, ToolGroup},
 };
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
+};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginEntryIterator, PluginError, PluginReadTransaction, PluginRegisterContext,
@@ -23,10 +25,12 @@ use barracuda_webserver_plugin::{
 };
 use http_client::ClientFactory;
 use search::{TavilyConfig, WebSearchTool};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// HTTP endpoint accepting Tavily credentials.
 pub const CONFIG_API_PATH: &str = "/api/tavily";
+/// HTTP endpoint reporting the active Tavily configuration without its key.
+pub const STATUS_API_PATH: &str = "/api/tavily/status";
 const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_API_BASE: &str = "https://api.tavily.com";
 const API_BASE_STORAGE_KEY: &str = "api_base";
@@ -34,17 +38,13 @@ const API_KEY_STORAGE_KEY: &str = "api_key";
 
 /// Plugin providing Tavily-backed Web Search directly to Agents.
 #[barracuda_plugin::macros::plugin]
-pub struct AgentWebsearchPlugin {
-    http_clients: ClientFactory<'static>,
-}
+pub struct AgentWebsearchPlugin;
 
 impl AgentWebsearchPlugin {
-    /// Creates an Agent Web Search Plugin using the shared Platform HTTP service.
+    /// Creates the unregistered Agent Web Search Plugin.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self {
-            http_clients: context.http_clients.clone(),
-        }
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self
     }
 }
 
@@ -61,27 +61,45 @@ impl Plugin for AgentWebsearchPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let config = Rc::new(RefCell::new(
+            embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
+        ));
+        let status = Rc::clone(&config);
         context.retain(
             portal
-                .register(
+                .register_with_status(
                     WebEntry {
                         id: "agent-websearch",
-                        title: "网页搜索",
+                        group: WebGroup::Agent,
+                        order: 20,
+                        title: WebText {
+                            zh: "网页搜索",
+                            en: "Web search",
+                        },
+                        summary: WebText {
+                            zh: "让 Agent 通过 Tavily 搜索网页",
+                            en: "Let the agent search the web with Tavily",
+                        },
+                        icon: Some("icon.svg"),
+                        figure: Some("figure.js"),
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
+                    move || entry_status(&status),
                 )
                 .map_err(PluginError::registration)?,
         );
         let tools = context.require::<AgentToolRegistry>("agent")?;
         let webserver = context.require::<WebServer>("webserver")?;
-        let config = Rc::new(RefCell::new(
-            embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
-        ));
-        let web_search = WebSearchTool::new(Rc::clone(&config), self.http_clients.clone());
+        let http_clients = (*context.require::<ClientFactory<'static>>("http")?).clone();
+        let web_search = WebSearchTool::new(Rc::clone(&config), http_clients);
         tools
             .register_group(ToolGroup::new("websearch", false, [Tool::new(web_search)]))
             .map_err(PluginError::registration)?;
+        let registration = webserver
+            .serve_http(STATUS_API_PATH, StatusEndpoint(Rc::clone(&config)))
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
         let registration = webserver
             .serve_http(
                 CONFIG_API_PATH,
@@ -96,6 +114,13 @@ impl Plugin for AgentWebsearchPlugin {
     }
 }
 
+type SharedConfig = RefCell<Option<Rc<TavilyConfig>>>;
+
+/// `ready` once Tavily credentials are active, otherwise `off`.
+fn entry_status(config: &SharedConfig) -> EntryStatus {
+    EntryStatus::configured(config.borrow().is_some())
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigRequest {
@@ -108,32 +133,71 @@ fn default_api_base() -> String {
     DEFAULT_API_BASE.into()
 }
 
+/// `GET` [`STATUS_API_PATH`]: `{"configured":bool,"config"?:{"api_base":"…"}}`;
+/// `config` is present while configured. The API key is never reported.
+struct StatusEndpoint(Rc<SharedConfig>);
+
+#[derive(Serialize)]
+struct StatusBody<'a> {
+    configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config: Option<StatusConfig<'a>>,
+}
+
+#[derive(Serialize)]
+struct StatusConfig<'a> {
+    api_base: &'a str,
+}
+
+fn status_body(config: &SharedConfig) -> Vec<u8> {
+    let config = config.borrow();
+    let body = StatusBody {
+        configured: config.is_some(),
+        config: config.as_ref().map(|config| StatusConfig {
+            api_base: config
+                .search_url
+                .strip_suffix("/search")
+                .unwrap_or(&config.search_url),
+        }),
+    };
+    serde_json::to_vec(&body).unwrap_or_default()
+}
+
+impl HttpEndpoint for StatusEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if request.method() != HttpMethod::Get {
+                return response(405, br#"{"error":"method_not_allowed"}"#);
+            }
+            HttpResponse::new(200, JSON_CONTENT_TYPE, status_body(&self.0))
+        })
+    }
+}
+
 struct ConfigEndpoint<Storage> {
     config: Rc<RefCell<Option<Rc<TavilyConfig>>>>,
     storage: Storage,
 }
 
-impl<Storage> ConfigEndpoint<Storage> {
-    fn response(status: u16, body: &'static [u8]) -> HttpResponse {
-        HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
-    }
+fn response(status: u16, body: &'static [u8]) -> HttpResponse {
+    HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
 }
 
 impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             if request.method() != HttpMethod::Post {
-                return Self::response(405, br#"{"error":"method_not_allowed"}"#);
+                return response(405, br#"{"error":"method_not_allowed"}"#);
             }
             let Ok(request) = serde_json::from_slice::<ConfigRequest>(request.body()) else {
-                return Self::response(400, br#"{"error":"invalid_request"}"#);
+                return response(400, br#"{"error":"invalid_request"}"#);
             };
             if !valid_configuration(&request.api_key, &request.api_base) {
-                return Self::response(422, br#"{"error":"invalid_configuration"}"#);
+                return response(422, br#"{"error":"invalid_configuration"}"#);
             }
             if let Err(error) = persist_configuration(&self.storage, &request).await {
                 log::error!("failed to persist Tavily configuration: {error}");
-                return Self::response(500, br#"{"error":"storage"}"#);
+                return response(500, br#"{"error":"storage"}"#);
             }
             let search_url = search_url(&request.api_base);
             self.config.replace(Some(Rc::new(TavilyConfig {
@@ -141,13 +205,22 @@ impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
                 search_url,
             })));
             log::info!("configured Tavily provider for web search");
-            Self::response(204, b"")
+            response(204, b"")
         })
     }
 }
 
+/// Longest accepted API key. Tavily keys are about 40 bytes; the bound keeps
+/// the key, the longest query, and the JSON framing inside the 2 KiB request
+/// buffer.
+pub(crate) const MAX_API_KEY_BYTES: usize = 256;
+/// Longest accepted API base URL.
+const MAX_API_BASE_BYTES: usize = 512;
+
 fn valid_configuration(api_key: &str, api_base: &str) -> bool {
-    !api_key.trim().is_empty()
+    api_key.len() <= MAX_API_KEY_BYTES
+        && api_base.len() <= MAX_API_BASE_BYTES
+        && !api_key.trim().is_empty()
         && api_key.bytes().all(|byte| byte.is_ascii_graphic())
         && api_base.bytes().all(|byte| byte.is_ascii_graphic())
         && (api_base.starts_with("https://") || api_base.starts_with("http://"))
@@ -244,17 +317,54 @@ mod tests {
     }
 
     #[test]
+    fn portal_status_follows_the_active_configuration() {
+        let config = RefCell::new(None);
+        assert_eq!(entry_status(&config), EntryStatus::configured(false));
+        config.replace(Some(Rc::new(TavilyConfig {
+            api_key: "secret".into(),
+            search_url: search_url(DEFAULT_API_BASE),
+        })));
+        assert_eq!(entry_status(&config), EntryStatus::configured(true));
+    }
+
+    #[test]
+    fn status_reports_the_api_base_without_the_key() {
+        let config = Rc::new(RefCell::new(None));
+        let endpoint = StatusEndpoint(Rc::clone(&config));
+        let get = || {
+            let response = embassy_futures::block_on(
+                endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())),
+            );
+            assert_eq!(response.status(), 200);
+            String::from_utf8(response.body().unwrap().to_vec()).unwrap()
+        };
+        assert_eq!(get(), r#"{"configured":false}"#);
+        config.replace(Some(Rc::new(TavilyConfig {
+            api_key: "secret".into(),
+            search_url: search_url("https://tavily.example/"),
+        })));
+        assert_eq!(
+            get(),
+            r#"{"configured":true,"config":{"api_base":"https://tavily.example"}}"#
+        );
+        let post = embassy_futures::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, Vec::new())),
+        );
+        assert_eq!(post.status(), 405);
+    }
+
+    #[test]
     fn config_defaults_to_tavily_api() {
         let request: ConfigRequest = serde_json::from_slice(br#"{"api_key":"secret"}"#).unwrap();
         assert_eq!(request.api_base, DEFAULT_API_BASE);
     }
 
     #[test]
-    fn configuration_has_no_plugin_specific_size_limit() {
-        let api_key = "k".repeat(512);
-        let api_base = format!("https://{}.example.com", "a".repeat(512));
-
-        assert!(valid_configuration(&api_key, &api_base));
+    fn configuration_fits_the_request_buffer() {
+        let base = |host_bytes: usize| format!("https://{}.example.com", "a".repeat(host_bytes));
+        assert!(valid_configuration(&"k".repeat(256), &base(492)));
+        assert!(!valid_configuration(&"k".repeat(257), DEFAULT_API_BASE));
+        assert!(!valid_configuration("secret", &base(493)));
     }
 
     #[test]

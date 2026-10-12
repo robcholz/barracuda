@@ -1,14 +1,6 @@
 //! LLM-backed implementation of the Session approval resolver.
 
-use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    format,
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-};
+use alloc::{borrow::ToOwned, boxed::Box, format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
@@ -16,13 +8,14 @@ use core::task::{Context, Poll};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolRunner, ToolSet, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+    ToolInvocation, ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
-use barracuda_model_api::{ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
+use barracuda_model_api::{ChatMessage, ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -81,6 +74,7 @@ where
 {
     async fn resolve(
         self: Rc<Self>,
+        context: ToolContext,
         tool_call: ToolCall,
         reason: String,
         reply: Message,
@@ -93,6 +87,7 @@ where
             resolve_permission_reply(
                 &api_manager,
                 &llm_factory,
+                context,
                 &tool_call,
                 &reason,
                 reply.as_str(),
@@ -144,7 +139,7 @@ impl ToolSpec for ResolvePermissionReplyTool {
 impl ToolHandler for ResolvePermissionReplyTool {
     type Args = ResolutionArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let resolution = match args.decision {
                 ResolutionDecision::Yes => ApprovalDecision::Approved,
@@ -161,10 +156,7 @@ impl ToolHandler for ResolvePermissionReplyTool {
             };
 
             *self.resolution.borrow_mut() = Some(resolution);
-            Ok(ToolOutput {
-                content: "approval reply resolved".to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new("approval reply resolved", true))
         })
     }
 }
@@ -172,6 +164,7 @@ impl ToolHandler for ResolvePermissionReplyTool {
 async fn resolve_permission_reply(
     api_manager: &SharedApiManager,
     llm_factory: &ModelApiFactory<impl TcpConnect + 'static, impl Dns + 'static>,
+    context: ToolContext,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
@@ -191,7 +184,7 @@ async fn resolve_permission_reply(
         )))],
     ))?;
     let tools = tools.begin()?;
-    let messages = [json!({
+    let messages = [ChatMessage::new(&json!({
         "role": "user",
         "content": format!(
             "Pending tool call:\nID: {}\nName: {}\nArguments JSON: {}\n\nPermission reason:\n{reason}\n\nUser reply:\n{user_reply}",
@@ -199,12 +192,13 @@ async fn resolve_permission_reply(
             tool_call.name,
             tool_call.arguments_json,
         )
-    })];
+    }))];
     let request = ChatRequest {
         system_prompt: APPROVAL_RESOLVER_PROMPT,
         messages: &messages,
         reminders: &[],
-        tools_json: Some(tools.static_schemas()),
+        tools_json: Some(tools.schemas()),
+        files: None,
         retry: RetryPolicy::none(),
     };
     let response = llm.chat(&request, Cancel::new(cancelled)).await?;
@@ -212,18 +206,15 @@ async fn resolve_permission_reply(
         return Err(ApprovalResolverError::MalformedToolCall);
     };
 
-    let runner = ToolRunner::new(&tools);
+    let runner = ToolRunner::new(&tools, context);
     let call = ToolInvocation::try_new(
         Some(&tool_call.id),
         &tool_call.name,
         &tool_call.arguments_json,
     )
     .map_err(|_| ApprovalResolverError::MalformedToolCall)?;
-    let (mut join, detached) = runner.run(vec![call]);
+    let mut join = runner.run(vec![call]);
     while join.next().await.is_some() {}
-    if let Some(mut detached) = detached {
-        while detached.next().await.is_some() {}
-    }
     let resolved = resolution.borrow().clone();
     resolved.ok_or(ApprovalResolverError::MalformedToolCall)
 }

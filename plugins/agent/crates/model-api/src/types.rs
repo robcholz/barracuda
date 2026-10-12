@@ -2,7 +2,11 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
+
+use barracuda_agent_message::ChatMessage;
 use barracuda_runtime_utils::stream::StreamPart;
+use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
 
 use crate::BackendKind;
@@ -36,6 +40,9 @@ pub struct ToolCall {
 pub enum ChatStreamEvent {
     /// Provider thinking/reasoning content and its explicit boundary.
     Reasoning(StreamPart<String>),
+    /// Provider signature over the reasoning just streamed. It arrives before
+    /// `Reasoning(End)` and must be sent back verbatim with that reasoning.
+    ReasoningSignature(String),
     /// Assistant-visible text and its explicit boundary.
     Output(StreamPart<String>),
     /// Complete requested tool calls and their explicit boundary.
@@ -83,14 +90,43 @@ pub struct ProviderUsage {
 const DEFAULT_TIMEOUT_MS: u32 = 120 * 1000;
 /// Default maximum output tokens sent to the backend.
 const DEFAULT_MAX_TOKENS: u32 = 8192;
-/// Default maximum local/inline image size accepted by media inference.
+/// Default largest attachment file a request inlines.
 const DEFAULT_IMAGE_MAX_BYTES: usize = 512 * 1024;
+/// Default number of the newest image (or PDF) attachments a request inlines.
+const DEFAULT_MAX_IMAGES_IN_CONTEXT: usize = 2;
+
+/// The attachment kinds a model reads directly.
+///
+/// An attachment of a kind that is off, or that the backend cannot take, is
+/// sent as a text placeholder naming the file.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputModalities {
+    /// JPEG, PNG, GIF and WebP images, sent as image blocks.
+    pub image: bool,
+    /// PDF documents, sent as document blocks (Anthropic-compatible only).
+    pub pdf: bool,
+}
+
+impl Default for InputModalities {
+    fn default() -> Self {
+        Self {
+            image: true,
+            pdf: false,
+        }
+    }
+}
+
+const fn default_max_images_in_context() -> usize {
+    DEFAULT_MAX_IMAGES_IN_CONTEXT
+}
 
 /// Inputs to [`crate::ModelApi::set_config`].
 ///
 /// Backend wire details and capability flags are intentionally not configurable
 /// here: [`BackendKind`] owns those decisions. Callers choose the provider
-/// endpoint and request policy (`timeout_ms`, `max_tokens`, `image_max_bytes`).
+/// endpoint and request policy (`timeout_ms`, `max_tokens`, attachment
+/// limits and `input_modalities`).
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ModelApiConfig {
     /// Built-in backend kind.
@@ -105,8 +141,16 @@ pub struct ModelApiConfig {
     pub timeout_ms: u32,
     /// Max output tokens.
     pub max_tokens: u32,
-    /// Max local image size for [`crate::ModelApi::infer_media`].
+    /// Largest attachment file, in bytes, a request inlines; a larger one is
+    /// sent as a placeholder.
     pub image_max_bytes: usize,
+    /// The attachment kinds the model reads directly.
+    #[serde(default)]
+    pub input_modalities: InputModalities,
+    /// How many of the newest image or PDF attachments in the context a
+    /// request inlines; older ones are sent as placeholders.
+    #[serde(default = "default_max_images_in_context")]
+    pub max_images_in_context: usize,
 }
 
 impl ModelApiConfig {
@@ -126,6 +170,8 @@ impl ModelApiConfig {
             timeout_ms: DEFAULT_TIMEOUT_MS,
             max_tokens: DEFAULT_MAX_TOKENS,
             image_max_bytes: DEFAULT_IMAGE_MAX_BYTES,
+            input_modalities: InputModalities::default(),
+            max_images_in_context: DEFAULT_MAX_IMAGES_IN_CONTEXT,
         }
     }
 
@@ -142,6 +188,9 @@ impl ModelApiConfig {
         if self.base_url.is_empty() {
             return Err(crate::InitError::MissingBaseUrl);
         }
+        if crate::transport::split_url(&self.base_url).is_err() {
+            return Err(crate::InitError::InvalidBaseUrl);
+        }
         Ok(())
     }
 }
@@ -155,8 +204,7 @@ const DEFAULT_MAX_BACKOFF_MS: u32 = 8_000;
 /// Default backoff growth factor (`2` = exponential).
 const DEFAULT_BACKOFF_MULTIPLIER: u32 = 2;
 
-/// Per-call retry policy, set via `with_retry` on a request
-/// ([`ChatRequest::with_retry`] or [`MediaRequest::with_retry`]).
+/// Per-call retry policy, set via [`ChatRequest::with_retry`].
 ///
 /// Only transient failures are retried (network errors, HTTP 408/429/5xx).
 /// Aborts and deterministic client errors (bad URL/body, 4xx) are never retried.
@@ -303,162 +351,85 @@ pub struct ChatJsonResponse<T> {
 
 /// A request for [`crate::ModelApi::chat`].
 ///
-/// `messages` is a JSON array of chat messages (e.g.
-/// `[{ "role": "user", "content": "..." }]`). Tools are optional; the per-call
+/// `messages` is the chat history as shared [`ChatMessage`] encodings (e.g.
+/// `{ "role": "user", "content": "..." }`). Tools are optional; the per-call
 /// [`RetryPolicy`] defaults and is overridable via
 /// [`with_retry`](ChatRequest::with_retry).
 ///
 /// ```
-/// use barracuda_model_api::{ChatRequest, RetryPolicy};
-/// let messages = [serde_json::json!({ "role": "user", "content": "hi" })];
+/// use barracuda_model_api::{ChatRequest, ChatMessage, RetryPolicy};
+/// let messages = [ChatMessage::new(&serde_json::json!({ "role": "user", "content": "hi" }))];
 /// let req = ChatRequest::new("be terse", &messages)
 ///     .with_retry(RetryPolicy::fixed(3, 250));
 /// # let _ = req;
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// A user or tool message may reference files by `media` content parts (see
+/// [`barracuda_agent_message::attachment`]). Before encoding, the client reads
+/// the newest of them from [`files`](ChatRequest::files) under the configured
+/// [`InputModalities`], `max_images_in_context` and `image_max_bytes`, and
+/// inlines them as the provider's image or document blocks; every other one
+/// is sent as a text placeholder naming the file.
+#[derive(Clone, Copy)]
 pub struct ChatRequest<'a> {
     /// System prompt / instructions.
     pub system_prompt: &'a str,
-    /// JSON array of chat messages (the persisted history segment).
-    pub messages: &'a [serde_json::Value],
+    /// Chat messages (the persisted history segment).
+    pub messages: &'a [ChatMessage],
     /// Ephemeral trailing messages appended after `messages` for this request
     /// only (never persisted). Kept as a separate segment so the history is not
     /// cloned to append them; the backend iterates `messages` then `reminders`.
-    /// Defaults to empty; set with [`with_reminders`](Self::with_reminders).
-    pub reminders: &'a [serde_json::Value],
+    /// Defaults to empty.
+    pub reminders: &'a [ChatMessage],
     /// Optional OpenAI-style tools JSON array.
     pub tools_json: Option<&'a str>,
     /// Per-call retry policy. Defaults to [`RetryPolicy::default`]; use
     /// [`RetryPolicy::none`] to disable retry.
     pub retry: RetryPolicy,
+    /// The filesystem attachments are read from. Without one, every
+    /// attachment is sent as a placeholder.
+    pub files: Option<&'a ScopedVfs>,
+}
+
+impl fmt::Debug for ChatRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChatRequest")
+            .field("system_prompt", &self.system_prompt)
+            .field("messages", &self.messages)
+            .field("reminders", &self.reminders)
+            .field("tools_json", &self.tools_json)
+            .field("retry", &self.retry)
+            .field("files", &self.files.is_some())
+            .finish()
+    }
 }
 
 impl<'a> ChatRequest<'a> {
     /// A tool-less chat request.
     #[must_use]
-    pub fn new(system_prompt: &'a str, messages: &'a [serde_json::Value]) -> Self {
+    pub fn new(system_prompt: &'a str, messages: &'a [ChatMessage]) -> Self {
         ChatRequest {
             system_prompt,
             messages,
             reminders: &[],
             tools_json: None,
             retry: RetryPolicy::default(),
+            files: None,
         }
+    }
+
+    /// Read attachments from `files`.
+    #[must_use]
+    pub fn with_files(mut self, files: &'a ScopedVfs) -> Self {
+        self.files = Some(files);
+        self
     }
 
     /// Attach an OpenAI-style tools JSON array.
     #[must_use]
     pub fn with_tools(mut self, tools_json: &'a str) -> Self {
         self.tools_json = Some(tools_json);
-        self
-    }
-
-    /// Attach ephemeral trailing reminder messages for this request only.
-    #[must_use]
-    pub fn with_reminders(mut self, reminders: &'a [serde_json::Value]) -> Self {
-        self.reminders = reminders;
-        self
-    }
-
-    /// Override the retry policy for this call.
-    #[must_use]
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-/// An image input for [`crate::ModelApi::infer_media`].
-///
-/// Each variant carries exactly the data its input mode needs, so mutually
-/// exclusive states are unrepresentable. Construct with
-/// [`MediaAsset::remote_url`] or [`MediaAsset::inline_bytes`]. The application
-/// reads local files through its injected filesystem before constructing inline
-/// bytes, so this transport-facing type never performs platform I/O.
-///
-/// ```
-/// use barracuda_model_api::MediaAsset;
-/// let a = MediaAsset::inline_bytes(vec![1, 2, 3], "image/png");
-/// let b = MediaAsset::remote_url("https://example.com/cat.png");
-/// # let _ = (a, b);
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MediaAsset {
-    /// A remote image URL, passed through to the provider unchanged.
-    RemoteUrl {
-        /// Image URL.
-        url: String,
-    },
-    /// Inline image bytes, base64-encoded into a data URL.
-    InlineBytes {
-        /// Raw image bytes.
-        bytes: Vec<u8>,
-        /// Explicit MIME type (inline bytes have no extension to infer from).
-        mime_type: String,
-    },
-}
-
-impl MediaAsset {
-    /// An asset referenced by a remote URL.
-    #[must_use]
-    pub fn remote_url(url: impl Into<String>) -> Self {
-        Self::RemoteUrl { url: url.into() }
-    }
-
-    /// An asset carrying inline bytes with an explicit MIME type.
-    #[must_use]
-    pub fn inline_bytes(bytes: Vec<u8>, mime_type: impl Into<String>) -> Self {
-        Self::InlineBytes {
-            bytes,
-            mime_type: mime_type.into(),
-        }
-    }
-}
-
-/// A request for [`crate::ModelApi::infer_media`]: one image plus optional prompts.
-///
-/// ```
-/// use barracuda_model_api::{MediaAsset, MediaRequest};
-/// let asset = MediaAsset::inline_bytes(vec![1, 2, 3], "image/png");
-/// let req = MediaRequest::new(&asset).with_user_prompt("Describe this image.");
-/// # let _ = req;
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MediaRequest<'a> {
-    /// Optional system prompt / instructions.
-    pub system_prompt: Option<&'a str>,
-    /// Optional user prompt accompanying the image.
-    pub user_prompt: Option<&'a str>,
-    /// The image asset to send.
-    pub media: &'a MediaAsset,
-    /// Per-call retry policy. Defaults to [`RetryPolicy::default`]; use
-    /// [`RetryPolicy::none`] to disable retry.
-    pub retry: RetryPolicy,
-}
-
-impl<'a> MediaRequest<'a> {
-    /// A media request over the given asset, with no prompts set yet.
-    #[must_use]
-    pub fn new(media: &'a MediaAsset) -> Self {
-        MediaRequest {
-            system_prompt: None,
-            user_prompt: None,
-            media,
-            retry: RetryPolicy::default(),
-        }
-    }
-
-    /// Set the system prompt / instructions.
-    #[must_use]
-    pub fn with_system_prompt(mut self, system_prompt: &'a str) -> Self {
-        self.system_prompt = Some(system_prompt);
-        self
-    }
-
-    /// Set the user prompt accompanying the image.
-    #[must_use]
-    pub fn with_user_prompt(mut self, user_prompt: &'a str) -> Self {
-        self.user_prompt = Some(user_prompt);
         self
     }
 

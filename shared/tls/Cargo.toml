@@ -2,26 +2,43 @@
 name = "barracuda-tls"
 version = "0.1.0"
 edition = "2021"
-description = "Platform-owned TLS client capability for Barracuda"
-
-[features]
-default = ["mbedtls"]
-mbedtls = [
-    "http-client/mbedtls",
-    "dep:mbedtls-rs",
-]
-force-esp-riscv-gcc = ["mbedtls", "mbedtls-rs/force-esp-riscv-gcc"]
-pem = ["mbedtls", "mbedtls-rs/pem-parse"]
-std = ["mbedtls", "mbedtls-rs/std"]
+description = "TLS client engine and compact trust-root bundle shared by every Barracuda Platform"
 
 [dependencies]
-http-client.workspace = true
-mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
-rand_core = "0.10.0-rc-2"
+barracuda-bulk-memory.workspace = true
+barracuda-platform.workspace = true
+log.workspace = true
+# `tls` is the feature set of the prebuilt device libraries (RSA, ECDSA, TLS 1.2
+# and 1.3). Outgoing records are capped at 4 KiB, which saves 12 KiB per idle
+# session and 28 KiB at the handshake peak; incoming records stay 16 KiB because
+# servers send full-size records (`tests/session_memory.rs`).
+mbedtls-rs = { version = "0.1.0", default-features = false, features = [
+    "tls",
+    "ssl-out-content-len-4096",
+] }
 thiserror = { version = "2", default-features = false }
 
+# The 4 KiB outgoing record buffer is not the prebuilt device libraries'
+# configuration, so device builds compile mbedTLS's C sources, each with its
+# chip's compiler: the ESP chips' own GCC, since Clang has no Xtensa target and
+# Espressif's RISC-V GCC carries the ESP C library headers. Every bare-metal
+# RISC-V target in this workspace is an ESP chip.
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+mbedtls-rs = { version = "0.1.0", default-features = false, features = ["use-gcc"] }
+
+[target.'cfg(all(target_arch = "riscv32", target_os = "none"))'.dependencies]
+mbedtls-rs = { version = "0.1.0", default-features = false, features = ["force-esp-riscv-gcc"] }
+
+[dev-dependencies]
+allocator-api2 = { version = "0.3.1", default-features = false, features = ["alloc"] }
+critical-section = { version = "1", features = ["std"] }
+embedded-io-async = "0.7"
+
+[build-dependencies]
+cc = "1"
+
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]

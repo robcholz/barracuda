@@ -1,9 +1,11 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc};
+use alloc::{boxed::Box, string::ToString};
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+    ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 
 use super::super::model::TranscriptText;
 use super::super::policy::SpawnPolicy;
@@ -31,7 +33,7 @@ impl ToolSpec for RunSubagentTool {
 impl ToolHandler for RunSubagentTool {
     type Args = SpawnArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let request = SpawnRequest::from_args(args, &self.policy, "subagent_run")?;
             let (child, result) = self
@@ -49,10 +51,7 @@ impl ToolHandler for RunSubagentTool {
                 ToolError::InvokeRejected(format!("subagent {child} result channel closed"))
             })?;
             self.control.acknowledge_delivery(child);
-            Ok(ToolOutput {
-                content: result.text(),
-                ok: result.ok(),
-            })
+            Ok(ToolOutput::new(result.text(), result.ok()))
         })
     }
 }

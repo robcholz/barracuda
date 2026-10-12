@@ -1,0 +1,57 @@
+name = "Edge: nested synchronous subagents"
+description = "root -> worker -> worker through subagent_run. Each subagent_run blocks its caller, so model calls are strictly ordered: root, outer worker, inner worker, inner worker, outer worker, root. The inner worker probes ancestors it must not control."
+
+[model]
+mode = "scripted"
+
+# call 0 (root, agent-1)
+[[model.responses]]
+request_contains = ["You are the user-facing assistant"]
+tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "outer", goal = "Outer goal: delegate the inner task.", timeout_ms = 60000 } }]
+
+# call 1 (outer worker, agent-2): worker agent.json allows spawning "worker".
+[[model.responses]]
+request_contains = ["You are a subagent spawned by the root agent", "Outer goal: delegate the inner task."]
+tool_calls = [{ name = "subagent_run", arguments = { kind = "worker", name = "inner", goal = "Inner goal: probe your ancestors.", timeout_ms = 30000 } }]
+
+# call 2 (inner worker, agent-3, depth 2). Parent and root are ancestors, not
+# descendants (model.rs:191-211), so every control call is refused; a worker
+# may not spawn the root kind (spawn.rs:122-129).
+[[model.responses]]
+request_contains = ["You are a subagent spawned by the root agent", "Inner goal: probe your ancestors."]
+tool_calls = [
+  { name = "subagent_watch", arguments = { agent = "agent-2" } },
+  { name = "subagent_delete", arguments = { agent = "agent-1" } },
+  { name = "subagent_interrupt", arguments = { agent = "agent-2", message = "stop" } },
+  { name = "subagent_list", arguments = {} },
+  { name = "subagent_spawn", arguments = { kind = "conversation", name = "up", goal = "g", timeout_ms = 1000 } },
+]
+
+# call 3 (inner worker): its tool results, as the model sees them.
+[[model.responses]]
+request_contains = [
+  "No subagent agent-2 in your subtree (unknown id, or not one of yours).",
+  "Cannot delete agent-1: it is not a subagent in your subtree.",
+  "Cannot interrupt agent-2: it is not a subagent in your subtree.",
+  '{\"subagents\":[]}',
+  "subagent_spawn: kind 'conversation' is not permitted for this agent. Allowed: worker",
+]
+text = "inner done"
+
+# call 4 (outer worker): model.rs:77-83 result rendering.
+[[model.responses]]
+request_contains = ["[subagent] id: agent-3, result: true, message: inner done"]
+text = "outer done"
+
+# call 5 (root)
+[[model.responses]]
+request_contains = ["[subagent] id: agent-2, result: true, message: outer done"]
+text = "Nested delegation finished."
+
+[[steps]]
+send = "Delegate a nested task."
+reply_contains = ["Nested delegation finished."]
+tool_contains = ["[subagent] id: agent-2, result: true, message: outer done"]
+
+[logs]
+expect = ["subagent spawn kind rejected by policy: conversation"]

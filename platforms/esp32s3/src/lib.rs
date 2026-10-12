@@ -7,14 +7,22 @@
 pub mod hal;
 
 #[cfg(target_arch = "xtensa")]
+mod entropy;
+
+#[cfg(target_arch = "xtensa")]
+pub use entropy::Esp32S3Entropy;
+
+#[cfg(target_arch = "xtensa")]
 #[doc(hidden)]
 pub mod application;
 
 #[cfg(target_arch = "xtensa")]
-mod wifi;
+mod wifi {
+    include!("../../esp32/src/wifi.rs");
+}
 
 #[cfg(target_arch = "xtensa")]
-pub use wifi::{Esp32S3WifiDevice, Esp32S3WifiError};
+pub use wifi::{EspWifiDevice as Esp32S3WifiDevice, EspWifiError as Esp32S3WifiError};
 
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,8 +240,8 @@ mod internal_flash {
 
     impl Platform for Esp32S3Platform {
         type Bindings = Esp32S3PlatformBindings;
-        type Tls = barracuda_tls::PlaintextTls;
         type Wifi = crate::Esp32S3WifiDevice;
+        type Entropy = crate::Esp32S3Entropy;
         type Partitions = Esp32S3Partitions;
         type Error = Esp32S3PlatformError;
 
@@ -254,7 +262,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack,
                 wifi: bindings.wifi,
-                tls: barracuda_tls::PlaintextTls,
+                entropy: crate::Esp32S3Entropy,
                 partitions,
             })
         }

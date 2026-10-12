@@ -1,12 +1,14 @@
-use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind};
 use barracuda_agent_memory::{Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_skill::SkillSetSource;
+use barracuda_agent_tool::{BackgroundToolPool, SessionId, ToolContext, ToolGroup, ToolSetSource};
 use barracuda_model_api::RetryPolicy;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use crate::baked;
 use crate::config::ApiPurpose;
@@ -18,7 +20,7 @@ use crate::context_providers::{
 use crate::engine::{
     agent_effect_channel, AgentEngine, AgentEngineBuildError, AgentEngineConfig, ContextProvider,
 };
-use crate::tools::internal_tools;
+use crate::tools::{background_tools, internal_tools};
 use crate::{Agent, AgentEngineState, AgentKind, ReasoningEffort, ReasoningEffortHandle};
 
 use super::error::AgentCreateError;
@@ -35,6 +37,8 @@ pub enum PersistenceConfig {
 }
 
 struct AgentEnvironment {
+    /// The session the Agent works for; its Tool calls run in it.
+    session: SessionId,
     transcript: Box<dyn Transcript>,
     is_root: bool,
     permission_policy: Arc<dyn PermissionPolicy>,
@@ -52,6 +56,7 @@ where
     pub fn resume_from(
         &self,
         id: AgentId,
+        session: SessionId,
         is_root: bool,
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
@@ -64,6 +69,7 @@ where
             id,
             &kind,
             AgentEnvironment {
+                session,
                 transcript,
                 is_root,
                 permission_policy,
@@ -80,6 +86,7 @@ where
     pub fn create(
         &self,
         id: AgentId,
+        session: SessionId,
         kind: &AgentKind,
         is_root: bool,
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
@@ -92,6 +99,7 @@ where
             id,
             kind,
             AgentEnvironment {
+                session,
                 transcript,
                 is_root,
                 permission_policy,
@@ -152,6 +160,7 @@ where
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
+            session,
             transcript,
             is_root,
             permission_policy,
@@ -167,7 +176,7 @@ where
             AgentCreateError::UnknownKind(kind.as_str().to_owned())
         })?;
         let runtime = manifest.runtime();
-        let skill_set = Arc::clone(&self.skill_registry).skill_set();
+        let skill_set = self.skill_registry.skill_set();
         let state =
             recovery_state.unwrap_or_else(|| DurableState::new(AgentEngineState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
@@ -178,6 +187,8 @@ where
             .tool_set_with_blacklist(runtime.tool_blacklist());
         let (effect_emitter, effect_inbox) = agent_effect_channel();
         tools.add_group(internal_tools(effect_emitter.clone()))?;
+        let background = BackgroundToolPool::new();
+        tools.add_group(background_tools(&background))?;
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
@@ -194,7 +205,8 @@ where
             COMPACTION_SEGMENT_TOKEN_BUDGET,
         );
         let profile_provider = ProfileContextProvider::new(self.profile_store.clone());
-        let provider = match self.long_term.provider(kind.as_str()) {
+        let tool_context = ToolContext::new(session);
+        let provider = match self.long_term.provider(kind.as_str(), tool_context) {
             Ok(provider) => provider,
             Err(error) => {
                 log::error!(
@@ -237,6 +249,7 @@ where
             api_manager: Arc::clone(&self.api_manager),
             api_purpose,
             tools,
+            background: background.clone(),
             effect_inbox,
             permission_policy,
             agent_instruction: Block::new(
@@ -246,6 +259,8 @@ where
             inherited_context,
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
+            files: self.filesystem.clone(),
+            tool_context,
         };
         let engine =
             AgentEngine::build(engine_config, self.llm_factory.create()).map_err(|error| {
@@ -259,7 +274,7 @@ where
                     AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
                 }
             })?;
-        let agent = Agent::new(engine);
+        let agent = Agent::new(engine, background);
 
         log::info!("Agent {id} ({}) created", kind.as_str());
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
@@ -270,15 +285,16 @@ where
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use alloc::{sync::Arc, vec::Vec};
+    use alloc::{boxed::Box, vec::Vec};
 
-    use barracuda_agent_permission::AllowAll;
+    use barracuda_agent_permission::{AllowAll, PermissionPolicy};
     use barracuda_agent_persistence::{DurableState, InstanceId, Persistence};
-    use barracuda_agent_tool::ToolRegistry;
+    use barracuda_agent_tool::{SessionId, ToolRegistry};
     use barracuda_model_api::{ModelApi, ModelApiFactory};
     use barracuda_platform_test::{memory_vfs, NeverStack};
     use futures_lite::future::block_on;
     use http_client::ClientFactory;
+    use portable_atomic_util::Arc;
 
     use crate::{baked, AgentEngineState, AgentId, ReasoningEffort, SharedApiManager};
 
@@ -338,8 +354,9 @@ mod tests {
             manager
                 .resume_from(
                     agent,
+                    SessionId::new(1),
                     true,
-                    Arc::new(AllowAll),
+                    Arc::from(Box::new(AllowAll) as Box<dyn PermissionPolicy>),
                     ReasoningEffort::Medium,
                     Vec::new(),
                 )
@@ -380,9 +397,10 @@ mod tests {
             manager
                 .create(
                     agent,
+                    SessionId::new(1),
                     baked::root_kind(),
                     true,
-                    Arc::new(AllowAll),
+                    Arc::from(Box::new(AllowAll) as Box<dyn PermissionPolicy>),
                     ReasoningEffort::Medium,
                     PersistenceConfig::Persistent,
                     Vec::new(),

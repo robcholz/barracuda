@@ -16,9 +16,9 @@ Board HAL = Board matrix + peripheral implementations + exposed I/O
 Target    = Platform + Board HAL
 ~~~
 
-- **Platform** is an execution platform family: ESP, STM32, nRF, CH, Linux,
-  macOS, or an equivalent environment. It provides platform mechanisms such as
-  an IP stack, TLS, and partitions and adapts its vendor HAL into upstream
+- **Platform** is one execution platform: a chip line such as ESP32-S3,
+  ESP32-C6, or STM32, or a hosted environment such as Linux or macOS. It provides platform mechanisms such as
+  an IP stack, entropy, and partitions and adapts its vendor HAL into upstream
   hardware contracts. It does not describe a Board's concrete peripherals,
   wiring, or product hardware matrix.
 - **Board** is one concrete hardware combination. Its matrix describes the
@@ -114,15 +114,31 @@ async fn application(spawner: Spawner, bindings: barracuda_target::Bindings) -> 
 barracuda_target::application_entry!(application);
 ~~~
 
-Host Targets have no chip peripheral singleton. Their selected-target entry
-macro supplies a binding pair whose Platform side is the host's unit binding;
-the application still uses the same `resources_with_bindings` boundary.
+Host Targets have no chip peripheral singleton. The Linux and macOS Platforms
+share a host-only virtual one instead (`platforms/virtual-io`): virtual pins
+and I2C controllers backed by a virtual peripherals manager that tests and
+developers drive over a loopback control interface. The host entry macro takes
+that singleton once, exactly as a device entry takes its chip singleton, and
+the generated Board bindings move the declared virtual tokens out of it. The
+application still uses the same `resources_with_bindings` boundary, and the
+virtual hardware never enters firmware.
+
+Host Boards declare peripherals in `board.yml` like device Boards. Because
+the host has no physical chips, its Platform HAL manifest sets
+`peripheral-models`: generated Board composition then announces every
+declared peripheral (name, implementation identifier, chip-native bindings,
+and scalar parameters) to `hal::declare_peripheral` before initializing any
+of them, and the virtual Platform attaches the chip model for that
+implementation at the declared bus and address. The Board stays the single
+declaration and the generator keeps no Platform or implementation special
+case. Device Platforms do not set it, so their generated composition is
+unchanged.
 
 The returned shape preserves ownership:
 
 ~~~rust,ignore
 TargetResources {
-    platform: PlatformResources { ip_stack, tls, partitions },
+    platform: PlatformResources { ip_stack, wifi, entropy, partitions },
     board_hal: BoardResources { peripherals, exposed_io },
 }
 ~~~
@@ -132,29 +148,48 @@ never become fields of a Board resource bundle.
 
 ## Platform
 
-A Platform represents a family such as ESP, STM32, nRF, CH, Linux, or macOS.
-It owns integration with that family's execution environment and supplies
+A Platform represents one execution platform: an ESP chip such as ESP32-S3
+or ESP32-C6, an STM32 line, Linux, macOS, or an equivalent environment. Each
+ESP chip is its own Platform crate and selection (`platforms/esp32`,
+`platforms/esp32c3`, `platforms/esp32s3`, ...); chips that share a vendor
+ecosystem declare the same `family` in `platform.yml` and may share vendor
+adaptation source, but they are never merged into one family Platform. A
+Platform owns integration with its execution environment and supplies
 platform-level services. Concrete Board peripherals do not become Platform
 fields or Platform associated types.
 
 Platform resources have stable, exact shapes. The current common contract
-exposes one Embassy IP stack, one TLS client capability, and one partitions
-collection:
+exposes one Embassy IP stack, one Wi-Fi control mechanism, one entropy source,
+and one partitions collection:
 
 ~~~rust,ignore
-pub struct PlatformResources<Tls, Partitions> {
+pub struct PlatformResources<Partitions, Wifi, Entropy> {
     pub ip_stack: embassy_net::Stack<'static>,
-    pub tls: Tls,
+    pub wifi: Wifi,
+    pub entropy: Entropy,
     pub partitions: Partitions,
 }
 ~~~
+
+`wifi` is a separate communication mechanism, not part of `ip_stack`.
+Platforms without a radio supply an explicitly unsupported implementation, and
+System hands the mechanism to the one Plugin that takes it and owns the
+policy.
+
+`entropy` is the Platform's source of unpredictable bytes, fit for
+cryptographic use: the operating system's generator on Host Platforms, a true
+random number generator fed by physical noise on devices. A Platform without
+one supplies `UnavailableEntropy`, never a weaker generator. System erases its
+type into `PluginContext::entropy`, which every Plugin that needs randomness
+clones, and the radio into `PluginContext::wifi`.
 
 This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
 fields such as filesystem_partition, resources_partition, or
 database_partition. The IP capability likewise remains `ip_stack` rather than
-web_network or database_network. TLS remains an independent `tls` capability;
-it is not hidden inside `ip_stack` or reconstructed by an HTTP consumer.
+web_network or database_network. TLS is not a Platform resource; the Plugin
+that owns HTTP builds it above the Platform boundary (see "TLS and HTTP
+clients").
 
 Adding a Plugin, peripheral, filesystem, database, or application subsystem
 does not modify the Platform API or PlatformResources shape.
@@ -180,7 +215,12 @@ used to construct a HAL; it does not implement or select a Platform.
 
 Board configuration identifies concrete hardware and the native names required
 to construct it. It does not contain mounted filesystems, database objects,
-Plugin instances, or application services.
+Plugin instances, or application services. Beside the hardware matrix, a Board
+names the profile under `boards/profiles/` that decides which Plugins its
+firmware contains, and its `plugins.<id>` section enables or disables single
+Plugins, sets their settings, and wires their peripheral slots when the
+defaults do not fit. That section is the only place a Board names a Plugin;
+the rules are in [`plugin-api.md`](plugin-api.md#enablement-per-board).
 
 Board selection is an explicit persistent step:
 
@@ -202,7 +242,8 @@ isolated artifact directory while an embedded `build-std` policy is active.
 The selector crates keep stable source manifests. `cargo board` bootstraps
 ignored local dependency packages under `.barracuda/selection` before Cargo
 resolves the source workspace, then activates only the concrete Platform and
-peripheral implementation dependencies required by the chosen Board. Every
+peripheral implementation dependencies required by the chosen Board, and the
+Plugins the Board enables. Every
 local package declares the complete optional dependency catalog, so changing
 the selected default features does not rewrite `Cargo.lock`. The build reads
 persistent workspace state; it does not require shell setup or a Board-aware
@@ -259,6 +300,13 @@ peripherals:
         pin: gpio10
       parameters:
         active-level: low
+    front:
+      implementation: mipi-dbi-display
+      primary: true
+      bindings: { ... }
+    status-panel:
+      implementation: gdeh0154d67-display
+      bindings: { ... }
 
 exposed-io:
   pins:
@@ -274,11 +322,16 @@ Platform types, Plugin identities, and application policy do not belong in the
 Board matrix. An implementation identifier selects registered composition
 code; YAML does not name a Rust type or crate path.
 
+Device names are the Board's own. A Board may attach several displays; every
+other peripheral kind has at most one device. With several devices of a kind,
+exactly one is marked `primary: true`, a hardware fact about the product's
+main device rather than a Plugin choice. A kind with one device needs no mark.
+
 Board resources contain no third hardware category:
 
 ~~~rust,ignore
 BoardResources {
-    peripherals: GeneratedPeripherals { /* Option<display>, Option<rtc>, ... */ },
+    peripherals: GeneratedPeripherals { /* one Option per declared device */ },
     exposed_io: GeneratedExposedIo { /* move-only tokens, Platform providers */ },
 }
 ~~~
@@ -286,10 +339,15 @@ BoardResources {
 `BoardResources<Peripherals, ExposedIo>` is the common ownership envelope. Its
 generic fields preserve the concrete, statically composed peripheral types for
 each selected Board. Every generated peripheral field is `Option<T>` because no
-peripheral kind is mandatory. The single exposed-I/O value owns all runtime
-physical resources.
-System places it in `PluginContext` behind one shared `Arc`; hardware VM Plugins
-clone that owner, not independent protocol collections. Platform-owned
+peripheral kind is mandatory. Each peripheral trait takes a device by
+`Instance`, the device's position among the Board's devices of that kind in
+name order; Plugins never build an `Instance` themselves but take the
+constants their build resolved from their declared slots. Several displays are
+returned as one generated `BoardDisplay` enum over the Board's display
+implementations, built by `display_set!`, so dispatch stays static. The single
+exposed-I/O value owns all runtime physical resources.
+System places it in `PluginContext` behind one shared `Arc`; Plugins that use
+exposed hardware clone that owner, not independent protocol collections. Platform-owned
 controller pools are part of this owner but are not application-visible names.
 
 Controller, channel, timer, DMA, and buffer inventory belongs to the Platform
@@ -556,9 +614,9 @@ backend:
 | --- | --- | --- |
 | `/resources` | FATFS or LittleFS selected by native partition metadata | Read-only image content. An upgrade may replace the complete filesystem. |
 | `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
-| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
+| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. MemFS keeps file pages in bulk memory, so its capacity is whatever bulk memory has free; a write that does not fit fails with `FsError::NoSpace` and leaves the file unchanged. |
 | `/media` | Target-selected installed filesystem; currently a System LittleFS subtree | Stable, durable, high-volume runtime content. Its physical medium may be soldered storage, installed storage, or FATFS on flash, but its namespace does not disappear while System is running. |
-| `/removable` | MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted at `/removable/<slot-id>`. |
+| `/removable` | Read-only MemFS namespace anchor plus live child mounts | Runtime namespace for filesystems that may appear and disappear. Each present medium is mounted read-write at `/removable/<slot-id>`; the anchor itself stores nothing. |
 
 System mounts `/resources` read-only regardless of the filesystem selected by
 the native Board layout. The default `/media` mount scopes the `/media` subtree
@@ -616,6 +674,21 @@ Plugin Manager derives one `ScopedVfs` for each filesystem-enabled Plugin:
 | `/workspace/media` | `/media/workspace` | Shared, durable |
 | `/workspace/removable` | `/removable` | Shared, dynamically available |
 
+A Plugin that declares `PluginFilesystem::Inspect` receives the same view plus,
+read-only, every Plugin's private trees. They are for a Plugin that shows the
+device's files to its owner, and System decides which Plugins ship with it:
+
+| Plugin-visible path | Global source | Ownership |
+| --- | --- | --- |
+| `/plugins/data` | `/data/plugins` | Every Plugin's, read-only |
+| `/plugins/cache` | `/cache/plugins` | Every Plugin's, read-only |
+| `/plugins/media` | `/media/plugins` | Every Plugin's, read-only |
+| `/plugins/resources` | `/resources/plugins` | Every Plugin's, read-only |
+
+The view refuses every change below these mounts with `FsError::ReadOnly`, even
+though their sources are writable. Plugin settings and credentials live in
+Plugin Manager's KV storage, not in these trees, and stay out of every view.
+
 Every filesystem-enabled Plugin sees the same Workspace content at the same
 logical paths. Private paths remain isolated by Plugin identity. Shared state
 required for correctness retains an explicit owner and belongs in that
@@ -646,6 +719,12 @@ A scoped view supports file operations and path translation; mount, unmount,
 backend inspection, concrete filesystem selection, and removable-media
 lifecycle stay at the System boundary.
 
+Every logical mount point is a directory of the view: it lists as empty until
+its source directory exists, and it cannot be written, removed, or renamed, so
+no Plugin can replace a private root or a shared Workspace directory with a
+file. Parents of mount points, such as `/` and `/workspace`, list the mount
+points below them. A rename never moves a directory into its own descendant.
+
 Path normalization contains operations within exposed logical mounts. Rename
 is confined to one mounted filesystem, so moving from `/workspace/cache` to
 `/workspace/media` requires copy followed by removal. Atomic publication writes
@@ -672,7 +751,7 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
-## Logging and Agent tracing
+## Logging and tracing
 
 Ordinary diagnostics across Platform, HAL, System, Core, and Plugins use the
 `log` facade. Library and subsystem crates emit records; they do not choose an
@@ -702,11 +781,10 @@ does not become a `PlatformResources` field, Plugin capability, Workflow
 contract, or Board peripheral. Platform-specific output setup remains outside
 Core and Plugins.
 
-`tracing` is not the general logging API. It remains available only to the
-Agent subsystem where nested spans and inherited execution context justify its
-cost and complexity. Agent trace lines may be rendered into the same `log`
-sink, but ordinary Core and Plugin code must not acquire a `tracing`
-dependency.
+`tracing` is not the general logging API. A Plugin whose nested spans and
+inherited execution context justify its cost may use it inside its own crates,
+rendering trace lines into the same `log` sink; Core and the layers below
+Plugins never acquire a `tracing` dependency.
 
 Logs must identify lifecycle boundaries and failures without including API
 keys, credentials, message bodies, or other secret-bearing payloads.
@@ -732,55 +810,92 @@ cannot be accessed safely. Bulk containers remain explicit: the Platform does
 not add external memory to the ordinary global allocator used by arbitrary
 System and Plugin state.
 
+A C library that allocates through `calloc`-style hooks asks for untyped
+memory, so the `Pod` boundary cannot be checked for it. `bulk_memory::foreign`
+gives such a library raw zeroed byte buffers from the same domain; its owner
+sends only large plain-data buffers there and keeps the library's control
+structures on the global heap. `shared/tls` is the one user: mbedTLS
+allocations of 4 KiB or more (record buffers and certificate copies) go to bulk
+memory, everything smaller to the global heap.
+
 ## TLS and HTTP clients
 
-TLS is a Platform capability because each Platform owns its randomness,
-trust-root source, TLS engine initialization, and process or firmware lifetime.
-Host Platforms load the system certificate bundle. Device Platforms construct
-the same semantic capability from Platform RNG state and provisioned DER trust
-roots. A Plugin must not load Host certificates, initialize a TLS backend, or
-select a TLS implementation through a Host-only feature.
+TLS is a shared software service above the Platform boundary. Its only
+Platform-specific input is randomness, which the Platform already supplies as
+`entropy`; the engine, its process lifetime, and the trust roots are the same
+on every Platform.
 
-`shared/tls` owns only TLS mechanisms: the `ClientTls` contract and constructors
-that accept caller-supplied RNG and DER/PEM roots. It must not inspect
-environment variables, read certificate files, or contain operating-system CA
-paths. Those policies live in each concrete Host Platform.
+`shared/tls` owns the TLS engine and the trust roots. `Tls::new(entropy)`
+initializes the process-wide mbedTLS engine from the Platform's entropy source
+and refuses `UnavailableEntropy` rather than fall back to a weaker generator; a
+source that fails later fails the handshake with an entropy error.
 
-HTTP is a shared software service above the Platform boundary:
+The trust roots are Mozilla's CA store, pinned in `shared/tls/roots`, the same
+on every Platform. As in ESP-IDF's certificate bundle, `build.rs` reduces each
+root to its subject name and public key and compiles the result in (about
+54 KiB for 121 roots). mbedTLS gets an empty CA chain and a verify callback:
+the top certificate of a server chain arrives untrusted, and the callback
+trusts it only when a bundled root of its issuer's name verifies its
+signature, or it is itself a bundled root (name and key). mbedTLS verifies the
+rest of the chain. A server may also send an older root above a bundled one
+(one sends GlobalSign Root CA above GlobalSign Root CA - R3); the
+callback then sets the untrusted top aside in a per-session word and trusts
+the chain only if a bundled root appears further down the verified path, as a
+browser stops at the first root it trusts. The roots stay in flash and
+only the matching root's key is parsed, so no Platform keeps parsed roots in
+RAM. Each connection's record buffers, 16 KiB for incoming records (servers
+send full-size records) and 4 KiB for outgoing ones, come from bulk memory (see
+"Bulk memory"), which is external RAM on Boards that have it. That outgoing
+size is not the prebuilt device libraries' configuration, so a device build
+compiles mbedTLS, and `barracuda-tls` selects the C compiler for the chip from
+the compilation target; no Platform depends on it. mbedTLS checks no certificate dates, so expired roots are left out of the
+bundle when it is generated. `mbedtls-rs` is vendored in
+`shared/tls/mbedtls-rs` with the verify callback and a fallible random source
+added.
+
+No Platform reads its operating system's certificate store, and `shared/tls`
+reads no environment variables or certificate files at run time. Only a host
+test build may add roots, through `BARRACUDA_TLS_TEST_ROOTS` at build time (for
+a test network that intercepts TLS); device firmware refuses it. It also owns
+the few C library functions mbedTLS calls on bare-metal targets, and exposes
+`aes_256_gcm_open`, incremental AES-128-ECB with PKCS#7 padding
+(`Aes128EcbEncryptor`, `Aes128EcbDecryptor`) and MD5 (`Md5`) on the same
+mbedTLS build, so a consumer that must speak a service's encryption or digest
+carries no second implementation.
+
+HTTP is a library too:
 
 ~~~text
-PlatformResources { ip_stack, tls }
+PluginContext { ip_stack, entropy }
                  |
                  v
-System composition
+http Plugin: barracuda_tls::Tls::new(entropy)
+             http_client::ClientFactory::new(ip_stack, tls)
                  |
-                 v
-shared/http-client
-        +-- ClientFactory (composition only)
-        +-- Client request facade (consumer API)
-        +-- buffered execute
-        +-- streaming execute
-                 |
-                 +----> Agent model protocol adapter
-                 +----> message-channel Providers
+                 v  ClientFactory capability
+        every Plugin that depends on http
 ~~~
 
-`shared/http-client` is the workspace's only reqwless integration. It owns URL
-and header validation, connection reuse, request-body streaming, response-body
-streaming, buffering, and transport error classification. Protocol crates may
-adapt its domain-neutral request and response values, but they do not create a
-second reqwless transport implementation.
-
-System combines the Platform's `ip_stack` and `tls` capabilities into one
-`http_client::ClientFactory`. Construction code may clone that factory;
-business consumers receive only `http_client::Client` and use its fluent
-`get`/`post`/`request` facade. TCP, DNS, TLS configuration, reqwless types, and
-buffer sizes must not parameterize Plugin or domain APIs.
+`shared/http-client` is the workspace's only reqwless integration: it builds
+reqwless clients from a TCP connector, a DNS resolver, and an optional TLS
+engine, and offers dedicated receive slots for long-lived connections. It
+holds no process-wide service. The `http` Plugin builds the TLS engine from the
+context's `entropy` and the request pool from its `ip_stack`, and publishes
+the `ClientFactory` as its capability; every HTTP consumer depends on `http`.
+When TLS cannot start, the factory has no TLS and `https://` requests fail
+instead of falling back to plaintext. Disabling `http` removes TLS and the
+pool from the build.
 
 Each `ClientFactory::create()` result independently owns connection reuse and
-request serialization while all results share the Platform network pool. Thus
-“one shared HTTP client” means one facade, implementation, and construction
-policy, not one mandatory TCP connection for unrelated concurrent protocols.
+request serialization while all results share the pool. Thus "one shared HTTP
+client" means one implementation and construction policy, not one TCP
+connection for unrelated concurrent protocols.
+
+Long-lived receive loops never take a connection from that pool. The Plugin
+that runs them owns `http_client::ReceiveSlots` built from the shared factory,
+each slot one statically allocated socket. Their number is that Plugin's
+Board setting, so a Board pays only for the connections it can afford and a
+build without the Plugin links no receive buffers.
 
 Embassy is the common task, timer, and lifecycle model used by Barracuda on
 embedded, macOS, and Linux Platforms. The operating-system Platforms may use
@@ -819,102 +934,16 @@ For example, a Display Plugin consumes Display. It does not consume SPI pins,
 a Board matrix, or a concrete display implementation. A storage-consuming
 Plugin receives scoped storage rather than a raw partition.
 
-Guidance for choosing among typed Plugin capabilities, Workflow contracts, and
-Agent Tools lives in [`plugin-communication.md`](plugin-communication.md).
-Execution ownership for long-lived Plugin work lives in
-[`execution-ownership.md`](execution-ownership.md).
-
-### Plugin directory ownership
-
-The framework owns the top-level namespace of `plugins/<id>/`. Plugin authors
-organize custom content under `resources/`, leaving the root available for
-framework-defined directories and future framework extensions. The framework
-defines `plugin.toml`, `crates/`, `docs/`, `filesystem/`, and the `resources/`
-container; authors choose the organization within that container.
-
-~~~text
-plugins/<id>/
-├── plugin.toml
-├── crates/
-├── docs/
-├── filesystem/
-│   └── resources/       # bundled read-only runtime files
-└── resources/          # author-owned source content and build inputs
-    ├── web/
-    ├── agent-tools/
-    └── workflow-schema/
-~~~
-
-Web source and Plugin-owned tests live in `resources/web/`. Agent Tool
-definitions and Workflow schemas belong under the
-same author-owned container, grouped by their purpose. Consumers locate these
-inputs through explicit paths or a documented resource contract; arbitrary
-subdirectory names do not create framework behavior or Plugin dependencies.
-
-Repository `resources/` is separate from the Plugin's runtime `/resources`
-mount. Its contents are not automatically packaged. A Plugin's build process
-places deployable outputs in `filesystem/resources/`, which the generic image
-builder includes for selected Plugins. For example, Bun compiles
-`resources/web/entry.ts` into `filesystem/resources/entry.js`. Each Plugin owns
-its output; the portal shell loads independently registered entries on demand.
-
-Custom author directories stay within `resources/`; adding one does not reserve
-a new Plugin-root name. Existing root-level custom directories and crate-local
-resource collections are migration work. Their consuming paths and resource
-contracts must change together when they move.
-
-Frontend development tools are repository-owned: one root `package.json`,
-`bun.lock`, TypeScript configuration, formatter, and linter cover all Plugins.
-Install dependencies once at the repository root. Run `bun run format`,
-`bun run format:check`, `bun run lint`, `bun run check`, and `bun run test`
-there. Tests remain with their owning Plugins; shared test helpers and the
-ordinary browser-module builder live in `tools/web/`.
-
-Each Plugin declares its build command, inputs, and isolated outputs in
-`plugin.toml`. Ordinary web entries use the shared builder. A Plugin with
-different output needs, such as the portal shell's HTML/CSS/JS scaffold, owns
-its custom build script in `resources/web/`. Repository-wide development
-commands are not repeated as per-Plugin tasks or package manifests. Shared
-tooling does not merge Plugin assets or change image-selection semantics.
-
-### Plugin host tasks
-
-Plugins declare named host tasks in `plugin.toml`. Each task defines an
-executable and literal arguments, a working directory relative to the Plugin
-root, and optional input paths, output paths, and environment dependencies.
-The host executor treats Bun, npm, generators, and other commands uniformly.
-It executes trusted repository code with the developer's permissions and
-environment; this is a build integration boundary, not a sandbox.
-
-`cargo plugin run <task>` runs that task sequentially for enabled Plugins in
-directory order. Plugins without the task are skipped. `--plugin <id>` selects
-one enabled Plugin and requires the task to exist. A failure stops execution.
-Plugin `depends-on` describes capability dependencies, not a host-task DAG.
-
-Each Plugin with automatic resource generation installs a `build.rs` hook
-calling the shared `barracuda-plugin-build` executor. Cargo invokes only its
-`build` task before compiling the Plugin, including during `cargo build`,
-`cargo run`, and `cargo check`. Hooks follow Cargo's actual package graph;
-explicitly building a disabled package with `-p` still builds that package.
-The selected System registry determines the normal application's Plugin graph.
-
-Cargo watches the manifest, declared input and output paths, PATH, and declared
-environment variables. When both inputs and outputs are declared, the hook
-uses content fingerprints in Cargo's OUT_DIR to skip unchanged commands and
-recreate missing or changed outputs. Inputs may include explicitly named
-shared source paths; outputs and the working directory stay Plugin-relative.
-Without explicit inputs, Cargo watches the working directory. Without both
-input and output declarations, the command runs whenever the hook runs.
-Watched paths are literal files/directories, not glob expressions; fingerprinted
-trees contain ordinary files/directories rather than symlinks.
-
-The CLI invokes tasks unconditionally, allowing explicit rebuilds after tool
-updates. A per-Plugin host lock serializes manual execution with Cargo hooks.
-Tasks inherit terminal interrupt behavior and must remain foreground processes.
-Tool installation is an explicit developer action, never an implicit build step.
-Automatic build tasks must not re-enter Cargo, which may hold its build lock.
-Image collection consumes completed outputs; it is a separate operation and
-does not depend on accidental ordering between Cargo build scripts.
+Every layer below the Plugins is Plugin-neutral: disabling a Plugin removes its
+feature from the build, and nothing in core, System, composition, Platforms,
+Boards, or `shared/` names it. A per-Board value a Plugin needs is the Plugin's
+own setting, set in the Board's `plugins.<id>` section, never a Platform or
+Board field. A Plugin that drives a peripheral declares a slot for it and
+receives the device the Board's resolution assigns; two Plugins never race to
+take one device. The Plugin contract (layout, `plugin.toml`, settings, host tasks,
+construction, lifecycle, collaboration contracts, files, and documentation)
+is [`plugin-api.md`](plugin-api.md). Execution ownership for long-lived Plugin
+work lives in [`execution-ownership.md`](execution-ownership.md).
 
 ## Dependency and repository direction
 
@@ -922,12 +951,17 @@ does not depend on accidental ordering between Cargo build scripts.
 platforms/
 +-- api/
 +-- selected/          # selects only Platform
-+-- esp/               # Platform services + vendor HAL adaptation
++-- esp32/             # one Platform per ESP chip: services + vendor HAL adaptation
++-- esp32c3/
++-- esp32c6/
++-- esp32p4/
++-- esp32s3/
 +-- stm32/             # Platform services + vendor HAL adaptation
 +-- nrf/
 +-- ch/
 +-- linux/
 +-- macos/
++-- virtual-io/        # host-only virtual GPIO/I2C shared by linux and macos
 
 peripherals/
 +-- api/
@@ -967,7 +1001,7 @@ Dependencies flow toward semantic consumers:
 ~~~text
 Platform adaptation + peripheral implementations + Board matrix -> Board HAL ----+
                                                                          |
-Platform services -> { IP, TLS, partitions } ----------------------------+-> System -> Plugins
+Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
 ~~~
 
 Platform crates do not own peripheral implementations or Board
@@ -996,7 +1030,7 @@ existing chip driver and adds no central renderer branch.
 - Peripheral implementation calls remain statically dispatched.
 - A device entry acquires the hardware singleton once, constructs the selected
   Target bindings, and invokes selected Target composition. Host Targets
-  construct their binding pair without a hardware singleton.
+  take their Platform's virtual peripheral singleton the same way.
 - Board HAL initialization consumes owned bindings; it does not reacquire
   peripherals or resolve pin numbers at runtime.
 - The Board HAL constructs only the optional peripherals and exposed I/O
@@ -1041,8 +1075,9 @@ Before changing target-sensitive code, verify:
     System or a Plugin?
 12. Does the application obtain the complete selected Target from the target
     composition crate without performing the wiring itself?
-13. Does Platform initialize TLS from Platform-owned randomness and trust
-    roots, while all HTTP consumers use `shared/http-client`?
+13. Does the Plugin that owns HTTP build TLS from the context's entropy and
+    the shared trust roots, with no Platform or System touching TLS, while all
+    HTTP consumers use its `ClientFactory`?
 14. Does the device entry acquire the hardware singleton exactly once and pass
     the resulting binding pair through selected-target composition before
     returning Target resources?
@@ -1057,3 +1092,8 @@ Before changing target-sensitive code, verify:
     operation trait?
 19. Does an SPI implementation receive `SpiDevice` when it owns a CS-selected device,
     with sharing and per-device configuration handled by an upstream adapter?
+20. Would disabling any Plugin remove every trace of its feature, with nothing
+    below the Plugins naming it?
+21. Does each Plugin take its peripherals through declared slots, with the
+    Board's profile and `plugins.<id>` deciding which Plugins exist and which
+    device each slot receives?

@@ -1,12 +1,23 @@
 # VM Plugin
 
+The VM Plugin owns isolated Lua execution: it publishes the typed `Vm`
+capability, the `LuaPackageRegistry` that VM package Plugins extend, and the
+Workflow Actions that run Lua scripts.
+
 - Plugin ID: `vm`
-- Direct dependency: `workflow`
-- Provided typed capabilities: `Vm`, `LuaPackageRegistry`
-- Required typed capabilities: `WorkflowActionRegistry` from `workflow`
-- Owned Components: none
-- Plugin-owned tasks: one lifecycle task and up to four Lua execution tasks
-- Workflow Actions: `vm.run`, `vm.input`, `vm.cancel`
+- Dependencies: `workflow`
+- Settings: none
+- Context resources: `entropy` (seeds `math.random`)
+- Provided capabilities: `Vm`, `LuaPackageRegistry`
+- Required capabilities: `WorkflowActionRegistry` from `workflow`
+- Workflow: Actions `vm.run`, `vm.input`, `vm.cancel`, see `action.md`
+- Agent Tools: none
+- Lua packages: none registered in `LuaPackageRegistry`; every Lua state gets
+  the VM's built-in `io`, `math`, and `os` packages, see `environment.md`
+- Web: none
+- Tasks: one lifecycle task, and a pool of four Lua execution tasks (one per
+  execution slot, each with a 1 MiB Lua heap from Platform bulk memory)
+- Storage: none
 
 `Vm` is the single typed execution API used by both Workflow Actions and the
 separate `agent-vm` adapter. Starting a run returns an awaitable `VmRun` handle
@@ -22,9 +33,9 @@ run that is waiting for input.
 The `vm.run` Workflow Action awaits that handle and returns only after the Lua
 execution finishes. VM output and terminal state are not emitted as Workflow
 Events, and input progress does not alter the Workflow Action contract. The
-Plugin owns a fixed pool of four Embassy execution slots and four
-reusable 96 KiB Lua heaps. Requests and responses use ordinary Serde values;
+Plugin owns a fixed pool of four Embassy execution slots; each running
+execution allocates a 1 MiB Lua heap from Platform bulk memory. Requests and responses use ordinary Serde values;
 there is no Event Router lane or transport-derived source/input limit.
 
-Dependent VM package Plugins still register require-only Lua packages through
+Dependent VM package Plugins register require-only Lua packages through
 `LuaPackageRegistry` during Plugin registration.

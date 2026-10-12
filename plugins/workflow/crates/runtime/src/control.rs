@@ -33,6 +33,9 @@ pub enum WorkflowControlRejection {
     NotFound,
     /// The persistence operation failed.
     Persistence,
+    /// The Workflow was loaded by its owning Plugin for this run, not stored,
+    /// so it cannot be unloaded.
+    NotUnloadable,
     /// A step's link arguments were malformed.
     InvalidArguments,
     /// A step addressed an Action that is not registered.
@@ -50,13 +53,6 @@ pub fn parse_definition(json: &str) -> Result<WorkflowDefinition, WorkflowContro
     let document: WorkflowDocument =
         serde_json::from_str(json).map_err(|_error| WorkflowControlRejection::InvalidJson)?;
     document.try_into()
-}
-
-/// Parses one Workflow ID request document.
-pub fn parse_workflow_id(json: &str) -> Result<WorkflowId, WorkflowControlRejection> {
-    let document: WorkflowIdDocument =
-        serde_json::from_str(json).map_err(|_error| WorkflowControlRejection::InvalidJson)?;
-    WorkflowId::try_from(document.id).map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)
 }
 
 #[derive(Deserialize)]
@@ -147,12 +143,6 @@ enum WorkflowStepDocument {
     Call(WorkflowCallDocument),
     Return(WorkflowReturnDocument),
     Branch(WorkflowBranchDocument),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WorkflowIdDocument {
-    id: String,
 }
 
 impl TryFrom<WorkflowDocument> for WorkflowDefinition {

@@ -1,10 +1,23 @@
 # VM Filesystem Plugin
 
+The VM Filesystem Plugin exposes its Plugin-scoped VFS to Lua code through
+Lua's standard `io` and `os` file APIs.
+
 - Plugin ID: `vm-filesystem`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: `barracuda_vm_filesystem_plugin::VmFileTransfer`
-- Owned tasks: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `VmFileTransfer`
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `vm-filesystem`, which extends the built-in `io` and `os`
+  tables
+- Web: none
+- Tasks: none
+- Storage: the Plugin's private filesystem (`PluginFilesystem::Private`); Lua
+  scripts address any path on its mounts, and `os.tmpname` and `io.tmpfile`
+  create files under `/cache`
 
 This Plugin adapts its Plugin Manager-provided private `ScopedVfs` to Lua's
 standard file API. It registers the adapter during Plugin registration and

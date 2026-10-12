@@ -1,29 +1,25 @@
 use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    collections::{BTreeSet, VecDeque},
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, collections::VecDeque, format,
+    string::String, string::ToString, vec::Vec,
 };
-use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
+use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_tool::{ToolContext, ToolGroup};
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{self, Receiver, Sender};
+use barracuda_runtime_utils::oneshot;
 use barracuda_runtime_utils::stream::StreamPart;
-use futures_channel::oneshot;
-use futures_core::Stream;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use super::agent_slot::{AgentDispatch, AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
     ApprovalCompletion, ApprovalDisplay, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
 };
+use super::clock::SessionClock;
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SessionDeleteError, SharedAgentManager};
 use super::orchestration::{
@@ -31,11 +27,11 @@ use super::orchestration::{
     OrchestrationPhysicalError, ReapStatus, RemovalOutcome, SessionOrchestration,
 };
 use super::permission::SessionPermission;
-use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
+use super::state::{record_user_message, AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
     InputRequestId, IterationEvent, SessionCloseReason, SessionEvent, SessionEventError, SessionId,
     SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError, TurnId,
-    TurnOrigin,
+    TurnOrigin, TurnOutcome,
 };
 use barracuda_agent::Message;
 use barracuda_agent::{
@@ -58,7 +54,7 @@ impl ActiveTurn {
     fn new(id: TurnId, origin: &TurnOrigin) -> Self {
         let cause = match origin {
             TurnOrigin::User => "user",
-            TurnOrigin::ToolCall { .. } => "detached_tool",
+            TurnOrigin::ToolCall { .. } => "background_tool",
         };
         Self {
             id,
@@ -204,6 +200,7 @@ where
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
+    clock: SessionClock,
     agent_manager: SharedAgentManager<Tcp, Resolver>,
     agent_id_allocator: AgentIdAllocatorHandle,
 
@@ -216,7 +213,7 @@ where
     managed_agents: BTreeSet<barracuda_agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
-    commands: Pin<Box<Receiver<SessionCommand>>>,
+    commands: Receiver<SessionCommand>,
     next_source: PollSource,
 
     client: Option<OpenSession>,
@@ -235,25 +232,27 @@ where
         agent_manager: SharedAgentManager<Tcp, Resolver>,
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
+        clock: SessionClock,
         approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
-        let (command_sender, commands) = async_channel::unbounded();
+        let (command_sender, commands) = local_channel::channel();
         (
             Self {
                 session,
                 persistence,
                 state,
+                clock,
                 agent_manager,
                 agent_id_allocator,
                 agents: AgentSlots::new(),
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
-                approval: ApprovalFlow::new(approval_resolver),
+                approval: ApprovalFlow::new(approval_resolver, ToolContext::new(session)),
                 orchestration: SessionOrchestration::new(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
-                commands: Box::pin(commands),
+                commands,
                 next_source: PollSource::Command,
                 client: None,
                 next_lease: 1,
@@ -273,7 +272,7 @@ where
             self.next_source = source.next();
             match source {
                 PollSource::Command => {
-                    if let Poll::Ready(command) = self.commands.as_mut().poll_next(context) {
+                    if let Poll::Ready(command) = self.commands.poll_recv(context) {
                         match command {
                             Some(command) => self.handle_command(command),
                             None => self.request_shutdown(),
@@ -389,6 +388,7 @@ where
             self.reject_closed(ack);
             return;
         }
+        record_user_message(&self.state, message.as_str(), self.clock.now());
         self.inbox.push_back(message);
         let _ = ack.send(Ok(()));
     }
@@ -492,13 +492,13 @@ where
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
         let reason = self.lifecycle.reason()?;
-        if self.agents.values().any(AgentSlot::is_in_flight) {
+        if self.agents.values().any(|slot| slot.is_in_flight()) {
             return None;
         }
         if reason != StopReason::Delete && self.orchestration.has_live_children() {
             return None;
         }
-        self.finish_turn();
+        self.finish_turn(TurnOutcome::Cancelled);
 
         let lifecycle = core::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
         let ActorLifecycle::Stopping(stopping) = lifecycle else {
@@ -584,15 +584,15 @@ where
         let Some(message) = self.inbox.pop_front() else {
             return false;
         };
-        if message.as_str().trim().is_empty() {
+        if message.is_empty() {
             self.begin_turn(TurnOrigin::User);
-            self.finish_turn();
+            self.finish_turn(TurnOutcome::Completed);
             return true;
         }
         if let Err(error) = self.ensure_root() {
             self.begin_turn(TurnOrigin::User);
             self.emit_turn_error(error.into());
-            self.finish_turn();
+            self.finish_turn(TurnOutcome::Failed);
             return true;
         }
         match self.dispatch_root(message) {
@@ -604,7 +604,7 @@ where
             Err(RootDispatchError::Invariant) => {
                 self.begin_turn(TurnOrigin::User);
                 self.emit_turn_error(SessionTurnError::Agent(AgentError::StateInvariant));
-                self.finish_turn();
+                self.finish_turn(TurnOutcome::Failed);
                 true
             }
         }
@@ -676,15 +676,19 @@ where
             return Ok(());
         }
         let reasoning_effort = self.state.get().reasoning_effort;
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let root_agent = self.state.get().root_agent;
         let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
             let kind = barracuda_agent::baked::root_kind().clone();
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
+                self.session,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 extension_tools,
             )?;
@@ -699,9 +703,10 @@ where
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.create(
                 id,
+                self.session,
                 &kind,
                 true,
-                Arc::clone(&permission) as Arc<_>,
+                Arc::clone(&permission),
                 reasoning_effort,
                 persistence,
                 extension_tools,
@@ -710,7 +715,7 @@ where
         };
         let previous = self
             .agents
-            .insert(id, AgentSlot::new(agent, reasoning_handle));
+            .insert(id, Box::new(AgentSlot::new(agent, reasoning_handle)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(id);
         if !self.orchestration.register_root(id, kind) {
@@ -769,7 +774,7 @@ where
             AgentSlotUpdate::Event(Err(error)) => {
                 if is_root {
                     self.emit_turn_error(SessionTurnError::from_agent(error));
-                    self.finish_turn();
+                    self.finish_turn(TurnOutcome::Failed);
                     self.orchestration.observe(agent, AgentNotice::Idle);
                 } else {
                     self.orchestration.observe(
@@ -845,20 +850,28 @@ where
                 if let Some(slot) = self.agents.get_mut(&agent) {
                     slot.finish_trace_turn();
                 }
-                let (text, completed, cancelled) = match outcome {
+                let (text, completed, cancelled, turn_outcome) = match outcome {
                     AgentOutcome::Completed(AgentCompletion::EffectOutput(message)) => {
                         if is_root {
                             self.emit_effect_output(message.clone());
                         }
-                        (message, true, false)
+                        (message, true, false, TurnOutcome::Completed)
                     }
                     AgentOutcome::Completed(AgentCompletion::Streamed(message)) => {
-                        (message, true, false)
+                        (message, true, false, TurnOutcome::Completed)
                     }
-                    AgentOutcome::Interrupted => {
-                        ("subagent was interrupted".to_owned(), false, false)
-                    }
-                    AgentOutcome::Cancelled => ("subagent was cancelled".to_owned(), false, true),
+                    AgentOutcome::Interrupted => (
+                        "subagent was interrupted".to_owned(),
+                        false,
+                        false,
+                        TurnOutcome::Interrupted,
+                    ),
+                    AgentOutcome::Cancelled => (
+                        "subagent was cancelled".to_owned(),
+                        false,
+                        true,
+                        TurnOutcome::Cancelled,
+                    ),
                 };
                 if cancelled {
                     self.orchestration.observe(agent, AgentNotice::Cancelled);
@@ -875,7 +888,7 @@ where
                     self.emit_approval_display(display);
                 }
                 if is_root {
-                    self.finish_turn();
+                    self.finish_turn(turn_outcome);
                 }
             }
         }
@@ -965,11 +978,14 @@ where
         self.emit_turn(TurnEvent::Started { turn: id, origin });
     }
 
-    fn finish_turn(&mut self) {
+    fn finish_turn(&mut self, outcome: TurnOutcome) {
         let Some(turn) = self.active_turn.take() else {
             return;
         };
-        self.emit_turn(TurnEvent::Ended { turn: turn.id });
+        self.emit_turn(TurnEvent::Ended {
+            turn: turn.id,
+            outcome,
+        });
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
@@ -987,7 +1003,7 @@ where
 
     fn root_mut(&mut self) -> Option<&mut AgentSlot<Tcp, Resolver>> {
         let root = self.root_id()?;
-        self.agents.get_mut(&root)
+        self.agents.get_mut(&root).map(|slot| &mut **slot)
     }
 
     fn accepts(&self, lease: u64) -> bool {
@@ -1033,13 +1049,13 @@ where
 
     fn emit_closed(&mut self, reason: SessionCloseReason) {
         if let Some(client) = self.client.take() {
-            let _ = client.events.try_send(SessionEvent::Closed(reason));
+            let _ = client.events.send(SessionEvent::Closed(reason));
         }
     }
 
     fn emit(&self, event: SessionEvent) {
         if let Some(client) = &self.client {
-            let _ = client.events.try_send(event);
+            let _ = client.events.send(event);
         }
     }
 }
@@ -1059,15 +1075,19 @@ where
         kind: &barracuda_agent::AgentKind,
         extension_tools: Vec<ToolGroup>,
     ) -> Result<(), OrchestrationPhysicalError> {
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let permission: Arc<dyn PermissionPolicy> = Arc::from(Box::new(SessionPermission::new(
+            self.state.clone(),
+        ))
+            as Box<dyn PermissionPolicy>);
         let reasoning_effort = self.state.get().reasoning_effort;
         let (created_agent, reasoning) = self
             .agent_manager
             .create(
                 agent,
+                self.session,
                 kind,
                 false,
-                permission as Arc<_>,
+                permission,
                 reasoning_effort,
                 PersistenceConfig::InMemory,
                 extension_tools,
@@ -1075,14 +1095,18 @@ where
             .map_err(|error| OrchestrationPhysicalError::new(error.to_string()))?;
         let previous = self
             .agents
-            .insert(agent, AgentSlot::new(created_agent, reasoning));
+            .insert(agent, Box::new(AgentSlot::new(created_agent, reasoning)));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(agent);
         Ok(())
     }
 
     fn rollback_agent(&mut self, agent: AgentId) -> ReapStatus {
-        if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+        if self
+            .agents
+            .get(&agent)
+            .is_some_and(|slot| slot.is_in_flight())
+        {
             if let Some(slot) = self.agents.get_mut(&agent) {
                 slot.begin_reaping();
             }
@@ -1140,7 +1164,11 @@ where
         agents
             .into_iter()
             .map(|agent| {
-                if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+                if self
+                    .agents
+                    .get(&agent)
+                    .is_some_and(|slot| slot.is_in_flight())
+                {
                     if let Some(slot) = self.agents.get_mut(&agent) {
                         slot.begin_reaping();
                     }

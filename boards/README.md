@@ -80,13 +80,12 @@ The Board HAL does not replace `embedded-hal`. It provides one shared runtime
 owner for exposed physical resources. Function providers atomically claim pins
 and an internally selected controller when required, ask the selected Platform
 to configure their mux, and return
-concrete `embedded-hal` or `embedded-hal-async` values to `vm-gpio`, `vm-i2c`,
-`vm-spi`, or another hardware Plugin. Its construction, GPIO-mode, and analog
+concrete `embedded-hal` or `embedded-hal-async` values to their consumer. Its construction, GPIO-mode, and analog
 extensions cover operations that embedded-hal 1.0 does not define.
 
 Generated device owners preserve vendor HAL move-only semantics. One function
 claim consumes its raw pin and controller tokens for the current boot; closing
-the VM handle stops access and drops the constructed HAL value but does not
+the consumer's handle stops access and drops the constructed HAL value but does not
 invent replacement singleton tokens. A conflicting or repeated open returns a
 runtime error, and a restart rebuilds the complete exposed surface.
 
@@ -108,6 +107,10 @@ Select a concrete Board once, then use the ordinary build command:
 cargo board select
 cargo run
 ```
+
+A host Board runs as `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run`; the
+variable names the loopback address of the virtual peripherals manager behind
+its virtual GPIO and I2C (see `platforms/virtual-io`).
 
 `cargo run` owns only the selected System application. Start the external
 terminal Channel in another terminal with `cargo cli [ws://DEVICE_ADDRESS:8787]`.
@@ -148,10 +151,9 @@ and commit its deterministic workspace dependency block. Use
 that commit only run `cargo board select` followed by ordinary Cargo commands.
 
 The repository currently provides reference Board bundles for the ESP32,
-ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog
-also includes Espressif DevKitM boards (`esp32c3-devkitm-1`,
-`esp32c6-devkitm-1`, `esp32s3-devkitm-1`), the ESP32-S2-Kaluga and
-ESP32-S3-BOX-3 evaluation kits, and the M5Stamp C3 Mate
+ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog also
+includes Espressif DevKitM boards (`esp32c3-devkitm-1`, `esp32c6-devkitm-1`,
+`esp32s3-devkitm-1`), the ESP32-S3-BOX-3 evaluation kit, and the M5Stamp C3 Mate
 (`m5stack-stamp-c3-mate`). Each ESP bundle keeps its ESP-IDF partition CSV
 as the native layout and records the chip-specific Rust target in
 `board.yml`.
@@ -160,8 +162,8 @@ Boards that use the same module are still separate Board bundles: add their
 exact fixed wiring to that bundle as the Board schema grows rather than treating
 one development kit as an alias for every product built around the chip.
 
-`stm32f429zi-nucleo` demonstrates the same YAML-only composition outside the
-ESP family. Its config builds the active-high green LD1 on PB0 through the
+`nucleo-u5a5zj-q` demonstrates the same YAML-only composition outside the
+ESP family. Its config builds the active-high green LD1 on PC7 through the
 shared `indicator-led` implementation and explicitly exposes PC13 as the dynamic GPIO
 name `user-button`. The STM32 Platform HAL replaces its former Board-specific
 HAL crate. The name `user-button` identifies the physical PC13 pin; an

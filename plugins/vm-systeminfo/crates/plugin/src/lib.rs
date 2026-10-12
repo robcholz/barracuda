@@ -15,9 +15,7 @@ pub struct VmSystemInfoPlugin {
 impl VmSystemInfoPlugin {
     /// Copies the selected Target identity from the shared construction context.
     #[must_use]
-    pub const fn new<Peripherals, ExposedIo>(
-        context: &mut PluginContext<Peripherals, ExposedIo>,
-    ) -> Self {
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             target_identity: context.target_identity,
         }
@@ -161,5 +159,11 @@ mod tests {
 
         assert_eq!(first_name, "changed");
         assert_eq!(second_name, "test-board");
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = SystemInfoPackage::new(INFO);
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

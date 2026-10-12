@@ -1,0 +1,110 @@
+# Schemas: plugins/agent-scheduler/crates/plugin/resources/tools/*/schema.json. A failing oneOf
+# reports only "OneOf" at the trigger (shared/json-validator/src/lib.rs:268-276).
+name = "Scheduler tool argument schema (1)"
+description = "scheduler_schedule and scheduler_cancel reject malformed IDs and triggers at the schema."
+
+[model]
+mode = "scripted"
+
+# Case 1: empty id
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.id: MinLength']
+text = "Case 1 checked."
+
+# Case 2: 17-character id exceeds 16
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "abcdefghijklmnopq", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.id: MaxLength']
+text = "Case 2 checked."
+
+# Case 3: id with a space
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "bad id", trigger = { type = "once", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.id: Pattern']
+text = "Case 3 checked."
+
+# Case 4: missing trigger
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: Required']
+text = "Case 4 checked."
+
+# Case 5: unknown trigger type
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "cron", at = "2099-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 5 checked."
+
+# Case 6: timestamp without milliseconds
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "once", at = "2099-01-01T00:00:00Z" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 6 checked."
+
+# Case 7: timestamp with an offset instead of Z
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e", trigger = { type = "once", at = "2099-01-01T00:00:00.000+00:00" } } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+text = "Case 7 checked."
+
+# Case 8: interval with every_seconds 0
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.id: MinLength']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.id: MaxLength']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.id: Pattern']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: Required']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 6 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler schema case."
+reply_contains = ["Case 7 checked."]
+tool_contains = ['invalid arguments: JSON schema validation failed at $.trigger: OneOf']
+tool_errors_allowed = true
+

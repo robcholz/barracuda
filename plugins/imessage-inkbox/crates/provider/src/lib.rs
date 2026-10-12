@@ -3,6 +3,9 @@
 
 extern crate alloc;
 
+pub mod inbound;
+mod signup;
+
 use alloc::{
     boxed::Box,
     format,
@@ -13,12 +16,17 @@ use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MediaKind, MessageChannel, ReactRequest, SendMediaRequest,
     SendMessageRequest, SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Multipart, RequestBody, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
-const DEFAULT_API_BASE: &str = "https://inkbox.ai";
+pub use signup::{InkboxSignup, SignupAccount, SignupError, SignupRequest};
+
+/// Gateway channel name this provider registers.
+pub const CHANNEL: &str = "inkbox";
+
+/// Production Inkbox service origin, without the `/api` suffix.
+pub const DEFAULT_API_BASE: &str = "https://inkbox.ai";
 
 /// Connection settings for the Inkbox iMessage API.
 pub struct InkboxConfig {
@@ -42,22 +50,15 @@ impl InkboxConfig {
 }
 
 /// Outbound iMessage provider backed by Inkbox.
-pub struct Inkbox<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct Inkbox {
+    http: GatewayHttp,
     config: InkboxConfig,
 }
 
-impl<'net, T, D> Inkbox<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    /// Creates a provider using Platform-owned HTTP resources.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: InkboxConfig) -> Self {
-        Self {
-            http_clients,
-            config,
-        }
+impl Inkbox {
+    /// Creates a provider sending through the Gateway's HTTP.
+    pub fn new(http: GatewayHttp, config: InkboxConfig) -> Self {
+        Self { http, config }
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -75,20 +76,21 @@ where
         content_type: &str,
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            method,
-            url,
-            &[
-                ("Content-Type", content_type),
-                ("X-API-Key", self.config.api_key.as_str()),
-            ],
-            body,
-        )
-        .await
-        .map_err(|error| ChannelError::Transport {
-            message: error.to_string(),
-        })?;
+        let response = self
+            .http
+            .send(
+                method,
+                url,
+                &[
+                    ("Content-Type", content_type),
+                    ("X-API-Key", self.config.api_key.as_str()),
+                ],
+                body,
+            )
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)
     }
 
@@ -109,16 +111,10 @@ where
         &self,
         target: barracuda_imessage_gateway_plugin::MessageTarget,
         text: String,
-        reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         if text.is_empty() {
             return Err(ChannelError::InvalidRequest {
                 message: "message text is empty".into(),
-            });
-        }
-        if reply_to.is_some() {
-            return Err(ChannelError::InvalidRequest {
-                message: "Inkbox iMessage does not support reply_to message IDs".into(),
             });
         }
         let root = self
@@ -138,11 +134,6 @@ where
         kind: MediaKind,
         request: SendMediaRequest,
     ) -> Result<SendReceipt, ChannelError> {
-        if request.reply_to.is_some() {
-            return Err(ChannelError::InvalidRequest {
-                message: "Inkbox iMessage does not support reply_to message IDs".into(),
-            });
-        }
         let filename = request
             .filename
             .unwrap_or_else(|| default_filename(kind).into());
@@ -192,15 +183,15 @@ where
     }
 }
 
-impl<T, D> MessageChannel for Inkbox<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for Inkbox {
     fn channel(&self) -> &str {
-        "imessage"
+        CHANNEL
     }
 
+    /// Sends text to the target conversation.
+    ///
+    /// Inkbox cannot quote a specific message, so `reply_to` is accepted and
+    /// ignored rather than failing replies to inbound messages.
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             let text = match request.body {
@@ -214,10 +205,12 @@ where
                     text
                 }
             };
-            self.send_text(request.target, text, request.reply_to).await
+            self.send_text(request.target, text).await
         })
     }
 
+    /// Uploads media and sends it to the target conversation; `reply_to` is
+    /// ignored as for text.
     fn send_media(
         &self,
         kind: MediaKind,

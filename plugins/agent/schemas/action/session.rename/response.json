@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"type":"object","maxProperties":0,"additionalProperties":false},{"type":"object","properties":{"error":{"enum":["invalid_request","session_not_found","invalid_title","worker_stopped"]}},"required":["error"],"additionalProperties":false}]}

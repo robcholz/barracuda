@@ -1,7 +1,11 @@
 #![no_std]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 
-//! `barracuda-model-api` — LLM client: OpenAI-/Anthropic-compatible chat, structured JSON
-//! output, and image inference over an injected HTTP transport.
+//! `barracuda-model-api` — LLM client: OpenAI-/Anthropic-compatible chat and
+//! structured JSON output over an injected HTTP transport, with the image and
+//! PDF attachments a conversation references inlined into each request.
 //!
 //! The standalone LLM client is reusable independently of agent execution.
 //!
@@ -15,7 +19,6 @@
 //! |---|---|---|
 //! | [`ModelApi::chat`] | [`ChatRequest`] | [`LlmResponse`] (text + tool calls) |
 //! | [`ModelApi::chat_json`] | [`ChatRequest`] + [`StaticOutputSchema`] | [`ChatJsonResponse`] (parsed `T` + tool calls) |
-//! | [`ModelApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
 //! | [`ModelApi::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
 //! Platform supplies an [`http_client::ClientFactory`]. This crate owns the
@@ -39,6 +42,14 @@
 //! [`RetryPolicy`] for the knobs and [`Error::is_retryable`] for the
 //! classification.
 //!
+//! # Attachments
+//!
+//! Messages reference files by `media` content parts. Each call reads the
+//! newest image and PDF attachments it may inline from
+//! [`ChatRequest::files`], once before its first attempt, and base64-encodes
+//! them into the request body; the rest become text placeholders. See
+//! [`ChatRequest`] and [`InputModalities`].
+//!
 //! See `examples/client.rs` for a complete wire-level example.
 
 #![cfg_attr(
@@ -59,18 +70,19 @@
 extern crate alloc;
 
 // Implementation modules are private: the public surface is the curated
-// re-exports below. The backend registry, media-prep pipeline, prompt helpers,
-// and retry loop are internal details, not part of the end-user API.
+// re-exports below. The backend registry, attachment resolution, prompt
+// helpers, and retry loop are internal details, not part of the end-user API.
+mod attachments;
 mod backends;
 mod chat_stream;
 mod client;
 mod errors;
-mod media;
 mod retry;
 mod transport;
 mod types;
 
 pub use backends::{BackendKind, ParseBackendKindError};
+pub use barracuda_agent_message::ChatMessage;
 pub use barracuda_runtime_utils::stream;
 pub use chat_stream::ChatStream;
 pub use client::{ModelApi, ModelApiFactory};
@@ -78,6 +90,6 @@ pub use errors::{Error, InitError};
 #[cfg(feature = "cache_profile")]
 pub use types::ProviderUsage;
 pub use types::{
-    ChatJsonResponse, ChatRequest, ChatStreamEvent, LlmResponse, MediaAsset, MediaRequest,
-    ModelApiConfig, RetryPolicy, StaticOutputSchema, ToolCall,
+    ChatJsonResponse, ChatRequest, ChatStreamEvent, InputModalities, LlmResponse, ModelApiConfig,
+    RetryPolicy, StaticOutputSchema, ToolCall,
 };

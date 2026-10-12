@@ -1,10 +1,10 @@
-use alloc::boxed::Box;
+use alloc::{borrow::Cow, boxed::Box};
 use core::{future::Future, pin::Pin};
 
 use crate::{
-    ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation, ReactRequest,
-    SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamRequest, SetTypingRequest,
-    StreamError, TextChunk,
+    sessions_text, ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SendSessionsRequest,
+    SendStreamRequest, SetTypingRequest, StreamError, TextChunk,
 };
 use futures_lite::{stream, StreamExt};
 use serde::Deserialize;
@@ -46,7 +46,7 @@ pub trait MessageChannel: 'static {
                                     ));
                                 }
                             };
-                            let Some(text) = TextChunk::inline(payload.text) else {
+                            let Some(text) = TextChunk::inline(&payload.text) else {
                                 return Some((
                                     Err(StreamError::failed("output_delta exceeds stream frame")),
                                     events,
@@ -74,6 +74,19 @@ pub trait MessageChannel: 'static {
         Box::pin(async move { Err(ChannelError::unsupported(kind.operation())) })
     }
 
+    /// Shows a conversation's sessions after a session command.
+    ///
+    /// The default sends [`sessions_text`] as one ordinary message, which is
+    /// all a text channel can show. Channels with a richer surface override it.
+    fn send_sessions(&self, request: SendSessionsRequest) -> ChannelFuture<'_, ()> {
+        Box::pin(async move {
+            let text = sessions_text(&request);
+            self.send_message(SendMessageRequest::text(request.target, text))
+                .await
+                .map(|_receipt| ())
+        })
+    }
+
     fn edit_message(&self, _request: EditMessageRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async { Err(ChannelError::unsupported(Operation::EditMessage)) })
     }
@@ -93,6 +106,8 @@ pub trait MessageChannel: 'static {
 
 #[derive(Deserialize)]
 struct OutputDelta<'a> {
+    /// Borrowed from the payload unless the JSON string has escapes, such as
+    /// a newline or a quote, which only an owned copy can hold decoded.
     #[serde(borrow)]
-    text: &'a str,
+    text: Cow<'a, str>,
 }

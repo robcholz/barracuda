@@ -1,10 +1,9 @@
-//! Runs compiled MicroTS views for apps and binds them to Lua.
+//! Runs compiled MicroTS views.
 //!
-//! An app's view is a BVIR program plus its stylesheet and fonts. A caller such
-//! as the app manager opens it with [`UiService::open`] and hands the session's
-//! [`ViewChannel`] to the app's Lua package, which gives Lua a [`LuaView`]. Lua
-//! writes values and receives handler calls; this Plugin's task applies the
-//! writes and keeps the UI tree laid out. Rendering to a display is not
+//! A view is a BVIR program plus its stylesheet and fonts. Its owner opens it
+//! with [`UiService::open`] and keeps the session; the session's
+//! [`ViewChannel`] writes typed [`ViewValue`]s and receives handler calls, and
+//! this Plugin's task applies the writes and keeps the UI tree laid out. Rendering to a display is not
 //! connected yet; views are laid out at [`DEFAULT_VIEWPORT`].
 
 #![no_std]
@@ -25,9 +24,10 @@ use barracuda_plugin::manager::{
 };
 use embassy_futures::select::select;
 
+pub use datum::{ViewType, ViewValue};
 pub use mailbox::MAX_EVENTS;
 pub use service::{DEFAULT_VIEWPORT, UiAssets, UiError, UiService, UiSession};
-pub use view::{LuaView, MAX_ARRAY_ITEMS, ViewCall, ViewChannel, ViewNext};
+pub use view::{MAX_ARRAY_ITEMS, ViewCall, ViewChannel, ViewError, ViewNext};
 
 /// Publishes [`UiService`].
 #[barracuda_plugin::macros::plugin]
@@ -87,7 +87,7 @@ impl Plugin for UiPlugin {
     }
 }
 
-/// Applies Lua writes to the views as they arrive.
+/// Applies owners' writes to the views as they arrive.
 #[embassy_executor::task]
 async fn ui_task(runtime: UiRuntime, cancellation: PluginTaskToken) {
     select(cancellation.cancelled(), runtime.service.drive()).await;

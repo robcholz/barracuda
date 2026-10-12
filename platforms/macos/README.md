@@ -15,8 +15,13 @@ Select the macOS Board and use the normal workflow:
 ```sh
 cargo board select local-macos
 cargo build
-cargo run
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
 ```
+
+`BARRACUDA_VIRTUAL_IO_ADDR` is required: it is the loopback address where the
+virtual peripherals manager listens (any free port other than the gateway's
+8787). `local-macos` exposes the virtual pins `vio-0` to `vio-7` and two
+virtual I2C controllers. See [`platforms/virtual-io`](../virtual-io/README.md).
 
 `cargo run` builds the Platform launcher, deploys the selected System image,
 starts the loopback network gateway, and starts the System application. The

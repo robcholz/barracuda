@@ -18,7 +18,13 @@ impl Rule {
     /// Returns whether this rule matches `event_id`.
     #[must_use]
     pub fn matches(&self, event_id: &EventId) -> bool {
-        glob_matches(self.0.as_bytes(), event_id.as_str().as_bytes())
+        self.matches_str(event_id.as_str())
+    }
+
+    /// Returns whether this rule matches the Event ID text `event_id`.
+    #[must_use]
+    pub(crate) fn matches_str(&self, event_id: &str) -> bool {
+        glob_matches(self.0.as_bytes(), event_id.as_bytes())
     }
 }
 

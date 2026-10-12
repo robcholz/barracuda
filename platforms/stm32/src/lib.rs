@@ -3,8 +3,17 @@
 #![no_std]
 
 /// Platform-owned GPIO implementation.
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 pub mod hal;
+
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
+#[doc(hidden)]
+pub mod application;
+
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
+mod entropy;
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
+pub use entropy::{Stm32Entropy, Stm32Rng};
 
 /// Runtime access discipline declared by the native linker memory region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +161,7 @@ impl<const N: usize> Stm32PartitionTable<N> {
 
 include!(concat!(env!("OUT_DIR"), "/stm32_layout.rs"));
 
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 mod internal_flash {
     use core::cell::RefCell;
 
@@ -164,13 +173,15 @@ mod internal_flash {
     use embassy_embedded_hal::flash::partition::BlockingPartition;
     use embassy_executor::Spawner;
     use embassy_net::Stack;
-    use embassy_stm32::flash::{Async, Flash};
+    use embassy_stm32::flash::{Blocking, Flash};
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 
-    use crate::{board_partition_table, LinkerRegionError, Stm32RegionAccess};
+    use crate::{
+        board_partition_table, LinkerRegionError, Stm32Entropy, Stm32RegionAccess, Stm32Rng,
+    };
 
-    /// STM32 internal flash driver with both blocking and asynchronous HAL APIs.
-    pub type Stm32Flash = Flash<'static, Async>;
+    /// STM32 internal flash driver; the STM32U5 HAL exposes blocking access only.
+    pub type Stm32Flash = Flash<'static, Blocking>;
 
     /// One linker-defined partition backed by Embassy STM32 flash.
     pub type Stm32Partition = BlockingPartition<'static, CriticalSectionRawMutex, Stm32Flash>;
@@ -178,39 +189,38 @@ mod internal_flash {
     /// Generic named STM32 partitions available to System.
     pub type Stm32Partitions = Partitions<Stm32Partition, 16>;
 
-    /// STM32 Platform implementation for the selected STM32F429 target.
+    /// STM32 Platform implementation for the selected STM32U5A5 target.
     pub struct Stm32Platform;
 
     /// Board/HAL bindings consumed by [`Stm32Platform`].
     pub struct Stm32PlatformBindings {
         ip_stack: Stack<'static>,
-        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
+        rng: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Rng>>,
     }
 
     impl Stm32PlatformBindings {
         /// Binds initialized STM32 Platform services to a compatible Board.
         ///
-        /// The selected Board/HAL composition owns the Ethernet wiring and
-        /// hands the resulting Platform IP service and internal flash to this
-        /// binding.
+        /// The selected Board/HAL composition hands the Platform IP service,
+        /// internal flash and random number generator to this binding.
         ///
         /// # Errors
         ///
-        /// Returns an error when the selected Board does not use STM32F429ZI.
+        /// Returns an error when the selected Board does not use STM32U5A5ZJ.
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
+            rng: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Rng>>,
         ) -> Result<Self, Stm32PlatformError> {
-            if board.hardware().chip() != "stm32f429zi" {
+            if board.hardware().chip() != "stm32u5a5zj" {
                 return Err(Stm32PlatformError::IncompatibleChip);
             }
             Ok(Self {
                 ip_stack,
-                tls,
                 flash,
+                rng,
             })
         }
     }
@@ -265,8 +275,8 @@ mod internal_flash {
 
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
-        type Tls = barracuda_tls::MbedTls;
         type Wifi = barracuda_platform::UnavailableWifiDevice;
+        type Entropy = Stm32Entropy;
         type Partitions = Stm32Partitions;
         type Error = Stm32PlatformError;
 
@@ -283,39 +293,31 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing STM32 Platform partitions");
             let partitions = partitions(bindings.flash)?;
-            log::info!("initializing STM32 Platform TLS");
-            let tls = bindings.tls.initialize()?;
             log::info!("initialized STM32 Platform");
             let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
                 ip_stack,
                 wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
-                tls,
+                entropy: Stm32Entropy::new(bindings.rng),
                 partitions,
             })
         }
     }
 
-    /// STM32F429 Platform initialization failure.
+    /// STM32 Platform initialization failure.
     #[derive(Debug)]
     pub enum Stm32PlatformError {
         /// The selected Board targets a different chip family.
         IncompatibleChip,
         /// Native linker regions could not become generic partitions.
         Partitions(Stm32PartitionsError),
-        /// Platform TLS initialization failed.
-        Tls(barracuda_tls::TlsError),
+        /// An Embassy network runner could not be allocated.
+        NetworkTask,
     }
 
     impl From<Stm32PartitionsError> for Stm32PlatformError {
         fn from(error: Stm32PartitionsError) -> Self {
             Self::Partitions(error)
-        }
-    }
-
-    impl From<barracuda_tls::TlsError> for Stm32PlatformError {
-        fn from(error: barracuda_tls::TlsError) -> Self {
-            Self::Tls(error)
         }
     }
 
@@ -326,7 +328,7 @@ mod internal_flash {
                 Self::Partitions(error) => {
                     write!(formatter, "invalid STM32 partitions: {error:?}")
                 }
-                Self::Tls(error) => write!(formatter, "failed to initialize STM32 TLS: {error}"),
+                Self::NetworkTask => formatter.write_str("failed to allocate STM32 network task"),
             }
         }
     }
@@ -334,7 +336,7 @@ mod internal_flash {
     impl core::error::Error for Stm32PlatformError {}
 }
 
-#[cfg(all(feature = "stm32f429zi", target_arch = "arm"))]
+#[cfg(all(feature = "stm32u5a5zj", target_arch = "arm"))]
 pub use internal_flash::{
     partitions, Stm32Flash, Stm32Partition, Stm32Partitions, Stm32PartitionsError, Stm32Platform,
     Stm32PlatformBindings, Stm32PlatformError,

@@ -30,7 +30,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use serde_json::{json, Value};
+use barracuda_agent_message::ChatMessage;
+use serde_json::json;
 
 use crate::block::BlockKind;
 
@@ -43,7 +44,7 @@ pub(crate) struct Reminders {
     texts: BTreeMap<BlockKind, String>,
     /// Reused render buffer: one trailing `user` message per text, rebuilt only
     /// when `dirty`.
-    rendered: Vec<Value>,
+    rendered: Vec<ChatMessage>,
     /// The render buffer is stale relative to `texts`.
     dirty: bool,
 }
@@ -97,17 +98,17 @@ impl Reminders {
                 .then_with(|| a.0.cmp(b.0))
         });
         for (_, text) in entries {
-            self.rendered.push(json!({
+            self.rendered.push(ChatMessage::new(&json!({
                 "role": "user",
                 "content": format!("<system-reminder>\n{text}\n</system-reminder>"),
-            }));
+            })));
         }
         self.dirty = false;
     }
 
     /// The rendered trailing messages for this request. Call
     /// [`refresh`](Self::refresh) earlier this tick so the buffer is current.
-    pub(crate) fn as_slice(&self) -> &[Value] {
+    pub(crate) fn as_slice(&self) -> &[ChatMessage] {
         &self.rendered
     }
 }

@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if board.name() != board_name {
         return Err("Board bundle directory and Board name differ".into());
     }
-    if board.hardware().chip() != "stm32f429zi" {
+    if board.hardware().chip() != "stm32u5a5zj" {
         let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
         let mut generated = String::from(
             "/// Resolves the inactive STM32 Platform to an empty partition table.\n\
@@ -52,9 +52,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     fs::copy(linker_path, output.join("memory.x"))?;
     println!("cargo:rustc-link-search={}", output.display());
-    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("arm") {
-        println!("cargo:rustc-link-arg-examples=-Tlink.x");
-    }
 
     let mut generated = String::from("unsafe extern \"C\" {\n");
     for region in &regions {

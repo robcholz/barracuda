@@ -16,7 +16,6 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true
-embassy-sync.workspace = true
 futures-lite = "2"
 
 [lints.rust]

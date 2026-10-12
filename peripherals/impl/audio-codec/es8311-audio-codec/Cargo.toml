@@ -6,6 +6,7 @@ description = "ES8311 audio codec implementation over embedded-hal I2C"
 license = "Apache-2.0"
 
 [dependencies]
+portable-atomic.workspace = true
 barracuda-driver-es8311.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true

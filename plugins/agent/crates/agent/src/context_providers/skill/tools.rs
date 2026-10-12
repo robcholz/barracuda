@@ -1,19 +1,17 @@
 //! Skill tools owned by the skill context provider.
 
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{borrow::ToOwned, format, string::String, string::ToString};
 use core::cell::RefCell;
 
+use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_skill::{
     SkillError, SkillName, SkillResourcePage, SkillSet, DEFAULT_RESOURCE_READ_BYTES,
 };
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, ToolError, ToolFuture, ToolHandler, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+    ToolOutput, ToolSpec,
 };
+use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::lock_skill_set;
@@ -45,19 +43,21 @@ pub(super) struct ListSkillTool {
 
 impl ToolSpec for ListSkillTool {
     tool_metadata!("skill_list");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ListSkillTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let mut skills = lock_skill_set(&self.skills);
             let output = skills.list_skills().to_owned();
-            Ok(ToolOutput {
-                content: output,
-                ok: true,
-            })
+            Ok(ToolOutput::new(output, true))
         })
     }
 }
@@ -69,28 +69,30 @@ pub(super) struct ReadSkillTool {
 
 impl ToolSpec for ReadSkillTool {
     tool_metadata!("skill_read");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReadSkillTool {
     type Args = ReadArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let skill_name = args.name.trim();
             let mut skills = { lock_skill_set(&self.skills).clone() };
             match skills.read_skill(&SkillName::new(skill_name)).await {
-                Ok(document) => Ok(ToolOutput {
-                    content: document.into_content(),
-                    ok: true,
-                }),
+                Ok(document) => Ok(ToolOutput::new(document.into_content(), true)),
                 Err(SkillError::NotFound(_)) => Err(ToolError::InvokeRejected(format!(
                     "unknown skill \"{skill_name}\"; call skill_list to see what is available."
                 ))
                 .into()),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Could not read skill \"{skill_name}\": {error}"),
-                    ok: false,
-                }),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Could not read skill \"{skill_name}\": {error}"),
+                    false,
+                )),
             }
         })
     }
@@ -103,12 +105,17 @@ pub(super) struct ReadSkillResourceTool {
 
 impl ToolSpec for ReadSkillResourceTool {
     tool_metadata!("skill_resource_read");
+
+    /// Only reads state.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReadSkillResourceTool {
     type Args = ReadResourceArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let skill_name = args.name.trim();
             let path = args.path.trim();
@@ -122,10 +129,10 @@ impl ToolHandler for ReadSkillResourceTool {
                     "unknown skill \"{skill_name}\"; call skill_list to see what is available."
                 ))
                 .into()),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Could not read resource for skill \"{skill_name}\": {error}"),
-                    ok: false,
-                }),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Could not read resource for skill \"{skill_name}\": {error}"),
+                    false,
+                )),
             }
         })
     }
@@ -156,7 +163,7 @@ fn encode_resource_page(
     .map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode skill resource response"))
     })?;
-    Ok(ToolOutput { content, ok: true })
+    Ok(ToolOutput::new(content, true))
 }
 
 /// Re-scans the skill registry's roots and swaps in a fresh catalog.
@@ -166,26 +173,51 @@ pub(super) struct ReloadSkillsTool {
 
 impl ToolSpec for ReloadSkillsTool {
     tool_metadata!("skill_reload");
+
+    /// Re-reads the skill roots; nothing on disk changes.
+    fn classify(&self, _call: &ToolInvocation) -> Action {
+        Action::new(self.name(), RiskClass::Safe)
+    }
 }
 
 impl ToolHandler for ReloadSkillsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let skills = { lock_skill_set(&self.skills).clone() };
             if let Err(error) = skills.reload().await {
                 log::warn!("skill catalog reload failed: {error}");
-                return Ok(ToolOutput {
-                    content: reload_failure_content(&error),
-                    ok: false,
-                });
+                return Ok(ToolOutput::new(reload_failure_content(&error), false));
             }
-            Ok(ToolOutput {
-                content: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
-                ok: true,
-            })
+            let rejected = skills.catalog().rejected().to_vec();
+            for error in &rejected {
+                log::warn!("skill package left out of the catalog: {error}");
+            }
+            Ok(ToolOutput::new(reload_success_content(&rejected), true))
         })
+    }
+}
+
+fn reload_success_content(rejected: &[SkillError]) -> String {
+    let mut content = String::from("Skills refreshed. Use skill_list to inspect the catalog.");
+    if !rejected.is_empty() {
+        content.push_str("\nThese skill packages were left out:");
+        for error in rejected {
+            content.push_str("\n- ");
+            content.push_str(&rejection_reason(error));
+        }
+    }
+    content
+}
+
+/// Why a package was left out, without the backing directories.
+fn rejection_reason(error: &SkillError) -> String {
+    match error {
+        SkillError::DuplicateSkill { name, .. } => {
+            format!("duplicate skill \"{name}\": every copy is left out until one is removed")
+        }
+        _ => error.to_string(),
     }
 }
 
@@ -200,13 +232,15 @@ fn reload_failure_content(error: &SkillError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::boxed::Box;
+    use barracuda_agent_skill::SkillSetSource;
     use core::cell::RefCell;
 
     use barracuda_agent_skill::FsSkillRegistry;
     use barracuda_agent_tool::{EmptyArgs, ToolHandler};
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
+    use portable_atomic_util::Arc;
 
     use super::{
         ReadArgs, ReadResourceArgs, ReadSkillResourceTool, ReadSkillTool, ReloadSkillsTool,
@@ -226,9 +260,12 @@ mod tests {
             let output = ReadSkillTool {
                 skills: Arc::new(RefCell::new(registry.skill_set())),
             }
-            .invoke(ReadArgs {
-                name: "example".into(),
-            })
+            .invoke(
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+                ReadArgs {
+                    name: "example".into(),
+                },
+            )
             .await?;
 
             assert!(output.ok);
@@ -256,12 +293,15 @@ mod tests {
                 skills: Arc::new(RefCell::new(registry.skill_set())),
             };
             let output = tool
-                .invoke(ReadResourceArgs {
-                    name: "example".into(),
-                    path: "references/guide.md".into(),
-                    offset: 6,
-                    limit: 5,
-                })
+                .invoke(
+                    barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+                    ReadResourceArgs {
+                        name: "example".into(),
+                        path: "references/guide.md".into(),
+                        offset: 6,
+                        limit: 5,
+                    },
+                )
                 .await?;
 
             assert!(output.ok);
@@ -295,12 +335,15 @@ mod tests {
             let output = ReadSkillResourceTool {
                 skills: Arc::new(RefCell::new(registry.skill_set())),
             }
-            .invoke(ReadResourceArgs {
-                name: "example".into(),
-                path: "../secret.md".into(),
-                offset: 0,
-                limit: 16,
-            })
+            .invoke(
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+                ReadResourceArgs {
+                    name: "example".into(),
+                    path: "../secret.md".into(),
+                    offset: 0,
+                    limit: 16,
+                },
+            )
             .await?;
 
             assert!(!output.ok);
@@ -326,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_error_hides_backend_directories() -> Result<(), Box<dyn core::error::Error>> {
+    fn reload_report_hides_backend_directories() -> Result<(), Box<dyn core::error::Error>> {
         block_on(async {
             let filesystem = memory_vfs().await?;
             filesystem
@@ -358,10 +401,13 @@ mod tests {
             let output = ReloadSkillsTool {
                 skills: Arc::new(RefCell::new(registry.skill_set())),
             }
-            .invoke(EmptyArgs {})
+            .invoke(
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+                EmptyArgs {},
+            )
             .await?;
 
-            assert!(!output.ok);
+            assert!(output.ok);
             assert!(output.content.contains("duplicate skill \"example\""));
             assert!(!output.content.contains("user-skills"));
             assert!(!output.content.contains("bundled-skills"));

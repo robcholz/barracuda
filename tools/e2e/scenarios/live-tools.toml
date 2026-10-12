@@ -1,0 +1,28 @@
+name = "Live tools"
+description = "A real model loads and uses the time, file, HTTP, and VM tools."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Use the time tool to get the current UTC time, then tell me the year."
+tool_contains = ['"utc":"20']
+reply_matches = ['20\d\d']
+
+[[steps]]
+send = "Use the file tools to write exactly the text barracuda-e2e to /data/live.txt, then read the file back and tell me what it contains."
+tool_contains = ['barracuda-e2e']
+reply_contains = ['barracuda-e2e']
+
+[[steps]]
+send = "Use the HTTP tool to GET http://10.42.0.1:18787/_llm_tape/health and tell me the HTTP status code."
+tool_contains = ['200']
+reply_contains = ['200']
+
+[[steps]]
+send = "Use the VM tool to run this Lua script and tell me what it printed: print(6 * 7)"
+reply_contains = ['42']
+
+[logs]
+ready = ["UTC clock synchronized"]
+await = ["VM run 1 finished"]

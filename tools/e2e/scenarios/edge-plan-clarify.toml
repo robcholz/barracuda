@@ -1,0 +1,42 @@
+name = "Edge: plan_clarify"
+description = "plan_clarify works outside Plan Mode, trims its question, ends the turn without another model call, runs alongside other Tools, and two task effects in one round fail the turn."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''This is a test of plan_clarify. Call plan_clarify {"question": "  Which color should the LED be?  "} with the question exactly as written, including the surrounding spaces.'''
+reply_matches = ['^Which color should the LED be\?$']
+tool_contains = ['Which color should the LED be?"}Clarification presented to the user.']
+request_contains = ['<system-reminder>\nnormal\n</system-reminder>']
+
+[[steps]]
+send = '''Red. Now, as a validation test, first call plan_clarify with a question that is only a space, a newline, and a space. Then, in one single response, make two parallel tool calls together: memory_store {"content": "The LED should be red."} and plan_clarify {"question": "Anything else?"}.'''
+reply_matches = ['^Anything else\?$']
+tool_errors_allowed = true
+tool_contains = [
+  'invalid arguments: JSON schema validation failed at $.question: TrimmedEmpty',
+  '"The LED should be red.", "tags": ["fact"]}Stored memory g-0.',
+  '{"question": "Anything else?"}Clarification presented to the user.',
+]
+request_contains = ['{"content":"Which color should the LED be?","role":"assistant"}']
+
+[[steps]]
+send = '''No, ask me two things. Call memory_list {} first. Then, in one single response, make two parallel plan_clarify calls together: plan_clarify {"question": "First question?"} and plan_clarify {"question": "Second question?"}.'''
+tool_contains = [
+  "All memories:\n- [g-0] (fact) The LED should be red.\n",
+  '{"question": "First question?"}Clarification presented to the user.',
+  '{"question": "Second question?"}Clarification presented to the user.',
+]
+reply_matches = ['^First question\?\n\nSecond question\?$']
+
+[[steps]]
+send = "Are you still there? Answer in a few words without calling tools."
+request_contains = [
+  '{"content":"No, ask me two things.',
+  'Second question?',
+  '{"content":"Are you still there?',
+]
+
+[logs]
+expect = ["Agent merged 2 turn-ending effects from one tool round"]

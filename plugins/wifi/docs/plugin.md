@@ -1,21 +1,32 @@
 # Wi-Fi Plugin
 
+Owns Wi-Fi policy: station and setup access-point lifecycle, persisted station
+credentials, and the provisioning page and API.
+
 - Plugin ID: `wifi`
-- Direct Plugin dependencies: `webserver`, `captive-portal`
-- Required typed capabilities: `barracuda_webserver_plugin::WebServer` from
-  `webserver`, `barracuda_captive_portal_plugin::CaptivePortal` from
-  `captive-portal`
-- Provided typed capability: `barracuda_wifi_plugin::WifiControl`
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `wifi` (`take()` of the selected Platform's `WifiDevice`), `ip_stack`
+  (the access-point stack when no radio is present)
+- Provided capabilities: `WifiControl`
+- Required capabilities: `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none
 - Agent Tools: none
-- System resource: the selected Platform's concrete
-  `barracuda_platform::WifiDevice`
-- Owned long-running tasks: one station/AP policy task, one DHCP server task,
-  and one captive DNS task
-- Retained registrations: the Wi-Fi Portal entry, Wi-Fi HTTP routes, captive
-  detection routes, and the AP-side WebServer listener
-- Storage: station credentials under the Plugin-scoped KV key `station`
+- Lua packages: none
+- Web: portal entry `wifi`, with status; `GET /api/wifi/status`,
+  `GET /api/wifi/scan`, `PUT /api/wifi`, `DELETE /api/wifi`; the captive-detection
+  paths `/`, `/generate_204`, `/gen_204`, `/hotspot-detect.html`,
+  `/library/test/success.html`, `/ncsi.txt`, `/connecttest.txt` and `/fwlink`,
+  answered with `CaptivePortal::landing()`; and, when the radio supports an
+  access point, a WebServer listener on the access-point stack's port 80
+- Tasks: when the Platform supports station configuration, three tasks in the
+  `run_wifi_runtime` pool (size 3): the station/AP policy task, the DHCP server
+  task, and the captive DNS task
+- Storage: station credentials under the Plugin-scoped KV key `station`; the portal
+  files `/resources/entry.js`, `/resources/figure.js` and `/resources/icon.svg`
+
+The Plugin declares a private filesystem, from which its portal entry serves
+those bundled files.
 
 Dependent Plugins can require `WifiControl` from `wifi` to inspect support and
 state, scan networks, start or stop the access point, configure a persisted
@@ -27,19 +38,36 @@ are adapters over the same capability rather than a separate policy path.
 The Plugin owns Wi-Fi policy rather than a specific radio driver. On a managed
 embedded Platform it restores persisted station credentials during startup. A
 successful restore leaves the device in station mode. Missing or unusable
-credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`.
-The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
+credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`;
+the Plugin assigns that address to the radio's access-point stack, which the
+Platform creates unconfigured. The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
 the shared route table on AP port 80 with one connection worker.
 
-`GET /api/wifi` returns capabilities plus current station and access-point
-state. `GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
+`GET /api/wifi/status` returns capabilities plus current station and
+access-point state. `GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
 connects, and only then persists `{ "ssid", "password" }`; after the response,
 the setup AP stops. A failed connection keeps or restores the setup AP so the
 caller can retry. `DELETE /api/wifi` removes persisted credentials,
-disconnects station mode, and starts the setup AP.
+disconnects station mode, and starts the setup AP. `/api/wifi` takes changes
+only (`PUT`, `DELETE`); other methods, including `GET`, answer `405`, as do
+methods other than `GET` on `/status` and `/scan`.
 
 The Portal registers a Wi-Fi module and exact captive-detection paths used by
-common Android, Apple, and Windows clients. Credentials are never returned by
+common Android, Apple, and Windows clients, which answer with
+`CaptivePortal::landing()`. The entry is registered with
+`CaptivePortal::register_with_status`; its `GET /portal/status` record maps the
+last state `WifiControl::status` observed, without a radio query:
+
+| Last observed state | `state` | `label` | `detail` |
+| --- | --- | --- | --- |
+| Station connected | `ready` | 已连接 / Connected | station SSID, when known |
+| Station connecting | `attention` | 正在连接… / Connecting… | none |
+| Disconnected, AP started | `attention` | 配置热点 / Setup hotspot | AP SSID |
+| Disconnected, AP starting | `attention` | 配置热点 / Setup hotspot | none |
+| Disconnected, AP stopped | `off` | 未连接 / Not connected | none |
+
+A Platform-managed network reports the host's connection: `ready` 已连接 /
+Connected, without a network name. Credentials are never returned by
 the status API or logged. The provisioning API currently has no authentication
 or transport encryption; the setup access point is intentionally open, so
 provision only in a trusted physical environment.
@@ -51,13 +79,26 @@ disconnected `UnavailableWifiDevice` instead of claiming host connectivity.
 
 The selected ESP32-S3 implementation owns the ESP radio controller and both
 Embassy network interfaces. Platform-owned runners drive station DHCP and the
-static AP stack. The Wi-Fi Plugin owns only policy and provisioning services.
+AP stack. The Wi-Fi Plugin owns policy, provisioning services and the AP
+address.
 Radio state, socket state, futures, locks, and atomics remain in internal RAM.
 WebServer TCP and HTTP byte buffers use `BulkBox<[u8]>`, allowing the selected
 Platform to place those POD buffers in PSRAM safely.
 
+Portal page: the `wifi` entry (group Device, order 10) is built on the
+portal UI kit from `resources/web/entry.ts`. Its header shows the station
+state, network and setup-hotspot state from `GET /api/wifi/status`, beside the
+`router` figure (`resources/web/figure.js`), whose antennas sweep while
+`GET /api/wifi/scan` runs. The page scans on open and on 重新扫描, lists
+nearby networks strongest first with signal bars and a lock for secured
+ones, joins a listed or manually named network with `PUT /api/wifi`, and
+offers `DELETE /api/wifi` for the connected network. After an accepted join or
+forget it calls `context.refreshStatus()`, so the portal's top bar badge, sidebar
+and overview follow. Phones get the design's list layout. Results are reported
+as portal toasts, in Chinese or English.
+
 Cargo automatically runs the declared `build` task before compiling this
-Plugin. To rebuild only the Portal module, run
-`cargo plugin run --plugin wifi build` from the repository root. The generated
-module is stored at `filesystem/resources/entry.js` and is bundled as the
-Plugin's private `/resources/entry.js`.
+Plugin. To rebuild only the Portal assets, run
+`cargo plugin run --plugin wifi build` from the repository root. It writes
+`filesystem/resources/entry.js`, `figure.js` and `icon.svg` (the Lucide
+`wifi` icon), bundled as the Plugin's private `/resources/` files.

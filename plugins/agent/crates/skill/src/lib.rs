@@ -19,5 +19,6 @@ pub use document::{
 };
 pub use registry::{
     CatalogSnapshot, EmptySkillRegistry, FsSkillRegistry, SkillRegistry, SkillRegistryVersion,
+    SkillSetSource,
 };
 pub use skill_set::SkillSet;

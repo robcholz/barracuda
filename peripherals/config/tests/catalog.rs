@@ -98,6 +98,9 @@ fn platform_runtime_controllers_are_composed_without_board_protocol_configuratio
         platform_directory.join("platform.yml"),
         r#"
 name: acme
+info:
+  family: acme
+  environment: bare-metal
 package: barracuda-platform-acme
 crate: barracuda_platform_acme
 type: AcmePlatform
@@ -535,7 +538,7 @@ fn renders_a_static_hal_from_only_board_and_implementation_yaml() {
         r#"
 name: nucleo-copy
 hardware:
-  chip: stm32f429zi
+  chip: stm32u5a5zj
 native-layout:
   artifact: memory.x
 peripherals:
@@ -932,4 +935,126 @@ fn atom_matrix_reserves_a_platform_spi_controller_without_a_fake_clock_pin() {
     assert!(rust.contains("pin_binding_type!(GPIO27)"));
     assert!(rust.contains("hal::spi_output("));
     assert!(!rust.contains("led_strip_spi_sck"));
+}
+
+#[test]
+fn host_boards_declare_their_peripherals_to_a_hal_with_device_models() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let catalog = load_catalog(root).expect("repository Implementation catalog");
+    for name in ["local-linux", "local-macos", "espressif-esp-vocat-v1-2"] {
+        let yaml = fs::read_to_string(root.join("boards/configs").join(name).join("board.yml"))
+            .expect("Board YAML");
+        let board = parse(&yaml).expect("valid Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("repository Board resolves");
+        let platform = resolve_board_platform(
+            root,
+            board.hardware().chip(),
+            board.toolchain().map(|toolchain| toolchain.target()),
+        )
+        .expect("repository Board Platform resolves");
+        let rust = render_board_hal_for_platform(&board, &resolved, &platform)
+            .expect("repository Board HAL generates");
+        assert_valid_rust(&rust);
+
+        if !platform.hal().peripheral_models() {
+            assert!(!rust.contains("declare_peripheral"), "{name}");
+            continue;
+        }
+        assert!(rust.contains(
+            r#"hal::declare_peripheral(&::barracuda_platform_selected::__platform::hal::PeripheralDeclaration { name: "real-time-clock", implementation: "rx8130ce-rtc", bindings: &[("i2c", "I2C2")], parameters: &[("address", "50")] });"#
+        ));
+        assert!(rust.contains(
+            r#"PeripheralDeclaration { name: "power-monitor", implementation: "ina226-power-monitor", bindings: &[("i2c", "I2C2")], parameters: &[("address", "64"), ("shunt-micro-ohms", "5000")] }"#
+        ));
+        let last_declaration = rust.rfind("declare_peripheral").expect("declarations");
+        let first_initialization = rust.find("::initialize(").expect("initializations");
+        assert!(last_declaration < first_initialization, "{name}");
+        // The peripherals' controller leaves the runtime I2C pool.
+        assert!(
+            rust.contains("hal::RuntimeIo<8, 2, 0, 0, 0, 0, 0>"),
+            "{name}"
+        );
+    }
+}
+
+const PANEL_MANIFEST: &str = r#"
+id: test-panel
+api-version: 1
+peripheral: display
+implementation:
+  package: test-panel
+  crate: test_panel
+  factory: "::{{crate}}::TestPanelImplementation<{{binding.enable.type}}>"
+  bindings-expression: "{{binding.enable.value}}"
+  config-expression: "()"
+bindings:
+  enable:
+    kind: digital-output
+    initial: low
+parameters: {}
+"#;
+
+fn two_device_board(implementation: &str, primary: &str) -> String {
+    format!(
+        "name: test-board\nhardware:\n  chip: stm32u5a5zj\nnative-layout:\n  artifact: memory.x\nperipherals:\n  devices:\n    front:\n      implementation: {implementation}\n{primary}      bindings:\n        enable: PB0\n    back:\n      implementation: {implementation}\n      bindings:\n        enable: PB1\n"
+    )
+}
+
+#[test]
+fn several_displays_render_one_enum_taken_by_instance() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-panel", PANEL_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board =
+        parse(&two_device_board("test-panel", "      primary: true\n")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("::barracuda_board_hal::display_set!"));
+    assert!(rust.contains("type Display = BoardDisplay;"));
+    // Instances follow the Board's device names: `back` is 0, `front` is 1.
+    assert!(rust.contains("0 => self.back.take().map(BoardDisplay::Back),"));
+    assert!(rust.contains("1 => self.front.take().map(BoardDisplay::Front),"));
+
+    let unmarked = parse(&two_device_board("test-panel", "")).expect("Board YAML");
+    let resolved = resolve_board(&unmarked, &catalog).expect("resolved composition");
+    let error = render_board_hal(&unmarked, &resolved).expect_err("ambiguous primary display");
+    assert!(
+        error
+            .to_string()
+            .contains("mark exactly one `primary: true`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn single_instance_peripherals_reject_a_second_device() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        &two_device_board("indicator-led", "")
+            .replace("enable:", "pin:")
+            .replace(
+                "        pin: PB0\n",
+                "        pin: PB0\n      parameters:\n        active-level: high\n",
+            )
+            .replace(
+                "        pin: PB1\n",
+                "        pin: PB1\n      parameters:\n        active-level: high\n",
+            ),
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+    let error = render_board_hal(&board, &resolved).expect_err("two indicators");
+    assert!(
+        error
+            .to_string()
+            .contains("only `display` supports several"),
+        "{error}"
+    );
 }

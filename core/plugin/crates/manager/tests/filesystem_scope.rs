@@ -69,7 +69,7 @@ async fn manager_with_vfs() -> (PluginManager<MemoryPartition>, Vfs) {
         .mount(
             "/removable",
             MemFs::new().into_backend(),
-            MountOptions::read_write(),
+            MountOptions::read_only(),
         )
         .await
         .expect("mount removable namespace");
@@ -93,6 +93,12 @@ fn existing_plugin_view_observes_removable_filesystems_mounted_by_system() {
             })
             .unwrap();
         let filesystem = filesystem.borrow().clone().unwrap();
+        assert_eq!(
+            filesystem
+                .write("/workspace/removable/stray.txt", b"s")
+                .await,
+            Err(FsError::ReadOnly)
+        );
 
         let card = MemFs::new();
         card.write_file("/identity", b"micro-sd").unwrap();
@@ -112,6 +118,10 @@ fn existing_plugin_view_observes_removable_filesystems_mounted_by_system() {
                 .unwrap(),
             b"micro-sd"
         );
+        filesystem
+            .write("/workspace/removable/micro-sd/notes.txt", b"n")
+            .await
+            .unwrap();
         assert_eq!(
             filesystem
                 .read_dir("/workspace/removable")
@@ -152,6 +162,113 @@ impl<const KIND: u8> Plugin for FilesystemPlugin<KIND> {
         *self.filesystem.borrow_mut() = Some(context.filesystem()?.clone());
         Ok(())
     }
+}
+
+struct InspectPlugin {
+    filesystem: Rc<RefCell<Option<ScopedVfs>>>,
+}
+
+impl PluginDeclaration for InspectPlugin {
+    const ID: &'static str = "files";
+}
+
+impl Plugin for InspectPlugin {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Inspect);
+
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        *self.filesystem.borrow_mut() = Some(context.filesystem()?.clone());
+        Ok(())
+    }
+}
+
+#[test]
+fn an_inspecting_plugin_reads_every_private_tree_but_changes_none() {
+    block_on(async {
+        let (mut manager, system_vfs) = manager_with_vfs().await;
+        let first = Rc::new(RefCell::new(None));
+        manager
+            .register(FilesystemPlugin::<0> {
+                filesystem: Rc::clone(&first),
+            })
+            .unwrap();
+        let first = first.borrow().clone().unwrap();
+        first.write("/data/notes/a.txt", b"a").await.unwrap();
+        first.write("/cache/run.log", b"log").await.unwrap();
+
+        let files = Rc::new(RefCell::new(None));
+        manager
+            .register(InspectPlugin {
+                filesystem: Rc::clone(&files),
+            })
+            .unwrap();
+        let files = files.borrow().clone().unwrap();
+
+        assert_eq!(
+            files.read("/plugins/data/first/notes/a.txt").await.unwrap(),
+            b"a"
+        );
+        assert_eq!(
+            files.read("/plugins/cache/first/run.log").await.unwrap(),
+            b"log"
+        );
+        assert_eq!(
+            files
+                .read("/plugins/resources/first/config.json")
+                .await
+                .unwrap(),
+            br#"{"enabled":true}"#
+        );
+        assert_eq!(
+            files.list_dir("/plugins").await.unwrap(),
+            ["cache", "data", "media", "resources"]
+        );
+        assert!(files
+            .list_dir("/plugins/data")
+            .await
+            .unwrap()
+            .contains(&String::from("first")));
+
+        assert_eq!(
+            files.write("/plugins/data/first/notes/b.txt", b"b").await,
+            Err(FsError::ReadOnly)
+        );
+        assert_eq!(
+            files.remove_file("/plugins/data/first/notes/a.txt").await,
+            Err(FsError::ReadOnly)
+        );
+        assert_eq!(
+            files
+                .rename(
+                    "/plugins/cache/first/run.log",
+                    "/plugins/cache/first/old.log"
+                )
+                .await,
+            Err(FsError::ReadOnly)
+        );
+        assert_eq!(
+            system_vfs
+                .read("/data/plugins/first/notes/a.txt")
+                .await
+                .unwrap(),
+            b"a"
+        );
+
+        // its own namespace and the Workspace stay writable
+        files.write("/data/state.json", b"{}").await.unwrap();
+        files.write("/workspace/media/a.txt", b"m").await.unwrap();
+        // and an ordinary Plugin never sees the other trees
+        assert_eq!(
+            first.metadata("/plugins/data").await,
+            Err(FsError::NotMounted)
+        );
+    });
 }
 
 struct KvOnlyPlugin {
@@ -247,11 +364,11 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         );
 
         first
-            .write("/workspace/cache/vm-output", b"temporary")
+            .write("/workspace/cache/output", b"temporary")
             .await
             .unwrap();
         assert_eq!(
-            second.read("/workspace/cache/vm-output").await.unwrap(),
+            second.read("/workspace/cache/output").await.unwrap(),
             b"temporary"
         );
         second
@@ -264,7 +381,7 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         );
         assert_eq!(
             first
-                .rename("/workspace/cache/vm-output", "/workspace/media/vm-output")
+                .rename("/workspace/cache/output", "/workspace/media/output")
                 .await,
             Err(FsError::CrossMount)
         );

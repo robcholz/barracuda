@@ -1,3 +1,3 @@
 id = "agent-imessage-gateway"
-depends-on = ["agent", "imessage-gateway", "workflow"]
-description = "Exposes iMessage Agent Tools and session bridge Workflow Actions."
+depends-on = ["agent", "imessage-gateway", "time", "workflow"]
+description = "Exposes iMessage Agent Tools, session bridge Actions and session commands."

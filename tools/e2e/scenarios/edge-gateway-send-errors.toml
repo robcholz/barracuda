@@ -1,0 +1,53 @@
+name = "Gateway send rejections"
+description = "gateway_send reports an unregistered channel, blank text, and argument-schema violations as Tool errors, and publishes nothing to the Web conversation for any of them."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+# The telegram Plugin registers its channel only once configured; a fresh
+# System has only `web`, so the facade lookup fails with UnknownChannel.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send", arguments = { channel = "telegram", conversation_id = "conversation", text = "Unroutable." } }]
+
+# Whitespace-only text passes the schema (no minLength on `text`) and is
+# rejected by the Web channel provider as an invalid request.
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"unknown_channel\"}","is_error":true']
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation", text = "   " } }]
+
+[[model.responses]]
+request_contains = ['"content":"{\"error\":\"invalid_request\"}","is_error":true']
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation", text = "" } }]
+
+# Schema rejections happen before the handler runs.
+[[model.responses]]
+tool_calls = [{ name = "gateway_send", arguments = { channel = "", conversation_id = "conversation", text = "No channel." } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.channel: MinLength']
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation", text = "Extra field.", kind = "reply" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "gateway_send", arguments = { channel = "web", conversation_id = "conversation" } }]
+
+[[model.responses]]
+request_contains = ['invalid arguments: JSON schema validation failed at $.text: Required']
+text = "Errors checked."
+
+[[steps]]
+send = "Try the broken sends."
+# Nothing but the final model text reaches the Web conversation: a published
+# blank or rejected message would add another reply record.
+reply_matches = ['^Errors checked\.$']
+tool_contains = [
+  'gateway_send{"channel": "telegram", "conversation_id": "conversation", "text": "Unroutable."}{"error":"unknown_channel"}',
+  'gateway_send{"channel": "web", "conversation_id": "conversation", "text": "   "}{"error":"invalid_request"}',
+  'gateway_send{"channel": "web", "conversation_id": "conversation", "text": ""}{"error":"invalid_request"}',
+  'gateway_send{"channel": "", "conversation_id": "conversation", "text": "No channel."}invalid arguments: JSON schema validation failed at $.channel: MinLength',
+  'invalid arguments: JSON schema validation failed at $.kind: AdditionalProperty',
+  'gateway_send{"channel": "web", "conversation_id": "conversation"}invalid arguments: JSON schema validation failed at $.text: Required',
+]
+tool_errors_allowed = true

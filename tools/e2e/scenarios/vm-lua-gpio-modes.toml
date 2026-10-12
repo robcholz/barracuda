@@ -1,0 +1,35 @@
+name = "Lua GPIO modes and errors"
+description = "A real model opens an open-drain output held low from outside, closes it, and meets busy, unknown, and invalid-mode pins."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character without any change. Then reply with only the word started. Lua source: local gpio = require('gpio') local od = assert(gpio.open_output('vio-5', true, 'open-drain')) assert(od:read() == false) od:close() assert(not od:is_open()) local value, read_err = od:read() assert(value == nil and read_err:find('closed')) local busy, busy_err = gpio.open_input('vio-5', 'none') assert(busy == nil and busy_err:find('busy')) local missing, missing_err = gpio.open_output('vio-9', true, 'push-pull') assert(missing == nil and missing_err:find('not exposed') and not gpio.available('vio-9')) local bad, bad_err = gpio.open_input('vio-6', 'sideways') assert(bad == nil and bad_err:find('pull') and gpio.available('vio-6')) print('gpio modes ok')'''
+tool_contains = ['"run_id":1']
+
+[virtual_io]
+# An external low wins over the released open-drain output.
+inputs = { vio-5 = false }
+
+[[virtual_io.expect_events]]
+kind = "gpio"
+pin = "vio-5"
+mode = "disabled"
+source = "system"
+
+[[virtual_io.expect_pins]]
+pin = "vio-5"
+function = "digital"
+mode = "disabled"
+drive = "open-drain"
+output = true
+
+# A rejected pull leaves the pin unclaimed.
+[[virtual_io.expect_pins]]
+pin = "vio-6"
+claimed = false
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

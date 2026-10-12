@@ -1,0 +1,20 @@
+name = "Live Workflow session administration"
+description = "A real model loads a Workflow that, on the next inbound message, creates, opens, configures, interrupts, cancels, closes, lists, and deletes a second Session, and probes unknown Sessions and input requests; then it lists and unloads the Workflow."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the workflow tools and call workflow_load exactly once with these arguments: {"id": "session-admin", "match": {"event": "gateway.message.received"}, "steps": [{"call": "session.new", "arguments": {"persistence": "persistent"}}, {"call": "session.open", "arguments": {"session": "session-2"}}, {"call": "session.set_reasoning_effort", "arguments": {"session": "session-2", "effort": "high"}}, {"call": "session.interrupt", "arguments": {"session": "session-2"}}, {"call": "session.cancel", "arguments": {"session": "session-2"}}, {"call": "session.respond", "arguments": {"session": "session-2", "request": "input-1", "text": "yes"}}, {"call": "session.list", "arguments": {"limit": 5}}, {"call": "session.list", "arguments": {"limit": 0}}, {"call": "session.close", "arguments": {"session": "session-2"}}, {"call": "session.delete", "arguments": {"session": "session-2"}}, {"call": "session.delete", "arguments": {"session": "session-2"}}, {"call": "session.open", "arguments": {"session": "session-99"}}, {"call": "session.set_reasoning_effort", "arguments": {"session": "session-99", "effort": "low"}}, {"call": "session.close", "arguments": {"session": "session-99"}}]}. Then reply with only the word loaded.'''
+tool_contains = ['session-admin']
+
+[[steps]]
+send = "Reply with only the word ok."
+kinds = ["reply"]
+
+[[steps]]
+send = "Call workflow_list, then call workflow_unload for session-admin, then call workflow_list again. Reply in one short sentence."
+tool_contains = ['session-admin']
+
+[logs]
+expect = ["Agent created session `session-2`"]

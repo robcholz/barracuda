@@ -4,20 +4,19 @@
 //! a [`TurnEvent`] bracket, and each root Agent iteration is nested inside it as
 //! an [`IterationEvent`] bracket. Only the root Agent is externally visible, so
 //! content events need no Agent id.
-//!
-//! See `.agents/design/sse.md` for the full model (ordering, SSE forward-compat).
 
 use alloc::{boxed::Box, string::String};
 use core::error::Error;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
 use barracuda_agent_tool::ToolOutput;
 use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::local_channel::{Receiver, Sender};
 use barracuda_runtime_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 use super::approval::ApprovalResolverError;
 use super::control::SessionCommand;
@@ -33,11 +32,27 @@ pub enum TurnOrigin {
     /// A public caller appended a message.
     #[default]
     User,
-    /// A detached tool delivered its result after the previous turn ended.
+    /// A background tool call delivered an update after the previous turn ended.
     ToolCall {
         /// The original model-requested call whose completion opened the turn.
         call: ToolCall,
     },
+}
+
+/// How a root-visible turn ended.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize, IntoStaticStr)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum TurnOutcome {
+    /// The Agent finished the turn.
+    #[default]
+    Completed,
+    /// A caller interrupted the turn at an iteration boundary.
+    Interrupted,
+    /// A caller cancelled the turn, or the session stopped while it ran.
+    Cancelled,
+    /// The turn ended with an error, reported before it ended.
+    Failed,
 }
 
 /// Semantic input the active turn needs from its caller.
@@ -95,6 +110,8 @@ pub enum TurnEvent {
     Ended {
         /// The session-local turn this bracket closes.
         turn: TurnId,
+        /// How the turn ended.
+        outcome: TurnOutcome,
     },
 }
 
@@ -226,7 +243,7 @@ pub enum SessionError {
 pub struct SessionStream {
     lease: u64,
     commands: Sender<SessionCommand>,
-    events: Pin<Box<Receiver<SessionEvent>>>,
+    events: Receiver<SessionEvent>,
     terminated: bool,
 }
 
@@ -239,7 +256,7 @@ impl SessionStream {
         Self {
             lease,
             commands,
-            events: Box::pin(events),
+            events,
             terminated: false,
         }
     }
@@ -252,7 +269,7 @@ impl Stream for SessionStream {
         if self.terminated {
             return Poll::Ready(None);
         }
-        match self.events.as_mut().poll_next(context) {
+        match self.events.poll_recv(context) {
             Poll::Ready(Some(event)) => {
                 if matches!(&event, SessionEvent::Closed(_)) {
                     self.terminated = true;
@@ -273,8 +290,8 @@ impl Drop for SessionStream {
         if self.terminated {
             return;
         }
-        let (ack, _result) = futures_channel::oneshot::channel();
-        let _ = self.commands.try_send(SessionCommand::Close {
+        let (ack, _result) = barracuda_runtime_utils::oneshot::channel();
+        let _ = self.commands.send(SessionCommand::Close {
             lease: self.lease,
             ack,
         });

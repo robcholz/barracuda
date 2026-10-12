@@ -1,10 +1,14 @@
-//! Lua package for the Board's primary built-in display.
+//! Lua package for the Board displays the `display` Plugin claims.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+mod config {
+    barracuda_plugin::config!();
+}
+
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::display::{
     Display, DisplayDescriptor, DisplayOrientation, DisplayPeripheral, DisplayPower,
     DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
@@ -12,36 +16,49 @@ use barracuda_board_hal::display::{
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
+    UserDataHandle, UserDataMethods, Variadic,
 };
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::RefCell;
 use embedded_graphics_core::{
     geometry::{Point, Size},
     pixelcolor::Rgb888,
     primitives::Rectangle,
 };
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
-const MAX_DRAW_BYTES: usize = 4 * 1024 * 1024;
+/// Largest RGB888 region accepted per draw: a full 360x360 frame fits, and the
+/// Lua string holding it fits the 1 MiB per-run Lua heap.
+const MAX_DRAW_BYTES: usize = 512 * 1024;
+/// Pixels converted per implementation call, staged on the stack.
+const DRAW_CHUNK_PIXELS: usize = 512;
 
-/// Owns the Board's primary display capability and publishes it to Lua.
+/// Owns the Board displays no other Plugin claims and publishes them to Lua
+/// by their Board names.
 #[barracuda_plugin::macros::plugin]
 pub struct DisplayPlugin<Device> {
-    display: Option<Device>,
+    displays: Vec<(&'static str, Device)>,
 }
 
 impl<Device> DisplayPlugin<Device> {
-    /// Takes the built-in display from the generated Board capability set.
+    /// Takes every claimed display from the generated Board capability set.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: DisplayPeripheral<Display = Device>,
     {
         Self {
-            display: context.hal.peripherals.take_display(),
+            displays: config::peripherals::DISPLAY_REST
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_display(*instance)
+                        .map(|display| (*name, display))
+                })
+                .collect(),
         }
     }
 }
@@ -63,22 +80,30 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(DisplayPackage::new(self.display.take()))
+            .register(DisplayPackage::new(core::mem::take(&mut self.displays)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
+/// The claimed displays by Board name; a display moves out when Lua opens it.
+type Displays<Device> = Vec<(&'static str, Option<Device>)>;
+
 struct DisplayPackage<Device> {
-    display: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    displays: Arc<critical_section::Mutex<RefCell<Displays<Device>>>>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> DisplayPackage<Device> {
-    fn new(display: Option<Device>) -> Self {
+    fn new(displays: Vec<(&'static str, Device)>) -> Self {
         Self {
-            display: Arc::new(critical_section::Mutex::new(RefCell::new(display))),
+            displays: Arc::new(critical_section::Mutex::new(RefCell::new(
+                displays
+                    .into_iter()
+                    .map(|(name, display)| (name, Some(display)))
+                    .collect(),
+            ))),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -91,31 +116,69 @@ where
     Device::RenderError: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_display = Arc::clone(&self.display);
+        let available_displays = Arc::clone(&self.displays);
         let available_active = Arc::clone(&self.active);
-        let open_display = Arc::clone(&self.display);
+        let list_displays = Arc::clone(&self.displays);
+        let open_displays = Arc::clone(&self.displays);
         let open_active = Arc::clone(&self.active);
         lua.register_lib("display", move |package| {
-            package.register("available", move |(): ()| {
+            package.register("available", move |name: Variadic<String>| {
+                let name = name.first().cloned();
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
-                        available_display.borrow(section).borrow().is_some()
+                        available_displays.borrow(section).borrow().iter().any(
+                            |(display, device)| {
+                                device.is_some()
+                                    && name.as_deref().is_none_or(|name| name == *display)
+                            },
+                        )
                     })))
             })?;
-            package.register_with("open", move |lua, (): ()| {
+            package.register_with("list", move |lua, (): ()| {
+                let names = critical_section::with(|section| {
+                    list_displays
+                        .borrow(section)
+                        .borrow()
+                        .iter()
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
+                });
+                let table = match lua.create_table() {
+                    Ok(table) => table,
+                    Err(error) => return Some(Err(error)),
+                };
+                for (index, name) in (1_i64..).zip(names) {
+                    if let Err(error) = table.set(index, name) {
+                        return Some(Err(error));
+                    }
+                }
+                Some(Ok(table))
+            })?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let name = name.first().cloned();
                 if !open_active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("display package has been revoked")));
                 }
                 let display = critical_section::with(|section| {
-                    open_display.borrow(section).borrow_mut().take()
+                    open_displays
+                        .borrow(section)
+                        .borrow_mut()
+                        .iter_mut()
+                        .find(|(display, device)| {
+                            device.is_some() && name.as_deref().is_none_or(|name| name == *display)
+                        })
+                        .and_then(|(_, device)| device.take())
                 });
                 Some(match display {
                     Some(display) => {
                         lua.create_userdata(DisplayHandle::new(display, Arc::clone(&open_active)))
                     }
-                    None => Err(Error::runtime(
-                        "built-in display is unavailable or already open",
-                    )),
+                    None => Err(Error::runtime(match name {
+                        Some(name) => {
+                            alloc::format!("display `{name}` is unavailable or already open")
+                        }
+                        None => String::from("no display is available"),
+                    })),
                 })
             })
         })
@@ -167,7 +230,7 @@ where
         });
         methods.add_method_mut(
             "draw_rgb888",
-            |handle, (x, y, width, height, bytes): (i64, i64, i64, i64, Vec<u8>)| {
+            |handle, (x, y, width, height, bytes): (i64, i64, i64, i64, Bytes)| {
                 Some(handle.draw_rgb888(x, y, width, height, &bytes))
             },
         );
@@ -251,24 +314,73 @@ where
             .ok_or_else(|| Error::runtime("display RGB payload is too large"))?;
         if expected > MAX_DRAW_BYTES || bytes.len() != expected {
             return Err(Error::runtime(
-                "display RGB payload length must equal width * height * 3 and stay within 4 MiB",
+                "display RGB payload length must equal width * height * 3 and stay within 512 KiB",
             ));
         }
         let (rgb, remainder) = bytes.as_chunks::<3>();
         if !remainder.is_empty() {
             return Err(Error::runtime("display RGB payload is incomplete"));
         }
-        let colors = rgb
-            .iter()
-            .map(|rgb| Rgb888::new(rgb[0], rgb[1], rgb[2]))
-            .collect::<Vec<_>>();
-        self.display_mut()?
-            .draw_rgb888(
-                Rectangle::new(Point::new(x, y), Size::new(width, height)),
-                &colors,
-            )
-            .map_err(|error| Error::runtime(alloc::format!("display drawing failed: {error:?}")))
+        draw_region(self.display_mut()?, x, y, width, rgb)
     }
+}
+
+/// Draws a validated RGB888 region through a fixed stack buffer: whole rows
+/// when they fit and row segments otherwise, so no frame-sized copy is made.
+fn draw_region<D: Display>(
+    display: &mut D,
+    x: i32,
+    y: i32,
+    width: u32,
+    rgb: &[[u8; 3]],
+) -> Result<()>
+where
+    D::RenderError: core::fmt::Debug,
+{
+    let row_pixels =
+        usize::try_from(width).map_err(|_| Error::runtime("display region is too large"))?;
+    if row_pixels <= DRAW_CHUNK_PIXELS {
+        let rows_per_block = DRAW_CHUNK_PIXELS / row_pixels;
+        for (index, block) in rgb.chunks(rows_per_block * row_pixels).enumerate() {
+            let origin = Point::new(x, offset(y, index * rows_per_block)?);
+            let size = Size::new(width, region_length(block.len() / row_pixels)?);
+            draw_block(display, Rectangle::new(origin, size), block)?;
+        }
+    } else {
+        for (row, pixels) in rgb.chunks(row_pixels).enumerate() {
+            for (segment, block) in pixels.chunks(DRAW_CHUNK_PIXELS).enumerate() {
+                let origin = Point::new(offset(x, segment * DRAW_CHUNK_PIXELS)?, offset(y, row)?);
+                let size = Size::new(region_length(block.len())?, 1);
+                draw_block(display, Rectangle::new(origin, size), block)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Converts at most [`DRAW_CHUNK_PIXELS`] RGB888 pixels and draws them.
+fn draw_block<D: Display>(display: &mut D, area: Rectangle, block: &[[u8; 3]]) -> Result<()>
+where
+    D::RenderError: core::fmt::Debug,
+{
+    let mut colors = [Rgb888::new(0, 0, 0); DRAW_CHUNK_PIXELS];
+    for (color, rgb) in colors.iter_mut().zip(block) {
+        *color = Rgb888::new(rgb[0], rgb[1], rgb[2]);
+    }
+    display
+        .draw_rgb888(area, &colors[..block.len()])
+        .map_err(|error| Error::runtime(alloc::format!("display drawing failed: {error:?}")))
+}
+
+fn region_length(length: usize) -> Result<u32> {
+    u32::try_from(length).map_err(|_| Error::runtime("display region is too large"))
+}
+
+fn offset(origin: i32, delta: usize) -> Result<i32> {
+    i32::try_from(delta)
+        .ok()
+        .and_then(|delta| origin.checked_add(delta))
+        .ok_or_else(|| Error::runtime("display region is out of range"))
 }
 
 impl<Device> Drop for DisplayHandle<Device> {
@@ -456,6 +568,7 @@ mod tests {
 
     struct TestDisplay {
         drawn: usize,
+        areas: std::vec::Vec<Rectangle>,
     }
 
     impl OriginDimensions for TestDisplay {
@@ -492,9 +605,14 @@ mod tests {
 
         fn draw_rgb888(
             &mut self,
-            _area: Rectangle,
+            area: Rectangle,
             pixels: &[Rgb888],
         ) -> core::result::Result<(), Self::RenderError> {
+            assert_eq!(
+                area.size.width as usize * area.size.height as usize,
+                pixels.len()
+            );
+            self.areas.push(area);
             self.drawn += pixels.len();
             Ok(())
         }
@@ -532,9 +650,43 @@ mod tests {
         }
     }
 
+    fn test_display() -> TestDisplay {
+        TestDisplay {
+            drawn: 0,
+            areas: std::vec::Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lua_opens_claimed_displays_by_name() {
+        let package = DisplayPackage::new(std::vec![
+            ("back-eink", test_display()),
+            ("status", test_display()),
+        ]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load(
+                "local displays = require('display')\n\
+                 local names = displays.list()\n\
+                 local status = displays.open('status')\n\
+                 local reopened = pcall(displays.open, 'status')\n\
+                 local first = displays.open()\n\
+                 return #names == 2 and names[1] == 'back-eink' and names[2] == 'status'\n\
+                     and status:is_open() and first:is_open()\n\
+                     and not displays.available() and not displays.available('status')\n\
+                     and displays.open() == nil",
+            )
+            .eval_async(),
+        )
+        .expect("use displays");
+        assert!(result);
+    }
+
     #[test]
     fn lua_draws_and_flushes_the_builtin_display() {
-        let package = DisplayPackage::new(Some(TestDisplay { drawn: 0 }));
+        let package = DisplayPackage::new(std::vec![("panel", test_display())]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -544,5 +696,56 @@ mod tests {
         )
         .expect("use display");
         assert!(result);
+    }
+
+    #[test]
+    fn regions_draw_through_bounded_stack_blocks() {
+        let mut display = TestDisplay {
+            drawn: 0,
+            areas: std::vec::Vec::new(),
+        };
+        let rows = std::vec![[1_u8, 2, 3]; 300 * 4];
+        super::draw_region(&mut display, 5, 7, 300, &rows).expect("draw rows");
+        assert_eq!(display.drawn, 1200);
+        assert_eq!(
+            display.areas,
+            std::vec![
+                Rectangle::new(Point::new(5, 7), Size::new(300, 1)),
+                Rectangle::new(Point::new(5, 8), Size::new(300, 1)),
+                Rectangle::new(Point::new(5, 9), Size::new(300, 1)),
+                Rectangle::new(Point::new(5, 10), Size::new(300, 1)),
+            ]
+        );
+
+        display.areas.clear();
+        let wide = std::vec![[0_u8; 3]; 600 * 2];
+        super::draw_region(&mut display, 0, 0, 600, &wide).expect("draw wide rows");
+        assert_eq!(
+            display.areas,
+            std::vec![
+                Rectangle::new(Point::new(0, 0), Size::new(512, 1)),
+                Rectangle::new(Point::new(512, 0), Size::new(88, 1)),
+                Rectangle::new(Point::new(0, 1), Size::new(512, 1)),
+                Rectangle::new(Point::new(512, 1), Size::new(88, 1)),
+            ]
+        );
+
+        display.areas.clear();
+        let narrow = std::vec![[0_u8; 3]; 100 * 12];
+        super::draw_region(&mut display, 0, 0, 100, &narrow).expect("draw narrow rows");
+        assert_eq!(
+            display.areas,
+            std::vec![
+                Rectangle::new(Point::new(0, 0), Size::new(100, 5)),
+                Rectangle::new(Point::new(0, 5), Size::new(100, 5)),
+                Rectangle::new(Point::new(0, 10), Size::new(100, 2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = DisplayPackage::new(std::vec![("panel", test_display())]);
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

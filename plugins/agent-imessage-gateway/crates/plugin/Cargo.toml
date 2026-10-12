@@ -9,15 +9,27 @@ license = "Apache-2.0"
 barracuda-agent-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
+barracuda-time-plugin.workspace = true
+barracuda-vfs.workspace = true
 barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
+embassy-time.workspace = true
 json-validator.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+barracuda-http-plugin.workspace = true
+barracuda-platform-test.workspace = true
+barracuda-webserver-plugin.workspace = true
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

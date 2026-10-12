@@ -6,6 +6,7 @@
 //! ```text
 //! cargo cli
 //! cargo cli configure [ADDRESS]
+//! cargo cli chat ADDRESS < messages.txt
 //! ```
 
 mod client;
@@ -13,6 +14,7 @@ mod command;
 mod configure;
 mod line_editor;
 mod protocol;
+mod script;
 
 use std::{net::IpAddr, path::Path, process};
 
@@ -31,6 +33,7 @@ const RUNTIME_ADDRESS_PATH: &str = ".barracuda/address";
 enum RunMode<'a> {
     Connect,
     Configure(Option<&'a str>),
+    Chat(&'a str),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -56,6 +59,10 @@ async fn run() -> Result<()> {
         RunMode::Connect => {
             let url = websocket_url(&prompt_for_address()?)?;
             client::run(&url).await
+        }
+        RunMode::Chat(address) => {
+            let url = websocket_url(address)?;
+            script::run(&url, script::ScriptTiming::default()).await
         }
         RunMode::Configure(explicit_address) => {
             let address = match explicit_address {
@@ -92,6 +99,7 @@ fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
         [] => Ok(RunMode::Connect),
         ["configure"] => Ok(RunMode::Configure(None)),
         ["configure", address] => Ok(RunMode::Configure(Some(address))),
+        ["chat", address] => Ok(RunMode::Chat(address)),
         [other, ..] => bail!("unknown command `{other}`; use `cargo cli` or `cargo cli configure`"),
     }
 }
@@ -179,14 +187,19 @@ fn runtime_address(start: &Path) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// WebSocket route registered by the IMessage Web Plugin.
+const MESSAGE_WEBSOCKET_PATH: &str = "/ws/message";
+
 fn websocket_url(address: &str) -> Result<String> {
-    if let Some(authority) = address.strip_prefix("http://") {
-        return Ok(format!("ws://{authority}"));
-    }
-    if let Some(authority) = address.strip_prefix("https://") {
-        return Ok(format!("wss://{authority}"));
-    }
-    bail!("Barracuda address must use http:// or https://")
+    let (scheme, authority) = if let Some(authority) = address.strip_prefix("http://") {
+        ("ws", authority)
+    } else if let Some(authority) = address.strip_prefix("https://") {
+        ("wss", authority)
+    } else {
+        bail!("Barracuda address must use http:// or https://")
+    };
+    let authority = authority.trim_end_matches('/');
+    Ok(format!("{scheme}://{authority}{MESSAGE_WEBSOCKET_PATH}"))
 }
 
 fn remote_address(address: IpAddr) -> String {
@@ -263,7 +276,7 @@ mod tests {
         );
         assert_eq!(
             websocket_url("http://127.0.0.1:49152/").expect("convert runtime address"),
-            "ws://127.0.0.1:49152/"
+            "ws://127.0.0.1:49152/ws/message"
         );
     }
 

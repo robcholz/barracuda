@@ -1,0 +1,36 @@
+[package]
+name = "barracuda-json-writer"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "JSON written directly into exactly sized bulk buffers"
+
+[lib]
+name = "barracuda_json_writer"
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-bulk-memory.workspace = true
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+
+[lints.rust]
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

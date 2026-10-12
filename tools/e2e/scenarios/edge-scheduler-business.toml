@@ -1,0 +1,113 @@
+# Scheduler::schedule order (plugins/scheduler/crates/plugin/src/scheduler.rs:237-269):
+# id -> clock -> trigger.parts() (calendar) -> past check -> book.add (duplicate) -> persist.
+# Errors are {"error":"<code>"} from plugins/agent-scheduler/crates/plugin/src/lib.rs:94-109.
+name = "Scheduler tool business rules (1)"
+description = "Calendar validation, past and pre-epoch triggers, check ordering, duplicate and unknown IDs, cancel idempotence, and maximal intervals."
+
+[model]
+mode = "scripted"
+
+# Case 1: trigger in the past (scheduler.rs:249-250)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "past", trigger = { type = "once", at = "2000-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"trigger_in_past\"}']
+text = "Case 1 checked."
+
+# Case 2: Unix epoch is valid but past
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "epoch", trigger = { type = "once", at = "1970-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"trigger_in_past\"}']
+text = "Case 2 checked."
+
+# Case 3: pre-epoch timestamp has a negative Unix time -> invalid_schedule, not trigger_in_past (scheduler.rs:426-431)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "pre-epoch", trigger = { type = "once", at = "1969-12-31T23:59:59.999Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_schedule\"}']
+text = "Case 3 checked."
+
+# Case 4: year 0000 passes the schema pattern, then fails the u64 conversion
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "year-zero", trigger = { type = "once", at = "0000-01-01T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_schedule\"}']
+text = "Case 4 checked."
+
+# Case 5: February 30 passes the schema day pattern but not the calendar (scheduler.rs:413-418)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "feb30", trigger = { type = "once", at = "2099-02-30T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_schedule\"}']
+text = "Case 5 checked."
+
+# Case 6: calendar validation precedes the past check (scheduler.rs:248 before 249)
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "feb30-past", trigger = { type = "once", at = "2000-02-30T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_schedule\"}']
+text = "Case 6 checked."
+
+# Case 7: February 29 in a non-leap year
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "feb29", trigger = { type = "once", at = "2027-02-29T00:00:00.000Z" } } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_schedule\"}']
+text = "Case 7 checked."
+
+# Case 8: February 29 in a leap year is accepted
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['{"error":"trigger_in_past"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['{"error":"trigger_in_past"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['{"error":"invalid_schedule"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['{"error":"invalid_schedule"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['{"error":"invalid_schedule"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 6 checked."]
+tool_contains = ['{"error":"invalid_schedule"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "Scheduler case."
+reply_contains = ["Case 7 checked."]
+tool_contains = ['{"error":"invalid_schedule"}']
+tool_errors_allowed = true
+
+[logs]
+ready = ['UTC clock synchronized from network time']

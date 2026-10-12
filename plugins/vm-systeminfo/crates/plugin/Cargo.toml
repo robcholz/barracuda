@@ -9,6 +9,10 @@ license = "Apache-2.0"
 barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 
+[dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

@@ -1,4 +1,4 @@
-//! Plugin discovery, selection, and System registry synchronization.
+//! Plugin discovery, per-Board selection, and System registry synchronization.
 
 use std::{
     fs, io,
@@ -6,15 +6,15 @@ use std::{
 };
 
 use barracuda_plugin::manifest::{parse, PluginManifest};
+
+mod conventions;
 use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
-const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
-const MANIFEST_END: &str = "# END GENERATED PLUGINS";
 const WORKSPACE_BEGIN: &str = "# BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES";
 const WORKSPACE_END: &str = "# END GENERATED PLUGIN WORKSPACE DEPENDENCIES";
-const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
-const SOURCE_END: &str = "// END GENERATED PLUGINS";
-const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
+const DISABLED_PATH: &str = barracuda_plugin_build::selection::LOCAL_DISABLED_PATH;
+const SELECTION_DIRECTORY: &str = ".barracuda/selection/plugins";
+const SELECTION_PACKAGE: &str = "barracuda-plugin-selection";
 const PLUGIN_MANIFEST: &str = "plugin.toml";
 
 #[derive(Debug)]
@@ -150,7 +150,12 @@ pub enum CommandError {
 /// Returns an error on invalid selection, unavailable tasks, or the first failed task.
 pub fn run(root: &Path, task: &str, name: Option<&str>) -> Result<(), CommandError> {
     let plugins = discover(root)?;
-    let disabled = read_disabled(root)?;
+    let (enabled, _) = enabled_set(root, &plugins)?;
+    let disabled = plugins
+        .iter()
+        .filter(|plugin| !enabled.contains(&plugin.id))
+        .map(|plugin| plugin.directory.clone())
+        .collect::<Vec<_>>();
     if let Some(name) = name {
         let plugin = plugins
             .iter()
@@ -187,7 +192,7 @@ pub fn run(root: &Path, task: &str, name: Option<&str>) -> Result<(), CommandErr
 /// Returns an error when discovery fails or the Plugin does not exist.
 pub fn info(root: &Path, name: &str) -> Result<PluginInfo, CommandError> {
     let plugins = discover(root)?;
-    let disabled = read_disabled(root)?;
+    let (enabled, _) = enabled_set(root, &plugins)?;
     let plugin = plugins
         .iter()
         .find(|plugin| plugin.id == name || plugin.directory == name)
@@ -204,8 +209,38 @@ pub fn info(root: &Path, name: &str) -> Result<PluginInfo, CommandError> {
         description: plugin.description.clone(),
         dependencies: plugin.dependencies.clone(),
         dependents,
-        enabled: disabled.binary_search(&plugin.directory).is_err(),
+        enabled: enabled.contains(&plugin.id),
     })
+}
+
+/// The Plugins enabled for the selected Board after the local override, and
+/// notes on Plugins the override's cascade disabled. Without a selected Board,
+/// every Plugin not disabled locally is enabled.
+fn enabled_set(
+    root: &Path,
+    plugins: &[Plugin],
+) -> Result<(Vec<String>, Vec<String>), CommandError> {
+    let sources = barracuda_plugin_build::selection::discover(root)?;
+    let local = barracuda_plugin_build::selection::local_disabled(root)?;
+    match barracuda_plugin_build::selection::selected_board(root)? {
+        Some(board) => {
+            let selection =
+                barracuda_plugin_build::selection::select(root, &board, &sources, &local)?;
+            Ok((selection.enabled().to_vec(), selection.notes().to_vec()))
+        }
+        None => Ok((
+            plugins
+                .iter()
+                .filter(|plugin| {
+                    !local
+                        .iter()
+                        .any(|name| name == &plugin.id || name == &plugin.directory)
+                })
+                .map(|plugin| plugin.id.clone())
+                .collect(),
+            Vec::new(),
+        )),
+    }
 }
 
 /// Synchronizes or validates the System registry against `plugins/`.
@@ -216,49 +251,72 @@ pub fn sync(root: &Path, check: bool) -> Result<(), CommandError> {
     sync_with_report(root, check).map(|_| ())
 }
 
-/// Synchronizes the registry and returns the enabled and disabled Plugin sets.
+/// Checks every Plugin against the checkable Plugin API conventions: its
+/// root layout, schema tree, `plugin.md` summary, Action and Event documents,
+/// and crate dependencies on other Plugins.
 ///
 /// # Errors
-/// Returns an error when discovery, generated files, or filesystem access fail.
+/// Returns every violation at once, or an error when discovery fails.
+pub fn check_conventions(root: &Path) -> Result<(), CommandError> {
+    let plugins = discover(root)?;
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    conventions::check(
+        root,
+        &plugins
+            .iter()
+            .zip(&manifests)
+            .map(|(plugin, manifest)| conventions::Checked {
+                directory: &plugin.directory,
+                manifest,
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(())
+}
+
+/// Synchronizes the workspace Plugin catalog, validates every Board's Plugin
+/// selection, and writes the selected Board's local Plugin selection.
+///
+/// # Errors
+/// Returns an error when discovery, a Board's selection, generated files, or
+/// filesystem access fail.
 pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandError> {
     let plugins = discover(root)?;
-    let disabled_names = read_disabled(root)?;
-    let (disabled, enabled): (Vec<_>, Vec<_>) = plugins
-        .iter()
-        .partition(|plugin| disabled_names.binary_search(&plugin.directory).is_ok());
-    let system_manifest = root.join("core/system/Cargo.toml");
-    let system_source = root.join("core/system/src/lib.rs");
+    validate_boards(root, &plugins)?;
     let workspace_manifest = root.join("Cargo.toml");
-    let old_manifest = read(&system_manifest)?;
-    let old_source = read(&system_source)?;
     let old_workspace = read(&workspace_manifest)?;
-    let manifest = replace_block(
-        &old_manifest,
-        MANIFEST_BEGIN,
-        MANIFEST_END,
-        &render_dependencies(&enabled),
-    )?;
-    let source = replace_block(
-        &old_source,
-        SOURCE_BEGIN,
-        SOURCE_END,
-        &render_registrations(&enabled),
-    )?;
     let workspace = replace_block(
         &old_workspace,
         WORKSPACE_BEGIN,
         WORKSPACE_END,
         &render_workspace_dependencies(&plugins),
     )?;
-    let stale = manifest != old_manifest || source != old_source || workspace != old_workspace;
+    let stale = workspace != old_workspace;
     if check && stale {
         return Err(CommandError::Stale);
     }
     if !check && stale {
         write(&workspace_manifest, &workspace)?;
-        write(&system_manifest, &manifest)?;
-        write(&system_source, &source)?;
     }
+    let (enabled, notes) = enabled_set(root, &plugins)?;
+    if !check {
+        write_selection_package(root, &plugins, &enabled)?;
+    }
+    for note in &notes {
+        eprintln!("note: {note}");
+    }
+    let (enabled, disabled): (Vec<_>, Vec<_>) = plugins
+        .iter()
+        .partition(|plugin| enabled.contains(&plugin.id));
     Ok(SyncReport {
         status: if stale && !check {
             SyncStatus::Updated
@@ -274,6 +332,104 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
             .map(|plugin| plugin.directory.clone())
             .collect(),
     })
+}
+
+/// Resolves Board `name`'s Plugin selection and writes it as the local
+/// selection package that System registers Plugins from. `cargo board
+/// select` calls this before recording the Board, so an invalid selection
+/// leaves the previous Board selected.
+///
+/// # Errors
+/// Returns an error when discovery, the Board's selection, or writing fails.
+pub fn select_board(root: &Path, name: &str) -> Result<(), CommandError> {
+    let plugins = discover(root)?;
+    let sources = barracuda_plugin_build::selection::discover(root)?;
+    let board = barracuda_plugin_build::selection::load_board(root, name)?;
+    let local = barracuda_plugin_build::selection::local_disabled(root)?;
+    let selection = barracuda_plugin_build::selection::select(root, &board, &sources, &local)?;
+    for note in selection.notes() {
+        eprintln!("note: {note}");
+    }
+    write_selection_package(root, &plugins, selection.enabled())
+}
+
+/// Writes the ignored package that carries one Board's Plugin selection: the
+/// full Plugin catalog as optional dependencies, the enabled ones as default
+/// features, and the registration macro System expands.
+fn write_selection_package(
+    root: &Path,
+    plugins: &[Plugin],
+    enabled: &[String],
+) -> Result<(), CommandError> {
+    let directory = root.join(SELECTION_DIRECTORY);
+    let enabled = plugins
+        .iter()
+        .filter(|plugin| enabled.contains(&plugin.id))
+        .collect::<Vec<_>>();
+    let manifest = render_selection_manifest(plugins, &enabled);
+    let source = render_selection_source(plugins, &enabled);
+    write_if_changed(&directory.join("Cargo.toml"), &manifest)?;
+    write_if_changed(&directory.join("src/lib.rs"), &source)
+}
+
+fn render_selection_manifest(plugins: &[Plugin], enabled: &[&Plugin]) -> String {
+    let default = enabled
+        .iter()
+        .map(|plugin| format!("{:?}", plugin.package))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut manifest = format!(
+        "# Generated by `cargo plugin sync` and `cargo board select`; do not edit.\n\n[package]\nname = {SELECTION_PACKAGE:?}\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[features]\ndefault = [{default}]\n"
+    );
+    for plugin in plugins {
+        manifest.push_str(&format!("{0} = [\"dep:{0}\"]\n", plugin.package));
+    }
+    manifest.push_str("\n[dependencies]\n");
+    for plugin in plugins {
+        manifest.push_str(&format!(
+            "{} = {{ path = \"../../../plugins/{}/crates/plugin\", optional = true }}\n",
+            plugin.package, plugin.directory
+        ));
+    }
+    manifest
+}
+
+fn render_selection_source(plugins: &[Plugin], enabled: &[&Plugin]) -> String {
+    let mut source =
+        String::from("//! Generated Plugin selection for one Board.\n\n#![no_std]\n\n");
+    // In rustfmt's order, so `cargo fmt --check` accepts the generated file.
+    let mut exports = plugins.iter().collect::<Vec<_>>();
+    exports.sort_by(|left, right| left.crate_name.cmp(&right.crate_name));
+    for plugin in exports {
+        source.push_str(&format!(
+            "#[cfg(feature = {:?})]\n#[doc(hidden)]\npub use {};\n",
+            plugin.package, plugin.crate_name
+        ));
+    }
+    source.push_str(
+        "\n/// Constructs every Plugin the selected Board enables from the Plugin\n/// context and registers them with the Plugin Manager.\n#[macro_export]\n#[rustfmt::skip]\nmacro_rules! register_plugins {\n    ($manager:ident, $context:ident) => {\n",
+    );
+    for plugin in enabled {
+        source.push_str(&format!(
+            "        $manager.add($crate::{}::{}::new(&mut $context))?;\n",
+            plugin.crate_name, plugin.entry
+        ));
+    }
+    source.push_str("        $manager.register_all()?;\n    };\n}\n");
+    source
+}
+
+fn write_if_changed(path: &Path, contents: &str) -> Result<(), CommandError> {
+    if fs::read_to_string(path).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| CommandError::Io {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    write(path, contents)
 }
 
 /// Opens a multi-select prompt and persists the unchecked Plugins as disabled.
@@ -442,10 +598,11 @@ fn write_disabled(root: &Path, names: &[String]) -> Result<(), CommandError> {
 
 fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
     let path = root.join("plugins");
-    let entries = fs::read_dir(&path).map_err(|source| CommandError::Io {
-        path: path.clone(),
-        source,
-    })?;
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => return Err(CommandError::Io { path, source }),
+    };
     let mut plugins = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| CommandError::Io {
@@ -557,6 +714,60 @@ fn validate_dependency_graph(plugins: &[Plugin]) -> Result<(), CommandError> {
     }
 }
 
+/// Checks every Board's Plugin selection and its `plugins` section against
+/// the Plugins' declared settings and peripheral slots, whether or not the
+/// Board or the Plugin is selected.
+fn validate_boards(root: &Path, plugins: &[Plugin]) -> Result<(), CommandError> {
+    let boards = root.join("boards/configs");
+    if !boards.is_dir() {
+        return Ok(());
+    }
+    let manifests = plugins
+        .iter()
+        .map(|plugin| {
+            let path = root
+                .join("plugins")
+                .join(&plugin.directory)
+                .join(PLUGIN_MANIFEST);
+            parse_metadata(&path, &read(&path)?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let sources = barracuda_plugin_build::selection::discover(root)?;
+    let entries = fs::read_dir(&boards).map_err(|source| CommandError::Io {
+        path: boards.clone(),
+        source,
+    })?;
+    let mut paths = entries
+        .map(|entry| entry.map(|entry| entry.path().join("board.yml")))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| CommandError::Io {
+            path: boards.clone(),
+            source,
+        })?;
+    paths.sort();
+    for path in paths.into_iter().filter(|path| path.is_file()) {
+        let board = barracuda_board_config::parse(&read(&path)?).map_err(|error| {
+            CommandError::Metadata(format!("invalid Board {}: {error}", path.display()))
+        })?;
+        for id in board.configured_plugins() {
+            let manifest = manifests
+                .iter()
+                .find(|manifest| manifest.id() == id)
+                .ok_or_else(|| {
+                    CommandError::Metadata(format!(
+                        "{} configures unknown Plugin `{id}`",
+                        path.display()
+                    ))
+                })?;
+            barracuda_plugin_build::resolve_config(manifest, Some(&board))?;
+        }
+        if !sources.is_empty() {
+            barracuda_plugin_build::selection::select(root, &board, &sources, &[])?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_metadata(path: &Path, contents: &str) -> Result<PluginManifest, CommandError> {
     parse(contents).map_err(|error| {
         CommandError::Metadata(format!(
@@ -626,14 +837,6 @@ fn plugin_implementation_entry(implementation: &syn::ItemImpl) -> Option<String>
     (entry != "Dependency").then_some(entry)
 }
 
-fn render_dependencies(plugins: &[&Plugin]) -> String {
-    plugins
-        .iter()
-        .map(|plugin| format!("{}.workspace = true", plugin.package))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn render_workspace_dependencies(plugins: &[Plugin]) -> String {
     plugins
         .iter()
@@ -647,25 +850,6 @@ fn render_workspace_dependencies(plugins: &[Plugin]) -> String {
         .join("\n")
 }
 
-fn render_registrations(plugins: &[&Plugin]) -> String {
-    let entries = plugins
-        .iter()
-        .map(|plugin| {
-            // Platform resource routing is part of the fixed System composition,
-            // not author-controlled Plugin metadata.
-            let platform_resources = match plugin.id.as_str() {
-                "wifi" => ", prepared.wifi",
-                _ => "",
-            };
-            format!(
-                "            {}::{}::new(&mut plugin_context{}),",
-                plugin.crate_name, plugin.entry, platform_resources
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("        register_plugins!(plugins;\n{entries}\n        );")
-}
 fn replace_block(text: &str, begin: &str, end: &str, body: &str) -> Result<String, CommandError> {
     let begin_offset = text.find(begin).ok_or_else(|| {
         CommandError::Generated(format!("missing generated block marker `{begin}`"))
@@ -710,10 +894,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
+        cascade_disabled, discover, format_cascade_dependencies, format_selection_summary, info,
         package_name, parse_metadata, persist_disabled_selection, plugin_entry,
-        render_dependencies, render_registrations, replace_block, sync_with_report,
-        validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
+        render_selection_manifest, render_selection_source, replace_block, sync_with_report,
+        validate_boards, validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -985,41 +1169,75 @@ mod tests {
     }
 
     #[test]
-    fn renders_plugin_dependencies_from_the_workspace_catalog() {
+    fn the_selection_package_carries_the_catalog_and_registers_enabled_plugins() {
+        let wifi = plugin("wifi", "wifi", &[]);
+        let vm = plugin("vm", "vm", &[]);
         let demo = plugin("demo", "demo", &[]);
+        let catalog = [demo, vm, wifi];
 
-        assert_eq!(
-            render_dependencies(&[&demo]),
-            "barracuda-demo-plugin.workspace = true"
-        );
+        let manifest = render_selection_manifest(&catalog, &[&catalog[2], &catalog[1]]);
+        assert!(manifest.contains("default = [\"barracuda-wifi-plugin\", \"barracuda-vm-plugin\"]"));
+        // Every Plugin stays in the catalog, so changing the selection never
+        // rewrites Cargo.lock.
+        for directory in ["demo", "vm", "wifi"] {
+            assert!(manifest.contains(&format!(
+                "barracuda-{directory}-plugin = {{ path = \"../../../plugins/{directory}/crates/plugin\", optional = true }}"
+            )));
+        }
+
+        let source = render_selection_source(&catalog, &[&catalog[2], &catalog[1]]);
+        assert!(source.contains(concat!(
+            "        $manager.add($crate::barracuda_wifi_plugin::TestPlugin::new(&mut $context))?;\n",
+            "        $manager.add($crate::barracuda_vm_plugin::TestPlugin::new(&mut $context))?;\n",
+            "        $manager.register_all()?;\n",
+        )));
+        assert!(!source.contains("barracuda_demo_plugin::TestPlugin"));
+        assert!(source.contains("#[cfg(feature = \"barracuda-demo-plugin\")]"));
     }
 
     #[test]
-    fn renders_plugin_registrations() {
-        let demo = plugin("demo", "demo", &[]);
+    fn boards_may_set_only_declared_plugin_settings() {
+        let root = tempdir().expect("temporary workspace");
+        let plugin = root.path().join("plugins/demo/crates/plugin");
+        fs::create_dir_all(plugin.join("src")).expect("Plugin source directory");
+        fs::write(
+            plugin.join("Cargo.toml"),
+            "[package]\nname = \"barracuda-demo-plugin\"\n",
+        )
+        .expect("Plugin manifest");
+        fs::write(
+            root.path().join("plugins/demo/plugin.toml"),
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates settings.\"\n\n[config.slots]\ntype = \"usize\"\ndefault = 1\ndescription = \"Slots.\"\n",
+        )
+        .expect("Plugin metadata");
+        fs::write(plugin.join("src/lib.rs"), "impl Plugin for DemoPlugin {}\n")
+            .expect("Plugin source");
+        let board = root.path().join("boards/configs/demo-board");
+        fs::create_dir_all(&board).expect("Board directory");
+        fs::create_dir_all(root.path().join("boards/profiles")).expect("profiles directory");
+        fs::write(
+            root.path().join("boards/profiles/base.yml"),
+            "enable: [demo]\n",
+        )
+        .expect("base profile");
+        let base =
+            "name: demo-board\nhardware:\n  chip: demo\nnative-layout:\n  artifact: layout.yml\n";
+        let plugins = discover(root.path()).expect("discover Plugins");
 
-        assert_eq!(
-            render_registrations(&[&demo]),
-            concat!(
-                "        register_plugins!(plugins;\n",
-                "            barracuda_demo_plugin::TestPlugin::new(&mut plugin_context),\n",
-                "        );"
-            )
-        );
-    }
-
-    #[test]
-    fn renders_platform_owned_wifi_constructor_argument() {
-        let demo = plugin("wifi", "wifi", &[]);
-
-        assert_eq!(
-            render_registrations(&[&demo]),
-            concat!(
-                "        register_plugins!(plugins;\n",
-                "            barracuda_wifi_plugin::TestPlugin::new(&mut plugin_context, prepared.wifi),\n",
-                "        );"
-            )
-        );
+        for (settings, valid) in [
+            ("plugins:\n  demo:\n    slots: 3\n", true),
+            ("plugins:\n  demo:\n    lanes: 3\n", false),
+            ("plugins:\n  missing:\n    slots: 3\n", false),
+            ("plugins:\n  demo:\n    enabled: false\n", true),
+            ("profile: missing\n", false),
+        ] {
+            fs::write(board.join("board.yml"), format!("{base}{settings}")).expect("Board");
+            assert_eq!(
+                validate_boards(root.path(), &plugins).is_ok(),
+                valid,
+                "{settings}"
+            );
+        }
     }
 
     #[test]
@@ -1039,22 +1257,11 @@ mod tests {
         .expect("Plugin metadata");
         fs::write(plugin.join("src/lib.rs"), "impl Plugin for DemoPlugin {}\n")
             .expect("Plugin source");
-        fs::create_dir_all(root.path().join("core/system/src")).expect("System source directory");
         fs::write(
             root.path().join("Cargo.toml"),
             "# BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES\nold\n# END GENERATED PLUGIN WORKSPACE DEPENDENCIES\n",
         )
         .expect("workspace manifest");
-        fs::write(
-            root.path().join("core/system/Cargo.toml"),
-            "# BEGIN GENERATED PLUGINS\nold\n# END GENERATED PLUGINS\n",
-        )
-        .expect("System manifest");
-        fs::write(
-            root.path().join("core/system/src/lib.rs"),
-            "// BEGIN GENERATED PLUGINS\nold\n// END GENERATED PLUGINS\n",
-        )
-        .expect("System source");
         fs::create_dir_all(root.path().join(".barracuda")).expect("state directory");
         fs::write(root.path().join(".barracuda/disabled-plugins"), "demo\n")
             .expect("disabled Plugins");
@@ -1064,12 +1271,14 @@ mod tests {
         assert_eq!(report.status(), SyncStatus::Updated);
         assert!(report.enabled().is_empty());
         assert_eq!(report.disabled(), ["demo"]);
-        let source = fs::read_to_string(root.path().join("core/system/src/lib.rs"))
-            .expect("generated System source");
+        let source =
+            fs::read_to_string(root.path().join(".barracuda/selection/plugins/src/lib.rs"))
+                .expect("generated Plugin selection");
         assert!(!source.contains("DemoPlugin::new"));
-        let manifest = fs::read_to_string(root.path().join("core/system/Cargo.toml"))
-            .expect("generated System manifest");
-        assert!(!manifest.contains("barracuda-demo-plugin"));
+        let manifest =
+            fs::read_to_string(root.path().join(".barracuda/selection/plugins/Cargo.toml"))
+                .expect("generated Plugin selection manifest");
+        assert!(manifest.contains("default = []"));
         let workspace = fs::read_to_string(root.path().join("Cargo.toml"))
             .expect("generated workspace manifest");
         assert!(

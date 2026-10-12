@@ -24,8 +24,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+use barracuda_agent_message::{BulkText, ChatMessage};
 use getset::CopyGetters;
-use serde_json::Value;
 
 use crate::block::{Block, BlockKind, Scope};
 use crate::reminder::Reminders;
@@ -49,7 +49,7 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 /// # Examples
 ///
 /// ```
-/// use barracuda_agent_context::{Block, BlockKind, Context};
+/// use barracuda_agent_context::{Block, BlockKind, Context, ChatMessage};
 /// use serde_json::json;
 ///
 /// let mut context = Context::new();
@@ -58,7 +58,7 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 ///     .with(Block::new(BlockKind::AgentInstruction, "You are a helpful agent."))
 ///     .with(Block::new(BlockKind::OutputContract, "Answer in one concise paragraph."));
 ///
-/// let history = [json!({ "role": "user", "content": "What's the weather?" })];
+/// let history = [ChatMessage::new(&json!({ "role": "user", "content": "What's the weather?" }))];
 /// let request = context.request(&history);
 /// assert_eq!(
 ///     request.system(),
@@ -69,10 +69,11 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 pub struct Context {
     /// One owned content string per declared kind. Only ever holds non-absent
     /// content — empty content drops the key (see [`with`](Self::with)).
-    blocks: BTreeMap<BlockKind, String>,
-    /// Cached rendered system prefix. Rebuilt by [`request`](Self::request) only
-    /// when `content_version != rendered_version`.
-    rendered: String,
+    /// Block text lives in bulk memory, sized exactly.
+    blocks: BTreeMap<BlockKind, BulkText>,
+    /// Cached rendered system prefix in bulk memory. Rebuilt by
+    /// [`request`](Self::request) only when `content_version != rendered_version`.
+    rendered: BulkText,
     /// Bumped on every real block change. The `version()` surface, and the gate
     /// for re-rendering.
     content_version: u64,
@@ -97,21 +98,10 @@ impl Context {
 
         Self {
             blocks: BTreeMap::new(),
-            rendered: String::new(),
+            rendered: BulkText::default(),
             content_version: 0,
             rendered_version: 0,
             reminders: Reminders::new(),
-        }
-    }
-
-    /// Declare a context item. Blocks and reminders are stored in this context;
-    /// message items belong to a [`ContextSink`] because they are per-request
-    /// history contributions.
-    pub fn with_item(&mut self, item: ContextItem<'_>) -> &mut Self {
-        match item {
-            ContextItem::Block(block) => self.with(block),
-            ContextItem::Reminder { kind, text } => self.with_reminder(kind, text.as_deref()),
-            ContextItem::Message { .. } => self,
         }
     }
 
@@ -136,7 +126,7 @@ impl Context {
             if is_empty {
                 self.blocks.remove(&kind);
             } else {
-                self.blocks.insert(kind, content.into_owned());
+                self.blocks.insert(kind, BulkText::new(&content));
             }
             self.content_version = self.content_version.saturating_add(1);
         }
@@ -175,7 +165,7 @@ impl Context {
             .blocks
             .iter()
             .filter(|(kind, _)| matches!(kind.scope(), Scope::Global | Scope::Session))
-            .map(|(kind, content)| Block::new(kind.clone(), content.clone()))
+            .map(|(kind, content)| Block::new(kind.clone(), String::from(content.as_str())))
             .collect::<Vec<_>>();
         blocks.sort_by(|left, right| block_order(&left.kind, &right.kind));
         blocks
@@ -192,7 +182,7 @@ impl Context {
     /// Assemble this request: pair the system prefix with the message tail
     /// (`history` plus the ephemeral reminders). Re-renders the prefix only when a
     /// block changed since the last call; otherwise reuses the cached string.
-    pub fn request<'a>(&'a mut self, history: &'a [Value]) -> RequestContext<'a> {
+    pub fn request<'a>(&'a mut self, history: &'a [ChatMessage]) -> RequestContext<'a> {
         if self.rendered_version != self.content_version {
             self.rebuild();
             self.rendered_version = self.content_version;
@@ -200,28 +190,30 @@ impl Context {
         self.reminders.refresh();
         #[cfg(feature = "intrusive-observability")]
         if observability::is_active() {
-            observability::publish(self.clone(), history.to_vec());
+            observability::publish(
+                self.clone(),
+                history.iter().map(ChatMessage::to_value).collect(),
+            );
         }
-        RequestContext::new(&self.rendered, history, self.reminders.as_slice())
+        RequestContext::new(self.rendered.as_str(), history, self.reminders.as_slice())
     }
 
     /// Re-render the cached prefix from the current blocks, in wire order
     /// (`band`, then `scope`, then in-band order), reusing the buffer.
     fn rebuild(&mut self) {
-        let mut entries: Vec<(&BlockKind, &String)> = self.blocks.iter().collect();
+        let mut entries: Vec<(&BlockKind, &BulkText)> = self.blocks.iter().collect();
         // Sort by the wire-order key; the full `BlockKind` Ord breaks ties between
         // custom blocks sharing a key, keeping the render deterministic.
         entries.sort_by(|left, right| block_order(left.0, right.0));
 
-        let mut buffer = core::mem::take(&mut self.rendered);
-        buffer.clear();
-        for (_, content) in entries {
-            if !buffer.is_empty() {
-                buffer.push_str(BLOCK_SEPARATOR);
+        self.rendered = BulkText::encode(|sink| {
+            for (index, (_, content)) in entries.iter().enumerate() {
+                if index > 0 {
+                    sink.put(BLOCK_SEPARATOR.as_bytes());
+                }
+                sink.put(content.as_str().trim().as_bytes());
             }
-            buffer.push_str(content.trim());
-        }
-        self.rendered = buffer;
+        });
     }
 }
 
@@ -242,7 +234,7 @@ pub enum ContextItem<'a> {
         /// The semantic kind used for cross-source ordering.
         kind: BlockKind,
         /// The message JSON object to append to history.
-        value: &'a Value,
+        value: &'a ChatMessage,
     },
     /// Ephemeral guidance rendered into the trailing reminder segment.
     Reminder {
@@ -260,7 +252,7 @@ impl<'a> ContextItem<'a> {
     }
 
     /// Construct a structured history-message item.
-    pub fn message(kind: BlockKind, value: &'a Value) -> Self {
+    pub fn message(kind: BlockKind, value: &'a ChatMessage) -> Self {
         Self::Message { kind, value }
     }
 
@@ -270,11 +262,6 @@ impl<'a> ContextItem<'a> {
             kind,
             text: Some(text.into()),
         }
-    }
-
-    /// Construct a reminder clear item.
-    pub fn clear_reminder(kind: BlockKind) -> Self {
-        Self::Reminder { kind, text: None }
     }
 }
 
@@ -286,7 +273,7 @@ impl<'a> ContextItem<'a> {
 /// request shape without making providers own the final history.
 pub struct ContextSink<'a> {
     context: &'a mut Context,
-    messages: Vec<(BlockKind, Value)>,
+    messages: Vec<(BlockKind, ChatMessage)>,
 }
 
 impl<'a> ContextSink<'a> {
@@ -319,7 +306,7 @@ impl<'a> ContextSink<'a> {
     }
 
     /// Accept a structured history message.
-    pub fn message(&mut self, kind: BlockKind, value: &Value) -> &mut Self {
+    pub fn message(&mut self, kind: BlockKind, value: &ChatMessage) -> &mut Self {
         self.messages.push((kind, value.clone()));
         self
     }
@@ -331,7 +318,7 @@ impl<'a> ContextSink<'a> {
     }
 
     /// Finish this sink and return the ordered history messages for the request.
-    pub fn into_history(mut self) -> Vec<Value> {
+    pub fn into_history(mut self) -> Vec<ChatMessage> {
         self.messages.sort_by(|a, b| {
             a.0.sort_key()
                 .cmp(&b.0.sort_key())
@@ -361,15 +348,19 @@ pub struct RequestContext<'a> {
     system: &'a str,
     /// The persisted conversation history (a JSON array of messages).
     #[getset(get_copy = "pub")]
-    history: &'a [Value],
+    history: &'a [ChatMessage],
     /// The ephemeral trailing reminders (never persisted), in order.
     #[getset(get_copy = "pub")]
-    reminders: &'a [Value],
+    reminders: &'a [ChatMessage],
 }
 
 impl<'a> RequestContext<'a> {
     /// Pair an assembled `system` prefix with the message tail's two segments.
-    pub(crate) fn new(system: &'a str, history: &'a [Value], reminders: &'a [Value]) -> Self {
+    pub(crate) fn new(
+        system: &'a str,
+        history: &'a [ChatMessage],
+        reminders: &'a [ChatMessage],
+    ) -> Self {
         Self {
             system,
             history,

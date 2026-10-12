@@ -1,7 +1,6 @@
-//! macOS file-backed and volatile NOR flash implementations.
+//! macOS file-backed NOR flash implementation.
 
 use alloc::vec;
-use alloc::vec::Vec;
 use core::ops::Range;
 use std::io::{Read as _, Seek as _, Write as _};
 use std::path::Path;
@@ -163,107 +162,5 @@ impl NorFlash for FileNorFlash {
             .map_err(FileNorFlashError::Io)?;
         self.file.write_all(bytes).map_err(FileNorFlashError::Io)?;
         self.file.sync_data().map_err(FileNorFlashError::Io)
-    }
-}
-
-/// Volatile standard-platform NOR flash used when durable storage is not required.
-pub struct VolatileNorFlash {
-    bytes: Vec<u8>,
-}
-
-impl VolatileNorFlash {
-    /// Creates a completely erased volatile region with `capacity` bytes.
-    #[must_use]
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            bytes: vec![0xff; capacity],
-        }
-    }
-
-    fn range(
-        &self,
-        offset: u32,
-        length: usize,
-        alignment: usize,
-    ) -> Result<Range<usize>, VolatileNorFlashError> {
-        let start = usize::try_from(offset).map_err(|_| VolatileNorFlashError::OutOfBounds)?;
-        if start.checked_rem(alignment) != Some(0) || length.checked_rem(alignment) != Some(0) {
-            return Err(VolatileNorFlashError::NotAligned);
-        }
-        let end = start
-            .checked_add(length)
-            .filter(|end| *end <= self.bytes.len())
-            .ok_or(VolatileNorFlashError::OutOfBounds)?;
-        Ok(start..end)
-    }
-}
-
-/// Failure from [`VolatileNorFlash`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VolatileNorFlashError {
-    /// An operation exceeded the configured region.
-    OutOfBounds,
-    /// An address or length violated the operation's granularity.
-    NotAligned,
-}
-
-impl NorFlashError for VolatileNorFlashError {
-    fn kind(&self) -> NorFlashErrorKind {
-        match self {
-            Self::OutOfBounds => NorFlashErrorKind::OutOfBounds,
-            Self::NotAligned => NorFlashErrorKind::NotAligned,
-        }
-    }
-}
-
-impl ErrorType for VolatileNorFlash {
-    type Error = VolatileNorFlashError;
-}
-
-impl ReadNorFlash for VolatileNorFlash {
-    const READ_SIZE: usize = 1;
-
-    fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
-        let range = self.range(offset, bytes.len(), Self::READ_SIZE)?;
-        let source = self
-            .bytes
-            .get(range)
-            .ok_or(VolatileNorFlashError::OutOfBounds)?;
-        bytes.copy_from_slice(source);
-        Ok(())
-    }
-
-    fn capacity(&self) -> usize {
-        self.bytes.len()
-    }
-}
-
-impl NorFlash for VolatileNorFlash {
-    const WRITE_SIZE: usize = 1;
-    const ERASE_SIZE: usize = 4096;
-
-    fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
-        let length = to
-            .checked_sub(from)
-            .and_then(|length| usize::try_from(length).ok())
-            .ok_or(VolatileNorFlashError::OutOfBounds)?;
-        let range = self.range(from, length, Self::ERASE_SIZE)?;
-        self.bytes
-            .get_mut(range)
-            .ok_or(VolatileNorFlashError::OutOfBounds)?
-            .fill(0xff);
-        Ok(())
-    }
-
-    fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
-        let range = self.range(offset, bytes.len(), Self::WRITE_SIZE)?;
-        let target = self
-            .bytes
-            .get_mut(range)
-            .ok_or(VolatileNorFlashError::OutOfBounds)?;
-        for (target, source) in target.iter_mut().zip(bytes) {
-            *target &= *source;
-        }
-        Ok(())
     }
 }

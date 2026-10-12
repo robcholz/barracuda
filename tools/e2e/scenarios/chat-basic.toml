@@ -1,0 +1,28 @@
+name = "Plain conversation round-trip"
+description = "A Web message reaches a new Agent session and the streamed reply returns to the CLI."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+reasoning = "The user greets me."
+text = "Hello from Barracuda."
+
+[[steps]]
+send = "hello"
+reply_contains = ["Hello from Barracuda."]
+kinds = ["reasoning"]
+
+[logs]
+expect = [
+  "Agent created session `session-1`",
+  "IMessage Web completed outbound message",
+]
+
+[memory]
+# Host ordinary-heap peak was 208 KiB locally when this budget was set
+# (CI runs about 1 KiB higher); the budget keeps at least 6 KiB of headroom.
+# About 3 KiB of it is the five external channel Plugins' idle receive
+# support: each channel's mode, owner-book and cursor handles, receive
+# control, parked receive runtime, and receive task.
+heap_high_water_max = 221184

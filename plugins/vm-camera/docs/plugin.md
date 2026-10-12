@@ -1,11 +1,22 @@
 # Camera Plugin
 
-- Plugin ID: `camera`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+The Camera Plugin owns the Board's primary camera and exposes frame
+capture to Lua code as the `camera` Lua package.
 
-This Plugin takes the Board's primary built-in `Camera` capability exactly
+- Plugin ID: `camera`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `camera.device` (`primary`, optional)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `camera`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `Camera` capability exactly
 once and installs the `camera` Lua package. OV2640/OV3660 control buses,
 parallel capture, and DMA remain owned by the implementation and Platform HAL.
 
@@ -18,7 +29,7 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-Capture storage is caller-sized and bounded to 4 MiB. Boards without a camera
+Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards without a camera
 report unavailable. The move-only built-in capability permits one handle per
 boot; explicit close, lexical `<close>`, collection, and Plugin revocation
 prevent further operations.

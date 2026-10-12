@@ -1,0 +1,41 @@
+# Log line: plugins/scheduler/crates/plugin/src/scheduler.rs:304-308. Completion and removal:
+# plugins/scheduler/crates/plugin/src/state.rs:173-206. The sentinel e2e-late fires 12 s after
+# the interval's first run, after a hypothetical 4th run (6 s), so the forbid patterns are meaningful.
+name = "Scheduler firing semantics"
+description = "A one-shot fires once, a three-count interval fires exactly three times, and a cancelled schedule never fires."
+
+[model]
+mode = "scripted"
+
+# Case 1: create one-shot, interval, cancelled, and sentinel schedules
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "scheduler" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-one", trigger = { type = "once", at = "${now+20s}" } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-rep", trigger = { type = "interval", at = "${now+20s}", every_seconds = 2, count = 3 } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-gone", trigger = { type = "once", at = "${now+20s}" } } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_cancel", arguments = { id = "e2e-gone" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "scheduler_schedule", arguments = { id = "e2e-late", trigger = { type = "once", at = "${now+32s}" } } }]
+
+[[model.responses]]
+text = "Case 1 checked."
+
+[[steps]]
+send = "Set up the timers."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['{"id":"e2e-one"}', '{"id":"e2e-rep"}', '{"id":"e2e-gone","completed_runs":0}', '{"id":"e2e-late"}']
+
+[logs]
+ready = ['UTC clock synchronized from network time']
+forbid = ['\bERROR\b', 'panicked at', 'schedule `e2e-one` triggered run 2', 'schedule `e2e-rep` triggered run 4', 'schedule `e2e-gone` triggered']
+await = ['schedule `e2e-one` triggered run 1', 'schedule `e2e-rep` triggered run 1', 'schedule `e2e-rep` triggered run 2', 'schedule `e2e-rep` triggered run 3', 'schedule `e2e-late` triggered run 1']
+await_seconds = 45

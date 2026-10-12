@@ -1,0 +1,111 @@
+# Failures are encoded as {"error":"<code>"} by plugins/agent-http/crates/plugin/src/lib.rs:67
+# with HttpError serialized snake_case (plugins/http/crates/plugin/src/http.rs:121-150).
+# No case reaches the network: validation fails first or reqwless rejects the URL before DNS/TCP.
+name = "HTTP tool request validation (1)"
+description = "The HTTP capability rejects scheme, header, size, and URL-syntax failures with stable error codes."
+
+[model]
+mode = "scripted"
+
+# Case 1: ftp scheme is rejected (http.rs:94-95)
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "http" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "ftp://10.42.0.1/file" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_url\"}']
+text = "Case 1 checked."
+
+# Case 2: URL schemes are case-insensitive, so HTTP:// reaches the host.
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "HTTP://10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"status\":200,']
+text = "Case 2 checked."
+
+# Case 3: URL without a scheme is rejected
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "10.42.0.1:18787/_llm_tape/health" } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_url\"}']
+text = "Case 3 checked."
+
+# Case 4: URL validation precedes header validation (http.rs:94 before http.rs:100)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "ftp://10.42.0.1/file", headers = [{ name = "X Bad", value = "1" }] } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_url\"}']
+text = "Case 4 checked."
+
+# Case 5: header name containing a space (http.rs:102)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X Bad", value = "1" }] } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_header\"}']
+text = "Case 5 checked."
+
+# Case 6: header name containing a colon (http.rs:102)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X:Bad", value = "1" }] } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_header\"}']
+text = "Case 6 checked."
+
+# Case 7: CRLF header-injection attempt in a value (http.rs:103-104)
+[[model.responses]]
+tool_calls = [{ name = "http_request", arguments = { method = "GET", url = "http://10.42.0.1:18787/_llm_tape/health", headers = [{ name = "X-A", value = "a\r\nX-Injected: 1" }] } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"invalid_header\"}']
+text = "Case 7 checked."
+
+# Case 8: URL within schema maxLength (chars) but over 2048 bytes (http.rs:87,92)
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 1 checked."]
+tool_contains = ['{"error":"invalid_url"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 2 checked."]
+tool_contains = ['"url": "HTTP://10.42.0.1:18787/_llm_tape/health"}{"status":200,']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 3 checked."]
+tool_contains = ['{"error":"invalid_url"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 4 checked."]
+tool_contains = ['{"error":"invalid_url"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 5 checked."]
+tool_contains = ['{"error":"invalid_header"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 6 checked."]
+tool_contains = ['{"error":"invalid_header"}']
+tool_errors_allowed = true
+
+[[steps]]
+send = "HTTP plugin case."
+reply_contains = ["Case 7 checked."]
+tool_contains = ['{"error":"invalid_header"}']
+tool_errors_allowed = true
+

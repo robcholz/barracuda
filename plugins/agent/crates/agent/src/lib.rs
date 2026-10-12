@@ -1,4 +1,7 @@
 #![cfg_attr(not(test), no_std)]
+// Without atomic compare-and-swap (ESP32-C3) `tracing` compiles to
+// nothing, so values only traced look unused there.
+#![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 // Runtime state is executor-local; Arc remains the ownership ABI between crates.
 #![allow(clippy::arc_with_non_send_sync)]
 
@@ -49,4 +52,4 @@ pub use instance::Agent;
 pub use manager::{
     AgentCreateError, AgentId, AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig,
 };
-pub use message::Message;
+pub use message::{sniff_media_type, Attachment, MediaKind, Message, SNIFF_BYTES};

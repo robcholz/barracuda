@@ -1,13 +1,14 @@
 //! The `UiService` capability: opens views and drives them.
 
-use crate::datum::{Datum, Shape};
+use crate::datum::{ViewType, ViewValue};
 use crate::mailbox::{Event, Mailbox, Schema};
 use crate::view::ViewChannel;
-use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, rc::Rc, string::String, vec::Vec};
 use barracuda_ui_runtime::{
     Document, DocumentAssets, DocumentError, Program, Value, format::FormatError,
 };
 use core::cell::{Cell, RefCell};
+use portable_atomic_util::Arc;
 
 /// The viewport views are laid out in until a display backend sets one.
 pub const DEFAULT_VIEWPORT: (f32, f32) = (360.0, 360.0);
@@ -68,7 +69,7 @@ impl Inner {
         .map_err(UiError::Document)
     }
 
-    /// Applies pending Lua writes and lays out every changed view.
+    /// Applies pending writes and lays out every changed view.
     fn pump(&self) {
         let mut documents = self.documents.borrow_mut();
         for (id, document) in documents.iter_mut() {
@@ -131,7 +132,7 @@ impl UiService {
                 .program()
                 .slots
                 .iter()
-                .map(|slot| (slot.name.clone(), Shape::from(&slot.ty)))
+                .map(|slot| (slot.name.clone(), ViewType::from(&slot.ty)))
                 .collect(),
         });
         let id = self.inner.next_id.get();
@@ -148,7 +149,7 @@ impl UiService {
         })
     }
 
-    /// Applies Lua writes to open views as they arrive; never returns.
+    /// Applies writes to open views as they arrive; never returns.
     ///
     /// Sessions also apply pending writes before every tap and read, so a
     /// host without this loop still sees current views.
@@ -159,32 +160,32 @@ impl UiService {
         }
     }
 
-    /// Ends every open view for Lua.
+    /// Ends every open view for its owner.
     pub(crate) fn close_all(&self) {
         self.inner.mailbox.close_all();
     }
 }
 
-/// One open view; dropping it unmounts the view and ends it for Lua.
+/// One open view; dropping it unmounts the view and ends it for its owner.
 pub struct UiSession {
     channel: ViewChannel,
     inner: Rc<Inner>,
 }
 
 impl UiSession {
-    /// The channel a Lua package hands to the program that owns this view.
+    /// The channel the view's owner writes to and reads calls from.
     #[must_use]
     pub fn channel(&self) -> &ViewChannel {
         &self.channel
     }
 
-    /// Whether Lua closed the view.
+    /// Whether the owner closed the view.
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.inner.mailbox.is_closed(self.channel.id)
     }
 
-    /// Drops handler calls Lua has not received yet.
+    /// Drops handler calls the owner has not received yet.
     pub fn clear_events(&self) {
         self.inner.mailbox.clear_events(self.channel.id);
     }
@@ -198,7 +199,7 @@ impl UiSession {
     /// Releases the view's tree and keeps only its values.
     ///
     /// A view is a function of its values, so [`UiSession::resume`] rebuilds the
-    /// same tree. Lua writes made meanwhile wait in the channel. Taps and reads
+    /// same tree. Writes made meanwhile wait in the channel. Taps and reads
     /// see nothing while suspended.
     pub fn suspend(&self) {
         self.inner.pump();
@@ -228,7 +229,9 @@ impl UiSession {
         let compatible =
             program.slots.len() == self.channel.schema.slots.len()
                 && program.slots.iter().zip(&self.channel.schema.slots).all(
-                    |(slot, (name, shape))| slot.name == *name && Shape::from(&slot.ty) == *shape,
+                    |(slot, (name, shape))| {
+                        slot.name == *name && ViewType::from(&slot.ty) == *shape
+                    },
                 );
         if !compatible {
             return Err(UiError::View(FormatError::Invalid(
@@ -254,7 +257,7 @@ impl UiSession {
         Ok(())
     }
 
-    /// Taps the view at (`x`, `y`) and delivers the handler call to Lua.
+    /// Taps the view at (`x`, `y`) and delivers the handler call to the owner.
     ///
     /// Returns the handler name, or `None` when nothing pressable is there or
     /// the event could not be queued.
@@ -268,7 +271,7 @@ impl UiSession {
             let args = event
                 .args
                 .iter()
-                .map(Datum::from_value)
+                .map(ViewValue::from_value)
                 .collect::<Option<Vec<_>>>()?;
             Event { handler, args }
         };

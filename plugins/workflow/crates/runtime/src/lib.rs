@@ -18,7 +18,7 @@ pub use action::{
     WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistration,
     WorkflowActionRegistry, WorkflowActionRegistryError, WorkflowActionSchema,
 };
-pub use control::{parse_definition, parse_workflow_id, WorkflowControlRejection};
+pub use control::{parse_definition, WorkflowControlRejection};
 pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
     WorkflowStep, WorkflowUnloadError,
@@ -28,12 +28,16 @@ pub use link::LinkError;
 pub use rule::{Rule, RuleError};
 pub use runtime::{
     validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo, WorkflowRuntime,
-    WorkflowRuntimeControl, WorkflowRuntimeView,
+    WorkflowRuntimeControl, WorkflowRuntimeView, EVENT_BACKLOG_LIMIT,
 };
 pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 
-/// Owned JSON value passed directly between Workflow Actions.
+/// JSON value used in Workflow definitions and other configuration.
 pub type WorkflowValue = serde_json::Value;
+
+/// Event inputs, Action requests and Action responses travel as shared
+/// compact JSON in bulk memory.
+pub use barracuda_json_writer::{JsonText, JsonTextError};
 
 /// Dependencies used by exported schema macros.
 #[doc(hidden)]

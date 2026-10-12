@@ -174,7 +174,9 @@ mod tests {
 
         const UNIQUE_SYSTEM: &str = "websocket-request-snapshot";
         context.with(Block::new(BlockKind::AgentInstruction, UNIQUE_SYSTEM));
-        let history = [json!({ "role": "user", "content": "hello" })];
+        let history = [barracuda_agent_message::ChatMessage::new(
+            &json!({ "role": "user", "content": "hello" }),
+        )];
         let _request = context.request(&history);
 
         let snapshot = loop {

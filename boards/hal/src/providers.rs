@@ -292,35 +292,6 @@ impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize> Runtime
     }
 }
 
-impl<H: RuntimePlatform, const P: usize, const I: usize, const S: usize, const U: usize>
-    RuntimeIo<H, P, I, S, U, 0, 0, 0>
-{
-    /// Creates the unified runtime owner with a Platform-owned UART pool.
-    #[must_use]
-    pub fn new_with_uart(
-        pins: [(&'static str, H::PinToken); P],
-        i2c: [H::I2cController; I],
-        spi: [H::SpiController; S],
-        uart: [H::UartController; U],
-    ) -> Self {
-        Self {
-            state: critical_section::Mutex::new(RefCell::new(RuntimeIoState {
-                pins: pins.map(|(name, token)| RuntimePin {
-                    name,
-                    token: Some(token),
-                    owner: None,
-                }),
-                i2c: i2c.map(Some),
-                spi: spi.map(Some),
-                uart: uart.map(Some),
-                adc: [],
-                pwm: [],
-                i2s: [],
-            })),
-        }
-    }
-}
-
 impl<
         H: RuntimePlatform,
         const P: usize,

@@ -69,6 +69,11 @@ def forwarded_request_headers(
     encodings. In that case the original encoding and length no longer describe
     the forwarded bytes, so both fields are removed and aiohttp recomputes the
     length.
+
+    A client that names no content coding gets the identity coding upstream.
+    Otherwise aiohttp would ask for its own default codings, and the
+    compressed body, passed through unchanged, would reach a client that
+    cannot decode it.
     """
 
     forwarded: CIMultiDict[str] = CIMultiDict()
@@ -82,6 +87,8 @@ def forwarded_request_headers(
         if decoded_request_body and lower_name == 'content-encoding':
             continue
         forwarded.add(name, value)
+    if 'accept-encoding' not in forwarded:
+        forwarded['Accept-Encoding'] = 'identity'
     return forwarded
 
 

@@ -2,11 +2,14 @@
 
 #![allow(clippy::expect_used)]
 
-use barracuda_plugin_manifest::{parse, ManifestError, MAX_DESCRIPTION_CHARS, PLUGIN_ID_PATTERN};
+use barracuda_plugin_manifest::{
+    parse, ConfigType, ConfigValue, ManifestError, PeripheralClaim, PeripheralFill,
+    MAX_DESCRIPTION_CHARS, PLUGIN_ID_PATTERN,
+};
 
 const VALID: &str = r#"
 id = "web-search"
-depends-on = ["webserver", "agent"]
+depends-on = ["alpha", "beta"]
 description = "Provides Web search."
 "#;
 
@@ -27,11 +30,38 @@ fn parses_generic_tasks_and_rejects_invalid_commands() {
 }
 
 #[test]
+fn parses_board_configurable_settings() {
+    let source = format!(
+        "{VALID}\n[config.receive-slots]\ntype = 'usize'\ndefault = 1\ndescription = 'Open receive connections.'\n"
+    );
+    let manifest = parse(&source).expect("settings manifest");
+    let setting = &manifest.config["receive-slots"];
+    assert_eq!(setting.kind, ConfigType::Usize);
+    assert_eq!(setting.default, ConfigValue::Integer(1));
+    assert_eq!(setting.default.rust_literal(), "1");
+
+    for setting in [
+        "type = 'u8'\ndefault = 300\ndescription = 'Too large.'",
+        "type = 'bool'\ndefault = 1\ndescription = 'Wrong type.'",
+        "type = 'usize'\ndefault = 1\ndescription = ' '",
+        "type = 'f32'\ndefault = 1\ndescription = 'Unknown type.'",
+    ] {
+        assert!(parse(&format!("{VALID}\n[config.slots]\n{setting}\n")).is_err());
+    }
+    assert!(matches!(
+        parse(&format!(
+            "{VALID}\n[config.Slots]\ntype = 'usize'\ndefault = 1\ndescription = 'Bad name.'\n"
+        )),
+        Err(ManifestError::InvalidSetting(name)) if name == "Slots"
+    ));
+}
+
+#[test]
 fn parses_a_canonical_manifest() {
     let manifest = parse(VALID).expect("valid Plugin manifest");
 
     assert_eq!(manifest.id(), "web-search");
-    assert_eq!(manifest.dependencies(), ["webserver", "agent"]);
+    assert_eq!(manifest.dependencies(), ["alpha", "beta"]);
     assert_eq!(manifest.description(), "Provides Web search.");
 }
 
@@ -119,4 +149,38 @@ fn rejects_unknown_fields() {
     let manifest = format!("{VALID}\nplatform = \"linux\"\n");
 
     assert!(parse(&manifest).is_err());
+}
+
+#[test]
+fn parses_peripheral_claims() {
+    let source = format!(
+        "{VALID}\n[peripherals.display]\nmain = \"primary\"\nside = {{ fill = \"any\", optional = true }}\nrest = \"*\"\n"
+    );
+    let manifest = parse(&source).expect("claims");
+    let display = &manifest.peripherals["display"];
+    assert_eq!(
+        display["main"],
+        PeripheralClaim {
+            fill: PeripheralFill::Primary,
+            optional: false
+        }
+    );
+    assert_eq!(
+        display["side"],
+        PeripheralClaim {
+            fill: PeripheralFill::Any,
+            optional: true
+        }
+    );
+    // Rest slots may receive nothing, so they are always optional.
+    assert!(display["rest"].optional);
+
+    for invalid in [
+        "[peripherals.display]\nmain = \"first\"\n",
+        "[peripherals.Display]\nmain = \"primary\"\n",
+        "[peripherals.display]\nMain = \"primary\"\n",
+        "[peripherals.display]\nmain = { fill = \"primary\", extra = true }\n",
+    ] {
+        assert!(parse(&format!("{VALID}\n{invalid}")).is_err(), "{invalid}");
+    }
 }

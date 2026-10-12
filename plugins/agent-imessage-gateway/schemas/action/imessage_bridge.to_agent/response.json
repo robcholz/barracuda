@@ -12,13 +12,17 @@
     },
     {
       "type": "object",
-      "maxProperties": 0,
+      "properties": {
+        "persistence": { "enum": ["persistent", "ephemeral"] }
+      },
+      "required": ["persistence"],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "session": { "type": "string", "pattern": "^session-[0-9]+$" }
+        "session": { "type": "string", "pattern": "^session-[0-9]+$" },
+        "input_request": { "type": "string", "pattern": "^input-[0-9]+$" }
       },
       "required": ["session"],
       "additionalProperties": false

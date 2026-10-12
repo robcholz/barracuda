@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -12,7 +13,11 @@ use barracuda_agent::{
     ToolCallId,
 };
 
-pub(super) type AgentSlots<Tcp, Resolver> = BTreeMap<AgentId, AgentSlot<Tcp, Resolver>>;
+/// Live agents of one session.
+///
+/// Slots are boxed: a B-tree leaf reserves room for eleven values, so storing
+/// the large slot inline would allocate a ~10 KiB leaf for a single agent.
+pub(super) type AgentSlots<Tcp, Resolver> = BTreeMap<AgentId, Box<AgentSlot<Tcp, Resolver>>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {

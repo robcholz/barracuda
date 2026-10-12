@@ -1,15 +1,22 @@
 # Audio Plugin
 
-- Plugin ID: `audio`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Events: none
-- Agent Tools: none
-- Owned long-running tasks: none
+The Audio Plugin owns the Board's primary audio codec and exposes
+playback and recording to Lua code as the `audio` Lua package.
 
-This Plugin takes the Board's primary built-in `AudioCodec` capability exactly
+- Plugin ID: `audio`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `audio-codec.device` (`primary`, optional)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `audio`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `AudioCodec` capability exactly
 once and installs the `audio` Lua package. Codec register control stays in the
 ES8311/ES8389 implementation, while I2S controller, DMA, and bounded buffers stay in
 the Platform HAL composition.
@@ -19,7 +26,6 @@ Lua API:
 - `audio.available() -> boolean`
 - `audio.open() -> handle`
 - `handle:descriptor() -> sample_rate_hz, channels, bits_per_sample`
-- `handle:format() -> sample_rate_hz, channels, bits_per_sample`
 - `handle:set_volume(percent)`
 - `handle:play(pcm_le_bytes)`
 - `handle:play_wav(wav_bytes)`
@@ -29,7 +35,7 @@ Lua API:
 
 `set_volume` accepts an integer percentage from 0 through 100 and maps it to
 the codec capability's portable 0-through-255 output scale. `descriptor`
-reports the required stream format; `format` is its compatibility alias.
+reports the required stream format.
 `play` and `record` use interleaved signed 16-bit little-endian PCM matching
 that format. `play_wav` accepts an uncompressed 16-bit integer PCM RIFF/WAVE
 file, validates its sample rate and channel count against the codec, skips

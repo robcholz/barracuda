@@ -6,10 +6,11 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
+use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
+pub use barracuda_vm_builtin_packages::math::SeedSource;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use embassy_executor::Spawner;
-use futures_channel::oneshot;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 
@@ -327,21 +328,18 @@ pub struct Vm {
 }
 
 impl Vm {
-    /// Creates the VM capability with its fixed execution pool.
-    pub fn new(package_registry: LuaPackageRegistry) -> Result<Self, VmMemoryPoolError> {
+    /// Creates the VM capability with its fixed execution pool, seeding each
+    /// execution's `math.random` from `seeds`.
+    pub fn new(
+        package_registry: LuaPackageRegistry,
+        seeds: SeedSource,
+    ) -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
             runtime: VmRuntime::new()?,
             limits: VmLimits::default(),
-            builtin_packages: BuiltinPackages::all(),
+            builtin_packages: BuiltinPackages::new(seeds),
             package_registry,
         })
-    }
-
-    /// Replaces Lua execution limits.
-    #[must_use]
-    pub fn with_limits(mut self, limits: VmLimits) -> Self {
-        self.limits = limits;
-        self
     }
 
     /// Installs the task spawner after Plugin registration completes.
@@ -360,7 +358,7 @@ impl Vm {
             .dispatch(
                 request.source,
                 self.limits,
-                self.builtin_packages,
+                self.builtin_packages.clone(),
                 self.package_registry.clone(),
             )
             .map_err(VmError::from)

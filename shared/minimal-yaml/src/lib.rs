@@ -426,21 +426,23 @@ fn block_indent(
     parent_indent: usize,
     first_line: usize,
 ) -> Result<Option<usize>, Error> {
+    // YAML detects a block scalar's indentation from its first non-empty
+    // line; a later, less indented content line is an error, reported by
+    // `render_block`.
     let mut offset = 0usize;
     let mut line = first_line;
-    let mut minimum = None;
     while let Some(candidate) = line_at(input, offset, line) {
         let (indent, content) = split_indent(candidate.text, candidate.number)?;
         if !content.is_empty() {
             if indent <= parent_indent {
                 return Err(Error::new(candidate.number, ErrorKind::UnexpectedIndent));
             }
-            minimum = Some(minimum.map_or(indent, |current: usize| current.min(indent)));
+            return Ok(Some(indent));
         }
         offset = candidate.next_offset;
         line = candidate.number.saturating_add(1);
     }
-    Ok(minimum)
+    Ok(None)
 }
 
 /// A syntax or requested-value mismatch in the supported YAML subset.

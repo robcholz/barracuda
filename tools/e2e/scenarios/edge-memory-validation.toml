@@ -1,0 +1,12 @@
+name = "Edge: memory argument validation"
+description = "Schema-invalid memory Tool calls are rejected before the handler runs, store nothing, and reach the model as is_error tool results."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = 'Try some malformed memory calls. This is a tool test. Make the following tool calls in order, one numbered item per response, with exactly these arguments, even when a call looks wrong or fails, and call nothing else: 1. in one single response, these 11 parallel calls together: memory_store {"content": "   "}; memory_store {"tags": ["preference"]}; memory_store {"content": "Valid text.", "tags": ["ok", " "]}; memory_store {"content": 42}; memory_list {"limit": 0}; memory_recall {"query": "  "}; memory_recall {"limit": 1.5}; memory_update {"content": "No id given."}; memory_update {"id": "a-0", "content": ""}; memory_forget {"id": ""}; memory_delete {"id": "a-0"} 2. memory_list {}. Then reply with only: Validation checked.'
+reply_contains = ['Validation checked.']
+tool_contains = ['invalid arguments: JSON schema validation failed at $.content: TrimmedEmpty', 'memory_store{"tags": ["preference"]}invalid arguments: JSON schema validation failed at $.content: Required', 'invalid arguments: JSON schema validation failed at $.tags[1]: TrimmedEmpty', 'memory_store{"content": 42}invalid arguments: JSON schema validation failed at $.content: Type { expected: String }', 'memory_list{"limit": 0}invalid arguments: JSON schema validation failed at $.limit: Minimum', 'invalid arguments: JSON schema validation failed at $.query: TrimmedEmpty', 'memory_recall{"limit": 1.5}invalid arguments: JSON schema validation failed at $.limit: Type { expected: Integer }', 'memory_update{"content": "No id given."}invalid arguments: JSON schema validation failed at $.id: Required', 'memory_update{"id": "a-0", "content": ""}invalid arguments: JSON schema validation failed at $.content: TrimmedEmpty', 'memory_forget{"id": ""}invalid arguments: JSON schema validation failed at $.id: TrimmedEmpty', 'memory_delete{"id": "a-0"}tool not found: memory_delete', 'memory_list{}No matching memories.']
+request_contains = ['</mode_policy>\n\nAvailable skills:', '"content":"invalid arguments: JSON schema validation failed at $.content: TrimmedEmpty","is_error":true', '"content":"tool not found: memory_delete","is_error":true', '"content":"No matching memories.","is_error":false']
+tool_errors_allowed = true

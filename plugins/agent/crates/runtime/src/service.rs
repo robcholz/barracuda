@@ -1,28 +1,29 @@
 //! Executor-neutral process runtime ownership and configuration entry point.
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use async_channel::Sender;
 use barracuda_agent_memory::LongTermInitError;
 use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersistence};
 use barracuda_agent_skill::SkillError;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
+use barracuda_runtime_utils::local_channel::{self, Sender};
+use barracuda_runtime_utils::oneshot;
 use barracuda_vfs::ScopedVfs;
-use futures_channel::oneshot;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 
 use barracuda_agent::{
     AgentCreateError, AgentManagerError, ApiPurpose, ModelApiManager, SharedApiManager,
 };
 use barracuda_agent_session::{
-    OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
-    SessionPersistence, SessionStream,
+    OpenSessionError, SessionClock, SessionControl, SessionCreateError, SessionDeleteError,
+    SessionId, SessionInfo, SessionPersistence, SessionRenameError, SessionStream, WallClock,
 };
 
 use crate::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
@@ -67,6 +68,7 @@ impl From<AgentManagerError> for RuntimeBuildError {
 pub(crate) struct RuntimeControl {
     commands: Sender<RuntimeCommand>,
     api_manager: SharedApiManager,
+    clock: SessionClock,
 }
 
 /// The long-running executor-neutral agent service future.
@@ -101,9 +103,11 @@ impl RuntimeControl {
         Tcp: TcpConnect + 'static,
         Resolver: Dns + 'static,
     {
-        let (commands, command_rx) = async_channel::unbounded();
+        let (commands, command_rx) = local_channel::channel();
         let api_manager = SharedApiManager::default();
         let worker_api_manager = Arc::clone(&api_manager);
+        let clock = SessionClock::default();
+        let worker_clock = clock.clone();
         let future = Box::pin(async move {
             let initialized: Result<RuntimeWorker<Tcp, Resolver>, RuntimeError> = async {
                 let persistence: SharedPersistence = Arc::new(
@@ -122,6 +126,7 @@ impl RuntimeControl {
                     skill_roots: storage.skill_roots,
                     api_manager: worker_api_manager,
                     llm_factory,
+                    clock: worker_clock,
                     commands: command_rx,
                 })
                 .await
@@ -140,6 +145,7 @@ impl RuntimeControl {
             Self {
                 commands,
                 api_manager,
+                clock,
             },
             RuntimeService { future },
         )
@@ -160,6 +166,11 @@ impl RuntimeControl {
         *self.api_manager.borrow_mut() = configuration;
     }
 
+    /// Installs the wall clock that stamps Session metadata.
+    pub(crate) fn set_wall_clock(&self, clock: WallClock) {
+        self.clock.install(clock);
+    }
+
     /// Open a Session's long-lived event stream.
     pub(crate) async fn open_session(
         &self,
@@ -168,7 +179,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::OpenSession { session, ack })
-            .await
             .map_err(|_| OpenSessionError::WorkerStopped)?;
         result.await.unwrap_or(Err(OpenSessionError::WorkerStopped))
     }
@@ -181,7 +191,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::CreateSession { persistence, ack })
-            .await
             .map_err(|_| SessionCreateError::WorkerStopped)?;
         result
             .await
@@ -194,12 +203,43 @@ impl RuntimeControl {
         if self
             .commands
             .send(RuntimeCommand::ListSessions { ack })
-            .await
             .is_err()
         {
             return Vec::new();
         }
         result.await.unwrap_or_default()
+    }
+
+    /// Describe live Sessions, sorted by id.
+    pub(crate) async fn describe_sessions(&self) -> Vec<SessionInfo> {
+        let (ack, result) = oneshot::channel();
+        if self
+            .commands
+            .send(RuntimeCommand::DescribeSessions { ack })
+            .is_err()
+        {
+            return Vec::new();
+        }
+        result.await.unwrap_or_default()
+    }
+
+    /// Replace a live Session's title.
+    pub(crate) async fn rename_session(
+        &self,
+        session: SessionId,
+        title: String,
+    ) -> Result<(), SessionRenameError> {
+        let (ack, result) = oneshot::channel();
+        self.commands
+            .send(RuntimeCommand::RenameSession {
+                session,
+                title,
+                ack,
+            })
+            .map_err(|_| SessionRenameError::WorkerStopped)?;
+        result
+            .await
+            .unwrap_or(Err(SessionRenameError::WorkerStopped))
     }
 
     /// Delete a live Session and its associated runtime state.
@@ -210,7 +250,6 @@ impl RuntimeControl {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::DeleteSession { session, ack })
-            .await
             .map_err(|_| SessionDeleteError::WorkerStopped)?;
         result
             .await
@@ -219,7 +258,7 @@ impl RuntimeControl {
 
     /// Ask the service to stop after its live actors finish closing.
     pub(crate) async fn shutdown(&self) {
-        let _ = self.commands.send(RuntimeCommand::Stop).await;
+        let _ = self.commands.send(RuntimeCommand::Stop);
     }
 }
 

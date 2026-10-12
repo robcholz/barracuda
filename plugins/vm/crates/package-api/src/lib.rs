@@ -4,10 +4,28 @@
 
 extern crate alloc;
 
-use alloc::sync::{Arc, Weak};
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use barracuda_lua::{Lua, Package, Result as LuaResult};
+use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
+
+/// Most Lua packages the registry holds at once.
+pub const MAX_LUA_PACKAGES: usize = 32;
+
+/// Lua heap one installed package may keep in a run once its installation's
+/// garbage is collected.
+///
+/// The VM sizes each run's heap so that the built-in packages,
+/// [`MAX_LUA_PACKAGES`] packages at this budget each, one installation's
+/// transient peak, and the script all fit; each package proves it stays
+/// within both budgets.
+pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 12 * 1024;
+
+/// Heap one package's installation may use beyond what it keeps, such as
+/// compiling Lua source. Packages install one after another, so only one
+/// such peak is ever live.
+pub const LUA_PACKAGE_INSTALL_PEAK_BYTES: usize = 32 * 1024;
 
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
@@ -42,18 +60,22 @@ impl LuaPackageRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error when the package name is empty or already registered.
+    /// Returns an error when the package name is empty or already registered,
+    /// or when the registry already holds [`MAX_LUA_PACKAGES`] packages.
     pub fn register(
         &self,
         package: impl LuaPackage + 'static,
     ) -> Result<LuaPackageRegistration, LuaPackageRegistryError> {
-        let package: Arc<dyn LuaPackage> = Arc::new(package);
+        let package: Arc<dyn LuaPackage> = Arc::from(Box::new(package) as Box<dyn LuaPackage>);
         let name = package.name();
         if name.is_empty() {
             return Err(LuaPackageRegistryError::EmptyName);
         }
 
         let mut state = self.state.lock();
+        if state.entries.len() >= MAX_LUA_PACKAGES {
+            return Err(LuaPackageRegistryError::Full);
+        }
         if state
             .entries
             .iter()
@@ -81,12 +103,6 @@ impl LuaPackageRegistry {
             entry.package.install(lua)?;
         }
         Ok(())
-    }
-
-    /// Returns the number of registered packages.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.state.lock().entries.len()
     }
 
     /// Returns whether no packages are registered.
@@ -135,4 +151,7 @@ pub enum LuaPackageRegistryError {
     /// Only one Plugin may own a given Lua package name.
     #[error("Lua package `{0}` is already registered")]
     DuplicateName(&'static str),
+    /// The registry already holds [`MAX_LUA_PACKAGES`] packages.
+    #[error("the VM holds at most {MAX_LUA_PACKAGES} Lua packages")]
+    Full,
 }

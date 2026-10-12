@@ -1,16 +1,20 @@
-use alloc::{boxed::Box, collections::BTreeSet, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeSet, string::String, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind, Context};
-use barracuda_agent_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
+use barracuda_agent_memory::{
+    AssistantFragment, AssistantHandle, ChatMessage, Transcript, TurnError, TurnHandle,
+};
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolSet;
+use barracuda_agent_tool::{BackgroundToolPool, ToolContext, ToolSet};
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
+use barracuda_vfs::ScopedVfs;
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
+use portable_atomic_util::Arc;
 use tracing::Instrument as _;
 
 use crate::config::{ApiPurpose, SharedApiManager};
@@ -38,9 +42,15 @@ pub(crate) struct AgentEngineConfig {
     pub(crate) api_manager: SharedApiManager,
     pub(crate) api_purpose: ApiPurpose,
     pub(crate) tools: ToolSet,
+    pub(crate) background: BackgroundToolPool,
     pub(crate) effect_inbox: AgentEffectInbox,
     pub(crate) permission_policy: Arc<dyn PermissionPolicy>,
     pub(crate) retry_policy: RetryPolicy,
+    /// The filesystem the attachments of messages and Tool results are read
+    /// from when a request inlines them.
+    pub(crate) files: ScopedVfs,
+    /// Handed to every Tool call the Agent makes.
+    pub(crate) tool_context: ToolContext,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,8 +105,11 @@ where
     transcript: Box<dyn Transcript>,
     active_turn: Option<TurnHandle>,
     tools: ToolSet,
+    background: BackgroundToolPool,
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
+    files: ScopedVfs,
+    tool_context: ToolContext,
     #[getset(get = "pub(crate)")]
     context: Context,
     run_state: RunState,
@@ -146,8 +159,11 @@ where
             transcript: config.transcript,
             active_turn: None,
             tools,
+            background: config.background,
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
+            files: config.files,
+            tool_context: config.tool_context,
             context,
             run_state: RunState::Stopped(StopReason::Ready),
             iteration_id_allocator: IterationIdAllocator::new(),
@@ -183,10 +199,7 @@ where
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
         self.iteration_id_allocator = IterationIdAllocator::new();
         let turn = self.transcript.open_turn()?;
-        {
-            let mut user = turn.user()?;
-            user.append(message.as_str());
-        }
+        record_user_message(&turn, &message)?;
         self.active_turn = Some(turn);
         self.run_state = RunState::Running;
         Ok(())
@@ -236,37 +249,42 @@ where
     }
 
     async fn reduce_agent_effects(&mut self) -> Result<Option<AgentEngineEvent>, AgentError> {
-        let mut effects = self.effect_inbox.drain();
+        let effects = self.effect_inbox.drain();
         if effects.len() > 1 {
+            // Every effect ends the turn with a message, and each tool already
+            // reported success, so the user gets all of them in order.
             let count = effects.len();
-            log::error!("Agent effect conflict: count={count}");
-            tracing::error!(name: "agent_effect_conflict", count = count as u64);
-            return Err(AgentError::ConflictingEffects { count });
+            log::warn!("Agent merged {count} turn-ending effects from one tool round");
+            tracing::warn!(name: "agent_effects_merged", count = count as u64);
         }
-        match effects.pop() {
-            Some(effect) => self.reduce_tool_effect(effect).await.map(Some),
+        let mut merged: Option<String> = None;
+        for effect in effects {
+            let (AgentEffect::Finish {
+                final_message: message,
+            }
+            | AgentEffect::Yield { message }) = effect;
+            match merged.as_mut() {
+                Some(text) => {
+                    text.push_str("\n\n");
+                    text.push_str(&message);
+                }
+                None => merged = Some(message),
+            }
+        }
+        match merged {
+            Some(message) => self.finish_with_message(message).await.map(Some),
             None => Ok(None),
         }
     }
 
-    async fn reduce_tool_effect(
+    /// Ends the task with `message` as its final assistant message.
+    async fn finish_with_message(
         &mut self,
-        effect: AgentEffect,
+        message: String,
     ) -> Result<AgentEngineEvent, AgentError> {
-        let message = match effect {
-            AgentEffect::Finish { final_message } => {
-                self.finish_effect_assistant(&final_message)?;
-                self.commit_active_turn().await?;
-                self.stop(StopReason::Completed);
-                final_message
-            }
-            AgentEffect::Yield { message } => {
-                self.finish_effect_assistant(&message)?;
-                self.commit_active_turn().await?;
-                self.stop(StopReason::Completed);
-                message
-            }
-        };
+        self.finish_effect_assistant(&message)?;
+        self.commit_active_turn().await?;
+        self.stop(StopReason::Completed);
         Ok(AgentEngineEvent::Finished(AgentOutcome::Completed(
             AgentCompletion::EffectOutput(message),
         )))
@@ -282,8 +300,7 @@ where
             .as_mut()
             .ok_or(AgentError::StateInvariant)?;
         for message in continuations {
-            let mut user = turn.user()?;
-            user.append(message.as_str());
+            record_user_message(turn, &message)?;
         }
         Ok(true)
     }
@@ -322,7 +339,7 @@ where
         Ok(())
     }
 
-    fn render_provider_context(&mut self) -> Result<Vec<serde_json::Value>, AgentError> {
+    fn render_provider_context(&mut self) -> Result<Vec<ChatMessage>, AgentError> {
         let mut sink = self.context.sink();
         for entry in &mut self.context_providers {
             entry
@@ -342,6 +359,16 @@ where
             }
         }
     }
+}
+
+/// Appends `message` to `turn` as one user message with its attachments.
+fn record_user_message(turn: &TurnHandle, message: &Message) -> Result<(), TurnError> {
+    let mut user = turn.user()?;
+    user.append(message.as_str());
+    for attachment in message.attachments() {
+        user.attach(attachment);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -400,6 +427,14 @@ impl<'a> IterationConsumer<'a> {
                 self.phase = ContentPhase::Output;
                 StreamPart::End
             }
+        }
+    }
+
+    /// Record the provider signature over the reasoning; it is not progress.
+    fn consume_reasoning_signature(&mut self, signature: &str) {
+        debug_assert_eq!(self.phase, ContentPhase::Reasoning);
+        if let Some(assistant) = self.assistant.as_mut() {
+            assistant.append(AssistantFragment::ReasoningSignature(signature));
         }
     }
 
@@ -653,6 +688,9 @@ where
                         messages: context.history(),
                         reminders: context.reminders(),
                         tools: &tools,
+                        background: &self.agent.background,
+                        files: &self.agent.files,
+                        tool_context: self.agent.tool_context,
                     };
                     drop(render_span);
                     drop(prepare_span);
@@ -711,6 +749,9 @@ where
                                     ))))
                                     .await;
                             }
+                            IterationLoopEvent::Iteration(IterationEvent::ReasoningSignature(
+                                signature,
+                            )) => consumer.consume_reasoning_signature(&signature),
                             IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
                                 match consumer.consume_output(part) {
                                     Ok(part) => {
@@ -761,7 +802,12 @@ where
                                             break;
                                         }
                                         match consumer.turn.tool(&call.id, !output.ok) {
-                                            Ok(mut tool) => tool.append(&output.content),
+                                            Ok(mut tool) => {
+                                                tool.append(&output.content);
+                                                for attachment in &output.attachments {
+                                                    tool.attach(attachment);
+                                                }
+                                            }
                                             Err(error) => {
                                                 result = Some(Err(AgentError::from(error)));
                                                 break;
@@ -805,11 +851,6 @@ where
                                             .await;
                                     }
                                 }
-                            }
-                            IterationLoopEvent::Detached(handle) => {
-                                yielder
-                                    .yield_one(Ok(AgentEngineEvent::Detached(handle)))
-                                    .await;
                             }
                             IterationLoopEvent::ApprovalRequired {
                                 tool_call_id,
@@ -1027,7 +1068,7 @@ mod tests {
 
     fn assistant_content(transcript: &TranscriptStore) -> Option<String> {
         let turns = transcript.turns();
-        let assistant = turns.last()?.messages.get(1)?;
+        let assistant = turns.last()?.messages.get(1)?.to_value();
         assistant.get("content")?.as_str().map(str::to_owned)
     }
 }

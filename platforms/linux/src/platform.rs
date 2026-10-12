@@ -88,14 +88,6 @@ impl LinuxPlatform {
         Ok(())
     }
 
-    /// Loads Linux trust roots and initializes the Platform TLS capability.
-    ///
-    /// # Errors
-    /// Returns an error when the Linux trust store or TLS engine is invalid.
-    pub fn initialize_tls() -> Result<barracuda_tls::MbedTls, LinuxPlatformError> {
-        crate::tls::initialize().map_err(LinuxPlatformError::Tls)
-    }
-
     /// Initializes partitions using generated Linux settings.
     ///
     /// # Errors
@@ -149,19 +141,23 @@ impl LinuxPlatform {
 
 impl Platform for LinuxPlatform {
     type Bindings = &'static Board;
-    type Tls = barracuda_tls::MbedTls;
     type Wifi = barracuda_platform::HostWifiDevice;
+    type Entropy = crate::LinuxEntropy;
     type Partitions = LinuxPartitions;
     type Error = LinuxPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
-        barracuda_bulk_memory::platform::install_global();
         crate::logging::install();
         log::info!("preparing Linux Platform");
+        crate::heap::install();
         Self::install_reactor()
     }
 
     async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
+        match crate::heap::report_high_water() {
+            Ok(task) => spawner.spawn(task),
+            Err(_error) => log::warn!("ordinary heap reporting task is unavailable"),
+        }
         log::info!("initializing Linux Platform partitions");
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
@@ -169,13 +165,11 @@ impl Platform for LinuxPlatform {
         let ip_stack =
             crate::network::initialize(spawner, crate::PLATFORM_SETTINGS.network_interface())
                 .await?;
-        log::info!("initializing Linux Platform TLS");
-        let tls = Self::initialize_tls()?;
         log::info!("initialized Linux Platform");
         Ok(PlatformResources {
             ip_stack,
             wifi: barracuda_platform::HostWifiDevice::new(ip_stack),
-            tls,
+            entropy: crate::LinuxEntropy,
             partitions,
         })
     }
@@ -196,9 +190,6 @@ pub enum LinuxPlatformError {
     /// The real TUN-backed Embassy network failed to initialize.
     #[error(transparent)]
     Network(#[from] LinuxNetworkError),
-    /// Host TLS initialization failed.
-    #[error(transparent)]
-    Tls(#[from] crate::LinuxTlsError),
     /// File-backed NOR initialization failed.
     #[error(transparent)]
     Flash(#[from] FileNorFlashError),

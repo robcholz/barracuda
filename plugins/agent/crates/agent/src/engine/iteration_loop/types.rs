@@ -1,9 +1,12 @@
-use barracuda_agent_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
+use barracuda_agent_memory::ChatMessage;
+use barracuda_agent_tool::{
+    BackgroundToolPool, ToolContext, ToolOutput, ToolSetError, ToolSetHandle,
+};
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::{Error as ModelError, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
-use serde_json::Value;
+use barracuda_vfs::ScopedVfs;
 use strum::IntoStaticStr;
 
 use super::{IterationId, ToolCallId};
@@ -35,18 +38,26 @@ pub enum IterationLoopError {
 pub(crate) struct LlmStep<'a> {
     pub(crate) iteration_id: IterationId,
     pub(crate) system_prompt: &'a str,
-    pub(crate) messages: &'a [Value],
+    pub(crate) messages: &'a [ChatMessage],
     /// Ephemeral trailing messages for this request only (never persisted),
     /// appended after `messages`. Empty when there is nothing to nudge.
-    pub(crate) reminders: &'a [Value],
+    pub(crate) reminders: &'a [ChatMessage],
     /// The tool view for this step. It stays stable for the whole iteration.
     pub(crate) tools: &'a ToolSetHandle<'a>,
+    /// Owns the background Tool calls this step accepts.
+    pub(crate) background: &'a BackgroundToolPool,
+    /// The filesystem attachments in `messages` are read from.
+    pub(crate) files: &'a ScopedVfs,
+    /// Handed to every Tool call of this step.
+    pub(crate) tool_context: ToolContext,
 }
 
 /// One event from an iteration.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationEvent {
     Reasoning(StreamPart<String>),
+    /// Provider signature over the reasoning, recorded with it in the transcript.
+    ReasoningSignature(String),
     Output(StreamPart<String>),
     #[cfg(feature = "cache_profile")]
     Usage(ProviderUsage),
@@ -63,7 +74,6 @@ pub(crate) enum IterationEvent {
 /// because they carry distinct control semantics for `AgentEngine`.
 pub(crate) enum IterationLoopEvent {
     Iteration(IterationEvent),
-    Detached(ToolDetachHandle),
     ApprovalRequired {
         tool_call_id: ToolCallId,
         tool_call: ToolCall,

@@ -49,7 +49,7 @@ pub use barracuda_peripheral::removable_storage;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
 /// Stable factory contract implemented by every peripheral implementation.
-pub use barracuda_peripheral::PeripheralImplementation;
+pub use barracuda_peripheral::{display_set, Instance, PeripheralImplementation};
 
 /// Statically allocated owner for one blocking I2C bus shared by attached peripherals.
 pub struct SharedI2cBus<Bus> {
@@ -70,20 +70,9 @@ impl<Bus> SharedI2cBus<Bus> {
     pub fn device(&'static self) -> embedded_hal_bus::i2c::CriticalSectionDevice<'static, Bus> {
         embedded_hal_bus::i2c::CriticalSectionDevice::new(&self.bus)
     }
-
-    /// Borrows the underlying bus while holding its critical-section lock.
-    ///
-    /// Platform adapters use this only to obtain stable vendor handles needed
-    /// by non-standard data planes such as MIPI-CSI sensor discovery.
-    pub fn with_bus<R>(&self, use_bus: impl FnOnce(&Bus) -> R) -> R {
-        critical_section::with(|critical_section| {
-            let bus = self.bus.borrow(critical_section).borrow();
-            use_bus(&bus)
-        })
-    }
 }
 
-/// Input bias selected while a VM-exposed GPIO operates as an input.
+/// Input bias selected while a exposed GPIO operates as an input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Pull {
     /// Leave the input electrically unbiased.
@@ -95,7 +84,7 @@ pub enum Pull {
     Down,
 }
 
-/// Electrical output driver selected for a VM-exposed GPIO.
+/// Electrical output driver selected for a exposed GPIO.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputDrive {
     /// Actively drive both high and low levels.
@@ -105,7 +94,7 @@ pub enum OutputDrive {
     OpenDrain,
 }
 
-/// Digital latch level used while changing a VM-exposed GPIO to output mode.
+/// Digital latch level used while changing a exposed GPIO to output mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DigitalLevel {
     /// Drive the logical low level.
@@ -115,14 +104,14 @@ pub enum DigitalLevel {
     High,
 }
 
-/// Runtime configuration for a VM-exposed digital input.
+/// Runtime configuration for a exposed digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputConfig {
     /// Input bias.
     pub pull: Pull,
 }
 
-/// Runtime configuration for a VM-exposed digital output.
+/// Runtime configuration for a exposed digital output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OutputConfig {
     /// Output latch installed before enabling the driver.
@@ -134,8 +123,9 @@ pub struct OutputConfig {
 /// An exposed GPIO whose runtime owner may change its digital mode.
 ///
 /// Reads and writes remain standard `embedded-hal` operations. This extension
-/// exists for the VM GPIO package because `embedded-hal` does not standardize
-/// runtime transitions between disabled, input, and output modes.
+/// exists for a runtime owner that switches a pin's mode, because
+/// `embedded-hal` does not standardize runtime transitions between disabled,
+/// input, and output modes.
 pub trait ConfigurableDigitalPin: InputPin + StatefulOutputPin {
     /// Configures the pin as a digital input.
     fn configure_input(&mut self, config: InputConfig) -> Result<(), Self::Error>;
@@ -170,7 +160,7 @@ pub trait CapacitiveTouchChannels {
     fn read(&mut self) -> Result<[u32; 2], Self::Error>;
 }
 
-/// Error family shared by one VM-exposed analog peripheral.
+/// Error family shared by one exposed analog peripheral.
 pub trait AnalogErrorType {
     /// Error returned by analog conversions.
     type Error: core::error::Error;
@@ -267,7 +257,7 @@ impl led_strip::LedStrip for UnavailableLedStrip {
 impl led_strip::LedStripPeripheral for NoPeripherals {
     type LedStrip = UnavailableLedStrip;
 
-    fn take_led_strip(&mut self) -> Option<Self::LedStrip> {
+    fn take_led_strip(&mut self, _instance: Instance) -> Option<Self::LedStrip> {
         None
     }
 }
@@ -295,7 +285,7 @@ impl camera::Camera for UnavailableCamera {
 impl camera::CameraPeripheral for NoPeripherals {
     type Camera = UnavailableCamera;
 
-    fn take_camera(&mut self) -> Option<Self::Camera> {
+    fn take_camera(&mut self, _instance: Instance) -> Option<Self::Camera> {
         None
     }
 }
@@ -320,7 +310,7 @@ impl imu::Imu for UnavailableImu {
 impl imu::ImuPeripheral for NoPeripherals {
     type Imu = UnavailableImu;
 
-    fn take_imu(&mut self) -> Option<Self::Imu> {
+    fn take_imu(&mut self, _instance: Instance) -> Option<Self::Imu> {
         None
     }
 }
@@ -353,7 +343,7 @@ impl audio::AudioCodec for UnavailableAudioCodec {
 impl audio::AudioCodecPeripheral for NoPeripherals {
     type AudioCodec = UnavailableAudioCodec;
 
-    fn take_audio_codec(&mut self) -> Option<Self::AudioCodec> {
+    fn take_audio_codec(&mut self, _instance: Instance) -> Option<Self::AudioCodec> {
         None
     }
 }
@@ -424,7 +414,7 @@ impl display::Display for UnavailableDisplay {
 impl display::DisplayPeripheral for NoPeripherals {
     type Display = UnavailableDisplay;
 
-    fn take_display(&mut self) -> Option<Self::Display> {
+    fn take_display(&mut self, _instance: Instance) -> Option<Self::Display> {
         None
     }
 }
@@ -472,7 +462,7 @@ impl power::PowerMonitor for UnavailablePowerMonitor {
 impl power::PowerMonitorPeripheral for NoPeripherals {
     type PowerMonitor = UnavailablePowerMonitor;
 
-    fn take_power_monitor(&mut self) -> Option<Self::PowerMonitor> {
+    fn take_power_monitor(&mut self, _instance: Instance) -> Option<Self::PowerMonitor> {
         None
     }
 }
@@ -501,7 +491,7 @@ impl real_time_clock::RealTimeClock for UnavailableRealTimeClock {
 impl real_time_clock::RealTimeClockPeripheral for NoPeripherals {
     type RealTimeClock = UnavailableRealTimeClock;
 
-    fn take_real_time_clock(&mut self) -> Option<Self::RealTimeClock> {
+    fn take_real_time_clock(&mut self, _instance: Instance) -> Option<Self::RealTimeClock> {
         None
     }
 }
@@ -526,7 +516,7 @@ impl touch::Touch for UnavailableTouch {
 impl touch::TouchPeripheral for NoPeripherals {
     type Touch = UnavailableTouch;
 
-    fn take_touch(&mut self) -> Option<Self::Touch> {
+    fn take_touch(&mut self, _instance: Instance) -> Option<Self::Touch> {
         None
     }
 }
@@ -547,7 +537,7 @@ impl buttons::Buttons for UnavailableButtons {
 impl buttons::ButtonsPeripheral for NoPeripherals {
     type Buttons = UnavailableButtons;
 
-    fn take_buttons(&mut self) -> Option<Self::Buttons> {
+    fn take_buttons(&mut self, _instance: Instance) -> Option<Self::Buttons> {
         None
     }
 }

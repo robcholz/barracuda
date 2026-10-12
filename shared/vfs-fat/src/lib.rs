@@ -6,7 +6,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp;
@@ -24,6 +23,7 @@ use hadris_fat::r#async::dir::DirectoryEntry;
 use hadris_fat::r#async::format::{FatFormatOptions, FatVolumeFormatter};
 use hadris_fat::r#async::{FatVolume, FatVolumeReadExt, FatVolumeWriteExt};
 use hadris_io::r#async::FromEmbedded;
+use portable_atomic_util::Arc;
 
 struct ErrorMapped<T>(T);
 

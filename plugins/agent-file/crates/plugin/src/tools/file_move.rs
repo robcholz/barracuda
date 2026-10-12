@@ -1,7 +1,8 @@
 use alloc::{boxed::Box, format, string::String};
 
 use barracuda_agent_plugin::tools::{
-    Action, Resource, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, Resource, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation,
+    ToolSpec,
 };
 use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ impl ToolSpec for FileMoveTool {
 impl ToolHandler for FileMoveTool {
     type Args = MoveArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let from = args.from.as_str();
             let to = args.to.as_str();
@@ -92,7 +93,7 @@ mod tests {
     use embassy_futures::block_on;
 
     use super::{FileMoveTool, MoveArgs};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn refuses_to_replace_a_destination() -> Result<(), Box<dyn core::error::Error>> {
@@ -105,10 +106,13 @@ mod tests {
             };
 
             let refused = tool
-                .invoke(MoveArgs {
-                    from: "/from".into(),
-                    to: "/to".into(),
-                })
+                .invoke(
+                    CONTEXT,
+                    MoveArgs {
+                        from: "/from".into(),
+                        to: "/to".into(),
+                    },
+                )
                 .await?;
             assert!(!refused.ok);
             assert_eq!(json(&refused.content)?["error"], "already_exists");
@@ -116,10 +120,13 @@ mod tests {
             assert_eq!(filesystem.read("/to").await?, b"target");
 
             let moved = tool
-                .invoke(MoveArgs {
-                    from: "/from".into(),
-                    to: "/moved".into(),
-                })
+                .invoke(
+                    CONTEXT,
+                    MoveArgs {
+                        from: "/from".into(),
+                        to: "/moved".into(),
+                    },
+                )
                 .await?;
             assert!(moved.ok);
             assert!(!filesystem.exists("/from").await?);

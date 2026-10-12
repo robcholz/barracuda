@@ -1,0 +1,43 @@
+name = "Live skill frontmatter YAML"
+description = "A Lua run writes skill packages whose frontmatter covers the supported YAML subset (quoted escapes, folded and literal blocks, nested metadata, comments) and each malformed form; a real model reloads the catalog, lists it, and reads a block-scalar skill."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Call vm_run exactly once with the Lua source below (load the vm tools first if they are not loaded), copied character for character as one single line without any change. Then reply with only the word started. Lua source: local nl, bs, tab = string.char(10), string.char(92), string.char(9) local function skill(name, ...) local f = assert(io.open('/workspace/media/skills/' .. name .. '/SKILL.md', 'w')) f:write('---' .. nl .. table.concat({...}, nl) .. nl .. '---' .. nl .. nl .. '# ' .. name .. nl .. nl .. 'Body of ' .. name .. '.' .. nl) f:close() end skill('yaml-quoted', 'name: yaml-quoted', 'description: "Double ' .. bs .. '"quoted' .. bs .. '" with ' .. bs .. bs .. ' and ' .. bs .. 't and ' .. bs .. 'n and ' .. bs .. 'r escapes"', "license: 'It''s single quoted'", 'compatibility: "plain double"', "allowed-tools: 'plain single'") skill('yaml-blocks', '# a comment line', 'name: yaml-blocks', '', 'description: >', '  Folded first line', '  continues here.', '', '  New paragraph.', 'license: |', '  Literal line one', '', '  Literal line three', 'compatibility: >', '  Works on every', '  host.', 'metadata:', '  author: e2e', '  version: "1.0"', '  notes: |', '    nested literal') skill('yaml-tab', 'name: yaml-tab', 'description: Tab.', 'metadata:', tab .. 'author: e2e') skill('yaml-indent', 'name: yaml-indent', '  description: Indented.') skill('yaml-nocolon', 'name: yaml-nocolon', 'description Missing colon') skill('yaml-key', 'name: yaml-key', 'bad key!: x', 'description: Bad key.') skill('yaml-unterminated', 'name: yaml-unterminated', 'description: "never closed') print('part 1 written')'''
+tool_contains = ['"run_id":1']
+
+[[steps]]
+send = '''Call vm_run exactly once with the Lua source below (load the vm tools first if they are not loaded), copied character for character as one single line without any change. Then reply with only the word started. Lua source: local nl, bs, tab = string.char(10), string.char(92), string.char(9) local function skill(name, ...) local f = assert(io.open('/workspace/media/skills/' .. name .. '/SKILL.md', 'w')) f:write('---' .. nl .. table.concat({...}, nl) .. nl .. '---' .. nl .. nl .. '# ' .. name .. nl .. nl .. 'Body of ' .. name .. '.' .. nl) f:close() end skill('yaml-single-unterminated', 'name: yaml-single-unterminated', "description: 'never closed") skill('yaml-escape', 'name: yaml-escape', 'description: "bad ' .. bs .. 'q escape"') skill('yaml-inner-quote', 'name: yaml-inner-quote', 'description: "inner " quote"') skill('yaml-single-escape', 'name: yaml-single-escape', "description: 'it's wrong'") skill('yaml-flow', 'name: yaml-flow', 'description: [a, b]') skill('yaml-anchor', 'name: yaml-anchor', 'description: &anchor value') skill('yaml-list', 'name: yaml-list', 'description: - item') print('part 2 written')'''
+tool_contains = ['"run_id":2']
+
+[[steps]]
+send = '''Call vm_run exactly once with the Lua source below (load the vm tools first if they are not loaded), copied character for character as one single line without any change. Then reply with only the word started. Lua source: local nl, bs, tab = string.char(10), string.char(92), string.char(9) local function skill(name, ...) local f = assert(io.open('/workspace/media/skills/' .. name .. '/SKILL.md', 'w')) f:write('---' .. nl .. table.concat({...}, nl) .. nl .. '---' .. nl .. nl .. '# ' .. name .. nl .. nl .. 'Body of ' .. name .. '.' .. nl) f:close() end skill('yaml-meta-scalar', 'name: yaml-meta-scalar', 'description: Meta scalar.', 'metadata: flat') skill('yaml-meta-empty', 'name: yaml-meta-empty', 'description: Meta empty.', 'metadata:') skill('yaml-nested-scalar', 'name: yaml-nested-scalar', 'description: Inline', '  child: value') skill('yaml-empty-child', 'name: yaml-empty-child', 'description:', '  child: value') skill('yaml-block-dedent', 'name: yaml-block-dedent', 'description: |', '    deep line', '  shallow line') skill('yaml-dup', 'name: yaml-dup', 'description: One.', 'description: Two.') skill('yaml-meta-dup', 'name: yaml-meta-dup', 'description: Meta dup.', 'metadata:', '  a: one', '  a: two') print('part 3 written')'''
+tool_contains = ['"run_id":3']
+
+[[steps]]
+send = '''Call vm_run exactly once with the Lua source below (load the vm tools first if they are not loaded), copied character for character as one single line without any change. Then reply with only the word started. Lua source: local nl, bs, tab = string.char(10), string.char(92), string.char(9) local function skill(name, ...) local f = assert(io.open('/workspace/media/skills/' .. name .. '/SKILL.md', 'w')) f:write('---' .. nl .. table.concat({...}, nl) .. nl .. '---' .. nl .. nl .. '# ' .. name .. nl .. nl .. 'Body of ' .. name .. '.' .. nl) f:close() end skill('yaml-meta-twice', 'name: yaml-meta-twice', 'description: Meta twice.', 'metadata:', '  a: one', 'metadata:', '  b: two') skill('yaml-meta-bad', 'name: yaml-meta-bad', 'description: Meta bad.', 'metadata:', '  a: [x]') skill('yaml-empty-block', 'name: yaml-empty-block', 'description: Empty block.', 'license: |') skill('yaml-meta-indent', 'name: yaml-meta-indent', 'description: Meta indent.', 'metadata:', '    a: one', '  b: two') print('part 4 written')'''
+tool_contains = ['"run_id":4']
+
+[[steps]]
+send = "Call skill_reload, then skill_list, then skill_read for the skill yaml-blocks. Then tell me in one short sentence how many skills were left out."
+tool_contains = [
+  'yaml-quoted',
+  'tab indentation is unsupported',
+  'unexpected indentation',
+  'expected a mapping entry',
+  'invalid mapping key',
+  'unterminated quoted scalar',
+  'unsupported value syntax',
+  'expected a nested mapping',
+  'expected a scalar value',
+  "duplicate field 'description'",
+  'Folded first line continues here.',
+]
+tool_errors_allowed = true
+
+[logs]
+await = ["VM run 4 finished: Success, 1 output line"]
+expect = ["VM run 1 finished: Success", "VM run 2 finished: Success", "VM run 3 finished: Success"]
+allow = ['left out']

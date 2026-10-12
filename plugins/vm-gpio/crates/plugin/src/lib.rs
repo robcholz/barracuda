@@ -4,11 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    sync::Arc,
-};
+use alloc::{format, string::String, string::ToString};
 use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, DigitalProvider, ExposedIo, InputConfig, OutputConfig,
     OutputDrive, Pull,
@@ -19,7 +15,8 @@ use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic_util::Arc;
 
 /// Shares the unified exposed-I/O owner with the `gpio` Lua package.
 #[barracuda_plugin::macros::plugin]
@@ -105,13 +102,13 @@ where
                     return Some(Err(Error::runtime("GPIO package has been revoked")));
                 }
                 let result = (|| {
+                    // Validate before claiming: a claimed pin stays consumed.
+                    let pull = parse_pull(&pull)?;
                     let mut pin = input
                         .acquire_digital(&name)
                         .map_err(|error| Error::runtime(error.to_string()))?;
-                    pin.configure_input(InputConfig {
-                        pull: parse_pull(&pull)?,
-                    })
-                    .map_err(|error| gpio_error(&name, error))?;
+                    pin.configure_input(InputConfig { pull })
+                        .map_err(|error| gpio_error(&name, error))?;
                     lua.create_userdata(GpioHandle::new(name, pin, Arc::clone(&input_active)))
                 })();
                 Some(result)
@@ -123,6 +120,8 @@ where
                         return Some(Err(Error::runtime("GPIO package has been revoked")));
                     }
                     let result = (|| {
+                        // Validate before claiming: a claimed pin stays consumed.
+                        let drive = parse_drive(&drive)?;
                         let mut pin = output
                             .acquire_digital(&name)
                             .map_err(|error| Error::runtime(error.to_string()))?;
@@ -132,7 +131,7 @@ where
                             } else {
                                 DigitalLevel::Low
                             },
-                            drive: parse_drive(&drive)?,
+                            drive,
                         })
                         .map_err(|error| gpio_error(&name, error))?;
                         lua.create_userdata(GpioHandle::new(name, pin, Arc::clone(&output_active)))
@@ -290,13 +289,24 @@ mod tests {
 
     extern crate std;
 
-    use core::{convert::Infallible, sync::atomic::AtomicBool};
+    use core::convert::Infallible;
     use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
+    use portable_atomic::AtomicBool;
 
     use super::*;
 
     struct TestProvider {
         busy: Arc<AtomicBool>,
+        acquisitions: portable_atomic::AtomicUsize,
+    }
+
+    impl TestProvider {
+        fn new() -> Self {
+            Self {
+                busy: Arc::new(AtomicBool::new(false)),
+                acquisitions: portable_atomic::AtomicUsize::new(0),
+            }
+        }
     }
 
     #[derive(Debug)]
@@ -330,6 +340,7 @@ mod tests {
         }
 
         fn acquire_digital(&self, name: &str) -> core::result::Result<Self::Pin, Self::Error> {
+            self.acquisitions.fetch_add(1, Ordering::AcqRel);
             if name != "D1" || self.busy.swap(true, Ordering::AcqRel) {
                 return Err(TestOpenError);
             }
@@ -399,9 +410,7 @@ mod tests {
 
     #[test]
     fn lua_handles_own_and_drop_provider_values() {
-        let provider = Arc::new(TestProvider {
-            busy: Arc::new(AtomicBool::new(false)),
-        });
+        let provider = Arc::new(TestProvider::new());
         let package = GpioPackage::new(Arc::clone(&provider));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install GPIO package");
@@ -422,9 +431,7 @@ mod tests {
 
     #[test]
     fn a_second_handle_observes_the_provider_conflict() {
-        let package = GpioPackage::new(Arc::new(TestProvider {
-            busy: Arc::new(AtomicBool::new(false)),
-        }));
+        let package = GpioPackage::new(Arc::new(TestProvider::new()));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install GPIO package");
 
@@ -442,10 +449,32 @@ mod tests {
     }
 
     #[test]
+    fn invalid_electrical_modes_are_rejected_before_the_pin_is_claimed() {
+        let provider = Arc::new(TestProvider::new());
+        let package = GpioPackage::new(Arc::clone(&provider));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install GPIO package");
+
+        let rejected: bool = lua
+            .load(
+                "local gpio = require('gpio')\n\
+                 local input, input_err = gpio.open_input('D1', 'sideways')\n\
+                 local output, output_err = gpio.open_output('D1', true, 'tristate')\n\
+                 return input == nil and input_err:find('pull') ~= nil\n\
+                     and output == nil and output_err:find('drive') ~= nil",
+            )
+            .eval()
+            .expect("run invalid-mode application");
+
+        assert!(rejected);
+        // A runtime owner never returns a claimed pin, so a rejected mode
+        // must not reach the provider at all.
+        assert_eq!(provider.acquisitions.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
     fn revocation_rejects_new_handles() {
-        let package = GpioPackage::new(Arc::new(TestProvider {
-            busy: Arc::new(AtomicBool::new(false)),
-        }));
+        let package = GpioPackage::new(Arc::new(TestProvider::new()));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install GPIO package");
         package.revoke();
@@ -459,5 +488,11 @@ mod tests {
             .eval()
             .expect("run revoked application");
         assert!(revoked);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = GpioPackage::new(Arc::new(TestProvider::new()));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

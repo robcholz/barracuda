@@ -3,12 +3,13 @@
 //! Global and per-agent stores appear as one catalog; id prefixes route writes
 //! back to the owning store.
 
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String};
+use portable_atomic_util::Arc;
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
-use barracuda_agent_tool::{Tool, ToolGroup};
+use barracuda_agent_tool::{Tool, ToolContext, ToolGroup};
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -32,7 +33,8 @@ mod tools;
 use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
 
-type ProviderBuilder = dyn Fn(LongTermMemory, LongTermMemory) -> LongTermMemoryContextProvider;
+type ProviderBuilder =
+    dyn Fn(LongTermMemory, LongTermMemory, ToolContext) -> LongTermMemoryContextProvider;
 
 /// The provider's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
@@ -68,16 +70,24 @@ pub(crate) struct LongTermMemoryContextProvider {
     /// Rebuilt only when a store version advances.
     catalog: CatalogCache,
     extraction_cursor: ExtractionCursor,
+    /// The Agent's Tool context, which the extractor's memory Tools run in.
+    tool_context: ToolContext,
 }
 
 impl LongTermMemoryContextProvider {
     /// Build an provider over the two stores and an `extractor`.
-    fn new(agent: LongTermMemory, global: LongTermMemory, extractor: Arc<dyn Extractor>) -> Self {
+    fn new(
+        agent: LongTermMemory,
+        global: LongTermMemory,
+        extractor: Arc<dyn Extractor>,
+        tool_context: ToolContext,
+    ) -> Self {
         Self {
             stores: MemoryStores { global, agent },
             extractor,
             catalog: CatalogCache::default(),
             extraction_cursor: ExtractionCursor::default(),
+            tool_context,
         }
     }
 
@@ -107,7 +117,9 @@ impl LongTermMemoryContextProvider {
         Resolver: Dns + 'static,
     {
         let extractor = LlmExtractor::shared(api_manager, &llm_factory);
-        Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
+        Arc::from(Box::new(move |agent, global, context| {
+            Self::new(agent, global, Arc::clone(&extractor), context)
+        }) as Box<ProviderBuilder>)
     }
 
     fn refresh_catalog(&mut self) {

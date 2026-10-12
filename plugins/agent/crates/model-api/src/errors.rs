@@ -46,6 +46,9 @@ pub enum Error {
     #[error("transient HTTP {status}: {body}")]
     #[strum(serialize = "transient_http_status")]
     TransientHttpStatus { status: u16, body: String },
+    #[error("provider reported an error in the stream: {0}")]
+    #[strum(serialize = "provider_error")]
+    ProviderError(String),
     #[error("failed to parse LLM JSON response")]
     #[strum(serialize = "parse")]
     Parse,
@@ -70,21 +73,6 @@ pub enum Error {
     #[error("structured chat requires an output schema")]
     #[strum(serialize = "missing_output_schema")]
     MissingOutputSchema,
-    #[error("media request is incomplete")]
-    #[strum(serialize = "incomplete_media_request")]
-    IncompleteMediaRequest,
-    #[error("media URL is empty")]
-    #[strum(serialize = "media_url_empty")]
-    MediaUrlEmpty,
-    #[error("media file is empty")]
-    #[strum(serialize = "media_file_empty")]
-    MediaFileEmpty,
-    #[error("media file is too large")]
-    #[strum(serialize = "media_too_large")]
-    MediaTooLarge,
-    #[error("backend requires local image data")]
-    #[strum(serialize = "requires_local_image")]
-    RequiresLocalImage,
 }
 
 impl Error {
@@ -129,4 +117,6 @@ pub enum InitError {
     MissingModel,
     #[error("LLM base URL is empty")]
     MissingBaseUrl,
+    #[error("LLM base URL is not an http(s) URL with a host")]
+    InvalidBaseUrl,
 }

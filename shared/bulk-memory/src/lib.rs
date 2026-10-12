@@ -1,19 +1,19 @@
 //! POD-only containers backed by a Platform-selected bulk-memory allocator.
 //!
 //! Platforms install the allocator that represents their high-capacity memory
-//! domain. Callers use [`BulkVec`] and [`BulkBox`] without receiving or naming
-//! that allocator, so non-POD control state cannot be placed in the domain by
-//! safe code.
+//! domain. Callers use [`BulkVec`], [`BulkBox`], and [`BulkText`] without
+//! receiving or naming that allocator, so non-POD control state cannot be
+//! placed in the domain by safe code.
 
 #![no_std]
 
-use core::{
-    alloc::Layout,
-    fmt,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+extern crate alloc;
+
+mod text;
+
+pub use text::{BulkText, ByteSink};
+
+use core::{alloc::Layout, fmt, ops::Deref, ops::DerefMut, ptr::NonNull};
 
 use allocator_api2::{
     alloc::{AllocError, Allocator, Global},
@@ -22,6 +22,7 @@ use allocator_api2::{
     vec::Vec as AllocVec,
 };
 use bytemuck::Pod;
+use portable_atomic::{AtomicPtr, Ordering};
 
 static GLOBAL_ALLOCATOR: Global = Global;
 static GLOBAL_BACKEND: platform::Backend = platform::Backend::new(&GLOBAL_ALLOCATOR);
@@ -80,6 +81,18 @@ pub trait BulkData: private::Sealed {}
 impl<T: Pod> BulkData for T {}
 impl<T: Pod> BulkData for [T] {}
 
+/// The active bulk-memory domain could not satisfy an allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BulkAllocError;
+
+impl fmt::Display for BulkAllocError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("bulk memory allocation failed")
+    }
+}
+
+impl core::error::Error for BulkAllocError {}
+
 /// A growable POD sequence allocated from the active Platform bulk-memory
 /// domain.
 pub struct BulkVec<T: Pod> {
@@ -101,6 +114,30 @@ impl<T: Pod> BulkVec<T> {
         Self {
             inner: AllocVec::with_capacity_in(capacity, BulkAllocator::active()),
         }
+    }
+
+    /// Creates an empty sequence with storage for exactly `capacity` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, BulkAllocError> {
+        let mut values = Self::new();
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|_error| BulkAllocError)?;
+        Ok(values)
+    }
+
+    /// Copies `values` into a new exactly sized sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_from_slice(values: &[T]) -> Result<Self, BulkAllocError> {
+        let mut copy = Self::try_with_capacity(values.len())?;
+        copy.extend_from_slice(values);
+        Ok(copy)
     }
 
     /// Returns the number of initialized elements.
@@ -247,6 +284,17 @@ impl<T: Pod> BulkBox<[T]> {
         let value = unsafe { value.assume_init() };
         Self { inner: value }
     }
+
+    /// Attempts to allocate a zero-filled POD slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BulkAllocError`] when the bulk-memory domain is exhausted.
+    pub fn try_new_zeroed_slice(length: usize) -> Result<Self, BulkAllocError> {
+        let mut values = BulkVec::try_with_capacity(length)?;
+        values.resize(length, bytemuck::Zeroable::zeroed());
+        Ok(values.into_boxed_slice())
+    }
 }
 
 impl<T: BulkData + ?Sized> Deref for BulkBox<T> {
@@ -266,6 +314,71 @@ impl<T: BulkData + ?Sized> DerefMut for BulkBox<T> {
 impl<T: BulkData + fmt::Debug + ?Sized> fmt::Debug for BulkBox<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(formatter)
+    }
+}
+
+/// Untyped byte buffers for C libraries that allocate through `calloc`-style
+/// hooks.
+///
+/// A C library such as mbedTLS asks for raw memory and decides itself what it
+/// stores there, so the [`BulkData`] boundary cannot be checked. Its owner
+/// sends only large plain-data buffers here (record and certificate buffers)
+/// and keeps the library's control structures on the global heap.
+pub mod foreign {
+    use core::{alloc::Layout, ptr::NonNull};
+
+    use super::{active_backend, platform::Backend};
+
+    /// Bytes before each buffer: its total size and its backend, padded to the
+    /// 16-byte alignment C expects from `calloc`.
+    const HEADER: usize = 16;
+
+    /// Allocates `size` zeroed bytes aligned to 16 from the active bulk-memory
+    /// domain, or returns null when the domain is exhausted.
+    #[must_use]
+    pub fn calloc(size: usize) -> *mut u8 {
+        let backend = active_backend();
+        let Some(layout) = size
+            .checked_add(HEADER)
+            .and_then(|total| Layout::from_size_align(total, HEADER).ok())
+        else {
+            return core::ptr::null_mut();
+        };
+        let Ok(block) = backend.allocator.allocate_zeroed(layout) else {
+            return core::ptr::null_mut();
+        };
+        let base = block.cast::<u8>().as_ptr();
+        // SAFETY: the block is at least `HEADER` bytes and 16-byte aligned,
+        // which fits a `usize` and a pointer at its start.
+        unsafe {
+            base.cast::<usize>().write(layout.size());
+            base.add(size_of::<usize>())
+                .cast::<*const Backend>()
+                .write(core::ptr::from_ref(backend));
+            base.add(HEADER)
+        }
+    }
+
+    /// Returns a buffer from [`calloc`] to the domain that allocated it.
+    ///
+    /// # Safety
+    ///
+    /// `pointer` is null, or came from [`calloc`] and has not been freed.
+    pub unsafe fn free(pointer: *mut u8) {
+        if pointer.is_null() {
+            return;
+        }
+        // SAFETY: `calloc` wrote the header just before `pointer`; the backend
+        // is static and the layout is the one it allocated with.
+        unsafe {
+            let base = pointer.sub(HEADER);
+            let size = base.cast::<usize>().read();
+            let backend = &*base.add(size_of::<usize>()).cast::<*const Backend>().read();
+            let layout = Layout::from_size_align_unchecked(size, HEADER);
+            backend
+                .allocator
+                .deallocate(NonNull::new_unchecked(base), layout);
+        }
     }
 }
 
@@ -297,7 +410,7 @@ pub mod platform {
     pub fn install(backend: &'static Backend) {
         super::ACTIVE_BACKEND.store(
             core::ptr::from_ref(backend).cast_mut(),
-            core::sync::atomic::Ordering::Release,
+            portable_atomic::Ordering::Release,
         );
     }
 
@@ -307,5 +420,44 @@ pub mod platform {
     /// use this backend while preserving the same caller-facing container API.
     pub fn install_global() {
         install(&super::GLOBAL_BACKEND);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::{BulkBox, BulkVec};
+
+    #[test]
+    fn fallible_constructors_allocate_exact_storage() {
+        let values = BulkVec::try_from_slice(&[1_u8, 2, 3]).expect("allocate copy");
+        assert_eq!(values.as_slice(), &[1, 2, 3]);
+        assert_eq!(values.capacity(), 3);
+
+        let zeroed = BulkBox::<[u16]>::try_new_zeroed_slice(4).expect("allocate zeroed slice");
+        assert_eq!(&*zeroed, &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn foreign_buffers_are_zeroed_aligned_and_returned() {
+        let buffer = super::foreign::calloc(20_000);
+        assert!(!buffer.is_null());
+        assert_eq!(buffer as usize % 16, 0);
+        // SAFETY: `calloc` returned 20 000 writable bytes.
+        let bytes = unsafe { core::slice::from_raw_parts_mut(buffer, 20_000) };
+        assert!(bytes.iter().all(|byte| *byte == 0));
+        bytes.fill(0xa5);
+        // SAFETY: the buffer came from `foreign::calloc`.
+        unsafe { super::foreign::free(buffer) };
+        // SAFETY: null is accepted and ignored.
+        unsafe { super::foreign::free(core::ptr::null_mut()) };
+        assert!(super::foreign::calloc(usize::MAX).is_null());
+    }
+
+    #[test]
+    fn impossible_allocations_report_errors() {
+        assert!(BulkVec::<u64>::try_with_capacity(usize::MAX).is_err());
+        assert!(BulkBox::<[u64]>::try_new_zeroed_slice(usize::MAX).is_err());
     }
 }

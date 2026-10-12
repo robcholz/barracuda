@@ -32,6 +32,7 @@ class RecordedRequest:
     headers: HeaderPairs
     body_sha256: str
     body_size: int
+    match_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ class TapeWriter:
         headers: HeaderPairs,
         body_sha256: str,
         body_size: int,
+        match_key: str | None = None,
     ) -> tuple[str, int]:
         """Allocate an interaction and append its request metadata."""
 
@@ -139,6 +141,7 @@ class TapeWriter:
                     'headers': headers,
                     'body_sha256': body_sha256,
                     'body_size': body_size,
+                    **({'match_key': match_key} if match_key is not None else {}),
                 }
             )
             return interaction_id, call_index
@@ -322,6 +325,7 @@ def _parse_request(event: dict[str, Any], line_number: int) -> RecordedRequest:
         headers=_parse_headers(event.get('headers'), line_number),
         body_sha256=_required_str(event, 'body_sha256', line_number),
         body_size=_non_negative_int(event, 'body_size', line_number),
+        match_key=_optional_str(event, 'match_key', line_number),
     )
 
 
@@ -433,6 +437,13 @@ def _parse_headers(value: Any, line_number: int) -> HeaderPairs:
             )
         headers.append((pair[0], pair[1]))
     return headers
+
+
+def _optional_str(event: dict[str, Any], key: str, line_number: int) -> str | None:
+    value = event.get(key)
+    if value is not None and not isinstance(value, str):
+        raise TapeFormatError(f'line {line_number}: {key} must be a string')
+    return value
 
 
 def _required_str(event: dict[str, Any], key: str, line_number: int) -> str:

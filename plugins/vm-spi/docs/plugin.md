@@ -1,11 +1,21 @@
 # SPI Plugin
 
-- Plugin ID: `spi`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
+Installs the require-only `spi` Lua package over the Board's exposed I/O pins.
 
-During unified Plugin construction, this Plugin shares the Board's single
+- Plugin ID: `spi`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `spi`
+- Web: none
+- Tasks: none
+- Storage: none
+
+During construction, this Plugin shares the Board's single
 runtime I/O owner. During registration it installs the require-only `spi` Lua
 package in the VM registry.
 

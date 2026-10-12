@@ -1,0 +1,70 @@
+name = "Lua I2C API"
+description = "A real model writes and reads a virtual register device, meets a NACK from an absent address, and sees injected arbitration-loss and timeout faults."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''Load the vm tools and call vm_run exactly once with the Lua source below, copied character for character without any change. Then reply with only the word started. Lua source: local i2c = require('i2c') local bus = assert(i2c.open('vio-0', 'vio-1', 100000)) local _, write_err = bus:write(0x50, string.char(0x10, 0xa1, 0xb2)) assert(write_err == nil) assert(bus:write_read(0x50, string.char(0x01), 3) == string.char(0x11, 0x22, 0x33)) assert(bus:read(0x50, 2) == string.char(0x44, 0x55)) local _, absent = bus:write(0x51, string.char(0)) assert(absent:find('NoAcknowledge')) local _, lost = bus:read(0x52, 1) assert(lost:find('ArbitrationLoss')) assert(bus:read(0x52, 1) == string.char(0x5a)) local _, slow = bus:read(0x53, 1) assert(slow:find('Timeout')) bus:close() assert(not bus:is_open()) local _, closed = bus:read(0x50, 1) assert(closed:find('closed')) print('i2c ok')'''
+tool_contains = ['"run_id":1']
+
+[virtual_io]
+
+[[virtual_io.devices]]
+address = 0x50
+data = "0011223344556677"
+
+[[virtual_io.devices]]
+address = 0x52
+data = "5a"
+
+[[virtual_io.faults]]
+address = 0x52
+fault = "arbitration-loss"
+
+[[virtual_io.faults]]
+address = 0x53
+fault = "timeout"
+once = false
+
+[[virtual_io.expect_registers]]
+address = 0x50
+offset = 0x10
+data = "a1b2"
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+bus = "I2C0"
+address = 0x50
+operations = [{ write = "01" }, { read = "112233" }]
+result = "ok"
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+address = 0x51
+result = "nack"
+injected = false
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+address = 0x52
+result = "arbitration-loss"
+injected = true
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+address = 0x52
+result = "ok"
+
+[[virtual_io.expect_events]]
+kind = "i2c"
+address = 0x53
+result = "timeout"
+
+[[virtual_io.expect_pins]]
+pin = "vio-0"
+function = "I2C0 SCL"
+
+[logs]
+# Every check in the script is an assert, so success means all of them held.
+await = ["VM run 1 finished: Success, 1 output line"]

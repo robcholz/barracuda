@@ -1,18 +1,22 @@
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used
+)]
 
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
 use barracuda_imessage_gateway_plugin::{
-    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
-    MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendStreamEvent, SendStreamRequest, SetTypingRequest, StreamError,
+    BinaryBody, BinaryChunk, BinaryStream, ChannelError, DeleteMessageRequest, EditMessageRequest,
+    MediaKind, MediaOpenFuture, MediaSource, MessageChannel, MessageGateway, MessageTarget,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SendStreamEvent, SendStreamRequest,
+    SetTypingRequest, StreamError,
 };
-use futures_lite::{future::block_on, stream};
-use web::{
-    InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, MediaPhase,
-    MessageBody, Web, WebDelivery, WebEventData, WebService,
-};
+use barracuda_plugin::api::SharedEntropy;
+use futures_lite::{future::block_on, stream, StreamExt};
+use web::{MediaSpool, SpoolFuture, Web, WebDelivery, WebEventData, MAX_KEPT};
 
 extern crate alloc;
 
@@ -20,10 +24,73 @@ fn target() -> MessageTarget {
     MessageTarget::new("web", "chat-42")
 }
 
+/// Bytes of known length, read again on every open.
+struct Memory(Vec<u8>);
+
+impl MediaSource for Memory {
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+
+    fn open(&self) -> MediaOpenFuture<'_> {
+        let bytes = self.0.clone();
+        Box::pin(async move {
+            Ok(Box::pin(stream::iter([Ok(BinaryChunk::from(bytes))])) as BinaryStream)
+        })
+    }
+}
+
+/// What a [`Spool`] wrote, in order: the kind, MIME type, name and bytes.
+type Spooled = Rc<RefCell<Vec<(MediaKind, String, Option<String>, Vec<u8>)>>>;
+
+/// Spools into memory and records each body, as the Plugin's spool writes to
+/// the Gateway's storage.
+#[derive(Default)]
+struct Spool(Spooled);
+
+impl MediaSpool for Spool {
+    fn spool(
+        &self,
+        kind: MediaKind,
+        mime_type: String,
+        filename: Option<String>,
+        mut body: BinaryStream,
+    ) -> SpoolFuture<'_> {
+        Box::pin(async move {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = body.next().await {
+                bytes.extend_from_slice(&chunk?);
+            }
+            self.0
+                .borrow_mut()
+                .push((kind, mime_type, filename, bytes.clone()));
+            Ok(Rc::new(Memory(bytes)) as Rc<dyn MediaSource>)
+        })
+    }
+}
+
+fn channel<const CAP: usize, const SUBS: usize>() -> (Web<CAP, SUBS>, Spooled) {
+    let spool = Spool::default();
+    let spooled = Rc::clone(&spool.0);
+    (
+        Web::new(Rc::new(spool), SharedEntropy::unavailable()),
+        spooled,
+    )
+}
+
+async fn read_all(source: &dyn MediaSource) -> Vec<u8> {
+    let mut stream = source.open().await.expect("open");
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        bytes.extend_from_slice(&chunk.expect("chunk"));
+    }
+    bytes
+}
+
 #[test]
 fn registers_as_web_and_streams_text_as_start_delta_end() {
     block_on(async {
-        let web = Rc::new(Web::<16, 2>::new());
+        let web = Rc::new(channel::<16, 2>().0);
         let gateway = MessageGateway::new();
         let _registration = gateway.register(web.clone()).expect("register Web channel");
         let mut events = web.subscribe("chat-42").expect("subscriber");
@@ -60,7 +127,7 @@ fn registers_as_web_and_streams_text_as_start_delta_end() {
 #[test]
 fn rich_stream_preserves_every_semantic_event() {
     block_on(async {
-        let web = Web::<16, 1>::new();
+        let web = channel::<16, 1>().0;
         let mut events = web.subscribe("chat-42").expect("subscriber");
         let stream_events = stream::iter([
             Ok(SendStreamEvent::new(
@@ -127,7 +194,7 @@ fn rich_stream_preserves_every_semantic_event() {
 #[test]
 fn a_failed_text_stream_emits_an_error_end_and_returns_the_failure() {
     block_on(async {
-        let web = Web::<8, 1>::new();
+        let web = channel::<8, 1>().0;
         let mut events = web.subscribe("chat-42").expect("subscriber");
         let chunks = stream::iter([
             Ok("partial".into()),
@@ -150,23 +217,11 @@ fn a_failed_text_stream_emits_an_error_end_and_returns_the_failure() {
 }
 
 #[test]
-fn maps_all_media_and_mutation_operations_to_events() {
+fn maps_mutation_operations_to_events() {
     block_on(async {
-        let web = Web::<32, 1>::new();
+        let web = channel::<32, 1>().0;
         let mut events = web.subscribe("chat-42").expect("subscriber");
 
-        let media = SendMediaRequest {
-            target: target(),
-            body: BinaryBody::Stream(Box::pin(stream::iter([
-                Ok(BinaryChunk::from(vec![1, 2])),
-                Ok(BinaryChunk::from(vec![3])),
-            ]))),
-            filename: Some("photo.jpg".into()),
-            mime_type: Some("image/jpeg".into()),
-            caption: Some("photo".into()),
-            reply_to: Some("parent".into()),
-        };
-        assert!(web.send_media(MediaKind::Image, media).await.is_ok());
         assert!(web
             .edit_message(EditMessageRequest::new(target(), "web-1", "updated"))
             .await
@@ -185,18 +240,6 @@ fn maps_all_media_and_mutation_operations_to_events() {
             .is_ok());
 
         assert!(
-            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { kind: MediaKind::Image, phase: MediaPhase::Start { .. }, .. }))
-        );
-        assert!(
-            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![1, 2]))
-        );
-        assert!(
-            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![3]))
-        );
-        assert!(
-            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::End { error: None }, .. }))
-        );
-        assert!(
             matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageEdit { text, .. } if text == "updated"))
         );
         assert!(
@@ -211,39 +254,189 @@ fn maps_all_media_and_mutation_operations_to_events() {
     });
 }
 
+/// The kept file behind a media event's URL.
+fn kept<const CAP: usize, const SUBS: usize>(
+    web: &Web<CAP, SUBS>,
+    url: &str,
+) -> Option<web::KeptMedia> {
+    web.media()
+        .kept(url.strip_prefix(web::MEDIA_PATH).expect("a media URL"))
+}
+
 #[test]
-fn serializes_stable_sse_names_json_and_base64_media() {
+fn every_body_becomes_one_media_event_naming_a_url() {
     block_on(async {
-        let web = Web::<8, 1>::new();
+        let (web, spooled) = channel::<16, 2>();
         let mut events = web.subscribe("chat-42").expect("subscriber");
-        assert!(web
+        let source: Rc<dyn MediaSource> = Rc::new(Memory(vec![4, 5, 6]));
+
+        let mut photo =
+            SendMediaRequest::source(target(), "photo.jpg", "image/jpeg", Rc::clone(&source));
+        photo.caption = Some("look".into());
+        photo.reply_to = Some("web-in-1".into());
+        let photo = web
+            .send_media(MediaKind::Image, photo)
+            .await
+            .expect("send a source");
+        let bytes = web
             .send_media(
                 MediaKind::File,
-                SendMediaRequest::bytes(
+                SendMediaRequest::bytes(target(), "a.bin", "", vec![0, 1, 2]),
+            )
+            .await
+            .expect("send bytes");
+        let streamed = web
+            .send_media(
+                MediaKind::Audio,
+                SendMediaRequest::stream(
                     target(),
-                    "a.bin",
-                    "application/octet-stream",
-                    vec![0, 1, 2]
+                    "voice.ogg",
+                    "audio/ogg",
+                    Box::pin(stream::iter([
+                        Ok(BinaryChunk::from(vec![7, 8])),
+                        Ok(BinaryChunk::from(vec![9])),
+                    ])),
                 ),
             )
             .await
-            .is_ok());
+            .expect("send a stream");
 
-        let _start = events.next().await.expect("start");
-        let delta = events.next().await.expect("delta");
-        let frame = delta.to_sse().expect("sse frame");
+        // a source is kept as it is; bytes and streams are spooled, nothing else
+        assert_eq!(
+            *spooled.borrow(),
+            vec![
+                (
+                    MediaKind::File,
+                    "application/octet-stream".into(),
+                    Some("a.bin".into()),
+                    vec![0, 1, 2]
+                ),
+                (
+                    MediaKind::Audio,
+                    "audio/ogg".into(),
+                    Some("voice.ogg".into()),
+                    vec![7, 8, 9]
+                ),
+            ]
+        );
+        let mut seen = Vec::new();
+        for receipt in [photo, bytes, streamed] {
+            let Some(WebDelivery::Event(event)) = events.next().await else {
+                panic!("one event per media message");
+            };
+            let WebEventData::Media {
+                message_id,
+                url,
+                size,
+                ..
+            } = &event.data
+            else {
+                panic!("a media event, not {:?}", event.data);
+            };
+            assert_eq!(message_id, &receipt.message_id);
+            assert_eq!(*size, 3);
+            seen.push((event.clone(), url.clone()));
+        }
+        let image = kept(&web, &seen[0].1).expect("the photo is kept");
+        assert!(Rc::ptr_eq(&image.source, &source), "a source is not copied");
+        assert_eq!(
+            read_all(&*kept(&web, &seen[2].1).unwrap().source).await,
+            [7, 8, 9]
+        );
+        let frame = WebDelivery::Event(Rc::clone(&seen[0].0)).to_sse().unwrap();
+        assert!(frame.starts_with("id: 1\nevent: message.image\ndata: "));
+        assert!(frame.contains(r#""caption":"look","filename":"photo.jpg","message_id":"web-1","mime_type":"image/jpeg","reply_to":"web-in-1","size":3,"url":"/api/web/media/00000000-0""#));
+        let frame = WebDelivery::Event(Rc::clone(&seen[1].0)).to_sse().unwrap();
+        assert!(frame.contains("event: message.file"));
+        assert!(frame.contains(r#""mime_type":"application/octet-stream""#));
 
-        assert!(frame.starts_with("id: 2\nevent: message.file\ndata: "));
-        assert!(frame.contains("\"phase\":\"delta\""));
-        assert!(frame.contains("\"data\":\"AAEC\""));
-        assert!(frame.ends_with("\n\n"));
+        // replay holds the same three small events, never the bytes
+        let mut replay = web.subscribe_from("chat-42", Some(0)).expect("replay");
+        for _ in 0..3 {
+            let Some(delivery) = replay.next().await else {
+                panic!("replayed");
+            };
+            let frame = delivery.to_sse().unwrap();
+            assert!(frame.len() < 256, "{}", frame.as_str());
+            assert!(!frame.contains("\"data\""));
+        }
+    });
+}
+
+/// Fails to open, as a file that left the cache does.
+struct Failing;
+
+impl MediaSource for Failing {
+    fn len(&self) -> u64 {
+        1
+    }
+
+    fn open(&self) -> MediaOpenFuture<'_> {
+        Box::pin(async { Err(StreamError::failed("gone")) })
+    }
+}
+
+/// Fails every body, as a full cache does.
+struct Refusing;
+
+impl MediaSpool for Refusing {
+    fn spool(
+        &self,
+        _kind: MediaKind,
+        _mime_type: String,
+        _filename: Option<String>,
+        _body: BinaryStream,
+    ) -> SpoolFuture<'_> {
+        Box::pin(async {
+            Err(ChannelError::Transport {
+                message: "out of space".into(),
+            })
+        })
+    }
+}
+
+#[test]
+fn a_failed_spool_sends_nothing_and_kept_files_are_bounded() {
+    block_on(async {
+        let web = Web::<8, 1>::new(Rc::new(Refusing), SharedEntropy::unavailable());
+        let mut events = web.subscribe("chat-42").expect("subscriber");
+        let refused = web
+            .send_media(
+                MediaKind::File,
+                SendMediaRequest::bytes(target(), "a.bin", "application/zip", vec![1]),
+            )
+            .await;
+        assert!(matches!(refused, Err(ChannelError::Transport { .. })));
+
+        let mut urls = Vec::new();
+        for _ in 0..=MAX_KEPT {
+            web.send_media(
+                MediaKind::File,
+                SendMediaRequest {
+                    body: BinaryBody::Source(Rc::new(Failing)),
+                    ..SendMediaRequest::bytes(target(), "a.bin", "application/zip", Vec::new())
+                },
+            )
+            .await
+            .expect("a source is sent without being opened");
+            let Some(WebDelivery::Event(event)) = events.next().await else {
+                panic!("an event");
+            };
+            let WebEventData::Media { url, .. } = &event.data else {
+                panic!("a media event");
+            };
+            urls.push(url.clone());
+        }
+        assert!(kept(&web, &urls[0]).is_none(), "the oldest is evicted");
+        assert!(kept(&web, &urls[1]).is_some());
+        assert!(kept(&web, &urls[MAX_KEPT]).is_some());
     });
 }
 
 #[test]
 fn replays_after_last_event_id_and_reports_bounded_history_gaps() {
     block_on(async {
-        let web = Web::<2, 2>::new();
+        let web = channel::<2, 2>().0;
         assert!(web
             .send_message(SendMessageRequest::text(target(), "one"))
             .await
@@ -266,7 +459,7 @@ fn replays_after_last_event_id_and_reports_bounded_history_gaps() {
 #[test]
 fn subscriptions_are_isolated_by_conversation() {
     block_on(async {
-        let web = Web::<8, 2>::new();
+        let web = channel::<8, 2>().0;
         let mut chat_42 = web.subscribe("chat-42").expect("subscriber");
         assert!(web
             .set_typing(SetTypingRequest::new(
@@ -286,80 +479,5 @@ fn subscriptions_are_isolated_by_conversation() {
                 if event.conversation_id == "chat-42"
                     && matches!(event.data, WebEventData::ConversationTyping { typing: false })
         ));
-    });
-}
-
-#[derive(Default)]
-struct RecordingSink {
-    messages: RefCell<Vec<InboundMessage>>,
-    media: RefCell<Vec<InboundMedia>>,
-}
-
-impl InboundMessageSink for RecordingSink {
-    fn receive_message(&self, request: InboundMessage) -> InboundFuture<'_, ()> {
-        self.messages.borrow_mut().push(request);
-        Box::pin(async { Ok(()) })
-    }
-
-    fn receive_media(&self, request: InboundMedia) -> InboundFuture<'_, ()> {
-        self.media.borrow_mut().push(request);
-        Box::pin(async { Ok(()) })
-    }
-}
-
-#[test]
-fn web_service_maps_rest_json_and_binary_body_to_the_inbound_sink() {
-    block_on(async {
-        let sink = Rc::new(RecordingSink::default());
-        let service = WebService::new(sink.clone());
-
-        let response = service
-            .receive_message_json(
-                "chat-42",
-                br#"{"message_id":"client-1","thread_id":null,"text":"hello","reply_to":"parent"}"#,
-            )
-            .await
-            .expect("valid request");
-        assert_eq!(response.message_id, "client-1");
-        assert_eq!(sink.messages.borrow()[0].conversation_id, "chat-42");
-        assert_eq!(sink.messages.borrow()[0].text, "hello");
-
-        assert!(service
-            .receive_media(
-                "chat-42",
-                MediaKind::Audio,
-                "client-2",
-                MessageBody::Bytes(vec![4, 5]),
-                Some("voice.ogg"),
-                Some("audio/ogg"),
-                None,
-                None,
-            )
-            .await
-            .is_ok());
-        assert_eq!(sink.media.borrow().len(), 1);
-    });
-}
-
-#[test]
-fn web_service_rejects_invalid_or_empty_rest_messages_before_the_sink() {
-    block_on(async {
-        let sink = Rc::new(RecordingSink::default());
-        let service = WebService::new(sink.clone());
-
-        let invalid_json = service.receive_message_json("chat", b"{").await;
-        let empty = service
-            .receive_message_json(
-                "chat",
-                br#"{"message_id":"client-1","text":"","reply_to":null}"#,
-            )
-            .await;
-
-        assert!(matches!(
-            invalid_json,
-            Err(InboundError::InvalidJson { .. })
-        ));
-        assert!(matches!(empty, Err(InboundError::InvalidRequest { .. })));
-        assert!(sink.messages.borrow().is_empty());
     });
 }

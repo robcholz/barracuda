@@ -1,11 +1,24 @@
 # Workflow Plugin
 
-- Plugin ID: `workflow`
-- Direct Plugin dependencies: none
-- Provided typed capabilities: `WorkflowActionRegistry`, `WorkflowService`
+Owns durable Workflow definitions, Event matching, and cooperative execution,
+and publishes the registry other Plugins add Workflow Actions to.
 
-The Workflow Plugin owns durable Workflow definitions, Event matching, and
-cooperative execution. A single execution awaits its Actions in document order;
+- Plugin ID: `workflow`
+- Dependencies: none
+- Settings: none
+- Context resources: none
+- Provided capabilities: `WorkflowActionRegistry`, `WorkflowService`
+- Required capabilities: none
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: one Workflow runtime task (`workflow_task`, pool size 1) that restores the
+  catalog and then polls executions
+- Storage: user-created definitions in `/data/workflows.json`
+
+The Plugin declares a private filesystem. It registers no Workflow Actions or
+Events of its own. A single execution awaits its Actions in document order;
 different executions are polled concurrently by the Workflow task.
 
 Dependent Plugins register direct typed Actions with

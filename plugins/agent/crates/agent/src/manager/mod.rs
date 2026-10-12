@@ -7,8 +7,9 @@ mod layout;
 mod long_term;
 mod persistence;
 
-use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
+use portable_atomic_util::Arc;
 
 use crate::config::SharedApiManager;
 use barracuda_agent_memory::{ProfileStore, TranscriptStore};

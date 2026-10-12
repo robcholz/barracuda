@@ -1,4 +1,4 @@
-use barracuda_agent_context::{Band, Block, BlockKind, Context, ContextItem, Scope};
+use barracuda_agent_context::{Band, Block, BlockKind, ChatMessage, Context, ContextItem, Scope};
 use serde_json::Value;
 
 #[test]
@@ -147,11 +147,11 @@ fn reminder_feeds_the_tail_without_touching_version() {
     context.reminder(Some("only these tools"));
     assert_eq!(context.version(), version);
 
-    let history: [Value; 0] = [];
+    let history: [ChatMessage; 0] = [];
     let request = context.request(&history);
     assert_eq!(request.reminders().len(), 1);
     assert_eq!(
-        reminder_content(request.reminders().first()),
+        reminder_content(request.reminders().first()).as_deref(),
         Some("<system-reminder>\nonly these tools\n</system-reminder>")
     );
 }
@@ -164,15 +164,15 @@ fn reminders_render_in_wire_order_and_clear_by_kind() {
         .with_reminder(BlockKind::ToolReminder, Some("tools"))
         .with_reminder(BlockKind::ActiveMode, Some("plan"));
 
-    let history: [Value; 0] = [];
+    let history: [ChatMessage; 0] = [];
     let request = context.request(&history);
     assert_eq!(request.reminders().len(), 3);
     assert_eq!(
-        reminder_content(request.reminders().first()),
+        reminder_content(request.reminders().first()).as_deref(),
         Some("<system-reminder>\ntools\n</system-reminder>")
     );
     assert_eq!(
-        reminder_content(request.reminders().get(1)),
+        reminder_content(request.reminders().get(1)).as_deref(),
         Some("<system-reminder>\nplan\n</system-reminder>")
     );
 
@@ -180,11 +180,11 @@ fn reminders_render_in_wire_order_and_clear_by_kind() {
     let request = context.request(&history);
     assert_eq!(request.reminders().len(), 2);
     assert_eq!(
-        reminder_content(request.reminders().first()),
+        reminder_content(request.reminders().first()).as_deref(),
         Some("<system-reminder>\nplan\n</system-reminder>")
     );
     assert_eq!(
-        reminder_content(request.reminders().get(1)),
+        reminder_content(request.reminders().get(1)).as_deref(),
         Some("<system-reminder>\noutput\n</system-reminder>")
     );
 }
@@ -192,8 +192,9 @@ fn reminders_render_in_wire_order_and_clear_by_kind() {
 #[test]
 fn sink_routes_items_to_their_request_channels() {
     let mut context = Context::new();
-    let recent = serde_json::json!({ "role": "user", "content": "hello" });
-    let summary = serde_json::json!({ "role": "assistant", "content": "summary" });
+    let recent = ChatMessage::new(&serde_json::json!({ "role": "user", "content": "hello" }));
+    let summary =
+        ChatMessage::new(&serde_json::json!({ "role": "assistant", "content": "summary" }));
 
     let history = {
         let mut sink = context.sink();
@@ -217,12 +218,15 @@ fn sink_routes_items_to_their_request_channels() {
 }
 
 fn system_of(context: &mut Context) -> String {
-    let history: [Value; 0] = [];
+    let history: [ChatMessage; 0] = [];
     context.request(&history).system().to_string()
 }
 
-fn reminder_content(message: Option<&Value>) -> Option<&str> {
-    message
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
+fn reminder_content(message: Option<&ChatMessage>) -> Option<String> {
+    message.map(ChatMessage::to_value).and_then(|message| {
+        message
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })
 }

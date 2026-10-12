@@ -5,13 +5,13 @@ use alloc::{borrow::ToOwned, string::String, string::ToString};
 use crate::engine::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, ToolDiscoveryHandle, ToolFuture, ToolHandler, ToolInvocation,
-    ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, ToolContext, ToolDiscoveryHandle, ToolFuture, ToolHandler,
+    ToolInvocation, ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 use serde_json::json;
 
-use super::record_loaded_tool_group;
+use super::{loaded_tool_groups, record_loaded_tool_group};
 
 #[derive(Deserialize)]
 pub(super) struct LoadArgs {
@@ -41,22 +41,43 @@ impl ToolSpec for ToolLoadTool {
 impl ToolHandler for ToolLoadTool {
     type Args = LoadArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let group_id = args.group_id.trim().to_owned();
-            let loaded = self.discovery.request_load(group_id.clone());
-            if loaded {
+            if self.discovery.request_load(group_id.clone()) {
                 record_loaded_tool_group(&self.storage, group_id.clone());
+                return Ok(ToolOutput::new(
+                    json!({
+                        "group_id": group_id,
+                        "loaded": true,
+                        "available_next_turn": true,
+                    })
+                    .to_string(),
+                    true,
+                ));
             }
-            Ok(ToolOutput {
-                content: json!({
+            // A loaded group leaves the loadable catalog. Reporting it as not
+            // loaded makes a model retry the load instead of calling its tools.
+            if loaded_tool_groups(&self.storage).contains(&group_id) {
+                return Ok(ToolOutput::new(
+                    json!({
+                        "group_id": group_id,
+                        "loaded": true,
+                        "already_loaded": true,
+                    })
+                    .to_string(),
+                    true,
+                ));
+            }
+            Ok(ToolOutput::new(
+                json!({
                     "group_id": group_id,
-                    "loaded": loaded,
-                    "available_next_turn": loaded,
+                    "loaded": false,
+                    "error": "unknown tool group; tool_search lists the loadable groups",
                 })
                 .to_string(),
-                ok: loaded,
-            })
+                false,
+            ))
         })
     }
 }
@@ -72,12 +93,12 @@ impl ToolSpec for ToolSearchTool {
 impl ToolHandler for ToolSearchTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            Ok(ToolOutput {
-                content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                json!({ "tool_groups": self.discovery.catalog() }).to_string(),
+                true,
+            ))
         })
     }
 }
@@ -121,8 +142,11 @@ mod tests {
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
                 .expect("valid invocation");
 
-        let (joined, detached) = ToolRunner::new(&tools).run(vec![call]);
-        assert!(detached.is_none());
+        let joined = ToolRunner::new(
+            &tools,
+            barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+        )
+        .run(vec![call]);
         let output = block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("load result")
@@ -130,6 +154,33 @@ mod tests {
 
         assert!(output.ok);
         assert_eq!(loaded_tool_groups(&storage), vec!["hidden".to_owned()]);
+
+        // Once the next iteration applies the load, the group is no longer
+        // loadable; loading it again reports it as already loaded.
+        let tools = tool_set.begin().expect("tool set begins again");
+        let load_again = |group: &str| {
+            let call = ToolInvocation::try_new(
+                Some("call-again"),
+                "tool_load",
+                &alloc::format!(r#"{{"group_id":"{group}"}}"#),
+            )
+            .expect("valid invocation");
+            let joined = ToolRunner::new(
+                &tools,
+                barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+            )
+            .run(vec![call]);
+            block_on(joined.collect::<Vec<_>>())
+                .pop()
+                .expect("load result")
+                .1
+        };
+        let again = load_again("hidden");
+        assert!(again.ok);
+        assert!(again.content.contains(r#""already_loaded":true"#));
+        let unknown = load_again("missing");
+        assert!(!unknown.ok);
+        assert!(unknown.content.contains("unknown tool group"));
     }
 
     struct HiddenTool;
@@ -153,13 +204,12 @@ mod tests {
     impl ToolHandler for HiddenTool {
         type Args = barracuda_agent_tool::EmptyArgs;
 
-        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
-            alloc::boxed::Box::pin(async {
-                Ok(ToolOutput {
-                    content: "ok".to_owned(),
-                    ok: true,
-                })
-            })
+        fn invoke<'a>(
+            &'a self,
+            _context: barracuda_agent_tool::ToolContext,
+            _args: Self::Args,
+        ) -> ToolFuture<'a> {
+            alloc::boxed::Box::pin(async { Ok(ToolOutput::new("ok", true)) })
         }
     }
 }

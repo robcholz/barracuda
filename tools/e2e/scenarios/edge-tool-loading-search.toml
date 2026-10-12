@@ -1,0 +1,16 @@
+name = "Tool search catalog"
+description = "tool_search ignores filter-like arguments and always returns the full sorted loadable catalog; a group disappears from the catalog once its load is applied, and loading it again reports already_loaded."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = '''This is a tool catalog test. Make these tool calls in order, one per response, with exactly these arguments: 1. tool_search {"query": "time", "limit": 1} 2. tool_load {"group_id": "file"} 3. tool_search {} 4. tool_load {"group_id": "file"}. Then reply with only the words Catalog checked.'''
+tool_contains = [
+  '"limit": 1}{"tool_groups":[{"id":"file","tools":[{"description":',
+  '{"id":"gateway","tools":[{"description":"Use `gateway_send` for one complete text message.',
+  '{"id":"workflow","tools":[',
+  '{"available_next_turn":true,"group_id":"file","loaded":true}',
+  'tool_search{}{"tool_groups":[{"id":"gateway","tools":[',
+  '{"already_loaded":true,"group_id":"file","loaded":true}',
+]

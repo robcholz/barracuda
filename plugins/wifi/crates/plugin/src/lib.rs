@@ -11,8 +11,11 @@ mod endpoint;
 use alloc::{boxed::Box, rc::Rc};
 use core::{future::Future, net::Ipv4Addr, pin::Pin, time::Duration};
 
-use barracuda_captive_portal_plugin::{AssetsProvider, CaptivePortal, ResourceFiles, WebEntry};
-use barracuda_platform::{StationState, WifiDevice};
+use barracuda_captive_portal_plugin::{
+    AssetsProvider, CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup,
+    WebText,
+};
+use barracuda_platform::{AccessPointState, StationState, WifiDevice};
 use barracuda_plugin::{
     api::PluginContext,
     manager::{
@@ -23,16 +26,20 @@ use barracuda_plugin::{
 use barracuda_webserver_plugin::{HttpResponse, WebServer};
 use control::RadioControl;
 use embassy_futures::select::select;
-use embassy_net::Stack;
+use embassy_net::{ConfigV4, Ipv4Cidr, Stack, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::Timer;
-use endpoint::{ScanEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WifiEndpoint};
+use endpoint::{
+    ScanEndpoint, StatusEndpoint, WIFI_API_PATH, WIFI_SCAN_API_PATH, WIFI_STATUS_API_PATH,
+    WifiEndpoint,
+};
 
 pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatus};
 
 const SETUP_AP_SSID: &str = "Barracuda Setup";
 const SETUP_AP_PASSWORD: &str = "";
 const SETUP_AP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 4, 1);
+const SETUP_AP_PREFIX: u8 = 24;
 const CAPTIVE_HTTP_PORT: u16 = 80;
 const CAPTIVE_DETECTION_PATHS: [&str; 8] = [
     "/",
@@ -57,15 +64,18 @@ pub struct WifiPlugin {
 }
 
 impl WifiPlugin {
-    /// Takes ownership of the selected Platform's Wi-Fi mechanism.
+    /// Takes the selected Platform's Wi-Fi radio from the context.
+    ///
+    /// Without one, the access-point side falls back to the context's IP
+    /// stack and registration fails.
     #[must_use]
-    pub fn new<Builtins, Io, Device: WifiDevice>(
-        _context: &mut PluginContext<Builtins, Io>,
-        device: Device,
-    ) -> Self {
-        let access_point_stack = device.access_point_stack();
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        let device = context.wifi.take();
+        let access_point_stack = device
+            .as_ref()
+            .map_or(context.ip_stack, WifiDevice::access_point_stack);
         Self {
-            radio: Some(RadioControl::new(device)),
+            radio: device.map(RadioControl::new),
             control: None,
             access_point_stack,
             access_point_shutdown: Rc::new(Signal::new()),
@@ -92,15 +102,26 @@ impl Plugin for WifiPlugin {
             context.storage().clone(),
             Rc::clone(&self.access_point_shutdown),
         ));
+        let entry = WebEntry {
+            id: "wifi",
+            group: WebGroup::Device,
+            order: 10,
+            title: WebText {
+                zh: "Wi-Fi",
+                en: "Wi-Fi",
+            },
+            summary: WebText {
+                zh: "扫描、连接或忘记无线网络",
+                en: "Scan, join or forget wireless networks",
+            },
+            icon: Some("icon.svg"),
+            figure: Some("figure.js"),
+            module: "entry.js",
+        };
+        let files = ResourceFiles::from(context.filesystem()?.clone());
+        let status = Rc::clone(&control);
         let entry = portal
-            .register(
-                WebEntry {
-                    id: "wifi",
-                    title: "Wi-Fi",
-                    module: "entry.js",
-                },
-                ResourceFiles::from(context.filesystem()?.clone()),
-            )
+            .register_with_status(entry, files, move || entry_status(&status.status()))
             .map_err(PluginError::registration)?;
         context.retain(entry);
         for path in CAPTIVE_DETECTION_PATHS {
@@ -128,6 +149,14 @@ impl Plugin for WifiPlugin {
                 .serve_http(WIFI_SCAN_API_PATH, ScanEndpoint::new(Rc::clone(&control)))
                 .map_err(PluginError::registration)?,
         );
+        context.retain(
+            webserver
+                .serve_http(
+                    WIFI_STATUS_API_PATH,
+                    StatusEndpoint::new(Rc::clone(&control)),
+                )
+                .map_err(PluginError::registration)?,
+        );
         context.provide(Rc::clone(&control))?;
         self.control = Some(control);
         Ok(())
@@ -150,6 +179,15 @@ impl Plugin for WifiPlugin {
             return Ok(());
         }
         let stack = self.access_point_stack;
+        if control.capabilities().access_point {
+            // The radio's access-point stack has no address until its owner
+            // gives it the setup network's.
+            stack.set_config_v4(ConfigV4::Static(StaticConfigV4 {
+                address: Ipv4Cidr::new(SETUP_AP_ADDRESS, SETUP_AP_PREFIX),
+                gateway: Some(SETUP_AP_ADDRESS),
+                dns_servers: Default::default(),
+            }));
+        }
         let access_point_shutdown = Rc::clone(&self.access_point_shutdown);
         let policy = cancellable(
             context.task_token(),
@@ -170,11 +208,55 @@ impl Plugin for WifiPlugin {
     }
 }
 
+/// Maps the last observed radio state to the portal status of the `wifi` entry.
+fn entry_status(status: &WifiStatus) -> EntryStatus {
+    match (status.station(), status.access_point()) {
+        (StationState::Connected { ssid }, _) => {
+            let connected = EntryStatus::new(
+                EntryState::Ready,
+                WebText {
+                    zh: "已连接",
+                    en: "Connected",
+                },
+            );
+            match ssid {
+                Some(ssid) => connected.with_detail(ssid.as_str()),
+                None => connected,
+            }
+        }
+        (StationState::Connecting, _) => EntryStatus::new(
+            EntryState::Attention,
+            WebText {
+                zh: "正在连接…",
+                en: "Connecting…",
+            },
+        ),
+        (StationState::Disconnected, AccessPointState::Started { ssid }) => {
+            EntryStatus::new(EntryState::Attention, SETUP_HOTSPOT).with_detail(ssid.as_str())
+        }
+        (StationState::Disconnected, AccessPointState::Starting) => {
+            EntryStatus::new(EntryState::Attention, SETUP_HOTSPOT)
+        }
+        (StationState::Disconnected, AccessPointState::Stopped) => EntryStatus::new(
+            EntryState::Off,
+            WebText {
+                zh: "未连接",
+                en: "Not connected",
+            },
+        ),
+    }
+}
+
+const SETUP_HOTSPOT: WebText = WebText {
+    zh: "配置热点",
+    en: "Setup hotspot",
+};
+
 struct PortalLanding(Rc<CaptivePortal>);
 
 impl AssetsProvider for PortalLanding {
     async fn serve(&self, _path: &str) -> HttpResponse {
-        AssetsProvider::serve(self.0.as_ref(), "/portal/").await
+        self.0.landing().await
     }
 }
 
@@ -280,3 +362,61 @@ async fn run_wifi_runtime(runtime: BoxedWifiRuntime) {
 #[derive(Debug, thiserror::Error)]
 #[error("Wi-Fi runtime was not prepared during Plugin registration")]
 struct WifiRuntimeUnavailable;
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+
+    use barracuda_platform::{AccessPointState, StationState, WifiCapabilities};
+    use serde_json::{Value, json};
+
+    use super::{WifiStatus, entry_status};
+
+    fn status(station: StationState, access_point: AccessPointState) -> Value {
+        let status = WifiStatus::from_parts(WifiCapabilities::managed(), station, access_point);
+        serde_json::to_value(entry_status(&status)).unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn entry_status_follows_station_then_setup_hotspot() {
+        let hotspot = || AccessPointState::Started {
+            ssid: String::from("Barracuda Setup"),
+        };
+        assert_eq!(
+            status(
+                StationState::Connected {
+                    ssid: Some(String::from("HomeNet")),
+                },
+                hotspot(),
+            ),
+            json!({"state": "ready", "label": {"zh": "已连接", "en": "Connected"}, "detail": "HomeNet"})
+        );
+        assert_eq!(
+            status(
+                StationState::Connected { ssid: None },
+                AccessPointState::Stopped
+            ),
+            json!({"state": "ready", "label": {"zh": "已连接", "en": "Connected"}})
+        );
+        assert_eq!(
+            status(StationState::Connecting, hotspot()),
+            json!({"state": "attention", "label": {"zh": "正在连接…", "en": "Connecting…"}})
+        );
+        assert_eq!(
+            status(StationState::Disconnected, hotspot()),
+            json!({
+                "state": "attention",
+                "label": {"zh": "配置热点", "en": "Setup hotspot"},
+                "detail": "Barracuda Setup"
+            })
+        );
+        assert_eq!(
+            status(StationState::Disconnected, AccessPointState::Starting),
+            json!({"state": "attention", "label": {"zh": "配置热点", "en": "Setup hotspot"}})
+        );
+        assert_eq!(
+            status(StationState::Disconnected, AccessPointState::Stopped),
+            json!({"state": "off", "label": {"zh": "未连接", "en": "Not connected"}})
+        );
+    }
+}

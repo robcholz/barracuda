@@ -1,7 +1,8 @@
 use alloc::{boxed::Box, format, string::String};
 
 use barracuda_agent_plugin::tools::{
-    Action, Resource, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, Resource, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation,
+    ToolSpec,
 };
 use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
@@ -54,7 +55,7 @@ impl ToolSpec for FileWriteTool {
 impl ToolHandler for FileWriteTool {
     type Args = WriteArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let path = args.path.as_str();
             let bytes = args.content.as_bytes();
@@ -99,7 +100,7 @@ mod tests {
     use embassy_futures::block_on;
 
     use super::{FileWriteTool, WriteArgs};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn creates_by_default_and_requires_opt_in_to_overwrite()
@@ -111,30 +112,39 @@ mod tests {
             };
 
             let created = tool
-                .invoke(WriteArgs {
-                    path: "data/note.txt".into(),
-                    content: "first".into(),
-                    overwrite: false,
-                })
+                .invoke(
+                    CONTEXT,
+                    WriteArgs {
+                        path: "data/note.txt".into(),
+                        content: "first".into(),
+                        overwrite: false,
+                    },
+                )
                 .await?;
             assert!(created.ok);
 
             let exists = tool
-                .invoke(WriteArgs {
-                    path: "data/note.txt".into(),
-                    content: "second".into(),
-                    overwrite: false,
-                })
+                .invoke(
+                    CONTEXT,
+                    WriteArgs {
+                        path: "data/note.txt".into(),
+                        content: "second".into(),
+                        overwrite: false,
+                    },
+                )
                 .await?;
             assert!(!exists.ok);
             assert_eq!(json(&exists.content)?["error"], "already_exists");
 
             let replaced = tool
-                .invoke(WriteArgs {
-                    path: "data/note.txt".into(),
-                    content: "second".into(),
-                    overwrite: true,
-                })
+                .invoke(
+                    CONTEXT,
+                    WriteArgs {
+                        path: "data/note.txt".into(),
+                        content: "second".into(),
+                        overwrite: true,
+                    },
+                )
                 .await?;
             assert!(replaced.ok);
             assert_eq!(filesystem.read("data/note.txt").await?, b"second");
@@ -147,11 +157,14 @@ mod tests {
         block_on(async {
             let filesystem = filesystem().await?;
             let output = FileWriteTool { filesystem }
-                .invoke(WriteArgs {
-                    path: "/../../outside".into(),
-                    content: "blocked".into(),
-                    overwrite: false,
-                })
+                .invoke(
+                    CONTEXT,
+                    WriteArgs {
+                        path: "/../../outside".into(),
+                        content: "blocked".into(),
+                        overwrite: false,
+                    },
+                )
                 .await?;
 
             assert!(!output.ok);

@@ -1,15 +1,20 @@
 # VM System Info Plugin
 
+Exposes the selected Platform and Board identity to Lua as the require-only
+`systeminfo` package.
+
 - Plugin ID: `vm-systeminfo`
-- Direct Plugin dependencies: `vm`
-- Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
-- Provided typed capabilities: none
-- Workflow Actions: none
-- Workflow Events: none
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `target_identity`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
 - Agent Tools: none
-- Owned long-running tasks: none
+- Lua packages: `systeminfo`
+- Web: none
+- Tasks: none
 - Storage: none
-- Retained registrations: one `systeminfo` Lua package registration
 
 This Plugin copies the selected Target's fixed `TargetIdentity` during System
 construction and projects it into every Lua execution. Platform manifests own

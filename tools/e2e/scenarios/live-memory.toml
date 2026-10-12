@@ -1,0 +1,21 @@
+name = "Live memory and profile"
+description = "A real model stores, recalls, updates, lists, and forgets a memory, and edits then clears the user profile."
+
+[model]
+mode = "recorded"
+
+[[steps]]
+send = "Use memory_store to remember that the user's favorite color is teal, tagged preference."
+tool_contains = ['teal']
+
+[[steps]]
+send = "Use memory_recall with the tag preference to find that memory, then use memory_update on it to change the color to orange."
+tool_contains = ['orange']
+
+[[steps]]
+send = "Use memory_list to list stored memories, then use memory_forget on the favorite color memory. Tell me when it is gone."
+tool_contains = ['"id"']
+
+[[steps]]
+send = "Use profile_replace to set the user_profile document to exactly: Name: Rob. Then use profile_read to read it back, then profile_clear to clear it."
+tool_contains = ['Name: Rob']

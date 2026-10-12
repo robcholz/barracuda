@@ -1,6 +1,10 @@
 use json_validator::{validator, Validator};
 
 const SCHEMAS: &[Validator] = &[
+    validator!("../../plugins/agent/crates/agent/resources/tools/background_cancel/schema.json"),
+    validator!("../../plugins/agent/crates/agent/resources/tools/background_input/schema.json"),
+    validator!("../../plugins/agent/crates/agent/resources/tools/background_list/schema.json"),
+    validator!("../../plugins/agent/crates/agent/resources/tools/background_wait/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/conversation_end/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/memory_forget/schema.json"),
     validator!("../../plugins/agent/crates/agent/resources/tools/memory_list/schema.json"),
@@ -37,5 +41,5 @@ const SCHEMAS: &[Validator] = &[
 
 #[test]
 fn every_current_tool_schema_compiles() {
-    assert_eq!(SCHEMAS.len(), 26);
+    assert_eq!(SCHEMAS.len(), 30);
 }

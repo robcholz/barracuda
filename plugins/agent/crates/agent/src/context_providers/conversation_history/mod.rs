@@ -10,11 +10,12 @@
 
 mod llm_compactor;
 
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
-use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
+use barracuda_agent_memory::{ChatMessage, CompactError, Compactor, Transcript, Turn, TurnId};
+use barracuda_agent_message::attachment::{has_media, Attachment, MediaKind};
 use barracuda_model_api::ModelApiFactory;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 use serde_json::Value;
@@ -28,6 +29,12 @@ use llm_compactor::LlmCompactor;
 /// Rough bytes-per-token divisor for the size estimate. See
 /// [`estimate_message_tokens`].
 const CHARS_PER_TOKEN: usize = 4;
+/// Tokens one image attachment is estimated to cost, whatever its file size:
+/// providers bill an image by its pixels, and about 1600 tokens is what a
+/// provider-scaled photo (around 1.15 megapixels) costs on Anthropic and in
+/// OpenAI's high-detail mode. A message references the file by path, so its
+/// encoded length says nothing about the image.
+const IMAGE_TOKENS: usize = 1600;
 
 /// The conversation-compaction policy knobs the provider applies.
 #[derive(Clone, Copy, Debug)]
@@ -70,9 +77,10 @@ pub(crate) struct ConversationHistoryContextProvider {
     /// Highest committed turn represented by `summary_messages`.
     covered_through: Option<TurnId>,
     /// Non-overlapping summaries of committed transcript prefixes.
-    summary_messages: Vec<Value>,
-    /// Verbatim committed turns after `covered_through`, plus the open turn.
-    verbatim_tail: Vec<Value>,
+    summary_messages: Vec<ChatMessage>,
+    /// Verbatim committed turns after `covered_through`, plus the open turn,
+    /// sharing the transcript's message encodings.
+    verbatim_tail: Vec<ChatMessage>,
 }
 
 impl ConversationHistoryContextProvider {
@@ -167,7 +175,10 @@ impl ConversationHistoryContextProvider {
     ///
     /// Summaries only ever cover **committed** turns, so the volatile open turn
     /// (`id == None`) is excluded here — it always stays verbatim.
-    fn select_window(&self, transcript: &dyn Transcript) -> Option<(TurnId, Vec<Value>, usize)> {
+    fn select_window(
+        &self,
+        transcript: &dyn Transcript,
+    ) -> Option<(TurnId, Vec<ChatMessage>, usize)> {
         let turns = transcript.turns();
         let uncovered: Vec<(TurnId, &Turn)> = turns
             .iter()
@@ -272,20 +283,44 @@ fn recent_tail_count(turns: &[(TurnId, &Turn)], keep_recent_tokens: usize) -> us
 
 // todo: replace this byte-length heuristic with a tokenizer estimate matching
 // the active backend. It only needs to remain monotonic for trigger behavior.
-fn estimate_message_tokens(message: &Value) -> usize {
-    message
-        .to_string()
+/// The encoded length in tokens, plus [`IMAGE_TOKENS`] per image attachment.
+///
+/// Every image counts, though a request inlines only the newest ones and
+/// names the rest: the estimate errs toward compacting earlier.
+fn estimate_message_tokens(message: &ChatMessage) -> usize {
+    let text = message
         .len()
         .checked_div(CHARS_PER_TOKEN)
         .unwrap_or(0)
-        .saturating_add(1)
+        .saturating_add(1);
+    if !has_media(message.as_str()) {
+        return text;
+    }
+    let images = message
+        .to_value()
+        .get("content")
+        .and_then(Value::as_array)
+        .map_or(0, |parts| {
+            parts
+                .iter()
+                .filter_map(Attachment::from_part)
+                .filter(is_image)
+                .count()
+        });
+    text.saturating_add(images.saturating_mul(IMAGE_TOKENS))
+}
+
+fn is_image(attachment: &Attachment) -> bool {
+    attachment.kind == MediaKind::Image || attachment.mime_type.starts_with("image/")
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use barracuda_agent_context::Context;
-    use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
+    use barracuda_agent_memory::{
+        ChatMessage, CompactFuture, Compactor, Transcript, TranscriptStore,
+    };
     use barracuda_agent_persistence::DurableState;
     use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
@@ -298,19 +333,45 @@ mod tests {
     struct WindowEchoCompactor;
 
     impl Compactor for WindowEchoCompactor {
-        fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
+        fn compact<'a>(&'a self, window: &'a [ChatMessage]) -> CompactFuture<'a> {
             Box::pin(async move {
                 let covered = window
                     .iter()
-                    .filter_map(|message| message.get("content").and_then(Value::as_str))
+                    .filter_map(|message| {
+                        message
+                            .to_value()
+                            .get("content")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .collect::<Vec<_>>()
                     .join("|");
-                Ok(vec![json!({
+                Ok(vec![ChatMessage::new(&json!({
                     "role": "system",
                     "content": format!("summary:{covered}"),
-                })])
+                }))])
             })
         }
+    }
+
+    #[test]
+    fn an_image_attachment_counts_a_fixed_cost_instead_of_its_bytes() {
+        let text = ChatMessage::new(&json!({"role": "user", "content": "look"}));
+        let image = |size: u64| {
+            ChatMessage::new(&json!({"role": "user", "content": [
+                {"type": "text", "text": "look"},
+                {"type": "media", "kind": "image", "path": "/workspace/cache/a.jpg",
+                 "mime_type": "image/jpeg", "size": size},
+                {"type": "media", "kind": "audio", "path": "/workspace/cache/b.ogg",
+                 "mime_type": "audio/ogg", "size": size},
+            ]}))
+        };
+        let small = super::estimate_message_tokens(&image(1));
+        let large = super::estimate_message_tokens(&image(9_000_000));
+        assert!(small >= super::IMAGE_TOKENS + super::estimate_message_tokens(&text));
+        assert!(small < 2 * super::IMAGE_TOKENS);
+        // only the two longer `size` numbers differ
+        assert!(large.abs_diff(small) <= 4);
     }
 
     #[test]
