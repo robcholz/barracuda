@@ -1,29 +1,38 @@
 -- Counter: the view (app.tsx) shows `count` and `history` and calls
--- `increment(by)` or `reset()`; this file owns the state.
-local ui = require("ui")
-local view = assert(ui.attach(APP.ui))
+-- `increment(by)` or `reset()`. This program owns the state and keeps it in
+-- the app's key-value store, so it survives being terminated.
+local app = require("app")
+local view = assert(app.view())
 
-local count, history, next_id = 0, {}, 1
+local saved = app.kv.get("state") or {}
+local count, history, next_id = saved.count or 0, saved.history or {}, saved.next_id or 1
 
 local function publish()
   assert(view:set("count", count))
   assert(view:set("history", history))
 end
 
+local function save()
+  assert(app.kv.set("state", { count = count, history = history, next_id = next_id }))
+end
+
 publish()
-while true do
-  local event, by = view:next()
-  if event == nil then
-    break -- the view was closed
-  elseif event == "increment" then
+for event, by in app.events() do
+  if event == "increment" then
     count = count + by
     table.insert(history, 1, { id = next_id, label = "+" .. by .. " = " .. count })
     next_id = next_id + 1
     if #history > 3 then
       table.remove(history)
     end
+    publish()
   elseif event == "reset" then
     count, history = 0, {}
+    publish()
+  elseif event == "app:background" then
+    save() -- a suspended app may be terminated without another event
+  elseif event == "app:terminate" then
+    save()
+    break
   end
-  publish()
 end

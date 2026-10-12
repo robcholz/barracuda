@@ -1,5 +1,5 @@
 use crate::bundle::AppList;
-use crate::manager::{AppError, AppExit, AppManager, ForegroundApp};
+use crate::manager::{AppError, AppExit, AppManager, RunningApp};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistration,
@@ -14,8 +14,14 @@ pub(crate) struct Empty {}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct LaunchRequest {
+pub(crate) struct AppRequest {
     id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InteractiveRequest {
+    interactive: bool,
 }
 
 #[derive(Deserialize)]
@@ -26,13 +32,14 @@ pub(crate) struct TapRequest {
 }
 
 #[derive(Serialize)]
-pub(crate) struct StopResponse {
-    stopped: Option<ForegroundApp>,
+pub(crate) struct AppResponse {
+    app: Option<RunningApp>,
 }
 
 #[derive(Serialize)]
 pub(crate) struct StatusResponse {
-    foreground: Option<ForegroundApp>,
+    foreground: Option<RunningApp>,
+    running: Vec<RunningApp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     texts: Option<Vec<String>>,
     last_exit: Option<AppExit>,
@@ -72,30 +79,58 @@ impl WorkflowActionHandler for ListAction {
     }
 }
 
-struct LaunchAction(AppManager);
+struct OpenAction(AppManager);
 
-impl WorkflowActionHandler for LaunchAction {
-    type Request = LaunchRequest;
-    type Response = Response<ForegroundApp>;
+impl WorkflowActionHandler for OpenAction {
+    type Request = AppRequest;
+    type Response = Response<RunningApp>;
 
-    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.launch");
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.open");
 
     fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
-        Box::pin(async move { Ok(self.0.launch(&request.id).await.into()) })
+        Box::pin(async move { Ok(self.0.open(&request.id).await.into()) })
     }
 }
 
-struct StopAction(AppManager);
+struct HomeAction(AppManager);
 
-impl WorkflowActionHandler for StopAction {
+impl WorkflowActionHandler for HomeAction {
     type Request = Empty;
-    type Response = StopResponse;
+    type Response = AppResponse;
 
-    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.stop");
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.home");
 
     fn invoke(&self, _request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
-        let stopped = self.0.stop();
-        Box::pin(async move { Ok(StopResponse { stopped }) })
+        let app = self.0.home();
+        Box::pin(async move { Ok(AppResponse { app }) })
+    }
+}
+
+struct InteractiveAction(AppManager);
+
+impl WorkflowActionHandler for InteractiveAction {
+    type Request = InteractiveRequest;
+    type Response = Response<RunningApp>;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.interactive");
+
+    fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
+        let result = self.0.set_interactive(request.interactive);
+        Box::pin(async move { Ok(result.into()) })
+    }
+}
+
+struct TerminateAction(AppManager);
+
+impl WorkflowActionHandler for TerminateAction {
+    type Request = AppRequest;
+    type Response = AppResponse;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.terminate");
+
+    fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
+        let app = self.0.terminate(&request.id);
+        Box::pin(async move { Ok(AppResponse { app }) })
     }
 }
 
@@ -110,6 +145,7 @@ impl WorkflowActionHandler for StatusAction {
     fn invoke(&self, _request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
         let response = StatusResponse {
             foreground: self.0.foreground(),
+            running: self.0.running(),
             texts: self.0.texts().ok(),
             last_exit: self.0.last_exit(),
         };
@@ -140,8 +176,10 @@ pub(crate) fn register_actions(
 ) -> Result<Vec<WorkflowActionRegistration>, WorkflowActionRegistryError> {
     Ok(alloc::vec![
         actions.add_action(ListAction(manager.clone()))?,
-        actions.add_action(LaunchAction(manager.clone()))?,
-        actions.add_action(StopAction(manager.clone()))?,
+        actions.add_action(OpenAction(manager.clone()))?,
+        actions.add_action(HomeAction(manager.clone()))?,
+        actions.add_action(InteractiveAction(manager.clone()))?,
+        actions.add_action(TerminateAction(manager.clone()))?,
         actions.add_action(StatusAction(manager.clone()))?,
         actions.add_action(TapAction(manager.clone()))?,
     ])
@@ -153,25 +191,23 @@ mod tests {
 
     use super::*;
     use crate::bundle::{AppInfo, AppLocation, InvalidApp};
+    use crate::port::AppState;
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
     use barracuda_workflow_plugin::WorkflowActionHandler;
     use serde_json::{Value, json};
 
-    fn app(has_view: bool) -> AppInfo {
-        AppInfo {
-            id: "counter".into(),
-            name: "计数器".into(),
-            version: "0.1.0".into(),
-            location: AppLocation::Bundled,
-            has_view,
-        }
-    }
-
-    fn foreground() -> ForegroundApp {
-        ForegroundApp {
-            app: app(true),
+    fn running(state: AppState) -> RunningApp {
+        RunningApp {
+            app: AppInfo {
+                id: "counter".into(),
+                name: "计数器".into(),
+                version: "0.1.0".into(),
+                location: AppLocation::Bundled,
+                has_view: true,
+            },
             run_id: 3,
+            state,
         }
     }
 
@@ -191,28 +227,37 @@ mod tests {
     fn responses_match_their_schemas() {
         check::<ListAction>(AppList::default());
         check::<ListAction>(AppList {
-            apps: vec![app(true), app(false)],
+            apps: vec![running(AppState::Active).app],
             invalid: vec![InvalidApp {
                 location: AppLocation::Workspace,
                 dir: "Draft".into(),
                 problem: "app.json is missing".into(),
             }],
         });
-        check::<LaunchAction>(Response::from(Ok::<_, AppError>(foreground())));
+        check::<OpenAction>(Response::from(Ok::<_, AppError>(running(AppState::Active))));
         for error in [AppError::NotFound, AppError::InvalidBundle, AppError::Busy] {
-            check::<LaunchAction>(Response::<ForegroundApp>::from(Err(error)));
+            check::<OpenAction>(Response::<RunningApp>::from(Err(error)));
         }
-        check::<StopAction>(StopResponse { stopped: None });
-        check::<StopAction>(StopResponse {
-            stopped: Some(foreground()),
+        check::<HomeAction>(AppResponse { app: None });
+        check::<HomeAction>(AppResponse {
+            app: Some(running(AppState::Background)),
+        });
+        check::<InteractiveAction>(Response::from(Ok::<_, AppError>(running(
+            AppState::Inactive,
+        ))));
+        check::<InteractiveAction>(Response::<RunningApp>::from(Err(AppError::NoForegroundApp)));
+        check::<TerminateAction>(AppResponse {
+            app: Some(running(AppState::Terminating)),
         });
         check::<StatusAction>(StatusResponse {
             foreground: None,
+            running: Vec::new(),
             texts: None,
             last_exit: None,
         });
         check::<StatusAction>(StatusResponse {
-            foreground: Some(foreground()),
+            foreground: Some(running(AppState::Active)),
+            running: vec![running(AppState::Active), running(AppState::Suspended)],
             texts: Some(vec!["0".into(), "+1".into()]),
             last_exit: Some(AppExit {
                 id: "broken".into(),
@@ -229,16 +274,23 @@ mod tests {
         check::<TapAction>(Response::from(Ok::<_, AppError>(TapResponse {
             handler: None,
         })));
-        check::<TapAction>(Response::<TapResponse>::from(Err(AppError::NoView)));
+        for error in [AppError::NoForegroundApp, AppError::NotInteractive] {
+            check::<TapAction>(Response::<TapResponse>::from(Err(error)));
+        }
     }
 
     #[test]
     fn requests_are_validated() {
         assert!(request::<ListAction>(json!({})));
-        assert!(request::<LaunchAction>(json!({ "id": "counter" })));
-        assert!(!request::<LaunchAction>(json!({})));
+        assert!(request::<OpenAction>(json!({ "id": "counter" })));
+        assert!(!request::<OpenAction>(json!({})));
+        assert!(request::<InteractiveAction>(
+            json!({ "interactive": false })
+        ));
+        assert!(!request::<InteractiveAction>(json!({})));
+        assert!(request::<TerminateAction>(json!({ "id": "counter" })));
         assert!(request::<TapAction>(json!({ "x": 12.5, "y": 40 })));
         assert!(!request::<TapAction>(json!({ "x": 12.5 })));
-        assert!(!request::<StopAction>(json!({ "id": "counter" })));
+        assert!(!request::<HomeAction>(json!({ "id": "counter" })));
     }
 }

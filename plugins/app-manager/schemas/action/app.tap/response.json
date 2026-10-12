@@ -22,7 +22,7 @@
         "error": {
           "enum": [
             "no_foreground_app",
-            "no_view"
+            "not_interactive"
           ]
         }
       },

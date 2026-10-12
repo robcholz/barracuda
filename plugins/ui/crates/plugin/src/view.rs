@@ -1,91 +1,47 @@
-//! The `ui` Lua package.
-//!
-//! ```lua
-//! local view = assert(require("ui").attach(APP.ui)) -- claim the view prepared for this run
-//! assert(view:set("count", 3))                       -- write a value slot
-//! local name, a, b = view:next()                     -- wait for a handler call; nil once closed
-//! view:close()
-//! ```
-//!
-//! Failures follow the Lua convention of returning `nil` and a message:
-//!
-//! ```lua
-//! local ok, message = view:set("count", "three") -- nil, "'count': expected an integer"
-//! ```
+//! The Lua side of a view: a `Send + Sync` channel to the UI task and the
+//! userdata Lua holds.
 
 use crate::datum::{Datum, Shape};
-use crate::mailbox::{Mailbox, MailboxError, Schema};
+use crate::mailbox::{Mailbox, MailboxError, NextEvent, Schema};
 use alloc::{format, string::String, sync::Arc, vec::Vec};
-use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaValue, MetaMethod, Package, Result, Table, UserData,
-    UserDataMethods, Variadic,
+use barracuda_vm_plugin::{Error, LuaValue, MetaMethod, Result, Table, UserData, UserDataMethods};
+use core::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
 };
-use core::sync::atomic::{AtomicBool, Ordering};
 
 /// The longest array Lua may write into one slot.
 pub const MAX_ARRAY_ITEMS: usize = 1024;
 const MAX_NESTING: usize = 16;
 
-pub(crate) struct UiPackage {
-    mailbox: Arc<Mailbox>,
-    active: Arc<AtomicBool>,
+/// One handler call from a view, converted for Lua.
+pub struct ViewCall {
+    /// The handler name from the view contract.
+    pub handler: String,
+    /// Its arguments; list arguments arrive as `nil`.
+    pub args: Vec<LuaValue>,
 }
 
-impl UiPackage {
-    pub(crate) fn new(mailbox: Arc<Mailbox>) -> Self {
-        Self {
-            mailbox,
-            active: Arc::new(AtomicBool::new(true)),
-        }
-    }
+/// A view as Lua packages see it: write values, wait for handler calls.
+///
+/// Cloning shares the same view. Closing it ends the view for Lua; the UI
+/// keeps the session until the owner drops it.
+#[derive(Clone)]
+pub struct ViewChannel {
+    pub(crate) id: u32,
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) mailbox: Arc<Mailbox>,
 }
 
-impl Package for UiPackage {
-    fn install(&self, lua: &mut Lua) -> Result<()> {
-        let mailbox = Arc::clone(&self.mailbox);
-        let active = Arc::clone(&self.active);
-        lua.register_lib("ui", move |package| {
-            package.register_with("attach", move |lua, ticket: String| {
-                if !active.load(Ordering::Acquire) {
-                    return Some(Err(Error::runtime("ui package has been revoked")));
-                }
-                Some(match mailbox.attach(&ticket) {
-                    Some((id, schema)) => lua.create_userdata(ViewHandle {
-                        id,
-                        schema,
-                        mailbox: Arc::clone(&mailbox),
-                        active: Arc::clone(&active),
-                    }),
-                    None => Err(Error::runtime("no view is waiting for this ticket")),
-                })
-            })
-        })
-    }
-}
-
-impl LuaPackage for UiPackage {
-    fn name(&self) -> &'static str {
-        "ui"
-    }
-
-    fn revoke(&self) {
-        self.active.store(false, Ordering::Release);
-        self.mailbox.close_all();
-    }
-}
-
-struct ViewHandle {
-    id: u32,
-    schema: Arc<Schema>,
-    mailbox: Arc<Mailbox>,
-    active: Arc<AtomicBool>,
-}
-
-impl ViewHandle {
-    fn set(&self, name: &str, value: LuaValue) -> Result<bool> {
-        if !self.active.load(Ordering::Acquire) {
-            return Err(Error::runtime("ui package has been revoked"));
-        }
+impl ViewChannel {
+    /// Writes a value declared by the view contract.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the view has no such value, `value` does not match its type,
+    /// or the view is closed.
+    pub fn set(&self, name: &str, value: LuaValue) -> Result<()> {
         let (slot, shape) = self
             .schema
             .slots
@@ -97,7 +53,6 @@ impl ViewHandle {
             .map_err(|expected| Error::runtime(format!("'{name}': expected {expected}")))?;
         self.mailbox
             .write(self.id, slot, datum)
-            .map(|()| true)
             .map_err(|error| match error {
                 MailboxError::Closed => Error::runtime("the view is closed"),
                 MailboxError::UnknownSlot => {
@@ -105,46 +60,68 @@ impl ViewHandle {
                 }
             })
     }
-}
 
-impl UserData for ViewHandle {
-    fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
-        methods.add_method("set", |view, (name, value): (String, LuaValue)| {
-            Some(view.set(&name, value))
-        });
-        methods.add_async_method("next", |view, (): ()| async move {
-            let next = {
-                let view = match view.borrow() {
-                    Ok(view) => view,
-                    Err(error) => return Some(Err(error)),
-                };
-                view.mailbox.next(view.id)
-            };
-            let Some(event) = next.await else {
-                return Some(Ok(Variadic::from(Vec::new())));
-            };
-            let mut values = Vec::with_capacity(event.args.len() + 1);
-            values.push(LuaValue::String(event.handler));
-            values.extend(event.args.into_iter().map(to_lua));
-            Some(Ok(Variadic::from(values)))
-        });
-        methods.add_method("is_open", |view, (): ()| {
-            Some(Ok(!view.mailbox.is_closed(view.id)))
-        });
-        methods.add_method("close", |view, (): ()| {
-            view.mailbox.close(view.id);
-            None::<Result<()>>
-        });
-        methods.add_meta_method(MetaMethod::Close, |view, _error: Option<String>| {
-            view.mailbox.close(view.id);
-            None::<Result<()>>
-        });
+    /// Waits for the next handler call; `None` once the view is closed.
+    #[must_use]
+    pub fn next(&self) -> ViewNext {
+        ViewNext {
+            inner: self.mailbox.next(self.id),
+        }
+    }
+
+    /// Whether the view still takes writes and delivers calls.
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        !self.mailbox.is_closed(self.id)
+    }
+
+    /// Ends the view for Lua.
+    pub fn close(&self) {
+        self.mailbox.close(self.id);
     }
 }
 
-impl Drop for ViewHandle {
-    fn drop(&mut self) {
-        self.mailbox.close(self.id);
+/// The future behind [`ViewChannel::next`].
+pub struct ViewNext {
+    inner: NextEvent,
+}
+
+impl Future for ViewNext {
+    type Output = Option<ViewCall>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.inner).poll(cx).map(|event| {
+            event.map(|event| ViewCall {
+                handler: event.handler,
+                args: event.args.into_iter().map(to_lua).collect(),
+            })
+        })
+    }
+}
+
+/// The view userdata Lua holds:
+///
+/// ```lua
+/// assert(view:set("count", 3))  -- or nil, message
+/// view:is_open()
+/// view:close()
+/// ```
+pub struct LuaView(pub ViewChannel);
+
+impl UserData for LuaView {
+    fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
+        methods.add_method("set", |view, (name, value): (String, LuaValue)| {
+            Some(view.0.set(&name, value).map(|()| true))
+        });
+        methods.add_method("is_open", |view, (): ()| Some(Ok(view.0.is_open())));
+        methods.add_method("close", |view, (): ()| {
+            view.0.close();
+            None::<Result<()>>
+        });
+        methods.add_meta_method(MetaMethod::Close, |view, _error: Option<String>| {
+            view.0.close();
+            None::<Result<()>>
+        });
     }
 }
 
@@ -219,7 +196,7 @@ fn expected(shape: &Shape) -> &'static str {
     }
 }
 
-/// Event arguments are scalars in practice; lists have no Lua form without a
+/// Handler arguments are scalars in practice; lists have no Lua form without a
 /// Lua context, so they arrive as `nil`.
 fn to_lua(datum: Datum) -> LuaValue {
     match datum {

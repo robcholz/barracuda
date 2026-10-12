@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "location": {
+          "enum": [
+            "bundled",
+            "installed",
+            "workspace"
+          ]
+        },
+        "has_view": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "location",
+        "has_view"
+      ],
+      "additionalProperties": false
+    },
+    "running": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "$ref": "#/$defs/app"
+        },
+        "run_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "state": {
+          "enum": [
+            "active",
+            "inactive",
+            "background",
+            "suspended",
+            "running",
+            "terminating"
+          ]
+        }
+      },
+      "required": [
+        "app",
+        "run_id",
+        "state"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/running"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "no_foreground_app"
+          ]
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

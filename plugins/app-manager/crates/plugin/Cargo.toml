@@ -11,9 +11,11 @@ barracuda-ui-plugin.workspace = true
 barracuda-vfs.workspace = true
 barracuda-vm-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
+critical-section = "1"
 embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
+embassy-time.workspace = true
 json-validator.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

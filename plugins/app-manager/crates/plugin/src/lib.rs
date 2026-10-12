@@ -2,10 +2,10 @@
 //!
 //! An app is a Lua program with an optional compiled MicroTS view, stored as a
 //! container directory in the format `docs/app-format.md` defines (see
-//! [`BUNDLED_APPS`], [`INSTALLED_APPS`], and [`WORKSPACE_APPS`]). Launching an
-//! app opens its view through the `ui` Plugin and runs its program on the VM;
-//! the program claims the view with `require("ui").attach(APP.ui)`. One app is
-//! in the foreground at a time.
+//! [`BUNDLED_APPS`], [`INSTALLED_APPS`], and [`WORKSPACE_APPS`]). Opening an
+//! app opens its view through the `ui` Plugin and runs its program on the VM
+//! with the `app` Lua package. The system UI drives the lifecycle through
+//! [`AppManager`]; `docs/plugin.md` describes the states.
 
 #![no_std]
 
@@ -13,6 +13,9 @@ extern crate alloc;
 
 mod bundle;
 mod manager;
+mod package;
+mod port;
+mod storage;
 mod workflow;
 
 use alloc::rc::Rc;
@@ -22,7 +25,7 @@ use barracuda_plugin::manager::{
     PluginStartContext, PluginTaskToken,
 };
 use barracuda_ui_plugin::UiService;
-use barracuda_vm_plugin::Vm;
+use barracuda_vm_plugin::{LuaPackageRegistry, Vm};
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 use embassy_futures::select::select;
 
@@ -30,9 +33,15 @@ pub use bundle::{
     AppInfo, AppList, AppLocation, BUNDLED_APPS, DEFAULT_ENTRY, FORMAT_VERSION, INSTALLED_APPS,
     InvalidApp, MANIFEST_FILE, MAX_SOURCE_BYTES, MAX_VIEW_BYTES, WORKSPACE_APPS,
 };
-pub use manager::{AppError, AppExit, AppManager, ForegroundApp, MAX_EXIT_OUTPUT_LINES};
+pub use manager::{
+    AppError, AppExit, AppManager, GRACE, MAX_APP_RUNS, MAX_EXIT_OUTPUT_LINES, MAX_SUSPENDED,
+    RunningApp,
+};
+pub use port::{AppState, MIN_TICK_MS};
+pub use storage::{APP_DATA, MAX_FILE_BYTES, MAX_KEY_BYTES, MAX_KV_BYTES};
 
-/// Publishes [`AppManager`] and the `app.*` Workflow Actions.
+/// Publishes [`AppManager`], the `app` Lua package, and the `app.*` Workflow
+/// Actions.
 #[barracuda_plugin::macros::plugin]
 pub struct AppManagerPlugin {
     manager: Option<AppManager>,
@@ -73,7 +82,10 @@ impl Plugin for AppManagerPlugin {
         let vm = context.require::<Vm>("vm")?;
         let ui = context.require::<UiService>("ui")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
-        let manager = AppManager::new(filesystem, vm, ui);
+        let packages = context.require::<LuaPackageRegistry>("vm")?;
+        let (manager, registration) = AppManager::register(filesystem, vm, ui, &packages)
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
         for registration in
             workflow::register_actions(&actions, &manager).map_err(PluginError::registration)?
         {
@@ -102,5 +114,7 @@ impl Plugin for AppManagerPlugin {
 #[embassy_executor::task]
 async fn app_task(manager: AppManager, cancellation: PluginTaskToken) {
     select(cancellation.cancelled(), manager.supervise()).await;
-    manager.stop();
+    for app in manager.running() {
+        manager.terminate(&app.app.id);
+    }
 }

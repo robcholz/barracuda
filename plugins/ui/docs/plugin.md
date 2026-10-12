@@ -1,13 +1,13 @@
 # UI Plugin
 
 - Plugin ID: `ui`
-- Direct dependency: `vm`
+- Direct dependencies: none
 - Provided typed capabilities: `UiService`
-- Required typed capabilities: `LuaPackageRegistry` from `vm`
+- Required typed capabilities: none
 - Owned Components: none
 - Plugin-owned tasks: one UI task that applies Lua writes to open views
-- Workflow Actions, Events, Agent Tools: none
-- Storage: none; retains its `ui` Lua package registration for its lifetime
+- Workflow Actions, Events, Agent Tools, Lua packages: none
+- Storage: none
 
 The Plugin runs compiled MicroTS views. A view is a BVIR program
 (`view.bvir`), its compiled stylesheet (`styles.bin`) and baked font atlases
@@ -15,29 +15,40 @@ The Plugin runs compiled MicroTS views. A view is a BVIR program
 crate `barracuda-ui-runtime` reads BVIR, mounts it into a vendored PocketJS
 core tree, and re-evaluates the tree when values change.
 
-`UiService::open` mounts a view and returns a `UiSession`. The session's
-one-time ticket goes to exactly one Lua run, which claims the view:
+`UiService::open` mounts a view and returns a `UiSession`, owned by whoever
+presents the view, such as the App Manager. Its `ViewChannel` is the `Send +
+Sync` half a Lua package hands to the program that owns the view, wrapped as
+the `LuaView` userdata:
 
 ```lua
-local view = assert(require("ui").attach(APP.ui))
-assert(view:set("count", 3))       -- write a value declared in app.d.ts
-local handler, a, b = view:next()  -- wait for a handler call; nil once closed
+assert(view:set("count", 3))  -- write a value declared in app.d.ts
+view:is_open()
 view:close()
 ```
+
+Handler calls reach the program through `ViewChannel::next`; the App Manager
+merges them into the app's single event loop. This Plugin registers no Lua
+package of its own.
 
 Lua values are checked against the view contract: names and types come from
 the app's `app.d.ts`, so a wrong name or type fails with `nil, message` and
 never reaches the tree. Writes keep only the latest value per slot. Handler
-calls queue up to `MAX_EVENTS` per view; arrays written from Lua hold at most
-`MAX_ARRAY_ITEMS` items.
+calls queue up to `MAX_EVENTS` per view, and `UiSession::clear_events` drops
+the ones not yet received when the view stops taking input. Arrays written
+from Lua hold at most `MAX_ARRAY_ITEMS` items.
 
-Lua runs never touch the UI tree. They share only a critical-section mailbox
-with the UI task, which keeps the `ui` package `Send + Sync`. The UI task
-wakes on writes, applies them, and lays out every changed view.
+Lua never touches the UI tree. It shares only a critical-section mailbox with
+the UI task, which wakes on writes, applies them, and lays out every changed
+view.
 
-Dropping the `UiSession` unmounts the view and ends it for Lua: `view:next()`
-returns nothing and `view:set` fails. Closing from Lua is visible through
-`UiSession::is_closed`. Revoking the package closes every view.
+A view is a function of its values. `UiSession::suspend` releases the tree
+(the bulk of a view's memory) and keeps the values; writes made meanwhile wait
+in the mailbox. `UiSession::resume` rebuilds the tree from the assets and those
+values, and refuses assets whose contract no longer matches.
+
+Dropping the `UiSession` unmounts the view and ends it for Lua: its channel
+stops delivering calls and `view:set` fails. Closing from Lua is visible
+through `UiSession::is_closed`.
 
 No display backend is connected yet. Views are laid out at
 `DEFAULT_VIEWPORT`, and `UiSession::press_at` and `UiSession::texts` stand in

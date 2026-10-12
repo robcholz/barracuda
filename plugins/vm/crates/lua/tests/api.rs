@@ -1460,3 +1460,36 @@ fn lua_value_converts_every_plain_type_both_ways() -> Result<()> {
     assert!(rejected.is_err());
     Ok(())
 }
+
+#[test]
+fn table_pairs_reads_every_entry_without_coercing_keys() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let table: Table = lua
+        .load("return setmetatable({ 10, 20, name = 'x', [2.5] = true }, { __index = error })")
+        .eval()?;
+    let mut entries: Vec<String> = table
+        .pairs()?
+        .into_iter()
+        .map(|(key, value)| {
+            let key = match key {
+                LuaValue::Integer(key) => format!("i{key}"),
+                LuaValue::Number(key) => format!("f{key}"),
+                LuaValue::String(key) => format!("s{key}"),
+                _ => "other".into(),
+            };
+            let value = match value {
+                LuaValue::Integer(value) => format!("{value}"),
+                LuaValue::String(value) => value,
+                LuaValue::Boolean(value) => format!("{value}"),
+                _ => "other".into(),
+            };
+            format!("{key}={value}")
+        })
+        .collect();
+    entries.sort();
+    assert_eq!(entries, ["f2.5=true", "i1=10", "i2=20", "sname=x"]);
+
+    let with_function: Table = lua.load("return { f = function() end }").eval()?;
+    assert!(with_function.pairs().is_err());
+    Ok(())
+}

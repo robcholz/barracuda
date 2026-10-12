@@ -2,39 +2,59 @@
 
 extern crate std;
 
-use crate::mailbox::Mailbox;
-use crate::package::UiPackage;
 use crate::service::{DEFAULT_VIEWPORT, UiAssets, UiService, UiSession};
-use alloc::{format, string::String, sync::Arc, vec::Vec};
-use barracuda_vm_plugin::{Lua, LuaPackage, Package};
+use crate::view::{LuaView, ViewChannel};
+use alloc::{format, string::String, vec::Vec};
+use barracuda_vm_plugin::Lua;
 use futures_lite::future;
 
 const VIEW: &[u8] = include_bytes!("../../runtime/tests/fixtures/counter.bvir");
 const STYLES: &[u8] = include_bytes!("../../runtime/tests/fixtures/counter.styles.bin");
 
-fn setup() -> (Lua, UiService, UiPackage) {
-    let mailbox = Arc::new(Mailbox::new());
-    let service = UiService::new(Arc::clone(&mailbox), DEFAULT_VIEWPORT);
-    let package = UiPackage::new(mailbox);
+fn assets() -> UiAssets {
+    UiAssets {
+        view: VIEW.to_vec(),
+        styles: STYLES.to_vec(),
+        fonts: Vec::new(),
+    }
+}
+
+/// A Lua state whose global `view` is the session's view.
+fn lua_with_view(session: &UiSession) -> Lua {
     let mut lua = Lua::new().expect("lua");
-    package.install(&mut lua).expect("install ui");
-    (lua, service, package)
+    let channel = session.channel().clone();
+    lua.register_with("get_view", move |lua, (): ()| {
+        Some(lua.create_userdata(LuaView(channel.clone())))
+    })
+    .expect("register");
+    lua.load("view = get_view()").exec().expect("view");
+    lua
 }
 
-fn open(service: &UiService) -> UiSession {
-    service
-        .open(&UiAssets {
-            view: VIEW.to_vec(),
-            styles: STYLES.to_vec(),
-            fonts: Vec::new(),
-        })
-        .expect("view opens")
+fn eval<T: barracuda_lua::FromLuaMulti>(lua: &mut Lua, source: &str) -> T {
+    future::block_on(lua.load(source).eval_async::<T>()).expect(source)
 }
 
-/// Finds a point that presses `handler`; every probe that hits queues an event.
+fn next_call(channel: &ViewChannel) -> Option<(String, Vec<String>)> {
+    future::block_on(channel.next()).map(|call| {
+        let args = call
+            .args
+            .into_iter()
+            .map(|value| match value {
+                barracuda_vm_plugin::LuaValue::Integer(value) => format!("{value}"),
+                _ => String::from("?"),
+            })
+            .collect();
+        (call.handler, args)
+    })
+}
+
+/// Finds a point that presses `handler`; every probe that hits queues a call.
+/// "Reset" sits right of "+1", so it is searched for from the right.
 fn find(session: &UiSession, handler: &str) -> (f32, f32) {
     for y in (0..360).step_by(6) {
         for x in (0..360).step_by(6) {
+            let x = if handler == "reset" { 354 - x } else { x };
             let (x, y) = (x as f32, y as f32);
             if session.press_at(x, y).as_deref() == Some(handler) {
                 return (x, y);
@@ -44,61 +64,37 @@ fn find(session: &UiSession, handler: &str) -> (f32, f32) {
     panic!("no '{handler}' button")
 }
 
-fn eval<T: barracuda_lua::FromLuaMulti>(lua: &mut Lua, source: &str) -> T {
-    future::block_on(lua.load(source).eval_async::<T>()).expect(source)
-}
-
 #[test]
-fn lua_drives_the_view_and_receives_taps() {
-    let (mut lua, service, _package) = setup();
-    let session = open(&service);
+fn lua_writes_drive_the_view_and_taps_arrive_as_calls() {
+    let service = UiService::new(DEFAULT_VIEWPORT);
+    let session = service.open(&assets()).expect("view opens");
+    let mut lua = lua_with_view(&session);
     assert_eq!(session.texts(), ["0", "+1", "Reset"]);
 
     eval::<()>(
         &mut lua,
-        &format!(
-            "view = assert(require('ui').attach('{}')) \
-             assert(view:set('count', 2)) \
-             assert(view:set('history', {{ {{ id = 2, label = 'two' }}, {{ id = 1, label = 'one' }} }}))",
-            session.ticket()
-        ),
+        "assert(view:set('count', 2)) \
+         assert(view:set('history', { { id = 2, label = 'two' }, { id = 1, label = 'one' } }))",
     );
     assert_eq!(session.texts(), ["2", "+1", "Reset", "two", "one"]);
 
-    // Probing for buttons taps them; drain those taps before checking new ones.
-    let plus = find(&session, "increment");
-    let reset = find(&session, "reset");
-    let (name, by): (String, i64) = eval(&mut lua, "return view:next()");
-    assert_eq!((name.as_str(), by), ("increment", 1));
-    eval::<()>(&mut lua, "repeat until view:next() == 'reset'");
-
-    assert_eq!(session.press_at(reset.0, reset.1).as_deref(), Some("reset"));
+    find(&session, "increment");
+    let channel = session.channel().clone();
     assert_eq!(
-        session.press_at(plus.0, plus.1).as_deref(),
-        Some("increment")
+        next_call(&channel),
+        Some(("increment".into(), alloc::vec!["1".into()]))
     );
-    let names: (String, String) = eval(
-        &mut lua,
-        "local a = view:next() local b = view:next() return a, b",
-    );
-    assert_eq!((names.0.as_str(), names.1.as_str()), ("reset", "increment"));
 
     // Integral floats are accepted for integer slots.
-    eval::<()>(&mut lua, "view:set('count', 0.0)");
+    eval::<()>(&mut lua, "assert(view:set('count', 0.0))");
     assert_eq!(session.texts(), ["0", "+1", "Reset"]);
 }
 
 #[test]
 fn writes_are_checked_against_the_contract() {
-    let (mut lua, service, _package) = setup();
-    let session = open(&service);
-    eval::<()>(
-        &mut lua,
-        &format!(
-            "view = assert(require('ui').attach('{}'))",
-            session.ticket()
-        ),
-    );
+    let service = UiService::new(DEFAULT_VIEWPORT);
+    let session = service.open(&assets()).expect("view opens");
+    let mut lua = lua_with_view(&session);
     for (source, message) in [
         ("view:set('count', 'two')", "'count': expected an integer"),
         ("view:set('count', 1.5)", "'count': expected an integer"),
@@ -123,82 +119,70 @@ fn writes_are_checked_against_the_contract() {
 }
 
 #[test]
-fn a_ticket_attaches_once() {
-    let (mut lua, service, _package) = setup();
-    let session = open(&service);
-    let results: (bool, bool, bool) = eval(
-        &mut lua,
-        &format!(
-            "local ui = require('ui') \
-             return ui.attach('{0}') ~= nil, \
-                 ui.attach('{0}') ~= nil, \
-                 ui.attach('view-999') ~= nil",
-            session.ticket()
-        ),
-    );
-    assert_eq!(results, (true, false, false));
-}
-
-#[test]
-fn closing_ends_the_view_for_both_sides() {
-    let (mut lua, service, package) = setup();
-    let session = open(&service);
-    eval::<()>(
-        &mut lua,
-        &format!(
-            "view = assert(require('ui').attach('{}'))",
-            session.ticket()
-        ),
-    );
+fn closing_ends_the_view_for_lua() {
+    let service = UiService::new(DEFAULT_VIEWPORT);
+    let session = service.open(&assets()).expect("view opens");
+    let mut lua = lua_with_view(&session);
     assert!(!session.is_closed());
     eval::<()>(&mut lua, "view:close()");
     assert!(session.is_closed());
-    let (is_open, next, set): (bool, Option<String>, bool) = eval(
+    let (is_open, set): (bool, bool) = eval(
         &mut lua,
-        "return view:is_open(), (view:next()), view:set('count', 1) ~= nil",
+        "return view:is_open(), view:set('count', 1) ~= nil",
     );
-    assert_eq!((is_open, next, set), (false, None, false));
+    assert_eq!((is_open, set), (false, false));
+    assert_eq!(next_call(session.channel()), None);
     assert_eq!(session.press_at(0.0, 0.0), None);
 
-    // Revoking the package closes every view and refuses new attaches.
-    let other = open(&service);
-    package.revoke();
-    assert!(other.is_closed());
-    let attached: bool = eval(
-        &mut lua,
-        &format!("return require('ui').attach('{}') ~= nil", other.ticket()),
-    );
-    assert!(!attached);
+    // Dropping the session closes channels that outlive it.
+    let other = service.open(&assets()).expect("view opens");
+    let channel = other.channel().clone();
+    drop(other);
+    assert!(!channel.is_open());
 }
 
 #[test]
-fn next_waits_for_a_tap() {
-    let (mut lua, service, _package) = setup();
-    let session = open(&service);
-    let ticket = String::from(session.ticket());
-    let script = format!(
-        "local view = assert(require('ui').attach('{ticket}')) \
-         local count = 0 \
-         while count < 3 do \
-             local event, by = view:next() \
-             count = count + by \
-             view:set('count', count) \
-         end \
-         return count"
+fn a_suspended_view_keeps_its_values_and_catches_up_on_resume() {
+    let service = UiService::new(DEFAULT_VIEWPORT);
+    let session = service.open(&assets()).expect("view opens");
+    let mut lua = lua_with_view(&session);
+    eval::<()>(
+        &mut lua,
+        "assert(view:set('count', 1)) \
+         assert(view:set('history', { { id = 1, label = 'one' } }))",
     );
-    // Finding the button queues the first tap; two more arrive while Lua waits.
-    let plus = find(&session, "increment");
-    let lua_side = lua.load(&script).eval_async::<i64>();
-    let taps = async {
-        for _ in 0..2 {
-            future::yield_now().await;
-            assert_eq!(
-                session.press_at(plus.0, plus.1).as_deref(),
-                Some("increment")
-            );
-        }
-    };
-    let (count, ()) = future::block_on(future::zip(lua_side, taps));
-    assert_eq!(count.expect("script"), 3);
-    assert_eq!(session.texts(), ["3", "+1", "Reset"]);
+    assert_eq!(session.texts(), ["1", "+1", "Reset", "one"]);
+
+    session.suspend();
+    assert!(session.is_suspended());
+    assert!(session.texts().is_empty());
+    assert_eq!(session.press_at(180.0, 180.0), None);
+    // Lua keeps writing while suspended; the writes wait for the resume.
+    eval::<()>(&mut lua, "assert(view:set('count', 5))");
+
+    session.resume(&assets()).expect("resume");
+    assert!(!session.is_suspended());
+    assert_eq!(session.texts(), ["5", "+1", "Reset", "one"]);
+
+    // Rejected assets leave the view suspended with its values.
+    session.suspend();
+    let mut broken = assets();
+    broken.view.truncate(10);
+    assert!(session.resume(&broken).is_err());
+    assert!(session.is_suspended());
+    session.resume(&assets()).expect("resume");
+    assert_eq!(session.texts(), ["5", "+1", "Reset", "one"]);
+}
+
+#[test]
+fn clearing_drops_calls_lua_has_not_received() {
+    let service = UiService::new(DEFAULT_VIEWPORT);
+    let session = service.open(&assets()).expect("view opens");
+    find(&session, "increment");
+    session.clear_events();
+    find(&session, "reset");
+    assert_eq!(
+        next_call(session.channel()).map(|(handler, _)| handler),
+        Some("reset".into())
+    );
 }

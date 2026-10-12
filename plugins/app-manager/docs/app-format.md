@@ -75,30 +75,71 @@ A container that breaks a rule is not launchable. `app.list` reports it under
 
 ## Program
 
-The entry program runs on the VM like any Lua run, with one global added on
-its first line, so line numbers in errors match the file:
+The entry program runs on the VM like any Lua run, with the `app` package
+bound to this app. The binding shares the program's first line, so line
+numbers in errors match the file. Apps have no standard input; a read gets
+end of file.
+
+### The event loop
+
+Every app is one loop over `app.events()`. View calls, lifecycle events, and
+timer ticks arrive in that one stream, in order:
 
 ```lua
-APP = { id = "counter", ui = "view-7" } -- ui is nil for a headless app
-```
+local app = require("app")
+local view = app.view()                -- nil for a headless app
 
-An app with a view claims it once and then waits for its handlers:
-
-```lua
-local view = assert(require("ui").attach(APP.ui))
-assert(view:set("count", 0))         -- a value the view declares
-while true do
-  local handler, arg = view:next()   -- nil once the view closes
-  if handler == nil then break end
-  -- update state, then view:set(...)
+for event, a, b in app.events() do
+  if event == "app:background" then save()
+  elseif event == "app:terminate" then save() break
+  elseif event == "increment" then ...  -- a view call: handler name, then arguments
+  end
 end
 ```
 
-`view:set` and `ui.attach` return `nil, message` on failure. Values are
-checked against the view's contract: the names and types its `app.d.ts`
-declares. Apps have no standard input; a read gets end of file. The app ends
-when the program returns or fails; the outcome and last output lines appear
-in `app.status` as `last_exit`.
+| Event            | When                                                                 |
+| ---------------- | -------------------------------------------------------------------- |
+| `app:active`     | The app is in the foreground and takes input. First event of a view app. |
+| `app:inactive`   | Still visible but not taking input: an overlay covers it or a transition runs. No view call follows until `app:active`. |
+| `app:background` | It left the foreground. Save now: a suspended app may be terminated without another event. |
+| `app:foreground` | It came back from the background; `app:active` follows.              |
+| `app:terminate`  | It is asked to exit. Return within the grace period or be cancelled. |
+| `app:tick`       | The interval set with `app.events{ every = ms }` passed (at least 100 ms). Not delivered in the background or while suspended. |
+
+After `app:background` the program must be back in `app.events()` within the
+grace period (1 s); it is then suspended: it uses no CPU, and its view tree is
+released and rebuilt from its values when it returns. A program still busy
+when the grace period ends is cancelled, as is one that ignores
+`app:terminate`. The loop ends after `app.exit()`; the program then returns.
+
+Headless apps never enter the foreground. They run as services and only see
+`app:tick` and `app:terminate`.
+
+### API
+
+| Call | Result |
+| ---- | ------ |
+| `app.id`, `app.name`, `app.version` | From the manifest. |
+| `app.view()` | The view, or `nil` for a headless app. |
+| `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
+| `app.exit()` | Ends the event loop. |
+| `view:set(name, value)` | Writes a value the view's `app.d.ts` declares; checked against its type. |
+| `view:is_open()`, `view:close()` | The view's state; closing ends view calls. |
+| `app.kv.get(key)` | The stored value, or `nil`. |
+| `app.kv.set(key, value)` | Stores booleans, numbers, strings, and tables that are arrays or have string keys; `nil` deletes. |
+| `app.kv.delete(key)`, `app.kv.keys()` | Delete a key; list keys, sorted. |
+| `app.fs.read(path)`, `app.fs.write(path, data)`, `app.fs.append(path, data)` | Whole-file access; writes replace atomically. |
+| `app.fs.list([dir])` | Sorted names; directories end in `/`. |
+| `app.fs.exists(path)`, `app.fs.remove(path)`, `app.fs.mkdir(path)` | Plain file management. |
+
+Failures return `nil` and a message instead of raising, so `assert(...)` turns
+them into errors. Keys are 1–64 bytes and the store holds at most 16 KiB of
+JSON. Files are at most 64 KiB; paths are relative to the app's own file
+tree, at most 8 names deep, with no `.` or `..`.
+
+Storage belongs to the app ID, not the container: it lives in the App
+Manager's private `/media/data/<id>/` (`kv.json` and `files/`), survives
+updates and restarts, and is never visible to other apps.
 
 ## Views
 
@@ -119,8 +160,11 @@ an existing build next to its own entry program.
 `/workspace/media/apps/hello/main.lua`:
 
 ```lua
-print("hello from " .. APP.id)
+local app = require("app")
+local runs = (app.kv.get("runs") or 0) + 1
+assert(app.kv.set("runs", runs))
+print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Launch it with `app.launch` and `{"id":"hello"}`; `app.status` then shows
-`last_exit.output` as `["hello from hello"]`.
+Open it with `app.open` and `{"id":"hello"}`; `app.status` then shows
+`last_exit.output` as `["hello from hello, run 1"]`.

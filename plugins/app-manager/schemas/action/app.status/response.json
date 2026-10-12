@@ -35,7 +35,7 @@
       ],
       "additionalProperties": false
     },
-    "foreground": {
+    "running": {
       "type": "object",
       "properties": {
         "app": {
@@ -45,11 +45,22 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
+        },
+        "state": {
+          "enum": [
+            "active",
+            "inactive",
+            "background",
+            "suspended",
+            "running",
+            "terminating"
+          ]
         }
       },
       "required": [
         "app",
-        "run_id"
+        "run_id",
+        "state"
       ],
       "additionalProperties": false
     },
@@ -109,9 +120,16 @@
           "type": "null"
         },
         {
-          "$ref": "#/$defs/foreground"
+          "$ref": "#/$defs/running"
         }
       ]
+    },
+    "running": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/running"
+      }
     },
     "texts": {
       "type": "array",
@@ -132,6 +150,7 @@
   },
   "required": [
     "foreground",
+    "running",
     "last_exit"
   ],
   "additionalProperties": false

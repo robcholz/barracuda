@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, rc::Rc, string::String};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{
     ffi::c_int,
     future::Future,
@@ -10,8 +10,8 @@ use core::{
 
 use lunka::cdef::auxlib::NO_REF;
 use lunka::cdef::{
-    MULT_RET, REGISTRY_INDEX, lua_gettop, lua_newthread, lua_pcallk, lua_pushvalue, lua_rawget,
-    lua_rawgeti, lua_rawset, lua_resetthread, lua_resume, lua_settop, lua_xmove,
+    MULT_RET, REGISTRY_INDEX, lua_gettop, lua_newthread, lua_next, lua_pcallk, lua_pushvalue,
+    lua_rawget, lua_rawgeti, lua_rawset, lua_resetthread, lua_resume, lua_settop, lua_xmove,
 };
 use lunka::{Thread, cdef::Type};
 
@@ -166,6 +166,28 @@ impl Table {
 
     pub fn is_empty(&self) -> Result<bool> {
         self.len().map(|length| length == 0)
+    }
+
+    /// Every key-value pair in `next` order, read without metamethods.
+    ///
+    /// Keys and values are plain Lua values; a pair holding a function,
+    /// userdata, or thread fails the conversion.
+    pub fn pairs(&self) -> Result<Vec<(LuaValue, LuaValue)>> {
+        self.inner.with_main(|lua| {
+            self.inner.push(lua)?;
+            let table = lua.top();
+            lua.push_nil();
+            let mut pairs = Vec::new();
+            while unsafe { lua_next(lua.as_ptr(), table) } != 0 {
+                // Converting the key in place would derail `lua_next`; LuaValue
+                // reads strings and numbers without coercion.
+                let key = LuaValue::from_lua(lua, -2)?;
+                let value = LuaValue::from_lua(lua, -1)?;
+                pairs.push((key, value));
+                unsafe { lua_settop(lua.as_ptr(), -2) };
+            }
+            Ok(pairs)
+        })
     }
 }
 

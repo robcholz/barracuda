@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Runs compiled MicroTS views (BVIR) on the vendored PocketJS core"
 license = "Apache-2.0"
+publish = false
 
 [dependencies]
 microts = { path = "../microts" }

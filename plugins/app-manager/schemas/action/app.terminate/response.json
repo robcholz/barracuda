@@ -34,10 +34,8 @@
         "has_view"
       ],
       "additionalProperties": false
-    }
-  },
-  "oneOf": [
-    {
+    },
+    "running": {
       "type": "object",
       "properties": {
         "app": {
@@ -47,32 +45,41 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
-        }
-      },
-      "required": [
-        "app",
-        "run_id"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "error": {
+        },
+        "state": {
           "enum": [
-            "not_found",
-            "invalid_bundle",
-            "storage",
-            "view_rejected",
-            "runtime_unavailable",
-            "busy"
+            "active",
+            "inactive",
+            "background",
+            "suspended",
+            "running",
+            "terminating"
           ]
         }
       },
       "required": [
-        "error"
+        "app",
+        "run_id",
+        "state"
       ],
       "additionalProperties": false
     }
-  ]
+  },
+  "type": "object",
+  "properties": {
+    "app": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/running"
+        }
+      ]
+    }
+  },
+  "required": [
+    "app"
+  ],
+  "additionalProperties": false
 }

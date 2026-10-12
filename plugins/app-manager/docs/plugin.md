@@ -3,45 +3,84 @@
 - Plugin ID: `app-manager`
 - Direct dependencies: `vm`, `ui`, `workflow`
 - Provided typed capabilities: `AppManager`
-- Required typed capabilities: `Vm` from `vm`, `UiService` from `ui`,
-  `WorkflowActionRegistry` from `workflow`
+- Required typed capabilities: `Vm` and `LuaPackageRegistry` from `vm`,
+  `UiService` from `ui`, `WorkflowActionRegistry` from `workflow`
 - Owned Components: none
-- Plugin-owned tasks: one task that supervises the foreground app's VM run
-- Workflow Actions: `app.list`, `app.launch`, `app.stop`, `app.status`, `app.tap`
+- Plugin-owned tasks: one task that supervises up to `MAX_APP_RUNS` (3) app
+  runs, their grace periods, and suspension
+- Workflow Actions: `app.list`, `app.open`, `app.home`, `app.interactive`,
+  `app.terminate`, `app.status`, `app.tap`
+- Lua packages: `app`
 - Events, Agent Tools: none
-- Storage: private Plugin filesystem; reads bundles and writes nothing. Retains
-  its Workflow Action registrations for its lifetime.
+- Storage: private Plugin filesystem. Reads app containers; writes each app's
+  data under `/media/data/<id>/`. Retains its Workflow Action and Lua package
+  registrations for its lifetime.
 
 ## Apps
 
 An app is a Lua program with an optional compiled MicroTS view, stored as an
-app container. [`app-format.md`](app-format.md) defines the container and
-manifest; `schemas/app/manifest.json` checks the manifest.
+app container. [`app-format.md`](app-format.md) defines the container, the
+manifest, and the `app` Lua API; `schemas/app/manifest.json` checks the
+manifest.
 
 App containers are carved out of this Plugin's own filesystem scope, which is
 unchanged: installed apps under the private `/media/apps`, bundled apps under
 the private `/resources/apps`, and apps that Agents create under the shared
 `/workspace/media/apps`, which this Plugin only reads. An installed app
 replaces a bundled one with the same ID; a Workspace container never replaces
-either.
+either. Each app's data lives under the private `/media/data/<id>/`.
 
-## Running
+## Lifecycle
 
-`AppManager::launch` stops the foreground app, opens the new app's view with
-`UiService::open`, and starts its entry program on the VM with a global
-prelude on its first line:
+The system UI owns the gestures and calls `AppManager`; this Plugin owns the
+states, the budgets, and what the program is told. Programs only respond.
 
-```lua
-APP = { id = "counter", ui = "view-7" }  -- ui is nil for a headless app
+```text
+               open                     home / open another app
+not running ──────────→ active ⇄ inactive ──────────────→ background
+                          ↑  set_interactive                │ parked within GRACE
+                          │                                 ↓
+                          └──────────── open ───────────  suspended
+terminate from any state → terminating → exits within GRACE, or is cancelled
 ```
 
-The program claims its view with `require("ui").attach(APP.ui)` and usually
-loops on `view:next()`. One app is in the foreground at a time and it holds
-one of the VM's four execution slots. The Plugin task watches the run: when
-the program ends, its view closes and `AppManager::last_exit` records the
-outcome, diagnostic, and last output lines. Apps have no input; a read gets
-EOF. `AppManager::stop` closes the view and cancels the run without recording
-an exit.
+| System UI action                          | `AppManager` call           | Program sees                         |
+| ----------------------------------------- | --------------------------- | ------------------------------------ |
+| Tap an icon                               | `open(id)`                  | launch, then `app:active`; or `app:foreground`, `app:active` when resuming |
+| Pull down the control center, start a gesture | `set_interactive(false)` | `app:inactive`                     |
+| Close the overlay                         | `set_interactive(true)`     | `app:active`                         |
+| Swipe up to home                          | `home()`                    | `app:inactive`, `app:background`     |
+| Close it in the app switcher              | `terminate(id)`             | `app:terminate`                      |
+| Taps on the app                           | `tap(x, y)`                 | the view's handler call              |
+
+- **Input.** Only an active app gets view calls. Calls queued before it stops
+  taking input are dropped, so none arrives after `app:inactive`.
+- **Suspension.** `GRACE` (1 s) after `app:background`, an app waiting in
+  `app.events()` is suspended: its view tree is released and its values kept,
+  and `open` rebuilds the tree from them. An app still running is cancelled.
+  The suspended program costs no CPU but keeps its VM run and Lua heap.
+- **Termination.** `terminate` sends `app:terminate`; the run is cancelled if
+  it has not ended `GRACE` later. Suspended apps beyond `MAX_SUSPENDED` (2),
+  and the least recently used suspended app when a launch needs a run, are
+  terminated without another event, which is why programs save on
+  `app:background`.
+- **Headless apps** have no view, never enter the foreground, and run as
+  services until they return or are terminated.
+- **Exits.** `AppManager::last_exit` records how the latest run ended: the VM
+  outcome, its diagnostic or the reason it was cancelled, and the last output
+  lines. `AppManager::running` lists running apps, most recently used first,
+  for the app switcher.
+
+Apps run on at most `MAX_APP_RUNS` (3) of the VM's four execution slots, so
+one stays free for Workflow and Agent runs.
+
+## The `app` package
+
+Every app program starts with `require("app").__bind("<ticket>");` on its first
+line. The ticket names the app's port, the `Send + Sync` state the program
+shares with this Plugin: the lifecycle queue, its view channel from the `ui`
+Plugin, its timer, and its storage. A ticket binds once; other Lua runs
+cannot claim an app.
 
 No display backend is connected yet. `AppManager::tap` and
 `AppManager::texts` stand in for touch input and rendering, and views are laid

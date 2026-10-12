@@ -2,10 +2,11 @@
 
 use crate::datum::{Datum, Shape};
 use crate::mailbox::{Event, Mailbox, Schema};
-use crate::package::UiPackage;
-use alloc::{collections::BTreeMap, format, rc::Rc, string::String, sync::Arc, vec::Vec};
-use barracuda_ui_runtime::{Document, DocumentAssets, DocumentError, format::FormatError};
-use barracuda_vm_plugin::{LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError};
+use crate::view::ViewChannel;
+use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use barracuda_ui_runtime::{
+    Document, DocumentAssets, DocumentError, Program, Value, format::FormatError,
+};
 use core::cell::{Cell, RefCell};
 
 /// The viewport views are laid out in until a display backend sets one.
@@ -45,11 +46,28 @@ impl core::error::Error for UiError {}
 struct Inner {
     mailbox: Arc<Mailbox>,
     documents: RefCell<BTreeMap<u32, Document>>,
+    /// The values of suspended views, kept to rebuild their trees on resume.
+    suspended: RefCell<BTreeMap<u32, Vec<Value>>>,
     next_id: Cell<u32>,
     viewport: (f32, f32),
 }
 
 impl Inner {
+    fn document(&self, program: Program, assets: &UiAssets) -> Result<Document, UiError> {
+        let fonts: Vec<&[u8]> = assets.fonts.iter().map(Vec::as_slice).collect();
+        let (width, height) = self.viewport;
+        Document::new(
+            program,
+            DocumentAssets {
+                styles: &assets.styles,
+                fonts: &fonts,
+            },
+            width,
+            height,
+        )
+        .map_err(UiError::Document)
+    }
+
     /// Applies pending Lua writes and lays out every changed view.
     fn pump(&self) {
         let mut documents = self.documents.borrow_mut();
@@ -80,28 +98,14 @@ pub struct UiService {
 }
 
 impl UiService {
-    /// Creates a service and registers the `ui` Lua package it serves.
-    ///
-    /// The `ui` Plugin does this during registration; keep the registration
-    /// for as long as the package should stay installed in new Lua states.
-    ///
-    /// # Errors
-    ///
-    /// Returns the registry's error when the package cannot be registered.
-    pub fn register(
-        packages: &LuaPackageRegistry,
-        viewport: (f32, f32),
-    ) -> Result<(Self, LuaPackageRegistration), LuaPackageRegistryError> {
-        let mailbox = Arc::new(Mailbox::new());
-        let registration = packages.register(UiPackage::new(Arc::clone(&mailbox)))?;
-        Ok((Self::new(mailbox, viewport), registration))
-    }
-
-    pub(crate) fn new(mailbox: Arc<Mailbox>, viewport: (f32, f32)) -> Self {
+    /// Creates a service that lays views out at `viewport`.
+    #[must_use]
+    pub fn new(viewport: (f32, f32)) -> Self {
         Self {
             inner: Rc::new(Inner {
-                mailbox,
+                mailbox: Arc::new(Mailbox::new()),
                 documents: RefCell::new(BTreeMap::new()),
+                suspended: RefCell::new(BTreeMap::new()),
                 next_id: Cell::new(1),
                 viewport,
             }),
@@ -114,28 +118,14 @@ impl UiService {
         self.inner.viewport
     }
 
-    /// Mounts a view and prepares it for one Lua run.
-    ///
-    /// Hand [`UiSession::ticket`] to the run; it claims the view with
-    /// `require("ui").attach(ticket)`. The view lives until the session drops.
+    /// Mounts a view. It lives until the session drops.
     ///
     /// # Errors
     ///
     /// Returns [`UiError`] when the program or an asset is rejected.
     pub fn open(&self, assets: &UiAssets) -> Result<UiSession, UiError> {
         let program = barracuda_ui_runtime::format::read(&assets.view).map_err(UiError::View)?;
-        let fonts: Vec<&[u8]> = assets.fonts.iter().map(Vec::as_slice).collect();
-        let (width, height) = self.inner.viewport;
-        let document = Document::new(
-            program,
-            DocumentAssets {
-                styles: &assets.styles,
-                fonts: &fonts,
-            },
-            width,
-            height,
-        )
-        .map_err(UiError::Document)?;
+        let document = self.inner.document(program, assets)?;
         let schema = Arc::new(Schema {
             slots: document
                 .program()
@@ -146,12 +136,14 @@ impl UiService {
         });
         let id = self.inner.next_id.get();
         self.inner.next_id.set(id.wrapping_add(1).max(1));
-        let ticket = format!("view-{id}");
-        self.inner.mailbox.insert(id, ticket.clone(), schema);
+        self.inner.mailbox.insert(id, schema.slots.len());
         self.inner.documents.borrow_mut().insert(id, document);
         Ok(UiSession {
-            id,
-            ticket,
+            channel: ViewChannel {
+                id,
+                schema,
+                mailbox: Arc::clone(&self.inner.mailbox),
+            },
             inner: Rc::clone(&self.inner),
         })
     }
@@ -175,22 +167,91 @@ impl UiService {
 
 /// One open view; dropping it unmounts the view and ends it for Lua.
 pub struct UiSession {
-    id: u32,
-    ticket: String,
+    channel: ViewChannel,
     inner: Rc<Inner>,
 }
 
 impl UiSession {
-    /// The one-time ticket a Lua run passes to `ui.attach`.
+    /// The channel a Lua package hands to the program that owns this view.
     #[must_use]
-    pub fn ticket(&self) -> &str {
-        &self.ticket
+    pub fn channel(&self) -> &ViewChannel {
+        &self.channel
     }
 
-    /// Whether Lua closed the view or the `ui` package was revoked.
+    /// Whether Lua closed the view.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.inner.mailbox.is_closed(self.id)
+        self.inner.mailbox.is_closed(self.channel.id)
+    }
+
+    /// Drops handler calls Lua has not received yet.
+    pub fn clear_events(&self) {
+        self.inner.mailbox.clear_events(self.channel.id);
+    }
+
+    /// Whether the tree is released; see [`UiSession::suspend`].
+    #[must_use]
+    pub fn is_suspended(&self) -> bool {
+        !self.inner.documents.borrow().contains_key(&self.channel.id)
+    }
+
+    /// Releases the view's tree and keeps only its values.
+    ///
+    /// A view is a function of its values, so [`UiSession::resume`] rebuilds the
+    /// same tree. Lua writes made meanwhile wait in the channel. Taps and reads
+    /// see nothing while suspended.
+    pub fn suspend(&self) {
+        self.inner.pump();
+        let Some(document) = self.inner.documents.borrow_mut().remove(&self.channel.id) else {
+            return;
+        };
+        let values = (0..document.program().slots.len())
+            .map(|slot| document.value(slot).cloned().unwrap_or(Value::Void))
+            .collect();
+        self.inner
+            .suspended
+            .borrow_mut()
+            .insert(self.channel.id, values);
+    }
+
+    /// Rebuilds a suspended view from its assets and kept values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UiError`] when the assets are rejected or no longer match the
+    /// view; the session stays suspended.
+    pub fn resume(&self, assets: &UiAssets) -> Result<(), UiError> {
+        if !self.is_suspended() {
+            return Ok(());
+        }
+        let program = barracuda_ui_runtime::format::read(&assets.view).map_err(UiError::View)?;
+        let compatible =
+            program.slots.len() == self.channel.schema.slots.len()
+                && program.slots.iter().zip(&self.channel.schema.slots).all(
+                    |(slot, (name, shape))| slot.name == *name && Shape::from(&slot.ty) == *shape,
+                );
+        if !compatible {
+            return Err(UiError::View(FormatError::Invalid(
+                "the view changed while suspended",
+            )));
+        }
+        let mut document = self.inner.document(program, assets)?;
+        let values = self
+            .inner
+            .suspended
+            .borrow_mut()
+            .remove(&self.channel.id)
+            .unwrap_or_default();
+        for (slot, value) in values.into_iter().enumerate() {
+            let _matching = document.set(slot, value);
+        }
+        document.frame();
+        self.inner
+            .documents
+            .borrow_mut()
+            .insert(self.channel.id, document);
+        self.inner.pump();
+        Ok(())
     }
 
     /// Taps the view at (`x`, `y`) and delivers the handler call to Lua.
@@ -201,7 +262,7 @@ impl UiSession {
         self.inner.pump();
         let event = {
             let mut documents = self.inner.documents.borrow_mut();
-            let document = documents.get_mut(&self.id)?;
+            let document = documents.get_mut(&self.channel.id)?;
             let event = document.press_at(x, y)?;
             let handler = document.program().handlers.get(event.handler)?.name.clone();
             let args = event
@@ -212,10 +273,10 @@ impl UiSession {
             Event { handler, args }
         };
         let handler = event.handler.clone();
-        if !self.inner.mailbox.post(self.id, event) {
+        if !self.inner.mailbox.post(self.channel.id, event) {
             log::warn!(
                 "ui view {}: dropped '{handler}' because the view is closed or busy",
-                self.id
+                self.channel.id
             );
             return None;
         }
@@ -229,7 +290,7 @@ impl UiSession {
         self.inner
             .documents
             .borrow()
-            .get(&self.id)
+            .get(&self.channel.id)
             .map(Document::texts)
             .unwrap_or_default()
     }
@@ -237,7 +298,8 @@ impl UiSession {
 
 impl Drop for UiSession {
     fn drop(&mut self) {
-        self.inner.mailbox.remove(self.id);
-        self.inner.documents.borrow_mut().remove(&self.id);
+        self.inner.mailbox.remove(self.channel.id);
+        self.inner.documents.borrow_mut().remove(&self.channel.id);
+        self.inner.suspended.borrow_mut().remove(&self.channel.id);
     }
 }

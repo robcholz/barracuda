@@ -2,7 +2,7 @@
 //!
 //! Lua writes values and waits for events here; the UI task applies the writes
 //! to the view and posts events. Everything inside is `Send`, guarded by a
-//! critical section, so the Lua package stays `Send + Sync`.
+//! critical section, so view channels stay `Send + Sync` for Lua packages.
 
 use crate::datum::{Datum, Shape};
 use alloc::{
@@ -36,10 +36,7 @@ pub(crate) struct Event {
 }
 
 struct Entry {
-    ticket: String,
-    attached: bool,
     closed: bool,
-    schema: Arc<Schema>,
     writes: Vec<Option<Datum>>,
     events: VecDeque<Event>,
     waker: Option<Waker>,
@@ -76,36 +73,19 @@ impl Mailbox {
         self.wake.wait().await;
     }
 
-    pub(crate) fn insert(&self, id: u32, ticket: String, schema: Arc<Schema>) {
-        let writes = schema.slots.iter().map(|_| None).collect();
+    pub(crate) fn insert(&self, id: u32, slots: usize) {
+        let writes = (0..slots).map(|_| None).collect();
         self.with(|entries| {
             entries.insert(
                 id,
                 Entry {
-                    ticket,
-                    attached: false,
                     closed: false,
-                    schema,
                     writes,
                     events: VecDeque::new(),
                     waker: None,
                 },
             );
         });
-    }
-
-    /// Claims an unattached view by ticket. A ticket attaches once.
-    pub(crate) fn attach(&self, ticket: &str) -> Option<(u32, Arc<Schema>)> {
-        self.with(|entries| {
-            let (id, entry) = entries
-                .iter_mut()
-                .find(|(_, entry)| entry.ticket == ticket)?;
-            if entry.attached || entry.closed {
-                return None;
-            }
-            entry.attached = true;
-            Some((*id, Arc::clone(&entry.schema)))
-        })
     }
 
     pub(crate) fn write(&self, id: u32, slot: usize, datum: Datum) -> Result<(), MailboxError> {
@@ -156,6 +136,15 @@ impl Mailbox {
             }
             true
         })
+    }
+
+    /// Drops queued events, so nothing reaches Lua after its view stops taking input.
+    pub(crate) fn clear_events(&self, id: u32) {
+        self.with(|entries| {
+            if let Some(entry) = entries.get_mut(&id) {
+                entry.events.clear();
+            }
+        });
     }
 
     fn poll_event(&self, id: u32, cx: &mut Context<'_>) -> Poll<Option<Event>> {
@@ -213,7 +202,7 @@ impl Mailbox {
     }
 }
 
-/// The future behind `view:next()`.
+/// Waits for the next handler call of one view.
 pub(crate) struct NextEvent {
     mailbox: Arc<Mailbox>,
     id: u32,
