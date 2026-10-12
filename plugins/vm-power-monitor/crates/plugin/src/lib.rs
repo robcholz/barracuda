@@ -4,6 +4,10 @@
 
 extern crate alloc;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::string::String;
 use barracuda_board_hal::power::{PowerMeasurement, PowerMonitor, PowerMonitorPeripheral};
 use barracuda_plugin::api::PluginContext;
@@ -30,7 +34,8 @@ impl<Monitor> PowerMonitorPlugin<Monitor> {
         Builtins: PowerMonitorPeripheral<PowerMonitor = Monitor>,
     {
         Self {
-            monitor: context.hal.peripherals.take_power_monitor(),
+            monitor: config::peripherals::POWER_MONITOR_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_power_monitor(instance)),
         }
     }
 }

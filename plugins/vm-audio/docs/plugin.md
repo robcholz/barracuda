@@ -1,12 +1,12 @@
 # Audio Plugin
 
-The Audio Plugin owns the Board's primary built-in audio codec and exposes
+The Audio Plugin owns the Board's primary audio codec and exposes
 playback and recording to Lua code as the `audio` Lua package.
 
 - Plugin ID: `audio`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_audio_codec()`
+- Context resources: peripheral slot `audio-codec.device` (`primary`, optional)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -16,7 +16,7 @@ playback and recording to Lua code as the `audio` Lua package.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary built-in `AudioCodec` capability exactly
+This Plugin takes the Board's primary `AudioCodec` capability exactly
 once and installs the `audio` Lua package. Codec register control stays in the
 ES8311/ES8389 implementation, while I2S controller, DMA, and bounded buffers stay in
 the Platform HAL composition.

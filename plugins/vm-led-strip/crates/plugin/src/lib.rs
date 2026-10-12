@@ -4,6 +4,10 @@
 
 extern crate alloc;
 
+mod config {
+    barracuda_plugin::config!();
+}
+
 use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::led_strip::{LedStrip, LedStripPeripheral, Rgb8};
 use barracuda_plugin::api::PluginContext;
@@ -30,7 +34,8 @@ impl<Strip> LedStripPlugin<Strip> {
         Builtins: LedStripPeripheral<LedStrip = Strip>,
     {
         Self {
-            strip: context.hal.peripherals.take_led_strip(),
+            strip: config::peripherals::LED_STRIP_DEVICE
+                .and_then(|instance| context.hal.peripherals.take_led_strip(instance)),
         }
     }
 }

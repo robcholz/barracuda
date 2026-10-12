@@ -1,6 +1,7 @@
 # The Plugins a Board builds unless it names another profile. It covers every
-# Plugin, matching the builds before per-Board selection; Boards and narrower
-# profiles turn Plugins off with `plugins.<id>.enabled: false`.
+# Plugin, matching the builds before per-Board selection. A Board turns a
+# Plugin off with `plugins.<id>.enabled: false`; a narrower product names a
+# profile that lists only its own Plugins.
 enable:
   - agent
   - agent-file

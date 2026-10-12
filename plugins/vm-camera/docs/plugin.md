@@ -1,12 +1,12 @@
 # Camera Plugin
 
-The Camera Plugin owns the Board's primary built-in camera and exposes frame
+The Camera Plugin owns the Board's primary camera and exposes frame
 capture to Lua code as the `camera` Lua package.
 
 - Plugin ID: `camera`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_camera()`
+- Context resources: peripheral slot `camera.device` (`primary`, optional)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -16,7 +16,7 @@ capture to Lua code as the `camera` Lua package.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary built-in `Camera` capability exactly
+This Plugin takes the Board's primary `Camera` capability exactly
 once and installs the `camera` Lua package. OV2640/OV3660 control buses,
 parallel capture, and DMA remain owned by the implementation and Platform HAL.
 

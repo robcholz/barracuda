@@ -215,7 +215,12 @@ used to construct a HAL; it does not implement or select a Platform.
 
 Board configuration identifies concrete hardware and the native names required
 to construct it. It does not contain mounted filesystems, database objects,
-Plugin instances, or application services.
+Plugin instances, or application services. Beside the hardware matrix, a Board
+names the profile under `boards/profiles/` that decides which Plugins its
+firmware contains, and its `plugins.<id>` section enables or disables single
+Plugins, sets their settings, and wires their peripheral slots when the
+defaults do not fit. That section is the only place a Board names a Plugin;
+the rules are in [`plugin-api.md`](plugin-api.md#enablement-per-board).
 
 Board selection is an explicit persistent step:
 
@@ -237,7 +242,8 @@ isolated artifact directory while an embedded `build-std` policy is active.
 The selector crates keep stable source manifests. `cargo board` bootstraps
 ignored local dependency packages under `.barracuda/selection` before Cargo
 resolves the source workspace, then activates only the concrete Platform and
-peripheral implementation dependencies required by the chosen Board. Every
+peripheral implementation dependencies required by the chosen Board, and the
+Plugins the Board enables. Every
 local package declares the complete optional dependency catalog, so changing
 the selected default features does not rewrite `Cargo.lock`. The build reads
 persistent workspace state; it does not require shell setup or a Board-aware
@@ -294,6 +300,13 @@ peripherals:
         pin: gpio10
       parameters:
         active-level: low
+    front:
+      implementation: mipi-dbi-display
+      primary: true
+      bindings: { ... }
+    status-panel:
+      implementation: gdeh0154d67-display
+      bindings: { ... }
 
 exposed-io:
   pins:
@@ -309,11 +322,16 @@ Platform types, Plugin identities, and application policy do not belong in the
 Board matrix. An implementation identifier selects registered composition
 code; YAML does not name a Rust type or crate path.
 
+Device names are the Board's own. A Board may attach several displays; every
+other peripheral kind has at most one device. With several devices of a kind,
+exactly one is marked `primary: true`, a hardware fact about the product's
+main device rather than a Plugin choice. A kind with one device needs no mark.
+
 Board resources contain no third hardware category:
 
 ~~~rust,ignore
 BoardResources {
-    peripherals: GeneratedPeripherals { /* Option<display>, Option<rtc>, ... */ },
+    peripherals: GeneratedPeripherals { /* one Option per declared device */ },
     exposed_io: GeneratedExposedIo { /* move-only tokens, Platform providers */ },
 }
 ~~~
@@ -321,8 +339,13 @@ BoardResources {
 `BoardResources<Peripherals, ExposedIo>` is the common ownership envelope. Its
 generic fields preserve the concrete, statically composed peripheral types for
 each selected Board. Every generated peripheral field is `Option<T>` because no
-peripheral kind is mandatory. The single exposed-I/O value owns all runtime
-physical resources.
+peripheral kind is mandatory. Each peripheral trait takes a device by
+`Instance`, the device's position among the Board's devices of that kind in
+name order; Plugins never build an `Instance` themselves but take the
+constants their build resolved from their declared slots. Several displays are
+returned as one generated `BoardDisplay` enum over the Board's display
+implementations, built by `display_set!`, so dispatch stays static. The single
+exposed-I/O value owns all runtime physical resources.
 System places it in `PluginContext` behind one shared `Arc`; Plugins that use
 exposed hardware clone that owner, not independent protocol collections. Platform-owned
 controller pools are part of this owner but are not application-visible names.
@@ -915,7 +938,9 @@ Every layer below the Plugins is Plugin-neutral: disabling a Plugin removes its
 feature from the build, and nothing in core, System, composition, Platforms,
 Boards, or `shared/` names it. A per-Board value a Plugin needs is the Plugin's
 own setting, set in the Board's `plugins.<id>` section, never a Platform or
-Board field. The Plugin contract (layout, `plugin.toml`, settings, host tasks,
+Board field. A Plugin that drives a peripheral declares a slot for it and
+receives the device the Board's resolution assigns; two Plugins never race to
+take one device. The Plugin contract (layout, `plugin.toml`, settings, host tasks,
 construction, lifecycle, collaboration contracts, files, and documentation)
 is [`plugin-api.md`](plugin-api.md). Execution ownership for long-lived Plugin
 work lives in [`execution-ownership.md`](execution-ownership.md).
@@ -1069,3 +1094,6 @@ Before changing target-sensitive code, verify:
     with sharing and per-device configuration handled by an upstream adapter?
 20. Would disabling any Plugin remove every trace of its feature, with nothing
     below the Plugins naming it?
+21. Does each Plugin take its peripherals through declared slots, with the
+    Board's profile and `plugins.<id>` deciding which Plugins exist and which
+    device each slot receives?

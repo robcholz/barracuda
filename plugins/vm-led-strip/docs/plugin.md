@@ -1,11 +1,11 @@
 # LED Strip Plugin
 
-Installs the `led_strip` Lua package over the Board's primary built-in LED strip.
+Installs the `led_strip` Lua package over the Board's primary LED strip.
 
 - Plugin ID: `led-strip`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: `hal.peripherals.take_led_strip()`
+- Context resources: peripheral slot `led-strip.device` (`primary`, optional)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -15,7 +15,7 @@ Installs the `led_strip` Lua package over the Board's primary built-in LED strip
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary built-in `LedStrip` capability exactly
+This Plugin takes the Board's primary `LedStrip` capability exactly
 once and installs the `led_strip` Lua package. It consumes the semantic peripheral
 capability and never exposes or reconstructs its SPI transport.
 

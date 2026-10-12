@@ -713,6 +713,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
@@ -848,6 +849,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
@@ -935,6 +937,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
@@ -1445,6 +1448,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
@@ -1500,6 +1504,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
@@ -2157,6 +2162,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",

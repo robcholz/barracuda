@@ -1,3 +1,6 @@
 id = "audio"
 depends-on = ["vm"]
 description = "Registers the built-in audio codec Lua package."
+
+[peripherals.audio-codec]
+device = { fill = "primary", optional = true }
