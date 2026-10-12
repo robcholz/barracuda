@@ -1,4 +1,4 @@
-# Peripheral Instances and Plugin Claims
+# Per-Board Plugins and Peripheral Claims
 
 Status: **proposed**. Once accepted, it lands as one Plugin API change set
 (core, every affected Plugin, [`plugin-api.md`](plugin-api.md),
@@ -8,6 +8,10 @@ documents remain authoritative.
 
 ## Problem
 
+- **Plugins are enabled globally.** The enabled set lives in the ignored
+  `.barracuda/disabled-plugins` and is the same for every Board. A Board cannot
+  say that it is a touch-screen device running the system UI while another is
+  a headless agent gateway, and CI builds every Board with one Plugin set.
 - **One instance per kind.** Each peripheral API exposes a single primary
   instance (`DisplayPeripheral::take_display() -> Option<Display>`), and the
   generator rejects a Board that declares a second device of the same kind
@@ -21,7 +25,89 @@ documents remain authoritative.
   ones. A Plugin author cannot know what each Board calls its devices, and a
   Board author should not edit Plugins to fit a product.
 
-## Model
+## Plugin enablement per Board
+
+Which Plugins a firmware contains is a property of the Board it is built for,
+committed with the Board. Plugins fall into three groups, decided by
+different facts:
+
+| Group | Examples | Enabled when |
+| --- | --- | --- |
+| Infrastructure | `workflow`, `vm`, `http`, `webserver`, `wifi`, `time` | almost always |
+| Hardware adapters | `display`, `vm-gpio`, `vm-i2c`, `camera`, `audio` | the Board has the hardware |
+| Product features | `ui`, `app-manager`, `agent`, `imessage-*` | the product built on the Board wants them |
+
+The third group is a product decision, not a hardware fact: the same Board can
+ship as a touch device or as a headless gateway. Named profiles capture those
+decisions once.
+
+### Profiles
+
+A profile is a named Plugin set under `boards/profiles/<name>.yml`, optionally
+extending one other profile:
+
+```yaml
+# boards/profiles/base.yml
+enable: [workflow, vm, http, webserver, wifi, time, captive-portal]
+```
+
+```yaml
+# boards/profiles/device.yml
+extends: base
+enable: [ui, app-manager, display]
+```
+
+### Board selection of Plugins
+
+A Board names one profile and overrides individual Plugins in its existing
+`plugins.<id>` section, next to their settings:
+
+```yaml
+profile: device
+plugins:
+  imessage-gateway:
+    enabled: false
+  agent:
+    enabled: true
+    # settings stay here as before
+```
+
+A Board without `profile` uses `base`.
+
+### The enabled set
+
+`cargo board select` and `cargo plugin sync --check` compute each Board's
+enabled set:
+
+1. Start from the profile chain: each profile's `enable` on top of the one it
+   extends.
+2. Apply the Board's `plugins.<id>.enabled` overrides.
+3. Add every Plugin an enabled Plugin depends on, transitively. A Board
+   enables features; their dependencies follow. A dependency the Board
+   explicitly disables is an error naming the dependent.
+4. Apply the local `.barracuda/disabled-plugins` override, which remains a
+   developer convenience and is never committed. A locally disabled Plugin
+   disables its dependents too, and sync prints why.
+
+An enabled Plugin whose required peripheral claim cannot be met on the Board is
+an error (see Resolution): enabling it was explicit, so the Board cannot
+deliver it. A Plugin that is not enabled makes no claims.
+
+Profiles and `plugins.<id>` are the only hand-written files that name Plugins
+outside the Plugins themselves; `cargo plugin sync --check` validates that
+every name they use is a Plugin.
+
+### Build composition
+
+Today `cargo plugin sync` writes one System registration list for the global
+enabled set. With per-Board sets, the generated registration list, workspace
+dependencies, and image selection cover every Plugin, each behind a feature of
+System, and Board selection activates the features of the Board's enabled set,
+the same way it already activates only the peripheral implementations the
+Board uses. Switching Boards therefore changes no committed file, and CI
+builds every Board with the set it ships.
+
+## Peripheral claims
 
 Three parties describe three things, each in the place it already owns.
 
@@ -114,10 +200,11 @@ enabled Plugin against the selected Board, in this order:
 4. **Rest.** A `"*"` slot takes every device of its kind still untaken, in
    Board order. At most one enabled Plugin may declare `"*"` per kind.
 
-Then:
+Only enabled Plugins take part. Then:
 
 - a device taken by two slots is an error, because peripherals are move-only;
-- a required slot left empty is an error;
+- a required slot left empty is an error: the Board enabled a Plugin it cannot
+  serve;
 - an optional slot left empty is delivered as `None`, and an empty `"*"` slot
   as an empty list;
 - an `"any"` slot with several candidates is an error;
@@ -134,11 +221,12 @@ compares names.
 
 | Board | `ui` gets | `display` (Lua) gets |
 | --- | --- | --- |
-| One display (most Boards today) | that display | nothing (empty list) |
-| `front` (primary), `back-eink`, `status` | `front` | `back-eink`, `status` |
-| One display, `ui` disabled | — | that display, as today |
+| `device` profile, one display | that display | nothing (empty list) |
+| `device` profile, `front` (primary), `back-eink`, `status` | `front` | `back-eink`, `status` |
+| `base` profile plus `display`, one display | — (not enabled) | that display, as today |
+| `device` profile, no display | build error: `ui` needs a primary display | — |
 
-The last row is why `"*"` collects an unclaimed primary device too: products
+The third row is why `"*"` collects an unclaimed primary device too: products
 without a system UI keep using the main screen from Lua. With both Plugins
 enabled, the system UI owns the primary screen and Lua drives every other
 screen, with no wiring on any Board.
@@ -177,23 +265,28 @@ impl UiPlugin {
 }
 ```
 
-A required slot's constant always names a device, so its `take` cannot be
-`None` in a build that passed `cargo plugin sync --check`; the Plugin still
-handles `None` instead of panicking. A `"*"` slot is a constant list of
+A required slot's constant always names a device in a build that passed
+resolution, so its `take` yields the device; the Plugin still handles `None`
+instead of panicking. A `"*"` slot is a constant list of
 `(name, instance)` pairs; the Lua `display` package then offers
 `display.list()` and `display.open(name)`, and `display.open()` without a name
 keeps opening the first one.
 
 ## Migration
 
-1. Peripheral APIs, the generator, and `board.yml` validation gain named
+1. Board profiles and per-Board enablement: `boards/profiles/`, `profile` and
+   `plugins.<id>.enabled` in `board.yml`, the enabled-set computation, and the
+   feature-gated System registration activated by Board selection. Existing
+   Boards start on `base` plus the overrides that reproduce today's builds.
+2. Peripheral APIs, the generator, and `board.yml` validation gain named
    instances, the `primary` mark, and per-kind enums. Boards with one device
    per kind need no edits.
-2. `plugin.toml` gains `[peripherals]`; `cargo plugin sync --check` resolves
-   and validates claims; the Plugin build emits claim constants.
-3. Every Plugin that calls `take_<peripheral>()` declares its slots and takes
+3. `plugin.toml` gains `[peripherals]`; `cargo plugin sync --check` resolves
+   and validates claims for every Board; the Plugin build emits claim
+   constants.
+4. Every Plugin that calls `take_<peripheral>()` declares its slots and takes
    by constant, in the same change set. The `display` Plugin declares
    `rest = "*"` and its Lua package gains named displays.
-4. `plugin-api.md` (construction, `plugin.toml`, the one-way table) and
-   `platform-architecture.md` (Board resources, peripherals, review checklist)
-   absorb this document, which is then removed.
+5. `plugin-api.md` (construction, `plugin.toml`, settings, the one-way table,
+   scope) and `platform-architecture.md` (Board, Board resources, peripherals,
+   review checklist) absorb this document, which is then removed.
