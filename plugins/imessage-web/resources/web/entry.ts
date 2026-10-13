@@ -36,6 +36,7 @@ import {
   term,
   type PortalContext,
 } from "../../../captive-portal/resources/web/ui";
+import * as history from "./history";
 import { spinningMark } from "./mark";
 import {
   MARKDOWN_CSS,
@@ -151,6 +152,7 @@ const STRINGS = {
     playVideo: "播放视频",
     unavailable: "已不可用",
     unavailableTip: "设备重启时清空了缓存中的附件",
+    sentGoneTip: "发出的文件不随会话保存在浏览器里",
     prev: "上一张",
     next: "下一张",
     close: "关闭",
@@ -246,6 +248,8 @@ const STRINGS = {
     playVideo: "Play video",
     unavailable: "Unavailable",
     unavailableTip: "The device cleared cached attachments when it restarted",
+    sentGoneTip:
+      "Files you sent aren't kept with the conversation in this browser",
     prev: "Previous",
     next: "Next",
     close: "Close",
@@ -905,6 +909,15 @@ export const mount = definePage((context: PortalContext) => {
   const dropped = new Set<string>();
   /** Sent messages of a conversation cleared for another session. */
   const stale = new Set<string>();
+  /** The saved session the page shows, and the browser's copy of its conversation. */
+  let saved: string | null = null;
+  let frames: history.Frame[] = [];
+  /** The conversation shown is copied: a saved session, or a new one the device names later. */
+  let copying = false;
+  /** The copy is being drawn again: what it draws is not kept twice. */
+  let replaying = false;
+  let replays = 0;
+  let saving: ReturnType<typeof setTimeout> | undefined;
   /** A rewound message waits in the composer: the queue holds until it is sent. */
   let held = false;
   /** Stop was asked for; the turn has not ended yet. */
@@ -1108,7 +1121,7 @@ export const mount = definePage((context: PortalContext) => {
     return button;
   }
 
-  function unavailable(item: Shown) {
+  function unavailable(item: Shown, tip = t.unavailableTip) {
     return fileRow(
       ICON_FILE_IMAGE,
       h(
@@ -1119,7 +1132,7 @@ export const mount = definePage((context: PortalContext) => {
       h(
         "span",
         { class: "bc-caption bc-muted" },
-        term(t.unavailable, t.unavailableTip, lang, { start: true }),
+        term(t.unavailable, tip, lang, { start: true }),
       ),
     );
   }
@@ -2199,6 +2212,7 @@ export const mount = definePage((context: PortalContext) => {
       // the device refused the frame (its files expired): no turn starts for it
       const entry = sent.get(id);
       if (!entry) return;
+      keep(event, value);
       awaiting.delete(id);
       arm();
       entry.confirmed = true;
@@ -2228,6 +2242,7 @@ export const mount = definePage((context: PortalContext) => {
       if (event === "message.end") dropped.delete(id);
       return;
     }
+    keep(event, value);
     const known = agents.get(id);
     switch (event) {
       case "message.start": {
@@ -2265,7 +2280,8 @@ export const mount = definePage((context: PortalContext) => {
         known.ended = true;
         active.delete(known);
         // a finished turn may have named or started a session: ask for the list again
-        if (sessions && !active.size) control({ control: "sessions" });
+        if (sessions && !active.size && !replaying)
+          control({ control: "sessions" });
         caret.remove();
         close(known);
         if (request?.owner === known) setRequest(null);
@@ -2575,6 +2591,20 @@ export const mount = definePage((context: PortalContext) => {
     // the bridge numbers each message frame on this connection: web-in-1, web-in-2, …
     const id = `web-in-${++inbound}`;
     const entry = addUser(text, id, target, files);
+    if (copying) {
+      history.append(frames, [
+        "u",
+        keyed(id),
+        text,
+        target,
+        files.map((upload) => [
+          upload.file.name,
+          upload.file.type,
+          upload.file.size,
+        ]),
+      ]);
+      later();
+    }
     if (request) {
       // an answer goes on the asking turn; no turn of its own starts
       answered = { owner: request.owner, entry };
@@ -2612,8 +2642,8 @@ export const mount = definePage((context: PortalContext) => {
 
   /**
    * Takes the device's session list. A switch or a new session (from this page, another tab, or
-   * a deletion of the current one) starts the conversation view over: the device keeps the
-   * history, the page shows only what comes next.
+   * a deletion of the current one) starts the conversation view over: the page draws the
+   * browser's copy of the session, if it has one, then what comes next.
    */
   function applySessions(next: SessionsState) {
     const before = sessions;
@@ -2622,12 +2652,11 @@ export const mount = definePage((context: PortalContext) => {
     show(railToggle, true);
     rail.update(next);
     const kind = next.notice?.kind;
-    if (
+    const restarted =
       kind === "switched" ||
       kind === "created" ||
-      (!!before?.current && next.current !== before.current)
-    )
-      startOver();
+      (!!before?.current && next.current !== before.current);
+    if (restarted) startOver();
     const problem =
       kind === "unknown_session"
         ? t.sessionGone
@@ -2638,6 +2667,93 @@ export const mount = definePage((context: PortalContext) => {
             : "";
     if (problem) context.toast({ kind: "error", title: problem });
     label();
+    // a temporary chat leaves nothing behind, in the browser either
+    copying = !next.temporary;
+    const shown = copying ? next.current : null;
+    if (restarted || shown !== saved) {
+      flush();
+      // a new session is named once its first message is sent: it keeps what the page drew
+      const drawn = restarted || saved !== null ? [] : frames;
+      saved = shown;
+      frames = shown ? [...history.load(shown), ...drawn] : drawn;
+      if (!items.length) replay();
+      if (drawn.length) later();
+    }
+    history.prune(
+      new Set([...next.sessions.map((item) => item.session), shown ?? ""]),
+    );
+  }
+
+  // ---- the browser's copy of each saved session
+  /** Message ids restart with each connection and each boot: the copy keeps them apart. */
+  function keyed(id: string) {
+    return `${epoch}~${id}`;
+  }
+
+  /** Keeps a bridge event in the session's copy. */
+  function keep(event: string, value: Data) {
+    if (replaying || !copying) return;
+    const data: Data = { ...value, message_id: keyed(str(value.message_id)) };
+    if (str(value.reply_to)) data.reply_to = keyed(str(value.reply_to));
+    history.append(frames, ["e", event, data]);
+    later();
+  }
+
+  function later() {
+    saving ??= setTimeout(flush, 1000);
+  }
+
+  function flush() {
+    clearTimeout(saving);
+    saving = undefined;
+    if (saved) history.save(saved, frames);
+  }
+
+  /**
+   * Draws the session's copy again, as the conversation stood when this browser last saw it. A
+   * sent message's files are no longer on the page, so each is a card saying so; a turn the
+   * reload cut off stays as far as it got.
+   */
+  function replay() {
+    if (!frames.length) return;
+    replaying = true;
+    // each drawing's ids are its own: a session left marks the ids it drew as dropped
+    const tag = `r${++replays}:`;
+    try {
+      for (const frame of frames) {
+        if (frame[0] === "e") {
+          const data: Data = {
+            ...frame[2],
+            message_id: tag + str(frame[2].message_id),
+          };
+          if (str(data.reply_to)) data.reply_to = tag + str(data.reply_to);
+          handle(frame[1], data);
+          continue;
+        }
+        const [, id, text, quoted, files] = frame;
+        const entry = addUser(text, tag + id, quoted);
+        entry.confirmed = true;
+        const bubble =
+          entry.root.querySelector(".bc-bubble") ?? entry.root.lastElementChild;
+        for (const [name, mime, size] of files)
+          entry.root.insertBefore(
+            unavailable({ url: "", name, mime, size }, t.sentGoneTip),
+            bubble,
+          );
+      }
+    } catch {
+      // a copy this page cannot read draws what it could
+    }
+    replaying = false;
+    for (const run of [...flowing]) settle(run);
+    for (const record of agents.values()) close(record);
+    active.clear();
+    awaiting.clear();
+    caret.remove();
+    setRequest(null);
+    stuck = true;
+    refresh();
+    follow();
   }
 
   /** Clears the conversation view for another session; what the left one still sends is dropped. */
@@ -2673,6 +2789,8 @@ export const mount = definePage((context: PortalContext) => {
   function rewindTo(id: string) {
     const entry = sent.get(id);
     if (!entry) return;
+    history.cut(frames, keyed(id));
+    flush();
     withdrawn.add(id);
     awaiting.delete(id);
     arm();
@@ -2787,6 +2905,8 @@ export const mount = definePage((context: PortalContext) => {
   // ---- connection
   let socket: WebSocket | undefined;
   let inbound = 0;
+  /** This connection, in the ids the browser's copy keeps. */
+  let epoch = "";
   let warned = false;
 
   function online() {
@@ -2809,6 +2929,7 @@ export const mount = definePage((context: PortalContext) => {
     show(offline, false);
     sent = new Map();
     inbound = 0;
+    epoch = Date.now().toString(36);
     // message ids restart with the connection, so old rewinds name nothing now
     withdrawn.clear();
     dropped.clear();
@@ -2887,6 +3008,7 @@ export const mount = definePage((context: PortalContext) => {
   signal.addEventListener(
     "abort",
     () => {
+      flush();
       const connection = socket;
       socket = undefined;
       connection?.close();
@@ -2908,6 +3030,8 @@ export const mount = definePage((context: PortalContext) => {
     { once: true },
   );
 
+  // a reload or a closed tab saves what is still waiting to be saved
+  window.addEventListener("pagehide", flush, { signal });
   column.append(empty);
   setFresh(true);
   changed();
