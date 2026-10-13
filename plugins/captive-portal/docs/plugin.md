@@ -148,7 +148,9 @@ plugin performs.
 
 The shell is an app shell with a collapsible sidebar (Ctrl/⌘ B; the choice is
 kept in `localStorage` as `barracuda.sidebar`), a breadcrumb top bar with the
-language menu (简体中文 / English, `barracuda.lang`) and the theme control
+language menu (简体中文 / English, `barracuda.lang`; with no choice stored, the
+portal starts in the browser's first preferred zh or en, English when it prefers
+only other languages, Chinese when it names none) and the theme control
 (浅色 / 深色 / 跟随系统, `barracuda.theme`, applied as `data-theme` on `<html>`),
 and hash routing: `#overview` (default) or `#<entry id>`; back and forward work.
 Below 720px the sidebar is replaced by the phone layout: the overview becomes a

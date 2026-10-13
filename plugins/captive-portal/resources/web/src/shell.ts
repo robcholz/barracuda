@@ -68,6 +68,18 @@ function stored(win: Window, key: string): string | null {
     return null;
   }
 }
+/**
+ * The language the portal starts in: the one the user picked, else the browser's first preferred
+ * zh or en; English when it prefers only others, Chinese when it names none.
+ */
+export function initialLang(win: Window): Lang {
+  const tags = win.navigator?.languages ?? [];
+  const tag =
+    stored(win, STORAGE.lang) ??
+    tags.find((tag) => /^(zh|en)\b/i.test(tag)) ??
+    (tags[0] ? "en" : "zh");
+  return /^en/i.test(tag) ? "en" : "zh";
+}
 function store(win: Window, key: string, value: string) {
   try {
     win.localStorage.setItem(key, value);
@@ -132,7 +144,7 @@ export class Portal {
     this.fetcher =
       options.fetch ?? ((input, init) => this.win.fetch(input, init));
     this.load = options.load;
-    this.lang = stored(this.win, STORAGE.lang) === "en" ? "en" : "zh";
+    this.lang = initialLang(this.win);
     const mode = stored(this.win, STORAGE.theme);
     this.mode = mode === "light" || mode === "dark" ? mode : "system";
     this.collapsed = stored(this.win, STORAGE.sidebar) === "collapsed";

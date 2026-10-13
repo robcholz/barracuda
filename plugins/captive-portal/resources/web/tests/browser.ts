@@ -1,8 +1,16 @@
 import { Window as HappyWindow } from "happy-dom";
 
 /** A happy-dom window installed as the globals the shell, the kit and the figure kernel read. */
-export function installBrowser(url = "http://localhost/portal/") {
+export function installBrowser(
+  url = "http://localhost/portal/",
+  languages: readonly string[] = ["zh-CN", "zh"],
+) {
   const browser = new HappyWindow({ url, width: 1280, height: 900 });
+  // happy-dom reports en-US; the portal starts in the browser's language, so pin it
+  Object.defineProperty(browser.navigator, "languages", { value: languages });
+  Object.defineProperty(browser.navigator, "language", {
+    value: languages[0] ?? "",
+  });
   const keys = [
     "window",
     "document",

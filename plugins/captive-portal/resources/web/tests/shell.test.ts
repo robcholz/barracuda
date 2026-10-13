@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { installBrowser, settle } from "./browser";
-import { Portal, routeOf, STORAGE } from "../src/shell";
+import { initialLang, Portal, routeOf, STORAGE } from "../src/shell";
 import { layoutModules, renderStatus } from "../src/overview";
 import type { PortalContext, WebEntry } from "../src/contract";
 
@@ -70,10 +70,12 @@ async function start(
     storage?: Record<string, string>;
     width?: number;
     status?: unknown;
+    languages?: readonly string[];
   } = {},
 ): Promise<Harness> {
   const installed = installBrowser(
     `http://localhost/portal/${options.hash ?? ""}`,
+    options.languages,
   );
   const { window, document } = installed;
   if (options.width)
@@ -446,6 +448,38 @@ test("a language change re-renders the shell, remounts the module and is remembe
   expect(h.$(".bc-crumb")?.textContent).toBe("Agent");
   expect(h.$(".bc-crumb--current")?.textContent).toBe("Models");
   expect(h.$(".bc-nav-label")?.textContent).toBe("Device");
+});
+
+test("with no stored choice the portal starts in the browser's language", async () => {
+  const h = await start({ languages: ["en-US", "en"] });
+  expect(h.document.documentElement.lang).toBe("en");
+  expect(h.$(".bc-display + .bc-lead, .portal-hero__lead")?.textContent).toBe(
+    "Set up this device's network, models and message channels.",
+  );
+  expect(h.window.localStorage.getItem(STORAGE.lang)).toBeNull();
+});
+
+test("a stored language wins over the browser's", async () => {
+  const h = await start({
+    languages: ["en-US", "en"],
+    storage: { [STORAGE.lang]: "zh" },
+  });
+  expect(h.document.documentElement.lang).toBe("zh-CN");
+  expect(h.$(".bc-nav-label")?.textContent).toBe("设备");
+});
+
+test("the start language is the browser's first zh or en, else English, else Chinese", () => {
+  const lang = (languages: string[]) =>
+    initialLang({
+      localStorage: { getItem: () => null },
+      navigator: { languages },
+    } as unknown as Window);
+  expect(lang(["zh-TW", "en"])).toBe("zh");
+  expect(lang(["ja-JP", "en-GB", "zh-CN"])).toBe("en");
+  expect(lang(["ja-JP", "zh-Hans"])).toBe("zh");
+  expect(lang(["fr-FR"])).toBe("en");
+  expect(lang(["EN"])).toBe("en");
+  expect(lang([])).toBe("zh");
 });
 
 test("a stored language and theme apply at start; the theme control switches and persists", async () => {
