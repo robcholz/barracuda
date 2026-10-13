@@ -9,7 +9,7 @@ use core::task::{Context, Poll, Waker};
 use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 pub use barracuda_vm_builtin_packages::math::SeedSource;
-use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_vm_package_api::{LuaPackageRegistry, LuaPackageScope};
 use embassy_executor::Spawner;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
@@ -354,12 +354,23 @@ impl Vm {
 
     /// Starts one isolated Lua execution and returns its awaitable completion handle.
     pub fn run(&self, request: VmRunRequest) -> Result<VmRun, VmError> {
+        self.run_scoped(request, LuaPackageScope::All)
+    }
+
+    /// Starts one isolated Lua execution that can `require` only the
+    /// registered packages `scope` admits, besides the built-in ones.
+    pub fn run_scoped(
+        &self,
+        request: VmRunRequest,
+        scope: LuaPackageScope,
+    ) -> Result<VmRun, VmError> {
         self.runtime
             .dispatch(
                 request.source,
                 self.limits,
                 self.builtin_packages.clone(),
                 self.package_registry.clone(),
+                scope,
             )
             .map_err(VmError::from)
     }

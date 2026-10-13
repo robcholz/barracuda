@@ -2150,6 +2150,7 @@ dependencies = [
  "barracuda-power-monitor-plugin",
  "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
+ "barracuda-shell-plugin",
  "barracuda-spi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
@@ -2278,6 +2279,38 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-shell-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-lua",
+ "barracuda-platform",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-time-plugin",
+ "barracuda-ui-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

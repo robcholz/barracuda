@@ -22,8 +22,20 @@
             "workspace"
           ]
         },
+        "kind": {
+          "enum": [
+            "system",
+            "installable"
+          ]
+        },
         "has_view": {
           "type": "boolean"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -31,7 +43,9 @@
         "name",
         "version",
         "location",
-        "has_view"
+        "kind",
+        "has_view",
+        "permissions"
       ],
       "additionalProperties": false
     },
@@ -75,6 +89,8 @@
         "error": {
           "enum": [
             "not_found",
+            "not_installed",
+            "system_app",
             "invalid_bundle",
             "storage",
             "view_rejected",

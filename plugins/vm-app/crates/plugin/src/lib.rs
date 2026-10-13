@@ -30,9 +30,12 @@ use barracuda_vm_plugin::{LuaPackageRegistry, Vm};
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 use embassy_futures::select::select;
 
+/// How an app run ended, as [`AppExit::outcome`] reports it.
+pub use barracuda_vm_plugin::VmRunOutcome;
 pub use bundle::{
-    AppInfo, AppList, AppLocation, BUNDLED_APPS, DEFAULT_ENTRY, FORMAT_VERSION, INSTALLED_APPS,
-    InvalidApp, MANIFEST_FILE, MAX_SOURCE_BYTES, MAX_VIEW_BYTES, WORKSPACE_APPS,
+    APP_PACKAGE, AppInfo, AppKind, AppList, AppLocation, BUNDLED_APPS, DEFAULT_ENTRY,
+    FORMAT_VERSION, INSTALLED_APPS, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES,
+    MAX_VIEW_BYTES, WORKSPACE_APPS,
 };
 pub use manager::{
     AppError, AppExit, AppManager, GRACE, MAX_APP_RUNS, MAX_EXIT_OUTPUT_LINES, MAX_SUSPENDED,

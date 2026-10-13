@@ -405,38 +405,28 @@ mod screen {
     }
 
     #[test]
-    fn touches_press_the_shown_view_only_while_it_takes_input() {
+    fn the_pointer_reads_fingers_in_view_coordinates() {
+        // The controller spans half the display, so its points double.
+        let mut pointer = Pointer::new(
+            Finger(VecDeque::from([Some((10, 20)), None])),
+            DEFAULT_VIEWPORT,
+        );
+        assert_eq!(pointer.poll(), Some((20.0, 40.0)));
+        assert_eq!(pointer.poll(), None);
+    }
+
+    #[test]
+    fn taps_press_the_shown_view_only_while_it_takes_input() {
         let service = UiService::new(DEFAULT_VIEWPORT);
         let session = service.open(&assets()).expect("view opens");
         let (x, y) = find(&session, "increment");
         session.clear_events();
 
-        // The controller spans half the display, so its points double.
-        let (tx, ty) = ((x / 2.0) as u16, (y / 2.0) as u16);
-        let mut pointer = Pointer::new(
-            Finger(VecDeque::from([
-                Some((tx, ty)),
-                Some((tx, ty)),
-                None,
-                Some((tx, ty)),
-            ])),
-            DEFAULT_VIEWPORT,
-        );
-        // A contact presses once, however long it lasts.
-        let point = pointer.poll().expect("a new contact");
-        assert_eq!(pointer.poll(), None);
-        assert_eq!(pointer.poll(), None);
-        assert_eq!(point, (f32::from(tx) * 2.0, f32::from(ty) * 2.0));
-
-        assert_eq!(service.press_shown(point.0, point.1), None);
+        assert_eq!(service.press_shown(x, y), None);
         session.show(false);
-        assert_eq!(service.press_shown(point.0, point.1), None);
+        assert_eq!(service.press_shown(x, y), None);
         session.show(true);
-        assert_eq!(
-            service.press_shown(point.0, point.1).as_deref(),
-            Some("increment")
-        );
-        assert!(pointer.poll().is_some());
+        assert_eq!(service.press_shown(x, y).as_deref(), Some("increment"));
     }
 
     fn screen_panel(screen: &Screen<Panel>) -> &Panel {
@@ -445,5 +435,149 @@ mod screen {
 
     fn screen_pixels(screen: &Screen<Panel>) -> &[Rgb565] {
         &screen.display().pixels
+    }
+}
+
+mod layers {
+    use super::{assets, find, next_call};
+    use crate::service::{DEFAULT_VIEWPORT, Layer, UiService};
+
+    #[test]
+    fn the_system_layer_covers_the_app_layer() {
+        let service = UiService::new(DEFAULT_VIEWPORT);
+        let app = service.open(&assets()).expect("app view");
+        let system = service
+            .open_on(Layer::System, &assets())
+            .expect("system view");
+        assert_eq!((app.layer(), system.layer()), (Layer::App, Layer::System));
+        let (x, y) = find(&app, "increment");
+        app.clear_events();
+        system.clear_events();
+
+        app.show(true);
+        assert!(app.is_shown());
+        system.show(true);
+        assert!(system.is_shown() && !app.is_shown());
+        // Taps reach only the view on the display.
+        assert_eq!(service.press_shown(x, y).as_deref(), Some("increment"));
+        assert_eq!(
+            next_call(system.channel()).map(|call| call.0),
+            Some("increment".into())
+        );
+        app.clear_events();
+
+        // The app's owner may change its view while it is covered.
+        app.show(false);
+        assert!(system.is_shown());
+        system.hide();
+        assert!(app.is_shown());
+        assert_eq!(service.showing(), Some(false));
+    }
+
+    #[test]
+    fn resolving_a_press_delivers_nothing() {
+        let service = UiService::new(DEFAULT_VIEWPORT);
+        let session = service
+            .open_on(Layer::System, &assets())
+            .expect("view opens");
+        let (x, y) = find(&session, "increment");
+        session.clear_events();
+        let call = session.resolve_press(x, y).expect("a button");
+        assert_eq!(call.handler, "increment");
+        session.channel().close();
+        assert!(next_call(session.channel()).is_none());
+    }
+}
+
+mod gestures {
+    use crate::gesture::{Direction, Edge, Gesture, LONG_PRESS_MS, Recognizer, Touched};
+    use crate::service::{DEFAULT_VIEWPORT, MAX_GESTURES, UiService};
+    use futures_lite::future;
+
+    /// Feeds `points`, one per 16 ms frame, and collects what they amount to.
+    fn feed(points: &[Option<(f32, f32)>]) -> alloc::vec::Vec<Touched> {
+        let mut recognizer = Recognizer::new(DEFAULT_VIEWPORT);
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(frame, point)| recognizer.sample(*point, frame as u64 * 16))
+            .collect()
+    }
+
+    #[test]
+    fn a_short_contact_that_stays_put_taps() {
+        assert_eq!(
+            feed(&[Some((100.0, 100.0)), Some((104.0, 103.0)), None]),
+            [Touched::Tap(100.0, 100.0)]
+        );
+        // A contact lifted before the next frame still taps.
+        assert_eq!(feed(&[Some((5.0, 6.0)), None]), [Touched::Tap(5.0, 6.0)]);
+    }
+
+    #[test]
+    fn resting_long_presses_once_and_taps_nothing() {
+        let frames = (LONG_PRESS_MS / 16 + 2) as usize;
+        let mut points = alloc::vec![Some((50.0, 60.0)); frames];
+        points.push(None);
+        assert_eq!(
+            feed(&points),
+            [Touched::Gesture(Gesture::LongPress { x: 50.0, y: 60.0 })]
+        );
+    }
+
+    #[test]
+    fn travel_swipes_and_edges_are_where_it_started() {
+        let swipe = |from: (f32, f32), to: (f32, f32)| {
+            feed(&[
+                Some(from),
+                Some(((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0)),
+                Some(to),
+                None,
+            ])
+        };
+        assert_eq!(
+            swipe((180.0, 10.0), (180.0, 200.0)),
+            [Touched::Gesture(Gesture::Swipe {
+                direction: Direction::Down,
+                edge: Some(Edge::Top),
+                x: 180.0,
+                y: 10.0,
+            })]
+        );
+        assert_eq!(
+            swipe((180.0, 350.0), (180.0, 150.0)),
+            [Touched::Gesture(Gesture::Swipe {
+                direction: Direction::Up,
+                edge: Some(Edge::Bottom),
+                x: 180.0,
+                y: 350.0,
+            })]
+        );
+        assert_eq!(
+            swipe((250.0, 180.0), (100.0, 190.0)),
+            [Touched::Gesture(Gesture::Swipe {
+                direction: Direction::Left,
+                edge: None,
+                x: 250.0,
+                y: 180.0,
+            })]
+        );
+        // Moving too little to swipe and too much to tap does nothing.
+        assert!(swipe((100.0, 100.0), (125.0, 100.0)).is_empty());
+    }
+
+    #[test]
+    fn the_service_keeps_the_latest_gestures() {
+        let service = UiService::new(DEFAULT_VIEWPORT);
+        for index in 0..=MAX_GESTURES {
+            service.post_gesture(Gesture::LongPress {
+                x: index as f32,
+                y: 0.0,
+            });
+        }
+        assert_eq!(
+            future::block_on(service.next_gesture()),
+            Gesture::LongPress { x: 1.0, y: 0.0 }
+        );
     }
 }

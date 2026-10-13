@@ -1,11 +1,20 @@
-// Builds every app under resources/apps/<name>/ into filesystem/resources/apps/<name>/.
+// Builds every system app under resources/apps/<name>/ into the image's
+// filesystem/resources/apps/<name>/, and every example installable app under
+// resources/examples/<name>/ into crates/plugin/tests/fixtures/<name>/, a
+// container ready to copy into the Workspace's media/apps/.
 //
 // A MicroTS view compiles with the PocketJS compiler, which is not part of this
 // repository: point POCKETJS_ROOT at a PocketJS checkout. The script copies each
 // app into that checkout so its `@pocketjs/*` imports resolve, compiles the view,
 // bakes the fonts it uses, and links the View IR into `view.bvir`.
 //
-//   POCKETJS_ROOT=~/src/pocketjs cargo plugin run apps --plugin app
+// An app whose view or program shows characters beyond ASCII bakes its fonts
+// from Noto Sans SC instead of Inter: point CJK_FONT_DIR at a directory with
+// NotoSansSC-Regular.otf and NotoSansSC-Bold.otf (github.com/notofonts/noto-cjk,
+// Sans/SubsetOTF/SC). The atlases then hold every such character in the
+// app's sources.
+//
+//   POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run apps --plugin app
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,8 +25,10 @@ if (!pocket) {
   process.exit(1);
 }
 const plugin = resolve(import.meta.dir, "../..");
-const sources = join(plugin, "resources/apps");
-const output = join(plugin, "filesystem/resources/apps");
+const groups = [
+  { sources: join(plugin, "resources/apps"), output: join(plugin, "filesystem/resources/apps") },
+  { sources: join(plugin, "resources/examples"), output: join(plugin, "crates/plugin/tests/fixtures") },
+];
 const { buildAot } = await import(join(pocket, "microts/compiler/aot-build.ts"));
 const { bakeAtlases } = await import(join(pocket, "framework/compiler/bake-font.ts"));
 
@@ -30,9 +41,12 @@ const strip = (value: unknown): unknown =>
         )
       : value;
 
-for (const name of readdirSync(sources, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name)) {
-  const source = join(sources, name);
-  const bundle = join(output, name);
+const apps = groups.flatMap(({ sources, output }) =>
+  readdirSync(sources, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ name: entry.name, source: join(sources, entry.name), bundle: join(output, entry.name) })),
+);
+for (const { name, source, bundle } of apps) {
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
   // The source manifest has no `view`; the build adds it once the view exists.
@@ -55,7 +69,15 @@ for (const name of readdirSync(sources, { withFileTypes: true }).filter((entry) 
     const view = join(work, "view.json");
     writeFileSync(view, JSON.stringify(strip({ version: program.version, types: program.types, components: program.components })));
     cpSync(join(work, "styles.bin"), join(bundle, "styles.bin"));
-    const fonts = await bakeAtlases({ codepoints: [], slots: program.styles.usedFontSlots });
+    const shown = [readFileSync(join(source, "app.tsx"), "utf8"), readFileSync(join(source, entry), "utf8")].join("");
+    const extraChars = [...new Set([...shown].filter((char) => char.codePointAt(0)! > 126 && !/\s/.test(char)))].join("");
+    const cjk = process.env.CJK_FONT_DIR;
+    if (extraChars && !cjk) {
+      console.error(`${name}: shows characters beyond ASCII; set CJK_FONT_DIR to the Noto Sans SC fonts.`);
+      process.exit(1);
+    }
+    const faces = extraChars ? { regularTtf: join(cjk!, "NotoSansSC-Regular.otf"), boldTtf: join(cjk!, "NotoSansSC-Bold.otf") } : {};
+    const fonts = await bakeAtlases({ codepoints: [], extraChars, slots: program.styles.usedFontSlots, ...faces });
     fonts.sort((left: { slot: number }, right: { slot: number }) => left.slot - right.slot);
     for (const font of fonts) writeFileSync(join(bundle, `font-${font.slot}.bin`), font.bytes);
     const link = Bun.spawnSync(

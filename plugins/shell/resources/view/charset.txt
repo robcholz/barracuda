@@ -1,0 +1,4 @@
+# Characters the system view may show beyond its own and the shell Plugin's
+# strings: the names of the system apps and the example apps. Text with
+# characters outside the baked atlases shows a placeholder box for them.
+设置 计数器

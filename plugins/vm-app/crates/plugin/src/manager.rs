@@ -6,19 +6,22 @@
 //! the switcher. This module turns those into app states, lifecycle events
 //! for the program, and VM and memory budgets.
 
-use crate::bundle::{self, AppInfo, AppList};
+use crate::bundle::{self, APP_PACKAGE, AppInfo, AppKind, AppList, INSTALLED_APPS};
 use crate::package::AppPackage;
 use crate::port::{AppState, Lifecycle, Port, Ports};
-use crate::storage::Storage;
+use crate::storage::{APP_DATA, Storage};
+use alloc::boxed::Box;
 use alloc::{format, rc::Rc, string::String, vec::Vec};
 use barracuda_ui_plugin::{UiService, UiSession};
-use barracuda_vfs::ScopedVfs;
+use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_vm_plugin::{
-    LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, Vm, VmError,
-    VmExecutionError, VmInputRequest, VmRun, VmRunCompletion, VmRunOutcome, VmRunProgress,
+    LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope, Vm,
+    VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion, VmRunOutcome, VmRunProgress,
     VmRunRequest, VmRunUpdate,
 };
 use core::cell::{Cell, RefCell};
+use core::future::Future;
+use core::pin::Pin;
 use embassy_futures::select::{Either3, select_array, select3};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
@@ -40,8 +43,12 @@ pub const MAX_EXIT_OUTPUT_LINES: usize = 16;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppError {
-    /// No app with that ID is installed, bundled, or in the Workspace.
+    /// No system or installed app has that ID.
     NotFound,
+    /// The app is offered in the Workspace but not installed.
+    NotInstalled,
+    /// System apps cannot be installed over or uninstalled.
+    SystemApp,
     /// The container breaks the app format.
     InvalidBundle,
     /// The filesystem failed while reading the container.
@@ -62,6 +69,8 @@ impl core::fmt::Display for AppError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             AppError::NotFound => "app not found",
+            AppError::NotInstalled => "the app is offered but not installed",
+            AppError::SystemApp => "system apps cannot be installed over or uninstalled",
             AppError::InvalidBundle => "invalid app container",
             AppError::Storage => "app storage failed",
             AppError::ViewRejected => "app view rejected",
@@ -112,6 +121,8 @@ pub struct AppExit {
     pub diagnostic: Option<String>,
     /// The last output lines, at most [`MAX_EXIT_OUTPUT_LINES`].
     pub output: Vec<String>,
+    /// Whether the app was in the foreground when it ended.
+    pub foreground: bool,
 }
 
 struct Running {
@@ -148,6 +159,8 @@ struct State {
     slots: [Slot; MAX_APP_RUNS],
     foreground: Option<usize>,
     last_exit: Option<AppExit>,
+    /// The app an install was requested for, awaiting the person's answer.
+    install_request: Option<AppInfo>,
 }
 
 impl State {
@@ -192,6 +205,7 @@ struct Inner {
     ports: Arc<Ports>,
     state: RefCell<State>,
     wakes: [Signal<NoopRawMutex, ()>; MAX_APP_RUNS],
+    changed: Signal<NoopRawMutex, ()>,
     clock: Cell<u64>,
     tickets: Cell<u64>,
 }
@@ -229,6 +243,7 @@ impl AppManager {
                 ports,
                 state: RefCell::new(State::default()),
                 wakes: core::array::from_fn(|_| Signal::new()),
+                changed: Signal::new(),
                 clock: Cell::new(0),
                 tickets: Cell::new(0),
             }),
@@ -246,12 +261,142 @@ impl AppManager {
         if let Some(wake) = self.inner.wakes.get(index) {
             wake.signal(());
         }
+        self.inner.changed.signal(());
     }
 
-    /// Every launchable app, sorted by ID, and every container that fails the
-    /// app format with the reason.
+    /// Waits until something the system UI shows may have changed: an app
+    /// opened, moved, or ended, an app was installed or uninstalled, or an
+    /// install was requested. One waiter, the system UI, is served.
+    pub async fn changed(&self) {
+        self.inner.changed.wait().await;
+    }
+
+    /// Every launchable app, sorted by ID, every Workspace container that can
+    /// be installed, and every container that fails the app format with the
+    /// reason.
     pub async fn list(&self) -> AppList {
         bundle::list(&self.inner.filesystem).await
+    }
+
+    /// Asks the system UI to offer the Workspace container `id` for
+    /// installation; the person installs or declines it there. A newer
+    /// request replaces one still unanswered.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when the Workspace offers no valid container
+    /// `id` or the ID belongs to a system app.
+    pub async fn request_install(&self, id: &str) -> Result<AppInfo, AppError> {
+        let offered = bundle::offered(&self.inner.filesystem, id).await?;
+        if self.system_app(id).await {
+            return Err(AppError::SystemApp);
+        }
+        self.inner.state.borrow_mut().install_request = Some(offered.info.clone());
+        self.inner.changed.signal(());
+        Ok(offered.info)
+    }
+
+    /// The install the system UI should ask the person about.
+    #[must_use]
+    pub fn install_request(&self) -> Option<AppInfo> {
+        self.inner.state.borrow().install_request.clone()
+    }
+
+    /// Drops the install request for app `id`, if it is the pending one.
+    pub fn decline_install(&self, id: &str) {
+        let mut state = self.inner.state.borrow_mut();
+        if state
+            .install_request
+            .as_ref()
+            .is_some_and(|request| request.id == id)
+        {
+            state.install_request = None;
+            drop(state);
+            self.inner.changed.signal(());
+        }
+    }
+
+    async fn system_app(&self, id: &str) -> bool {
+        bundle::info(&self.inner.filesystem, id)
+            .await
+            .is_ok_and(|app| app.kind == AppKind::System)
+    }
+
+    /// Installs the Workspace container `id` as an installable app, with the
+    /// permissions its manifest asks for. The system UI calls this once the
+    /// person agreed; an installed app at another version is replaced, and a
+    /// running copy is terminated first. The app's data is kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when the Workspace offers no valid container
+    /// `id`, the ID belongs to a system app, or the copy fails.
+    pub async fn install(&self, id: &str) -> Result<AppInfo, AppError> {
+        let offered = bundle::offered(&self.inner.filesystem, id).await?;
+        if self.system_app(id).await {
+            return Err(AppError::SystemApp);
+        }
+        self.terminate(id);
+        let filesystem = &self.inner.filesystem;
+        let target = format!("{INSTALLED_APPS}/{id}");
+        let staging = format!("{INSTALLED_APPS}/.{id}");
+        let copied = async {
+            remove_tree(filesystem, &staging).await?;
+            filesystem.create_dir_all(&staging).await?;
+            for file in offered.files() {
+                let bytes = filesystem.read(&format!("{}/{file}", offered.dir)).await?;
+                filesystem
+                    .write(&format!("{staging}/{file}"), &bytes)
+                    .await?;
+            }
+            remove_tree(filesystem, &target).await?;
+            filesystem.rename(&staging, &target).await
+        }
+        .await;
+        if let Err(error) = copied {
+            log::warn!("app: cannot install {id}: {error:?}");
+            let _cleaned = remove_tree(filesystem, &staging).await;
+            return Err(AppError::Storage);
+        }
+        log::info!("app: installed {id} {}", offered.info.version);
+        {
+            let mut state = self.inner.state.borrow_mut();
+            if state
+                .install_request
+                .as_ref()
+                .is_some_and(|request| request.id == id)
+            {
+                state.install_request = None;
+            }
+        }
+        self.inner.changed.signal(());
+        bundle::info(filesystem, id).await
+    }
+
+    /// Uninstalls installable app `id`: terminates it and deletes its
+    /// container and its data.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::SystemApp`] for a system app, [`AppError::NotFound`]
+    /// when no app `id` is installed, and [`AppError::Storage`] when the
+    /// filesystem fails.
+    pub async fn uninstall(&self, id: &str) -> Result<(), AppError> {
+        let app = bundle::info(&self.inner.filesystem, id).await?;
+        if app.kind == AppKind::System {
+            return Err(AppError::SystemApp);
+        }
+        self.terminate(id);
+        let filesystem = &self.inner.filesystem;
+        for tree in [format!("{INSTALLED_APPS}/{id}"), format!("{APP_DATA}/{id}")] {
+            remove_tree(filesystem, &tree).await.map_err(|error| {
+                log::warn!("app: cannot remove {tree}: {error:?}");
+                AppError::Storage
+            })?;
+        }
+        log::info!("app: uninstalled {id}");
+        self.inner.changed.signal(());
+        Ok(())
     }
 
     /// Opens app `id`: resumes it if it is running, otherwise launches it.
@@ -268,7 +413,14 @@ impl AppManager {
         if let Some(index) = running {
             return self.reopen(index).await;
         }
-        let bundle = bundle::load(&self.inner.filesystem, id).await?;
+        let bundle = match bundle::load(&self.inner.filesystem, id).await {
+            Err(AppError::NotFound)
+                if bundle::offered(&self.inner.filesystem, id).await.is_ok() =>
+            {
+                return Err(AppError::NotInstalled);
+            }
+            loaded => loaded?,
+        };
         // Another open may have launched it while the container loaded.
         let running = self.inner.state.borrow().find(id);
         if let Some(index) = running {
@@ -303,7 +455,17 @@ impl AppManager {
         self.inner.ports.insert(ticket.clone(), Arc::clone(&port));
         // The binding shares the first line so Lua line numbers stay correct.
         let source = format!("require(\"app\").__bind({ticket:?}); {}", bundle.source);
-        let run = match self.inner.vm.run(VmRunRequest { source }) {
+        // A system app may require every package; an installable app only
+        // `app` and what its manifest asked for when it was installed.
+        let scope = match bundle.info.kind {
+            AppKind::System => LuaPackageScope::All,
+            AppKind::Installable => LuaPackageScope::Only(
+                core::iter::once(String::from(APP_PACKAGE))
+                    .chain(bundle.info.permissions.iter().cloned())
+                    .collect(),
+            ),
+        };
+        let run = match self.inner.vm.run_scoped(VmRunRequest { source }, scope) {
             Ok(run) => run,
             Err(error) => {
                 self.inner.ports.remove(&ticket);
@@ -678,6 +840,7 @@ impl AppManager {
             error: None,
             diagnostic: Some(String::from(reason)),
             output: Vec::new(),
+            foreground: state.foreground == Some(index),
         };
         log::warn!("app: {}: {reason}", exit.id);
         self.remove(&mut state, index, Some(exit));
@@ -693,6 +856,7 @@ impl AppManager {
         let Some(running) = state.slots[index].app.as_ref() else {
             return;
         };
+        let foreground = state.foreground == Some(index);
         let exit = completion.map(|completion| {
             match completion.outcome {
                 VmRunOutcome::Error => log::warn!(
@@ -713,6 +877,7 @@ impl AppManager {
                 error: completion.error,
                 diagnostic: completion.diagnostic,
                 output: completion.output.into_iter().skip(skip).collect(),
+                foreground,
             }
         });
         self.remove(&mut state, index, exit);
@@ -735,8 +900,30 @@ impl AppManager {
         if exit.is_some() {
             state.last_exit = exit;
         }
+        state.present();
         self.wake(index);
     }
+}
+
+/// Deletes the file or directory tree at `path`; a missing one is fine.
+fn remove_tree<'a>(
+    filesystem: &'a ScopedVfs,
+    path: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<(), FsError>> + 'a>> {
+    Box::pin(async move {
+        let metadata = match filesystem.metadata(path).await {
+            Ok(metadata) => metadata,
+            Err(FsError::NotFound) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !metadata.is_dir() {
+            return filesystem.remove_file(path).await;
+        }
+        for name in filesystem.list_dir(path).await? {
+            remove_tree(filesystem, &format!("{path}/{name}")).await?;
+        }
+        filesystem.remove_dir(path).await
+    })
 }
 
 fn lru_suspended(state: &State) -> Option<usize> {

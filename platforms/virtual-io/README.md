@@ -62,7 +62,8 @@ its driver drew it; the page redraws when a panel changes and shows a panel
 that is off, asleep, or not yet initialized as dark. Clicking or dragging on a
 panel touches it through the Board's CST816T: the page writes the finger
 position to the touch model's backdoor, and the System reads it like a real
-touch.
+touch, so a click taps, a drag swipes, and holding the button still
+long-presses the system UI.
 
 | Request | Answer |
 | --- | --- |

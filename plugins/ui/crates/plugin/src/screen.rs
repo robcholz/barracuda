@@ -1,4 +1,4 @@
-//! Puts the shown view on the Board display and turns touches into presses.
+//! Puts the shown view on the Board display and reads where it is touched.
 //!
 //! The view is rasterized in strips of [`STRIP_ROWS`] rows, so the Plugin
 //! never holds a framebuffer: only the regions the PocketJS damage tracker
@@ -70,6 +70,13 @@ impl<Panel: Display> Screen<Panel> {
     /// display pixel.
     pub(crate) fn viewport(&self) -> (f32, f32) {
         (self.width as f32, self.height as f32)
+    }
+
+    /// Sets the panel's brightness.
+    pub(crate) async fn set_brightness(&mut self, brightness: u8) {
+        if let Err(error) = self.display.set_brightness(brightness).await {
+            log::warn!("ui: the display refused a brightness: {error:?}");
+        }
     }
 
     /// Draws what changed since the last frame and presents it.
@@ -205,12 +212,10 @@ fn rect_pixels(rect: DamageRect) -> usize {
     (rect.x1 - rect.x0) as usize * (rect.y1 - rect.y0) as usize
 }
 
-/// The touch controller, turning new contacts into presses in view
-/// coordinates.
+/// The touch controller, read in view coordinates.
 pub(crate) struct Pointer<Input> {
     touch: Input,
     scale: (f32, f32),
-    down: bool,
 }
 
 impl<Input: Touch> Pointer<Input> {
@@ -231,11 +236,11 @@ impl<Input: Touch> Pointer<Input> {
                 axis(descriptor.height, viewport.1),
             ),
             touch,
-            down: false,
         }
     }
 
-    /// The point of a contact that began since the last poll.
+    /// Where the first finger is, or `None` while nothing touches the panel
+    /// or the controller cannot be read.
     pub(crate) fn poll(&mut self) -> Option<(f32, f32)> {
         let frame = match self.touch.read_frame() {
             Ok(frame) => frame,
@@ -244,10 +249,7 @@ impl<Input: Touch> Pointer<Input> {
                 return None;
             }
         };
-        let point = frame.get(0);
-        let began = point.filter(|_| !self.down);
-        self.down = point.is_some();
-        began.map(|point| {
+        frame.get(0).map(|point| {
             (
                 f32::from(point.x) * self.scale.0,
                 f32::from(point.y) * self.scale.1,

@@ -1,0 +1,10 @@
+id = "shell"
+depends-on = ["ui", "app", "workflow", "time", "wifi"]
+description = "The device's system UI: home, launcher, panels, and app lifecycle screens."
+
+[tasks.view]
+cwd = "."
+command = ["bun", "resources/view/build.ts"]
+inputs = ["resources/view"]
+outputs = ["filesystem/resources/view"]
+env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]

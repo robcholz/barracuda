@@ -1,34 +1,52 @@
 # App Workflow Actions
 
-The `app` Plugin registers `app.list`, `app.open`, `app.home`,
-`app.interactive`, `app.terminate`, `app.status`, and `app.tap`. They are the
-same operations the system UI performs; see [the lifecycle](plugin.md#lifecycle).
+The `app` Plugin registers `app.list`, `app.open`, `app.install`, `app.home`,
+`app.interactive`, `app.terminate`, `app.status`, and `app.tap`. Except for
+`app.install`, which only asks, they are the same operations the system UI
+performs; see [the lifecycle](plugin.md#lifecycle).
 Their request and response contracts live at `schemas/action/<address>/`.
 Rejections return `{"error":"<code>"}` so a Workflow can branch on them.
 
 A running app is reported as:
 
 ```json
-{"app":{"id":"counter","name":"计数器","version":"0.1.0","location":"bundled","has_view":true},
+{"app":{"id":"counter","name":"计数器","version":"0.1.0","location":"installed",
+        "kind":"installable","has_view":true,"permissions":[]},
  "run_id":1,"state":"active"}
 ```
+
+`kind` is `system` for an app in the image and `installable` for one the
+person installed; `permissions` are the Lua packages its manifest asks for.
 
 `state` is `active`, `inactive`, `background`, `suspended`, `running` (a
 headless app), or `terminating`.
 
-`app.list` takes `{}` and returns every launchable app, and every container
-that breaks the [app format](app-format.md) with the reason, so its author can
-fix it. `location` is `installed`, `bundled`, or `workspace`:
+`app.list` takes `{}` and returns every launchable app, every Workspace
+container that can be installed (a new app, or an installed one at another
+version), and every container that breaks the [app format](app-format.md) with
+the reason, so its author can fix it. `location` is `bundled`, `installed`, or
+`workspace`:
 
 ```json
-{"apps":[{"id":"counter","name":"计数器","version":"0.1.0","location":"bundled","has_view":true}],
+{"apps":[{"id":"settings","name":"设置","version":"0.1.0","location":"bundled",
+          "kind":"system","has_view":true,"permissions":[]}],
+ "installable":[{"id":"lamp","name":"灯带","version":"1","location":"workspace",
+                 "kind":"installable","has_view":true,"permissions":["led_strip"]}],
  "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
 ```
 
 `app.open` takes `{"id":"counter"}`. It resumes a running app or launches it,
 returns the running app once its program has started, and fails with
-`not_found`, `invalid_bundle`, `storage`, `view_rejected`,
-`runtime_unavailable`, or `busy`.
+`not_found`, `not_installed` (the app is only offered in the Workspace),
+`invalid_bundle`, `storage`, `view_rejected`, `runtime_unavailable`, or
+`busy`.
+
+`app.install` takes `{"id":"lamp"}` and asks the system UI to offer that
+Workspace container for installation. It returns at once with
+`{"requested": <app>}`; the person installs or declines on the device, and
+`app.list` shows the outcome. A newer request replaces one still unanswered.
+It fails with `not_found`, `system_app` (the ID belongs to a system app),
+`invalid_bundle`, or `storage`.
 
 `app.home` takes `{}` and returns `{"app": <running app or null>}`: the app
 that moved to the background.
@@ -46,8 +64,11 @@ run ended:
 
 ```json
 {"foreground":null,"running":[],
- "last_exit":{"id":"counter","run_id":1,"outcome":"success","output":[]}}
+ "last_exit":{"id":"counter","run_id":1,"outcome":"success","output":[],"foreground":false}}
 ```
+
+`last_exit.foreground` says whether the app was in the foreground when it
+ended.
 
 `app.tap` taps the active foreground view at view coordinates and returns the
 handler it called, or `null` when nothing pressable is there:

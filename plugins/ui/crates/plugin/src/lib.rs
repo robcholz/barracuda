@@ -1,11 +1,14 @@
 //! Runs compiled MicroTS views and shows one on the Board display.
 //!
 //! A view is a BVIR program plus its stylesheet and fonts. Its owner opens it
-//! with [`UiService::open`] and keeps the session; the session's
-//! [`ViewChannel`] writes typed [`ViewValue`]s and receives handler calls.
-//! [`UiSession::show`] puts the view on the display claimed through the
-//! `display.main` slot, and touches from the `touch.main` slot press it. This
-//! Plugin's task applies the writes, draws what changed, and polls touch.
+//! with [`UiService::open`] (apps) or [`UiService::open_on`] and keeps the
+//! session; the session's [`ViewChannel`] writes typed [`ViewValue`]s and
+//! receives handler calls. [`UiSession::show`] puts the view on its
+//! [`Layer`]; the display claimed through the `display.main` slot shows the
+//! system layer over the app layer. Taps from the `touch.main` slot press the
+//! view on the display, and long presses and swipes go to the system UI
+//! through [`UiService::next_gesture`]. This Plugin's task applies the writes,
+//! draws what changed, and polls touch.
 
 #![no_std]
 
@@ -16,6 +19,7 @@ mod config {
 }
 
 mod datum;
+mod gesture;
 mod mailbox;
 mod screen;
 mod service;
@@ -33,12 +37,14 @@ use barracuda_plugin::manager::{
 };
 use core::{future::Future, pin::Pin};
 use embassy_futures::select::select;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
+use gesture::{Recognizer, Touched};
 use screen::{Pointer, Screen};
 
 pub use datum::{ViewType, ViewValue};
+pub use gesture::{Direction, Edge, Gesture};
 pub use mailbox::MAX_EVENTS;
-pub use service::{DEFAULT_VIEWPORT, UiAssets, UiError, UiService, UiSession};
+pub use service::{DEFAULT_VIEWPORT, Layer, MAX_GESTURES, UiAssets, UiError, UiService, UiSession};
 pub use view::{MAX_ARRAY_ITEMS, ViewCall, ViewChannel, ViewError, ViewNext};
 
 /// How often the task steps an animating view and polls touch.
@@ -56,6 +62,7 @@ struct UiRuntime<Panel, Input> {
     service: Rc<UiService>,
     screen: Option<Screen<Panel>>,
     pointer: Option<Pointer<Input>>,
+    recognizer: Recognizer,
 }
 
 impl<Panel, Input> UiPlugin<Panel, Input> {
@@ -109,6 +116,7 @@ where
             service,
             screen,
             pointer,
+            recognizer: Recognizer::new(viewport),
         });
         Ok(())
     }
@@ -136,8 +144,8 @@ async fn ui_task(ui: UiLoop) {
     ui.await;
 }
 
-/// Applies owners' writes, presses the shown view where it is touched, and
-/// draws what changed, until cancelled.
+/// Applies owners' writes, presses the shown view where it is tapped, hands
+/// gestures to the system UI, and draws what changed, until cancelled.
 async fn run<Panel: Display, Input: Touch>(
     mut runtime: UiRuntime<Panel, Input>,
     cancellation: PluginTaskToken,
@@ -146,20 +154,32 @@ async fn run<Panel: Display, Input: Touch>(
     let work = async {
         let mut animating = false;
         loop {
-            let polling = runtime.pointer.is_some() && service.shown().input;
+            // Touch is read while anything is on the display, and until a
+            // contact that began ends.
+            let polling = runtime.pointer.is_some()
+                && (service.shown().view.is_some() || runtime.recognizer.is_touching());
             if animating || polling {
                 select(service.changed(), Timer::after(FRAME)).await;
             } else {
                 service.changed().await;
             }
             service.pump();
-            if let Some((x, y)) = runtime.pointer.as_mut().and_then(Pointer::poll) {
-                let _handler = service.press_shown(x, y);
+            if let Some(pointer) = runtime.pointer.as_mut() {
+                let point = pointer.poll();
+                match runtime.recognizer.sample(point, Instant::now().as_millis()) {
+                    Some(Touched::Tap(x, y)) => {
+                        let _handler = service.press_shown(x, y);
+                    }
+                    Some(Touched::Gesture(gesture)) => service.post_gesture(gesture),
+                    None => {}
+                }
             }
-            animating = match runtime.screen.as_mut() {
-                Some(screen) => screen.refresh(&service).await,
-                None => false,
-            };
+            if let Some(screen) = runtime.screen.as_mut() {
+                if let Some(brightness) = service.take_brightness() {
+                    screen.set_brightness(brightness).await;
+                }
+                animating = screen.refresh(&service).await;
+            }
         }
     };
     select(cancellation.cancelled(), work).await;

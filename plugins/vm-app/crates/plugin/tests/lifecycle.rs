@@ -1,5 +1,6 @@
 //! Runs apps on a real VM through their lifecycle, the way the system UI
-//! drives it: open, tap, cover, go home, resume, terminate.
+//! drives it: install, open, tap, cover, go home, resume, terminate,
+//! uninstall.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic, missing_docs)]
 
@@ -7,11 +8,13 @@ use std::rc::Rc;
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
-use barracuda_app_plugin::{AppError, AppLocation, AppManager, AppState};
+use barracuda_app_plugin::{AppError, AppKind, AppLocation, AppManager, AppState};
 use barracuda_ui_plugin::{DEFAULT_VIEWPORT, UiService};
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
-use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm, VmExecutionError, VmRunOutcome};
+use barracuda_vm_plugin::{
+    Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm, VmExecutionError, VmRunOutcome,
+};
 use embassy_executor::{Executor, Spawner};
 use embassy_time::Timer;
 
@@ -19,11 +22,7 @@ macro_rules! counter_file {
     ($name:literal) => {
         (
             $name,
-            include_bytes!(concat!(
-                "../../../filesystem/resources/apps/counter/",
-                $name
-            ))
-            .as_slice(),
+            include_bytes!(concat!("fixtures/counter/", $name)).as_slice(),
         )
     };
 }
@@ -37,6 +36,24 @@ const COUNTER: &[(&str, &[u8])] = &[
     counter_file!("font-2.bin"),
     counter_file!("font-12.bin"),
 ];
+
+/// A package only some apps may require.
+struct Secret;
+
+impl Package for Secret {
+    fn install(&self, lua: &mut Lua) -> barracuda_vm_plugin::Result<()> {
+        lua.register_lib("secret", |_package| Ok(()))
+    }
+}
+
+impl LuaPackage for Secret {
+    fn name(&self) -> &'static str {
+        "secret"
+    }
+}
+
+/// Prints whether the program may require `secret`.
+const PROBE: &[u8] = b"print(pcall(require, 'secret'))";
 
 /// A headless Workspace app that exercises storage and the timer.
 const NOTES: &str = r#"
@@ -111,8 +128,39 @@ async fn filesystem() -> ScopedVfs {
         .unwrap();
     let fs = vfs.scoped("/app").unwrap();
     for (name, bytes) in COUNTER {
-        put(&fs, &format!("/resources/apps/counter/{name}"), bytes).await;
+        put(&fs, &format!("/workspace/media/apps/counter/{name}"), bytes).await;
     }
+    // A system app may require every package.
+    put(
+        &fs,
+        "/resources/apps/system/app.json",
+        br#"{"format":1,"id":"system","name":"System","version":"1"}"#,
+    )
+    .await;
+    put(&fs, "/resources/apps/system/main.lua", PROBE).await;
+    // Installable apps require only what they asked for.
+    for (id, permissions) in [("nosy", "[]"), ("trusted", r#"["secret"]"#)] {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}/app.json"),
+            format!(
+                r#"{{"format":1,"id":"{id}","name":"{id}","version":"1","permissions":{permissions}}}"#
+            )
+            .as_bytes(),
+        )
+        .await;
+        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), PROBE).await;
+    }
+    // Fails while it is on the display.
+    view_app(
+        &fs,
+        "crash",
+        "local app = require('app') \
+         for event in app.events() do \
+           if event == 'app:active' then error('crashed') end \
+         end",
+    )
+    .await;
     put(
         &fs,
         "/media/apps/broken/app.json",
@@ -167,8 +215,9 @@ async fn filesystem() -> ScopedVfs {
         .await;
     }
 
-    // Workspace containers never replace an installed or bundled app.
-    for id in ["broken", "counter"] {
+    // Workspace containers never take a system app's ID, and one at the
+    // installed version offers nothing new.
+    for id in ["broken", "system"] {
         put(
             &fs,
             &format!("/workspace/media/apps/{id}/app.json"),
@@ -260,8 +309,21 @@ fn first_text(manager: &AppManager) -> Option<String> {
     texts(manager).into_iter().next()
 }
 
+const OFFERED: [&str; 9] = [
+    "agent-counter",
+    "busy",
+    "counter",
+    "crash",
+    "idle-1",
+    "idle-2",
+    "idle-3",
+    "notes",
+    "nosy",
+];
+
 async fn scenario(spawner: Spawner) {
     let packages = LuaPackageRegistry::new();
+    let _secret = packages.register(Secret).unwrap();
     let ui = Rc::new(UiService::new(DEFAULT_VIEWPORT));
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
@@ -269,38 +331,44 @@ async fn scenario(spawner: Spawner) {
         AppManager::register(filesystem().await, vm, Rc::clone(&ui), &packages).unwrap();
     spawner.spawn(supervise(manager.clone()).unwrap());
 
-    // The container list, with broken containers and their reasons.
+    // The container list: launchable apps, Workspace offers, and broken
+    // containers with their reasons.
     let list = manager.list().await;
     let apps: Vec<_> = list
         .apps
         .iter()
-        .map(|app| (app.id.as_str(), app.location, app.has_view))
+        .map(|app| (app.id.as_str(), app.location, app.kind, app.has_view))
         .collect();
     assert_eq!(
         apps,
         [
-            ("agent-counter", AppLocation::Workspace, true),
-            ("broken", AppLocation::Installed, false),
-            ("busy", AppLocation::Workspace, true),
-            ("counter", AppLocation::Bundled, true),
-            ("idle-1", AppLocation::Workspace, true),
-            ("idle-2", AppLocation::Workspace, true),
-            ("idle-3", AppLocation::Workspace, true),
-            ("notes", AppLocation::Workspace, false),
+            (
+                "broken",
+                AppLocation::Installed,
+                AppKind::Installable,
+                false
+            ),
+            ("system", AppLocation::Bundled, AppKind::System, false),
         ]
     );
+    let offered: Vec<_> = list.installable.iter().map(|app| app.id.as_str()).collect();
+    let mut expected = OFFERED.to_vec();
+    expected.push("trusted");
+    expected.sort_unstable();
+    assert_eq!(offered, expected);
     let invalid: Vec<_> = list
         .invalid
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 5, "{invalid:#?}");
+    assert_eq!(invalid.len(), 6, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
         ("Draft", "not an app ID"),
         ("escape", "$.view.program"),
         ("future", "$.format"),
         ("nomain", "main.lua is missing"),
         ("stray", "does not match the directory name"),
+        ("system", "belongs to a system app"),
     ]) {
         assert_eq!(*dir, expected_dir);
         assert!(problem.contains(expected), "{dir}: {problem}");
@@ -308,11 +376,67 @@ async fn scenario(spawner: Spawner) {
     for (id, error) in [
         ("missing", AppError::NotFound),
         ("../counter", AppError::NotFound),
-        ("escape", AppError::InvalidBundle),
-        ("stray", AppError::InvalidBundle),
+        ("counter", AppError::NotInstalled),
     ] {
         assert_eq!(manager.open(id).await.err(), Some(error), "{id}");
     }
+    for (id, error) in [
+        ("escape", AppError::InvalidBundle),
+        ("stray", AppError::InvalidBundle),
+        ("system", AppError::SystemApp),
+        ("missing", AppError::NotFound),
+    ] {
+        assert_eq!(manager.install(id).await.err(), Some(error), "{id}");
+    }
+    assert_eq!(manager.uninstall("system").await, Err(AppError::SystemApp));
+
+    // An install request waits for the person's answer in the system UI.
+    assert_eq!(
+        manager.request_install("system").await.err(),
+        Some(AppError::SystemApp)
+    );
+    assert_eq!(
+        manager
+            .request_install("trusted")
+            .await
+            .unwrap()
+            .permissions,
+        ["secret"]
+    );
+    assert_eq!(manager.install_request().unwrap().id, "trusted");
+    manager.decline_install("trusted");
+    assert_eq!(manager.install_request(), None);
+    manager.request_install("trusted").await.unwrap();
+    for id in OFFERED.iter().chain(&["trusted"]) {
+        let installed = manager.install(id).await.unwrap();
+        assert_eq!(
+            (installed.location, installed.kind),
+            (AppLocation::Installed, AppKind::Installable)
+        );
+    }
+    assert_eq!(manager.install_request(), None);
+    assert!(manager.list().await.installable.is_empty());
+
+    // Packages: a system app requires any, an installable app only those it
+    // asked for.
+    for (id, granted) in [("system", "true"), ("nosy", "false"), ("trusted", "true")] {
+        manager.open(id).await.unwrap();
+        until("the probe to exit", || state_of(&manager, id).is_none()).await;
+        let exit = manager.last_exit().unwrap();
+        assert!(
+            exit.output
+                .first()
+                .is_some_and(|line| line.starts_with(granted)),
+            "{id}: {exit:?}"
+        );
+    }
+
+    // An app failing on the display says so.
+    manager.open("crash").await.unwrap();
+    until("the crash", || state_of(&manager, "crash").is_none()).await;
+    let exit = manager.last_exit().unwrap();
+    assert_eq!((exit.outcome, exit.foreground), (VmRunOutcome::Error, true));
+    assert_eq!(ui.showing(), None);
 
     // Open, tap, and cover the counter.
     assert_eq!(manager.tap(0.0, 0.0), Err(AppError::NoForegroundApp));
@@ -402,7 +526,10 @@ async fn scenario(spawner: Spawner) {
     })
     .await;
     let exit = manager.last_exit().unwrap();
-    assert_eq!(exit.outcome, VmRunOutcome::Cancelled);
+    assert_eq!(
+        (exit.outcome, exit.foreground),
+        (VmRunOutcome::Cancelled, false)
+    );
     assert!(
         exit.diagnostic
             .unwrap()
@@ -514,6 +641,31 @@ async fn scenario(spawner: Spawner) {
             ("idle-3".into(), AppState::Suspended),
         ]
     );
+
+    // Uninstalling ends the app and deletes its container and data; the
+    // Workspace offer remains.
+    manager.uninstall("counter").await.unwrap();
+    assert_eq!(state_of(&manager, "counter"), Some(AppState::Terminating));
+    until("the uninstalled counter's exit", || {
+        state_of(&manager, "counter").is_none()
+    })
+    .await;
+    assert_eq!(
+        manager.open("counter").await.err(),
+        Some(AppError::NotInstalled)
+    );
+    manager.install("counter").await.unwrap();
+    // A run cancelled after its grace period may still hold its VM slot.
+    for _ in 0..100 {
+        match manager.open("counter").await {
+            Err(AppError::Busy) => Timer::after_millis(10).await,
+            opened => {
+                opened.unwrap();
+                break;
+            }
+        }
+    }
+    until("a fresh count", || texts(&manager) == ["0", "+1", "Reset"]).await;
 }
 
 #[embassy_executor::task]

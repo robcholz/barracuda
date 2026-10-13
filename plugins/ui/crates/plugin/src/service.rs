@@ -1,18 +1,50 @@
 //! The `UiService` capability: opens views and drives them.
 
 use crate::datum::{ViewType, ViewValue};
+use crate::gesture::Gesture;
 use crate::mailbox::{Event, Mailbox, Schema};
-use crate::view::ViewChannel;
-use alloc::{collections::BTreeMap, rc::Rc, string::String, vec::Vec};
+use crate::view::{ViewCall, ViewChannel};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    rc::Rc,
+    string::String,
+    vec::Vec,
+};
 use barracuda_ui_runtime::{
     Document, DocumentAssets, DocumentError, Program, Value, format::FormatError,
 };
 use core::cell::{Cell, RefCell};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use portable_atomic_util::Arc;
 
 /// The viewport views are laid out in when the Board gives the Plugin no
 /// display.
 pub const DEFAULT_VIEWPORT: (f32, f32) = (360.0, 360.0);
+
+/// Gestures kept for the system UI before older ones are dropped.
+pub const MAX_GESTURES: usize = 8;
+
+/// Where a view sits on the display.
+///
+/// Each layer shows at most one view. The display shows the system layer's
+/// view when it has one, and the app layer's otherwise, so the system UI
+/// covers apps without the apps' owner taking their views down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Layer {
+    /// Apps' views.
+    App,
+    /// The system UI's views: home, panels, and dialogs.
+    System,
+}
+
+impl Layer {
+    const fn index(self) -> usize {
+        match self {
+            Layer::App => 0,
+            Layer::System => 1,
+        }
+    }
+}
 
 /// The compiled files of one view.
 #[derive(Clone, Debug, Default)]
@@ -56,6 +88,13 @@ pub(crate) struct Shown {
     pub(crate) revision: u64,
 }
 
+/// What one layer shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct Placement {
+    view: Option<u32>,
+    input: bool,
+}
+
 struct Inner {
     mailbox: Arc<Mailbox>,
     documents: RefCell<BTreeMap<u32, Document>>,
@@ -63,7 +102,11 @@ struct Inner {
     suspended: RefCell<BTreeMap<u32, Vec<Value>>>,
     next_id: Cell<u32>,
     viewport: (f32, f32),
+    layers: Cell<[Placement; 2]>,
     shown: Cell<Shown>,
+    gestures: RefCell<VecDeque<Gesture>>,
+    gesture: Signal<NoopRawMutex, ()>,
+    brightness: Cell<Option<u8>>,
 }
 
 impl Inner {
@@ -80,6 +123,16 @@ impl Inner {
             height,
         )
         .map_err(UiError::Document)
+    }
+
+    /// Puts `view` on `layer`, or clears the layer, and shows the top one.
+    fn place(&self, layer: Layer, view: Option<u32>, input: bool) {
+        let mut layers = self.layers.get();
+        layers[layer.index()] = Placement { view, input };
+        self.layers.set(layers);
+        let [app, system] = layers;
+        let top = if system.view.is_some() { system } else { app };
+        self.show(top.view, top.input);
     }
 
     fn show(&self, view: Option<u32>, input: bool) {
@@ -100,28 +153,33 @@ impl Inner {
         self.mailbox.notify();
     }
 
-    /// Takes view `id` off the screen if it is there.
+    /// Takes view `id` off its layer if it is there.
     fn withdraw(&self, id: u32) {
-        if self.shown.get().view == Some(id) {
-            self.show(None, false);
+        for layer in [Layer::App, Layer::System] {
+            if self.layers.get()[layer.index()].view == Some(id) {
+                self.place(layer, None, false);
+            }
         }
+    }
+
+    /// The handler call pressing view `id` at (`x`, `y`) selects.
+    fn resolve(&self, id: u32, x: f32, y: f32) -> Option<Event> {
+        self.pump();
+        let mut documents = self.documents.borrow_mut();
+        let document = documents.get_mut(&id)?;
+        let event = document.press_at(x, y)?;
+        let handler = document.program().handlers.get(event.handler)?.name.clone();
+        let args = event
+            .args
+            .iter()
+            .map(ViewValue::from_value)
+            .collect::<Option<Vec<_>>>()?;
+        Some(Event { handler, args })
     }
 
     /// Presses view `id` at (`x`, `y`) and queues the handler call it selects.
     fn press(&self, id: u32, x: f32, y: f32) -> Option<String> {
-        self.pump();
-        let event = {
-            let mut documents = self.documents.borrow_mut();
-            let document = documents.get_mut(&id)?;
-            let event = document.press_at(x, y)?;
-            let handler = document.program().handlers.get(event.handler)?.name.clone();
-            let args = event
-                .args
-                .iter()
-                .map(ViewValue::from_value)
-                .collect::<Option<Vec<_>>>()?;
-            Event { handler, args }
-        };
+        let event = self.resolve(id, x, y)?;
         let handler = event.handler.clone();
         if !self.mailbox.post(id, event) {
             log::warn!("ui view {id}: dropped '{handler}' because the view is closed or busy");
@@ -170,7 +228,11 @@ impl UiService {
                 suspended: RefCell::new(BTreeMap::new()),
                 next_id: Cell::new(1),
                 viewport,
+                layers: Cell::new([Placement::default(); 2]),
                 shown: Cell::new(Shown::default()),
+                gestures: RefCell::new(VecDeque::new()),
+                gesture: Signal::new(),
+                brightness: Cell::new(None),
             }),
         }
     }
@@ -181,12 +243,22 @@ impl UiService {
         self.inner.viewport
     }
 
-    /// Mounts a view. It lives until the session drops.
+    /// Mounts an app's view on the [`Layer::App`] layer. It lives until the
+    /// session drops.
     ///
     /// # Errors
     ///
     /// Returns [`UiError`] when the program or an asset is rejected.
     pub fn open(&self, assets: &UiAssets) -> Result<UiSession, UiError> {
+        self.open_on(Layer::App, assets)
+    }
+
+    /// Mounts a view on `layer`. It lives until the session drops.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UiError`] when the program or an asset is rejected.
+    pub fn open_on(&self, layer: Layer, assets: &UiAssets) -> Result<UiSession, UiError> {
         let program = barracuda_ui_runtime::format::read(&assets.view).map_err(UiError::View)?;
         let document = self.inner.document(program, assets)?;
         let schema = Arc::new(Schema {
@@ -202,6 +274,7 @@ impl UiService {
         self.inner.mailbox.insert(id, schema.slots.len());
         self.inner.documents.borrow_mut().insert(id, document);
         Ok(UiSession {
+            layer,
             channel: ViewChannel {
                 id,
                 schema,
@@ -217,6 +290,41 @@ impl UiService {
     pub fn showing(&self) -> Option<bool> {
         let shown = self.inner.shown.get();
         shown.view.map(|_| shown.input)
+    }
+
+    /// Waits for the next long press or swipe on the display.
+    ///
+    /// Gestures are the system UI's: taps press the view on the display, and
+    /// gestures reach no view. Only the latest [`MAX_GESTURES`] are kept
+    /// while nobody waits.
+    pub async fn next_gesture(&self) -> Gesture {
+        loop {
+            if let Some(gesture) = self.inner.gestures.borrow_mut().pop_front() {
+                return gesture;
+            }
+            self.inner.gesture.wait().await;
+        }
+    }
+
+    /// Sets the display's brightness on the `0..=255` scale.
+    pub fn set_brightness(&self, brightness: u8) {
+        self.inner.brightness.set(Some(brightness));
+        self.inner.mailbox.notify();
+    }
+
+    /// Queues a gesture for [`UiService::next_gesture`].
+    pub(crate) fn post_gesture(&self, gesture: Gesture) {
+        let mut gestures = self.inner.gestures.borrow_mut();
+        if gestures.len() == MAX_GESTURES {
+            gestures.pop_front();
+        }
+        gestures.push_back(gesture);
+        self.inner.gesture.signal(());
+    }
+
+    /// A brightness set since the last call.
+    pub(crate) fn take_brightness(&self) -> Option<u8> {
+        self.inner.brightness.take()
     }
 
     /// Waits until a view is written or what is on screen changes.
@@ -262,6 +370,7 @@ impl UiService {
 
 /// One open view; dropping it unmounts the view and ends it for its owner.
 pub struct UiSession {
+    layer: Layer,
     channel: ViewChannel,
     inner: Rc<Inner>,
 }
@@ -284,13 +393,21 @@ impl UiSession {
         self.inner.mailbox.clear_events(self.channel.id);
     }
 
-    /// Puts the view on the display in place of whatever was there; touches
-    /// reach it only while `input` is set.
-    pub fn show(&self, input: bool) {
-        self.inner.show(Some(self.channel.id), input);
+    /// The layer the view sits on.
+    #[must_use]
+    pub fn layer(&self) -> Layer {
+        self.layer
     }
 
-    /// Takes the view off the display if it is there; the display goes blank.
+    /// Puts the view on its layer in place of whatever was there; touches
+    /// reach it only while `input` is set. It is on the display unless the
+    /// system layer covers it.
+    pub fn show(&self, input: bool) {
+        self.inner.place(self.layer, Some(self.channel.id), input);
+    }
+
+    /// Takes the view off its layer if it is there, uncovering the app layer
+    /// or leaving the display blank.
     pub fn hide(&self) {
         self.inner.withdraw(self.channel.id);
     }
@@ -376,6 +493,18 @@ impl UiSession {
     /// the event could not be queued.
     pub fn press_at(&self, x: f32, y: f32) -> Option<String> {
         self.inner.press(self.channel.id, x, y)
+    }
+
+    /// The handler call a press at (`x`, `y`) would deliver, without
+    /// delivering it. The system UI resolves long presses this way.
+    #[must_use]
+    pub fn resolve_press(&self, x: f32, y: f32) -> Option<ViewCall> {
+        self.inner
+            .resolve(self.channel.id, x, y)
+            .map(|event| ViewCall {
+                handler: event.handler,
+                args: event.args,
+            })
     }
 
     /// The text of every text-bearing node in document order, after pending writes.

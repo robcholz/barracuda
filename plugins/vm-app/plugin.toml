@@ -5,6 +5,6 @@ description = "Lists, launches, and supervises Lua apps with optional MicroTS vi
 [tasks.apps]
 cwd = "."
 command = ["bun", "resources/apps/build.ts"]
-inputs = ["resources/apps"]
-outputs = ["filesystem/resources/apps"]
-env = ["POCKETJS_ROOT"]
+inputs = ["resources/apps", "resources/examples"]
+outputs = ["filesystem/resources/apps", "crates/plugin/tests/fixtures"]
+env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]

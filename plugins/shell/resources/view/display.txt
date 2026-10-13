@@ -1,0 +1,3 @@
+# The only characters the large display font (24 px bold) holds besides
+# ASCII: the home screen's headline.
+待命

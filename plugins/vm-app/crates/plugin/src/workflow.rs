@@ -1,4 +1,4 @@
-use crate::bundle::AppList;
+use crate::bundle::{AppInfo, AppList};
 use crate::manager::{AppError, AppExit, AppManager, RunningApp};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use barracuda_workflow_plugin::{
@@ -46,6 +46,11 @@ pub(crate) struct StatusResponse {
 }
 
 #[derive(Serialize)]
+pub(crate) struct InstallResponse {
+    requested: AppInfo,
+}
+
+#[derive(Serialize)]
 pub(crate) struct TapResponse {
     handler: Option<String>,
 }
@@ -89,6 +94,22 @@ impl WorkflowActionHandler for OpenAction {
 
     fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
         Box::pin(async move { Ok(self.0.open(&request.id).await.into()) })
+    }
+}
+
+struct InstallAction(AppManager);
+
+impl WorkflowActionHandler for InstallAction {
+    type Request = AppRequest;
+    type Response = Response<InstallResponse>;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.install");
+
+    fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
+        Box::pin(async move {
+            let result = self.0.request_install(&request.id).await;
+            Ok(result.map(|requested| InstallResponse { requested }).into())
+        })
     }
 }
 
@@ -177,6 +198,7 @@ pub(crate) fn register_actions(
     Ok(alloc::vec![
         actions.add_action(ListAction(manager.clone()))?,
         actions.add_action(OpenAction(manager.clone()))?,
+        actions.add_action(InstallAction(manager.clone()))?,
         actions.add_action(HomeAction(manager.clone()))?,
         actions.add_action(InteractiveAction(manager.clone()))?,
         actions.add_action(TerminateAction(manager.clone()))?,
@@ -190,7 +212,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
-    use crate::bundle::{AppInfo, AppLocation, InvalidApp};
+    use crate::bundle::{AppKind, AppLocation, InvalidApp};
     use crate::port::AppState;
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
@@ -203,8 +225,10 @@ mod tests {
                 id: "counter".into(),
                 name: "计数器".into(),
                 version: "0.1.0".into(),
-                location: AppLocation::Bundled,
+                location: AppLocation::Installed,
+                kind: AppKind::Installable,
                 has_view: true,
+                permissions: vec!["gpio".into()],
             },
             run_id: 3,
             state,
@@ -228,6 +252,7 @@ mod tests {
         check::<ListAction>(AppList::default());
         check::<ListAction>(AppList {
             apps: vec![running(AppState::Active).app],
+            installable: vec![running(AppState::Active).app],
             invalid: vec![InvalidApp {
                 location: AppLocation::Workspace,
                 dir: "Draft".into(),
@@ -235,8 +260,19 @@ mod tests {
             }],
         });
         check::<OpenAction>(Response::from(Ok::<_, AppError>(running(AppState::Active))));
-        for error in [AppError::NotFound, AppError::InvalidBundle, AppError::Busy] {
+        for error in [
+            AppError::NotFound,
+            AppError::NotInstalled,
+            AppError::InvalidBundle,
+            AppError::Busy,
+        ] {
             check::<OpenAction>(Response::<RunningApp>::from(Err(error)));
+        }
+        check::<InstallAction>(Response::from(Ok::<_, AppError>(InstallResponse {
+            requested: running(AppState::Active).app,
+        })));
+        for error in [AppError::NotFound, AppError::SystemApp] {
+            check::<InstallAction>(Response::<InstallResponse>::from(Err(error)));
         }
         check::<HomeAction>(AppResponse { app: None });
         check::<HomeAction>(AppResponse {
@@ -266,6 +302,7 @@ mod tests {
                 error: Some(VmExecutionError::LuaRuntime),
                 diagnostic: Some("boom".into()),
                 output: vec!["starting".into()],
+                foreground: true,
             }),
         });
         check::<TapAction>(Response::from(Ok::<_, AppError>(TapResponse {
@@ -284,6 +321,7 @@ mod tests {
         assert!(request::<ListAction>(json!({})));
         assert!(request::<OpenAction>(json!({ "id": "counter" })));
         assert!(!request::<OpenAction>(json!({})));
+        assert!(request::<InstallAction>(json!({ "id": "counter" })));
         assert!(request::<InteractiveAction>(
             json!({ "interactive": false })
         ));

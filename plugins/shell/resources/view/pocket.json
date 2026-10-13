@@ -1,0 +1,14 @@
+{
+  "pocket": 2,
+  "id": "dev.barracuda.shell",
+  "name": "barracuda-shell",
+  "title": "System",
+  "version": "0.1.0",
+  "engine": { "capabilities": { "requires": ["text.glyphs.baked", "input.buttons"] } },
+  "app": {
+    "entry": "app.tsx",
+    "framework": "solid",
+    "viewport": { "fixed": { "logical": [360, 360], "presentation": "integer-fit" } },
+    "aot": true
+  }
+}

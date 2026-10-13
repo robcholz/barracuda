@@ -33,6 +33,16 @@
       },
       "required": ["program", "styles"],
       "additionalProperties": false
+    },
+    "permissions": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "pattern": "^[A-Za-z0-9_.-]+$"
+      }
     }
   },
   "required": ["format", "id", "name", "version"],

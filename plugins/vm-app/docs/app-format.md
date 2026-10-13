@@ -2,22 +2,27 @@
 
 This is the format of an app container, version 1. The `app` Plugin loads any
 container in this format from each of its locations, so a container written
-by the image build, an installer, or an Agent is the same thing.
+by the image build, the portal, or an Agent is the same thing; where it lives
+decides what kind of app it is (see
+[`device-ui.md`](../../../.agents/docs/device-ui.md)).
 `crates/plugin/resources/app-manifest.json` is the machine-readable form of the manifest
 rules below.
 
 ## Locations
 
-| Location    | Directory               | Written by                                 |
-| ----------- | ----------------------- | ------------------------------------------ |
-| `installed` | `/media/apps/<id>/`     | the `app` Plugin (private)                 |
-| `bundled`   | `/resources/apps/<id>/` | the image build (private, read-only)       |
-| `workspace` | `/workspace/media/apps/<id>/` | Agents and other Plugins (shared Workspace) |
+| Location    | Directory                     | Written by                            | Holds |
+| ----------- | ----------------------------- | ------------------------------------- | ----- |
+| `bundled`   | `/resources/apps/<id>/`       | the image build (private, read-only)  | system apps |
+| `installed` | `/media/apps/<id>/`           | the `app` Plugin on install (private) | installable apps |
+| `workspace` | `/workspace/media/apps/<id>/` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
 
 All three are paths the `app` Plugin's existing filesystem scope already
-contains; the `app` Plugin only reads the Workspace. When two containers share
-an ID, the first location in the table wins, so a Workspace container never
-replaces an installed or bundled app.
+contains; the `app` Plugin only reads the Workspace. Bundled and installed
+apps are launchable; a Workspace container is an offer. Installing it copies
+the manifest and the files it names into `/media/apps/<id>/`, replacing an
+installed app at another version. A system app's ID belongs to it: no
+container elsewhere may use it, and `app.list` reports one that does as
+invalid.
 
 ## Container
 
@@ -48,7 +53,8 @@ Other files are ignored. Directories whose names start with `.` are skipped.
     "program": "view.bvir",
     "styles": "styles.bin",
     "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"]
-  }
+  },
+  "permissions": ["led_strip", "http"]
 }
 ```
 
@@ -63,11 +69,18 @@ Other files are ignored. Directories whose names start with `.` are skipped.
 | `view.program` | with view | the BVIR view program                                      |
 | `view.styles`  | with view | the compiled stylesheet                                    |
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
+| `permissions`  | no       | up to 16 distinct Lua package names besides `app`, such as `gpio` or `http`; defaults to none |
 
 Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
 `0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
 are rejected so a typo is reported, not ignored. The manifest is at most
 4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
+
+An installable app's runs can `require` only `app` and its `permissions`; a
+package it did not ask for is not there, and `require` fails. The system UI
+lists the permissions in plain words before the person installs the app. A
+system app may `require` every registered package, so its manifest needs
+none.
 
 A container that breaks a rule is not launchable. `app.list` reports it under
 `invalid` with the location, directory name, and the problem, for example
@@ -149,7 +162,7 @@ links it into BVIR, and the font baker produces the atlases. An Agent that
 cannot run that toolchain writes a headless app, or copies the view files of
 an existing build next to its own entry program.
 
-## Example: a headless app an Agent can write
+## Example: a headless app an Agent can offer
 
 `/workspace/media/apps/hello/app.json`:
 
@@ -166,5 +179,8 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Open it with `app.open` and `{"id":"hello"}`; `app.status` then shows
-`last_exit.output` as `["hello from hello, run 1"]`.
+Offer it with `app.install` and `{"id":"hello"}`: the device shows the
+install screen, and once the person installs it, open it with `app.open` and
+`{"id":"hello"}`; `app.status` then shows `last_exit.output` as
+`["hello from hello, run 1"]`. `crates/plugin/tests/fixtures/counter/` is a
+built app with a view, ready to copy into `/workspace/media/apps/counter/`.

@@ -1,5 +1,10 @@
 //! App containers: one directory per app, in the format `docs/app-format.md`
 //! defines and `resources/app-manifest.json` checks.
+//!
+//! Where a container lives decides what kind of app it is: the image's
+//! bundled containers are system apps, and installed ones are installable
+//! apps. Workspace containers are not launchable; they are what an install
+//! copies into [`INSTALLED_APPS`].
 
 use crate::AppError;
 use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
@@ -8,12 +13,18 @@ use barracuda_vfs::{FsError, ScopedVfs};
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Containers shipped in the system image, inside this Plugin's private resources.
+/// System apps, shipped in the system image inside this Plugin's private
+/// resources.
 pub const BUNDLED_APPS: &str = "/resources/apps";
-/// Containers installed at runtime, inside this Plugin's private media.
+/// Installable apps the person installed, inside this Plugin's private media.
 pub const INSTALLED_APPS: &str = "/media/apps";
-/// Containers that Agents and other Plugins create in the shared Workspace.
+/// Containers that Agents, the portal, and other Plugins offer for
+/// installation, in the shared Workspace.
 pub const WORKSPACE_APPS: &str = "/workspace/media/apps";
+/// The most Lua packages a manifest may ask for.
+pub const MAX_PERMISSIONS: usize = 16;
+/// The package every app program uses, granted without being asked for.
+pub const APP_PACKAGE: &str = "app";
 
 /// The manifest file at the root of every container.
 pub const MANIFEST_FILE: &str = "app.json";
@@ -38,18 +49,35 @@ pub enum AppLocation {
     Bundled,
     /// Installed under [`INSTALLED_APPS`].
     Installed,
-    /// Created in the Workspace under [`WORKSPACE_APPS`].
+    /// Offered for installation in the Workspace under [`WORKSPACE_APPS`].
     Workspace,
 }
 
+/// What an app may do, decided by where its container lives.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppKind {
+    /// Shipped in the image: may require every Lua package, cannot be
+    /// uninstalled, and no installed app may take its ID.
+    System,
+    /// Installed by the person: requires only `app` and the packages its
+    /// manifest asked for when it was installed, and can be uninstalled.
+    Installable,
+}
+
 impl AppLocation {
-    /// When two containers share an ID, the earlier location wins: an installed
-    /// app updates a bundled one, and Workspace apps never replace either.
-    const PRECEDENCE: [AppLocation; 3] = [
-        AppLocation::Installed,
-        AppLocation::Bundled,
-        AppLocation::Workspace,
-    ];
+    /// The launchable locations, in the order an app ID is looked up: a system
+    /// app's ID is never taken by an installed app.
+    const LAUNCHABLE: [AppLocation; 2] = [AppLocation::Bundled, AppLocation::Installed];
+
+    /// The kind of app a container here is.
+    #[must_use]
+    pub const fn kind(self) -> AppKind {
+        match self {
+            AppLocation::Bundled => AppKind::System,
+            AppLocation::Installed | AppLocation::Workspace => AppKind::Installable,
+        }
+    }
 
     /// The directory holding this location's containers.
     #[must_use]
@@ -62,7 +90,7 @@ impl AppLocation {
     }
 }
 
-/// One launchable app.
+/// One app container that passed the app format.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct AppInfo {
     /// Stable ID, equal to the container directory name.
@@ -73,8 +101,13 @@ pub struct AppInfo {
     pub version: String,
     /// Where the container was found.
     pub location: AppLocation,
+    /// What the app may do.
+    pub kind: AppKind,
     /// Whether the app has a view; apps without one run headless.
     pub has_view: bool,
+    /// The Lua packages the manifest asks for besides `app`. Only an
+    /// installable app is limited to them.
+    pub permissions: Vec<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -88,11 +121,14 @@ pub struct InvalidApp {
     pub problem: String,
 }
 
-/// Every container, split into launchable and broken ones.
+/// Every container, split into launchable, offered, and broken ones.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize)]
 pub struct AppList {
-    /// Launchable apps, sorted by ID; shadowed containers are left out.
+    /// Launchable system and installed apps, sorted by ID.
     pub apps: Vec<AppInfo>,
+    /// Workspace containers that can be installed: new apps and installed
+    /// apps at another version, sorted by ID.
+    pub installable: Vec<AppInfo>,
     /// Containers that fail the app format, so their authors can fix them.
     pub invalid: Vec<InvalidApp>,
 }
@@ -107,6 +143,8 @@ struct Manifest {
     entry: Option<String>,
     #[serde(default)]
     view: Option<ViewFiles>,
+    #[serde(default)]
+    permissions: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,11 +156,24 @@ struct ViewFiles {
 }
 
 /// A container checked against the app format.
-struct Container {
-    info: AppInfo,
-    dir: String,
+pub(crate) struct Container {
+    pub(crate) info: AppInfo,
+    pub(crate) dir: String,
     entry: String,
     view: Option<ViewFiles>,
+}
+
+impl Container {
+    /// Every file the container consists of: the manifest and what it names.
+    pub(crate) fn files(&self) -> Vec<&str> {
+        let mut files = alloc::vec![MANIFEST_FILE, self.entry.as_str()];
+        if let Some(view) = &self.view {
+            files.push(&view.program);
+            files.push(&view.styles);
+            files.extend(view.fonts.iter().map(String::as_str));
+        }
+        files
+    }
 }
 
 pub(crate) struct Bundle {
@@ -226,6 +277,13 @@ async fn read_container(
             manifest.id
         )));
     }
+    for (index, permission) in manifest.permissions.iter().enumerate() {
+        if manifest.permissions[..index].contains(permission) {
+            return Err(invalid(format!(
+                "{MANIFEST_FILE}: permission \"{permission}\" is listed twice"
+            )));
+        }
+    }
     let entry = manifest
         .entry
         .unwrap_or_else(|| String::from(DEFAULT_ENTRY));
@@ -249,7 +307,13 @@ async fn read_container(
             name: manifest.name,
             version: manifest.version,
             location,
+            kind: location.kind(),
             has_view: manifest.view.is_some(),
+            permissions: manifest
+                .permissions
+                .into_iter()
+                .filter(|permission| permission != APP_PACKAGE)
+                .collect(),
         },
         dir,
         entry,
@@ -279,13 +343,33 @@ async fn container_names(filesystem: &ScopedVfs, location: AppLocation) -> Vec<S
 /// Every container in every location.
 pub(crate) async fn list(filesystem: &ScopedVfs) -> AppList {
     let mut apps = BTreeMap::new();
+    let mut installable = Vec::new();
     let mut invalid = Vec::new();
-    for location in AppLocation::PRECEDENCE {
+    for location in [
+        AppLocation::Bundled,
+        AppLocation::Installed,
+        AppLocation::Workspace,
+    ] {
         for name in container_names(filesystem, location).await {
-            if apps.contains_key(&name) {
+            let installed: Option<&AppInfo> = apps.get(&name);
+            if installed.is_some_and(|app| app.kind == AppKind::System) {
+                // A system app's ID is never installed over, so a container
+                // reusing it elsewhere is reported rather than offered.
+                if location != AppLocation::Bundled {
+                    invalid.push(InvalidApp {
+                        location,
+                        dir: name,
+                        problem: String::from("the ID belongs to a system app"),
+                    });
+                }
                 continue;
             }
             match read_container(filesystem, location, &name).await {
+                Ok(container) if location == AppLocation::Workspace => {
+                    if installed.is_none_or(|app| app.version != container.info.version) {
+                        installable.push(container.info);
+                    }
+                }
                 Ok(container) => {
                     apps.insert(name, container.info);
                 }
@@ -302,25 +386,46 @@ pub(crate) async fn list(filesystem: &ScopedVfs) -> AppList {
     }
     AppList {
         apps: apps.into_values().collect(),
+        installable,
         invalid,
     }
 }
 
-/// Reads everything needed to launch app `id`.
-pub(crate) async fn load(filesystem: &ScopedVfs, id: &str) -> Result<Bundle, AppError> {
+/// The container of launchable app `id`: its system app, or else its
+/// installed app.
+async fn find(filesystem: &ScopedVfs, id: &str) -> Result<Container, AppError> {
     if !valid_id(id) {
         return Err(AppError::NotFound);
     }
-    let mut location = None;
-    for candidate in AppLocation::PRECEDENCE {
-        let manifest = format!("{}/{id}/{MANIFEST_FILE}", candidate.root());
+    for location in AppLocation::LAUNCHABLE {
+        let manifest = format!("{}/{id}/{MANIFEST_FILE}", location.root());
         if filesystem.exists(&manifest).await.unwrap_or(false) {
-            location = Some(candidate);
-            break;
+            return Ok(read_container(filesystem, location, id).await?);
         }
     }
-    let location = location.ok_or(AppError::NotFound)?;
-    let container = read_container(filesystem, location, id).await?;
+    Err(AppError::NotFound)
+}
+
+/// The launchable app `id`.
+pub(crate) async fn info(filesystem: &ScopedVfs, id: &str) -> Result<AppInfo, AppError> {
+    Ok(find(filesystem, id).await?.info)
+}
+
+/// The Workspace container offered as app `id`.
+pub(crate) async fn offered(filesystem: &ScopedVfs, id: &str) -> Result<Container, AppError> {
+    if !valid_id(id) {
+        return Err(AppError::NotFound);
+    }
+    let manifest = format!("{WORKSPACE_APPS}/{id}/{MANIFEST_FILE}");
+    if !filesystem.exists(&manifest).await.unwrap_or(false) {
+        return Err(AppError::NotFound);
+    }
+    Ok(read_container(filesystem, AppLocation::Workspace, id).await?)
+}
+
+/// Reads everything needed to launch app `id`.
+pub(crate) async fn load(filesystem: &ScopedVfs, id: &str) -> Result<Bundle, AppError> {
+    let container = find(filesystem, id).await?;
     let source = read_limited(
         filesystem,
         &container.dir,

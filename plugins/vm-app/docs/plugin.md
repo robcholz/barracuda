@@ -1,7 +1,8 @@
 # App Plugin
 
-Lists, launches, and supervises apps: Lua programs with optional MicroTS views,
-installed, bundled, or written by Agents.
+Lists, installs, launches, and supervises apps: Lua programs with optional
+MicroTS views. It runs the device UI's system apps and installable apps; the
+`shell` Plugin is the system that drives it.
 
 - Plugin ID: `app`
 - Dependencies: `vm`, `ui`, `workflow`
@@ -10,16 +11,18 @@ installed, bundled, or written by Agents.
 - Provided capabilities: `AppManager`
 - Required capabilities: `Vm` and `LuaPackageRegistry` from `vm`, `UiService`
   from `ui`, `WorkflowActionRegistry` from `workflow`
-- Workflow: Actions `app.list`, `app.open`, `app.home`, `app.interactive`,
-  `app.terminate`, `app.status`, `app.tap`, see `action.md`; Events none
+- Workflow: Actions `app.list`, `app.open`, `app.install`, `app.home`,
+  `app.interactive`, `app.terminate`, `app.status`, `app.tap`, see
+  `action.md`; Events none
 - Agent Tools: none
 - Lua packages: `app`
 - Web: none
 - Tasks: one task that supervises up to `MAX_APP_RUNS` (3) app runs, their
   grace periods, and suspension
-- Storage: app containers under the private `/media/apps` and `/resources/apps`
-  and the shared `/workspace/media/apps` (read only); each app's key-value store
-  and files under the private `/media/data/<id>/`
+- Storage: system apps under the private `/resources/apps`, installed apps
+  under the private `/media/apps`, offers under the shared
+  `/workspace/media/apps` (read only); each app's key-value store and files
+  under the private `/media/data/<id>/`
 
 ## Apps
 
@@ -28,17 +31,36 @@ app container. [`app-format.md`](app-format.md) defines the container, the
 manifest, and the `app` Lua API;
 `crates/plugin/resources/app-manifest.json` checks the manifest.
 
-App containers are carved out of this Plugin's own filesystem scope, which is
-unchanged: installed apps under the private `/media/apps`, bundled apps under
-the private `/resources/apps`, and apps that Agents create under the shared
-`/workspace/media/apps`, which this Plugin only reads. An installed app
-replaces a bundled one with the same ID; a Workspace container never replaces
-either. Each app's data lives under the private `/media/data/<id>/`.
+Where a container lives decides its `AppKind`, as
+[`device-ui.md`](../../../.agents/docs/device-ui.md) defines:
+
+- **System apps** are bundled in the image under the private
+  `/resources/apps`. Their runs may `require` every registered Lua package,
+  `uninstall` refuses them, and no installed app may take their IDs. The image
+  ships 设置 (`settings`), which reads `systeminfo`.
+- **Installable apps** are installed under the private `/media/apps`. Their
+  runs get `LuaPackageScope::Only` the `app` package and the `permissions`
+  their manifest asks for, through `Vm::run_scoped`.
+- **Offers** are containers under the shared `/workspace/media/apps`, written
+  by the portal, Agents, or other Plugins. They are not launchable; `open`
+  answers `NotInstalled`. `AppManager::install` copies an offer into
+  `/media/apps`, replacing an installed app at another version, and
+  `AppManager::uninstall` deletes an installed app and its data. Only the
+  system UI calls them, after asking the person; `AppManager::request_install`
+  (the `app.install` Action) asks the system UI to show an offer, and
+  `AppManager::install_request` and `AppManager::decline_install` are its side
+  of that request.
+
+Each app's data lives under the private `/media/data/<id>/`, keyed by ID, so
+it survives updates.
 
 ## Lifecycle
 
-The system UI owns the gestures and calls `AppManager`; this Plugin owns the
-states, the budgets, and what the program is told. Programs only respond.
+The system UI, the `shell` Plugin, owns the gestures and calls `AppManager`;
+this Plugin owns the states, the budgets, and what the program is told.
+Programs only respond. `AppManager::changed` wakes the system UI after every
+transition, exit, install, and install request, so apps that Workflows open
+or close move its screens too.
 
 ```text
                open                     home / open another app
@@ -52,10 +74,11 @@ terminate from any state → terminating → exits within GRACE, or is cancelled
 | System UI action                          | `AppManager` call           | Program sees                         |
 | ----------------------------------------- | --------------------------- | ------------------------------------ |
 | Tap an icon                               | `open(id)`                  | launch, then `app:active`; or `app:foreground`, `app:active` when resuming |
-| Pull down the control center, start a gesture | `set_interactive(false)` | `app:inactive`                     |
-| Close the overlay                         | `set_interactive(true)`     | `app:active`                         |
-| Swipe up to home                          | `home()`                    | `app:inactive`, `app:background`     |
+| Pull down a panel, or any system screen covers the app | `set_interactive(false)` | `app:inactive`         |
+| Close the panel                           | `set_interactive(true)`     | `app:active`                         |
+| Swipe right out of the app                | `home()`                    | `app:inactive`, `app:background`     |
 | Close it in the app switcher              | `terminate(id)`             | `app:terminate`                      |
+| Uninstall it from its info screen         | `uninstall(id)`             | `app:terminate`                      |
 | Touch the app's view                      | none; `tap(x, y)` from code | the view's handler call              |
 
 - **Input.** Only an active app gets view calls; an inactive app's view stays
@@ -73,8 +96,9 @@ terminate from any state → terminating → exits within GRACE, or is cancelled
 - **Headless apps** have no view, never enter the foreground, and run as
   services until they return or are terminated.
 - **Exits.** `AppManager::last_exit` records how the latest run ended: the VM
-  outcome, its diagnostic or the reason it was cancelled, and the last output
-  lines. `AppManager::running` lists running apps, most recently used first,
+  outcome, its diagnostic or the reason it was cancelled, the last output
+  lines, and whether the app was in the foreground, so the system UI can say
+  that the app on the display exited. `AppManager::running` lists running apps, most recently used first,
   for the app switcher.
 
 Apps run on at most `MAX_APP_RUNS` (3) of the VM's four execution slots, so
@@ -103,22 +127,27 @@ view:close()
 
 ## The display
 
-The foreground app's view is on the display: after every transition this
-Plugin calls `UiSession::show` for it, with touches reaching it only while the
-app is active, and hides it when no app is in the foreground, which leaves the
-display blank. Touches on the display press the view directly through the `ui`
-Plugin. `AppManager::tap` and `AppManager::texts` do the same from code, for
-Workflows (`app.tap`) and tests, and work without a display.
+App views sit on the `ui` Plugin's app layer. After every transition this
+Plugin calls `UiSession::show` for the foreground app's view, with touches
+reaching it only while the app is active, and hides app views when no app is
+in the foreground. The system UI's view sits on the system layer above, so it
+covers an app without this Plugin's involvement. Taps on the display press the
+view directly through the `ui` Plugin. `AppManager::tap` and
+`AppManager::texts` do the same from code, for Workflows (`app.tap`) and
+tests, and work without a display.
 
 ## Building bundles
 
-App sources live in `resources/apps/<id>/`: a manifest without `view`, the
-entry program, and an optional `app.tsx` view with its `app.d.ts` contract and
-`pocket.json`. `resources/apps/build.ts` compiles them into
-`filesystem/resources/apps` and adds the `view` files to the manifest. It
-needs a PocketJS checkout for the MicroTS compiler and font baker, so it is a
-manual task and its outputs are committed:
+System app sources live in `resources/apps/<id>/` and example installable apps
+in `resources/examples/<id>/`: a manifest without `view`, the entry program,
+and an optional `app.tsx` view with its `app.d.ts` contract and `pocket.json`.
+`resources/apps/build.ts` compiles system apps into `filesystem/resources/apps`
+and examples into `crates/plugin/tests/fixtures`, and adds the `view` files to
+each manifest. It needs a PocketJS checkout for the MicroTS compiler and font
+baker; an app whose sources show characters beyond ASCII bakes its fonts from
+Noto Sans SC, found in `CJK_FONT_DIR`. It is a manual task and its outputs are
+committed:
 
 ```sh
-POCKETJS_ROOT=~/src/pocketjs cargo plugin run apps --plugin app
+POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run apps --plugin app
 ```

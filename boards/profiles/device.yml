@@ -3,4 +3,5 @@
 extends: base
 enable:
   - app
+  - shell
   - ui

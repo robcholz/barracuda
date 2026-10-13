@@ -1,7 +1,8 @@
 # UI Plugin
 
-Runs compiled MicroTS views and shows one of them on the Board's primary
-display, pressed by its touch input.
+Runs compiled MicroTS views and shows them on the Board's primary display in
+two layers, pressed by its touch input, and turns touch into the gestures the
+system UI navigates by.
 
 - Plugin ID: `ui`
 - Dependencies: none
@@ -15,7 +16,7 @@ display, pressed by its touch input.
 - Lua packages: none
 - Web: none
 - Tasks: one UI task that applies owners' writes to open views, draws the
-  shown view, and polls touch
+  shown view, polls touch, and recognizes gestures
 - Storage: none
 
 The Plugin runs compiled MicroTS views. A view is a BVIR program
@@ -24,8 +25,9 @@ The Plugin runs compiled MicroTS views. A view is a BVIR program
 crate `barracuda-ui-runtime` reads BVIR, mounts it into a vendored PocketJS
 core tree, and re-evaluates the tree when values change.
 
-`UiService::open` mounts a view and returns a `UiSession`, kept by whoever
-presents the view. Its `ViewChannel` is the `Send + Sync` half for the code
+`UiService::open` mounts an app's view on the app layer and
+`UiService::open_on` a view on a chosen `Layer`; both return a `UiSession`,
+kept by whoever presents the view. Its `ViewChannel` is the `Send + Sync` half for the code
 that drives the view, on any task: `ViewChannel::set` writes a `ViewValue`,
 and `ViewChannel::next` waits for the next handler call, whose arguments are
 `ViewValue`s too. This Plugin knows nothing about Lua; a Plugin that gives a
@@ -55,10 +57,18 @@ through the channel is visible through `UiSession::is_closed`.
 
 The Plugin takes the Board's primary display through its `display.main` slot,
 so a Board that enables it needs one, and lays every view out at the display's
-size, one view pixel per display pixel. Its owner puts a view on the display
-with `UiSession::show`, which replaces whatever was there, and takes it off
-with `UiSession::hide`; suspending or dropping the session hides it too, and a
-display with no view is blank. `UiService::showing` reports what is shown.
+size, one view pixel per display pixel.
+
+Views sit on one of two layers. `Layer::App` holds apps' views and
+`Layer::System` the system UI's; each layer shows at most one view, and the
+display shows the system layer's view when it has one and the app layer's
+otherwise (see [`device-ui.md`](../../../.agents/docs/device-ui.md)). An owner
+puts its view on its layer with `UiSession::show`, which replaces the layer's
+previous view, and takes it off with `UiSession::hide`; suspending or dropping
+the session hides it too. So the system UI covers and uncovers an app without
+the app's owner taking its view down. A display with no view on either layer
+is blank. `UiService::showing` reports what is on the display, and
+`UiService::set_brightness` sets the panel's brightness.
 
 Only what changed is drawn. After each change the task asks the PocketJS damage
 tracker which regions of the view's DrawList differ from the last frame,
@@ -67,12 +77,26 @@ rows, draws each strip, and flushes the changed bounds. No
 framebuffer is kept. While a frame still changes, as during an animation, the
 task steps frames at 60 per second; a settled view costs nothing.
 
-The optional `touch.main` slot takes the Board's touch controller. While the
-shown view takes input (`UiSession::show(true)`), the task polls it every frame
-and presses the view where a contact begins, scaling the controller's span to
-the display; a held contact presses once. Handler calls arrive through the
-view's channel as from `UiSession::press_at`, which presses from code and works
-without a display. `UiSession::texts` reads a view's text the same way.
+The optional `touch.main` slot takes the Board's touch controller. While a
+view is on the display, and until a contact that began ends, the task polls
+it every frame, scaling the controller's span to the display, and classifies
+each contact:
+
+| Contact | Becomes |
+| --- | --- |
+| lifts within 12 px of where it began | a tap: presses the view on the display at the start, if it takes input (`UiSession::show(true)`) |
+| rests within 12 px for 0.5 s | `Gesture::LongPress`, reported while the finger is still down; the contact taps nothing |
+| travels 40 px or more along one axis, then lifts | `Gesture::Swipe` with its `Direction` and, when it started within 12% of the side it travelled away from, that `Edge` |
+
+Gestures reach no view: the system UI waits for them with
+`UiService::next_gesture`, which keeps the latest `MAX_GESTURES` (8) while
+nobody waits. To act on what a long press is over, the system UI asks its own
+session with `UiSession::resolve_press`, which returns the handler call a press
+there would make without delivering it.
+
+Handler calls from taps arrive through the view's channel as from
+`UiSession::press_at`, which presses from code and works without a display.
+`UiSession::texts` reads a view's text the same way.
 
 Text without a size or weight class uses font slot 0 in the UI core, while the
 PocketJS compiler means its 16 px default and bakes that as slot 2. When a
