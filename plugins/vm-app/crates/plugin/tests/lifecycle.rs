@@ -266,7 +266,7 @@ async fn scenario(spawner: Spawner) {
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
     let (manager, _registration) =
-        AppManager::register(filesystem().await, vm, ui, &packages).unwrap();
+        AppManager::register(filesystem().await, vm, Rc::clone(&ui), &packages).unwrap();
     spawner.spawn(supervise(manager.clone()).unwrap());
 
     // The container list, with broken containers and their reasons.
@@ -316,8 +316,11 @@ async fn scenario(spawner: Spawner) {
 
     // Open, tap, and cover the counter.
     assert_eq!(manager.tap(0.0, 0.0), Err(AppError::NoForegroundApp));
+    assert_eq!(ui.showing(), None);
     let opened = manager.open("counter").await.unwrap();
     assert_eq!(opened.state, AppState::Active);
+    // The active app's view is on the display and takes touches.
+    assert_eq!(ui.showing(), Some(true));
     until("the first frame", || {
         texts(&manager) == ["0", "+1", "Reset"]
     })
@@ -335,16 +338,19 @@ async fn scenario(spawner: Spawner) {
         AppState::Inactive
     );
     assert_eq!(manager.tap(180.0, 180.0), Err(AppError::NotInteractive));
+    assert_eq!(ui.showing(), Some(false));
     assert_eq!(
         manager.set_interactive(true).unwrap().state,
         AppState::Active
     );
+    assert_eq!(ui.showing(), Some(true));
 
     // Home: background, then suspended once it parks; the view is released.
     assert_eq!(
         manager.home().map(|app| app.state),
         Some(AppState::Background)
     );
+    assert_eq!(ui.showing(), None);
     assert_eq!(manager.foreground(), None);
     assert_eq!(manager.texts(), Err(AppError::NoForegroundApp));
     until("the counter to suspend", || {

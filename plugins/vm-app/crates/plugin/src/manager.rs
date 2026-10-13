@@ -160,6 +160,23 @@ impl State {
     fn running(&mut self, index: usize) -> Option<&mut Running> {
         self.slots.get_mut(index)?.app.as_mut()
     }
+
+    /// Puts the foreground app's view on the display, taking touches while
+    /// the app is active, or blanks the display when no app is in front.
+    fn present(&self) {
+        let foreground = self
+            .foreground
+            .and_then(|index| self.slots[index].app.as_ref())
+            .and_then(|running| running.session.as_ref().map(|session| (running, session)));
+        match foreground {
+            Some((running, session)) => session.show(running.state == AppState::Active),
+            None => self
+                .slots
+                .iter()
+                .filter_map(|slot| slot.app.as_ref()?.session.as_ref())
+                .for_each(UiSession::hide),
+        }
+    }
 }
 
 /// What the deadline of a slot's run decided.
@@ -315,6 +332,7 @@ impl AppManager {
         if has_view {
             state.foreground = Some(index);
         }
+        state.present();
         drop(state);
         self.wake(index);
         Ok(public)
@@ -385,6 +403,7 @@ impl AppManager {
                     AppState::Active,
                     &[Lifecycle::Foreground, Lifecycle::Active],
                 );
+                state.present();
                 drop(state);
                 self.wake(index);
             }
@@ -415,6 +434,7 @@ impl AppManager {
         }
         running.port.transition(AppState::Background, events);
         let public = running.public();
+        state.present();
         drop(state);
         self.wake(index);
         Some(public)
@@ -448,7 +468,9 @@ impl AppManager {
             }
             _ => {}
         }
-        Ok(running.public())
+        let public = running.public();
+        state.present();
+        Ok(public)
     }
 
     /// Asks app `id` to exit with `app:terminate`; it is cancelled if it is
@@ -471,6 +493,7 @@ impl AppManager {
             state.slots[index].deadline = Some(Instant::now() + GRACE);
         }
         let public = state.slots[index].app.as_ref().map(Running::public);
+        state.present();
         drop(state);
         self.wake(index);
         public

@@ -1,18 +1,21 @@
 # UI Plugin
 
-Runs compiled MicroTS views and lays them out for whoever owns them.
+Runs compiled MicroTS views and shows one of them on the Board's primary
+display, pressed by its touch input.
 
 - Plugin ID: `ui`
 - Dependencies: none
 - Settings: none
-- Context resources: none
+- Context resources: peripheral slots `display.main` (`primary`) and
+  `touch.main` (`primary`, optional)
 - Provided capabilities: `UiService`
 - Required capabilities: none
 - Workflow: none
 - Agent Tools: none
 - Lua packages: none
 - Web: none
-- Tasks: one UI task that applies owners' writes to open views
+- Tasks: one UI task that applies owners' writes to open views, draws the
+  shown view, and polls touch
 - Storage: none
 
 The Plugin runs compiled MicroTS views. A view is a BVIR program
@@ -48,6 +51,32 @@ Dropping the `UiSession` unmounts the view and ends it for the channel: it
 stops delivering calls and writes fail with `ViewError::Closed`. Closing
 through the channel is visible through `UiSession::is_closed`.
 
-No display backend is connected yet. Views are laid out at
-`DEFAULT_VIEWPORT`, and `UiSession::press_at` and `UiSession::texts` stand in
-for touch input and rendering.
+## The display
+
+The Plugin takes the Board's primary display through its `display.main` slot,
+so a Board that enables it needs one, and lays every view out at the display's
+size, one view pixel per display pixel. Its owner puts a view on the display
+with `UiSession::show`, which replaces whatever was there, and takes it off
+with `UiSession::hide`; suspending or dropping the session hides it too, and a
+display with no view is blank. `UiService::showing` reports what is shown.
+
+Only what changed is drawn. After each change the task asks the PocketJS damage
+tracker which regions of the view's DrawList differ from the last frame,
+rasterizes them as RGB565 in strips of 16 rows, converts each strip to the
+display's portable RGB888 input, and flushes the changed bounds. No
+framebuffer is kept. While a frame still changes, as during an animation, the
+task steps frames at 60 per second; a settled view costs nothing.
+
+The optional `touch.main` slot takes the Board's touch controller. While the
+shown view takes input (`UiSession::show(true)`), the task polls it every frame
+and presses the view where a contact begins, scaling the controller's span to
+the display; a held contact presses once. Handler calls arrive through the
+view's channel as from `UiSession::press_at`, which presses from code and works
+without a display. `UiSession::texts` reads a view's text the same way.
+
+Text without a size or weight class uses font slot 0 in the UI core, while the
+PocketJS compiler means its 16 px default and bakes that as slot 2. When a
+view ships slot 2 but no slot 0, the runtime serves slot 0 from it.
+
+Without a display, as in tests or when no Board is selected, views are laid
+out at `DEFAULT_VIEWPORT` and nothing is drawn.

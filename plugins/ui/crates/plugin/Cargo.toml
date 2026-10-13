@@ -2,10 +2,16 @@
 name = "barracuda-ui-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Barracuda Plugin that runs compiled MicroTS views"
+description = "Barracuda Plugin that runs compiled MicroTS views on the Board display"
 license = "Apache-2.0"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
+barracuda-board-hal.workspace = true
+embedded-graphics-core.workspace = true
+embassy-time.workspace = true
 portable-atomic.workspace = true
 portable-atomic-util.workspace = true
 barracuda-plugin.workspace = true

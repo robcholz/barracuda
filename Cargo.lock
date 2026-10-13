@@ -2486,12 +2486,16 @@ dependencies = [
 name = "barracuda-ui-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-ui-runtime",
  "critical-section",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-graphics-core",
  "futures-lite",
  "log",
  "portable-atomic",

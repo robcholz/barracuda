@@ -1,4 +1,5 @@
 name: espressif-esp-vocat-v1-2
+profile: device
 hardware:
   chip: esp32s3
   flash-size: 16mb

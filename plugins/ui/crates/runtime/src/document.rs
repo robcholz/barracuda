@@ -4,7 +4,14 @@ use crate::program::Program;
 use crate::value::{Value, ValueError};
 use crate::view::View;
 use alloc::{string::String, vec::Vec};
+use microts::pocketjs_core::Ui as CoreUi;
 use microts::{Input, NodeId, Ui};
+
+/// The byte of a baked font atlas that names its slot.
+const FONT_SLOT_BYTE: usize = 12;
+/// The slot the PocketJS compiler bakes for text without a size or weight
+/// class: 16 px regular.
+const DEFAULT_FONT_SLOT: u8 = 2;
 
 /// Compiled resources a view needs besides its program.
 #[derive(Clone, Copy, Debug)]
@@ -69,6 +76,23 @@ impl Document {
         }
         for (index, font) in assets.fonts.iter().enumerate() {
             if !ui.core_mut().load_font_atlas(font) {
+                return Err(DocumentError::Font(index));
+            }
+        }
+        // Text without a size or weight class carries no font slot, so the UI
+        // core draws it with slot 0, while the PocketJS compiler means its
+        // 16 px regular default and bakes that as slot 2. Serve slot 0 from the
+        // default atlas when the view ships no atlas of its own for it.
+        let slot = |font: &&[u8]| font.get(FONT_SLOT_BYTE).copied();
+        if !assets.fonts.iter().any(|font| slot(font) == Some(0))
+            && let Some(index) = assets
+                .fonts
+                .iter()
+                .position(|font| slot(font) == Some(DEFAULT_FONT_SLOT))
+        {
+            let mut unstyled = assets.fonts[index].to_vec();
+            unstyled[FONT_SLOT_BYTE] = 0;
+            if !ui.core_mut().load_font_atlas(&unstyled) {
                 return Err(DocumentError::Font(index));
             }
         }
@@ -142,6 +166,15 @@ impl Document {
             self.dirty = false;
         }
         self.ui.tick();
+    }
+
+    /// Draws the tree into `words`, the UI core's DrawList, and returns the
+    /// core, which resolves the list's fonts and textures for the rasterizer.
+    pub fn draw(&mut self, words: &mut Vec<u32>) -> &CoreUi {
+        let list = self.ui.core_mut().draw();
+        words.clear();
+        words.extend_from_slice(&list.words);
+        self.ui.core()
     }
 
     /// Applies one input sample and returns the handler it selects.

@@ -56,10 +56,11 @@ terminate from any state → terminating → exits within GRACE, or is cancelled
 | Close the overlay                         | `set_interactive(true)`     | `app:active`                         |
 | Swipe up to home                          | `home()`                    | `app:inactive`, `app:background`     |
 | Close it in the app switcher              | `terminate(id)`             | `app:terminate`                      |
-| Taps on the app                           | `tap(x, y)`                 | the view's handler call              |
+| Touch the app's view                      | none; `tap(x, y)` from code | the view's handler call              |
 
-- **Input.** Only an active app gets view calls. Calls queued before it stops
-  taking input are dropped, so none arrives after `app:inactive`.
+- **Input.** Only an active app gets view calls; an inactive app's view stays
+  on the display but ignores touches. Calls queued before it stops taking
+  input are dropped, so none arrives after `app:inactive`.
 - **Suspension.** `GRACE` (1 s) after `app:background`, an app waiting in
   `app.events()` is suspended: its view tree is released and its values kept,
   and `open` rebuilds the tree from them. An app still running is cancelled.
@@ -100,9 +101,14 @@ view:is_open()
 view:close()
 ```
 
-No display backend is connected yet. `AppManager::tap` and
-`AppManager::texts` stand in for touch input and rendering, and views are laid
-out at the `ui` Plugin's default viewport.
+## The display
+
+The foreground app's view is on the display: after every transition this
+Plugin calls `UiSession::show` for it, with touches reaching it only while the
+app is active, and hides it when no app is in the foreground, which leaves the
+display blank. Touches on the display press the view directly through the `ui`
+Plugin. `AppManager::tap` and `AppManager::texts` do the same from code, for
+Workflows (`app.tap`) and tests, and work without a display.
 
 ## Building bundles
 

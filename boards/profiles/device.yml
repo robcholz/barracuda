@@ -1,0 +1,6 @@
+# Products with a screen: the base set plus the system UI and the apps it
+# shows. The `ui` Plugin requires the Board's primary display.
+extends: base
+enable:
+  - app
+  - ui

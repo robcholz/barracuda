@@ -68,9 +68,15 @@ impl Mailbox {
         critical_section::with(|cs| f(&mut self.entries.borrow(cs).borrow_mut()))
     }
 
-    /// Wakes the UI task to apply writes.
+    /// Waits until a write arrives or [`Mailbox::notify`] is called.
     pub(crate) async fn wait(&self) {
         self.wake.wait().await;
+    }
+
+    /// Wakes the UI task for a change outside the mailbox, such as what is on
+    /// screen.
+    pub(crate) fn notify(&self) {
+        self.wake.signal(());
     }
 
     pub(crate) fn insert(&self, id: u32, slots: usize) {

@@ -10,7 +10,8 @@ use barracuda_ui_runtime::{
 use core::cell::{Cell, RefCell};
 use portable_atomic_util::Arc;
 
-/// The viewport views are laid out in until a display backend sets one.
+/// The viewport views are laid out in when the Board gives the Plugin no
+/// display.
 pub const DEFAULT_VIEWPORT: (f32, f32) = (360.0, 360.0);
 
 /// The compiled files of one view.
@@ -44,6 +45,17 @@ impl core::fmt::Display for UiError {
 
 impl core::error::Error for UiError {}
 
+/// What the display shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct Shown {
+    /// The view on screen, if any.
+    pub(crate) view: Option<u32>,
+    /// Whether touches reach it.
+    pub(crate) input: bool,
+    /// Counts changes of what is shown, so a redraw can start from scratch.
+    pub(crate) revision: u64,
+}
+
 struct Inner {
     mailbox: Arc<Mailbox>,
     documents: RefCell<BTreeMap<u32, Document>>,
@@ -51,6 +63,7 @@ struct Inner {
     suspended: RefCell<BTreeMap<u32, Vec<Value>>>,
     next_id: Cell<u32>,
     viewport: (f32, f32),
+    shown: Cell<Shown>,
 }
 
 impl Inner {
@@ -67,6 +80,54 @@ impl Inner {
             height,
         )
         .map_err(UiError::Document)
+    }
+
+    fn show(&self, view: Option<u32>, input: bool) {
+        let shown = self.shown.get();
+        if shown.view == view && shown.input == input {
+            return;
+        }
+        let revision = if shown.view == view {
+            shown.revision
+        } else {
+            shown.revision.wrapping_add(1)
+        };
+        self.shown.set(Shown {
+            view,
+            input,
+            revision,
+        });
+        self.mailbox.notify();
+    }
+
+    /// Takes view `id` off the screen if it is there.
+    fn withdraw(&self, id: u32) {
+        if self.shown.get().view == Some(id) {
+            self.show(None, false);
+        }
+    }
+
+    /// Presses view `id` at (`x`, `y`) and queues the handler call it selects.
+    fn press(&self, id: u32, x: f32, y: f32) -> Option<String> {
+        self.pump();
+        let event = {
+            let mut documents = self.documents.borrow_mut();
+            let document = documents.get_mut(&id)?;
+            let event = document.press_at(x, y)?;
+            let handler = document.program().handlers.get(event.handler)?.name.clone();
+            let args = event
+                .args
+                .iter()
+                .map(ViewValue::from_value)
+                .collect::<Option<Vec<_>>>()?;
+            Event { handler, args }
+        };
+        let handler = event.handler.clone();
+        if !self.mailbox.post(id, event) {
+            log::warn!("ui view {id}: dropped '{handler}' because the view is closed or busy");
+            return None;
+        }
+        Some(handler)
     }
 
     /// Applies pending writes and lays out every changed view.
@@ -109,6 +170,7 @@ impl UiService {
                 suspended: RefCell::new(BTreeMap::new()),
                 next_id: Cell::new(1),
                 viewport,
+                shown: Cell::new(Shown::default()),
             }),
         }
     }
@@ -149,15 +211,47 @@ impl UiService {
         })
     }
 
-    /// Applies writes to open views as they arrive; never returns.
+    /// What the display shows: `None` when it is blank, otherwise whether
+    /// the view on it takes touches.
+    #[must_use]
+    pub fn showing(&self) -> Option<bool> {
+        let shown = self.inner.shown.get();
+        shown.view.map(|_| shown.input)
+    }
+
+    /// Waits until a view is written or what is on screen changes.
+    pub(crate) async fn changed(&self) {
+        self.inner.mailbox.wait().await;
+    }
+
+    /// Applies pending writes and lays out every changed view.
     ///
-    /// Sessions also apply pending writes before every tap and read, so a
-    /// host without this loop still sees current views.
-    pub async fn drive(&self) {
-        loop {
-            self.inner.mailbox.wait().await;
-            self.inner.pump();
-        }
+    /// Sessions also apply pending writes before every tap and read, so
+    /// callers without the UI task still see current views.
+    pub(crate) fn pump(&self) {
+        self.inner.pump();
+    }
+
+    /// What the display shows.
+    pub(crate) fn shown(&self) -> Shown {
+        self.inner.shown.get()
+    }
+
+    /// Runs `f` on the tree of view `id`; `None` when it has none, such as
+    /// while suspended.
+    pub(crate) fn with_document<R>(
+        &self,
+        id: u32,
+        f: impl FnOnce(&mut Document) -> R,
+    ) -> Option<R> {
+        self.inner.documents.borrow_mut().get_mut(&id).map(f)
+    }
+
+    /// Presses the view on screen at (`x`, `y`) if it takes input.
+    pub(crate) fn press_shown(&self, x: f32, y: f32) -> Option<String> {
+        let shown = self.inner.shown.get();
+        let view = shown.view.filter(|_| shown.input)?;
+        self.inner.press(view, x, y)
     }
 
     /// Ends every open view for its owner.
@@ -190,6 +284,23 @@ impl UiSession {
         self.inner.mailbox.clear_events(self.channel.id);
     }
 
+    /// Puts the view on the display in place of whatever was there; touches
+    /// reach it only while `input` is set.
+    pub fn show(&self, input: bool) {
+        self.inner.show(Some(self.channel.id), input);
+    }
+
+    /// Takes the view off the display if it is there; the display goes blank.
+    pub fn hide(&self) {
+        self.inner.withdraw(self.channel.id);
+    }
+
+    /// Whether the view is on the display.
+    #[must_use]
+    pub fn is_shown(&self) -> bool {
+        self.inner.shown.get().view == Some(self.channel.id)
+    }
+
     /// Whether the tree is released; see [`UiSession::suspend`].
     #[must_use]
     pub fn is_suspended(&self) -> bool {
@@ -200,8 +311,9 @@ impl UiSession {
     ///
     /// A view is a function of its values, so [`UiSession::resume`] rebuilds the
     /// same tree. Writes made meanwhile wait in the channel. Taps and reads
-    /// see nothing while suspended.
+    /// see nothing while suspended, and the view leaves the display.
     pub fn suspend(&self) {
+        self.inner.withdraw(self.channel.id);
         self.inner.pump();
         let Some(document) = self.inner.documents.borrow_mut().remove(&self.channel.id) else {
             return;
@@ -257,33 +369,13 @@ impl UiSession {
         Ok(())
     }
 
-    /// Taps the view at (`x`, `y`) and delivers the handler call to the owner.
+    /// Taps the view at (`x`, `y`) and delivers the handler call to the owner,
+    /// whether or not it is on the display.
     ///
     /// Returns the handler name, or `None` when nothing pressable is there or
     /// the event could not be queued.
     pub fn press_at(&self, x: f32, y: f32) -> Option<String> {
-        self.inner.pump();
-        let event = {
-            let mut documents = self.inner.documents.borrow_mut();
-            let document = documents.get_mut(&self.channel.id)?;
-            let event = document.press_at(x, y)?;
-            let handler = document.program().handlers.get(event.handler)?.name.clone();
-            let args = event
-                .args
-                .iter()
-                .map(ViewValue::from_value)
-                .collect::<Option<Vec<_>>>()?;
-            Event { handler, args }
-        };
-        let handler = event.handler.clone();
-        if !self.inner.mailbox.post(self.channel.id, event) {
-            log::warn!(
-                "ui view {}: dropped '{handler}' because the view is closed or busy",
-                self.channel.id
-            );
-            return None;
-        }
-        Some(handler)
+        self.inner.press(self.channel.id, x, y)
     }
 
     /// The text of every text-bearing node in document order, after pending writes.
@@ -301,6 +393,7 @@ impl UiSession {
 
 impl Drop for UiSession {
     fn drop(&mut self) {
+        self.inner.withdraw(self.channel.id);
         self.inner.mailbox.remove(self.channel.id);
         self.inner.documents.borrow_mut().remove(&self.channel.id);
         self.inner.suspended.borrow_mut().remove(&self.channel.id);

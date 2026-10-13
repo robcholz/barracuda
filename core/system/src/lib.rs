@@ -233,6 +233,8 @@ where
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
     Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RemovableStorage: Send + 'static,
+    Peripherals::Touch: Send + 'static,
+    <Peripherals::Touch as barracuda_board_hal::touch::Touch>::Error: core::fmt::Debug,
     Io: ExposedIo
         + AnalogProvider
         + DigitalProvider
