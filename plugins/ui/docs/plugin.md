@@ -62,8 +62,8 @@ display with no view is blank. `UiService::showing` reports what is shown.
 
 Only what changed is drawn. After each change the task asks the PocketJS damage
 tracker which regions of the view's DrawList differ from the last frame,
-rasterizes them as RGB565 in strips of 16 rows, converts each strip to the
-display's portable RGB888 input, and flushes the changed bounds. No
+rasterizes them as RGB565, the display API's pixel format, in strips of 16
+rows, draws each strip, and flushes the changed bounds. No
 framebuffer is kept. While a frame still changes, as during an animation, the
 task steps frames at 60 per second; a settled view costs nothing.
 

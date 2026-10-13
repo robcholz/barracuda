@@ -2,8 +2,8 @@
 //!
 //! The view is rasterized in strips of [`STRIP_ROWS`] rows, so the Plugin
 //! never holds a framebuffer: only the regions the PocketJS damage tracker
-//! reports changed since the last frame are drawn, each strip as RGB565 and
-//! converted to the display's portable RGB888 input.
+//! reports changed since the last frame are drawn, each strip in RGB565, the
+//! display API's pixel format.
 
 use crate::service::{Shown, UiService};
 use alloc::vec::Vec;
@@ -16,7 +16,7 @@ use barracuda_ui_runtime::pocketjs_core::{
 };
 use embedded_graphics_core::{
     geometry::{Point, Size},
-    pixelcolor::Rgb888,
+    pixelcolor::{Rgb565, raw::RawU16},
     primitives::Rectangle,
 };
 
@@ -34,8 +34,10 @@ pub(crate) struct Screen<Panel> {
     height: u32,
     tracker: DamageTracker<MAX_REGIONS>,
     words: Vec<u32>,
+    /// The rasterizer's output for one strip.
     strip: Vec<u16>,
-    pixels: Vec<Rgb888>,
+    /// The same strip as the display takes it.
+    pixels: Vec<Rgb565>,
     /// What the panel holds: the shown state it was drawn for, or `None`
     /// before the first frame and after the display refused one.
     drawn: Option<Shown>,
@@ -143,7 +145,11 @@ impl<Panel: Display> Screen<Panel> {
                 self.strip.resize(rect_pixels(strip), 0);
                 render_scaled_rgb565_window_over(core, &self.words, &mut self.strip, 1, strip);
                 self.pixels.clear();
-                self.pixels.extend(self.strip.iter().copied().map(rgb888));
+                self.pixels.extend(
+                    self.strip
+                        .iter()
+                        .map(|&pixel| Rgb565::from(RawU16::new(pixel))),
+                );
                 if !self.send(strip) {
                     return None;
                 }
@@ -168,7 +174,7 @@ impl<Panel: Display> Screen<Panel> {
         while y0 < screen.y1 {
             let strip = DamageRect::new(0, y0, screen.x1, (y0 + STRIP_ROWS).min(screen.y1));
             self.pixels.clear();
-            self.pixels.resize(rect_pixels(strip), Rgb888::new(0, 0, 0));
+            self.pixels.resize(rect_pixels(strip), Rgb565::new(0, 0, 0));
             if !self.send(strip) {
                 return None;
             }
@@ -183,7 +189,7 @@ impl<Panel: Display> Screen<Panel> {
             Point::new(strip.x0, strip.y0),
             Size::new((strip.x1 - strip.x0) as u32, (strip.y1 - strip.y0) as u32),
         );
-        match self.display.draw_rgb888(area, &self.pixels) {
+        match self.display.draw_rgb565(area, &self.pixels) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("ui: the display refused pixels: {error:?}");
@@ -197,17 +203,6 @@ impl<Panel: Display> Screen<Panel> {
 
 fn rect_pixels(rect: DamageRect) -> usize {
     (rect.x1 - rect.x0) as usize * (rect.y1 - rect.y0) as usize
-}
-
-fn rgb888(pixel: u16) -> Rgb888 {
-    let r = (pixel >> 11) & 0x1f;
-    let g = (pixel >> 5) & 0x3f;
-    let b = pixel & 0x1f;
-    Rgb888::new(
-        ((r << 3) | (r >> 2)) as u8,
-        ((g << 2) | (g >> 4)) as u8,
-        ((b << 3) | (b >> 2)) as u8,
-    )
 }
 
 /// The touch controller, turning new contacts into presses in view

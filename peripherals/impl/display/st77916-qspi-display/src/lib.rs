@@ -19,7 +19,7 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{Dimensions, OriginDimensions, Size},
-    pixelcolor::{Rgb565, Rgb888, RgbColor},
+    pixelcolor::{IntoStorage, Rgb565},
     primitives::Rectangle,
 };
 use embedded_hal::{delay::DelayNs, digital::OutputPin};
@@ -261,7 +261,7 @@ where
             {
                 continue;
             }
-            let value = rgb565_components(color.r(), color.g(), color.b()).to_be_bytes();
+            let value = color.into_storage().to_be_bytes();
             self.write_pixels(point.x as u16, point.y as u16, 1, 1, &value)?;
         }
         Ok(())
@@ -291,7 +291,7 @@ where
         )
     }
 
-    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+    fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Self::RenderError> {
         if area.intersection(&self.bounding_box()) != area
             || area.size.width == 0
             || area.size.height == 0
@@ -317,7 +317,7 @@ where
                 .iter_mut()
                 .zip(source)
             {
-                *target = rgb565(*color).to_be_bytes();
+                *target = color.into_storage().to_be_bytes();
             }
             self.write_pixels(
                 area.top_left.x as u16,
@@ -376,12 +376,4 @@ where
     async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
         Ok(())
     }
-}
-
-fn rgb565(color: Rgb888) -> u16 {
-    rgb565_components(color.r(), color.g(), color.b())
-}
-
-fn rgb565_components(red: u8, green: u8, blue: u8) -> u16 {
-    (u16::from(red & 0xf8) << 8) | (u16::from(green & 0xfc) << 3) | (u16::from(blue) >> 3)
 }

@@ -20,9 +20,9 @@ Its `display.rest` slot receives, at build time, every display of the Board
 that no other enabled Plugin's slot takes, under the Board's device names.
 When another Plugin claims the primary display, Lua drives the others;
 otherwise Lua gets the primary display too. Panel buses and
-control pins stay inside the selected implementation. Portable RGB888 input is
-converted by the implementation to its native LCD or e-paper pixel
-representation.
+control pins stay inside the selected implementation. Pixels are RGB565, the
+display API's format, which LCD panels take as is and e-paper implementations
+reduce to their own pixel representation.
 
 Lua API:
 
@@ -31,8 +31,12 @@ Lua API:
 - `display.list() -> { name, ... }`: the Board names of the Plugin's displays
 - `display.open([name]) -> handle`: opens the named display, or the first one
   still available
+- `display.rgb565(red, green, blue) -> integer`: packs 8-bit channels into one
+  RGB565 value
 - `handle:descriptor() -> width, height, pixel_format, technology`
-- `handle:draw_rgb888(x, y, width, height, rgb_bytes)`
+- `handle:draw_rgb565(x, y, width, height, pixels)` where `pixels` holds
+  `width * height` little-endian 16-bit RGB565 values, at most 256 KiB, such as
+  `string.pack('<I2', display.rgb565(255, 0, 0))` for one red pixel
 - `handle:flush(mode)` where mode is `automatic`, `full`, `partial`, or `fast`
 - `handle:set_power(state)` where state is `on`, `sleep`, or `off`
 - `handle:set_brightness(value)` on the `0..255` scale

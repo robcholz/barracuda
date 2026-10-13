@@ -188,18 +188,18 @@ mod screen {
         Pixel,
         draw_target::DrawTarget,
         geometry::{OriginDimensions, Size},
-        pixelcolor::Rgb888,
+        pixelcolor::Rgb565,
         pixelcolor::RgbColor,
         primitives::Rectangle,
     };
     use futures_lite::future;
 
-    const BLACK: Rgb888 = Rgb888::new(0, 0, 0);
+    const BLACK: Rgb565 = Rgb565::new(0, 0, 0);
 
     /// A display that keeps its pixels and records every draw and refresh.
     struct Panel {
         width: u32,
-        pixels: Vec<Rgb888>,
+        pixels: Vec<Rgb565>,
         drawn: Vec<Rectangle>,
         flushed: Vec<RefreshRequest>,
     }
@@ -208,7 +208,7 @@ mod screen {
         fn new((width, height): (f32, f32)) -> Self {
             Self {
                 width: width as u32,
-                pixels: vec![Rgb888::new(1, 2, 3); width as usize * height as usize],
+                pixels: vec![Rgb565::new(1, 2, 3); width as usize * height as usize],
                 drawn: Vec::new(),
                 flushed: Vec::new(),
             }
@@ -229,7 +229,7 @@ mod screen {
     }
 
     impl DrawTarget for Panel {
-        type Color = Rgb888;
+        type Color = Rgb565;
         type Error = Infallible;
 
         fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
@@ -247,13 +247,13 @@ mod screen {
         fn descriptor(&self) -> DisplayDescriptor {
             DisplayDescriptor::new(
                 self.size(),
-                PixelFormat::Rgb888,
+                PixelFormat::Rgb565,
                 DisplayTechnology::Lcd,
                 Default::default(),
             )
         }
 
-        fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Infallible> {
+        fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Infallible> {
             assert_eq!((area.size.width * area.size.height) as usize, pixels.len());
             for (row, line) in pixels.chunks(area.size.width as usize).enumerate() {
                 let start = (area.top_left.y as usize + row) * self.width as usize
@@ -365,9 +365,10 @@ mod screen {
         session.show(true);
         refresh(&mut screen, &service);
 
-        // The "+1" button is lime (#CCFF00); its label (#09090B) has no size class.
+        // The "+1" button is lime (#CCFF00); its label (#09090B) has no size
+        // class. Channels are RGB565's 5, 6, and 5 bits.
         let width = DEFAULT_VIEWPORT.0 as usize;
-        let lime = |pixel: &Rgb888| pixel.r() > 180 && pixel.g() > 230 && pixel.b() < 40;
+        let lime = |pixel: &Rgb565| pixel.r() > 22 && pixel.g() > 57 && pixel.b() < 5;
         let pixels = screen_pixels(&screen);
         let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
         for (index, _) in pixels.iter().enumerate().filter(|(_, pixel)| lime(pixel)) {
@@ -382,7 +383,7 @@ mod screen {
             .flat_map(|y| (x0..=x1).map(move |x| y * width + x))
             .filter(|index| {
                 let pixel = pixels[*index];
-                pixel.r() < 60 && pixel.g() < 60 && pixel.b() < 60
+                pixel.r() < 8 && pixel.g() < 15 && pixel.b() < 8
             })
             .count();
         assert!(label > 20, "the label drew {label} pixels");
@@ -442,7 +443,7 @@ mod screen {
         screen.display()
     }
 
-    fn screen_pixels(screen: &Screen<Panel>) -> &[Rgb888] {
+    fn screen_pixels(screen: &Screen<Panel>) -> &[Rgb565] {
         &screen.display().pixels
     }
 }
