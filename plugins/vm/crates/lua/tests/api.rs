@@ -1,6 +1,6 @@
 use barracuda_lua::{
-    Environment, Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Package, Result, Table,
-    UserData, UserDataHandle, UserDataMethods, Variadic,
+    Environment, Error, ErrorKind, Function, Lua, LuaReturn, LuaValue, MetaMethod, Package, Result,
+    Table, UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 
 #[test]
@@ -1418,5 +1418,79 @@ fn execution_rejects_async_values_owned_by_another_vm() -> Result<()> {
     let error = futures_lite::future::block_on(lua.load("return foreign_table()").exec_async())
         .unwrap_err();
     assert!(error.message().contains("different state"));
+    Ok(())
+}
+
+#[test]
+fn lua_value_converts_every_plain_type_both_ways() -> Result<()> {
+    let mut lua = Lua::new()?;
+    lua.register("describe", |values: Variadic<LuaValue>| {
+        let kinds: Vec<String> = values
+            .iter()
+            .map(|value| {
+                match value {
+                    LuaValue::Nil => "nil",
+                    LuaValue::Boolean(_) => "boolean",
+                    LuaValue::Integer(_) => "integer",
+                    LuaValue::Number(_) => "number",
+                    LuaValue::String(_) => "string",
+                    LuaValue::Table(_) => "table",
+                }
+                .into()
+            })
+            .collect();
+        Some(Ok(kinds.join(",")))
+    })?;
+    lua.register("echo", |values: Variadic<LuaValue>| Some(Ok(values)))?;
+    let kinds: String = lua
+        .load("return describe(nil, true, 3, 1.5, 'x', {})")
+        .eval()?;
+    assert_eq!(kinds, "nil,boolean,integer,number,string,table");
+    let echoed: bool = lua
+        .load(
+            "local t = {} \
+             local a, b, c, d, e = echo(false, 7, 2.5, 'y', t) \
+             return a == false and tostring(b) == '7' \
+                and tostring(c) == '2.5' and d == 'y' and e == t",
+        )
+        .eval()?;
+    assert!(echoed);
+    let rejected = lua
+        .load("return describe(print or function() end)")
+        .eval::<String>();
+    assert!(rejected.is_err());
+    Ok(())
+}
+
+#[test]
+fn table_pairs_reads_every_entry_without_coercing_keys() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let table: Table = lua
+        .load("return setmetatable({ 10, 20, name = 'x', [2.5] = true }, { __index = error })")
+        .eval()?;
+    let mut entries: Vec<String> = table
+        .pairs()?
+        .into_iter()
+        .map(|(key, value)| {
+            let key = match key {
+                LuaValue::Integer(key) => format!("i{key}"),
+                LuaValue::Number(key) => format!("f{key}"),
+                LuaValue::String(key) => format!("s{key}"),
+                _ => "other".into(),
+            };
+            let value = match value {
+                LuaValue::Integer(value) => format!("{value}"),
+                LuaValue::String(value) => value,
+                LuaValue::Boolean(value) => format!("{value}"),
+                _ => "other".into(),
+            };
+            format!("{key}={value}")
+        })
+        .collect();
+    entries.sort();
+    assert_eq!(entries, ["f2.5=true", "i1=10", "i2=20", "sname=x"]);
+
+    let with_function: Table = lua.load("return { f = function() end }").eval()?;
+    assert!(with_function.pairs().is_err());
     Ok(())
 }

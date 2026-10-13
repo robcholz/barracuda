@@ -1,0 +1,10 @@
+id = "app"
+depends-on = ["vm", "ui", "workflow"]
+description = "Lists, launches, and supervises Lua apps with optional MicroTS views."
+
+[tasks.apps]
+cwd = "."
+command = ["bun", "resources/apps/build.ts"]
+inputs = ["resources/apps"]
+outputs = ["filesystem/resources/apps"]
+env = ["POCKETJS_ROOT"]

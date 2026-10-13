@@ -708,6 +708,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-app-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-plugin",
+ "barracuda-ui-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "json-validator",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-audio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -2101,6 +2127,7 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
+ "barracuda-app-plugin",
  "barracuda-audio-plugin",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
@@ -2126,6 +2153,7 @@ dependencies = [
  "barracuda-spi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
+ "barracuda-ui-plugin",
  "barracuda-vm-agent-plugin",
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-http-plugin",
@@ -2452,6 +2480,35 @@ dependencies = [
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-ui-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-ui-runtime",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-graphics-core",
+ "futures-lite",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-ui-runtime"
+version = "0.1.0"
+dependencies = [
+ "microts",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5521,6 +5578,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
  "hash32",
+ "portable-atomic",
  "serde",
  "stable_deref_trait",
 ]
@@ -6091,6 +6149,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "microts"
+version = "0.1.0"
+dependencies = [
+ "heapless 0.8.0",
+ "libm",
+ "pocketjs-core",
+ "portable-atomic",
+ "ryu-js",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6519,10 +6588,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pocketjs-core"
+version = "0.1.0"
+dependencies = [
+ "taffy",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
+dependencies = [
+ "critical-section",
+]
 
 [[package]]
 name = "portable-atomic-util"
@@ -7013,6 +7092,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7288,6 +7373,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "smallbox"
@@ -7566,6 +7660,17 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
+
+[[package]]
+name = "taffy"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfde4e2f8595f222ceaae1fb16b4963952e9b33e358869dc4cd6316b0e0790cd"
+dependencies = [
+ "arrayvec",
+ "serde",
+ "slotmap",
+]
 
 [[package]]
 name = "tap"

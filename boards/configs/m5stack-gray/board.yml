@@ -1,4 +1,5 @@
 name: m5stack-gray
+profile: device
 hardware:
   chip: esp32
 toolchain:

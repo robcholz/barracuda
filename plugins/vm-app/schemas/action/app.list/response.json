@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "location": {
+          "enum": [
+            "bundled",
+            "installed",
+            "workspace"
+          ]
+        },
+        "has_view": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "location",
+        "has_view"
+      ],
+      "additionalProperties": false
+    },
+    "invalid": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "enum": [
+            "bundled",
+            "installed",
+            "workspace"
+          ]
+        },
+        "dir": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "location",
+        "dir",
+        "problem"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "apps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/app"
+      }
+    },
+    "invalid": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/invalid"
+      }
+    }
+  },
+  "required": [
+    "apps",
+    "invalid"
+  ],
+  "additionalProperties": false
+}

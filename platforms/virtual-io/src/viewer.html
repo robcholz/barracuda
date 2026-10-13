@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual Displays</title>
+<style>
+  :root {
+    --bg: #f4f4f5; --panel: #ffffff; --text: #18181b; --muted: #71717a;
+    --border: #e4e4e7; --bezel: #18181b; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #09090b; --panel: #18181b; --text: #fafafa; --muted: #a1a1aa;
+      --border: #27272a; --bezel: #000000; --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { max-width: 960px; margin: 0 auto 20px; }
+  h1 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 960px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; max-width: 100%;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .bezel {
+    position: relative; background: var(--bezel); border-radius: 10px; padding: 12px;
+    display: inline-block; max-width: 100%;
+  }
+  canvas {
+    display: block; image-rendering: pixelated; max-width: 100%; height: auto;
+    touch-action: none; cursor: crosshair; background: #000;
+  }
+  .off {
+    position: absolute; inset: 12px; display: none; align-items: center; justify-content: center;
+    color: #71717a; font-size: 12px; letter-spacing: .04em; background: #000;
+  }
+  .bezel.dark .off { display: flex; }
+  .touch { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 18px; }
+  .touch b { color: var(--accent); font-weight: 600; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Virtual Displays</h1>
+  <p>Panels the host Board drives, as its display driver draws them. Click or drag on a panel to touch it.</p>
+</header>
+<main id="displays"><p class="empty">Waiting for a display panel…</p></main>
+<script>
+"use strict";
+const root = document.getElementById("displays");
+const views = new Map();
+let touch = null;
+
+async function control(request) {
+  const response = await fetch("/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const reply = await response.json();
+  if (!reply.ok) throw new Error(reply.error);
+  return reply;
+}
+
+function hex(bytes) {
+  return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function findTouch() {
+  const { buses } = await control({ op: "buses" });
+  for (const bus of buses) {
+    const device = bus.devices.find((device) => device.model === "cst816t");
+    if (device) return { bus: bus.name, address: device.address };
+  }
+  return null;
+}
+
+async function setTouch(point) {
+  if (!touch) return;
+  const bytes = point
+    ? [1, point.x >> 8, point.x & 0xff, point.y >> 8, point.y & 0xff]
+    : [0];
+  await control({ op: "write_registers", bus: touch.bus, address: touch.address, offset: 0, data: hex(bytes) });
+}
+
+function view(display) {
+  let entry = views.get(display.bus);
+  if (entry) return entry;
+  if (views.size === 0) root.textContent = "";
+  const card = document.createElement("section");
+  card.className = "card";
+  const title = document.createElement("h2");
+  title.textContent = display.peripheral || display.bus;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const bezel = document.createElement("div");
+  bezel.className = "bezel";
+  const canvas = document.createElement("canvas");
+  const off = document.createElement("div");
+  off.className = "off";
+  off.textContent = "PANEL OFF";
+  const status = document.createElement("div");
+  status.className = "touch";
+  bezel.append(canvas, off);
+  card.append(title, meta, bezel, status);
+  root.append(card);
+  entry = { canvas, bezel, meta, status, revision: -1, pressed: false };
+  attachTouch(entry);
+  views.set(display.bus, entry);
+  return entry;
+}
+
+function attachTouch(entry) {
+  const point = (event) => {
+    const box = entry.canvas.getBoundingClientRect();
+    const x = Math.floor(((event.clientX - box.left) / box.width) * entry.canvas.width);
+    const y = Math.floor(((event.clientY - box.top) / box.height) * entry.canvas.height);
+    return {
+      x: Math.max(0, Math.min(entry.canvas.width - 1, x)),
+      y: Math.max(0, Math.min(entry.canvas.height - 1, y)),
+    };
+  };
+  const show = (text) => { entry.status.innerHTML = text; };
+  entry.canvas.addEventListener("pointerdown", (event) => {
+    if (!touch) { show("No touch controller on this Board."); return; }
+    entry.pressed = true;
+    entry.canvas.setPointerCapture(event.pointerId);
+    const at = point(event);
+    show(`<b>Touching</b> ${at.x}, ${at.y}`);
+    setTouch(at).catch((error) => show(error.message));
+  });
+  entry.canvas.addEventListener("pointermove", (event) => {
+    if (!entry.pressed) return;
+    const at = point(event);
+    show(`<b>Touching</b> ${at.x}, ${at.y}`);
+    setTouch(at).catch(() => {});
+  });
+  const release = () => {
+    if (!entry.pressed) return;
+    entry.pressed = false;
+    show("");
+    setTouch(null).catch(() => {});
+  };
+  entry.canvas.addEventListener("pointerup", release);
+  entry.canvas.addEventListener("pointercancel", release);
+}
+
+async function draw(display, entry) {
+  const response = await fetch(`/display/${display.bus}`);
+  if (!response.ok) return;
+  const width = Number(response.headers.get("X-Width"));
+  const height = Number(response.headers.get("X-Height"));
+  const pixels = new Uint16Array(await response.arrayBuffer());
+  const { canvas } = entry;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    const scale = Math.max(1, Math.floor(480 / Math.max(width, height)));
+    canvas.style.width = `${width * scale}px`;
+  }
+  const image = new ImageData(width, height);
+  for (let index = 0; index < pixels.length; index += 1) {
+    const pixel = pixels[index];
+    const r = (pixel >> 11) & 0x1f, g = (pixel >> 5) & 0x3f, b = pixel & 0x1f;
+    const at = index * 4;
+    image.data[at] = (r << 3) | (r >> 2);
+    image.data[at + 1] = (g << 2) | (g >> 4);
+    image.data[at + 2] = (b << 3) | (b >> 2);
+    image.data[at + 3] = 255;
+  }
+  canvas.getContext("2d").putImageData(image, 0, 0);
+}
+
+async function poll() {
+  try {
+    const { displays } = await control({ op: "displays" });
+    if (touch === null) touch = await findTouch();
+    for (const display of displays) {
+      const entry = view(display);
+      entry.meta.textContent =
+        `${display.model} on ${display.bus} · ${display.width}×${display.height}` +
+        (touch ? " · touch" : "");
+      entry.bezel.classList.toggle("dark", !display.visible);
+      if (display.revision !== entry.revision) {
+        entry.revision = display.revision;
+        await draw(display, entry);
+      }
+    }
+  } catch (error) {
+    if (views.size === 0) root.innerHTML = `<p class="empty">${error.message}</p>`;
+  }
+  setTimeout(poll, 33);
+}
+poll();
+</script>
+</body>
+</html>

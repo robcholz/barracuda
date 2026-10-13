@@ -1,9 +1,11 @@
 //! Line-delimited JSON control interface of the virtual peripherals manager.
 //!
-//! The protocol is documented in this crate's `README.md`.
+//! The protocol is documented in this crate's `README.md`. The same port
+//! answers HTTP from a browser: `GET /` serves a viewer of the display panels
+//! that also touches the panel through a touch controller model.
 
 use std::{
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     thread,
 };
@@ -71,6 +73,10 @@ enum Request {
     },
     Violations,
     Reset,
+    Displays,
+    Display {
+        bus: String,
+    },
 }
 
 fn default_model() -> String {
@@ -85,6 +91,7 @@ const fn default_once() -> bool {
 pub const DEVICE_MODELS: &[&str] = &[
     "registers",
     "bq27220",
+    "cst816t",
     "es7210",
     "es8311",
     "es8389",
@@ -99,6 +106,7 @@ pub fn device_model(name: &str) -> Option<Box<dyn I2cDevice>> {
     match name {
         "registers" => Some(Box::new(RegisterDevice::new())),
         "bq27220" => Some(Box::new(crate::models::Bq27220Model::new())),
+        "cst816t" => Some(Box::new(crate::models::Cst816tModel::new())),
         "es7210" => Some(Box::new(crate::models::everest::es7210())),
         "es8311" => Some(Box::new(crate::models::everest::es8311())),
         "es8389" => Some(Box::new(crate::models::everest::es8389())),
@@ -196,7 +204,26 @@ fn execute(hardware: &VirtualHardware, request: Request) -> Result<Value, Reques
             hardware.reset();
             json!({})
         }
+        Request::Displays => json!({ "displays": hardware.displays() }),
+        Request::Display { bus } => {
+            let frame = hardware.display(&bus)?;
+            json!({
+                "width": frame.width,
+                "height": frame.height,
+                "visible": frame.visible,
+                "revision": frame.revision,
+                "data": hex(&frame_bytes(&frame.pixels)),
+            })
+        }
     })
+}
+
+/// Row-major RGB565 pixels as little-endian bytes.
+fn frame_bytes(pixels: &[u16]) -> Vec<u8> {
+    pixels
+        .iter()
+        .flat_map(|pixel| pixel.to_le_bytes())
+        .collect()
 }
 
 /// Binds the control listener and serves it from background threads.
@@ -236,19 +263,161 @@ fn serve_connection(hardware: &VirtualHardware, stream: TcpStream) {
         return;
     };
     let mut writer = stream;
-    for line in BufReader::new(reader).lines() {
-        let Ok(line) = line else {
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        if line.starts_with("GET ") || line.starts_with("POST ") {
+            serve_http(hardware, &line, &mut reader, &mut writer);
             return;
-        };
+        }
         if line.trim().is_empty() {
             continue;
         }
-        let mut response = handle(hardware, &line);
+        let mut response = handle(hardware, line.trim_end());
         response.push('\n');
         if writer.write_all(response.as_bytes()).is_err() {
             return;
         }
     }
+}
+
+/// The browser viewer of the display panels.
+const VIEWER: &str = include_str!("viewer.html");
+/// Largest HTTP request body accepted, one control request.
+const MAX_HTTP_BODY: usize = 64 * 1024;
+
+/// One HTTP request and its answer on a fresh connection, then close.
+///
+/// `GET /` is the viewer, `GET /display/<bus>` a panel's pixels, and
+/// `POST /control` one control request. Only pages served from this
+/// loopback address may post: the request must name a loopback `Host`,
+/// carry JSON, and come from no other origin, so other websites the
+/// developer visits cannot drive the virtual hardware.
+fn serve_http(
+    hardware: &VirtualHardware,
+    request_line: &str,
+    reader: &mut BufReader<TcpStream>,
+    writer: &mut TcpStream,
+) {
+    let mut parts = request_line.split_whitespace();
+    let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let mut host = None;
+    let mut origin = None;
+    let mut json_body = false;
+    let mut length = 0_usize;
+    let mut header = String::new();
+    loop {
+        header.clear();
+        match reader.read_line(&mut header) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let header = header.trim_end();
+        if header.is_empty() {
+            break;
+        }
+        let Some((name, value)) = header.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match name.trim().to_ascii_lowercase().as_str() {
+            "host" => host = Some(String::from(value)),
+            "origin" => origin = Some(String::from(value)),
+            "content-type" => json_body = value.starts_with("application/json"),
+            "content-length" => length = value.parse().unwrap_or(usize::MAX),
+            _ => {}
+        }
+    }
+    let loopback_host = host.as_deref().is_some_and(is_loopback_host);
+    let response = match (method, path) {
+        _ if !loopback_host => http(403, "text/plain", &[], b"loopback hosts only".to_vec()),
+        ("GET", "/") => http(
+            200,
+            "text/html; charset=utf-8",
+            &[],
+            VIEWER.as_bytes().to_vec(),
+        ),
+        ("GET", path) if path.starts_with("/display/") => {
+            match hardware.display(&path["/display/".len()..]) {
+                Ok(frame) => http(
+                    200,
+                    "application/octet-stream",
+                    &[
+                        ("X-Width", frame.width.to_string()),
+                        ("X-Height", frame.height.to_string()),
+                        ("X-Visible", frame.visible.to_string()),
+                        ("X-Revision", frame.revision.to_string()),
+                    ],
+                    frame_bytes(&frame.pixels),
+                ),
+                Err(error) => http(404, "text/plain", &[], error.to_string().into_bytes()),
+            }
+        }
+        ("POST", "/control") => {
+            let same_origin = origin.as_deref().is_none_or(|origin| {
+                host.as_deref()
+                    .is_some_and(|host| origin == format!("http://{host}"))
+            });
+            if !json_body || !same_origin {
+                http(403, "text/plain", &[], b"same-origin JSON only".to_vec())
+            } else if length > MAX_HTTP_BODY {
+                http(413, "text/plain", &[], b"request too large".to_vec())
+            } else {
+                let mut body = vec![0; length];
+                if reader.read_exact(&mut body).is_err() {
+                    return;
+                }
+                let line = String::from_utf8_lossy(&body);
+                http(
+                    200,
+                    "application/json",
+                    &[],
+                    handle(hardware, line.trim()).into_bytes(),
+                )
+            }
+        }
+        _ => http(404, "text/plain", &[], b"not found".to_vec()),
+    };
+    let _closed = writer.write_all(&response);
+}
+
+/// Whether an HTTP `Host` names this loopback server, by IP or `localhost`.
+fn is_loopback_host(host: &str) -> bool {
+    let name = host
+        .rsplit_once(':')
+        .filter(|(_, port)| port.parse::<u16>().is_ok())
+        .map_or(host, |(name, _)| name);
+    name == "localhost"
+        || name
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn http(status: u16, content_type: &str, headers: &[(&str, String)], body: Vec<u8>) -> Vec<u8> {
+    let reason = match status {
+        200 => "OK",
+        403 => "Forbidden",
+        404 => "Not Found",
+        _ => "Payload Too Large",
+    };
+    let mut response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        response.push_str(&format!("{name}: {value}\r\n"));
+    }
+    response.push_str("\r\n");
+    let mut bytes = response.into_bytes();
+    bytes.extend(body);
+    bytes
 }
 
 #[cfg(test)]
@@ -392,5 +561,67 @@ mod tests {
         let second: Value =
             serde_json::from_str(&lines.next().expect("line").expect("read")).expect("JSON");
         assert_eq!(second, serde_json::json!({ "ok": true }));
+    }
+
+    fn http_request(address: SocketAddr, request: &str) -> String {
+        let mut stream = TcpStream::connect(address).expect("connect");
+        stream.write_all(request.as_bytes()).expect("send");
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).expect("receive");
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    #[test]
+    fn displays_are_listed_read_and_served_to_a_same_origin_browser() {
+        let hardware = VirtualHardware::new(&["GPIO0"], &[], Clock::manual()).with_spi(&["SPI0"]);
+        hardware
+            .attach_spi_peripheral(
+                "SPI0",
+                Box::new(crate::models::MipiDbiPanelModel::new(2, 1, (0, 0), 0)),
+                "display",
+            )
+            .expect("panel");
+        let listed = call(&hardware, r#"{"op":"displays"}"#);
+        assert_eq!(listed["displays"][0]["peripheral"], "display");
+        assert_eq!(listed["displays"][0]["width"], 2);
+        let frame = call(&hardware, r#"{"op":"display","bus":"SPI0"}"#);
+        assert_eq!(frame["data"], "00000000");
+        assert_eq!(frame["visible"], false);
+
+        let address = start(hardware, "127.0.0.1:0".parse().expect("address")).expect("start");
+        let page = http_request(address, "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert!(page.contains("<title>Virtual Displays</title>"));
+        let pixels = http_request(
+            address,
+            "GET /display/SPI0 HTTP/1.1\r\nHost: localhost:1\r\n\r\n",
+        );
+        assert!(pixels.contains("X-Width: 2\r\n"), "{pixels}");
+        let body = r#"{"op":"displays"}"#;
+        let post = |headers: &str| {
+            http_request(
+                address,
+                &format!(
+                    "POST /control HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{headers}Content-Length: {}\r\n\r\n{body}",
+                    address.port(),
+                    body.len()
+                ),
+            )
+        };
+        let answered = post("Content-Type: application/json\r\n");
+        assert!(answered.contains(r#""ok":true"#), "{answered}");
+        let same_origin = post(&format!(
+            "Content-Type: application/json\r\nOrigin: http://127.0.0.1:{}\r\n",
+            address.port()
+        ));
+        assert!(same_origin.starts_with("HTTP/1.1 200"), "{same_origin}");
+        // Other sites the developer visits cannot drive the hardware.
+        for refused in [
+            post("Content-Type: text/plain\r\n"),
+            post("Content-Type: application/json\r\nOrigin: http://example.com\r\n"),
+            http_request(address, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+        ] {
+            assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+        }
     }
 }

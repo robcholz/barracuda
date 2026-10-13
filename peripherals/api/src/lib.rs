@@ -380,7 +380,7 @@ pub mod display {
     use embedded_graphics_core::{
         draw_target::DrawTarget,
         geometry::{OriginDimensions, Size},
-        pixelcolor::Rgb888,
+        pixelcolor::Rgb565,
         primitives::Rectangle,
     };
 
@@ -467,8 +467,6 @@ pub mod display {
         Rgb565,
         /// 18-bit RGB carried in three bytes.
         Rgb666,
-        /// 24-bit RGB carried in three bytes.
-        Rgb888,
     }
 
     /// Physical display technology and its broad presentation behavior.
@@ -666,11 +664,12 @@ pub mod display {
         /// Describes this initialized display.
         fn descriptor(&self) -> DisplayDescriptor;
 
-        /// Draws one row-major RGB888 region using implementation-owned color conversion.
-        fn draw_rgb888(
+        /// Draws one row-major RGB565 region, converted by the implementation
+        /// when its native pixel format differs.
+        fn draw_rgb565(
             &mut self,
             area: Rectangle,
-            pixels: &[Rgb888],
+            pixels: &[Rgb565],
         ) -> Result<(), Self::RenderError>;
 
         /// Presents pixels written through [`DrawTarget`].
@@ -721,8 +720,8 @@ pub mod display {
 /// enum holds whichever concrete display a claimed instance names, and
 /// implements [`display::Display`] by forwarding to it. Drawing through
 /// [`DrawTarget`](embedded_graphics_core::draw_target::DrawTarget) takes
-/// portable RGB888 pixels and converts them through
-/// [`display::Display::draw_rgb888`], so displays with different native color
+/// portable RGB565 pixels and draws them through
+/// [`display::Display::draw_rgb565`], so displays with different native color
 /// types share one type.
 ///
 /// ```ignore
@@ -775,7 +774,7 @@ macro_rules! display_set {
         }
 
         impl $crate::__private::embedded_graphics_core::draw_target::DrawTarget for $name {
-            type Color = $crate::__private::embedded_graphics_core::pixelcolor::Rgb888;
+            type Color = $crate::__private::embedded_graphics_core::pixelcolor::Rgb565;
             type Error = $render;
 
             fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
@@ -791,7 +790,7 @@ macro_rules! display_set {
                     let area = Rectangle::new(point, Size::new(1, 1));
                     match self {
                         $(Self::$variant(display) => {
-                            $crate::display::Display::draw_rgb888(display, area, &[color])
+                            $crate::display::Display::draw_rgb565(display, area, &[color])
                                 .map_err($render::$variant)?;
                         })+
                     }
@@ -810,14 +809,14 @@ macro_rules! display_set {
                 }
             }
 
-            fn draw_rgb888(
+            fn draw_rgb565(
                 &mut self,
                 area: $crate::__private::embedded_graphics_core::primitives::Rectangle,
-                pixels: &[$crate::__private::embedded_graphics_core::pixelcolor::Rgb888],
+                pixels: &[$crate::__private::embedded_graphics_core::pixelcolor::Rgb565],
             ) -> Result<(), Self::RenderError> {
                 match self {
                     $(Self::$variant(display) => {
-                        $crate::display::Display::draw_rgb888(display, area, pixels)
+                        $crate::display::Display::draw_rgb565(display, area, pixels)
                             .map_err($render::$variant)
                     })+
                 }

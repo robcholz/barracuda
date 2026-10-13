@@ -18,12 +18,13 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{OriginDimensions, Size},
-    pixelcolor::{Rgb565, Rgb888},
+    pixelcolor::Rgb565,
     primitives::Rectangle,
 };
 
 #[derive(Default)]
 struct CustomDisplay {
+    drawn: std::vec::Vec<Rgb565>,
     flushed: bool,
     brightness: u8,
     power: Option<DisplayPower>,
@@ -64,11 +65,12 @@ impl Display for CustomDisplay {
         )
     }
 
-    fn draw_rgb888(
+    fn draw_rgb565(
         &mut self,
         _area: Rectangle,
-        _pixels: &[Rgb888],
+        pixels: &[Rgb565],
     ) -> Result<(), Self::RenderError> {
+        self.drawn.extend_from_slice(pixels);
         Ok(())
     }
 
@@ -305,11 +307,11 @@ fn a_display_set_forwards_to_the_display_it_holds() {
     for display in &mut displays {
         assert_eq!(display.size(), Size::new(320, 240));
         assert_eq!(display.descriptor().pixel_format(), PixelFormat::Rgb565);
-        // Portable RGB888 pixels reach displays of any native color type.
+        // Portable RGB565 pixels reach displays of any native color type.
         display
             .draw_iter([Pixel(
                 embedded_graphics_core::geometry::Point::new(1, 2),
-                Rgb888::new(1, 2, 3),
+                Rgb565::new(1, 2, 3),
             )])
             .expect("draw");
         ready(display.set_brightness(200)).expect("brightness");
@@ -319,5 +321,7 @@ fn a_display_set_forwards_to_the_display_it_holds() {
         panic!("variants keep their displays");
     };
     assert!(front.flushed && back.flushed);
+    assert_eq!(front.drawn, [Rgb565::new(1, 2, 3)]);
+    assert_eq!(back.drawn, [Rgb565::new(1, 2, 3)]);
     assert_eq!((front.brightness, back.brightness), (200, 200));
 }

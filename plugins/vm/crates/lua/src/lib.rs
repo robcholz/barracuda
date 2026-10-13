@@ -47,7 +47,7 @@ mod userdata;
 pub use convert::{Bytes, FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Number, Variadic};
 pub use environment::{Environment, Package};
 pub use error::{Error, ErrorKind, Result};
-pub use object::{Context, Function, FunctionCall, RegistryKey, Table};
+pub use object::{Context, Function, FunctionCall, LuaValue, RegistryKey, Table};
 pub use run::LuaExecution;
 pub use runtime::{Chunk, Execution, Library, Lua};
 pub use userdata::{

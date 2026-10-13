@@ -1,0 +1,9 @@
+id = "ui"
+depends-on = []
+description = "Runs compiled MicroTS views and shows one on the Board's primary display."
+
+[peripherals.display]
+main = "primary"
+
+[peripherals.touch]
+main = { fill = "primary", optional = true }

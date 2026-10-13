@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{
     ffi::c_int,
     future::Future,
@@ -9,9 +9,9 @@ use core::{
 };
 
 use crate::ffi::{
-    MULT_RET, NO_REF, REGISTRY_INDEX, Thread, Type, lua_gettop, lua_newthread, lua_pcallk,
-    lua_pushvalue, lua_rawget, lua_rawgeti, lua_rawset, lua_resetthread, lua_resume, lua_settop,
-    lua_xmove,
+    MULT_RET, NO_REF, REGISTRY_INDEX, Thread, Type, lua_gettop, lua_newthread, lua_next,
+    lua_pcallk, lua_pushvalue, lua_rawget, lua_rawgeti, lua_rawset, lua_resetthread, lua_resume,
+    lua_settop, lua_xmove,
 };
 
 use crate::runtime::{
@@ -165,6 +165,28 @@ impl Table {
 
     pub fn is_empty(&self) -> Result<bool> {
         self.len().map(|length| length == 0)
+    }
+
+    /// Every key-value pair in `next` order, read without metamethods.
+    ///
+    /// Keys and values are plain Lua values; a pair holding a function,
+    /// userdata, or thread fails the conversion.
+    pub fn pairs(&self) -> Result<Vec<(LuaValue, LuaValue)>> {
+        self.inner.with_main(|lua| {
+            self.inner.push(lua)?;
+            let table = lua.top();
+            lua.push_nil();
+            let mut pairs = Vec::new();
+            while unsafe { lua_next(lua.as_ptr(), table) } != 0 {
+                // Converting the key in place would derail `lua_next`; LuaValue
+                // reads strings and numbers without coercion.
+                let key = LuaValue::from_lua(lua, -2)?;
+                let value = LuaValue::from_lua(lua, -1)?;
+                pairs.push((key, value));
+                unsafe { lua_settop(lua.as_ptr(), -2) };
+            }
+            Ok(pairs)
+        })
     }
 }
 
@@ -401,6 +423,59 @@ impl RegistryKey {
         Self {
             inner: Some(inner),
             not_send: PhantomData,
+        }
+    }
+}
+
+/// Any Lua value a native function exchanges by value: nil, a boolean, a
+/// number, a string or a table.
+///
+/// Use it where an argument or result may have more than one type. Functions,
+/// userdata and threads are rejected on conversion.
+pub enum LuaValue {
+    /// `nil`.
+    Nil,
+    /// A boolean.
+    Boolean(bool),
+    /// An integer-subtype number.
+    Integer(i64),
+    /// A float-subtype number.
+    Number(f64),
+    /// A UTF-8 string.
+    String(String),
+    /// A table.
+    Table(Table),
+}
+
+impl FromLua for LuaValue {
+    fn from_lua(lua: &mut Thread, index: c_int) -> Result<Self> {
+        match lua.type_of(index) {
+            Type::Nil | Type::None => Ok(Self::Nil),
+            Type::Boolean => bool::from_lua(lua, index).map(Self::Boolean),
+            Type::Number if lua.is_integer(index) => i64::from_lua(lua, index).map(Self::Integer),
+            Type::Number => f64::from_lua(lua, index).map(Self::Number),
+            Type::String => String::from_lua(lua, index).map(Self::String),
+            Type::Table => Table::from_lua(lua, index).map(Self::Table),
+            _ => Err(Error::new(
+                ErrorKind::Conversion,
+                "expected nil, boolean, number, string or table",
+            )),
+        }
+    }
+}
+
+impl IntoLua for LuaValue {
+    fn push_to_lua(self, lua: &mut Thread) -> Result<()> {
+        match self {
+            Self::Nil => {
+                lua.push_nil();
+                Ok(())
+            }
+            Self::Boolean(value) => value.push_to_lua(lua),
+            Self::Integer(value) => value.push_to_lua(lua),
+            Self::Number(value) => value.push_to_lua(lua),
+            Self::String(value) => value.push_to_lua(lua),
+            Self::Table(value) => value.push_to_lua(lua),
         }
     }
 }

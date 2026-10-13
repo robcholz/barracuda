@@ -116,8 +116,9 @@ barracuda_target::application_entry!(application);
 
 Host Targets have no chip peripheral singleton. The Linux and macOS Platforms
 share a host-only virtual one instead (`platforms/virtual-io`): virtual pins
-and I2C controllers backed by a virtual peripherals manager that tests and
-developers drive over a loopback control interface. The host entry macro takes
+and I2C and SPI controllers backed by a virtual peripherals manager that tests
+and developers drive over a loopback control interface, which also serves a
+browser view of the display panels. The host entry macro takes
 that singleton once, exactly as a device entry takes its chip singleton, and
 the generated Board bindings move the declared virtual tokens out of it. The
 application still uses the same `resources_with_bindings` boundary, and the
@@ -129,7 +130,9 @@ the host has no physical chips, its Platform HAL manifest sets
 declared peripheral (name, implementation identifier, chip-native bindings,
 and scalar parameters) to `hal::declare_peripheral` before initializing any
 of them, and the virtual Platform attaches the chip model for that
-implementation at the declared bus and address. The Board stays the single
+implementation at the declared bus and address. A display's panel model sits
+on its SPI controller and reads its data/command pin, so the host Board's
+display shows in a browser exactly as its real driver draws it. The Board stays the single
 declaration and the generator keeps no Platform or implementation special
 case. Device Platforms do not set it, so their generated composition is
 unchanged.

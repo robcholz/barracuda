@@ -10,7 +10,7 @@
 use crate::{
     device::I2cDevice,
     hardware::{HardwareError, VirtualHardware},
-    models::{Bq27220Model, Ina226Model, Rx8130ceModel},
+    models::{Bq27220Model, Cst816tModel, Ina226Model, MipiDbiPanelModel, Rx8130ceModel},
 };
 
 /// Bus voltage of the modelled INA226 supply: 5.000 V in 1.25 mV LSBs
@@ -29,7 +29,7 @@ pub struct PeripheralDeclaration {
     /// Peripheral implementation identifier, such as `rx8130ce-rtc`.
     pub implementation: &'static str,
     /// Binding roles and the chip-native resource each resolves to: the
-    /// controller of an I2C device, the pin of a digital binding.
+    /// controller of an I2C or SPI device, the pin of a digital binding.
     pub bindings: &'static [(&'static str, &'static str)],
     /// Scalar parameters with defaults applied, as their YAML text.
     pub parameters: &'static [(&'static str, &'static str)],
@@ -67,8 +67,9 @@ impl PeripheralDeclaration {
 pub struct DeclaredDevice {
     /// Controller the model answers on.
     pub bus: &'static str,
-    /// Seven-bit address.
-    pub address: u8,
+    /// Seven-bit address on an I2C controller; `None` on an SPI controller,
+    /// where the model is the controller's only device.
+    pub address: Option<u8>,
     /// Device model name.
     pub model: &'static str,
 }
@@ -101,6 +102,8 @@ enum Model {
     Rx8130ce,
     Ina226,
     Bq27220,
+    Cst816t,
+    MipiDbiPanel,
 }
 
 impl Model {
@@ -109,6 +112,8 @@ impl Model {
             "rx8130ce-rtc" => Some(Self::Rx8130ce),
             "ina226-power-monitor" => Some(Self::Ina226),
             "bq27220-power-monitor" => Some(Self::Bq27220),
+            "cst816t-touch" => Some(Self::Cst816t),
+            "mipi-dbi-display" => Some(Self::MipiDbiPanel),
             _ => None,
         }
     }
@@ -135,8 +140,45 @@ impl Model {
                 Box::new(Ina226Model::new().with_inputs(shunt, INA226_BUS_LSB))
             }
             Self::Bq27220 => Box::new(Bq27220Model::new()),
+            Self::Cst816t => Box::new(Cst816tModel::new()),
+            // The panel sits on SPI; `attach` places it before reaching here.
+            Self::MipiDbiPanel => return Err(DeclarationError::MissingBinding("i2c")),
         })
     }
+}
+
+/// Attaches the panel behind a declared `mipi-dbi-display` to its SPI
+/// controller, reading its D/C line from the declared `dc` pin.
+fn attach_panel(
+    hardware: &VirtualHardware,
+    declaration: &PeripheralDeclaration,
+) -> Result<DeclaredDevice, DeclarationError> {
+    let bus = declaration
+        .binding("spi")
+        .ok_or(DeclarationError::MissingBinding("spi"))?;
+    let dc = declaration
+        .binding("dc")
+        .ok_or(DeclarationError::MissingBinding("dc"))?;
+    let dimension = |name: &str| -> Result<u16, DeclarationError> {
+        let value = declaration.integer(name)?.unwrap_or(0);
+        u16::try_from(value).map_err(|_error| DeclarationError::InvalidParameter {
+            parameter: String::from(name),
+            value: value.to_string(),
+        })
+    };
+    let panel = MipiDbiPanelModel::new(
+        dimension("width")?,
+        dimension("height")?,
+        (dimension("offset-x")?, dimension("offset-y")?),
+        hardware.pin_index(dc)?,
+    );
+    let model = crate::spi::SpiDevice::model(&panel);
+    hardware.attach_spi_peripheral(bus, Box::new(panel), declaration.name)?;
+    Ok(DeclaredDevice {
+        bus,
+        address: None,
+        model,
+    })
 }
 
 /// Attaches the device model behind one declared peripheral.
@@ -155,6 +197,9 @@ pub fn attach(
     let Some(model) = Model::for_implementation(declaration.implementation) else {
         return Ok(None);
     };
+    if model == Model::MipiDbiPanel {
+        return attach_panel(hardware, declaration).map(Some);
+    }
     let bus = declaration
         .binding("i2c")
         .ok_or(DeclarationError::MissingBinding("i2c"))?;
@@ -170,7 +215,7 @@ pub fn attach(
     hardware.attach_peripheral(bus, u64::from(address), device, declaration.name)?;
     Ok(Some(DeclaredDevice {
         bus,
-        address,
+        address: Some(address),
         model,
     }))
 }
@@ -211,7 +256,7 @@ mod tests {
             rtc,
             Some(DeclaredDevice {
                 bus: "I2C2",
-                address: 0x32,
+                address: Some(0x32),
                 model: "rx8130ce",
             })
         );
@@ -245,6 +290,51 @@ mod tests {
         // 200 mA through 5 mΩ is 1 mV: 400 LSBs of 2.5 µV.
         assert_eq!(i16::from_be_bytes(word), 400);
         assert!(hardware.violations().is_empty());
+    }
+
+    #[test]
+    fn a_declared_display_and_touch_get_a_panel_and_a_controller() {
+        let hardware =
+            VirtualHardware::new(&["GPIO13"], &["I2C2"], Clock::manual()).with_spi(&["SPI0"]);
+        let display = PeripheralDeclaration {
+            name: "display",
+            implementation: "mipi-dbi-display",
+            bindings: &[("spi", "SPI0"), ("dc", "GPIO13")],
+            parameters: &[("width", "320"), ("height", "240"), ("offset-x", "0")],
+        };
+        assert_eq!(
+            attach(&hardware, &display, 0).expect("panel"),
+            Some(DeclaredDevice {
+                bus: "SPI0",
+                address: None,
+                model: "mipi-dbi-panel",
+            })
+        );
+        let displays = hardware.displays();
+        assert_eq!(displays.len(), 1);
+        assert_eq!(displays[0].peripheral.as_deref(), Some("display"));
+        assert_eq!((displays[0].width, displays[0].height), (320, 240));
+        // Declared devices outlive a reset.
+        hardware.reset();
+        assert_eq!(hardware.displays().len(), 1);
+
+        let touch = PeripheralDeclaration {
+            name: "touch",
+            implementation: "cst816t-touch",
+            bindings: &[("i2c", "I2C2"), ("interrupt", "GPIO13")],
+            parameters: &[("address", "21"), ("width", "320"), ("height", "240")],
+        };
+        let touch = attach(&hardware, &touch, 0).expect("touch").expect("model");
+        assert_eq!((touch.address, touch.model), (Some(0x15), "cst816t"));
+
+        let unwired = PeripheralDeclaration {
+            bindings: &[("spi", "SPI0")],
+            ..display
+        };
+        assert!(matches!(
+            attach(&hardware, &unwired, 0),
+            Err(DeclarationError::MissingBinding("dc"))
+        ));
     }
 
     #[test]

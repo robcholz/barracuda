@@ -360,7 +360,7 @@ impl embedded_graphics_core::geometry::OriginDimensions for UnavailableDisplay {
 }
 
 impl embedded_graphics_core::draw_target::DrawTarget for UnavailableDisplay {
-    type Color = embedded_graphics_core::pixelcolor::Rgb888;
+    type Color = embedded_graphics_core::pixelcolor::Rgb565;
     type Error = Infallible;
 
     fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
@@ -379,10 +379,10 @@ impl display::Display for UnavailableDisplay {
         match self.never {}
     }
 
-    fn draw_rgb888(
+    fn draw_rgb565(
         &mut self,
         _area: embedded_graphics_core::primitives::Rectangle,
-        _pixels: &[embedded_graphics_core::pixelcolor::Rgb888],
+        _pixels: &[embedded_graphics_core::pixelcolor::Rgb565],
     ) -> Result<(), Self::RenderError> {
         match self.never {}
     }

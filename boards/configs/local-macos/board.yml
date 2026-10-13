@@ -1,4 +1,5 @@
 name: local-macos
+profile: device
 hardware:
   chip: macos
 native-layout:
@@ -13,7 +14,39 @@ peripherals:
         scl: GPIO8
         sda: GPIO9
         frequency-hz: 400000
+    spi-device:
+      display-spi:
+        peripheral: SPI0
+        sck: GPIO10
+        mosi: GPIO11
+        chip-select: GPIO12
+        frequency-hz: 40000000
   devices:
+    # A 320x240 panel and its touch controller. The virtual peripherals
+    # manager shows the panel at http://<BARRACUDA_VIRTUAL_IO_ADDR>/ and
+    # touches it where the page is clicked.
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        spi: display-spi
+        dc: GPIO13
+        reset: GPIO14
+        backlight: GPIO15
+      parameters:
+        controller: ili9342c
+        width: 320
+        height: 240
+        color-order: rgb
+    # CST816T at 15h on the Board's I2C bus.
+    touch:
+      implementation: cst816t-touch
+      bindings:
+        i2c: board-peripherals
+        interrupt: GPIO16
+      parameters:
+        address: 21
+        width: 320
+        height: 240
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings:
