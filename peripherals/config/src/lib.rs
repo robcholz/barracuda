@@ -1895,6 +1895,10 @@ fn render_declaration(
                 .peripheral_io()
                 .i2c_device(resource)
                 .map(|i2c| i2c.peripheral()),
+            BindingKind::SpiDevice => board
+                .peripheral_io()
+                .spi_device(resource)
+                .map(|spi| spi.peripheral()),
             BindingKind::DigitalInput | BindingKind::DigitalOutput => Some(resource),
             _ => None,
         };

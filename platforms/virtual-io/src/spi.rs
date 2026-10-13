@@ -37,6 +37,27 @@ pub trait SpiDevice: Send {
     ///
     /// Returns [`RegisterRangeError`] when the range is outside the model.
     fn peek(&self, offset: usize, buffer: &mut [u8]) -> Result<(), RegisterRangeError>;
+
+    /// What a display panel model shows; `None` for any other device.
+    fn frame(&self) -> Option<Frame> {
+        None
+    }
+}
+
+/// The picture a display panel model shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    /// Width in pixels, as the panel is addressed.
+    pub width: u16,
+    /// Height in pixels.
+    pub height: u16,
+    /// Whether the panel shows anything: on, awake, and backlit.
+    pub visible: bool,
+    /// Changes whenever the picture or `visible` changes.
+    pub revision: u64,
+    /// Row-major RGB565 pixels as they appear, after the panel's color order
+    /// and inversion.
+    pub pixels: Vec<u16>,
 }
 
 /// Failure of one virtual SPI transfer, produced by an injected fault.

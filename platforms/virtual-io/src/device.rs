@@ -19,12 +19,14 @@ pub struct RuleViolation {
     pub message: String,
 }
 
-/// Time and violation sink handed to a device model for one bus phase.
+/// Time, pin levels, and violation sink handed to a device model for one bus
+/// phase.
 #[derive(Debug)]
 pub struct DeviceContext<'a> {
     now: Duration,
     violations: &'a mut Vec<RuleViolation>,
     notes: Vec<String>,
+    pins: Vec<bool>,
 }
 
 impl<'a> DeviceContext<'a> {
@@ -33,7 +35,20 @@ impl<'a> DeviceContext<'a> {
             now,
             violations,
             notes: Vec::new(),
+            pins: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_pins(mut self, pins: Vec<bool>) -> Self {
+        self.pins = pins;
+        self
+    }
+
+    /// Level of the pin with chip index `index` during this bus phase, such
+    /// as a display's data/command select; `None` for an unknown pin.
+    #[must_use]
+    pub fn pin(&self, index: usize) -> Option<bool> {
+        self.pins.get(index).copied()
     }
 
     pub(crate) fn into_notes(self) -> Vec<String> {

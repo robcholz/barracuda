@@ -16,30 +16,42 @@ use std::{
 };
 
 use barracuda_board_hal::{
-    audio::PcmFormat, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimePlatform,
+    audio::PcmFormat, DigitalLevel, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimePlatform,
     RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, UartConfig, UnavailableAnalogInput,
     UnavailableAnalogOutput, UnavailableI2s, UnavailablePwm, UnavailableSpi, UnavailableUart,
     UnsupportedFunction,
 };
-use embedded_hal::spi::Mode;
+use embedded_hal::{
+    digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
+    spi::Mode,
+};
+use embedded_hal_bus::spi::ExclusiveDevice;
 
 pub use crate::declared::PeripheralDeclaration;
 use crate::{
-    clock::Clock, control, declared, gpio::VirtualDigitalPin, hardware::VirtualHardware,
+    clock::Clock,
+    control, declared,
+    gpio::VirtualDigitalPin,
+    hardware::{PinDrive, PinMode, PinPull, VirtualHardware},
     i2c::VirtualI2cBus,
+    spi::VirtualSpiBus,
 };
 
 /// Environment variable naming the loopback address of the control server.
 pub const ADDRESS_VARIABLE: &str = "BARRACUDA_VIRTUAL_IO_ADDR";
 
 /// Chip-native names of the virtual pins, in index order.
-pub const PIN_NAMES: [&str; 16] = [
+pub const PIN_NAMES: [&str; 24] = [
     "GPIO0", "GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9",
-    "GPIO10", "GPIO11", "GPIO12", "GPIO13", "GPIO14", "GPIO15",
+    "GPIO10", "GPIO11", "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18",
+    "GPIO19", "GPIO20", "GPIO21", "GPIO22", "GPIO23",
 ];
 
 /// Names of the virtual I2C controllers, in index order.
 pub const I2C_CONTROLLER_NAMES: [&str; 3] = ["I2C0", "I2C1", "I2C2"];
+
+/// Names of the virtual SPI controllers, in index order.
+pub const SPI_CONTROLLER_NAMES: [&str; 2] = ["SPI0", "SPI1"];
 
 static HARDWARE: OnceLock<VirtualHardware> = OnceLock::new();
 static CONTROL_ADDRESS: OnceLock<SocketAddr> = OnceLock::new();
@@ -48,7 +60,10 @@ static TAKEN: AtomicBool = AtomicBool::new(false);
 /// The process-wide virtual hardware behind the host Platform.
 #[must_use]
 pub fn hardware() -> &'static VirtualHardware {
-    HARDWARE.get_or_init(|| VirtualHardware::new(&PIN_NAMES, &I2C_CONTROLLER_NAMES, Clock::real()))
+    HARDWARE.get_or_init(|| {
+        VirtualHardware::new(&PIN_NAMES, &I2C_CONTROLLER_NAMES, Clock::real())
+            .with_spi(&SPI_CONTROLLER_NAMES)
+    })
 }
 
 /// The virtual peripherals could not be started.
@@ -107,7 +122,11 @@ pub fn control_address(value: Option<&str>) -> Result<SocketAddr, VirtualIoStart
 }
 
 macro_rules! virtual_peripherals {
-    (pins: [$($pin:ident = $pin_index:literal),* $(,)?], i2c: [$($bus:ident = $bus_index:literal),* $(,)?]) => {
+    (
+        pins: [$($pin:ident = $pin_index:literal),* $(,)?],
+        i2c: [$($bus:ident = $bus_index:literal),* $(,)?],
+        spi: [$($spi:ident = $spi_index:literal),* $(,)?]
+    ) => {
         /// Move-only tokens of every virtual pin and controller.
         ///
         /// This is the host counterpart of a chip's peripheral singleton:
@@ -124,6 +143,10 @@ macro_rules! virtual_peripherals {
                 #[doc = concat!("Virtual I2C controller `", stringify!($bus), "`.")]
                 pub $bus: VirtualI2cController,
             )*
+            $(
+                #[doc = concat!("Virtual SPI controller `", stringify!($spi), "`.")]
+                pub $spi: VirtualSpiController,
+            )*
         }
 
         impl VirtualPeripherals {
@@ -131,6 +154,7 @@ macro_rules! virtual_peripherals {
                 Self {
                     $($pin: VirtualPinToken { hardware: hardware.clone(), pin: $pin_index },)*
                     $($bus: VirtualI2cController { hardware: hardware.clone(), bus: $bus_index },)*
+                    $($spi: VirtualSpiController { hardware: hardware.clone(), bus: $spi_index },)*
                 }
             }
         }
@@ -141,9 +165,11 @@ virtual_peripherals!(
     pins: [
         GPIO0 = 0, GPIO1 = 1, GPIO2 = 2, GPIO3 = 3, GPIO4 = 4, GPIO5 = 5, GPIO6 = 6, GPIO7 = 7,
         GPIO8 = 8, GPIO9 = 9, GPIO10 = 10, GPIO11 = 11, GPIO12 = 12, GPIO13 = 13, GPIO14 = 14,
-        GPIO15 = 15,
+        GPIO15 = 15, GPIO16 = 16, GPIO17 = 17, GPIO18 = 18, GPIO19 = 19, GPIO20 = 20,
+        GPIO21 = 21, GPIO22 = 22, GPIO23 = 23,
     ],
-    i2c: [I2C0 = 0, I2C1 = 1, I2C2 = 2]
+    i2c: [I2C0 = 0, I2C1 = 1, I2C2 = 2],
+    spi: [SPI0 = 0, SPI1 = 1]
 );
 
 impl VirtualPeripherals {
@@ -183,6 +209,77 @@ pub struct VirtualPinToken {
 pub struct VirtualI2cController {
     hardware: VirtualHardware,
     bus: usize,
+}
+
+/// Move-only token of one virtual SPI controller.
+#[derive(Debug)]
+pub struct VirtualSpiController {
+    hardware: VirtualHardware,
+    bus: usize,
+}
+
+/// A virtual SPI controller rejected its configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum VirtualSpiConfigError {
+    /// A zero bus clock was requested.
+    #[error("SPI frequency must be nonzero")]
+    ZeroFrequency,
+}
+
+/// A virtual pin a peripheral implementation drives as a push-pull output,
+/// such as a display's data/command select.
+#[derive(Debug)]
+pub struct VirtualOutput {
+    hardware: VirtualHardware,
+    pin: usize,
+}
+
+impl ErrorType for VirtualOutput {
+    type Error = Infallible;
+}
+
+impl OutputPin for VirtualOutput {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        self.hardware.set_output(self.pin, false);
+        Ok(())
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        self.hardware.set_output(self.pin, true);
+        Ok(())
+    }
+}
+
+impl StatefulOutputPin for VirtualOutput {
+    fn is_set_high(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.hardware.output_latch(self.pin))
+    }
+
+    fn is_set_low(&mut self) -> Result<bool, Self::Error> {
+        Ok(!self.hardware.output_latch(self.pin))
+    }
+}
+
+/// A virtual pin a peripheral implementation reads, such as a touch
+/// controller's interrupt line; clients drive it with `set_input`.
+#[derive(Debug)]
+pub struct VirtualInput {
+    hardware: VirtualHardware,
+    pin: usize,
+}
+
+impl ErrorType for VirtualInput {
+    type Error = Infallible;
+}
+
+impl InputPin for VirtualInput {
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.hardware.level(self.pin))
+    }
+
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        Ok(!self.hardware.level(self.pin))
+    }
 }
 
 /// A virtual I2C controller rejected its configuration.
@@ -414,10 +511,13 @@ pub fn declare_peripheral(declaration: &PeripheralDeclaration) {
         .map_or(0, |elapsed| elapsed.as_secs());
     match declared::attach(hardware(), declaration, unix_seconds) {
         Ok(Some(device)) => log::info!(
-            "virtual {} at {}/{:#04x} backs peripheral `{}` ({})",
+            "virtual {} at {}{} backs peripheral `{}` ({})",
             device.model,
             device.bus,
-            device.address,
+            device
+                .address
+                .map(|address| format!("/{address:#04x}"))
+                .unwrap_or_default(),
             declaration.name,
             declaration.implementation
         ),
@@ -459,6 +559,83 @@ pub fn i2c_device(
     VirtualRuntime::i2c(controller, scl, sda, frequency_hz)
 }
 
+/// Push-pull digital output handed to a peripheral implementation.
+pub type DigitalOutput = VirtualOutput;
+/// Digital input handed to a peripheral implementation.
+pub type DigitalInput = VirtualInput;
+/// Single-owner SPI device: a virtual controller with its chip-select pin.
+pub type SpiDevice = ExclusiveDevice<VirtualSpiBus, DigitalOutput, embedded_hal_bus::spi::NoDelay>;
+/// Virtual SPI construction failure.
+pub type SpiConfigError = VirtualSpiConfigError;
+
+/// Drives a virtual pin as a push-pull output starting at `initial`.
+#[must_use]
+pub fn digital_output(pin: VirtualPinToken, initial: DigitalLevel) -> DigitalOutput {
+    let high = matches!(initial, DigitalLevel::High);
+    pin.hardware.claim_digital(pin.pin);
+    pin.hardware.configure_pin(
+        pin.pin,
+        PinMode::Output,
+        PinPull::None,
+        PinDrive::PushPull,
+        Some(high),
+    );
+    VirtualOutput {
+        hardware: pin.hardware,
+        pin: pin.pin,
+    }
+}
+
+/// Reads a virtual pin as a floating input.
+#[must_use]
+pub fn digital_input(pin: VirtualPinToken) -> DigitalInput {
+    pin.hardware.claim_digital(pin.pin);
+    pin.hardware.configure_pin(
+        pin.pin,
+        PinMode::Input,
+        PinPull::None,
+        PinDrive::PushPull,
+        None,
+    );
+    VirtualInput {
+        hardware: pin.hardware,
+        pin: pin.pin,
+    }
+}
+
+/// Constructs a write-only SPI device on a virtual controller: the device
+/// model attached to the controller receives every transfer.
+///
+/// # Errors
+///
+/// Returns [`VirtualSpiConfigError::ZeroFrequency`] for a zero bus clock.
+pub fn spi_device(
+    controller: VirtualSpiController,
+    sck: VirtualPinToken,
+    mosi: VirtualPinToken,
+    chip_select: VirtualPinToken,
+    frequency_hz: u32,
+) -> Result<SpiDevice, SpiConfigError> {
+    if frequency_hz == 0 {
+        return Err(VirtualSpiConfigError::ZeroFrequency);
+    }
+    let chip_select_pin = chip_select.pin;
+    let chip_select = digital_output(chip_select, DigitalLevel::High);
+    controller.hardware.claim_spi(
+        controller.bus,
+        [
+            (sck.pin, "SCK"),
+            (mosi.pin, "MOSI"),
+            (chip_select_pin, "CS"),
+        ],
+    );
+    let bus = VirtualSpiBus::new(controller.hardware, controller.bus, frequency_hz);
+    match ExclusiveDevice::new_no_delay(bus, chip_select) {
+        Ok(device) => Ok(device),
+        Err(never) => match never {},
+    }
+}
+
 /// Returns the delay handed to peripheral implementations.
 #[must_use]
 pub const fn delay() -> PeripheralDelay {
@@ -493,6 +670,12 @@ macro_rules! __barracuda_virtual_io_pin_binding_type {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __barracuda_virtual_io_controller_binding_type {
+    (SPI0) => {
+        $crate::hal::VirtualSpiController
+    };
+    (SPI1) => {
+        $crate::hal::VirtualSpiController
+    };
     ($controller:ident) => {
         $crate::hal::VirtualI2cController
     };
@@ -513,7 +696,6 @@ mod tests {
         ConfigurableDigitalPin as _, DigitalLevel, DigitalProvider as _, I2cProvider as _,
         I2cRequest, OutputConfig, OutputDrive,
     };
-    use embedded_hal::digital::OutputPin as _;
     use embedded_hal_async::i2c::I2c as _;
 
     use super::*;
