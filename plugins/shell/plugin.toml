@@ -7,4 +7,4 @@ cwd = "."
 command = ["bun", "resources/view/build.ts"]
 inputs = ["resources/view"]
 outputs = ["filesystem/resources/view"]
-env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]
+env = ["POCKETJS_ROOT"]

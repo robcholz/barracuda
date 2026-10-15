@@ -21,6 +21,9 @@ use portable_atomic_util::Arc;
 /// display.
 pub const DEFAULT_VIEWPORT: (f32, f32) = (360.0, 360.0);
 
+/// The byte of a baked font atlas that names its slot.
+const FONT_SLOT_BYTE: usize = 12;
+
 /// Gestures kept for the system UI before older ones are dropped.
 pub const MAX_GESTURES: usize = 8;
 
@@ -107,11 +110,25 @@ struct Inner {
     gestures: RefCell<VecDeque<Gesture>>,
     gesture: Signal<NoopRawMutex, ()>,
     brightness: Cell<Option<u8>>,
+    /// Atlases for the font slots a view ships none for.
+    system_fonts: RefCell<Vec<Vec<u8>>>,
+    /// Whether the system fonts are in place.
+    ready: Cell<bool>,
 }
 
 impl Inner {
     fn document(&self, program: Program, assets: &UiAssets) -> Result<Document, UiError> {
-        let fonts: Vec<&[u8]> = assets.fonts.iter().map(Vec::as_slice).collect();
+        // The view's own atlases first; the system fonts fill the other slots.
+        let system = self.system_fonts.borrow();
+        let slot = |font: &[u8]| font.get(FONT_SLOT_BYTE).copied();
+        let mut fonts: Vec<&[u8]> = assets.fonts.iter().map(Vec::as_slice).collect();
+        let own: Vec<Option<u8>> = fonts.iter().map(|font| slot(font)).collect();
+        fonts.extend(
+            system
+                .iter()
+                .map(Vec::as_slice)
+                .filter(|font| !own.contains(&slot(font))),
+        );
         let (width, height) = self.viewport;
         Document::new(
             program,
@@ -218,9 +235,25 @@ pub struct UiService {
 }
 
 impl UiService {
-    /// Creates a service that lays views out at `viewport`.
+    /// Creates a service that lays views out at `viewport`, without system
+    /// fonts: views draw only with their own atlases.
     #[must_use]
     pub fn new(viewport: (f32, f32)) -> Self {
+        Self::with_system_fonts(viewport, Vec::new())
+    }
+
+    /// Creates a service whose views draw with `fonts` in the slots they
+    /// ship no atlas for.
+    #[must_use]
+    pub fn with_system_fonts(viewport: (f32, f32), fonts: Vec<Vec<u8>>) -> Self {
+        let service = Self::loading(viewport);
+        service.set_system_fonts(fonts);
+        service
+    }
+
+    /// A service whose system fonts arrive later through
+    /// [`UiService::set_system_fonts`]; until then [`UiService::ready`] waits.
+    pub(crate) fn loading(viewport: (f32, f32)) -> Self {
         Self {
             inner: Rc::new(Inner {
                 mailbox: Arc::new(Mailbox::new()),
@@ -233,7 +266,23 @@ impl UiService {
                 gestures: RefCell::new(VecDeque::new()),
                 gesture: Signal::new(),
                 brightness: Cell::new(None),
+                system_fonts: RefCell::new(Vec::new()),
+                ready: Cell::new(false),
             }),
+        }
+    }
+
+    /// Installs the system fonts; views opened from now on draw with them.
+    pub(crate) fn set_system_fonts(&self, fonts: Vec<Vec<u8>>) {
+        *self.inner.system_fonts.borrow_mut() = fonts;
+        self.inner.ready.set(true);
+    }
+
+    /// Waits until the system fonts are in place, so views opened next draw
+    /// their text. Owners open their first views after this.
+    pub async fn ready(&self) {
+        while !self.inner.ready.get() {
+            embassy_time::Timer::after_millis(10).await;
         }
     }
 
@@ -484,6 +533,17 @@ impl UiSession {
             .insert(self.channel.id, document);
         self.inner.pump();
         Ok(())
+    }
+
+    /// Steps the view `frames` display frames ahead without drawing it, as
+    /// the display would; transitions and animations move on.
+    pub fn advance(&self, frames: u32) {
+        self.inner.pump();
+        if let Some(document) = self.inner.documents.borrow_mut().get_mut(&self.channel.id) {
+            for _ in 0..frames {
+                document.frame();
+            }
+        }
     }
 
     /// Taps the view at (`x`, `y`) and delivers the handler call to the owner,

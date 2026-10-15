@@ -8,8 +8,9 @@
 // app into that checkout so its `@pocketjs/*` imports resolve, compiles the view,
 // bakes the fonts it uses, and links the View IR into `view.bvir`.
 //
-// An app whose view or program shows characters beyond ASCII bakes its fonts
-// from Noto Sans SC instead of Inter: point CJK_FONT_DIR at a directory with
+// System apps ship no atlases and draw with the `ui` Plugin's system fonts.
+// An example app whose view or program shows characters beyond ASCII bakes its
+// own fonts from Noto Sans SC instead of Inter: point CJK_FONT_DIR at a directory with
 // NotoSansSC-Regular.otf and NotoSansSC-Bold.otf (github.com/notofonts/noto-cjk,
 // Sans/SubsetOTF/SC). The atlases then hold every such character in the
 // app's sources.
@@ -25,9 +26,11 @@ if (!pocket) {
   process.exit(1);
 }
 const plugin = resolve(import.meta.dir, "../..");
+// System apps draw with the `ui` Plugin's system fonts; example installable
+// apps carry their own atlases, as an app from elsewhere would.
 const groups = [
-  { sources: join(plugin, "resources/apps"), output: join(plugin, "filesystem/resources/apps") },
-  { sources: join(plugin, "resources/examples"), output: join(plugin, "crates/plugin/tests/fixtures") },
+  { sources: join(plugin, "resources/apps"), output: join(plugin, "filesystem/resources/apps"), ownFonts: false },
+  { sources: join(plugin, "resources/examples"), output: join(plugin, "crates/plugin/tests/fixtures"), ownFonts: true },
 ];
 const { buildAot } = await import(join(pocket, "microts/compiler/aot-build.ts"));
 const { bakeAtlases } = await import(join(pocket, "framework/compiler/bake-font.ts"));
@@ -41,12 +44,12 @@ const strip = (value: unknown): unknown =>
         )
       : value;
 
-const apps = groups.flatMap(({ sources, output }) =>
+const apps = groups.flatMap(({ sources, output, ownFonts }) =>
   readdirSync(sources, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => ({ name: entry.name, source: join(sources, entry.name), bundle: join(output, entry.name) })),
+    .map((entry) => ({ name: entry.name, source: join(sources, entry.name), bundle: join(output, entry.name), ownFonts })),
 );
-for (const { name, source, bundle } of apps) {
+for (const { name, source, bundle, ownFonts } of apps) {
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
   // The source manifest has no `view`; the build adds it once the view exists.
@@ -69,27 +72,27 @@ for (const { name, source, bundle } of apps) {
     const view = join(work, "view.json");
     writeFileSync(view, JSON.stringify(strip({ version: program.version, types: program.types, components: program.components })));
     cpSync(join(work, "styles.bin"), join(bundle, "styles.bin"));
-    const shown = [readFileSync(join(source, "app.tsx"), "utf8"), readFileSync(join(source, entry), "utf8")].join("");
-    const extraChars = [...new Set([...shown].filter((char) => char.codePointAt(0)! > 126 && !/\s/.test(char)))].join("");
-    const cjk = process.env.CJK_FONT_DIR;
-    if (extraChars && !cjk) {
-      console.error(`${name}: shows characters beyond ASCII; set CJK_FONT_DIR to the Noto Sans SC fonts.`);
-      process.exit(1);
+    let fonts: Array<{ slot: number; bytes: Uint8Array }> = [];
+    if (ownFonts) {
+      const shown = [readFileSync(join(source, "app.tsx"), "utf8"), readFileSync(join(source, entry), "utf8")].join("");
+      const extraChars = [...new Set([...shown].filter((char) => char.codePointAt(0)! > 126 && !/\s/.test(char)))].join("");
+      const cjk = process.env.CJK_FONT_DIR;
+      if (extraChars && !cjk) {
+        console.error(`${name}: shows characters beyond ASCII; set CJK_FONT_DIR to the Noto Sans SC fonts.`);
+        process.exit(1);
+      }
+      const faces = extraChars ? { regularTtf: join(cjk!, "NotoSansSC-Regular.otf"), boldTtf: join(cjk!, "NotoSansSC-Bold.otf") } : {};
+      fonts = await bakeAtlases({ codepoints: [], extraChars, slots: program.styles.usedFontSlots, ...faces });
+      fonts.sort((left, right) => left.slot - right.slot);
+      for (const font of fonts) writeFileSync(join(bundle, `font-${font.slot}.bin`), font.bytes);
     }
-    const faces = extraChars ? { regularTtf: join(cjk!, "NotoSansSC-Regular.otf"), boldTtf: join(cjk!, "NotoSansSC-Bold.otf") } : {};
-    const fonts = await bakeAtlases({ codepoints: [], extraChars, slots: program.styles.usedFontSlots, ...faces });
-    fonts.sort((left: { slot: number }, right: { slot: number }) => left.slot - right.slot);
-    for (const font of fonts) writeFileSync(join(bundle, `font-${font.slot}.bin`), font.bytes);
     const link = Bun.spawnSync(
       ["cargo", "run", "--quiet", "--package", "barracuda-ui-runtime", "--features", "compiler", "--bin", "ui-link", "--", view, join(bundle, "view.bvir")],
       { stdout: "inherit", stderr: "inherit" },
     );
     if (link.exitCode !== 0) process.exit(link.exitCode ?? 1);
-    manifest.view = {
-      program: "view.bvir",
-      styles: "styles.bin",
-      fonts: fonts.map((font: { slot: number }) => `font-${font.slot}.bin`),
-    };
+    manifest.view = { program: "view.bvir", styles: "styles.bin" };
+    if (fonts.length) manifest.view.fonts = fonts.map((font) => `font-${font.slot}.bin`);
     writeManifest();
     console.log(`${name}: view.bvir, styles.bin, ${fonts.length} font(s)`);
   } finally {

@@ -31,13 +31,27 @@ pub(crate) fn permission(package: &str) -> String {
     String::from(words)
 }
 
+/// The system icon shown beside a permission.
+pub(crate) fn permission_icon(package: &str) -> &'static str {
+    match package {
+        "http" | "webserver" => "globe",
+        "camera" => "camera",
+        "audio" | "i2s" => "mic",
+        "led_strip" => "lamp",
+        "vm-filesystem" => "hard-drive",
+        "agent" => "agent",
+        "vm-time" => "timer",
+        "systeminfo" => "info",
+        _ => "activity",
+    }
+}
+
 /// Where a running app is in its lifecycle, for the app switcher.
 pub(crate) const fn state(state: AppState) -> &'static str {
     match state {
-        AppState::Active | AppState::Inactive => "正在显示",
+        AppState::Active | AppState::Inactive | AppState::Running => "运行中",
         AppState::Background => "后台",
         AppState::Suspended => "已挂起",
-        AppState::Running => "后台服务",
         AppState::Terminating => "正在退出",
     }
 }

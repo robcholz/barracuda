@@ -109,6 +109,8 @@ pub struct DisplaySnapshot {
     pub height: u16,
     /// Whether the panel shows anything.
     pub visible: bool,
+    /// Whether the glass is round.
+    pub round: bool,
     /// Changes whenever the picture changes.
     pub revision: u64,
 }
@@ -618,6 +620,7 @@ impl VirtualHardware {
                     width: frame.width,
                     height: frame.height,
                     visible: frame.visible,
+                    round: frame.round,
                     revision: frame.revision,
                 })
             })
@@ -981,7 +984,7 @@ impl VirtualHardware {
         }
     }
 
-    pub(crate) fn claim_spi(&self, bus: usize, pins: [(usize, &str); 3]) {
+    pub(crate) fn claim_spi<const PINS: usize>(&self, bus: usize, pins: [(usize, &str); PINS]) {
         let mut hardware = self.lock();
         let Some(name) = hardware.spi.get(bus).map(|bus| bus.name) else {
             return;

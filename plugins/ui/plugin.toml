@@ -7,3 +7,16 @@ main = "primary"
 
 [peripherals.touch]
 main = { fill = "primary", optional = true }
+
+[tasks.icons]
+cwd = "."
+command = ["python3", "resources/icons/build.py"]
+inputs = ["resources/icons/svg", "resources/icons/codepoints.json"]
+outputs = ["resources/icons/codepoints.json", "resources/icons/barracuda-icons.otf", "resources/icons/icons.json", "crates/plugin/src/icons.rs"]
+
+[tasks.fonts]
+cwd = "."
+command = ["bun", "resources/fonts/build.ts"]
+inputs = ["resources/fonts", "resources/icons/barracuda-icons.otf"]
+outputs = ["filesystem/resources/fonts"]
+env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]

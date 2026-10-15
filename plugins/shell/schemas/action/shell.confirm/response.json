@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "allowed": {
+      "type": "boolean"
+    },
+    "answered": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "allowed",
+    "answered"
+  ],
+  "additionalProperties": false
+}

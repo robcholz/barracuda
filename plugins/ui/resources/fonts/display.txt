@@ -1,0 +1,3 @@
+# The only characters beyond ASCII the 24 px display font holds: page titles
+# and headlines drawn large.
+待命可用设置通知

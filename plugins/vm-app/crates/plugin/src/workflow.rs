@@ -229,6 +229,7 @@ mod tests {
                 kind: AppKind::Installable,
                 has_view: true,
                 permissions: vec!["gpio".into()],
+                icon: Some("lamp".into()),
             },
             run_id: 3,
             state,

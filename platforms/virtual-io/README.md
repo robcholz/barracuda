@@ -42,13 +42,16 @@ or on the controller of its `spi` binding:
 | `bq27220-power-monitor` | `bq27220` | power-on state |
 | `cst816t-touch` | `cst816t` | no finger on the panel |
 | `mipi-dbi-display` | `mipi-dbi-panel` on SPI | the declared `width` × `height`, asleep and off; D/C read from the `dc` pin, addresses shifted by `offset-x`/`offset-y` |
+| `st77916-qspi-display` | `st77916` on quad SPI | a round 360 × 360 panel, asleep and off; each write's header carries the opcode and the DCS command |
 
 A peripheral without a model is logged and uses its bindings directly. The
 host Boards declare `real-time-clock` (RX8130CE at `32h`), `power-monitor`
 (INA226 at `40h`, 5 mΩ shunt), and `touch` (CST816T at `15h`, interrupt on
-`GPIO16`) on `I2C2` (`GPIO8`/`GPIO9`, 400 kHz), and `display`, a 320×240
-ILI9342C on `SPI0` (`GPIO10` SCK, `GPIO11` MOSI, `GPIO12` CS, `GPIO13` D/C,
-`GPIO14` reset, `GPIO15` backlight). Their models are ordinary attached
+`GPIO16`) on `I2C2` (`GPIO8`/`GPIO9`, 400 kHz), and `display`, the
+ESP-VoCat's round 360×360 ST77916 on quad SPI `SPI0` (`GPIO10` SCK,
+`GPIO11`/`GPIO17`/`GPIO18`/`GPIO19` data, `GPIO12` CS, `GPIO13` D/C, `GPIO14`
+reset, `GPIO15` backlight, `GPIO20` power), so the host shows the device UI
+as the round boards do. Their models are ordinary attached
 devices: the manager reads and writes their registers, injects faults at
 their addresses, and records their transactions and datasheet violations,
 which the System also logs as warnings. `buses` names the peripheral of each
@@ -59,7 +62,8 @@ I2C device, `displays` that of each panel, and `reset` keeps them all.
 The control port also answers HTTP. Open `http://<BARRACUDA_VIRTUAL_IO_ADDR>/`
 in a browser, such as `http://127.0.0.1:7878/`, to see every display panel as
 its driver drew it; the page redraws when a panel changes and shows a panel
-that is off, asleep, or not yet initialized as dark. Clicking or dragging on a
+that is off, asleep, or not yet initialized as dark, and a round panel as a
+circle. Clicking or dragging on a
 panel touches it through the Board's CST816T: the page writes the finger
 position to the touch model's backdoor, and the System reads it like a real
 touch, so a click taps, a drag swipes, and holding the button still

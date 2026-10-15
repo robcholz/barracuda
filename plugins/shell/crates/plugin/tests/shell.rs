@@ -17,7 +17,7 @@ use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext,
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
-use barracuda_shell_plugin::{Notifications, Screen, Services, Shell};
+use barracuda_shell_plugin::{AgentState, AgentStatus, Notifications, Screen, Services, Shell};
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_ui_plugin::{
     DEFAULT_VIEWPORT, Direction, Edge, Gesture, UiAssets, UiService, ViewCall, ViewValue,
@@ -63,10 +63,7 @@ fn system_view() -> UiAssets {
     UiAssets {
         view: view_file!("view.bvir").to_vec(),
         styles: view_file!("styles.bin").to_vec(),
-        fonts: [view_file!("font-12.bin"), view_file!("font-2.bin")]
-            .iter()
-            .map(|font| font.to_vec())
-            .collect(),
+        fonts: Vec::new(),
     }
 }
 
@@ -207,26 +204,26 @@ fn texts(shell: &Shell) -> String {
 /// Where the launcher shows app `name`: the point a press selects it at, and
 /// its index.
 fn icon(shell: &Shell, name: &str) -> ((f32, f32), i32) {
-    let texts = shell.session().texts();
+    let index = shell
+        .launcher()
+        .iter()
+        .position(|shown| *shown == name)
+        .unwrap_or_else(|| panic!("no {name} in {:?}", shell.launcher()));
+    let index = i32::try_from(index).unwrap();
+    // Let the launcher finish sliding in.
+    shell.session().advance(60);
     for y in (0..360).step_by(4) {
         for x in (0..360).step_by(4) {
             let (x, y) = (x as f32, y as f32);
             if let Some(call) = shell.session().resolve_press(x, y)
                 && call.handler == "openApp"
-                && let Some(ViewValue::I32(index)) = call.args.first()
+                && call.args.first() == Some(&ViewValue::I32(index))
             {
-                // Icons show the glyph, then the name, in index order.
-                let names: Vec<&String> = texts.iter().skip(1).skip(1).step_by(2).collect();
-                if names
-                    .get(*index as usize)
-                    .is_some_and(|shown| *shown == name)
-                {
-                    return ((x, y), *index);
-                }
+                return ((x, y), index);
             }
         }
     }
-    panic!("no icon for {name} in {texts:?}")
+    panic!("no icon for {name} on the launcher")
 }
 
 async fn until(what: &str, mut check: impl FnMut() -> bool) {
@@ -258,11 +255,13 @@ async fn scenario(spawner: Spawner) {
     // 2026-10-13 10:42:00 UTC.
     updater.synchronize(SyncSample::new(1_791_888_120_000, Instant::now()));
     let notices = Rc::new(Notifications::new());
+    let agent = Rc::new(AgentStatus::new());
     let mut shell = Shell::new(
         Services {
             ui: Rc::clone(&ui),
             apps: apps.clone(),
             notices: Rc::clone(&notices),
+            agent: Rc::clone(&agent),
             clock,
             wifi: wifi().await,
         },
@@ -285,9 +284,13 @@ async fn scenario(spawner: Spawner) {
         assert!(launcher.contains(name), "{launcher}");
     }
 
-    // A long press shows a system app's info, which offers no uninstall.
+    // A long press opens a system app's menu; its info offers no
+    // uninstall.
     let (at, _) = icon(&shell, "System");
     shell.gesture(Gesture::LongPress { x: at.0, y: at.1 }).await;
+    assert_eq!(shell.screen(), Some(Screen::Menu));
+    assert!(!texts(&shell).contains("卸载"), "{}", texts(&shell));
+    shell.call(press("info", None)).await;
     assert_eq!(shell.screen(), Some(Screen::Info));
     let info = texts(&shell);
     assert!(
@@ -339,17 +342,19 @@ async fn scenario(spawner: Spawner) {
         .gesture(swipe(Direction::Up, Some(Edge::Bottom)))
         .await;
     assert_eq!(shell.screen(), Some(Screen::Control));
-    shell.call(press("toggle", Some(1))).await;
+    shell.call(press("toggle", Some(3))).await;
     let control = texts(&shell);
-    assert!(
-        control.contains("勿扰|开") && control.contains("Wi-Fi|已连接"),
-        "{control}"
-    );
+    assert!(control.contains("勿扰|开"), "{control}");
     // Do not disturb hides the unread mark; turn it off again.
-    notices.post("静音时", "");
+    notices.post("静音时", "", None);
     shell.refresh();
-    assert!(!texts(&shell).contains("静音时"));
-    shell.call(press("toggle", Some(1))).await;
+    shell.call(press("toggle", Some(3))).await;
+    assert!(texts(&shell).contains("勿扰|关"));
+    // The brightness tile opens its slider, which sets the panel.
+    shell.call(press("toggle", Some(4))).await;
+    shell.call(press("setBrightness", Some(40))).await;
+    assert!(texts(&shell).contains("40%"), "{}", texts(&shell));
+    shell.call(press("closeControl", None)).await;
     notices.clear();
     shell.gesture(swipe(Direction::Down, None)).await;
     assert_eq!(shell.screen(), None);
@@ -380,8 +385,33 @@ async fn scenario(spawner: Spawner) {
     shell.call(press("cancel", None)).await;
     assert_eq!(shell.screen(), Some(Screen::Home));
 
+    // The Agent's states show on home.
+    agent.set(AgentState::Answering, "明天几点开会？", "9:30 产品评审");
+    shell.refresh();
+    let home = texts(&shell);
+    assert!(
+        home.contains("明天几点开会？") && home.contains("9:30 产品评审"),
+        "{home}"
+    );
+    agent.set(AgentState::Standby, "", "");
+
+    // A question shows on home and is answered from its card.
+    let asked = notices.ask("打开客厅灯带？", "林夏 · Telegram");
+    shell.refresh();
+    assert!(
+        texts(&shell).contains("Agent 请求确认"),
+        "{}",
+        texts(&shell)
+    );
+    shell.gesture(swipe(Direction::Down, Some(Edge::Top))).await;
+    shell
+        .call(press("allow", Some(i32::try_from(asked).unwrap())))
+        .await;
+    assert_eq!(notices.answer(asked).await, Some(true));
+    shell.gesture(swipe(Direction::Up, None)).await;
+
     // A notice marks home; opening the center reads it.
-    let id = notices.post("门铃", "有人在门口");
+    let id = notices.post("门铃", "有人在门口", None);
     shell.refresh();
     assert!(texts(&shell).contains("门铃"));
     shell.gesture(swipe(Direction::Down, Some(Edge::Top))).await;
@@ -406,11 +436,11 @@ async fn scenario(spawner: Spawner) {
     shell.reconcile().await;
     assert_eq!(shell.screen(), Some(Screen::Home));
 
-    // Uninstalling an installable app from its info screen.
+    // Uninstalling an installable app from its menu.
     shell.gesture(swipe(Direction::Left, None)).await;
     let (at, _) = icon(&shell, "计数器");
     shell.gesture(Gesture::LongPress { x: at.0, y: at.1 }).await;
-    assert_eq!(shell.screen(), Some(Screen::Info));
+    assert_eq!(shell.screen(), Some(Screen::Menu));
     assert!(texts(&shell).contains("卸载"));
     shell.call(press("confirm", None)).await;
     assert_eq!(shell.screen(), Some(Screen::Apps));

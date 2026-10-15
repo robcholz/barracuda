@@ -15,6 +15,7 @@
 
 extern crate alloc;
 
+mod agent;
 mod notices;
 mod shell;
 mod words;
@@ -32,9 +33,10 @@ use barracuda_ui_plugin::{UiAssets, UiService};
 use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_wifi_plugin::WifiControl;
 use barracuda_workflow_plugin::WorkflowActionRegistry;
-use embassy_futures::select::{Either4, select, select4};
+use embassy_futures::select::{Either4, select, select3, select4};
 use embassy_time::{Duration, Timer};
 
+pub use agent::{AgentState, AgentStatus};
 pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
 pub use shell::{Screen, Services, Shell};
 
@@ -43,8 +45,8 @@ pub const VIEW_DIR: &str = "/resources/view";
 /// How often the status bar's clock is redrawn.
 const CLOCK_PERIOD: Duration = Duration::from_secs(15);
 
-/// Publishes [`Notifications`] and the `shell.notify` Workflow Action, and
-/// runs the system UI.
+/// Publishes [`Notifications`], [`AgentStatus`], and the `shell.*` Workflow
+/// Actions, and runs the system UI.
 #[barracuda_plugin::macros::plugin]
 pub struct ShellPlugin {
     runtime: Option<(ScopedVfs, Services)>,
@@ -88,16 +90,21 @@ impl Plugin for ShellPlugin {
         let clock = context.require::<UtcClock>("time")?;
         let wifi = context.require::<WifiControl>("wifi")?;
         let notices = Rc::new(Notifications::new());
-        context.retain(
-            workflow::register_actions(&actions, &notices).map_err(PluginError::registration)?,
-        );
+        let agent = Rc::new(AgentStatus::new());
+        for registration in workflow::register_actions(&actions, &notices, &agent)
+            .map_err(PluginError::registration)?
+        {
+            context.retain(registration);
+        }
         context.provide(Rc::clone(&notices))?;
+        context.provide(Rc::clone(&agent))?;
         self.runtime = Some((
             filesystem,
             Services {
                 ui,
                 apps: (*apps).clone(),
                 notices,
+                agent,
                 clock,
                 wifi,
             },
@@ -137,6 +144,7 @@ async fn run(filesystem: &ScopedVfs, services: Services) {
     let ui = Rc::clone(&services.ui);
     let apps = services.apps.clone();
     let notices = Rc::clone(&services.notices);
+    let agent = Rc::clone(&services.agent);
     let mut shell = match Shell::new(services, &assets).await {
         Ok(shell) => shell,
         Err(error) => {
@@ -146,11 +154,14 @@ async fn run(filesystem: &ScopedVfs, services: Services) {
     };
     let channel = shell.session().channel().clone();
     loop {
+        let tick = shell
+            .next_expiry()
+            .map_or(CLOCK_PERIOD, |expiry| expiry.min(CLOCK_PERIOD));
         let event = select4(
             ui.next_gesture(),
             channel.next(),
             apps.changed(),
-            select(notices.changed(), Timer::after(CLOCK_PERIOD)),
+            select3(notices.changed(), agent.changed(), Timer::after(tick)),
         )
         .await;
         match event {

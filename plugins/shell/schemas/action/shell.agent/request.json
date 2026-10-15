@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "enum": [
+        "standby",
+        "listening",
+        "thinking",
+        "answering"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "answer": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "additionalProperties": false
+}

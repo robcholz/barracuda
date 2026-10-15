@@ -109,7 +109,7 @@ impl MipiDbiPanelModel {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    fn command(&mut self, context: &mut DeviceContext<'_>, command: u8) {
+    pub(crate) fn command(&mut self, context: &mut DeviceContext<'_>, command: u8) {
         self.command = Some(command);
         self.parameters.clear();
         self.half_pixel = None;
@@ -140,7 +140,7 @@ impl MipiDbiPanelModel {
         self.changed();
     }
 
-    fn data(&mut self, context: &mut DeviceContext<'_>, bytes: &[u8]) {
+    pub(crate) fn data(&mut self, context: &mut DeviceContext<'_>, bytes: &[u8]) {
         match self.command {
             Some(dcs::WRITE_MEMORY_START | dcs::WRITE_MEMORY_CONTINUE) => {
                 self.pixels(context, bytes);
@@ -299,6 +299,7 @@ impl SpiDevice for MipiDbiPanelModel {
             width,
             height,
             visible: self.on && !self.sleeping,
+            round: false,
             revision: self.revision,
             pixels: self.pixels.iter().map(|pixel| self.shown(*pixel)).collect(),
         })

@@ -125,6 +125,10 @@ impl UserData for AppHandle {
             app.port.set_every(every);
             Some(Ok(true))
         });
+        methods.add_method("set_depth", |app, depth: i64| {
+            app.port.set_depth(u32::try_from(depth).unwrap_or(0));
+            Some(Ok(true))
+        });
         methods.add_method("exit", |app, (): ()| {
             app.port.end();
             None::<Result<()>>
@@ -339,6 +343,13 @@ function app.__bind(ticket)
   end
 
   function app.exit() handle:exit() end
+
+  function app.navigation(depth)
+    if math.type(depth) ~= "integer" or depth < 0 then
+      error("depth is a whole number of pages", 2)
+    end
+    handle:set_depth(depth)
+  end
 
   local function decoded(json, message)
     if json ~= nil then return decode(json) end

@@ -16,6 +16,7 @@ portable-atomic.workspace = true
 portable-atomic-util.workspace = true
 barracuda-plugin.workspace = true
 barracuda-ui-runtime = { path = "../runtime" }
+barracuda-vfs.workspace = true
 critical-section = "1"
 embassy-executor.workspace = true
 embassy-futures.workspace = true

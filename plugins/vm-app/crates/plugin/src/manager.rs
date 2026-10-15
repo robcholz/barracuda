@@ -431,6 +431,8 @@ impl AppManager {
             self.home();
         }
         let index = self.free_slot()?;
+        // Views draw with the system fonts, which load at start.
+        self.inner.ui.ready().await;
         let session = match &bundle.view {
             Some(view) => Some(self.inner.ui.open(view).map_err(|error| {
                 log::warn!("app: {id}: {error}");
@@ -600,6 +602,30 @@ impl AppManager {
         drop(state);
         self.wake(index);
         Some(public)
+    }
+
+    /// Goes back one step: the foreground app pops a page with `app:back`
+    /// when it has one open above its first (see `app.navigation`), and
+    /// otherwise moves to the background as with [`AppManager::home`].
+    /// Returns whether the app went back a page.
+    pub fn back(&self) -> bool {
+        {
+            let mut state = self.inner.state.borrow_mut();
+            let Some(index) = state.foreground else {
+                return false;
+            };
+            if let Some(running) = state.running(index)
+                && running.state == AppState::Active
+                && running.port.depth() > 0
+            {
+                running
+                    .port
+                    .transition(AppState::Active, &[Lifecycle::Back]);
+                return true;
+            }
+        }
+        self.home();
+        false
     }
 
     /// Lets the foreground app take input, or stops it while an overlay such

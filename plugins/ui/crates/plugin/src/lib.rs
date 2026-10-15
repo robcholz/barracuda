@@ -20,6 +20,7 @@ mod config {
 
 mod datum;
 mod gesture;
+pub mod icons;
 mod mailbox;
 mod screen;
 mod service;
@@ -33,8 +34,10 @@ use barracuda_board_hal::display::{Display, DisplayPeripheral};
 use barracuda_board_hal::touch::{Touch, TouchPeripheral};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
-    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
+    Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
+    PluginStartContext, PluginTaskToken,
 };
+use barracuda_vfs::ScopedVfs;
 use core::{future::Future, pin::Pin};
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
@@ -49,6 +52,8 @@ pub use view::{MAX_ARRAY_ITEMS, ViewCall, ViewChannel, ViewError, ViewNext};
 
 /// How often the task steps an animating view and polls touch.
 const FRAME: Duration = Duration::from_micros(16_667);
+/// Where the system fonts live in this Plugin's filesystem.
+pub const SYSTEM_FONTS: &str = "/resources/fonts";
 
 /// Publishes [`UiService`] and drives the display and touch input it claims.
 #[barracuda_plugin::macros::plugin]
@@ -60,6 +65,7 @@ pub struct UiPlugin<Panel, Input> {
 
 struct UiRuntime<Panel, Input> {
     service: Rc<UiService>,
+    filesystem: ScopedVfs,
     screen: Option<Screen<Panel>>,
     pointer: Option<Pointer<Input>>,
     recognizer: Recognizer,
@@ -100,6 +106,9 @@ where
     Panel: Display + 'static,
     Input: Touch + 'static,
 {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
@@ -110,10 +119,11 @@ where
         let screen = self.display.take().map(Screen::new);
         let viewport = screen.as_ref().map_or(DEFAULT_VIEWPORT, Screen::viewport);
         let pointer = self.touch.take().map(|touch| Pointer::new(touch, viewport));
-        let service = Rc::new(UiService::new(viewport));
+        let service = Rc::new(UiService::loading(viewport));
         context.provide(Rc::clone(&service))?;
         self.runtime = Some(UiRuntime {
             service,
+            filesystem: context.filesystem()?.clone(),
             screen,
             pointer,
             recognizer: Recognizer::new(viewport),
@@ -152,6 +162,7 @@ async fn run<Panel: Display, Input: Touch>(
 ) {
     let service = Rc::clone(&runtime.service);
     let work = async {
+        service.set_system_fonts(system_fonts(&runtime.filesystem).await);
         let mut animating = false;
         loop {
             // Touch is read while anything is on the display, and until a
@@ -184,4 +195,28 @@ async fn run<Panel: Display, Input: Touch>(
     };
     select(cancellation.cancelled(), work).await;
     service.close_all();
+}
+
+/// Reads every system font atlas; a missing or unreadable one is left out.
+async fn system_fonts(filesystem: &ScopedVfs) -> alloc::vec::Vec<alloc::vec::Vec<u8>> {
+    let mut names = match filesystem.list_dir(SYSTEM_FONTS).await {
+        Ok(names) => names,
+        Err(error) => {
+            log::warn!("ui: no system fonts under {SYSTEM_FONTS}: {error:?}");
+            return alloc::vec::Vec::new();
+        }
+    };
+    names.retain(|name| name.starts_with("font-") && name.ends_with(".bin"));
+    names.sort_unstable();
+    let mut fonts = alloc::vec::Vec::with_capacity(names.len());
+    for name in names {
+        match filesystem
+            .read(&alloc::format!("{SYSTEM_FONTS}/{name}"))
+            .await
+        {
+            Ok(font) => fonts.push(font),
+            Err(error) => log::warn!("ui: cannot read system font {name}: {error:?}"),
+        }
+    }
+    fonts
 }

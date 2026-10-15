@@ -1,0 +1,7 @@
+# Directories, relative to the repository root, whose sources hold the text
+# the system fonts must cover, and the file extensions to read there.
+plugins/shell/resources/view .tsx
+plugins/shell/crates/plugin/src .rs
+plugins/vm-app/resources/apps .tsx .lua .json
+plugins/vm-app/resources/examples .tsx .lua .json
+plugins/vm-system/crates .rs

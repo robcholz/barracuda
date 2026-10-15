@@ -2,5 +2,6 @@
   "format": 1,
   "id": "settings",
   "name": "设置",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "icon": "settings"
 }

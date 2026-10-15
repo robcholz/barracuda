@@ -53,6 +53,9 @@ pub struct Frame {
     pub height: u16,
     /// Whether the panel shows anything: on, awake, and backlit.
     pub visible: bool,
+    /// Whether the glass is round, showing only the circle inscribed in the
+    /// addressed square.
+    pub round: bool,
     /// Changes whenever the picture or `visible` changes.
     pub revision: u64,
     /// Row-major RGB565 pixels as they appear, after the panel's color order

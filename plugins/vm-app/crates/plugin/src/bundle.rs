@@ -108,6 +108,9 @@ pub struct AppInfo {
     /// The Lua packages the manifest asks for besides `app`. Only an
     /// installable app is limited to them.
     pub permissions: Vec<String>,
+    /// The name of the system icon the app is shown with, if it picked one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -145,6 +148,8 @@ struct Manifest {
     view: Option<ViewFiles>,
     #[serde(default)]
     permissions: Vec<String>,
+    #[serde(default)]
+    icon: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -314,6 +319,7 @@ async fn read_container(
                 .into_iter()
                 .filter(|permission| permission != APP_PACKAGE)
                 .collect(),
+            icon: manifest.icon,
         },
         dir,
         entry,

@@ -14,7 +14,7 @@ hal:
   # Virtual hardware from platforms/virtual-io: pins GPIO0..GPIO23, the I2C
   # controllers below, and SPI controllers SPI0 and SPI1, controlled through
   # BARRACUDA_VIRTUAL_IO_ADDR.
-  bindings: [digital-input, digital-output, gpio, spi-device, i2c-device]
+  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, i2c-device]
   runtime-i2c-controllers: [I2C0, I2C1, I2C2]
   # Every Board-declared peripheral gets its chip's virtual device model.
   peripheral-models: true

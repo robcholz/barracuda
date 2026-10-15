@@ -47,6 +47,7 @@ pub(crate) enum Lifecycle {
     Background,
     Foreground,
     Terminate,
+    Back,
 }
 
 impl Lifecycle {
@@ -57,6 +58,7 @@ impl Lifecycle {
             Lifecycle::Background => "app:background",
             Lifecycle::Foreground => "app:foreground",
             Lifecycle::Terminate => "app:terminate",
+            Lifecycle::Back => "app:back",
         }
     }
 }
@@ -77,6 +79,8 @@ struct PortState {
     ended: bool,
     every: Option<Duration>,
     next_tick: Option<Instant>,
+    /// Pages the app has open above its first; a back gesture pops one.
+    depth: u32,
 }
 
 pub(crate) struct Port {
@@ -111,6 +115,7 @@ impl Port {
                 ended: false,
                 every: None,
                 next_tick: None,
+                depth: 0,
             })),
         }
     }
@@ -146,6 +151,16 @@ impl Port {
         if let Some(view) = &self.view {
             view.close();
         }
+    }
+
+    /// Records how many pages the app has open above its first.
+    pub(crate) fn set_depth(&self, depth: u32) {
+        self.with(|port| port.depth = depth);
+    }
+
+    /// Pages the app has open above its first.
+    pub(crate) fn depth(&self) -> u32 {
+        self.with(|port| port.depth)
     }
 
     /// Delivers `app:tick` every `every`, starting one interval from now.
