@@ -8,6 +8,7 @@
 
 use crate::agent::{AgentState, AgentStatus};
 use crate::notices::Notifications;
+use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_app_plugin::{
@@ -30,11 +31,14 @@ const TILE_QUIET: usize = 3;
 const TILE_BRIGHTNESS: usize = 4;
 const TILE_PORTAL: usize = 5;
 /// The control center's views: the tiles, the brightness bar, the portal.
+/// The system apps first on the launcher, in this order; installed apps,
+/// then offered ones, follow.
+const LAUNCHER_ORDER: [&str; 4] = ["sessions", "workflow", "files", "settings"];
+
 const CONTROL_TILES: i32 = 0;
 const CONTROL_BRIGHTNESS: i32 = 1;
 const CONTROL_PORTAL: i32 = 2;
 /// Brightness when the system starts, in percent.
-const DEFAULT_BRIGHTNESS: i32 = 70;
 /// The brightness bar's inner height in pixels.
 const BRIGHTNESS_BAR: i32 = 158;
 /// How long an answered or allowed result stays on screen.
@@ -115,19 +119,12 @@ pub struct Services {
     pub notices: Rc<Notifications>,
     /// The Agent's state on the home screen.
     pub agent: Rc<AgentStatus>,
+    /// The settings the control center switches.
+    pub preferences: Rc<Preferences>,
     /// The time on the status bar.
     pub clock: Rc<UtcClock>,
     /// Network status and the portal's access point.
     pub wifi: Rc<WifiControl>,
-}
-
-/// System settings the control center switches.
-#[derive(Clone, Copy, Debug)]
-struct Switches {
-    microphone: bool,
-    muted: bool,
-    quiet: bool,
-    brightness: i32,
 }
 
 /// The system UI's state.
@@ -150,7 +147,6 @@ pub struct Shell {
     exit_seen: Option<u32>,
     /// The foreground app as last seen.
     foreground: Option<String>,
-    switches: Switches,
     /// The latest answered question, shown in the notification center and
     /// on the home screen for a while.
     done: Option<(String, Instant)>,
@@ -167,9 +163,6 @@ impl Shell {
     pub async fn new(services: Services, assets: &UiAssets) -> Result<Self, UiError> {
         services.ui.ready().await;
         let session = services.ui.open_on(Layer::System, assets)?;
-        services
-            .ui
-            .set_brightness(percent_to_level(DEFAULT_BRIGHTNESS));
         let mut shell = Self {
             services,
             session,
@@ -182,15 +175,10 @@ impl Shell {
             exit_reason: "",
             exit_seen: None,
             foreground: None,
-            switches: Switches {
-                microphone: true,
-                muted: false,
-                quiet: false,
-                brightness: DEFAULT_BRIGHTNESS,
-            },
             done: None,
             answered: None,
         };
+        shell.apply_preferences();
         shell.reload().await;
         shell.reconcile().await;
         if shell.screen.is_none() && shell.foreground.is_none() {
@@ -209,6 +197,22 @@ impl Shell {
     #[must_use]
     pub const fn session(&self) -> &UiSession {
         &self.session
+    }
+
+    /// Applies changed preferences to the display and redraws.
+    pub fn preferences_changed(&mut self) {
+        self.apply_preferences();
+        self.render();
+    }
+
+    /// Puts the brightness and screen timeout on the display.
+    fn apply_preferences(&self) {
+        let values = self.services.preferences.get();
+        let ui = &self.services.ui;
+        ui.set_brightness(percent_to_level(i32::from(values.brightness)));
+        ui.set_screen_timeout(
+            (values.screen_off != 0).then(|| Duration::from_secs(u64::from(values.screen_off))),
+        );
     }
 
     /// The launcher's app names, in the order `openApp` indexes them.
@@ -235,6 +239,17 @@ impl Shell {
                 offered: true,
             }))
             .collect();
+        self.entries.sort_by_key(|entry| {
+            let place = LAUNCHER_ORDER
+                .iter()
+                .position(|id| *id == entry.info.id)
+                .unwrap_or(LAUNCHER_ORDER.len());
+            match (entry.info.kind, entry.offered) {
+                (AppKind::System, _) => place,
+                (_, false) => LAUNCHER_ORDER.len() + 1,
+                (_, true) => LAUNCHER_ORDER.len() + 2,
+            }
+        });
     }
 
     /// Puts `screen` on the display, or uncovers the foreground app.
@@ -407,11 +422,11 @@ impl Shell {
             }
             "toggle" => self.toggle(selected).await,
             "setBrightness" => {
-                if let Some(level) = selected.and_then(|level| i32::try_from(level).ok()) {
-                    self.switches.brightness = level.clamp(10, 100);
+                if let Some(level) = selected.and_then(|level| u8::try_from(level.min(100)).ok()) {
                     self.services
-                        .ui
-                        .set_brightness(percent_to_level(self.switches.brightness));
+                        .preferences
+                        .update(|values| values.brightness = level);
+                    self.apply_preferences();
                 }
                 self.render();
             }
@@ -439,9 +454,18 @@ impl Shell {
     async fn toggle(&mut self, tile: Option<usize>) {
         match tile {
             Some(TILE_WIFI) => self.open_system_app("settings").await,
-            Some(TILE_MIC) => self.switches.microphone = !self.switches.microphone,
-            Some(TILE_MUTE) => self.switches.muted = !self.switches.muted,
-            Some(TILE_QUIET) => self.switches.quiet = !self.switches.quiet,
+            Some(TILE_MIC) => self
+                .services
+                .preferences
+                .update(|values| values.microphone = !values.microphone),
+            Some(TILE_MUTE) => self
+                .services
+                .preferences
+                .update(|values| values.muted = !values.muted),
+            Some(TILE_QUIET) => self
+                .services
+                .preferences
+                .update(|values| values.quiet = !values.quiet),
             Some(TILE_BRIGHTNESS) => self.control = CONTROL_BRIGHTNESS,
             Some(TILE_PORTAL) => {
                 let wifi = &self.services.wifi;
@@ -681,7 +705,8 @@ impl Shell {
         };
         let now = Instant::now();
         let notices = self.services.notices.list();
-        let quiet = self.switches.quiet;
+        let preferences = self.services.preferences.get();
+        let quiet = preferences.quiet;
         let unread = self.services.notices.unread() && !quiet;
         let offline = self.offline();
         let question = notices.iter().find(|notice| notice.question);
@@ -778,23 +803,18 @@ impl Shell {
             ("Wi-Fi", network, "wifi", !offline),
             (
                 "麦克风",
-                switch(self.switches.microphone),
+                switch(preferences.microphone),
                 "mic",
-                self.switches.microphone,
+                preferences.microphone,
             ),
             (
                 "静音",
-                switch(self.switches.muted),
+                switch(preferences.muted),
                 "volume-x",
-                self.switches.muted,
+                preferences.muted,
             ),
             ("勿扰", switch(quiet), "moon", quiet),
-            (
-                "亮度",
-                format!("{}%", self.switches.brightness),
-                "sun",
-                false,
-            ),
+            ("亮度", format!("{}%", preferences.brightness), "sun", false),
             (
                 "门户",
                 switch(self.portal_open()),
@@ -921,10 +941,13 @@ impl Shell {
                 ),
             ),
             ("control", ViewValue::I32(self.control)),
-            ("brightness", ViewValue::I32(self.switches.brightness)),
+            (
+                "brightness",
+                ViewValue::I32(i32::from(preferences.brightness)),
+            ),
             (
                 "brightnessFill",
-                ViewValue::I32(self.switches.brightness * BRIGHTNESS_BAR / 100),
+                ViewValue::I32(i32::from(preferences.brightness) * BRIGHTNESS_BAR / 100),
             ),
             (
                 "portal",

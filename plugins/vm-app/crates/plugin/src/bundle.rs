@@ -25,6 +25,9 @@ pub const WORKSPACE_APPS: &str = "/workspace/media/apps";
 pub const MAX_PERMISSIONS: usize = 16;
 /// The package every app program uses, granted without being asked for.
 pub const APP_PACKAGE: &str = "app";
+/// The package that runs the device's settings, granted only to system apps:
+/// an installable app that asks for it is not valid.
+pub const SYSTEM_PACKAGE: &str = "system";
 
 /// The manifest file at the root of every container.
 pub const MANIFEST_FILE: &str = "app.json";
@@ -286,6 +289,11 @@ async fn read_container(
         if manifest.permissions[..index].contains(permission) {
             return Err(invalid(format!(
                 "{MANIFEST_FILE}: permission \"{permission}\" is listed twice"
+            )));
+        }
+        if permission == SYSTEM_PACKAGE && location.kind() == AppKind::Installable {
+            return Err(invalid(format!(
+                "{MANIFEST_FILE}: permission \"{SYSTEM_PACKAGE}\" is only for system apps"
             )));
         }
     }

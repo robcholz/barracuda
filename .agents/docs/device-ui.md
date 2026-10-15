@@ -12,10 +12,10 @@ the Plugins' docs.
 | What it is | native Rust in the `shell` Plugin | an app container in the image | an app container the person installed |
 | Where it lives | the firmware and the `shell` Plugin's `/resources/view` | the `app` Plugin's `/resources/apps/<id>` | the `app` Plugin's `/media/apps/<id>` |
 | Runs as | the `shell` task | a Lua run with a MicroTS view, under the `app` lifecycle | the same |
-| Lua packages | none | every registered package | `app` and the permissions it asked for at install |
+| Lua packages | none | every registered package, `system` included | `app` and the permissions it asked for at install; never `system` |
 | Removable | no | no; only app info | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
-| Examples | home, launcher, switcher, notification and control centers, launching, exited, install, app info | 设置 (Settings); planned: 会话, 工作流, 文件 | 计数器, 空气质量, 灯带 |
+| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | 会话 (Sessions), 工作流 (Workflows), 文件 (Files), 设置 (Settings) | 空气质量, 灯带, 相机, 计数器 |
 
 ## Deciding the layer
 
@@ -52,8 +52,20 @@ take the person's way out.
 
 Notices reach the person through the system's notification center, which
 any Plugin posts to with the `shell` Plugin's `Notifications` capability and
-Workflows with `shell.notify`. An app never draws over another app or over
-the system.
+Workflows with `shell.notify`. A question that needs the person's answer
+(`Notifications::ask`, `shell.confirm`) is listed first and shows on the home
+screen until answered. The home screen also shows the Agent's state
+(standby, listening, thinking, answering) from `AgentStatus` or
+`shell.agent`. An app never draws over another app or over the system.
+
+The device's settings (brightness, volume, mute, microphone, do not disturb,
+and the screen timeout) are the `shell` Plugin's `Preferences`: the control
+center and the Settings system app change the same values, the shell applies
+brightness and the timeout to the display, and keeps them across restarts.
+
+A right swipe over an app is back: an app that reported pages with
+`app.navigation(depth)` receives `app:back` while its depth is above zero;
+otherwise the app goes to the background and the launcher shows.
 
 ## System apps
 
@@ -64,6 +76,12 @@ same lifecycle as any app (active, inactive, background, suspended,
 terminating) and may `require` every registered Lua package without
 declaring it. No installed app may take a system app's ID, and system apps
 cannot be uninstalled.
+
+The `system` Lua package, from the `vm-system` Plugin, is what makes them
+system apps: through it they read and change the device's settings, Wi-Fi,
+apps, the Agent's conversations, Workflows, and the shared files. The `app`
+Plugin refuses an installable app whose manifest asks for `system`. A system
+app draws with the system fonts and ships no atlases of its own.
 
 ## Installable apps
 
@@ -79,10 +97,12 @@ stays until its author removes it.
 
 ## Fonts
 
-Views carry their own baked font atlases, which live on the resources
-partition and in RAM while the view is open. The system view bakes one text
-size with every character the system itself shows and the names of the
-bundled apps, and a display size with only its headline; apps bake the
-characters in their own sources. Text with characters outside an atlas
-shows a placeholder box. A shared system font is the follow-up that lets
-installable apps' names in any script show in the launcher.
+The `ui` Plugin bakes the system fonts into its `/resources/fonts`: Noto Sans
+SC at the sizes the system view and the system apps use, with every
+character in their sources, and the system icon font's glyphs at the sizes
+icons are drawn at. The 16 px regular slot is the prose slot: it also holds
+GB 2312's 3,755 common characters, so text no source names, such as an
+Agent's answer, a notice, or a conversation's title, is drawn in it. A view
+that ships no atlas for a font slot draws with the system font for it, so
+installable apps may use them too; an app that shows other characters bakes
+its own. Text with characters outside an atlas shows a placeholder box.

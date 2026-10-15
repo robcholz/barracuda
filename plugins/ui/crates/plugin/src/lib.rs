@@ -164,6 +164,12 @@ async fn run<Panel: Display, Input: Touch>(
     let work = async {
         service.set_system_fonts(system_fonts(&runtime.filesystem).await);
         let mut animating = false;
+        // The brightness the person picked, put back when the screen wakes.
+        let mut level = u8::MAX;
+        let mut last_touch = Instant::now();
+        let mut asleep = false;
+        // A contact that woke the screen, ignored until it ends.
+        let mut waking = false;
         loop {
             // Touch is read while anything is on the display, and until a
             // contact that began ends.
@@ -175,19 +181,49 @@ async fn run<Panel: Display, Input: Touch>(
                 service.changed().await;
             }
             service.pump();
+            let mut wake = service.take_wake();
             if let Some(pointer) = runtime.pointer.as_mut() {
                 let point = pointer.poll();
-                match runtime.recognizer.sample(point, Instant::now().as_millis()) {
-                    Some(Touched::Tap(x, y)) => {
-                        let _handler = service.press_shown(x, y);
+                if point.is_some() {
+                    last_touch = Instant::now();
+                    if asleep {
+                        wake = true;
+                        waking = true;
                     }
-                    Some(Touched::Gesture(gesture)) => service.post_gesture(gesture),
-                    None => {}
                 }
+                if waking {
+                    waking = point.is_some();
+                } else {
+                    match runtime.recognizer.sample(point, Instant::now().as_millis()) {
+                        Some(Touched::Tap(x, y)) => {
+                            let _handler = service.press_shown(x, y);
+                        }
+                        Some(Touched::Gesture(gesture)) => service.post_gesture(gesture),
+                        None => {}
+                    }
+                }
+            }
+            if wake {
+                last_touch = Instant::now();
             }
             if let Some(screen) = runtime.screen.as_mut() {
                 if let Some(brightness) = service.take_brightness() {
-                    screen.set_brightness(brightness).await;
+                    level = brightness;
+                    if !asleep {
+                        screen.set_brightness(level).await;
+                    }
+                }
+                if asleep && wake {
+                    asleep = false;
+                    screen.set_brightness(level).await;
+                } else if !asleep
+                    && runtime.pointer.is_some()
+                    && service
+                        .screen_timeout()
+                        .is_some_and(|timeout| last_touch.elapsed() >= timeout)
+                {
+                    asleep = true;
+                    screen.set_brightness(0).await;
                 }
                 animating = screen.refresh(&service).await;
             }

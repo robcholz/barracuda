@@ -5,3 +5,4 @@ enable:
   - app
   - shell
   - ui
+  - vm-system

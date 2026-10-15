@@ -64,6 +64,7 @@ Other files are ignored. Directories whose names start with `.` are skipped.
 | `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; equal to the directory name      |
 | `name`         | yes      | display name, 1–64 characters                               |
 | `version`      | yes      | the author's version string, 1–32 characters                |
+| `icon`         | no       | a system icon's name, such as `lamp`, shown on the launcher; without one it shows the name's first character |
 | `entry`        | no       | the Lua program to run; defaults to `main.lua`              |
 | `view`         | no       | omit for a headless app                                     |
 | `view.program` | with view | the BVIR view program                                      |
@@ -80,7 +81,8 @@ An installable app's runs can `require` only `app` and its `permissions`; a
 package it did not ask for is not there, and `require` fails. The system UI
 lists the permissions in plain words before the person installs the app. A
 system app may `require` every registered package, so its manifest needs
-none.
+none. `system`, the package that runs the device's settings, is only for
+system apps: an installable app that asks for it is not valid.
 
 A container that breaks a rule is not launchable. `app.list` reports it under
 `invalid` with the location, directory name, and the problem, for example
@@ -118,6 +120,7 @@ end
 | `app:foreground` | It came back from the background; `app:active` follows.              |
 | `app:terminate`  | It is asked to exit. Return within the grace period or be cancelled. |
 | `app:tick`       | The interval set with `app.events{ every = ms }` passed (at least 100 ms). Not delivered in the background or while suspended. |
+| `app:back`       | The person swiped back while the app reported a page deeper than its first with `app.navigation`. Show the previous page and report its depth. |
 
 After `app:background` the program must be back in `app.events()` within the
 grace period (1 s); it is then suspended: it uses no CPU, and its view tree is
@@ -136,6 +139,7 @@ Headless apps never enter the foreground. They run as services and only see
 | `app.view()` | The view, or `nil` for a headless app. |
 | `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
 | `app.exit()` | Ends the event loop. |
+| `app.navigation(depth)` | Reports how many pages deep the app is; 0, the default, is its first page. A back swipe delivers `app:back` while it is above 0, and leaves the app at 0. |
 | `view:set(name, value)` | Writes a value the view's `app.d.ts` declares; checked against its type. |
 | `view:is_open()`, `view:close()` | The view's state; closing ends view calls. |
 | `app.kv.get(key)` | The stored value, or `nil`. |
@@ -182,5 +186,7 @@ print("hello from " .. app.id .. ", run " .. runs)
 Offer it with `app.install` and `{"id":"hello"}`: the device shows the
 install screen, and once the person installs it, open it with `app.open` and
 `{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/plugin/tests/fixtures/counter/` is a
-built app with a view, ready to copy into `/workspace/media/apps/counter/`.
+`["hello from hello, run 1"]`. `crates/plugin/tests/fixtures/` holds built
+example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
+`air` (空气质量, no packages), `lamp` (灯带, `led_strip`), `camera` (相机,
+`camera`), and `counter` (计数器, no packages).

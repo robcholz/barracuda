@@ -116,16 +116,16 @@ export default function System() {
         </Show>
         <Show when={agent() === 2}>
           <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px]">
-            <Text class="text-5xl font-bold text-[#CCFF00] animate-spin">{"\uE008"}</Text>
-            <Text class="text-sm text-[#A1A1AA] mt-[16px]">{question()}</Text>
-            <Text class="text-sm text-[#A1A1AA]">思考中</Text>
+            <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px] animate-pulse">{"\uE008"}</Text>
+            <Text class="text-base text-[#A1A1AA] mt-[6px]">{question()}</Text>
+            <Text class="text-base text-[#FAFAFA]">思考中</Text>
           </View>
         </Show>
         <Show when={agent() === 3}>
           <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px] px-[56px]" focusable onPress={() => cardTap()}>
-            <Text class="text-5xl font-bold text-[#CCFF00]">{"\uE008"}</Text>
-            <Text class="text-sm text-[#A1A1AA] mt-[16px]">{question()}</Text>
-            <Text class="text-base text-[#FAFAFA] text-center mt-[6px]">{answer()}</Text>
+            <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px]">{"\uE008"}</Text>
+            <Text class="text-base text-[#A1A1AA] mt-[6px]">{question()}</Text>
+            <Text class="text-base text-[#FAFAFA] text-center mt-[4px]">{answer()}</Text>
           </View>
         </Show>
       </View>
@@ -315,7 +315,7 @@ export default function System() {
           <Show when={done() !== ""}>
             <View class="w-[252px] rounded-lg border border-[#27272A] flex-row items-center gap-2 px-[14px] py-[10px]">
               <Text class="text-base text-[#FAFAFA]">{"\uE020"}</Text>
-              <Text class="text-sm text-[#FAFAFA]">{done()}</Text>
+              <Text class="text-base text-[#FAFAFA]">{done()}</Text>
             </View>
           </Show>
           <For each={notices()} by={(notice) => notice.id}>
@@ -325,9 +325,9 @@ export default function System() {
                   <View class="flex-col px-[14px] pt-[12px] pb-[10px]">
                     <View class="flex-row items-center gap-2">
                       <Text class="text-base text-[#ED8E04]">{"\uE070"}</Text>
-                      <Text class="text-base font-bold text-[#FAFAFA]">{notice().title}</Text>
+                      <Text class="text-base text-[#FAFAFA]">{notice().title}</Text>
                     </View>
-                    <Text class="text-sm text-[#A1A1AA] mt-[4px]">{notice().body}</Text>
+                    <Text class="text-base text-[#A1A1AA] mt-[2px]">{notice().body}</Text>
                   </View>
                   <View class="w-[250px] h-[1px] bg-[#27272A]" />
                   <View class="flex-row gap-2 px-[14px] py-[10px]">
@@ -349,8 +349,8 @@ export default function System() {
                       <Text class="absolute text-sm font-bold text-[#F4F4F5]">{notice().letter}</Text>
                     </View>
                     <View class="flex-1 flex-col">
-                      <Text class="text-sm font-bold text-[#FAFAFA]">{notice().title}</Text>
-                      <Text class="text-sm text-[#A1A1AA]">{notice().body}</Text>
+                      <Text class="text-base text-[#FAFAFA]">{notice().title}</Text>
+                      <Text class="text-base text-[#A1A1AA]">{notice().body}</Text>
                     </View>
                     <View class="w-8 h-8 items-center justify-center" focusable onPress={() => dismiss(notice().id)}>
                       <Text class="text-base text-[#A1A1AA]">{"\uE0A8"}</Text>

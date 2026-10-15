@@ -17,6 +17,7 @@ extern crate alloc;
 
 mod agent;
 mod notices;
+mod preferences;
 mod shell;
 mod words;
 mod workflow;
@@ -33,20 +34,23 @@ use barracuda_ui_plugin::{UiAssets, UiService};
 use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_wifi_plugin::WifiControl;
 use barracuda_workflow_plugin::WorkflowActionRegistry;
-use embassy_futures::select::{Either4, select, select3, select4};
+use embassy_futures::select::{Either4, select, select4};
 use embassy_time::{Duration, Timer};
 
 pub use agent::{AgentState, AgentStatus};
 pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
+pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
 pub use shell::{Screen, Services, Shell};
 
 /// Where the compiled system view lives in this Plugin's filesystem.
 pub const VIEW_DIR: &str = "/resources/view";
+/// Where the preferences are kept across restarts.
+pub const PREFERENCES_FILE: &str = "/data/preferences.json";
 /// How often the status bar's clock is redrawn.
 const CLOCK_PERIOD: Duration = Duration::from_secs(15);
 
-/// Publishes [`Notifications`], [`AgentStatus`], and the `shell.*` Workflow
-/// Actions, and runs the system UI.
+/// Publishes [`Notifications`], [`AgentStatus`], [`Preferences`], and the
+/// `shell.*` Workflow Actions, and runs the system UI.
 #[barracuda_plugin::macros::plugin]
 pub struct ShellPlugin {
     runtime: Option<(ScopedVfs, Services)>,
@@ -91,6 +95,7 @@ impl Plugin for ShellPlugin {
         let wifi = context.require::<WifiControl>("wifi")?;
         let notices = Rc::new(Notifications::new());
         let agent = Rc::new(AgentStatus::new());
+        let preferences = Rc::new(Preferences::default());
         for registration in workflow::register_actions(&actions, &notices, &agent)
             .map_err(PluginError::registration)?
         {
@@ -98,6 +103,7 @@ impl Plugin for ShellPlugin {
         }
         context.provide(Rc::clone(&notices))?;
         context.provide(Rc::clone(&agent))?;
+        context.provide(Rc::clone(&preferences))?;
         self.runtime = Some((
             filesystem,
             Services {
@@ -105,6 +111,7 @@ impl Plugin for ShellPlugin {
                 apps: (*apps).clone(),
                 notices,
                 agent,
+                preferences,
                 clock,
                 wifi,
             },
@@ -141,6 +148,10 @@ async fn run(filesystem: &ScopedVfs, services: Services) {
             return;
         }
     };
+    let preferences = Rc::clone(&services.preferences);
+    if let Some(saved) = load_preferences(filesystem).await {
+        preferences.update(|values| *values = saved);
+    }
     let ui = Rc::clone(&services.ui);
     let apps = services.apps.clone();
     let notices = Rc::clone(&services.notices);
@@ -161,7 +172,12 @@ async fn run(filesystem: &ScopedVfs, services: Services) {
             ui.next_gesture(),
             channel.next(),
             apps.changed(),
-            select3(notices.changed(), agent.changed(), Timer::after(tick)),
+            select4(
+                notices.changed(),
+                agent.changed(),
+                preferences.changed(),
+                Timer::after(tick),
+            ),
         )
         .await;
         match event {
@@ -172,8 +188,30 @@ async fn run(filesystem: &ScopedVfs, services: Services) {
                 return;
             }
             Either4::Third(()) => shell.reconcile().await,
+            Either4::Fourth(Either4::Third(())) => {
+                shell.preferences_changed();
+                save_preferences(filesystem, preferences.get()).await;
+            }
             Either4::Fourth(_) => shell.refresh(),
         }
+    }
+}
+
+/// The preferences saved by an earlier run, if they can be read.
+async fn load_preferences(filesystem: &ScopedVfs) -> Option<PreferenceValues> {
+    let bytes = filesystem.read(PREFERENCES_FILE).await.ok()?;
+    serde_json::from_slice(&bytes)
+        .inspect_err(|error| log::warn!("shell: ignoring damaged preferences: {error}"))
+        .ok()
+}
+
+async fn save_preferences(filesystem: &ScopedVfs, values: PreferenceValues) {
+    let saved = match serde_json::to_vec(&values) {
+        Ok(json) => filesystem.write(PREFERENCES_FILE, &json).await,
+        Err(_) => return,
+    };
+    if let Err(error) = saved {
+        log::warn!("shell: cannot save the preferences: {error:?}");
     }
 }
 

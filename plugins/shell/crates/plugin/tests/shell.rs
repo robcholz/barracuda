@@ -17,7 +17,9 @@ use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext,
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
-use barracuda_shell_plugin::{AgentState, AgentStatus, Notifications, Screen, Services, Shell};
+use barracuda_shell_plugin::{
+    AgentState, AgentStatus, Notifications, Preferences, Screen, Services, Shell,
+};
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_ui_plugin::{
     DEFAULT_VIEWPORT, Direction, Edge, Gesture, UiAssets, UiService, ViewCall, ViewValue,
@@ -262,6 +264,7 @@ async fn scenario(spawner: Spawner) {
             apps: apps.clone(),
             notices: Rc::clone(&notices),
             agent: Rc::clone(&agent),
+            preferences: Rc::new(Preferences::default()),
             clock,
             wifi: wifi().await,
         },

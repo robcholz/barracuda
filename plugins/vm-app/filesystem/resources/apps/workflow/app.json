@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "id": "workflow",
+  "name": "工作流",
+  "version": "0.1.0",
+  "icon": "workflow",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin"
+  }
+}

@@ -2159,6 +2159,7 @@ dependencies = [
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-http-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-system-plugin",
  "barracuda-vm-systeminfo-plugin",
  "barracuda-vm-time-plugin",
  "barracuda-vm-webserver-plugin",
@@ -2720,6 +2721,35 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm-system-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-agent-plugin",
+ "barracuda-app-plugin",
+ "barracuda-platform",
+ "barracuda-plugin",
+ "barracuda-runtime-utils",
+ "barracuda-shell-plugin",
+ "barracuda-time-plugin",
+ "barracuda-ui-plugin",
+ "barracuda-vfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-wifi-plugin",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "futures-lite",
+ "futures-util",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_json",
 ]
 
 [[package]]

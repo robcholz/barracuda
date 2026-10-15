@@ -32,8 +32,16 @@ const groups = [
   { sources: join(plugin, "resources/apps"), output: join(plugin, "filesystem/resources/apps"), ownFonts: false },
   { sources: join(plugin, "resources/examples"), output: join(plugin, "crates/plugin/tests/fixtures"), ownFonts: true },
 ];
+// The system icon font, so example apps can show system icons too.
+const icons = resolve(plugin, "../ui/resources/icons/barracuda-icons.otf");
+// Font slots 24 px and larger: their size and whether they are bold.
+const DISPLAY_SLOTS: Record<number, [number, boolean]> = {
+  5: [24, false], 6: [36, false], 12: [24, true], 13: [36, true], 14: [54, false], 15: [54, true],
+};
 const { buildAot } = await import(join(pocket, "microts/compiler/aot-build.ts"));
-const { bakeAtlases } = await import(join(pocket, "framework/compiler/bake-font.ts"));
+const { bakeAtlases, bakeSlot } = await import(join(pocket, "framework/compiler/bake-font.ts"));
+const opentypeJs = (await import(join(pocket, "node_modules/opentype.js"))).default;
+const opentype = async (path: string) => opentypeJs.parse(await Bun.file(path).arrayBuffer());
 
 const strip = (value: unknown): unknown =>
   Array.isArray(value)
@@ -74,7 +82,10 @@ for (const { name, source, bundle, ownFonts } of apps) {
     cpSync(join(work, "styles.bin"), join(bundle, "styles.bin"));
     let fonts: Array<{ slot: number; bytes: Uint8Array }> = [];
     if (ownFonts) {
-      const shown = [readFileSync(join(source, "app.tsx"), "utf8"), readFileSync(join(source, entry), "utf8")].join("");
+      const sources = [readFileSync(join(source, "app.tsx"), "utf8"), readFileSync(join(source, entry), "utf8")].join("");
+      // `\uE068` and `\u{E068}` escapes name system icons, drawn from the icon font.
+      const escaped = [...sources.matchAll(/\\u\{?([0-9A-Fa-f]{4,5})\}?/g)].map((match) => String.fromCodePoint(parseInt(match[1], 16)));
+      const shown = sources + escaped.join("");
       const extraChars = [...new Set([...shown].filter((char) => char.codePointAt(0)! > 126 && !/\s/.test(char)))].join("");
       const cjk = process.env.CJK_FONT_DIR;
       if (extraChars && !cjk) {
@@ -82,7 +93,20 @@ for (const { name, source, bundle, ownFonts } of apps) {
         process.exit(1);
       }
       const faces = extraChars ? { regularTtf: join(cjk!, "NotoSansSC-Regular.otf"), boldTtf: join(cjk!, "NotoSansSC-Bold.otf") } : {};
-      fonts = await bakeAtlases({ codepoints: [], extraChars, slots: program.styles.usedFontSlots, ...faces });
+      // Display sizes (24 px and up) show numbers and icons, not prose: they
+      // hold digits, a little punctuation, and the icons, which keeps their
+      // atlases small.
+      const slots: number[] = program.styles.usedFontSlots;
+      const large = slots.filter((slot) => slot in DISPLAY_SLOTS);
+      const small = slots.filter((slot) => !(slot in DISPLAY_SLOTS));
+      if (small.length) fonts = await bakeAtlases({ codepoints: [], extraChars, slots: small, fallbackTtfs: [icons], ...faces });
+      const shownLarge = [..."0123456789 .,:%-+"].concat([...extraChars].filter((char) => char.codePointAt(0)! >= 0xe000 && char.codePointAt(0)! <= 0xf8ff));
+      for (const slot of large) {
+        const [px, bold] = DISPLAY_SLOTS[slot];
+        const face = await opentype(bold ? (faces.boldTtf ?? join(pocket, "assets/fonts/Inter-Bold.ttf")) : (faces.regularTtf ?? join(pocket, "assets/fonts/Inter-Regular.ttf")));
+        const codepoints = [...new Set(shownLarge.map((char) => char.codePointAt(0)!))].sort((a, b) => a - b);
+        fonts.push(bakeSlot(face, slot, px, bold, codepoints, 1, [await opentype(icons)]));
+      }
       fonts.sort((left, right) => left.slot - right.slot);
       for (const font of fonts) writeFileSync(join(bundle, `font-${font.slot}.bin`), font.bytes);
     }

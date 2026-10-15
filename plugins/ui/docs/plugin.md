@@ -17,7 +17,7 @@ system UI navigates by.
 - Web: none
 - Tasks: one UI task that applies owners' writes to open views, draws the
   shown view, polls touch, and recognizes gestures
-- Storage: none
+- Storage: reads the system fonts from its private `/resources/fonts`
 
 The Plugin runs compiled MicroTS views. A view is a BVIR program
 (`view.bvir`), its compiled stylesheet (`styles.bin`) and baked font atlases
@@ -70,6 +70,10 @@ the app's owner taking its view down. A display with no view on either layer
 is blank. `UiService::showing` reports what is on the display, and
 `UiService::set_brightness` sets the panel's brightness.
 
+`UiService::set_screen_timeout` turns the panel off after a time without a
+touch, on Boards with touch; the touch that turns it back on reaches no view
+and makes no gesture. `UiService::wake` turns it on from code.
+
 Only what changed is drawn. After each change the task asks the PocketJS damage
 tracker which regions of the view's DrawList differ from the last frame,
 rasterizes them as RGB565, the display API's pixel format, in strips of 16
@@ -96,7 +100,26 @@ there would make without delivering it.
 
 Handler calls from taps arrive through the view's channel as from
 `UiSession::press_at`, which presses from code and works without a display.
-`UiSession::texts` reads a view's text the same way.
+`UiSession::texts` reads a view's text the same way, and
+`UiSession::advance` steps its transitions as the display would.
+
+## Fonts and icons
+
+The system fonts are font atlases the task reads from `/resources/fonts`
+(`SYSTEM_FONTS`) before the first view opens; `UiService::ready` waits for
+them. A view that ships no atlas for a font slot draws with the system font
+for it, so the system UI and the system apps share one set and ship none.
+`resources/fonts/build.ts` bakes them from Noto Sans SC: ASCII and every
+character in the sources `sources.txt` names at the text sizes, GB 2312's
+3,755 common characters at 16 px regular for prose no source names, a few
+headline characters at 24 px bold, and digits at 54 px bold.
+
+The system icon set is one font, `resources/icons/barracuda-icons.otf`,
+built from `resources/icons/svg` by `resources/icons/build.py`. Each icon is a
+glyph per color layer at fixed code points (`codepoints.json`), stacked and
+tinted by a view; `icons::icon` lists an icon's layers for Rust code. The
+system fonts carry the icons at 16 px regular and 18 px bold, and the app
+icons at 36 px.
 
 Text without a size or weight class uses font slot 0 in the UI core, while the
 PocketJS compiler means its 16 px default and bakes that as slot 2. When a

@@ -15,6 +15,7 @@ use barracuda_ui_runtime::{
 };
 use core::cell::{Cell, RefCell};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use embassy_time::Duration;
 use portable_atomic_util::Arc;
 
 /// The viewport views are laid out in when the Board gives the Plugin no
@@ -110,6 +111,10 @@ struct Inner {
     gestures: RefCell<VecDeque<Gesture>>,
     gesture: Signal<NoopRawMutex, ()>,
     brightness: Cell<Option<u8>>,
+    /// How long the screen stays on without a touch; `None` is always.
+    screen_timeout: Cell<Option<Duration>>,
+    /// Whether the screen was asked to turn back on.
+    wake: Cell<bool>,
     /// Atlases for the font slots a view ships none for.
     system_fonts: RefCell<Vec<Vec<u8>>>,
     /// Whether the system fonts are in place.
@@ -266,6 +271,8 @@ impl UiService {
                 gestures: RefCell::new(VecDeque::new()),
                 gesture: Signal::new(),
                 brightness: Cell::new(None),
+                screen_timeout: Cell::new(None),
+                wake: Cell::new(false),
                 system_fonts: RefCell::new(Vec::new()),
                 ready: Cell::new(false),
             }),
@@ -359,6 +366,29 @@ impl UiService {
     pub fn set_brightness(&self, brightness: u8) {
         self.inner.brightness.set(Some(brightness));
         self.inner.mailbox.notify();
+    }
+
+    /// Turns the screen off after `timeout` without a touch, or never for
+    /// `None`. The touch that turns it back on reaches no view.
+    pub fn set_screen_timeout(&self, timeout: Option<Duration>) {
+        self.inner.screen_timeout.set(timeout);
+        self.inner.mailbox.notify();
+    }
+
+    /// Turns the screen back on, as a touch would, and restarts its timeout.
+    pub fn wake(&self) {
+        self.inner.wake.set(true);
+        self.inner.mailbox.notify();
+    }
+
+    /// How long the screen stays on without a touch.
+    pub(crate) fn screen_timeout(&self) -> Option<Duration> {
+        self.inner.screen_timeout.get()
+    }
+
+    /// Whether [`UiService::wake`] was called since the last call.
+    pub(crate) fn take_wake(&self) -> bool {
+        self.inner.wake.take()
     }
 
     /// Queues a gesture for [`UiService::next_gesture`].

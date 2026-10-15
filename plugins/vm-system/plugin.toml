@@ -1,0 +1,3 @@
+id = "vm-system"
+depends-on = ["vm", "ui", "shell", "app", "wifi", "agent", "workflow", "time"]
+description = "Gives system apps the device's settings and state as the `system` Lua package."

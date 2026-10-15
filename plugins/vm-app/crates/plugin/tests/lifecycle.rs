@@ -151,6 +151,14 @@ async fn filesystem() -> ScopedVfs {
         .await;
         put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), PROBE).await;
     }
+    // Only system apps may run the device's settings.
+    put(
+        &fs,
+        "/workspace/media/apps/greedy/app.json",
+        br#"{"format":1,"id":"greedy","name":"Greedy","version":"1","permissions":["system"]}"#,
+    )
+    .await;
+    put(&fs, "/workspace/media/apps/greedy/main.lua", PROBE).await;
     // Fails while it is on the display.
     view_app(
         &fs,
@@ -193,6 +201,20 @@ async fn filesystem() -> ScopedVfs {
         "local app = require('app') \
          assert(assert(app.view()):set('count', 42)) \
          for event in app.events() do end",
+    )
+    .await;
+    // Two pages deep once active; back shows the first page.
+    view_app(
+        &fs,
+        "pages",
+        "local app = require('app') local view = assert(app.view()) local deep = false \
+         for event in app.events() do \
+           if event == 'app:active' and not deep then \
+             deep = true app.navigation(1) assert(view:set('count', 2)) \
+           elseif event == 'app:back' then \
+             app.navigation(0) assert(view:set('count', 1)) \
+           elseif event == 'app:terminate' then break end \
+         end",
     )
     .await;
     // Busy instead of parking when it leaves the foreground.
@@ -309,7 +331,7 @@ fn first_text(manager: &AppManager) -> Option<String> {
     texts(manager).into_iter().next()
 }
 
-const OFFERED: [&str; 9] = [
+const OFFERED: [&str; 10] = [
     "agent-counter",
     "busy",
     "counter",
@@ -319,6 +341,7 @@ const OFFERED: [&str; 9] = [
     "idle-3",
     "notes",
     "nosy",
+    "pages",
 ];
 
 async fn scenario(spawner: Spawner) {
@@ -361,11 +384,12 @@ async fn scenario(spawner: Spawner) {
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 6, "{invalid:#?}");
+    assert_eq!(invalid.len(), 7, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
         ("Draft", "not an app ID"),
         ("escape", "$.view.program"),
         ("future", "$.format"),
+        ("greedy", "only for system apps"),
         ("nomain", "main.lua is missing"),
         ("stray", "does not match the directory name"),
         ("system", "belongs to a system app"),
@@ -383,6 +407,7 @@ async fn scenario(spawner: Spawner) {
     for (id, error) in [
         ("escape", AppError::InvalidBundle),
         ("stray", AppError::InvalidBundle),
+        ("greedy", AppError::InvalidBundle),
         ("system", AppError::SystemApp),
         ("missing", AppError::NotFound),
     ] {
@@ -538,6 +563,26 @@ async fn scenario(spawner: Spawner) {
     manager.terminate("counter");
     until("the counter to exit", || {
         state_of(&manager, "counter").is_none()
+    })
+    .await;
+
+    // Back goes to an app's previous page, and from its first page out of it.
+    manager.open("pages").await.unwrap();
+    until("the second page", || {
+        first_text(&manager).as_deref() == Some("2")
+    })
+    .await;
+    assert!(manager.back());
+    until("the first page", || {
+        first_text(&manager).as_deref() == Some("1")
+    })
+    .await;
+    assert_eq!(state_of(&manager, "pages"), Some(AppState::Active));
+    assert!(!manager.back());
+    assert_eq!(state_of(&manager, "pages"), Some(AppState::Background));
+    manager.terminate("pages");
+    until("the pages app to exit", || {
+        state_of(&manager, "pages").is_none()
     })
     .await;
 

@@ -37,7 +37,10 @@ Where a container lives decides its `AppKind`, as
 - **System apps** are bundled in the image under the private
   `/resources/apps`. Their runs may `require` every registered Lua package,
   `uninstall` refuses them, and no installed app may take their IDs. The image
-  ships 设置 (`settings`), which reads `systeminfo`.
+  ships 会话 (`sessions`), 工作流 (`workflow`), 文件 (`files`), and 设置
+  (`settings`), which read and change the device through the `system`
+  package (`SYSTEM_PACKAGE`); a manifest outside the image that asks for it
+  is invalid.
 - **Installable apps** are installed under the private `/media/apps`. Their
   runs get `LuaPackageScope::Only` the `app` package and the `permissions`
   their manifest asks for, through `Vm::run_scoped`.
@@ -76,7 +79,8 @@ terminate from any state → terminating → exits within GRACE, or is cancelled
 | Tap an icon                               | `open(id)`                  | launch, then `app:active`; or `app:foreground`, `app:active` when resuming |
 | Pull down a panel, or any system screen covers the app | `set_interactive(false)` | `app:inactive`         |
 | Close the panel                           | `set_interactive(true)`     | `app:active`                         |
-| Swipe right out of the app                | `home()`                    | `app:inactive`, `app:background`     |
+| Swipe right in the app, on a deeper page  | `back()`                    | `app:back`                           |
+| Swipe right out of the app, on its first page | `back()`, which calls `home()` | `app:inactive`, `app:background` |
 | Close it in the app switcher              | `terminate(id)`             | `app:terminate`                      |
 | Uninstall it from its info screen         | `uninstall(id)`             | `app:terminate`                      |
 | Touch the app's view                      | none; `tap(x, y)` from code | the view's handler call              |
@@ -144,9 +148,12 @@ and an optional `app.tsx` view with its `app.d.ts` contract and `pocket.json`.
 `resources/apps/build.ts` compiles system apps into `filesystem/resources/apps`
 and examples into `crates/plugin/tests/fixtures`, and adds the `view` files to
 each manifest. It needs a PocketJS checkout for the MicroTS compiler and font
-baker; an app whose sources show characters beyond ASCII bakes its fonts from
-Noto Sans SC, found in `CJK_FONT_DIR`. It is a manual task and its outputs are
-committed:
+baker. System apps ship no fonts: they draw with the `ui` Plugin's system
+fonts. Examples bake their own, as an app from elsewhere would: from Noto
+Sans SC, found in `CJK_FONT_DIR`, when their sources show characters beyond
+ASCII, with system icons named by `\uE0xx` escapes from the `ui` Plugin's
+icon font, and with only digits and icons at sizes of 24 px and up. It is a
+manual task and its outputs are committed:
 
 ```sh
 POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run apps --plugin app

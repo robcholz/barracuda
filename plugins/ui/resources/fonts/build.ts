@@ -7,9 +7,12 @@
 // Sans/SubsetOTF/SC), monospace is the PocketJS checkout's JetBrains Mono
 // (POCKETJS_ROOT), and icons come from ../icons/barracuda-icons.otf.
 //
-// Text slots hold ASCII and every character beyond ASCII in the sources that
+// Text slots (14, 16, and 18 px regular, 14 and 18 px bold) hold ASCII
+// and every character beyond ASCII in the sources that
 // sources.txt names and in charset.txt; the 16 px regular and 18 px bold ones
-// also hold every icon. Display slots hold little: 24 px bold ASCII and
+// also hold every icon. The 16 px regular slot is the prose slot: it also
+// holds GB 2312's 3,755 common characters, so views show text they cannot
+// know in advance, such as an Agent's answer, in it. Display slots hold little: 24 px bold ASCII and
 // display.txt, 36 px the app icons, 54 px bold digits and the Agent mark. Monospace slots hold
 // ASCII. Text with other characters shows a placeholder box for them.
 //
@@ -66,6 +69,17 @@ const beyond = codepoints(sourceText.join("")).filter((cp) => cp > 126 && !(cp >
 const display = codepoints(lines("display.txt").join("")).filter((cp) => cp > 126);
 const sorted = (set: number[]) => [...new Set(set)].sort((a, b) => a - b);
 
+// The 3,755 most common Chinese characters, GB 2312's first level, for the
+// prose slot: an Agent's answers, notices, and conversation titles can say
+// anything.
+const gbk = new TextDecoder("gbk");
+const common: number[] = [];
+for (let row = 0xb0; row <= 0xd7; row++) {
+  for (let cell = 0xa1; cell <= (row === 0xd7 ? 0xf9 : 0xfe); cell++) {
+    common.push(gbk.decode(new Uint8Array([row, cell])).codePointAt(0)!);
+  }
+}
+
 const regular = await load(join(fonts, "NotoSansSC-Regular.otf"));
 const bold = await load(join(fonts, "NotoSansSC-Bold.otf"));
 const mono = await load(join(pocket, "assets/fonts/JetBrainsMono-Regular.ttf"));
@@ -77,9 +91,9 @@ const withIcons = sorted([...text, ...icons]);
 const digits = [..."0123456789.%-"].map((char) => char.codePointAt(0)!);
 const slots: Array<[number, any, number, boolean, number[]]> = [
   [1, regular, 14, false, text],
-  [2, regular, 16, false, withIcons],
+  [2, regular, 16, false, sorted([...withIcons, ...common])],
+  [3, regular, 18, false, text],
   [8, bold, 14, true, text],
-  [9, bold, 16, true, text],
   [10, bold, 18, true, withIcons],
   [12, bold, 24, true, sorted([...ascii, ...display])],
   [6, regular, 36, false, sorted(appIcons)],

@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "id": "camera",
+  "name": "相机",
+  "version": "0.1.0",
+  "icon": "camera",
+  "permissions": ["camera"]
+}

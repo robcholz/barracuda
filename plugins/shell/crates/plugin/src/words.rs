@@ -35,9 +35,9 @@ pub(crate) fn permission(package: &str) -> String {
 pub(crate) fn permission_icon(package: &str) -> &'static str {
     match package {
         "http" | "webserver" => "globe",
-        "camera" => "camera",
+        "camera" => "image",
         "audio" | "i2s" => "mic",
-        "led_strip" => "lamp",
+        "led_strip" => "sun",
         "vm-filesystem" => "hard-drive",
         "agent" => "agent",
         "vm-time" => "timer",
