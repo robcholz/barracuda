@@ -43,6 +43,17 @@ const FRAME: Duration = Duration::from_micros(16_667);
 /// Where the system fonts live in this Plugin's filesystem.
 pub const SYSTEM_FONTS: &str = "/resources/fonts";
 
+/// The display views are drawn on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplayInfo {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// Whether only the circle inscribed in the frame is visible.
+    pub round: bool,
+}
+
 /// A display and its touch input, drawing the views of one [`UiService`].
 pub struct Ui<Panel, Input> {
     service: Rc<UiService>,
@@ -64,6 +75,18 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
             recognizer: Recognizer::new(viewport),
             screen,
         }
+    }
+
+    /// The display's size and shape.
+    #[must_use]
+    pub const fn display(&self) -> DisplayInfo {
+        self.screen.info()
+    }
+
+    /// Whether the display reads touch.
+    #[must_use]
+    pub const fn touch(&self) -> bool {
+        self.pointer.is_some()
     }
 
     /// The views this display shows.

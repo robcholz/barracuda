@@ -5,9 +5,10 @@
 //! reports changed since the last frame are drawn, each strip in RGB565, the
 //! display API's pixel format.
 
+use crate::DisplayInfo;
 use crate::service::{Shown, UiService};
 use alloc::vec::Vec;
-use barracuda_board_hal::display::{Display, RefreshMode, RefreshRequest};
+use barracuda_board_hal::display::{Display, DisplayFeatures, RefreshMode, RefreshRequest};
 use barracuda_board_hal::touch::Touch;
 use barracuda_ui_runtime::pocketjs_core::{
     Ui as CoreUi,
@@ -32,6 +33,7 @@ pub(crate) struct Screen<Panel> {
     display: Panel,
     width: u32,
     height: u32,
+    round: bool,
     tracker: DamageTracker<MAX_REGIONS>,
     words: Vec<u32>,
     /// The rasterizer's output for one strip.
@@ -48,10 +50,15 @@ pub(crate) struct Screen<Panel> {
 impl<Panel: Display> Screen<Panel> {
     pub(crate) fn new(display: Panel) -> Self {
         let Size { width, height } = display.size();
+        let round = display
+            .descriptor()
+            .features()
+            .contains(DisplayFeatures::ROUND);
         Self {
             display,
             width,
             height,
+            round,
             tracker: DamageTracker::new(),
             words: Vec::new(),
             strip: Vec::new(),
@@ -64,6 +71,15 @@ impl<Panel: Display> Screen<Panel> {
     #[cfg(test)]
     pub(crate) fn display(&self) -> &Panel {
         &self.display
+    }
+
+    /// The display's size and shape.
+    pub(crate) const fn info(&self) -> DisplayInfo {
+        DisplayInfo {
+            width: self.width,
+            height: self.height,
+            round: self.round,
+        }
     }
 
     /// The size views are laid out in: the display's, one view pixel per

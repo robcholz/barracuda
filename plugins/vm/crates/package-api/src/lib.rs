@@ -28,10 +28,41 @@ pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 12 * 1024;
 /// such peak is ever live.
 pub const LUA_PACKAGE_INSTALL_PEAK_BYTES: usize = 32 * 1024;
 
+/// Where a package stands in the app API, the packages an installable app
+/// may count on from one device to the next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppApi {
+    /// Every app has it without asking, from API level `since`.
+    Core {
+        /// The API level it joined the app API at.
+        since: u32,
+    },
+    /// An app asks for it by name; it works the same on every device that has
+    /// it.
+    Capability {
+        /// The API level it joined the app API at.
+        since: u32,
+        /// What an app may do with it, in the words the install screen shows.
+        purpose: &'static str,
+    },
+    /// Talks to a Board's hardware directly: an app that asks for it names
+    /// the Boards it is for.
+    DeviceSpecific {
+        /// What an app may do with it, in the words the install screen shows.
+        purpose: &'static str,
+    },
+}
+
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
     /// Returns the stable name accepted by Lua's `require` function.
     fn name(&self) -> &'static str;
+
+    /// Where the package stands in the app API; `None` for a package that is
+    /// not part of it, which apps may still ask for by name.
+    fn app_api(&self) -> Option<AppApi> {
+        None
+    }
 
     /// Revokes resources captured by callbacks already installed into a Lua state.
     ///
@@ -112,6 +143,17 @@ impl LuaPackageRegistry {
             }
         }
         Ok(())
+    }
+
+    /// Every registered package's name, and where it stands in the app API.
+    #[must_use]
+    pub fn packages(&self) -> Vec<(&'static str, Option<AppApi>)> {
+        self.state
+            .lock()
+            .entries
+            .iter()
+            .map(|entry| (entry.package.name(), entry.package.app_api()))
+            .collect()
     }
 
     /// Returns whether no packages are registered.

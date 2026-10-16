@@ -20,7 +20,7 @@ use alloc::{
 use async_channel::{Receiver, Sender};
 use barracuda_runtime_utils::{oneshot, unordered::Unordered};
 use barracuda_vfs::ScopedVfs;
-use barracuda_vm_plugin::{Error, Lua, LuaPackage, Package, Result};
+use barracuda_vm_plugin::{AppApi, Error, Lua, LuaPackage, Package, Result};
 use core::{cell::RefCell, future::Future, pin::Pin};
 use futures_util::stream::StreamExt as _;
 use portable_atomic::{AtomicBool, Ordering};
@@ -90,16 +90,19 @@ impl Backends {
         }
     }
 
-    /// Adds `backend` and returns the Lua package that reaches it as `name`.
+    /// Adds `backend` and returns the Lua package that reaches it as `name`,
+    /// placed in the app API at `api`.
     pub(crate) fn add(
         &self,
         name: &'static str,
+        api: Option<AppApi>,
         backend: Rc<dyn BuiltinBackend>,
     ) -> BackendPackage {
         let mut backends = self.backends.borrow_mut();
         backends.push(backend);
         BackendPackage {
             name,
+            api,
             backend: backends.len() - 1,
             jobs: self.jobs.clone(),
             active: Arc::new(AtomicBool::new(true)),
@@ -137,6 +140,7 @@ impl Backends {
 /// A builtin app's Lua package, as the VM installs it.
 pub(crate) struct BackendPackage {
     name: &'static str,
+    api: Option<AppApi>,
     backend: usize,
     jobs: Sender<Job>,
     active: Arc<AtomicBool>,
@@ -209,6 +213,10 @@ impl LuaPackage for BackendPackage {
         self.name
     }
 
+    fn app_api(&self) -> Option<AppApi> {
+        self.api
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -267,7 +275,7 @@ mod tests {
     #[test]
     fn calls_queue_for_the_backend_and_answer_its_value() {
         let backends = Backends::new();
-        let package = backends.add("echo", Rc::new(Echo));
+        let package = backends.add("echo", None, Rc::new(Echo));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install the package");
         assert!(backends.queue.try_recv().is_err());
@@ -300,7 +308,7 @@ mod tests {
     #[test]
     fn package_fits_the_vm_package_budget() {
         let backends = Backends::new();
-        let package = backends.add("echo", Rc::new(Echo));
+        let package = backends.add("echo", None, Rc::new(Echo));
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

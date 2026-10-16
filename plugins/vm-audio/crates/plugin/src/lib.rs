@@ -70,6 +70,8 @@ where
 }
 
 struct AudioPackage<Device> {
+    /// Whether the Board has the device, which makes the package a capability.
+    present: bool,
     codec: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
     active: Arc<AtomicBool>,
 }
@@ -77,6 +79,7 @@ struct AudioPackage<Device> {
 impl<Device> AudioPackage<Device> {
     fn new(codec: Option<Device>) -> Self {
         Self {
+            present: codec.is_some(),
             codec: Arc::new(critical_section::Mutex::new(RefCell::new(codec))),
             active: Arc::new(AtomicBool::new(true)),
         }
@@ -127,6 +130,14 @@ where
 {
     fn name(&self) -> &'static str {
         "audio"
+    }
+
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        self.present
+            .then_some(barracuda_vm_plugin::AppApi::Capability {
+                since: 1,
+                purpose: "播放声音和录音",
+            })
     }
 
     fn revoke(&self) {

@@ -59,6 +59,8 @@ export declare const lines: Accessor<Line[]>;
 export declare const primary: Accessor<string>;
 export declare const secondary: Accessor<string>;
 export declare const removable: Accessor<boolean>;
+/** The app cannot run on this device: the install button is shown disabled. */
+export declare const blocked: Accessor<boolean>;
 
 export declare function openApp(id: i32): void;
 export declare function switchTo(id: i32): void;

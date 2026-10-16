@@ -2,4 +2,5 @@
 # system fonts must cover, and the file extensions to read there.
 resources/view .tsx
 crates/plugin/src .rs
+crates/appkit/src .rs
 resources/examples .tsx .lua .json

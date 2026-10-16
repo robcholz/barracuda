@@ -23,6 +23,7 @@ mod config {
 
 mod agent;
 mod notices;
+mod notify;
 mod preferences;
 mod system;
 mod words;
@@ -49,12 +50,13 @@ use embassy_time::{Duration, Timer};
 
 pub use agent::{AgentState, AgentStatus};
 pub use barracuda_appkit::{
-    APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation, AppManager,
-    AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage, InvalidApp,
-    RunningApp, VmRunOutcome,
+    API_LEVEL, APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation,
+    AppManager, AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage,
+    Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
 };
 pub use barracuda_uikit::icons;
 pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
+pub use notify::{NOTIFY, NOTIFY_API};
 pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
 pub use system::{Screen, Services, SystemUi, WIFI_SETTINGS};
 
@@ -70,6 +72,8 @@ const CLOCK_PERIOD: Duration = Duration::from_secs(15);
 /// runs apps, and the system UI when the Board has a display.
 #[barracuda_plugin::macros::plugin]
 pub struct AppManagerPlugin<Panel, Input> {
+    /// The Board's stable name, which apps' `boards` list.
+    board: &'static str,
     display: Option<Panel>,
     touch: Option<Input>,
     runtime: Option<Runtime<Panel, Input>>,
@@ -89,8 +93,10 @@ impl<Panel, Input> AppManagerPlugin<Panel, Input> {
     where
         Builtins: DisplayPeripheral<Display = Panel> + TouchPeripheral<Touch = Input>,
     {
+        let board = context.target_identity.board().name();
         let peripherals = &mut context.hal.peripherals;
         Self {
+            board,
             display: config::peripherals::DISPLAY_MAIN
                 .and_then(|instance| peripherals.take_display(instance)),
             touch: config::peripherals::TOUCH_MAIN
@@ -137,10 +143,16 @@ where
             .display
             .take()
             .map(|display| Ui::new(display, self.touch.take()));
+        let device = Device {
+            board: self.board,
+            display: ui.as_ref().map(Ui::display),
+            touch: ui.as_ref().is_some_and(Ui::touch),
+        };
         let (apps, registration) = AppManager::register(
             filesystem.clone(),
             vm,
             ui.as_ref().map(Ui::service),
+            device,
             &packages,
         )
         .map_err(PluginError::registration)?;
@@ -153,6 +165,14 @@ where
         let notices = Rc::new(Notifications::new());
         let agent = Rc::new(AgentStatus::new());
         let preferences = Rc::new(Preferences::default());
+        let registration = apps
+            .add_package(
+                NOTIFY,
+                NOTIFY_API,
+                Rc::new(notify::Notify(Rc::clone(&notices))),
+            )
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
         for registration in workflow::register_actions(&actions, &notices, &agent)
             .map_err(PluginError::registration)?
         {

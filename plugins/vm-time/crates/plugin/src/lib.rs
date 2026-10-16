@@ -196,7 +196,11 @@ impl Package for TimePackage {
 
 impl LuaPackage for TimePackage {
     fn name(&self) -> &'static str {
-        "vm-time"
+        "time"
+    }
+
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        Some(barracuda_vm_plugin::AppApi::Core { since: 1 })
     }
 
     fn revoke(&self) {

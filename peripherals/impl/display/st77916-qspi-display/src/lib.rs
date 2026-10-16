@@ -287,7 +287,11 @@ where
             self.size(),
             PixelFormat::Rgb565,
             DisplayTechnology::Lcd,
-            DisplayFeatures::BRIGHTNESS | DisplayFeatures::ORIENTATION | DisplayFeatures::SLEEP,
+            // The init sequence drives the 360x360 round panel.
+            DisplayFeatures::BRIGHTNESS
+                | DisplayFeatures::ORIENTATION
+                | DisplayFeatures::SLEEP
+                | DisplayFeatures::ROUND,
         )
     }
 

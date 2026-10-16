@@ -68,6 +68,8 @@ where
 }
 
 struct CameraPackage<Device> {
+    /// Whether the Board has the device, which makes the package a capability.
+    present: bool,
     camera: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
     active: Arc<AtomicBool>,
 }
@@ -75,6 +77,7 @@ struct CameraPackage<Device> {
 impl<Device> CameraPackage<Device> {
     fn new(camera: Option<Device>) -> Self {
         Self {
+            present: camera.is_some(),
             camera: Arc::new(critical_section::Mutex::new(RefCell::new(camera))),
             active: Arc::new(AtomicBool::new(true)),
         }
@@ -125,6 +128,14 @@ where
 {
     fn name(&self) -> &'static str {
         "camera"
+    }
+
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        self.present
+            .then_some(barracuda_vm_plugin::AppApi::Capability {
+                since: 1,
+                purpose: "使用相机拍照",
+            })
     }
 
     fn revoke(&self) {

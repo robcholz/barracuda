@@ -29,6 +29,10 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
+The package is the app API's `camera` capability
+([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
+device.
+
 Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards without a camera
 report unavailable. The move-only built-in capability permits one handle per
 boot; explicit close, lexical `<close>`, collection, and Plugin revocation

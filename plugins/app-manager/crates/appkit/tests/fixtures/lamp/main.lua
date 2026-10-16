@@ -1,16 +1,16 @@
 -- Lamp: an example installable app that switches the Board's LED strip and
--- picks warm or cool light. It asks for the `led_strip` package.
+-- picks warm or cool light. It requires the `light` capability.
 local app = require("app")
-local led_strip = require("led_strip")
+local light = require("light")
 local view = assert(app.view())
 
 local LEVEL = 60 -- percent
 local COLORS = { warm = { 255, 147, 41 }, cool = { 201, 226, 255 } }
 local saved = app.kv.get("lamp") or {}
 local on, tone = saved.on ~= false, saved.tone or "warm"
-local strip = led_strip.available() and led_strip.open() or nil
+local strip = light.available() and light.open() or nil
 
-local function light()
+local function shine()
   if strip == nil then return end
   if not on then
     strip:clear()
@@ -30,7 +30,7 @@ local function publish()
   assert(view:set("warm", tone == "warm"))
   local name = tone == "warm" and "暖光" or "冷光"
   assert(view:set("status", on and (name .. " · " .. LEVEL .. "%") or "已关闭"))
-  light()
+  shine()
 end
 
 publish()

@@ -3,5 +3,7 @@
   "id": "air",
   "name": "空气质量",
   "version": "0.1.0",
-  "icon": "air"
+  "api": 1,
+  "icon": "air",
+  "view": { "shape": "round" }
 }

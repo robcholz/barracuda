@@ -3,5 +3,7 @@
   "id": "settings",
   "name": "设置",
   "version": "0.1.0",
-  "icon": "settings"
+  "api": 1,
+  "icon": "settings",
+  "view": { "shape": "round" }
 }

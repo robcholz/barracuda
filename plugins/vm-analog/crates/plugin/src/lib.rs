@@ -134,6 +134,12 @@ where
         "analog"
     }
 
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        Some(barracuda_vm_plugin::AppApi::DeviceSpecific {
+            purpose: "读取模拟输入",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

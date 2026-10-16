@@ -123,6 +123,12 @@ where
         "i2c"
     }
 
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        Some(barracuda_vm_plugin::AppApi::DeviceSpecific {
+            purpose: "访问 I2C 设备",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

@@ -43,6 +43,10 @@ unknown chunks, and plays its `data` chunk. Compressed WAV formats are not
 decoded. One PCM operation transfers at most 256 KiB, and a WAV file may carry
 at most 64 KiB of container overhead.
 
+The package is the app API's `audio` capability
+([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
+device.
+
 Boards without a built-in codec report unavailable. The move-only built-in
 capability permits one handle per boot; explicit close, lexical `<close>`,
 collection, and Plugin revocation prevent further operations and do not

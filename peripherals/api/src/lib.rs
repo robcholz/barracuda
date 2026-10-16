@@ -504,6 +504,8 @@ pub mod display {
         pub const BUSY: Self = Self(1 << 5);
         /// Pixels can be read back from the display.
         pub const READBACK: Self = Self(1 << 6);
+        /// Only the circle inscribed in the frame is visible.
+        pub const ROUND: Self = Self(1 << 7);
 
         /// Returns an empty feature set.
         #[must_use]

@@ -7,6 +7,7 @@
 //! launchable; they are what an install copies into [`INSTALLED_APPS`].
 
 use crate::AppError;
+use crate::device::{self, API_LEVEL, Device, Packages, ViewShape};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -15,6 +16,7 @@ use alloc::{
 };
 use barracuda_uikit::UiAssets;
 use barracuda_vfs::{FsError, ScopedVfs};
+use barracuda_vm_plugin::AppApi;
 use core::cell::RefCell;
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +29,8 @@ pub const INSTALLED_APPS: &str = "/media/apps";
 /// Containers that Agents, the portal, and other Plugins offer for
 /// installation, in the shared Workspace.
 pub const WORKSPACE_APPS: &str = "/workspace/media/apps";
-/// The most Lua packages a manifest may ask for.
+/// The most Lua packages each of a manifest's `requires`, `uses`, and
+/// `permissions` may list.
 pub const MAX_PERMISSIONS: usize = 16;
 /// The package every app program uses, granted without being asked for.
 pub const APP_PACKAGE: &str = "app";
@@ -112,12 +115,30 @@ pub struct AppInfo {
     pub kind: AppKind,
     /// Whether the app has a view; apps without one run headless.
     pub has_view: bool,
-    /// The Lua packages the manifest asks for besides `app`. Only an
-    /// installable app is limited to them.
+    /// The app API level the app is written for.
+    pub api: u32,
+    /// The app API capabilities the app cannot run without.
+    pub requires: Vec<String>,
+    /// The app API capabilities the app uses when the device has them.
+    pub uses: Vec<String>,
+    /// The Lua packages outside the app API the app asks for: device-specific
+    /// ones and others. Only an installable app is limited to its packages.
     pub permissions: Vec<String>,
+    /// The Boards the app is for; empty when it is for any.
+    pub boards: Vec<String>,
+    /// The size its view was built for, if it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_size: Option<[u32; 2]>,
+    /// The shape its view was built for, if it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_shape: Option<ViewShape>,
     /// The name of the system icon the app is shown with, if it picked one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Why the app cannot run on this device, in the words the install
+    /// screen shows; only for installable apps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incompatible: Option<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -153,10 +174,22 @@ struct Manifest {
     entry: Option<String>,
     #[serde(default)]
     view: Option<ViewFiles>,
+    #[serde(default = "first_level")]
+    api: u32,
+    #[serde(default)]
+    requires: Vec<String>,
+    #[serde(default)]
+    uses: Vec<String>,
     #[serde(default)]
     permissions: Vec<String>,
     #[serde(default)]
+    boards: Vec<String>,
+    #[serde(default)]
     icon: Option<String>,
+}
+
+const fn first_level() -> u32 {
+    1
 }
 
 #[derive(Deserialize)]
@@ -165,6 +198,10 @@ struct ViewFiles {
     styles: String,
     #[serde(default)]
     fonts: Vec<String>,
+    #[serde(default)]
+    size: Option<[u32; 2]>,
+    #[serde(default)]
+    shape: Option<ViewShape>,
 }
 
 /// A container checked against the app format.
@@ -292,18 +329,7 @@ async fn read_container(
             manifest.id
         )));
     }
-    for (index, permission) in manifest.permissions.iter().enumerate() {
-        if manifest.permissions[..index].contains(permission) {
-            return Err(invalid(format!(
-                "{MANIFEST_FILE}: permission \"{permission}\" is listed twice"
-            )));
-        }
-        if location.kind() == AppKind::Installable && shelf.builtins.reserves(permission) {
-            return Err(invalid(format!(
-                "{MANIFEST_FILE}: permission \"{permission}\" is only for builtin apps"
-            )));
-        }
-    }
+    check_packages(&manifest, location, shelf)?;
     let entry = manifest
         .entry
         .unwrap_or_else(|| String::from(DEFAULT_ENTRY));
@@ -321,7 +347,7 @@ async fn read_container(
         }
         require_file(filesystem, &dir, file).await?;
     }
-    Ok(Container {
+    let mut container = Container {
         filesystem: filesystem.clone(),
         info: AppInfo {
             id: manifest.id,
@@ -330,17 +356,88 @@ async fn read_container(
             location,
             kind: location.kind(),
             has_view: manifest.view.is_some(),
-            permissions: manifest
-                .permissions
-                .into_iter()
-                .filter(|permission| permission != APP_PACKAGE)
-                .collect(),
+            api: manifest.api,
+            requires: manifest.requires,
+            uses: manifest.uses,
+            permissions: manifest.permissions,
+            boards: manifest.boards,
+            view_size: manifest.view.as_ref().and_then(|view| view.size),
+            view_shape: manifest.view.as_ref().and_then(|view| view.shape),
             icon: manifest.icon,
+            incompatible: None,
         },
         dir,
         entry,
         view: manifest.view,
-    })
+    };
+    if location.kind() == AppKind::Installable {
+        container.info.incompatible =
+            device::incompatibility(&container.info, shelf.device, &shelf.packages);
+    }
+    Ok(container)
+}
+
+/// Checks the packages a manifest asks for against the app API: capabilities
+/// in `requires` and `uses`, everything else in `permissions`, each once, and
+/// `boards` for packages that talk to a Board's hardware.
+fn check_packages(
+    manifest: &Manifest,
+    location: AppLocation,
+    shelf: &Shelf<'_>,
+) -> Result<(), Problem> {
+    let lists = [
+        ("requires", &manifest.requires),
+        ("uses", &manifest.uses),
+        ("permissions", &manifest.permissions),
+    ];
+    let mut seen = BTreeSet::new();
+    for (list, names) in lists {
+        for name in names {
+            if !seen.insert(name.as_str()) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is listed twice"
+                )));
+            }
+            if device::is_core(name) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is a core package, which every app has"
+                )));
+            }
+            if location.kind() == AppKind::Installable && shelf.builtins.reserves(name) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is only for builtin apps"
+                )));
+            }
+            let capability = device::is_capability(name, API_LEVEL);
+            match list {
+                "permissions" if capability => {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" is an app API capability: list it in requires or uses"
+                    )));
+                }
+                // Capabilities of a later level are checked by a later system.
+                "requires" | "uses"
+                    if manifest.api <= API_LEVEL && !device::is_capability(name, manifest.api) =>
+                {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" is not a capability of app API {}",
+                        manifest.api
+                    )));
+                }
+                _ => {}
+            }
+            let hardware = matches!(
+                shelf.packages.get(name.as_str()),
+                Some(Some(AppApi::DeviceSpecific { .. }))
+            );
+            if hardware && manifest.boards.is_empty() {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" talks to a Board's hardware: list the boards the app is for"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Builtin apps, each registered by the Plugin that ships it, and the Lua
@@ -395,10 +492,14 @@ impl Builtins {
     }
 }
 
-/// Where containers are: this Plugin's filesystem and the builtin apps'.
+/// Where containers are, this Plugin's filesystem and the builtin apps', and
+/// the device installable apps are checked against.
 pub(crate) struct Shelf<'a> {
     pub(crate) filesystem: &'a ScopedVfs,
     pub(crate) builtins: &'a Builtins,
+    pub(crate) device: &'a Device,
+    /// The registered Lua packages.
+    pub(crate) packages: Packages,
 }
 
 impl Shelf<'_> {

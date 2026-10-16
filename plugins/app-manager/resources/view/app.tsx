@@ -9,6 +9,7 @@ import {
   apps,
   battery,
   batteryFill,
+  blocked,
   brightness,
   brightnessFill,
   cancel,
@@ -286,13 +287,18 @@ export default function System() {
               <View class="w-[100px] h-12 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => cancel()}>
                 <Text class="text-lg font-bold text-[#FAFAFA]">{secondary()}</Text>
               </View>
-              <Show when={primary() !== ""}>
+              <Show when={primary() !== "" && !blocked()}>
                 <View
                   class={screen() === 8 ? "w-[124px] h-12 rounded-md bg-[#FF7878] items-center justify-center" : "w-[124px] h-12 rounded-md bg-[#CCFF00] items-center justify-center"}
                   focusable
                   onPress={() => confirm()}
                 >
                   <Text class="text-lg font-bold text-[#09090B]">{primary()}</Text>
+                </View>
+              </Show>
+              <Show when={blocked()}>
+                <View class="w-[124px] h-12 rounded-md bg-[#27272A] items-center justify-center">
+                  <Text class="text-lg font-bold text-[#63636B]">{primary()}</Text>
                 </View>
               </Show>
             </View>

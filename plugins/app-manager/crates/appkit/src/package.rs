@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 use barracuda_vm_plugin::{
-    Context, Error, Lua, LuaPackage, LuaValue, Package, Result, UserData, UserDataHandle,
+    AppApi, Context, Error, Lua, LuaPackage, LuaValue, Package, Result, UserData, UserDataHandle,
     UserDataMethods, Variadic,
 };
 use embassy_time::Duration;
@@ -85,6 +85,10 @@ impl LuaPackage for AppPackage {
         "app"
     }
 
+    fn app_api(&self) -> Option<AppApi> {
+        Some(AppApi::Core { since: 1 })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
         self.ports.end_all();
@@ -110,6 +114,7 @@ impl UserData for AppHandle {
         methods.add_method("id", |app, (): ()| Some(Ok(app.port.id.clone())));
         methods.add_method("name", |app, (): ()| Some(Ok(app.port.name.clone())));
         methods.add_method("version", |app, (): ()| Some(Ok(app.port.version.clone())));
+        methods.add_method("device", |app, (): ()| Some(Ok(app.port.device.clone())));
         methods.add_method("set_every", |app, every: Option<i64>| {
             let every = match every {
                 None => None,
@@ -330,6 +335,8 @@ function app.__bind(ticket)
   local handle = assert(attach(ticket))
   setmetatable(app, nil)
   app.id, app.name, app.version = handle:id(), handle:name(), handle:version()
+  local device = handle:device()
+  function app.device() return decode(device) end
 
   local view = view_of(handle)
   function app.view() return view end

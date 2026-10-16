@@ -5,8 +5,9 @@ container in this format from each of its locations, so a container written
 by the image build, the portal, or an Agent is the same thing; where it lives
 decides what kind of app it is (see
 [`device-ui.md`](../../../.agents/docs/device-ui.md)).
-`crates/plugin/resources/app-manifest.json` is the machine-readable form of the manifest
-rules below.
+`crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
+rules below. What an app may use, and how a device decides it fits, is the
+app API, in [`app-api.md`](app-api.md).
 
 ## Locations
 
@@ -48,13 +49,17 @@ Other files are ignored. Directories whose names start with `.` are skipped.
   "id": "counter",
   "name": "计数器",
   "version": "0.1.0",
+  "api": 1,
+  "requires": ["light"],
+  "uses": ["http"],
   "entry": "main.lua",
   "view": {
     "program": "view.bvir",
     "styles": "styles.bin",
-    "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"]
-  },
-  "permissions": ["led_strip", "http"]
+    "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"],
+    "size": [360, 360],
+    "shape": "round"
+  }
 }
 ```
 
@@ -70,19 +75,32 @@ Other files are ignored. Directories whose names start with `.` are skipped.
 | `view.program` | with view | the BVIR view program                                      |
 | `view.styles`  | with view | the compiled stylesheet                                    |
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `permissions`  | no       | up to 16 distinct Lua package names besides `app`, such as `gpio` or `http`; defaults to none |
+| `view.size`    | no       | `[width, height]` the view is laid out for; the build writes it from `pocket.json` |
+| `view.shape`   | no       | `round` or `rect`, the display the view is drawn for         |
+| `api`          | no       | the app API level the app is written for; defaults to `1`   |
+| `requires`     | no       | up to 16 app API capabilities the app cannot run without, such as `light` |
+| `uses`         | no       | up to 16 app API capabilities it uses when the device has them |
+| `permissions`  | no       | up to 16 Lua packages outside the app API: device-specific ones, such as `gpio`, and others |
+| `boards`       | with a device-specific package | the Boards the app is for, by their stable name |
 
 Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
 `0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
 are rejected so a typo is reported, not ignored. The manifest is at most
 4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
 
-An installable app's runs can `require` only `app` and its `permissions`; a
-package it did not ask for is not there, and `require` fails. The system UI
-lists the permissions in plain words before the person installs the app. A
-system app may `require` every registered package, so its manifest needs
-none. A builtin app's own package, such as `settings`, is only for builtin
-apps: an installable app that asks for one is not valid.
+Each package is named once across `requires`, `uses`, and `permissions`:
+capabilities in the first two, everything else in the third; core packages,
+which every app has, in none. A capability of a level above the app's `api`
+is not valid, nor is a device-specific package without `boards`.
+
+An installable app's runs can `require` the core packages and the packages
+its manifest names; a package it did not name is not there, and `require`
+fails. Before the person installs the app, the install screen lists what it
+asks for in the words each package's Plugin declares, or says why this
+device cannot run it ([`app-api.md`](app-api.md#install-check)). A system app
+may `require` every registered package, so its manifest needs none. A
+builtin app's own package, such as `settings`, is only for builtin apps: an
+installable app that asks for one is not valid.
 
 A container that breaks a rule is not launchable. `app.list` reports it under
 `invalid` with the location, directory name, and the problem, for example
@@ -136,6 +154,7 @@ Headless apps never enter the foreground. They run as services and only see
 | Call | Result |
 | ---- | ------ |
 | `app.id`, `app.name`, `app.version` | From the manifest. |
+| `app.device()` | The API level, Board, display, touch, and capabilities ([`app-api.md`](app-api.md#runs)). |
 | `app.view()` | The view, or `nil` for a headless app. |
 | `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
 | `app.exit()` | Ends the event loop. |
@@ -160,9 +179,10 @@ updates and restarts, and is never visible to other apps.
 
 ## Views
 
-`view.program`, `view.styles`, and `view.fonts` are build outputs: the MicroTS
-compiler turns `app.tsx` and its `app.d.ts` contract into View IR, `ui-link`
-links it into BVIR, and the font baker produces the atlases. An Agent that
+`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
+outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
+into View IR, `ui-link` links it into BVIR, and the font baker produces the
+atlases. A source manifest's `view` holds only the `shape`. An Agent that
 cannot run that toolchain writes a headless app, or copies the view files of
 an existing build next to its own entry program.
 
@@ -186,7 +206,7 @@ print("hello from " .. app.id .. ", run " .. runs)
 Offer it with `app.install` and `{"id":"hello"}`: the device shows the
 install screen, and once the person installs it, open it with `app.open` and
 `{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/plugin/tests/fixtures/` holds built
+`["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
 example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
-`air` (空气质量, no packages), `lamp` (灯带, `led_strip`), `camera` (相机,
-`camera`), and `counter` (计数器, no packages).
+`air` (空气质量, no packages), `lamp` (灯带, requires `light`), `camera`
+(相机, requires `camera`), and `counter` (计数器, no packages).

@@ -1,6 +1,6 @@
 # IMU Plugin
 
-Installs the `imu` Lua package over the Board's primary IMU.
+Installs the `motion` Lua package over the Board's primary IMU.
 
 - Plugin ID: `imu`
 - Dependencies: `vm`
@@ -10,24 +10,28 @@ Installs the `imu` Lua package over the Board's primary IMU.
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
 - Agent Tools: none
-- Lua packages: `imu`
+- Lua packages: `motion`
 - Web: none
 - Tasks: none
 - Storage: none
 
 This Plugin takes the Board's primary `Imu` capability exactly once
-and installs the `imu` Lua package. I2C ownership, chip initialization, integer
+and installs the `motion` Lua package. I2C ownership, chip initialization, integer
 unit conversion, and Board-relative axis mapping remain owned by the selected
 implementation and generated Board HAL.
 
 Lua API:
 
-- `imu.available() -> boolean`
-- `imu.open() -> handle`
+- `motion.available() -> boolean`
+- `motion.open() -> handle`
 - `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature`
 - `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc`
 - `handle:is_open() -> boolean`
 - `handle:close()`
+
+The package is the app API's `motion` capability
+([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
+device.
 
 Boards without an IMU report unavailable. The move-only built-in capability
 permits one handle per boot; explicit close, lexical `<close>`, collection, and

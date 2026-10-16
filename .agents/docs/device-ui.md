@@ -12,7 +12,7 @@ the Plugins' docs.
 | What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container the person installed |
 | Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | the `app-manager` Plugin's `/media/apps/<id>` |
 | Runs as | the `app-manager` task | a Lua run with a MicroTS view, under the app lifecycle | the same |
-| Lua packages | none | every registered package, its own package included | `app` and the permissions it asked for at install; never a builtin app's package |
+| Lua packages | none | every registered package, its own package included | the app API's core packages and those its manifest names; never a builtin app's package |
 | Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
 | Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | 会话 (Sessions), 工作流 (Workflows), 文件 (Files), 设置 (Settings) | 空气质量, 灯带, 相机, 计数器 |
@@ -101,11 +101,17 @@ no atlases of their own.
 ## Installable apps
 
 An installable app starts as a container offered in the Workspace under
-`/workspace/media/apps/<id>`; it is not launchable there. Its manifest lists
-`permissions`: the Lua packages it wants besides `app`. The system's install
-screen shows them in plain words; when the person installs it, the
+`/workspace/media/apps/<id>`; it is not launchable there. It is written
+against the app API
+([`app-api.md`](../../plugins/app-manager/docs/app-api.md)): its manifest
+names the API level, the capabilities it requires or uses, other packages it
+asks for, and the Boards it is for when it talks to their hardware. The
+system checks it against the device; one that cannot run here shows why and
+cannot be installed. Otherwise the install screen lists what it asks for in
+the words each package's Plugin declares; when the person installs it, the
 `app-manager` Plugin copies the container into its private `/media/apps/<id>`,
-and from then on every run of it may `require` only `app` and those packages.
+and from then on every run of it may `require` only the core packages and
+those it named.
 A Workflow or Agent asks for an install with `app.install`; only the person
 completes it. Uninstalling deletes the container and the app's data; the
 Workspace offer stays until its author removes it.

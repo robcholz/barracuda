@@ -6,21 +6,25 @@
 //! the switcher. This module turns those into app states, lifecycle events
 //! for the program, and VM and memory budgets.
 
-use crate::builtin::{Backends, BuiltinApp};
-use crate::bundle::{
-    self, APP_PACKAGE, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf,
-};
+use crate::builtin::{Backends, BuiltinApp, BuiltinBackend};
+use crate::bundle::{self, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf};
+use crate::device::{self, Device, Packages};
 use crate::package::AppPackage;
 use crate::port::{AppState, Lifecycle, Port, Ports};
 use crate::storage::{APP_DATA, Storage};
 use alloc::boxed::Box;
-use alloc::{format, rc::Rc, string::String, vec::Vec};
+use alloc::{
+    format,
+    rc::Rc,
+    string::{String, ToString},
+    vec::Vec,
+};
 use barracuda_uikit::{UiService, UiSession};
 use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_vm_plugin::{
-    LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope, Vm,
-    VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion, VmRunOutcome, VmRunProgress,
-    VmRunRequest, VmRunUpdate,
+    AppApi, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope,
+    Vm, VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion, VmRunOutcome,
+    VmRunProgress, VmRunRequest, VmRunUpdate,
 };
 use core::cell::{Cell, RefCell};
 use core::future::Future;
@@ -60,6 +64,8 @@ pub enum AppError {
     ViewRejected,
     /// The app has a view and the device has no display.
     NoDisplay,
+    /// The app cannot run on this device; its `incompatible` says why.
+    Incompatible,
     /// No app is in the foreground.
     NoForegroundApp,
     /// The foreground app is not taking input.
@@ -80,6 +86,7 @@ impl core::fmt::Display for AppError {
             AppError::Storage => "app storage failed",
             AppError::ViewRejected => "app view rejected",
             AppError::NoDisplay => "the device has no display for the app's view",
+            AppError::Incompatible => "the app cannot run on this device",
             AppError::NoForegroundApp => "no app is in the foreground",
             AppError::NotInteractive => "the foreground app is not taking input",
             AppError::RuntimeUnavailable => "VM runtime is unavailable",
@@ -234,6 +241,7 @@ struct Inner {
     vm: Rc<Vm>,
     /// Shows apps' views; `None` on a device without a display.
     ui: Option<Rc<UiService>>,
+    device: Device,
     packages: LuaPackageRegistry,
     builtins: Builtins,
     backends: Backends,
@@ -259,6 +267,7 @@ impl AppManager {
     /// Creates a manager over a Plugin filesystem and registers the `app` Lua
     /// package its programs use. Keep the registration for the manager's life.
     /// Apps' views show through `ui`; without one, only headless apps open.
+    /// Installable apps are checked against `device`.
     ///
     /// # Errors
     ///
@@ -267,6 +276,7 @@ impl AppManager {
         filesystem: ScopedVfs,
         vm: Rc<Vm>,
         ui: Option<Rc<UiService>>,
+        device: Device,
         packages: &LuaPackageRegistry,
     ) -> Result<(Self, LuaPackageRegistration), LuaPackageRegistryError> {
         let ports = Arc::new(Ports::new());
@@ -276,6 +286,7 @@ impl AppManager {
                 filesystem,
                 vm,
                 ui,
+                device,
                 packages: packages.clone(),
                 builtins: Builtins::default(),
                 backends: Backends::new(),
@@ -294,7 +305,45 @@ impl AppManager {
         Shelf {
             filesystem: &self.inner.filesystem,
             builtins: &self.inner.builtins,
+            device: &self.inner.device,
+            packages: self.packages(),
         }
+    }
+
+    fn packages(&self) -> Packages {
+        self.inner.packages.packages().into_iter().collect()
+    }
+
+    /// What installable apps are checked against.
+    #[must_use]
+    pub fn device(&self) -> &Device {
+        &self.inner.device
+    }
+
+    /// What package `name` lets an app do, in the words its Plugin declared
+    /// for the install screen; `None` for a package outside the app API or
+    /// one this device lacks.
+    #[must_use]
+    pub fn purpose(&self, name: &str) -> Option<&'static str> {
+        device::purpose(&self.packages(), name)
+    }
+
+    /// Registers a Lua package of the app API answered by `backend` on the
+    /// app manager's task, the way builtin apps' packages are. Keep the
+    /// registration for as long as the package is offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns the registry's error when the package cannot be registered.
+    pub fn add_package(
+        &self,
+        name: &'static str,
+        api: AppApi,
+        backend: Rc<dyn BuiltinBackend>,
+    ) -> Result<LuaPackageRegistration, LuaPackageRegistryError> {
+        self.inner
+            .packages
+            .register(self.inner.backends.add(name, Some(api), backend))
     }
 
     /// Adds a builtin app, a system app another Plugin ships, and registers
@@ -317,7 +366,7 @@ impl AppManager {
                 let registration = self
                     .inner
                     .packages
-                    .register(self.inner.backends.add(package.name, package.backend))
+                    .register(self.inner.backends.add(package.name, None, package.backend))
                     .map_err(BuiltinError::Package)?;
                 self.inner.builtins.reserve(package.name);
                 Some(registration)
@@ -397,15 +446,16 @@ impl AppManager {
     /// # Errors
     ///
     /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id` or the ID belongs to a system app.
+    /// `id`, the ID belongs to a system app, or the app cannot run on this
+    /// device.
     pub async fn request_install(&self, id: &str) -> Result<AppInfo, AppError> {
-        let offered = bundle::offered(&self.shelf(), id).await?;
-        if self.system_app(id).await {
-            return Err(AppError::SystemApp);
+        let offered = self.offered(id).await?;
+        if offered.incompatible.is_some() {
+            return Err(AppError::Incompatible);
         }
-        self.inner.state.borrow_mut().install_request = Some(offered.info.clone());
+        self.inner.state.borrow_mut().install_request = Some(offered.clone());
         self.inner.changed.signal(());
-        Ok(offered.info)
+        Ok(offered)
     }
 
     /// The install the system UI should ask the person about.
@@ -428,6 +478,21 @@ impl AppManager {
         }
     }
 
+    /// The Workspace container offered as app `id`, with why it cannot run on
+    /// this device, if it cannot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when the Workspace offers no valid container
+    /// `id` or the ID belongs to a system app.
+    pub async fn offered(&self, id: &str) -> Result<AppInfo, AppError> {
+        let offered = bundle::offered(&self.shelf(), id).await?;
+        if self.system_app(id).await {
+            return Err(AppError::SystemApp);
+        }
+        Ok(offered.info)
+    }
+
     async fn system_app(&self, id: &str) -> bool {
         bundle::info(&self.shelf(), id)
             .await
@@ -442,11 +507,15 @@ impl AppManager {
     /// # Errors
     ///
     /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id`, the ID belongs to a system app, or the copy fails.
+    /// `id`, the ID belongs to a system app, the app cannot run on this
+    /// device, or the copy fails.
     pub async fn install(&self, id: &str) -> Result<AppInfo, AppError> {
         let offered = bundle::offered(&self.shelf(), id).await?;
         if self.system_app(id).await {
             return Err(AppError::SystemApp);
+        }
+        if offered.info.incompatible.is_some() {
+            return Err(AppError::Incompatible);
         }
         self.terminate(id);
         let filesystem = &self.inner.filesystem;
@@ -518,8 +587,8 @@ impl AppManager {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError`] when the container cannot be loaded, its view is
-    /// rejected, or no app run is free.
+    /// Returns [`AppError`] when the container cannot be loaded, the app no
+    /// longer fits this device, its view is rejected, or no app run is free.
     pub async fn open(&self, id: &str) -> Result<RunningApp, AppError> {
         let running = self.inner.state.borrow().find(id);
         if let Some(index) = running {
@@ -536,14 +605,18 @@ impl AppManager {
         if let Some(index) = running {
             return self.reopen(index).await;
         }
-        let has_view = bundle.view.is_some();
-        if has_view {
-            self.home();
-        }
         let ui = match (&bundle.view, &self.inner.ui) {
             (Some(_), None) => return Err(AppError::NoDisplay),
             (_, ui) => ui.clone(),
         };
+        if bundle.info.incompatible.is_some() {
+            return Err(AppError::Incompatible);
+        }
+        let packages = self.packages();
+        let has_view = bundle.view.is_some();
+        if has_view {
+            self.home();
+        }
         let index = self.free_slot()?;
         let session = match (&bundle.view, ui) {
             (Some(view), Some(ui)) => {
@@ -567,6 +640,7 @@ impl AppManager {
             bundle.info.version.clone(),
             session.as_ref().map(|session| session.channel().clone()),
             Storage::new(self.inner.filesystem.clone(), &bundle.info.id),
+            device::describe(&self.inner.device, &packages).to_string(),
             state,
         ));
         let ticket = self.ticket(index);
@@ -574,14 +648,10 @@ impl AppManager {
         // The binding shares the first line so Lua line numbers stay correct.
         let source = format!("require(\"app\").__bind({ticket:?}); {}", bundle.source);
         // A system app may require every package; an installable app only
-        // `app` and what its manifest asked for when it was installed.
+        // the core packages and what its manifest asked for.
         let scope = match bundle.info.kind {
             AppKind::System => LuaPackageScope::All,
-            AppKind::Installable => LuaPackageScope::Only(
-                core::iter::once(String::from(APP_PACKAGE))
-                    .chain(bundle.info.permissions.iter().cloned())
-                    .collect(),
-            ),
+            AppKind::Installable => LuaPackageScope::Only(device::grant(&bundle.info, &packages)),
         };
         let run = match self.inner.vm.run_scoped(VmRunRequest { source }, scope) {
             Ok(run) => run,

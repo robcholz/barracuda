@@ -12,7 +12,7 @@ use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_appkit::{
-    AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
+    AppError, AppInfo, AppKind, AppManager, AppState, CAPABILITIES, RunningApp, VmRunOutcome,
 };
 use barracuda_platform::{AccessPointState, StationState};
 use barracuda_time_plugin::UtcClock;
@@ -506,6 +506,8 @@ impl SystemUi {
             return;
         };
         match self.screen {
+            // An app that cannot run here is never installed.
+            Some(Screen::Install) if subject.incompatible.is_some() => {}
             Some(Screen::Install) => {
                 if let Err(error) = self.services.apps.install(&subject.id).await {
                     log::warn!("system ui: cannot install {}: {error}", subject.id);
@@ -697,6 +699,51 @@ impl SystemUi {
         )
     }
 
+    /// What an app asks to be allowed, in the words of the Plugins that
+    /// provide it, with its icons; what it uses only when the device has it
+    /// is marked optional.
+    fn permissions(&self, subject: Option<&AppInfo>) -> Vec<(String, String)> {
+        let Some(info) = subject else {
+            return Vec::new();
+        };
+        let permissions: Vec<(String, String)> = info
+            .requires
+            .iter()
+            .chain(&info.uses)
+            .chain(&info.permissions)
+            .map(|package| {
+                // A capability this device lacks goes by its name in the
+                // app API; any other package by its own.
+                let purpose = self.services.apps.purpose(package).map_or_else(
+                    || {
+                        CAPABILITIES
+                            .iter()
+                            .find(|(name, _, _)| name == package)
+                            .map_or_else(
+                                || format!("使用 {package}"),
+                                |(_, _, noun)| {
+                                    let gap = if noun.is_ascii() { " " } else { "" };
+                                    format!("使用{gap}{noun}")
+                                },
+                            )
+                    },
+                    String::from,
+                );
+                let text = if info.uses.contains(package) {
+                    format!("{purpose}（可选）")
+                } else {
+                    purpose
+                };
+                (text, glyph(words::permission_icon(package)))
+            })
+            .collect();
+        if permissions.is_empty() {
+            vec![(String::from("不需要额外权限"), glyph("check"))]
+        } else {
+            permissions
+        }
+    }
+
     /// Writes every value of the system view.
     fn render(&self) {
         let Some(screen) = self.screen else {
@@ -765,13 +812,22 @@ impl SystemUi {
                 "重新打开",
                 "回到主页",
             ),
-            Screen::Install => (
-                format!("安装“{subject_name}”？"),
-                String::from("来自工作区"),
-                permissions(subject),
-                "安装",
-                "取消",
-            ),
+            Screen::Install => match subject.and_then(|info| info.incompatible.as_ref()) {
+                Some(reason) => (
+                    format!("无法安装“{subject_name}”"),
+                    reason.clone(),
+                    self.permissions(subject),
+                    "安装",
+                    "返回",
+                ),
+                None => (
+                    format!("安装“{subject_name}”？"),
+                    String::from("来自工作区"),
+                    self.permissions(subject),
+                    "安装",
+                    "取消",
+                ),
+            },
             Screen::Info => (
                 String::from(subject_name),
                 format!(
@@ -782,7 +838,7 @@ impl SystemUi {
                 if system {
                     Vec::new()
                 } else {
-                    permissions(subject)
+                    self.permissions(subject)
                 },
                 if system { "" } else { "卸载" },
                 "返回",
@@ -983,6 +1039,13 @@ impl SystemUi {
             ("primary", ViewValue::Str(String::from(primary))),
             ("secondary", ViewValue::Str(String::from(secondary))),
             ("removable", ViewValue::Bool(!system)),
+            (
+                "blocked",
+                ViewValue::Bool(
+                    screen == Screen::Install
+                        && subject.is_some_and(|info| info.incompatible.is_some()),
+                ),
+            ),
         ];
         let channel = self.session.channel();
         for (name, value) in values {
@@ -1066,27 +1129,5 @@ fn index(call: &ViewCall) -> Option<usize> {
     match call.args.first() {
         Some(ViewValue::I32(index)) => usize::try_from(*index).ok(),
         _ => None,
-    }
-}
-
-/// What an app asks to be allowed, in the person's words, with its icons.
-fn permissions(subject: Option<&AppInfo>) -> Vec<(String, String)> {
-    let permissions: Vec<(String, String)> = subject
-        .map(|info| {
-            info.permissions
-                .iter()
-                .map(|package| {
-                    (
-                        words::permission(package),
-                        glyph(words::permission_icon(package)),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if permissions.is_empty() {
-        vec![(String::from("不需要额外权限"), glyph("check"))]
-    } else {
-        permissions
     }
 }

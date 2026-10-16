@@ -19,7 +19,8 @@ centers, and the screens around an app's lifecycle.
   `app.interactive`, `app.terminate`, `app.status`, `app.tap`, `app.notify`,
   `app.confirm`, and `app.agent`, see `action.md`; Events none
 - Agent Tools: none
-- Lua packages: `app`, and each builtin app's package
+- Lua packages: `app` (core) and `notify` (a capability) of the app API,
+  and each builtin app's package
 - Web: none
 - Tasks: one task that supervises up to `MAX_APP_RUNS` (3) app runs, answers
   builtin apps' package calls, and, with a display, draws views, reads
@@ -62,8 +63,8 @@ Where a container lives decides its `AppKind`, as
   registered Lua package, `uninstall` refuses them, and no installed app may
   take their IDs.
 - **Installable apps** are installed under the private `/media/apps`. Their
-  runs get `LuaPackageScope::Only` the `app` package and the `permissions`
-  their manifest asks for, through `Vm::run_scoped`.
+  runs get `LuaPackageScope::Only` the app API's core packages and the
+  packages their manifest names, through `Vm::run_scoped`.
 - **Offers** are containers under the shared `/workspace/media/apps`, written
   by the portal, Agents, or other Plugins. They are not launchable; `open`
   answers `NotInstalled`. `AppManager::install` copies an offer into
@@ -93,6 +94,23 @@ backend, which returns a JSON value Lua receives as tables, or a message Lua
 receives as `nil, message`. At most `MAX_BUILTIN_CALLS` (8) calls wait at once,
 and calls that wait on the person, such as a question, hold up no others.
 `AppManager::serve_builtins` runs the answering loop.
+
+## App API
+
+[`app-api.md`](app-api.md) is the contract between installable apps and the
+device. This Plugin hands `AppManager::register` the `Device` apps are
+checked against: the Board's stable name, the display's size and shape from
+the UI kit (`DisplayFeatures::ROUND` marks a round panel), and whether it
+reads touch. Every listing reads the packages' tiers from
+`LuaPackageRegistry::packages`, so a package Plugin registered after this
+one counts, and fills each installable app's `incompatible`; `request_install`,
+`install`, and `open` refuse an app that has one with `Incompatible`.
+`AppManager::purpose` is the install screen's line for a package, as its
+Plugin declared it.
+
+The `notify` capability is this Plugin's: `AppManager::add_package`
+registers it with the same bridge builtin apps' packages use, and its backend
+posts to `Notifications`.
 
 ## Lifecycle
 
@@ -308,7 +326,7 @@ the person.
 | Control       | tiles for Wi-Fi, microphone, mute, do not disturb, brightness, and the portal; the brightness slider; the portal's address | swiping up from the bottom edge, anywhere; swipe down to close |
 | Launching     | the app's icon and name while it starts                        | tapping an app                              |
 | Exited        | the app on the display ended unexpectedly; reopen or go home   | the foreground app failing or being cancelled |
-| Install       | the offered app and its permissions in plain words; install or cancel | tapping an offered app, or an `app.install` request |
+| Install       | the offered app and what it asks for in its Plugins' words; install or cancel, or, for an app this device cannot run, why, with install disabled | tapping an offered app, or an `app.install` request |
 | Info          | an app's version and kind; installable apps list their permissions | the menu's app info                    |
 
 Home shows the Agent's `AgentStatus`: standby; listening, with a level meter

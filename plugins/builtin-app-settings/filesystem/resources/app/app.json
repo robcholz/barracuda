@@ -3,9 +3,15 @@
   "id": "settings",
   "name": "设置",
   "version": "0.1.0",
+  "api": 1,
   "icon": "settings",
   "view": {
     "program": "view.bvir",
-    "styles": "styles.bin"
+    "styles": "styles.bin",
+    "size": [
+      360,
+      360
+    ],
+    "shape": "round"
   }
 }

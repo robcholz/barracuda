@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
-use barracuda_appkit::{AppError, AppManager};
+use barracuda_appkit::{AppError, AppManager, Device};
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm};
@@ -60,8 +60,14 @@ async fn scenario(spawner: Spawner) {
     let packages = LuaPackageRegistry::new();
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
-    let (manager, _registration) =
-        AppManager::register(filesystem().await, vm, None, &packages).unwrap();
+    let (manager, _registration) = AppManager::register(
+        filesystem().await,
+        vm,
+        None,
+        Device::headless("test-board"),
+        &packages,
+    )
+    .unwrap();
     spawner.spawn(supervise(manager.clone()).unwrap());
 
     let ids: Vec<String> = manager

@@ -3,5 +3,7 @@
   "id": "sessions",
   "name": "会话",
   "version": "0.1.0",
-  "icon": "chat"
+  "api": 1,
+  "icon": "chat",
+  "view": { "shape": "round" }
 }

@@ -123,6 +123,12 @@ where
         "power_monitor"
     }
 
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        Some(barracuda_vm_plugin::AppApi::DeviceSpecific {
+            purpose: "读取电源数据",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

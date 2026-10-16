@@ -12,7 +12,7 @@ use std::time::Duration;
 use barracuda_app_manager_plugin::{
     AgentState, AgentStatus, Notifications, Preferences, Screen, Services, SystemUi,
 };
-use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, WIFI_SETTINGS};
+use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, Device, WIFI_SETTINGS};
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::HostWifiDevice;
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
@@ -22,11 +22,12 @@ use barracuda_plugin::manager::{
 };
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_uikit::{
-    DEFAULT_VIEWPORT, Direction, Edge, Gesture, UiAssets, UiService, ViewCall, ViewValue,
+    DEFAULT_VIEWPORT, Direction, DisplayInfo, Edge, Gesture, UiAssets, UiService, ViewCall,
+    ViewValue,
 };
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
-use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm};
+use barracuda_vm_plugin::{AppApi, Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm};
 use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
 use embassy_executor::{Executor, Spawner};
@@ -85,17 +86,25 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     )
     .await;
     put(&builtin, "/resources/app/main.lua", b"").await;
-    // An offered app, and one that asks for packages.
+    // An offered app, one that asks for capabilities, and one this device
+    // lacks a capability for.
     for (name, bytes) in COUNTER {
         put(&fs, &format!("/workspace/media/apps/counter/{name}"), bytes).await;
     }
     put(
         &fs,
         "/workspace/media/apps/lamp/app.json",
-        br#"{"format":1,"id":"lamp","name":"Lamp","version":"1","permissions":["led_strip","http"]}"#,
+        br#"{"format":1,"id":"lamp","name":"Lamp","version":"1","requires":["light"],"uses":["http"]}"#,
     )
     .await;
     put(&fs, "/workspace/media/apps/lamp/main.lua", b"").await;
+    put(
+        &fs,
+        "/workspace/media/apps/photo/app.json",
+        br#"{"format":1,"id":"photo","name":"Photo","version":"1","requires":["camera"]}"#,
+    )
+    .await;
+    put(&fs, "/workspace/media/apps/photo/main.lua", b"").await;
     // An installed app that fails once it is on the display.
     for (name, bytes) in COUNTER
         .iter()
@@ -243,14 +252,51 @@ fn state_of(apps: &AppManager, id: &str) -> Option<AppState> {
         .map(|app| app.state)
 }
 
+/// The `light` capability, without a light behind it.
+struct Light;
+
+impl Package for Light {
+    fn install(&self, lua: &mut Lua) -> barracuda_vm_plugin::Result<()> {
+        lua.register_lib("light", |_package| Ok(()))
+    }
+}
+
+impl LuaPackage for Light {
+    fn name(&self) -> &'static str {
+        "light"
+    }
+
+    fn app_api(&self) -> Option<AppApi> {
+        Some(AppApi::Capability {
+            since: 1,
+            purpose: "控制灯光",
+        })
+    }
+}
+
 async fn scenario(spawner: Spawner) {
     let packages = LuaPackageRegistry::new();
+    let _light = packages.register(Light).unwrap();
     let ui = Rc::new(UiService::new(DEFAULT_VIEWPORT));
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
     let (filesystem, builtin) = app_filesystem().await;
-    let (apps, _registration) =
-        AppManager::register(filesystem, vm, Some(Rc::clone(&ui)), &packages).unwrap();
+    let (apps, _registration) = AppManager::register(
+        filesystem,
+        vm,
+        Some(Rc::clone(&ui)),
+        Device {
+            board: "test-board",
+            display: Some(DisplayInfo {
+                width: 360,
+                height: 360,
+                round: true,
+            }),
+            touch: true,
+        },
+        &packages,
+    )
+    .unwrap();
     apps.add_builtin(BuiltinApp {
         id: "system",
         filesystem: builtin,
@@ -289,7 +335,7 @@ async fn scenario(spawner: Spawner) {
     system.gesture(swipe(Direction::Left, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
     let launcher = texts(&system);
-    for name in ["Crash", "System", "计数器", "Lamp"] {
+    for name in ["Crash", "System", "计数器", "Lamp", "Photo"] {
         assert!(launcher.contains(name), "{launcher}");
     }
 
@@ -318,12 +364,33 @@ async fn scenario(spawner: Spawner) {
     let install = texts(&system);
     assert!(
         install.contains("安装“Lamp”？")
-            && install.contains("控制灯带")
-            && install.contains("联网收发数据"),
+            && install.contains("控制灯光")
+            && install.contains("使用网络（可选）"),
         "{install}"
     );
     system.call(press("cancel", None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
+
+    // An app this device cannot run says why and cannot be installed.
+    let (_, photo) = icon(&system, "Photo");
+    system.call(press("openApp", Some(photo))).await;
+    assert_eq!(system.screen(), Some(Screen::Install));
+    let install = texts(&system);
+    assert!(
+        install.contains("无法安装“Photo”") && install.contains("此设备没有相机"),
+        "{install}"
+    );
+    system.call(press("confirm", None)).await;
+    assert_eq!(system.screen(), Some(Screen::Install));
+    system.call(press("cancel", None)).await;
+    assert_eq!(system.screen(), Some(Screen::Apps));
+    assert!(
+        apps.list()
+            .await
+            .installable
+            .iter()
+            .any(|app| app.id == "photo")
+    );
 
     // Installing the counter, then opening it: the app's view shows.
     let (_, counter) = icon(&system, "计数器");

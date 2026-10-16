@@ -6,3 +6,5 @@
 0123456789·…—“”‘’、，。：；！？（）《》【】×
 # Words of settings, conversations, files, and Workflows screens.
 设置与显示附近的网络媒体资源缓存存储卡芯片永不秒分钟几点个月对话你这帮你定一个工作流变化体现插入
+# What Lua packages declare they let an app do, shown on the install screen.
+控制灯光读取动作传感器联网收发数据使用相机拍照播放声音和录音读写共享文件引脚模拟输入输出信号访问设备音频总线串口直接屏幕电源发通知向你确认

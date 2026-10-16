@@ -64,6 +64,8 @@ where
 }
 
 struct LedStripPackage<Strip> {
+    /// Whether the Board has the device, which makes the package a capability.
+    present: bool,
     strip: Arc<critical_section::Mutex<RefCell<Option<Strip>>>>,
     active: Arc<AtomicBool>,
 }
@@ -71,6 +73,7 @@ struct LedStripPackage<Strip> {
 impl<Strip> LedStripPackage<Strip> {
     fn new(strip: Option<Strip>) -> Self {
         Self {
+            present: strip.is_some(),
             strip: Arc::new(critical_section::Mutex::new(RefCell::new(strip))),
             active: Arc::new(AtomicBool::new(true)),
         }
@@ -87,7 +90,7 @@ where
         let available_active = Arc::clone(&self.active);
         let open_strip = Arc::clone(&self.strip);
         let open_active = Arc::clone(&self.active);
-        lua.register_lib("led_strip", move |package| {
+        lua.register_lib("light", move |package| {
             package.register("available", move |(): ()| {
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
@@ -120,7 +123,15 @@ where
     Strip::Error: core::fmt::Debug,
 {
     fn name(&self) -> &'static str {
-        "led_strip"
+        "light"
+    }
+
+    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+        self.present
+            .then_some(barracuda_vm_plugin::AppApi::Capability {
+                since: 1,
+                purpose: "控制灯光",
+            })
     }
 
     fn revoke(&self) {
@@ -267,7 +278,7 @@ mod tests {
         package.install(&mut lua).expect("install package");
 
         let result: bool = lua
-            .load("local leds = require('led_strip')\nlocal strip <close> = leds.open()\nstrip:write('\\001\\002\\003\\004\\005\\006')\nreturn strip:len() == 2")
+            .load("local leds = require('light')\nlocal strip <close> = leds.open()\nstrip:write('\\001\\002\\003\\004\\005\\006')\nreturn strip:len() == 2")
             .eval()
             .expect("use strip");
         assert!(result);
@@ -280,7 +291,7 @@ mod tests {
         package.install(&mut lua).expect("install package");
 
         let result: bool = lua
-            .load("local leds = require('led_strip')\nlocal strip, err = leds.open()\nreturn not leds.available() and strip == nil and type(err) == 'string'")
+            .load("local leds = require('light')\nlocal strip, err = leds.open()\nreturn not leds.available() and strip == nil and type(err) == 'string'")
             .eval()
             .expect("query strip");
         assert!(result);
