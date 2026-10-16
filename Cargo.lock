@@ -708,12 +708,48 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-app-plugin"
+name = "barracuda-app-manager-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-appkit",
+ "barracuda-board-hal",
+ "barracuda-captive-portal-plugin",
+ "barracuda-lua",
+ "barracuda-platform",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-time-plugin",
+ "barracuda-uikit",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-appkit"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
  "barracuda-lua",
  "barracuda-plugin",
- "barracuda-ui-plugin",
+ "barracuda-runtime-utils",
+ "barracuda-uikit",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-vm-plugin",
@@ -725,6 +761,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
+ "futures-util",
  "json-validator",
  "log",
  "portable-atomic",
@@ -858,6 +895,54 @@ dependencies = [
  "barracuda-driver-bq27220",
  "barracuda-peripheral",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-builtin-app-files-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "futures-lite",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-sessions-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-time-plugin",
+ "futures-lite",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-settings-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-platform",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-wifi-plugin",
+ "futures-lite",
+ "log",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-workflow-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "futures-lite",
+ "serde_json",
 ]
 
 [[package]]
@@ -2127,8 +2212,12 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
- "barracuda-app-plugin",
+ "barracuda-app-manager-plugin",
  "barracuda-audio-plugin",
+ "barracuda-builtin-app-files-plugin",
+ "barracuda-builtin-app-sessions-plugin",
+ "barracuda-builtin-app-settings-plugin",
+ "barracuda-builtin-app-workflow-plugin",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
@@ -2150,16 +2239,13 @@ dependencies = [
  "barracuda-power-monitor-plugin",
  "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
- "barracuda-shell-plugin",
  "barracuda-spi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
- "barracuda-ui-plugin",
  "barracuda-vm-agent-plugin",
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-http-plugin",
  "barracuda-vm-plugin",
- "barracuda-vm-system-plugin",
  "barracuda-vm-systeminfo-plugin",
  "barracuda-vm-time-plugin",
  "barracuda-vm-webserver-plugin",
@@ -2280,38 +2366,6 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "portable-atomic",
  "portable-atomic-util",
-]
-
-[[package]]
-name = "barracuda-shell-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-app-plugin",
- "barracuda-captive-portal-plugin",
- "barracuda-lua",
- "barracuda-platform",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-time-plugin",
- "barracuda-ui-plugin",
- "barracuda-vfs",
- "barracuda-vfs-memfs",
- "barracuda-vm-plugin",
- "barracuda-vm-runtime",
- "barracuda-webserver-plugin",
- "barracuda-wifi-plugin",
- "barracuda-workflow-plugin",
- "critical-section",
- "embassy-executor",
- "embassy-futures",
- "embassy-sync 0.7.2",
- "embassy-time",
- "futures-lite",
- "log",
- "portable-atomic",
- "portable-atomic-util",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2517,12 +2571,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-ui-plugin"
+name = "barracuda-ui-runtime"
+version = "0.1.0"
+dependencies = [
+ "microts",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-uikit"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
- "barracuda-plugin",
- "barracuda-plugin-build",
  "barracuda-ui-runtime",
  "barracuda-vfs",
  "critical-section",
@@ -2535,15 +2596,6 @@ dependencies = [
  "log",
  "portable-atomic",
  "portable-atomic-util",
-]
-
-[[package]]
-name = "barracuda-ui-runtime"
-version = "0.1.0"
-dependencies = [
- "microts",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2721,35 +2773,6 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-vm-system-plugin"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "barracuda-agent-plugin",
- "barracuda-app-plugin",
- "barracuda-platform",
- "barracuda-plugin",
- "barracuda-runtime-utils",
- "barracuda-shell-plugin",
- "barracuda-time-plugin",
- "barracuda-ui-plugin",
- "barracuda-vfs",
- "barracuda-vm-plugin",
- "barracuda-vm-runtime",
- "barracuda-wifi-plugin",
- "barracuda-workflow-plugin",
- "critical-section",
- "embassy-executor",
- "embassy-futures",
- "futures-lite",
- "futures-util",
- "log",
- "portable-atomic",
- "portable-atomic-util",
- "serde_json",
 ]
 
 [[package]]

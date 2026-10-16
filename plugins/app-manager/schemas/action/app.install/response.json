@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "location": {
+          "enum": [
+            "builtin",
+            "installed",
+            "workspace"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "system",
+            "installable"
+          ]
+        },
+        "has_view": {
+          "type": "boolean"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "icon": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "location",
+        "kind",
+        "has_view",
+        "permissions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "requested": {
+          "$ref": "#/$defs/app"
+        }
+      },
+      "required": [
+        "requested"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "not_found",
+            "system_app",
+            "invalid_bundle",
+            "storage"
+          ]
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

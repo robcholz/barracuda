@@ -9,13 +9,26 @@ the Plugins' docs.
 
 | | System | System app | Installable app |
 | --- | --- | --- | --- |
-| What it is | native Rust in the `shell` Plugin | an app container in the image | an app container the person installed |
-| Where it lives | the firmware and the `shell` Plugin's `/resources/view` | the `app` Plugin's `/resources/apps/<id>` | the `app` Plugin's `/media/apps/<id>` |
-| Runs as | the `shell` task | a Lua run with a MicroTS view, under the `app` lifecycle | the same |
-| Lua packages | none | every registered package, `system` included | `app` and the permissions it asked for at install; never `system` |
-| Removable | no | no; only app info | yes; app info and uninstall |
+| What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container the person installed |
+| Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | the `app-manager` Plugin's `/media/apps/<id>` |
+| Runs as | the `app-manager` task | a Lua run with a MicroTS view, under the app lifecycle | the same |
+| Lua packages | none | every registered package, its own package included | `app` and the permissions it asked for at install; never a builtin app's package |
+| Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
 | Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | 会话 (Sessions), 工作流 (Workflows), 文件 (Files), 设置 (Settings) | 空气质量, 灯带, 相机, 计数器 |
+
+## The Plugins
+
+| Plugin | Holds |
+| --- | --- |
+| `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
+| `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
+
+The app kit needs no display. On a Board without one, the `app-manager`
+Plugin runs no UI kit and no system UI: it is an app manager for headless
+apps, and apps with views answer `no_display`. A device Board enables
+`app-manager` with the builtin apps it ships; a Board leaves a system app out
+by not enabling its Plugin.
 
 ## Deciding the layer
 
@@ -29,8 +42,8 @@ Put a feature in the **system** when any of these holds:
   system surfaces, and the Board's home and Agent keys.
 
 Make it a **system app** when it is a full-screen experience the device
-ships with, that needs packages an installable app could not get without
-asking, and that may fail without taking the device down: Settings,
+ships with, that needs the device's state an installable app could not get
+without asking, and that may fail without taking the device down: Settings,
 conversations, Workflows, files.
 
 Everything else is an **installable app**: it is offered in the Workspace by
@@ -38,30 +51,30 @@ the portal, an Agent, or another Plugin, and the person installs it.
 
 ## The system
 
-The `shell` Plugin is the system. It is the only caller that switches,
-installs, and uninstalls apps for the person and the only owner of the
-system gestures. Its view sits on the `ui` Plugin's system layer, above the
+The `app-manager` Plugin's system UI is the system. It is the only caller
+that switches, installs, and uninstalls apps for the person and the only
+owner of the system gestures. Its view sits on the system layer, above the
 app layer: while an app is in the foreground and no system screen covers it,
-the app's view shows; any system screen covers the app and the shell stops
-the app's input (`AppManager::set_interactive`) until the screen closes.
+the app's view shows; any system screen covers the app and stops its input
+(`AppManager::set_interactive`) until the screen closes.
 
-The `ui` Plugin turns touch into taps, which press the view on the display,
-and long presses and swipes, which go only to the system
+The UI kit turns touch into taps, which press the view on the display, and
+long presses and swipes, which go only to the system
 (`UiService::next_gesture`). Apps never see system gestures, so no app can
 take the person's way out.
 
 Notices reach the person through the system's notification center, which
-any Plugin posts to with the `shell` Plugin's `Notifications` capability and
-Workflows with `shell.notify`. A question that needs the person's answer
-(`Notifications::ask`, `shell.confirm`) is listed first and shows on the home
+any Plugin posts to with the `Notifications` capability and Workflows with
+`app.notify`. A question that needs the person's answer
+(`Notifications::ask`, `app.confirm`) is listed first and shows on the home
 screen until answered. The home screen also shows the Agent's state
-(standby, listening, thinking, answering) from `AgentStatus` or
-`shell.agent`. An app never draws over another app or over the system.
+(standby, listening, thinking, answering) from `AgentStatus` or `app.agent`.
+An app never draws over another app or over the system.
 
 The device's settings (brightness, volume, mute, microphone, do not disturb,
-and the screen timeout) are the `shell` Plugin's `Preferences`: the control
-center and the Settings system app change the same values, the shell applies
-brightness and the timeout to the display, and keeps them across restarts.
+and the screen timeout) are the `Preferences` capability: the control center
+and the Settings app change the same values, and the system UI applies
+brightness and the timeout to the display and keeps them across restarts.
 
 A right swipe over an app is back: an app that reported pages with
 `app.navigation(depth)` receives `app:back` while its depth is above zero;
@@ -69,40 +82,43 @@ otherwise the app goes to the background and the launcher shows.
 
 ## System apps
 
-System apps are containers in the image, under the `app` Plugin's
-`/resources/apps`. The `app` Plugin decides their kind from that location, so
-nothing outside the image build can make a system app. They run under the
-same lifecycle as any app (active, inactive, background, suspended,
-terminating) and may `require` every registered Lua package without
-declaring it. No installed app may take a system app's ID, and system apps
-cannot be uninstalled.
+A system app is a builtin app: a `builtin-app-<name>` Plugin depends on
+`app-manager` and adds its container with `AppManager::add_builtin`. Only
+Plugins in the image can do that, so nothing installed can make a system app.
+System apps run under the same lifecycle as any app (active, inactive,
+background, suspended, terminating) and may `require` every registered Lua
+package without declaring it. No installed app may take a system app's ID,
+and system apps cannot be uninstalled.
 
-The `system` Lua package, from the `vm-system` Plugin, is what makes them
-system apps: through it they read and change the device's settings, Wi-Fi,
-apps, the Agent's conversations, Workflows, and the shared files. The `app`
-Plugin refuses an installable app whose manifest asks for `system`. A system
-app draws with the system fonts and ships no atlases of its own.
+A builtin app reaches the device through its own Lua package, such as
+`settings`, whose backend lives in its Plugin and reads only the
+capabilities that Plugin depends on. An installable app whose manifest asks
+for a builtin app's package is invalid. A builtin app may say what the system
+UI opens it for, such as `wifi` for the control center's Wi-Fi tile, so the
+system UI never names an app. System apps draw with the system fonts and ship
+no atlases of their own.
 
 ## Installable apps
 
 An installable app starts as a container offered in the Workspace under
 `/workspace/media/apps/<id>`; it is not launchable there. Its manifest lists
 `permissions`: the Lua packages it wants besides `app`. The system's install
-screen shows them in plain words; when the person installs it, the `app`
-Plugin copies the container into its private `/media/apps/<id>`, and from then
-on every run of it may `require` only `app` and those packages. A Workflow or
-Agent asks for an install with `app.install`; only the person completes it.
-Uninstalling deletes the container and the app's data; the Workspace offer
-stays until its author removes it.
+screen shows them in plain words; when the person installs it, the
+`app-manager` Plugin copies the container into its private `/media/apps/<id>`,
+and from then on every run of it may `require` only `app` and those packages.
+A Workflow or Agent asks for an install with `app.install`; only the person
+completes it. Uninstalling deletes the container and the app's data; the
+Workspace offer stays until its author removes it.
 
 ## Fonts
 
-The `ui` Plugin bakes the system fonts into its `/resources/fonts`: Noto Sans
-SC at the sizes the system view and the system apps use, with every
-character in their sources, and the system icon font's glyphs at the sizes
-icons are drawn at. The 16 px regular slot is the prose slot: it also holds
-GB 2312's 3,755 common characters, so text no source names, such as an
-Agent's answer, a notice, or a conversation's title, is drawn in it. A view
-that ships no atlas for a font slot draws with the system font for it, so
-installable apps may use them too; an app that shows other characters bakes
-its own. Text with characters outside an atlas shows a placeholder box.
+The `app-manager` Plugin bakes the system fonts into its `/resources/fonts`:
+Noto Sans SC at the sizes the system view and the system apps use, with every
+character in its own sources and in its `charset.txt`, and the system icon
+font's glyphs at the sizes icons are drawn at. The 16 px regular slot is the
+prose slot: it also holds GB 2312's 3,755 common characters, so text no
+source names, such as an Agent's answer, a notice, or a conversation's title,
+is drawn in it. A view that ships no atlas for a font slot draws with the
+system font for it, so installable apps may use them too; an app that shows
+other characters bakes its own. Text with characters outside an atlas shows a
+placeholder box.

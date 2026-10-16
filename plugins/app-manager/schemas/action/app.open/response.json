@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "location": {
+          "enum": [
+            "builtin",
+            "installed",
+            "workspace"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "system",
+            "installable"
+          ]
+        },
+        "has_view": {
+          "type": "boolean"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "icon": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "location",
+        "kind",
+        "has_view",
+        "permissions"
+      ],
+      "additionalProperties": false
+    },
+    "running": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "$ref": "#/$defs/app"
+        },
+        "run_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "state": {
+          "enum": [
+            "active",
+            "inactive",
+            "background",
+            "suspended",
+            "running",
+            "terminating"
+          ]
+        }
+      },
+      "required": [
+        "app",
+        "run_id",
+        "state"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/running"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "not_found",
+            "not_installed",
+            "system_app",
+            "invalid_bundle",
+            "storage",
+            "view_rejected",
+            "no_display",
+            "runtime_unavailable",
+            "busy"
+          ]
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

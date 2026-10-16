@@ -1,0 +1,5 @@
+# Directories, relative to this Plugin, whose sources hold the text the
+# system fonts must cover, and the file extensions to read there.
+resources/view .tsx
+crates/plugin/src .rs
+resources/examples .tsx .lua .json

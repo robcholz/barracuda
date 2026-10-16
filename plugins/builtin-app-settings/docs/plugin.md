@@ -1,0 +1,59 @@
+# Builtin App Settings Plugin
+
+Ships 设置 (Settings), a system app for Wi-Fi, sound and display, installed
+apps, storage, and the device.
+
+- Plugin ID: `builtin-app-settings`
+- Dependencies: `app-manager`, `wifi`
+- Settings: none
+- Context resources: `target_identity`
+- Provided capabilities: none
+- Required capabilities: `AppManager` and `Preferences` from `app-manager`,
+  `WifiControl` from `wifi`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `settings`, for this app only
+- Web: none
+- Tasks: none; `app-manager`'s task answers the package
+- Storage: the app's container in `/resources/app`; reads sizes under
+  `/workspace/media` and `/workspace/cache`
+
+The app is a builtin app, see the `app-manager` Plugin's
+[`plugin.md`](../../app-manager/docs/plugin.md#builtin-apps). It opens for
+`wifi`: the control center's Wi-Fi tile opens it. Its pages are 设置, Wi-Fi,
+声音与显示, 应用, 存储, and 关于本机; a right swipe goes back a page.
+
+## Lua API
+
+Every call returns its value, or `nil` and a message.
+
+~~~lua
+local settings = require("settings")
+
+settings.status()
+-- { wifi = { state = "connected" | "connecting" | "disconnected", ssid = ... },
+--   brightness = 70, volume = 60, muted = false, microphone = true,
+--   quiet = false, screen_off = 30,
+--   device = { version = "0.1.0", board = ..., chip = ..., platform = ... } }
+settings.set("brightness", 40)  -- also volume, muted, microphone, quiet, screen_off
+settings.scan()                 -- { { ssid, bars = 1..4, glyphs, secured }, ... }
+settings.apps()                 -- installed apps: { { id, name, version, glyphs, letter, state }, ... }
+settings.storage()              -- { used, label, parts = { { name, icon, bytes, label }, ... } }
+~~~
+
+`set` changes `app-manager`'s `Preferences`, which the control center shows
+too, and returns the new `status()`. Brightness and volume are percents;
+`screen_off` is one of `SCREEN_TIMEOUTS`, in seconds. `glyphs` are an icon's
+layers in the system icon font, `{ base, accent, dim }`. An app's `state` is
+`running`, `background`, `suspended`, `terminating`, or absent. `storage` adds
+up the Workspace's media and cache and `AppManager::used_bytes`.
+
+## Building
+
+`resources/app/` holds the app's sources; the `app` task builds them into
+`filesystem/resources/app/` with `app-manager`'s `resources/build-app.ts`.
+The app ships no fonts and draws with the system fonts.
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-settings
+```

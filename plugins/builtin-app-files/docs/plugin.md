@@ -1,0 +1,46 @@
+# Builtin App Files Plugin
+
+Ships 文件 (Files), a system app that shows the files in the shared
+Workspace.
+
+- Plugin ID: `builtin-app-files`
+- Dependencies: `app-manager`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AppManager` from `app-manager`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `files`, for this app only
+- Web: none
+- Tasks: none; `app-manager`'s task answers the package
+- Storage: the app's container in `/resources/app`; reads
+  `/workspace/media`, `/workspace/resources`, `/workspace/removable`, and
+  `/workspace/cache`
+
+The app is a builtin app, see the `app-manager` Plugin's
+[`plugin.md`](../../app-manager/docs/plugin.md#builtin-apps). Its first page
+counts the files in each area (`AREAS`): 媒体, 资源, 存储卡, and 缓存;
+opening one lists its files.
+
+## Lua API
+
+~~~lua
+local files = require("files")
+
+files.areas()     -- { { name = "媒体", count, present }, ... }
+files.list("媒体") -- { name, present, count, label, files = { { path, label }, ... } }
+~~~
+
+`present` is false for an area that is not there, such as 存储卡 without a
+card. A listing holds at most `MAX_FILES` (64) files, sorted by their path in
+the area.
+
+## Building
+
+`resources/app/` holds the app's sources; the `app` task builds them into
+`filesystem/resources/app/` with `app-manager`'s `resources/build-app.ts`.
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-files
+```
