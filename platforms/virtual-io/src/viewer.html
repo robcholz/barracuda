@@ -43,6 +43,8 @@
     color: #71717a; font-size: 12px; letter-spacing: .04em; background: #000;
   }
   .bezel.dark .off { display: flex; }
+  .bezel.round { border-radius: 50%; }
+  .bezel.round canvas, .bezel.round .off { border-radius: 50%; }
   .touch { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 18px; }
   .touch b { color: var(--accent); font-weight: 600; }
   .empty { color: var(--muted); }
@@ -190,6 +192,7 @@ async function poll() {
         `${display.model} on ${display.bus} · ${display.width}×${display.height}` +
         (touch ? " · touch" : "");
       entry.bezel.classList.toggle("dark", !display.visible);
+      entry.bezel.classList.toggle("round", Boolean(display.round));
       if (display.revision !== entry.revision) {
         entry.revision = display.revision;
         await draw(display, entry);

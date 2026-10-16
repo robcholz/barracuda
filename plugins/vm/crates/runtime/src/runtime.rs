@@ -5,7 +5,7 @@ use core::task::{Poll, Waker};
 
 use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
-use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_vm_package_api::{LuaPackageRegistry, LuaPackageScope};
 use embassy_executor::Spawner;
 
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
@@ -179,6 +179,7 @@ impl VmRuntime {
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
         package_registry: LuaPackageRegistry,
+        package_scope: LuaPackageScope,
     ) -> Result<VmRun, DispatchError> {
         let spawner = self
             .state
@@ -199,6 +200,7 @@ impl VmRuntime {
             limits,
             builtin_packages,
             package_registry,
+            package_scope,
             progress,
             completion,
         })

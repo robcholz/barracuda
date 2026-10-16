@@ -12,6 +12,10 @@ authoritative Plugin contract: the scope rules, layout, `plugin.toml` and
 settings, construction, lifecycle, collaboration contracts, files, tests, and
 the required `plugin.md` form.
 
+See [.agents/docs/device-ui.md](.agents/docs/device-ui.md) for the
+authoritative split of the device UI into the system, system apps, and
+installable apps.
+
 See [.agents/docs/execution-ownership.md](.agents/docs/execution-ownership.md)
 for the authoritative ownership and cancellation rules for long-lived Embassy
 tasks.

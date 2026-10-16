@@ -1,0 +1,8 @@
+# Characters the system fonts hold besides the ones in the listed sources:
+# common words in app names and notices, so installable apps that use the
+# system fonts read well. Lines starting with # are ignored.
+计数器空气质量灯带相机姿态天气音乐时钟闹钟计时日历笔记备忘录照片地图电量温度湿度光照声音显示网络存储关于本机系统信息
+客厅门铃有人在门口打开关闭已完成失败成功提醒今天明天昨天上午下午晚上周一二三四五六日
+0123456789·…—“”‘’、，。：；！？（）《》【】×
+# Words of settings, conversations, files, and Workflows screens.
+设置与显示附近的网络媒体资源缓存存储卡芯片永不秒分钟几点个月对话你这帮你定一个工作流变化体现插入

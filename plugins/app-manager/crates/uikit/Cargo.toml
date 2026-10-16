@@ -1,0 +1,36 @@
+[package]
+name = "barracuda-uikit"
+version = "0.1.0"
+edition = "2024"
+description = "Runs compiled MicroTS views on a display and turns touch into gestures"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-board-hal.workspace = true
+embedded-graphics-core.workspace = true
+embassy-time.workspace = true
+portable-atomic.workspace = true
+portable-atomic-util.workspace = true
+barracuda-ui-runtime = { path = "../runtime" }
+barracuda-vfs.workspace = true
+critical-section = "1"
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

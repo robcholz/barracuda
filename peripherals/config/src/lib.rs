@@ -1899,6 +1899,10 @@ fn render_declaration(
                 .peripheral_io()
                 .spi_device(resource)
                 .map(|spi| spi.peripheral()),
+            BindingKind::QuadSpiDevice => board
+                .peripheral_io()
+                .quad_spi_device(resource)
+                .map(|spi| spi.peripheral()),
             BindingKind::DigitalInput | BindingKind::DigitalOutput => Some(resource),
             _ => None,
         };

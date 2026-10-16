@@ -636,6 +636,67 @@ pub fn spi_device(
     }
 }
 
+/// Single-owner quad-SPI device: a virtual controller with its chip-select
+/// pin, framing each write as its opcode, 24-bit address, and payload.
+pub struct QuadSpiDevice {
+    device: SpiDevice,
+}
+
+/// Virtual quad-SPI construction failure.
+pub type QuadSpiConfigError = VirtualSpiConfigError;
+
+impl barracuda_board_hal::QuadSpiBus for QuadSpiDevice {
+    type Error = <SpiDevice as embedded_hal::spi::ErrorType>::Error;
+
+    fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error> {
+        let [_, high, middle, low] = address.to_be_bytes();
+        let mut frame = Vec::with_capacity(4 + data.len());
+        frame.extend_from_slice(&[opcode, high, middle, low]);
+        frame.extend_from_slice(data);
+        embedded_hal::spi::SpiDevice::write(&mut self.device, &frame)
+    }
+}
+
+/// Constructs a write-only quad-SPI device on a virtual controller: the
+/// device model attached to the controller receives every framed write.
+///
+/// # Errors
+///
+/// Returns [`VirtualSpiConfigError::ZeroFrequency`] for a zero bus clock.
+#[allow(clippy::too_many_arguments)]
+pub fn quad_spi_device(
+    controller: VirtualSpiController,
+    sck: VirtualPinToken,
+    data0: VirtualPinToken,
+    data1: VirtualPinToken,
+    data2: VirtualPinToken,
+    data3: VirtualPinToken,
+    chip_select: VirtualPinToken,
+    frequency_hz: u32,
+) -> Result<QuadSpiDevice, QuadSpiConfigError> {
+    if frequency_hz == 0 {
+        return Err(VirtualSpiConfigError::ZeroFrequency);
+    }
+    let chip_select_pin = chip_select.pin;
+    let chip_select = digital_output(chip_select, DigitalLevel::High);
+    controller.hardware.claim_spi(
+        controller.bus,
+        [
+            (sck.pin, "SCK"),
+            (data0.pin, "D0"),
+            (data1.pin, "D1"),
+            (data2.pin, "D2"),
+            (data3.pin, "D3"),
+            (chip_select_pin, "CS"),
+        ],
+    );
+    let bus = VirtualSpiBus::new(controller.hardware, controller.bus, frequency_hz);
+    match ExclusiveDevice::new_no_delay(bus, chip_select) {
+        Ok(device) => Ok(QuadSpiDevice { device }),
+        Err(never) => match never {},
+    }
+}
+
 /// Returns the delay handed to peripheral implementations.
 #[must_use]
 pub const fn delay() -> PeripheralDelay {

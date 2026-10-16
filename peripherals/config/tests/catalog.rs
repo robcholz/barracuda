@@ -969,10 +969,10 @@ fn host_boards_declare_their_peripherals_to_a_hal_with_device_models() {
         assert!(rust.contains(
             r#"PeripheralDeclaration { name: "power-monitor", implementation: "ina226-power-monitor", bindings: &[("i2c", "I2C2")], parameters: &[("address", "64"), ("shunt-micro-ohms", "5000")] }"#
         ));
-        // An SPI panel names its controller and the pins its model watches.
+        // A QSPI panel names its controller and the pins its model watches.
         assert!(
             rust.contains(
-                r#"implementation: "mipi-dbi-display", bindings: &[("backlight", "GPIO15"), ("dc", "GPIO13"), ("reset", "GPIO14"), ("spi", "SPI0")]"#
+                r#"implementation: "st77916-qspi-display", bindings: &[("backlight", "GPIO15"), ("bus", "SPI0"), ("dc", "GPIO13"), ("power_enable", "GPIO20"), ("reset", "GPIO14")]"#
             ),
             "{name}"
         );

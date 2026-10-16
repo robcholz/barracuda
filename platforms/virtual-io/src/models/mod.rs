@@ -11,6 +11,7 @@ pub mod mipi_dbi;
 pub mod pi4ioe5v6408;
 pub mod register_map;
 pub mod rx8130ce;
+pub mod st77916;
 pub mod ws2812b;
 
 pub use bq27220::Bq27220Model;
@@ -20,4 +21,5 @@ pub use mipi_dbi::MipiDbiPanelModel;
 pub use pi4ioe5v6408::Pi4ioe5v6408Model;
 pub use register_map::{RegisterMapModel, RegisterMapSpec};
 pub use rx8130ce::Rx8130ceModel;
+pub use st77916::St77916PanelModel;
 pub use ws2812b::Ws2812bModel;

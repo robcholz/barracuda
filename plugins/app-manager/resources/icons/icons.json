@@ -1,0 +1,383 @@
+{
+  "about": [
+    {
+      "codepoint": 57344,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57345,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "activity": [
+    {
+      "codepoint": 57348,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "agent": [
+    {
+      "codepoint": 57352,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "air": [
+    {
+      "codepoint": 57356,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57357,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "alert": [
+    {
+      "codepoint": 57360,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "apps": [
+    {
+      "codepoint": 57364,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57365,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "camera": [
+    {
+      "codepoint": 57368,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57369,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "chat": [
+    {
+      "codepoint": 57372,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57373,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "check": [
+    {
+      "codepoint": 57376,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "chevron-left": [
+    {
+      "codepoint": 57380,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "chevron-right": [
+    {
+      "codepoint": 57384,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "files": [
+    {
+      "codepoint": 57388,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57389,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "globe": [
+    {
+      "codepoint": 57392,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "hard-drive": [
+    {
+      "codepoint": 57396,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "house": [
+    {
+      "codepoint": 57400,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "image": [
+    {
+      "codepoint": 57404,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "info": [
+    {
+      "codepoint": 57408,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "lamp": [
+    {
+      "codepoint": 57412,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57413,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "loader": [
+    {
+      "codepoint": 57416,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "lock": [
+    {
+      "codepoint": 57420,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "memory": [
+    {
+      "codepoint": 57424,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "mic": [
+    {
+      "codepoint": 57428,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "moon": [
+    {
+      "codepoint": 57432,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "network": [
+    {
+      "codepoint": 57436,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57437,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "package": [
+    {
+      "codepoint": 57440,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "posture": [
+    {
+      "codepoint": 57444,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57445,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "power": [
+    {
+      "codepoint": 57448,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "settings": [
+    {
+      "codepoint": 57452,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57453,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "shield-alert": [
+    {
+      "codepoint": 57456,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "signal-1": [
+    {
+      "codepoint": 57460,
+      "color": "#52525B",
+      "layer": "dim"
+    },
+    {
+      "codepoint": 57461,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "signal-2": [
+    {
+      "codepoint": 57464,
+      "color": "#52525B",
+      "layer": "dim"
+    },
+    {
+      "codepoint": 57465,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "signal-3": [
+    {
+      "codepoint": 57468,
+      "color": "#52525B",
+      "layer": "dim"
+    },
+    {
+      "codepoint": 57469,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "signal-4": [
+    {
+      "codepoint": 57472,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "sound": [
+    {
+      "codepoint": 57476,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57477,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "stop": [
+    {
+      "codepoint": 57480,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "storage": [
+    {
+      "codepoint": 57484,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57485,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "sun": [
+    {
+      "codepoint": 57488,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "timer": [
+    {
+      "codepoint": 57492,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "volume-x": [
+    {
+      "codepoint": 57496,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "wifi-off": [
+    {
+      "codepoint": 57504,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "wifi": [
+    {
+      "codepoint": 57500,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ],
+  "workflow": [
+    {
+      "codepoint": 57508,
+      "color": "#F4F4F5",
+      "layer": "base"
+    },
+    {
+      "codepoint": 57509,
+      "color": "#CCFF00",
+      "layer": "accent"
+    }
+  ],
+  "x": [
+    {
+      "codepoint": 57512,
+      "color": "#FAFAFA",
+      "layer": "base"
+    }
+  ]
+}

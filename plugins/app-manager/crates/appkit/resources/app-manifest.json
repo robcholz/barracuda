@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "format": { "const": 1 },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "version": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "entry": { "$ref": "#/$defs/file" },
+    "view": {
+      "type": "object",
+      "properties": {
+        "program": { "$ref": "#/$defs/file" },
+        "styles": { "$ref": "#/$defs/file" },
+        "fonts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/file" }
+        }
+      },
+      "required": ["program", "styles"],
+      "additionalProperties": false
+    },
+    "icon": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9_.-]+$" },
+    "permissions": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "pattern": "^[A-Za-z0-9_.-]+$"
+      }
+    }
+  },
+  "required": ["format", "id", "name", "version"],
+  "additionalProperties": false
+}

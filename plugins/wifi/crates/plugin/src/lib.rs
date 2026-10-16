@@ -36,9 +36,12 @@ use endpoint::{
 
 pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatus};
 
-const SETUP_AP_SSID: &str = "Barracuda Setup";
-const SETUP_AP_PASSWORD: &str = "";
-const SETUP_AP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 4, 1);
+/// Name of the open provisioning access point, where the portal is reachable.
+pub const SETUP_AP_SSID: &str = "Barracuda Setup";
+/// Password of the provisioning access point: none.
+pub const SETUP_AP_PASSWORD: &str = "";
+/// The device's address on the provisioning access point.
+pub const SETUP_AP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 4, 1);
 const SETUP_AP_PREFIX: u8 = 24;
 const CAPTIVE_HTTP_PORT: u16 = 80;
 const CAPTIVE_DETECTION_PATHS: [&str; 8] = [

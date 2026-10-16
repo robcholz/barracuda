@@ -1,6 +1,9 @@
-# Products with a screen: the base set plus the system UI and the apps it
-# shows. The `ui` Plugin requires the Board's primary display.
+# Products with a screen: the base set plus the app manager, which shows apps
+# and the system UI on the Board's primary display, and the builtin apps.
 extends: base
 enable:
-  - app
-  - ui
+  - app-manager
+  - builtin-app-files
+  - builtin-app-sessions
+  - builtin-app-settings
+  - builtin-app-workflow

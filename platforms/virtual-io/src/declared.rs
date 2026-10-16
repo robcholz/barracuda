@@ -10,7 +10,10 @@
 use crate::{
     device::I2cDevice,
     hardware::{HardwareError, VirtualHardware},
-    models::{Bq27220Model, Cst816tModel, Ina226Model, MipiDbiPanelModel, Rx8130ceModel},
+    models::{
+        Bq27220Model, Cst816tModel, Ina226Model, MipiDbiPanelModel, Rx8130ceModel,
+        St77916PanelModel,
+    },
 };
 
 /// Bus voltage of the modelled INA226 supply: 5.000 V in 1.25 mV LSBs
@@ -104,6 +107,7 @@ enum Model {
     Bq27220,
     Cst816t,
     MipiDbiPanel,
+    St77916Panel,
 }
 
 impl Model {
@@ -114,6 +118,7 @@ impl Model {
             "bq27220-power-monitor" => Some(Self::Bq27220),
             "cst816t-touch" => Some(Self::Cst816t),
             "mipi-dbi-display" => Some(Self::MipiDbiPanel),
+            "st77916-qspi-display" => Some(Self::St77916Panel),
             _ => None,
         }
     }
@@ -141,8 +146,10 @@ impl Model {
             }
             Self::Bq27220 => Box::new(Bq27220Model::new()),
             Self::Cst816t => Box::new(Cst816tModel::new()),
-            // The panel sits on SPI; `attach` places it before reaching here.
-            Self::MipiDbiPanel => return Err(DeclarationError::MissingBinding("i2c")),
+            // Panels sit on SPI; `attach` places them before reaching here.
+            Self::MipiDbiPanel | Self::St77916Panel => {
+                return Err(DeclarationError::MissingBinding("i2c"));
+            }
         })
     }
 }
@@ -199,6 +206,19 @@ pub fn attach(
     };
     if model == Model::MipiDbiPanel {
         return attach_panel(hardware, declaration).map(Some);
+    }
+    if model == Model::St77916Panel {
+        let bus = declaration
+            .binding("bus")
+            .ok_or(DeclarationError::MissingBinding("bus"))?;
+        let panel = St77916PanelModel::new();
+        let model = crate::spi::SpiDevice::model(&panel);
+        hardware.attach_spi_peripheral(bus, Box::new(panel), declaration.name)?;
+        return Ok(Some(DeclaredDevice {
+            bus,
+            address: None,
+            model,
+        }));
     }
     let bus = declaration
         .binding("i2c")

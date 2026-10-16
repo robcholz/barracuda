@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "id": "lamp",
+  "name": "灯带",
+  "version": "0.1.0",
+  "icon": "lamp",
+  "permissions": ["led_strip"]
+}

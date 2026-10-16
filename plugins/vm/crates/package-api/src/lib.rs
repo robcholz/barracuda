@@ -5,6 +5,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use barracuda_lua::{Lua, Package, Result as LuaResult};
 use portable_atomic_util::{Arc, Weak};
@@ -99,8 +100,16 @@ impl LuaPackageRegistry {
 
     /// Installs every package registered during Plugin composition.
     pub fn install(&self, lua: &mut Lua) -> LuaResult<()> {
+        self.install_scoped(lua, &LuaPackageScope::All)
+    }
+
+    /// Installs the registered packages `scope` admits; the others cannot be
+    /// required in `lua`.
+    pub fn install_scoped(&self, lua: &mut Lua, scope: &LuaPackageScope) -> LuaResult<()> {
         for entry in &self.state.lock().entries {
-            entry.package.install(lua)?;
+            if scope.admits(entry.package.name()) {
+                entry.package.install(lua)?;
+            }
         }
         Ok(())
     }
@@ -109,6 +118,27 @@ impl LuaPackageRegistry {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.state.lock().entries.is_empty()
+    }
+}
+
+/// The registered packages one Lua run may `require`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum LuaPackageScope {
+    /// Every registered package.
+    #[default]
+    All,
+    /// Only the registered packages with these names.
+    Only(Vec<String>),
+}
+
+impl LuaPackageScope {
+    /// Whether the package `name` is installed in a run of this scope.
+    #[must_use]
+    pub fn admits(&self, name: &str) -> bool {
+        match self {
+            LuaPackageScope::All => true,
+            LuaPackageScope::Only(names) => names.iter().any(|admitted| admitted == name),
+        }
     }
 }
 

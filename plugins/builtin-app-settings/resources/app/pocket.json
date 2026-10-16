@@ -1,0 +1,14 @@
+{
+  "pocket": 2,
+  "id": "dev.barracuda.settings",
+  "name": "barracuda-settings",
+  "title": "Settings",
+  "version": "0.1.0",
+  "engine": { "capabilities": { "requires": ["text.glyphs.baked", "input.buttons"] } },
+  "app": {
+    "entry": "app.tsx",
+    "framework": "solid",
+    "viewport": { "fixed": { "logical": [360, 360], "presentation": "integer-fit" } },
+    "aot": true
+  }
+}
