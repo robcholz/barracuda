@@ -31,8 +31,8 @@ memory card, and cache; opening one lists its files.
 ~~~lua
 local files = require("files")
 
-files.areas()     -- { { name = "媒体", count, present }, ... }
-files.list("媒体") -- { name, present, count, label, files = { { path, label }, ... } }
+files.areas()     -- { { name, count, present }, ... }, one per area
+files.list(name)  -- { name, present, count, label, files = { { path, label }, ... } }
 ~~~
 
 `present` is false for an area that is not there, such as the memory card area

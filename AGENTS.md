@@ -2,9 +2,11 @@
 
 All documentation lives in the Mintlify site under [docs/](docs/), with its
 navigation in [docs/docs.json](docs/docs.json). Pages are MDX: write `<`, `{`,
-and `}` in prose as `\<`, `\{`, and `\}`, or inside code spans. Add every new
-page to `docs/docs.json`, and run `npx mint validate` and
-`npx mint broken-links` from `docs/` after changing pages.
+and `}` in prose as `\<`, `\{`, and `\}`, or inside code spans. Write pages in
+English only, code samples included: quote a UI label by its English string,
+and show a phrase's Chinese text as `"…"`. Add every new page to
+`docs/docs.json`, and run `npx mint validate` and `npx mint broken-links` from
+`docs/` after changing pages.
 
 See [docs/architecture/codestyle.mdx](docs/architecture/codestyle.mdx) for the Rust API.
 

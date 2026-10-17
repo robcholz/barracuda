@@ -30,7 +30,7 @@ across restarts.
 ~~~lua
 local workflows = require("workflows")
 
-workflows.list()                  -- { { id, event, trigger = "定时" | ..., enabled }, ... }
+workflows.list()                  -- { { id, event, trigger, enabled }, ... }; trigger is a display label
 workflows.set_enabled(id, enabled) -- enabled, or nil and a message
 ~~~
 

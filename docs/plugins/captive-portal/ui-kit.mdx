@@ -205,15 +205,16 @@ import {
 
 export const mount = definePage((context) => {
   const { lang } = context;
+  // Each phrase is { zh, en }; the Chinese text is elided as "…" here.
   const form = settingsForm(
     {
       endpoint: "/api/example",
-      submit: { zh: "保存", en: "Save" },
+      submit: { zh: "…", en: "Save" },
       rows: [
         {
-          title: { zh: "服务", en: "Service" },
+          title: { zh: "…", en: "Service" },
           hint: {
-            zh: "在服务的控制台创建 `API Key`",
+            zh: "…",
             en: "Create an `API Key` in the service's console",
           },
           fields: [{ kind: "secret", name: "api_key", label: "API Key" }],
@@ -230,7 +231,7 @@ export const mount = definePage((context) => {
           {
             kind: "number",
             name: "timeout_secs",
-            label: { zh: "超时", en: "Timeout" },
+            label: { zh: "…", en: "Timeout" },
             value: 30,
             unit: "s",
           },
@@ -240,7 +241,7 @@ export const mount = definePage((context) => {
       success: context.has("other")
         ? {
             action: {
-              label: { zh: "去看看", en: "Take a look" },
+              label: { zh: "…", en: "Take a look" },
               run: () => context.navigate("other"),
             },
           }
@@ -253,7 +254,7 @@ export const mount = definePage((context) => {
       {
         title: "Example",
         lead: {
-          zh: "连接一个外部服务。",
+          zh: "…",
           en: "Connect an external service.",
         },
         icon: new URL("./icon.svg", import.meta.url).href,

@@ -32,7 +32,7 @@ off the top of the page.
 ~~~lua
 local sessions = require("sessions")
 
-sessions.list()          -- { { id, title, when = "10:31" | "昨天" | "周一" | "9月15日" }, ... }
+sessions.list()          -- { { id, title, when }, ... }; when is "10:31" today, else a day or date label
 sessions.transcript(id)  -- { { mine, text, tools = { name, ... }, open }, ... }, oldest first
 sessions.agent()         -- { state = "standby" | "listening" | "thinking" | "answering", question, answer }
 ~~~

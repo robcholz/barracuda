@@ -94,7 +94,7 @@ WebServer before dispatch.
   (group, order, id) and rejects the whole manifest if any record is malformed
   or names a URL outside its own `/portal/assets/<id>/`.
 - `/portal/status` returns
-  `{"entries":{"<id>":{"state":"ready","label":{"zh":"已连接","en":"Connected"},"detail":"HomeNet"},...}}`.
+  `{"entries":{"<id>":{"state":"ready","label":{"zh":"…","en":"Connected"},"detail":"HomeNet"},...}}`.
   Only entries registered with a status source are listed, in registration
   order; `state` is `"ready"`, `"attention"` or `"off"`, and `label` and
   `detail` are omitted when absent. Every request calls each source afresh;
@@ -256,7 +256,7 @@ import type { PortalContext } from "../../../captive-portal/resources/web/ui";
 
 export function mount(root: HTMLElement, context: PortalContext) {
   const label = document.createElement("p");
-  label.textContent = context.lang === "zh" ? "模块内容" : "Module content";
+  label.textContent = context.lang === "zh" ? "…" : "Module content"; // "…": the Chinese text
   root.append(label);
   // Pass context.signal to fetch/listeners; clean up timers and other owned resources.
   return () => root.replaceChildren();

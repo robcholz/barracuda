@@ -74,7 +74,7 @@ Every channel serves the same JSON under its config path: `GET <endpoint>/status
   const inbound = channelInbound(context, {
     endpoint: "/api/gateway/telegram",
     channel: "Telegram",
-    how: { zh: "在 Telegram 里给 Bot 发送", en: "In Telegram, send the bot" },
+    how: { zh: "…", en: "In Telegram, send the bot" }, // zh: the Chinese text, elided
     command: (code) => `/start ${code}`,
   });
   inbound.attach(form);
