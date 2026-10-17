@@ -35,7 +35,7 @@ The kit imports the portal UI kit only through its public index. List
   which answers `{"configured": bool, …}` and never settings or keys. Resolves the reply (`T`
   adds page-specific fields, such as Inkbox's `signup`), or `null` when the device gave none
   in that shape. It never toasts.
-- `configuredRow(name, lang)` returns `{ element, show(visible) }`: a 「通道」 row with
+- `configuredRow(name, lang)` returns `{ element, show(visible) }`: a "Channel" row with
   the result card `name` led by the bare check, hidden until `show(true)`. Put it first in
   the form; show it when `readChannel` says `configured`, and after a save succeeds:
 
@@ -58,9 +58,9 @@ Every channel serves the same JSON under its config path: `GET <endpoint>/status
 
 - `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
   returns `{ rows, alert, attach(form), apply(status), refresh() }`: the two rows below, wired to the
-  device. `onStatus(status)` runs with each state the rows show (WeChat offers 「重新绑定」 when
-  its receive state is the 「需要重新扫码」 error).
-  - `attach(form)` puts them before the form's 「高级」 fold (or its footer).
+  device. `onStatus(status)` runs with each state the rows show (WeChat offers "Link again" when
+  its receive state is the "Scan again to relink" error).
+  - `attach(form)` puts them before the form's "Advanced" fold (or its footer).
   - `alert` is the no-slot caution alert: put it in the page under the header frame, before the form
     (`page(header(…), inbound.alert, form.element)`).
   - `apply(status)` shows the state the page's own `readChannel` read; `refresh()` reads it again
@@ -83,20 +83,21 @@ Every channel serves the same JSON under its config path: `GET <endpoint>/status
   ```
 
 - `modeRow({ endpoint, channel, modes?, onChange? }, context)` returns `{ element, update(status) }`:
-  the 「模式」 row, one radio card per mode in `modes` (default `CHANNEL_MODES`: 停用 / 仅发送 /
-  收发; WeChat passes `["disabled", "send_receive"]`). Under the cards, the state badge: 收发中
-  (signal) for `receiving`, 连接中 for `starting` and `idle`, 等待名额 for `no_slot`, 连接中断 with
-  the device's `message` in mono for `error`, followed by the slots in use (the term 「名额」, saying
+  the "Mode" row, one radio card per mode in `modes` (default `CHANNEL_MODES`: "Disabled" /
+  "Send only" / "Send and receive"; WeChat passes `["disabled", "send_receive"]`). Under the
+  cards, the state badge: "Receiving" (signal) for `receiving`, "Connecting" for `starting` and
+  `idle`, "Waiting for a slot" for `no_slot`, "Disconnected" with the device's `message` in mono
+  for `error`, followed by the slots in use (the term "Slots", saying
   what sets them, and the count `1/2` in mono); `no_slot` also shows the returned `alert`
-  (「收发名额已满」, `triangle-alert` in `warning`); 仅发送 and 已停用 for the
+  ("Receive slots are full", `triangle-alert` in `warning`); "Send only" and "Disabled" for the
   other modes. Choosing posts `{mode}` at once; a 204 or a 409 `no_slot` (the mode is saved) runs
   `onChange`, any other answer is toasted and the choice goes back.
 - `accountsRow({ endpoint, how, command? }, context)` returns `{ element, load(), hide(), count() }`:
-  the 「授权账号」 row. A card holds the binding code (`.bc-code-display`, `command(code)` when
-  given) under `how`, its countdown (「有效期还剩 m:ss」, counted locally; the list is read again when
-  it ends) and 「换一个绑定码」 (`{"rotate": true}`); `pairing: null` drops that box. Then each account,
-  `label` over its `id` in mono (the `id` alone, in mono, without a label), with 「移除」
-  (`{"remove": id}`, no confirmation), or 「还没有授权账号」. Refusals are toasted; a success reads
-  the list again.
+  the "Allowed accounts" row. A card holds the binding code (`.bc-code-display`, `command(code)` when
+  given) under `how`, its countdown ("Expires in m:ss", counted locally; the list is read again when
+  it ends) and "New code" (`{"rotate": true}`); `pairing: null` drops that box. Then each account,
+  `label` over its `id` in mono (the `id` alone, in mono, without a label), with "Remove"
+  (`{"remove": id}`, no confirmation), or "No allowed accounts yet". Refusals are toasted; a success
+  reads the list again.
 - Types: `ChannelMode`, `ReceiveState`, `ChannelStatus`, `Owner`, `OwnersReply`, and the options
   and handles above.

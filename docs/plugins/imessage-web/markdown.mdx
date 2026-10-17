@@ -52,7 +52,7 @@ survive each paint.
 | Split into top-level blocks; a block whose source is unchanged keeps its node                                                                                                                                                                                      | `index.ts`, `blocks.ts` | block memoization                                     |
 | Patch the block that changed in place                                                                                                                                                                                                                              | `dom.ts`                | React's reconciliation, in about 80 lines             |
 | A code block whose fence is still open is `data-incomplete`: its actions rest, and the caret hides after it (and after a table)                                                                                                                                    | `index.ts`, `style.ts`  | the incomplete code block and the caret's hiding rule |
-| A bare URL ends at CJK punctuation (`https://example.com。谢谢`)                                                                                                                                                                                                   | `inline.ts`             | streamdown-cjk's autolink boundaries                  |
+| A bare URL ends at CJK punctuation (a URL followed directly by a CJK full stop and CJK text)                                                                                                                                                                       | `inline.ts`             | streamdown-cjk's autolink boundaries                  |
 | Colour code by its fence's language                                                                                                                                                                                                                                | `highlight.ts`          | (Shiki's job there) a small scanner here              |
 
 A finished reply is healed too, as Streamdown heals in its streaming mode, so
@@ -69,7 +69,7 @@ nothing changes the moment it ends. Only the last-line waits drop out.
 - A link's URL counted as whole at its first `)`. `[x](https://a.com/x_(y)` showed
   raw. Now the URL is whole only once its parentheses balance.
 - Once a link was healed, remend stopped. Marks around the link stayed open
-  (`*[链接](https://ex` showed its `*`), and so did marks inside its label. `heal`
+  (`*[link](https://ex` showed its `*`), and so did marks inside its label. `heal`
   heals both.
 
 remend's handlers for KaTeX, HTML tags, setext headings and single tildes, its

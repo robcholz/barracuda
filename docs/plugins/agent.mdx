@@ -174,16 +174,16 @@ configuration; malformed stored data fails Plugin registration.
 
 The portal entry is registered with `CaptivePortal::register_with_status`; its
 `GET /portal/status` record is `EntryStatus::configured`: `ready`
-已配置/Configured while the active configuration resolves a model for at least
-one purpose (explicitly or through the default), otherwise `off` 未配置/Not set
-up. It reads a flag the endpoint updates after restore and each accepted
+"Configured" while the active configuration resolves a model for at least
+one purpose (explicitly or through the default), otherwise `off` "Not set
+up". It reads a flag the endpoint updates after restore and each accepted
 `POST`.
 
 ## Portal page
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
-`agent`, group `WebGroup::Agent`, order 10, title `模型配置` / `Models`, a bilingual
+`agent`, group `WebGroup::Agent`, order 10, title `Models` (bilingual), a bilingual
 summary, icon `icon.svg`, figure `figure.js`, module `entry.js`, and a
 `ResourceFiles` provider. Unload removes the navigation entry and resource
 provider; no extra HTTP route is registered.
@@ -201,16 +201,16 @@ helper, not a runtime dependency on another contributor's files.
 
 The page is built on the portal UI kit: a header with the live `socket` figure
 (`resources/web/figure.js`, using the shell's global `HL`), radio cards for the
-API format (`backend`) and purpose, the 设为默认模型 switch (`default`),
-connection fields (`base_url`, `model`, `api_key`), the 输入 switches 图片 and
-PDF (`input_modalities.image`, `input_modalities.pdf`), and an open 高级 fold
+API format (`backend`) and purpose, the "Make default" switch (`default`),
+connection fields (`base_url`, `model`, `api_key`), the "Input" switches "Images" and
+PDF (`input_modalities.image`, `input_modalities.pdf`), and an open "Advanced" fold
 with `timeout_ms`, `max_tokens`, `image_max_bytes` and
 `max_images_in_context`. It sends every field the endpoint requires, as a
 one-element batch, and renders zh or en from the portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
 
 The page submits the existing POST configuration contract and, once the device
-accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and
-navigation follow. Its header shows the 状态 badge and, for each purpose, the
+accepts, calls `context.refreshStatus()` so the portal's "Get started" step and
+navigation follow. Its header shows the "Status" badge and, for each purpose, the
 model it uses (its own, or the default), read from `GET /api/model-api/status`
 on mount and after each accepted save. It does not claim that acceptance
 verifies the upstream service. Secrets

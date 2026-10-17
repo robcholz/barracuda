@@ -134,10 +134,10 @@ browser plays a video from its start and cannot seek ahead of what it loaded.
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
-`imessage-web`, group `WebGroup::Channel`, order 10, title `Web 聊天` / `Web
-chat`, a bilingual summary, icon `icon.svg`, figure `figure.js`, module
-`entry.js`, and a `ResourceFiles` provider. Unload removes the navigation entry,
-the resource provider and the file routes.
+`imessage-web`, group `WebGroup::Channel`, order 10, title `Web chat`, a bilingual
+summary, icon `icon.svg`, figure `figure.js`, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry, the resource
+provider and the file routes.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
 To build only its resources, run `cargo plugin run build --plugin imessage-web`
@@ -186,7 +186,7 @@ with every connection and the device's with every boot. When the page shows a
 saved session with nothing on screen yet (it opens, or switches to the
 session), it draws the copy again without asking the device for anything; a
 turn the reload cut off stays as far as it got, and a sent file, whose page
-copy is gone, is a card saying 「已不可用」. The copy is saved a second after
+copy is gone, is a card saying "Unavailable". The copy is saved a second after
 it changes and when the page goes away; a session's copy past 100,000 UTF-16
 code units loses its oldest turns, only the 20 sessions saved last are kept, a
 full store gives up the oldest other copies first, and a store that is blocked
@@ -195,10 +195,10 @@ message and its turn leave the copy, and a session the device no longer lists
 loses its copy.
 
 Files follow the design system's Attachment, Media and Viewer cards. The
-composer's paperclip (「添加附件」, the first of its actions) opens the file
+composer's paperclip ("Attach files", the first of its actions) opens the file
 picker; a pasted picture or a drop anywhere on the page adds files too, and
 while files are dragged over the page the composer turns dashed and says
-「松开以添加附件」. It holds at most four, and the paperclip rests at four or
+"Drop to attach". It holds at most four, and the paperclip rests at four or
 offline. JPEG, PNG and WebP pictures are drawn again at most 1568 px on their
 long side and encoded at 0.85 (JPEG as JPEG, the others as WebP, which also
 drops their metadata) before upload. Each file uploads at once with
@@ -208,16 +208,16 @@ limit names the limit in MB. Send is enabled with files and no text, and
 disabled while a file uploads or failed. A queued message keeps its files (its
 bar counts them after a paperclip), an edited one puts them back as they are,
 and a rewound one uploads them again, since the device took them with the
-message. A refused frame marks its message 「附件已失效，这条消息没有发出」.
+message. A refused frame marks its message "Its attachments expired; this message wasn't sent".
 In the log, a user turn's files sit above its bubble (none when it has no
 text), shown from the page's own copies; an Agent's media follows its reading
 order. One picture is a button opening the Viewer, at most 320 px wide in a
 user turn and 440 px in an Agent's; pictures in a row of a turn share a
-two-column grid of square cells, the fourth dimmed under 「+N」 past four.
+two-column grid of square cells, the fourth dimmed under "+N" past four.
 Audio is a card with play and pause, `0:12 / 0:48` and a 2px position line;
 video shows its first frame under a play button, then the native controls; any
 other file is a card with its type, size and a download link. A picture whose
-URL fails (evicted, or cleared by a restart) becomes a card saying 「已不可用」.
+URL fails (evicted, or cleared by a restart) becomes a card saying "Unavailable".
 The Viewer covers the page on the dark ground with the picture's name, type
 and size, its place among several, download and close; arrows and swipes page,
 and Escape, close or a click beside the picture closes it, giving focus back to
@@ -225,8 +225,8 @@ the picture that opened it.
 
 The page follows the design system's Chat card. Connected, it asks for the
 conversation's sessions and shows them in a rail at its left (a sheet opened
-from the head on a phone): 「新会话」 and the temporary-chat toggle, the
-sessions grouped by day (今天, 昨天, 过去 7 天, 更早), the one current
+from the head on a phone): "New session" and the temporary-chat toggle, the
+sessions grouped by day ("Today", "Yesterday", "Previous 7 days", "Older"), the one current
 highlighted and one still replying spinning, each with a menu to rename in
 place or delete (red, asking first), and the count at the foot. Every change
 is a command; the device's answer redraws the rail, and a switch or a new
@@ -234,8 +234,8 @@ session (from this page or another) starts the view over: the page draws the
 browser's copy of the session, if it has one, then what comes next, and output
 the left session still sends is dropped. The list is asked for again after each turn. A fresh
 conversation holds the composer mid-page under the `laptop` figure, with
-suggestions below, and says what it is: 「新会话」, the title of the session
-it continues, or 「临时会话」; a temporary chat keeps a pinned 「临时会话」
+suggestions below, and says what it is: "New session", the title of the session
+it continues, or "Temporary chat"; a temporary chat keeps a pinned "Temporary chat"
 badge at the head. The composer is one row:
 the textarea fits its text up to 200px beside its send button. Messages are
 capped at 1,024 UTF-8 bytes; past the cap send is disabled and one sentence
@@ -245,7 +245,7 @@ the page's queue, where it can be edited or removed, and goes out when the turn
 ends; a permission answer goes out at once. While a turn runs its author mark
 spins (`resources/web/mark.ts`: WebGL, which plain HTTP allows; the static mark
 and typing dots where WebGL is missing, the mark at rest under reduced motion)
-and 「思考中」 shimmers until text streams. Replies stream in smoothly behind a
+and "Thinking" shimmers until text streams. Replies stream in smoothly behind a
 blinking caret, rendered as Markdown by the page's own package
 (`resources/web/markdown/`, see its README): the rendering logic of Vercel's
 Streamdown without React, with remend's healing ported (Apache-2.0; see its
@@ -262,12 +262,12 @@ A code block shows its language and its own Copy button, which rests while its
 fence is still open, and the caret hides after it. Code is coloured by a
 dependency-free scanner for Rust, C/C++, JavaScript/TypeScript, JSON, Python,
 shell, Go, Java/Kotlin/Swift/C#, TOML/YAML/INI, SQL, Lua and diffs. Copy and Reply
-take a reply's Markdown source. Reasoning folds itself away as 「思考了 N 秒」; a running tool
+take a reply's Markdown source. Reasoning folds itself away as "Thought for Ns"; a running tool
 spins; each finished reply ends with Copy and Reply icon buttons. While a turn
 runs, Stop (`circle-stop`) replaces send as the primary (outline once the
-reader types, beside 「加入队列」); the turn's `turn_ended` outcome
-`interrupted` or `cancelled` ends it with 「已停止」. The message whose turn has
-not ended carries 「撤回」 (`undo-2`): it sends `cancel`, removes the message
+reader types, beside "Add to queue"); the turn's `turn_ended` outcome
+`interrupted` or `cancelled` ends it with "Stopped". The message whose turn has
+not ended carries "Rewind" (`undo-2`): it sends `cancel`, removes the message
 and everything after it, drops the cancelled turn's remaining events (and
 cancels again if that turn starts late), and puts the text back in the
 composer ahead of anything typed; the queue holds until that text is sent,

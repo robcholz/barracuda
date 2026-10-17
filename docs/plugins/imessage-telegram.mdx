@@ -98,7 +98,7 @@ failures back off from 1 s to 30 s.
 - **Errors.**
   - 409 because a webhook is set: `deleteWebhook` is called once per entry into
     `send_receive` (or new configuration), then polling resumes. Another 409,
-    including 「terminated by other getUpdates request」 from a second poller,
+    including "terminated by other getUpdates request" from a second poller,
     reports `error` with Telegram's description and backs off.
   - 429: waits at least `parameters.retry_after`.
   - 401 or 404 (a wrong or revoked token): reports `error` and stops until the
@@ -163,8 +163,8 @@ scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
 `imessage-telegram`, group `WebGroup::Channel`, order 20, title `Telegram`, a
 bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
 `ResourceFiles` provider. Its `GET /portal/status` record is `entry_status`
-over `IMessageGateway::channel_status`: 未配置/Not set up, 已停用/Disabled, 仅发送/Send only,
-收发中/Receiving, 连接中/Connecting, 名额已满/No slot, or 连接中断/Disconnected.
+over `IMessageGateway::channel_status`: "Not set up", "Disabled", "Send only",
+"Receiving", "Connecting", "No slot", or "Disconnected".
 Unload removes the navigation entry and resource provider.
 
 Cargo automatically runs the declared `build` task before compiling this Plugin.
@@ -181,15 +181,15 @@ helper, not a runtime dependency on another contributor's files.
 The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
 the Gateway's channel page kit) posts
 `{token, api_base, draft_min_delta_bytes}` to `POST /api/gateway/telegram`. Its
-「验证」 button calls the Bot API's `getMe` straight from the browser (Telegram
-allows any origin) at the 「高级」 `api_base`: a bot shows its name, `@username` and
+"Verify" button calls the Bot API's `getMe` straight from the browser (Telegram
+allows any origin) at the "Advanced" `api_base`: a bot shows its name, `@username` and
 a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
 `description` are shown on the token field. When the browser has no route out (a
 phone on the device's hotspot) the page notes that the token is unverified;
 verifying never gates saving. The device's error `message` is shown in the
 toast. On mount it reads `GET /api/gateway/telegram/status`, which reports the
-channel status and never the settings; a configured channel shows as a 「通道」
-row with the 已配置 card above the form that replaces it. The row also appears
+channel status and never the settings; a configured channel shows as a "Channel"
+row with the configured card above the form that replaces it. The row also appears
 after a save succeeds, and the page then calls `context.refreshStatus()` so the
 portal's navigation and overview follow. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser storage, and cleared on

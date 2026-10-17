@@ -3,7 +3,7 @@ title: "App Portal Plugin"
 sidebarTitle: "App Portal"
 ---
 
-Adds 应用 (Apps) to the portal: the install waiting for the person, with
+Adds the Apps page to the portal: the install waiting for the person, with
 what it asks for and who signed it, and the apps the Workspace offers. Only
 a client on the device's setup hotspot may install or decline, so a Board
 without a display installs apps from a phone next to the device.
@@ -22,8 +22,8 @@ without a display installs apps from a phone next to the device.
 - Tasks: none
 - Storage: the page in `/resources`
 
-The entry's status is 待确认 with the app's name while an install waits
-(`AppManager::install_request`), else 无待安装.
+The entry's status is "Waiting" with the app's name while an install waits
+(`AppManager::install_request`), else "Nothing waiting".
 
 ## HTTP API
 

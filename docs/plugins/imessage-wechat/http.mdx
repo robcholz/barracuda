@@ -19,8 +19,8 @@ answer `405`:
 - `receive` (only in `send_receive`): `state` is `idle`, `starting`,
   `receiving`, `no_slot` (with `capacity`), or `error` (with `message`).
   After iLink reports the bot session expired (code -14) it is
-  `{"state":"error","message":"需要重新扫码 / Scan again to relink"}` until a
-  new QR login is confirmed.
+  `{"state":"error","message":"… / Scan again to relink"}` (the Chinese half
+  elided) until a new QR login is confirmed.
 - `owners.count`: allowed accounts.
 
 It never returns settings or the token; `POST /api/gateway/wechat` takes
@@ -41,13 +41,13 @@ because iLink sends need inbound activity.
 
 ## `GET`/`POST /api/gateway/wechat/owners`
 
-The allowed accounts (授权账号) and the pairing code (绑定码), served by the
+The allowed accounts and the pairing code, served by the
 Gateway's shared owners route. `GET` answers
 `{"owners":[{"id":"…@im.wechat","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`;
 `POST` `{"remove":"<id>"}` or `{"rotate":true}` answers `204`. A WeChat owner
 id is the sender's `from_user_id`; it has no label. A message whose trimmed
 text is the current code adds its sender and is answered once with
-「已绑定，可以开始对话了」 / "Paired. You can start chatting.". Before a bot is
+`PAIRED_REPLY` ("Paired. You can start chatting."). Before a bot is
 linked both answer `409` `{"error":"not_configured"}`: there is no owner book
 yet.
 

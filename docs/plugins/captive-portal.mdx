@@ -35,7 +35,7 @@ A plugin that contributes UI declares `captive-portal` as a dependency, obtains
 icon, figure, module }, assets)`:
 
 - `group` (`WebGroup::Device`, `Agent` or `Channel`) places the entry under
-  设备 / 智能体 / 消息通道 in the navigation; `order` sorts it within the group
+  "Device" / "Agent" / "Channels" in the navigation; `order` sorts it within the group
   (ascending, ties by ID).
 - `title` and `summary` are `WebText { zh, en }`: the navigation label and the
   one line under it on overview tiles and rows.
@@ -54,7 +54,7 @@ never queries a device or network, and must not call back into the portal. An
 `EntryStatus` is `{ state, label, detail }`: `state` is `EntryState::Ready`,
 `Attention` or `Off`; `label` is an optional `WebText`; `detail` an optional
 untranslated `String` such as a network name. `EntryStatus::configured(bool)`
-gives the shared `ready` 已配置/Configured or `off` 未配置/Not set up record.
+gives the shared `ready` "Configured" or `off` "Not set up" record.
 A Plugin that sends clients to the portal from routes of its own, such as
 captive-network detection paths, answers them with `CaptivePortal::landing()`,
 the portal's landing page; it never names the portal's paths.
@@ -151,20 +151,20 @@ plugin performs.
 
 The shell is an app shell with a collapsible sidebar (Ctrl/⌘ B; the choice is
 kept in `localStorage` as `barracuda.sidebar`), a breadcrumb top bar with the
-language menu (简体中文 / English, `barracuda.lang`; with no choice stored, the
+language menu (Simplified Chinese / English, `barracuda.lang`; with no choice stored, the
 portal starts in the browser's first preferred zh or en, English when it prefers
 only other languages, Chinese when it names none) and the theme control
-(浅色 / 深色 / 跟随系统, `barracuda.theme`, applied as `data-theme` on `<html>`),
+("Light" / "Dark" / "System", `barracuda.theme`, applied as `data-theme` on `<html>`),
 and hash routing: `#overview` (default) or `#<entry id>`; back and forward work.
 Below 720px the sidebar is replaced by the phone layout: the overview becomes a
 grouped list and pages get a back link.
 
 The overview is generated from the manifest: the header frame (title, lead,
 the number of plugin pages, the connection, the `board` figure), one
-「开始使用」 step per group that has entries (linking to its first entry), and the
+"Get started" step per group that has entries (linking to its first entry), and the
 module grid. Every device and agent entry, and every channel entry with a
 `figure`, is a tile (figure, title, summary; the whole tile is a hover zone for
-the figure). Channel entries without a figure are rows in the 消息通道 card
+the figure). Channel entries without a figure are rows in the "Message channels" card
 beside the `riffle` figure.
 
 Entry state comes from `/portal/status`, read with the manifest, on every
@@ -172,17 +172,17 @@ navigation, when the window gains focus or becomes visible, and when a page
 calls `refreshStatus()`; it never blocks rendering. A status change redraws the
 sidebar and top bar and repaints the overview in place, so figures keep
 running. The first device entry with a status and a label is the top bar badge
-「\<title> \<label>」 (「Wi-Fi 已连接」; the signal badge when `ready`, the plain badge
+"\<title> \<label>" ("Wi-Fi connected"; the signal badge when `ready`, the plain badge
 otherwise; desktop only). An entry's `detail` is shown in mono after its
 sidebar label, on its overview tile and on its phone row. The header's first
-two k/v rows are the device's: 状态 with its label as a badge (the signal badge
+two k/v rows are the device's: "Status" with its label as a badge (the signal badge
 when `ready`), then its title with its `detail` in mono (Wi-Fi · HomeNet), or
-「—」 when it has none (a network the host manages). A step is
-done when any entry of its group is `ready`: it shows a check and 「已连接
-HomeNet」 for the device group (just its label, 「已连接」, when it has no
+"—" when it has none (a network the host manages). A step is
+done when any entry of its group is `ready`: it shows a check and "Connected to
+HomeNet" for the device group (just its label, "Connected", when it has no
 `detail`), or the ready entry's title and label (an entry with a label is
-preferred), instead of its link. Channel rows in the 消息通道
-card and on the phone list show the label (「已配置」). A failed or malformed
+preferred), instead of its link. Channel rows in the "Message channels"
+card and on the phone list show the label ("Configured"). A failed or malformed
 read leaves every status slot empty; the shell shows no state it did not read.
 
 Status pages cover no entries (empty), an entry that is unknown or was removed
@@ -191,7 +191,7 @@ progress (loading), and a module that failed to import or mount (failed, with
 retry). The page imports a module only when selected. It refreshes the
 manifest on request, on becoming visible, and every 30 seconds while visible.
 A failed refresh preserves the last known entries and the mounted module and
-shows 「连接未就绪」 in the top bar. Build-time exclusion and runtime route removal
+shows "Not connected" in the top bar. Build-time exclusion and runtime route removal
 are distinct: runtime unload does not erase image files.
 
 ### Live figures
@@ -281,7 +281,7 @@ The context is `{ signal, lang, toast, navigate, has, status, refreshStatus, bad
   calls it after a save succeeds. It resolves when done and never rejects; a
   call during a read reads once more after it;
 - `badge?({ label, tone: "live" | "lost" } | null)` shows the page's live state in
-  the top bar in place of the device badge (Web chat: 已连接 / 已断开), or clears
+  the top bar in place of the device badge (Web chat: "Connected" / "Disconnected"), or clears
   it; the shell clears it when the page closes.
 
 The device's web server holds four connections and refuses any beyond them, so

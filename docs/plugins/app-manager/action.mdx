@@ -105,19 +105,19 @@ It fails with `no_foreground_app` or `not_interactive`.
 
 ## The system UI
 
-`app.notify` takes `{"title":"门铃","body":"有人在门口","icon":"alert"}`,
+`app.notify` takes `{"title":"Doorbell","body":"Someone is at the door","icon":"alert"}`,
 with `body` and `icon` optional, posts the notice to the notification center,
 and returns `{"id":3}`. `icon` names a system icon; without one the notice
 shows the title's first character. Titles and bodies longer than 64
 characters are cut, and beyond eight notices the oldest is dropped.
 
-`app.confirm` takes `{"title":"打开客厅灯带？","body":"林夏 · Telegram"}`,
+`app.confirm` takes `{"title":"Turn on the living room light strip?","body":"Lin Xia · Telegram"}`,
 with `body` optional, asks the person on a card listed before every notice
 and on the home screen, and returns once they answer:
 `{"allowed":true,"answered":true}`. A card dismissed or dropped unanswered
 returns `{"allowed":false,"answered":false}`.
 
-`app.agent` takes `{"state":"answering","question":"明天几点开会？","answer":"9:30 产品评审"}`,
+`app.agent` takes `{"state":"answering","question":"When is tomorrow's meeting?","answer":"9:30 product review"}`,
 with `question` and `answer` optional, and shows the Agent's state on the
 home screen: `standby`, `listening`, `thinking`, or `answering`. It returns
 `{}`. An answer returns to standby after nine seconds or when tapped.

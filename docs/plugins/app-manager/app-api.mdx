@@ -47,8 +47,9 @@ This Plugin's own packages:
 - `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
   a card listed before every notice and waits for the answer: `true` when
   they allow it, `false` when they deny or dismiss it. From version 2,
-  `allow` and `deny` name the card's two buttons (允许 and 拒绝 unless given,
-  at most 6 characters each), as in `notify.ask("开灯？", nil, "现在开", "等会儿")`.
+  `allow` and `deny` name the card's two buttons (default labels meaning Allow and Deny
+  unless given, at most 6 characters each), as in
+  `notify.ask("Lights on?", nil, "Now", "Later")`.
 
 Failures return `nil` and a message.
 
@@ -59,16 +60,16 @@ in this order, and stops at the first reason. `app.list` reports the reason
 as the app's `incompatible`; the install screen shows it and disables the
 install button; `app.install` answers `{"error": "incompatible", "reason": …}`.
 
-| Check | Reason |
+| Check | What the reason says |
 | --- | --- |
-| `api` is above the device's level | 需要更新系统（应用需要 API 2，本机是 1） |
-| `boards` does not list this Board | 只适用于 espressif-esp-vocat-v1-2 |
-| the app has a view and the device no display | 此设备没有屏幕 |
-| the display is smaller than `view.size` | 屏幕太小（应用需要 480×480） |
-| `view.shape` is `rect` and the display is round | 应用需要方屏 |
-| a package in `requires` is not a stable package here | 此设备没有 notify |
-| its version here is below the one `requires` names | 需要更新系统（应用需要 notify 第 2 版，本机是第 1 版） |
-| a package in `permissions` is missing | 此设备不支持 serial |
+| `api` is above the device's level | update the system: the app needs API 2, this device has 1 |
+| `boards` does not list this Board | only for espressif-esp-vocat-v1-2 (the listed Boards) |
+| the app has a view and the device no display | this device has no screen |
+| the display is smaller than `view.size` | the screen is too small: the app needs 480×480 |
+| `view.shape` is `rect` and the display is round | the app needs a square screen |
+| a package in `requires` is not a stable package here | this device has no notify |
+| its version here is below the one `requires` names | update the system: the app needs notify version 2, this device has version 1 |
+| a package in `permissions` is missing | this device does not support serial |
 
 An installed app that no longer fits, after a Board or system change, does
 not open; `app.open` answers `incompatible`.

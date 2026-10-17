@@ -63,14 +63,14 @@ last state `WifiControl::status` observed, without a radio query:
 
 | Last observed state | `state` | `label` | `detail` |
 | --- | --- | --- | --- |
-| Station connected | `ready` | 已连接 / Connected | station SSID, when known |
-| Station connecting | `attention` | 正在连接… / Connecting… | none |
-| Disconnected, AP started | `attention` | 配置热点 / Setup hotspot | AP SSID |
-| Disconnected, AP starting | `attention` | 配置热点 / Setup hotspot | none |
-| Disconnected, AP stopped | `off` | 未连接 / Not connected | none |
+| Station connected | `ready` | "Connected" | station SSID, when known |
+| Station connecting | `attention` | "Connecting…" | none |
+| Disconnected, AP started | `attention` | "Setup hotspot" | AP SSID |
+| Disconnected, AP starting | `attention` | "Setup hotspot" | none |
+| Disconnected, AP stopped | `off` | "Not connected" | none |
 
-A Platform-managed network reports the host's connection: `ready` 已连接 /
-Connected, without a network name. Credentials are never returned by
+A Platform-managed network reports the host's connection: `ready` "Connected",
+without a network name. Credentials are never returned by
 the status API or logged. The provisioning API currently has no authentication
 or transport encryption; the setup access point is intentionally open, so
 provision only in a trusted physical environment.
@@ -92,7 +92,7 @@ Portal page: the `wifi` entry (group Device, order 10) is built on the
 portal UI kit from `resources/web/entry.ts`. Its header shows the station
 state, network and setup-hotspot state from `GET /api/wifi/status`, beside the
 `router` figure (`resources/web/figure.js`), whose antennas sweep while
-`GET /api/wifi/scan` runs. The page scans on open and on 重新扫描, lists
+`GET /api/wifi/scan` runs. The page scans on open and on "Rescan", lists
 nearby networks strongest first with signal bars and a lock for secured
 ones, joins a listed or manually named network with `PUT /api/wifi`, and
 offers `DELETE /api/wifi` for the connected network. After an accepted join or

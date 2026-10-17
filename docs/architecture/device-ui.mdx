@@ -17,7 +17,7 @@ the Plugins' docs.
 | Lua packages | none | every registered package, its own package included | the ambient packages and those its manifest names; never a builtin app's package |
 | Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
-| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | 会话 (Sessions), 工作流 (Workflows), 文件 (Files), 设置 (Settings) | 空气质量, 灯带, 相机, 计数器 |
+| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | Sessions, Workflows, Files, Settings | the air quality, light strip, camera, and counter examples |
 
 ## The Plugins
 
@@ -125,7 +125,7 @@ the words each package's Plugin declares; when the person installs it, the
 and from then on every run of it may `require` only the ambient packages and
 those it named.
 A Workflow or Agent asks for an install with `app.install`; only the person
-completes it, on the device's install screen or, on the portal's 应用 page,
+completes it, on the device's install screen or, on the portal's Apps page,
 from a phone on the device's setup hotspot, which is how a Board without a
 display installs apps. Either way the install takes exactly what the person
 was shown: the offer's digest is pinned when the install is asked for. An

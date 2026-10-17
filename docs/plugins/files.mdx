@@ -24,7 +24,7 @@ Browses Workspace files and shows every Plugin's private files read-only.
   serves its bundled `/resources/entry.js`, `/resources/figure.js`,
   `/resources/icon.svg`
 
-The Files Plugin is the portal's file browser. It registers the 文件/Files
+The Files Plugin is the portal's file browser. It registers the "Files"
 entry in the Device group, after Wi-Fi, with the cabinet figure, and the
 `/api/files` routes the page uses. It declares `PluginFilesystem::Inspect`:
 its view holds the Workspace and, read-only beneath `/plugins`, every Plugin's
@@ -68,7 +68,7 @@ HTML and SVG included, as `application/octet-stream`.
 ## Portal
 
 The page groups the Plugin trees by Plugin, `/plugins/<tree>/<id>` shown as
-插件/`<id>`/`<tree>`, and shows them without any change controls. Modified
+"Plugins"/`<id>`/`<tree>`, and shows them without any change controls. Modified
 times are not shown: VFS metadata carries none. A storage card appears only
 while one is mounted under `/workspace/removable`. The tree and pane rules
 come with the page, added while it is open: the shell's stylesheet is held to

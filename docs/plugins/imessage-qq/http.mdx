@@ -17,8 +17,8 @@ Returns `200` with the shared channel status (see the
 `configured` is whether a configuration is stored. `receive` is present only
 in `send_receive`; its `state` is `idle`, `starting`, `receiving`, `no_slot`
 (with `capacity`), or `error` (with `message`, for example
-「QQ 机器人已下架，只能连接沙箱环境 / The QQ bot is delisted and may only use the
-sandbox」 after close code 4914). It never returns settings, the App Secret,
+"The QQ bot is delisted and may only use the sandbox", after its Chinese half, after
+close code 4914). It never returns settings, the App Secret,
 or a token, and makes no request to QQ. Other methods answer `405`.
 
 ## `POST /api/gateway/qq/mode`
@@ -107,8 +107,9 @@ Before storing anything, the device exchanges the App Secret for one access
 token: `POST {token_url}` with `{"appId":"<app_id>","clientSecret":"<app_secret>"}`.
 QQ answers `{"access_token":"...","expires_in":"7200"}` (`expires_in` may be a
 string or a number). A reply without `access_token`, such as HTTP 200
-`{"code":10004,"message":"机器人不存在"}`, is a rejection. Only after a token is
-issued is the configuration stored and the channel registered with the Gateway.
+`{"code":10004,"message":"…"}` with a message saying the bot does not exist,
+is a rejection. Only after a token is issued is the configuration stored and
+the channel registered with the Gateway.
 The token itself is never stored.
 
 Responses:

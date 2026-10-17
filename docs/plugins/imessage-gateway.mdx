@@ -406,7 +406,7 @@ allocation.
   `starting`, `receiving`, `no_slot`, or `error`. `message` comes only with
   `error`, and `capacity` only with `no_slot`. `slots`
   (`{"in_use":n,"capacity":n}`) comes whenever the channel draws from a
-  bounded slot pool, so the portal can show 「名额 1/2」; webhook receivers
+  bounded slot pool, so the portal can show "Slots 1/2"; webhook receivers
   (`UnlimitedSlots`) have none.
 - A 409 still saves the mode; receive then reports `no_slot` until a slot
   frees.
@@ -430,17 +430,17 @@ allocation.
 
 | Channel | Status |
 | --- | --- |
-| not configured | `off` 未配置/Not set up |
-| `disabled` | `off` 已停用/Disabled |
-| `send` | `ready` 仅发送/Send only |
-| `send_receive`, receiving | `ready` 收发中/Receiving |
-| `send_receive`, idle or starting | `attention` 连接中/Connecting |
-| `send_receive`, no slot | `attention` 名额已满/No slot |
-| `send_receive`, error | `attention` 连接中断/Disconnected |
+| not configured | `off` "Not set up" |
+| `disabled` | `off` "Disabled" |
+| `send` | `ready` "Send only" |
+| `send_receive`, receiving | `ready` "Receiving" |
+| `send_receive`, idle or starting | `attention` "Connecting" |
+| `send_receive`, no slot | `attention` "No slot" |
+| `send_receive`, error | `attention` "Disconnected" |
 
 **Channel page kit.** `resources/web/channel/` (documented in
 [Channel page kit](/plugins/imessage-gateway/channel-page-kit)) is build-time TypeScript for the JSON above: `readChannel`,
-`configuredRow` and `channelInbound` (the 「模式」 and 「授权账号」 rows). A
+`configuredRow` and `channelInbound` (the "Mode" and "Allowed accounts" rows). A
 channel's portal entry bundles it together with the captive portal's UI kit;
 the Gateway itself serves no portal entry and does not depend on the captive
 portal. Its tests are in `resources/web/tests/`.
@@ -488,7 +488,7 @@ portal. Its tests are in `resources/web/tests/`.
    5. persist the cursor.
 
    Return `ReceiveError::new` for failures that a retry can fix, `halt` for
-   ones it cannot (WeChat `-14`: 「需要重新扫码」), and `.retry_after(..)` for
+   ones it cannot (WeChat `-14`: "Scan again to relink"), and `.retry_after(..)` for
    429s.
 6. **Runtime.** Build
    `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`,

@@ -113,8 +113,8 @@ A connection the server closes after a healthy poll is reopened at once.
 Other failures go through the scaffold's backoff (1 s doubling to 30 s; 30 s
 after HTTP 429). `ret` or `errcode` -14 means the bot session expired: the
 loop halts with receive state `error` and message
-「需要重新扫码 / Scan again to relink」 until a new QR login is confirmed or
-the configuration or mode changes.
+`SESSION_EXPIRED_MESSAGE` ("Scan again to relink", after its Chinese half)
+until a new QR login is confirmed or the configuration or mode changes.
 
 **Files.** Every iLink file lives on the CDN (`cdn_base`, default
 `https://novac2c.cdn.weixin.qq.com/c2c`), AES-128-ECB encrypted with PKCS#7
@@ -209,12 +209,12 @@ Then receiving is synced to the mode and restarted, which also clears an
 expired-session halt.
 
 The portal entry is registered with `CaptivePortal::register_with_status`. Its
-`GET /portal/status` record is `attention` 等待扫码/Waiting for scan while a QR
-login session is in `wait` or `scanned`, `attention` 需要重新扫码/Scan again to
-relink while receiving is halted by an expired bot session, and otherwise the
-Gateway's `channel_status` of the channel: `off` 未配置 when not linked, `off`
-已停用 when disabled, `ready` 收发中 while receiving, `attention` 连接中,
-名额已满 or 连接中断 otherwise.
+`GET /portal/status` record is `attention` "Waiting for scan" while a QR
+login session is in `wait` or `scanned`, `attention` "Scan again to
+relink" while receiving is halted by an expired bot session, and otherwise the
+Gateway's `channel_status` of the channel: `off` "Not set up" when not linked, `off`
+"Disabled" when disabled, `ready` "Receiving" while receiving, `attention` "Connecting",
+"No slot" or "Disconnected" otherwise.
 
 The configuration can also be obtained by QR login at
 `/api/gateway/wechat/login`. Registration retains two HTTP routes: the
@@ -239,7 +239,7 @@ waiting `POST` with `502`.
 
 Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
 scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
-`imessage-wechat`, group `WebGroup::Channel`, order 30, title `微信` / `WeChat`, a
+`imessage-wechat`, group `WebGroup::Channel`, order 30, title `WeChat`, a
 bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
 `ResourceFiles` provider. Unload removes the navigation entry and resource
 provider; no extra HTTP route is registered.
@@ -261,9 +261,9 @@ a QR login on mount (`POST /api/gateway/wechat/login`), draws the returned `url`
 as a QR Code with a countdown from `expires_in`, polls `GET` every 2 s (wait,
 scanned, confirmed, expired or failed) and sends a `keepalive` `DELETE` when it
 goes away. A `GET` that reports `configured` with no session running shows the
-linked state with 「重新绑定」 instead of starting a login. On a phone (narrower than
-720 px) it shows the steps and a 「复制链接」 button instead of the code and starts no
-session. A token entered by hand under 「高级」 posts to `POST /api/gateway/wechat`;
+linked state with "Link again" instead of starting a login. On a phone (narrower than
+720 px) it shows the steps and a "Copy link" button instead of the code and starts no
+session. A token entered by hand under "Advanced" posts to `POST /api/gateway/wechat`;
 the footer shows only while that fold is open. After a confirmed login or an
 accepted token the page calls `context.refreshStatus()`, so the portal's
 navigation and overview follow. Secrets are password inputs,

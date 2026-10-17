@@ -81,8 +81,8 @@ exactly while it is configured and its mode is `send` or `send_receive`. A
 configuration stored before modes existed loads as `send`. A device without an
 Inkbox channel starts in `send_receive`, and a signup on such a device sets
 `send_receive` before storing its result. The portal entry's `GET
-/portal/status` record maps the Gateway's `channel_status` of the channel (未配置, 已停用, 仅发送,
-收发中, 连接中, 名额已满, or 连接中断).
+/portal/status` record maps the Gateway's `channel_status` of the channel ("Not set up",
+"Disabled", "Send only", "Receiving", "Connecting", "No slot", or "Disconnected").
 
 ## Receiving
 
@@ -115,14 +115,14 @@ after awaiting `IMessageGateway::ready()`. The list is newest first and
   messages with text are handled; the sender is `remote_number` and the route
   is `inkbox`/`conversation_id`, the conversation the send path takes. An
   owner's message is published with the Inkbox message `id`; a pairing code
-  from a new sender adds them and sends 「已绑定，可以开始对话了」 to that
+  from a new sender adds them and sends `PAIRED_REPLY` ("Paired. You can start chatting.") to that
   conversation through the normal send path; anyone else is dropped and
   counted. Group messages are not listed (Inkbox's `include_groups` stays off).
 - **Large pages.** A body over 32 KiB is asked for again with half the limit;
   more than a full page of new messages within one interval skips the oldest,
   with a warning.
 - **Errors.** 401 or 403 halts receiving with
-  「Inkbox 拒绝了 API Key / Inkbox rejected the API key」 until the
+  "Inkbox rejected the API key" (after its Chinese half) until the
   configuration changes; 429 waits `Retry-After` seconds (60 when absent);
   other statuses and failed connections retry with the runtime's backoff; a
   connection that ends after a healthy poll is reopened at once.
@@ -159,20 +159,20 @@ helper, not a runtime dependency on another contributor's files.
 
 The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
 the Gateway's channel page kit) offers
-two methods. 「用邮箱新建」 posts the email to `POST /api/gateway/inkbox/signup`, then
-the emailed 6-digit code to `/verify` (「重新发送」 calls `/resend`; a cooldown is
+two methods. "Create with email" posts the email to `POST /api/gateway/inkbox/signup`, then
+the emailed 6-digit code to `/verify` ("Resend" calls `/resend`; a cooldown is
 shown beside it) and shows the claimed identity's address; Inkbox's own messages
 are shown on the field they concern, and a 409 `conflict` returns to the email
 step. A signup error with `"retry": true` (the device kept the signup) offers
-「重试」, which posts the same email again and resumes it without a second email.
-「已有 API Key」 posts `{api_key, identity_id, api_base}` to `POST
+"Retry", which posts the same email again and resumes it without a second email.
+"I have an API key" posts `{api_key, identity_id, api_base}` to `POST
 /api/gateway/inkbox`; the form footer shows only in this mode. On mount the page
 reads `GET /api/gateway/inkbox/status` (the channel status plus `signup`): a stored signup resumes at the code step
 (`claim_status` other than `agent_claimed`; the note names `human_email` and
 prefills the email field, or says the code went to the person's inbox when
 `human_email` is absent) or at the claimed
 step with the agent's `email_address`; a channel configured with a key shows a
-「通道」 row with the 已配置 card above the form. After a signup, a claim or a saved
+"Channel" row with the configured card above the form. After a signup, a claim or a saved
 key the page calls `context.refreshStatus()`. It never reads settings or keys.
 Secrets are password inputs, never persisted in browser
 storage, and cleared on success or unmount. Requests are cancelled on unmount

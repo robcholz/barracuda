@@ -17,7 +17,7 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [Wi-Fi](/plugins/wifi) | Owns Wi-Fi policy: station and setup access-point lifecycle, persisted station credentials, and the provisioning page and API. |
 | [System Wi-Fi](/plugins/system-wifi) | Shows Wi-Fi in the system UI: the link on the status bar, the home screen's offline card, and the control center's Wi-Fi tile, and the setup hotspot the portal tile opens. |
 | [Captive Portal](/plugins/captive-portal) | Aggregates pluggable web entries and resource providers into the portal shell. |
-| [App Portal](/plugins/app-portal) | Adds 应用 (Apps) to the portal: the install waiting for the person, with what it asks for and who signed it, and the apps the Workspace offers. |
+| [App Portal](/plugins/app-portal) | Adds the Apps page to the portal: the install waiting for the person, with what it asks for and who signed it, and the apps the Workspace offers. |
 | [Power](/plugins/power) | Owns the Board's primary power monitor and publishes its readings and the battery's charge to other Plugins as `Power`. |
 | [Sound](/plugins/sound) | Owns the Board's primary audio codec, lends it to one borrower at a time as `Sound`, and keeps the device's output level, which the person sets for every sound, as `Volume`. |
 | [Time](/plugins/time) | The Time Plugin synchronizes UTC time over SNTP, keeps the Board's real-time clock, and publishes the time as a typed, read-only clock capability. |
@@ -30,10 +30,10 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | Plugin | What it owns |
 | --- | --- |
 | [App Manager](/plugins/app-manager) | Runs Lua apps with optional MicroTS views and, on a Board with a display, shows them and the device's system UI: the home screen and the Agent's states, the launcher, the app switcher, the notification and control centers, and the screens around an app's lifecycle. |
-| [Builtin App Files](/plugins/builtin-app-files) | Ships 文件 (Files), a system app that shows the files in the shared Workspace. |
-| [Builtin App Sessions](/plugins/builtin-app-sessions) | Ships 会话 (Sessions), a system app that lists the Agent's conversations. |
-| [Builtin App Settings](/plugins/builtin-app-settings) | Ships 设置 (Settings), a system app for Wi-Fi, sound and display, installed apps, storage, and the device. |
-| [Builtin App Workflow](/plugins/builtin-app-workflow) | Ships 工作流 (Workflows), a system app that lists the loaded Workflows, what starts each, and a switch that turns each on or off. |
+| [Builtin App Files](/plugins/builtin-app-files) | Ships Files, a system app that shows the files in the shared Workspace. |
+| [Builtin App Sessions](/plugins/builtin-app-sessions) | Ships Sessions, a system app that lists the Agent's conversations. |
+| [Builtin App Settings](/plugins/builtin-app-settings) | Ships Settings, a system app for Wi-Fi, sound and display, installed apps, storage, and the device. |
+| [Builtin App Workflow](/plugins/builtin-app-workflow) | Ships Workflows, a system app that lists the loaded Workflows, what starts each, and a switch that turns each on or off. |
 
 ## Agent
 

@@ -3,7 +3,7 @@ title: "Builtin App Files Plugin"
 sidebarTitle: "Builtin App Files"
 ---
 
-Ships 文件 (Files), a system app that shows the files in the shared
+Ships the Files app, a system app that shows the files in the shared
 Workspace.
 
 - Plugin ID: `builtin-app-files`
@@ -23,8 +23,8 @@ Workspace.
 
 The app is a builtin app, see the `app-manager` Plugin's
 [App Manager](/plugins/app-manager#builtin-apps). Its first page
-counts the files in each area (`AREAS`): 媒体, 资源, 存储卡, and 缓存;
-opening one lists its files.
+counts the files in each area (`AREAS`), whose names mean media, resources,
+memory card, and cache; opening one lists its files.
 
 ## Lua API
 
@@ -35,8 +35,8 @@ files.areas()     -- { { name = "媒体", count, present }, ... }
 files.list("媒体") -- { name, present, count, label, files = { { path, label }, ... } }
 ~~~
 
-`present` is false for an area that is not there, such as 存储卡 without a
-card. A listing holds at most `MAX_FILES` (64) files, sorted by their path in
+`present` is false for an area that is not there, such as the memory card area
+without a card. A listing holds at most `MAX_FILES` (64) files, sorted by their path in
 the area.
 
 ## Building
