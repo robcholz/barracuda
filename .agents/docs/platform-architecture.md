@@ -720,7 +720,10 @@ System installs the stable semantic roots before Plugin Manager derives any
 later removable-filesystem mount is visible to already-running Plugins.
 A scoped view supports file operations and path translation; mount, unmount,
 backend inspection, concrete filesystem selection, and removable-media
-lifecycle stay at the System boundary.
+lifecycle stay at the System boundary. A scoped view may ask how large the
+filesystem holding a path is and how much of it is free (`usage`), which names
+no backend; mounts that share one filesystem report the same figures, and a
+backend that cannot tell answers `Unsupported`.
 
 Every logical mount point is a directory of the view: it lists as empty until
 its source directory exists, and it cannot be written, removed, or renamed, so

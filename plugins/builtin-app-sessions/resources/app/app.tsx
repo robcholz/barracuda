@@ -60,7 +60,7 @@ export default function Sessions() {
           </Show>
         </View>
         <View class="absolute left-[60px] right-[60px] bottom-[14px] flex-row justify-center overflow-hidden">
-          <Text class="text-sm text-[#A1A1AA]">{title()}</Text>
+          <Text class="text-base text-[#A1A1AA]">{title()}</Text>
         </View>
       </Show>
     </View>

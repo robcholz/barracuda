@@ -10,7 +10,8 @@ use portable_atomic_util::Arc;
 
 use crate::path::{backend_path, matches_mount, normalize, normalize_retained};
 use crate::{
-    Backend, DirEntry, File, FileType, FsError, Metadata, MountOptions, OpenOptions, ReadDir,
+    Backend, DirEntry, File, FileType, FsError, FsUsage, Metadata, MountOptions, OpenOptions,
+    ReadDir,
 };
 
 #[derive(Clone)]
@@ -264,6 +265,12 @@ impl Vfs {
     pub async fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
         let resolved = self.resolve(path)?;
         resolved.mount.backend.inner.metadata(&resolved.path).await
+    }
+
+    /// Returns the size and free space of the filesystem mounted at `path`.
+    pub async fn usage(&self, path: &str) -> Result<FsUsage, FsError> {
+        let resolved = self.resolve(path)?;
+        resolved.mount.backend.inner.usage().await
     }
 
     /// Lists immediate children of a mounted directory.

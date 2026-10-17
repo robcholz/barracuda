@@ -104,8 +104,12 @@ end
 local function publish_storage()
   local storage = assert(settings.storage())
   set("used", storage.label .. " 已用")
-  set("usedNote", "媒体、应用与缓存")
-  local total = math.max(storage.used, 1)
+  if storage.total then
+    set("usedNote", storage.free_label .. " 可用，共 " .. storage.total_label)
+  else
+    set("usedNote", "媒体、应用与缓存")
+  end
+  local total = math.max(storage.total or storage.used, storage.used, 1)
   local fills = {}
   local rows = {}
   local glyphs = { image = "\u{E03C}", package = "\u{E060}", memory = "\u{E050}" }
@@ -126,7 +130,7 @@ local function publish_about()
   set("rows", {
     { id = 1, label = "系统版本", value = device.version, glyph = "\u{E040}", mono = true },
     { id = 2, label = "芯片", value = device.chip, glyph = "\u{E050}", mono = true },
-    { id = 3, label = "存储", value = storage.label .. " 已用", glyph = "\u{E034}", mono = false },
+    { id = 3, label = "存储", value = storage.free_label and (storage.free_label .. " 可用") or (storage.label .. " 已用"), glyph = "\u{E034}", mono = false },
   })
 end
 

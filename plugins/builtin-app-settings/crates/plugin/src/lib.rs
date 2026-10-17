@@ -226,9 +226,15 @@ impl Settings {
             (AREAS[1].0, AREAS[1].1, cache),
         ];
         let used: u64 = parts.iter().map(|(_, _, bytes)| bytes).sum();
+        // The shared media's filesystem holds the apps and their data too.
+        let usage = self.filesystem.usage(AREAS[0].2).await.ok();
         json!({
             "used": used,
             "label": words::size(used),
+            "total": usage.map(|usage| usage.total()),
+            "free": usage.map(|usage| usage.free()),
+            "free_label": usage.map(|usage| words::size(usage.free())),
+            "total_label": usage.map(|usage| words::size(usage.total())),
             "parts": parts
                 .iter()
                 .map(|(name, icon, bytes)| json!({

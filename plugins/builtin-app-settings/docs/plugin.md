@@ -38,7 +38,8 @@ settings.status()
 settings.set("brightness", 40)  -- also volume, muted, microphone, quiet, screen_off
 settings.scan()                 -- { { ssid, bars = 1..4, glyphs, secured }, ... }
 settings.apps()                 -- installed apps: { { id, name, version, glyphs, letter, state }, ... }
-settings.storage()              -- { used, label, parts = { { name, icon, bytes, label }, ... } }
+settings.storage()              -- { used, label, total, free, total_label, free_label,
+                                 --   parts = { { name, icon, bytes, label }, ... } }
 ~~~
 
 `set` changes `app-manager`'s `Preferences`, which the control center shows
@@ -46,7 +47,10 @@ too, and returns the new `status()`. Brightness and volume are percents;
 `screen_off` is one of `SCREEN_TIMEOUTS`, in seconds. `glyphs` are an icon's
 layers in the system icon font, `{ base, accent, dim }`. An app's `state` is
 `running`, `background`, `suspended`, `terminating`, or absent. `storage` adds
-up the Workspace's media and cache and `AppManager::used_bytes`.
+up the Workspace's media and cache and `AppManager::used_bytes`; `total` and
+`free` are the size and free space of the filesystem that holds the shared
+media, apps, and data (`ScopedVfs::usage`), absent where the filesystem cannot
+tell. The storage page fills its bar against `total` and says what is free.
 
 ## Building
 
