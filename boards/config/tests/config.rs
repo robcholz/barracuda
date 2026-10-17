@@ -563,7 +563,13 @@ fn parses_plugin_profiles() {
     let profile =
         barracuda_board_config::parse_profile("extends: base\nenable: [ui, app-manager]\n")
             .expect("profile");
-    assert_eq!(profile.extends(), Some("base"));
+    assert_eq!(profile.extends(), ["base"]);
     assert_eq!(profile.enable(), ["ui", "app-manager"]);
+    let both = barracuda_board_config::parse_profile("extends: [scripting, network]\n")
+        .expect("profile extending two");
+    assert_eq!(both.extends(), ["scripting", "network"]);
+    assert!(both.enable().is_empty());
+    let root = barracuda_board_config::parse_profile("enable: [time]\n").expect("root profile");
+    assert!(root.extends().is_empty());
     assert!(barracuda_board_config::parse_profile("enable: [ui]\nextra: true\n").is_err());
 }

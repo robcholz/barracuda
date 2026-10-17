@@ -1,0 +1,22 @@
+# Offline scripting: core plus the Lua VM and the Lua packages that need no
+# network, including those for the Board's hardware.
+extends: core
+enable:
+  - analog
+  - audio
+  - camera
+  - display
+  - gpio
+  - i2c
+  - i2s
+  - imu
+  - led-strip
+  - message-queue
+  - power-monitor
+  - pwm
+  - spi
+  - uart
+  - vm
+  - vm-filesystem
+  - vm-systeminfo
+  - vm-time

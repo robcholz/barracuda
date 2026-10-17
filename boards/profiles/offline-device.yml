@@ -1,0 +1,3 @@
+# Products with a screen that never go online: offline scripting and the
+# system UI, without Wi-Fi, the portal, or the Agent.
+extends: [scripting, screen]

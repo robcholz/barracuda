@@ -1,12 +1,9 @@
-# Products with a screen: the base set plus the app manager, which shows apps
-# and the system UI on the Board's primary display, the system fonts they
-# draw with, and the builtin apps.
-extends: base
+# Products with a screen: the base set and the system UI, with what needs the
+# network too: Wi-Fi in the system UI, installing from the portal, and the
+# Sessions and Settings apps.
+extends: [base, screen]
 enable:
-  - app-manager
   - app-portal
-  - builtin-app-files
   - builtin-app-sessions
   - builtin-app-settings
-  - builtin-app-workflow
-  - system-fonts
+  - system-wifi

@@ -1,52 +1,11 @@
 # The Plugins a Board builds unless it names another profile: every Plugin
-# that needs no screen. Boards with one name `device`, which adds the system
-# UI. A Board turns a Plugin off with `plugins.<id>.enabled: false`; a narrower
-# product names a profile that lists only its own Plugins.
+# that needs no screen, as offline scripting and the online assistant plus the
+# Lua packages that need both. Boards with a screen name `device`. A Board
+# turns a Plugin off with `plugins.<id>.enabled: false`; a narrower product
+# names a narrower profile, such as core, scripting, connected, or assistant.
+extends: [scripting, assistant]
 enable:
-  - agent
-  - agent-file
-  - agent-http
-  - agent-imessage-gateway
-  - agent-scheduler
-  - agent-time
   - agent-vm
-  - agent-websearch
-  - agent-workflow
-  - analog
-  - audio
-  - camera
-  - captive-portal
-  - display
-  - files
-  - gpio
-  - http
-  - i2c
-  - i2s
-  - imessage-bluebubble
-  - imessage-gateway
-  - imessage-inkbox
-  - imessage-qq
-  - imessage-telegram
-  - imessage-web
-  - imessage-wechat
-  - imu
-  - led-strip
-  - message-queue
-  - power
-  - power-monitor
-  - pwm
-  - scheduler
-  - sound
-  - spi
-  - time
-  - uart
-  - vm
   - vm-agent
-  - vm-filesystem
   - vm-http
-  - vm-systeminfo
-  - vm-time
   - vm-webserver
-  - webserver
-  - wifi
-  - workflow

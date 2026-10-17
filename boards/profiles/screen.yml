@@ -1,0 +1,8 @@
+# A layer, not a product: the app manager with the system UI on the Board's
+# primary display, the system fonts, and the builtin apps that need no
+# network. A screen profile extends it together with a non-screen one.
+enable:
+  - app-manager
+  - builtin-app-files
+  - builtin-app-workflow
+  - system-fonts

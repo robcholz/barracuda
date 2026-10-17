@@ -150,6 +150,47 @@ fn profiles_overrides_and_dependencies_decide_the_enabled_set() {
 }
 
 #[test]
+fn a_profile_extends_several_and_each_counts_once() {
+    let root = workspace();
+    write(
+        root.path(),
+        "boards/profiles/screen.yml",
+        "enable: [app-manager]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/lua.yml",
+        "extends: base\nenable: [display]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/both.yml",
+        "extends: [lua, screen, base]\n",
+    );
+    let selection = run(root.path(), &format!("{ONE_DISPLAY}profile: both\n"), &[]).unwrap();
+    assert_eq!(
+        selection.enabled(),
+        ["app-manager", "display", "ui", "workflow"]
+    );
+
+    write(
+        root.path(),
+        "boards/profiles/loop-a.yml",
+        "extends: [base, loop-b]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/loop-b.yml",
+        "extends: loop-a\n",
+    );
+    let error = run(root.path(), "profile: loop-a\n", &[]).unwrap_err();
+    assert!(
+        error.contains("profile `loop-a` extends itself through `loop-a`, `loop-b`"),
+        "{error}"
+    );
+}
+
+#[test]
 fn the_local_override_disables_dependents_too() {
     let root = workspace();
     let selection = run(
