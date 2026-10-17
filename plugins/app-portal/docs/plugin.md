@@ -32,8 +32,8 @@ The entry's status is 待确认 with the app's name while an install waits
 | `POST /api/apps/decline` `{"id"}` | declines the waiting app; `204` |
 
 Install and decline answer `403 setup_hotspot_only` unless the request came
-in on the setup hotspot's address (`SETUP_AP_ADDRESS`, from
-`HttpRequest::local_address`). That keeps the decision with someone in Wi-Fi
+in over the setup hotspot, which `WifiStatus::is_setup_access_point` tells
+from the connection's device end (`HttpRequest::local_address`). That keeps the decision with someone in Wi-Fi
 range of the device while its hotspot runs, which is while Wi-Fi is not set
 up or after the person opens the portal: nobody on the home network or the
 internet can install. It is nearness, not identity: the setup hotspot is

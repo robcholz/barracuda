@@ -19,8 +19,7 @@ use barracuda_plugin::manager::{
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
-use barracuda_wifi_plugin::SETUP_AP_ADDRESS;
-use core::net::IpAddr;
+use barracuda_wifi_plugin::WifiControl;
 use serde::{Deserialize, Serialize};
 
 /// `GET`: the offers and the waiting install.
@@ -59,6 +58,7 @@ impl Plugin for AppPortalPlugin {
         let apps = context.require::<AppManager>("app-manager")?;
         let webserver = context.require::<WebServer>("webserver")?;
         let portal = context.require::<CaptivePortal>("captive-portal")?;
+        let wifi = context.require::<WifiControl>("wifi")?;
         let entry = WebEntry {
             id: "apps",
             group: WebGroup::Device,
@@ -90,6 +90,7 @@ impl Plugin for AppPortalPlugin {
         for (path, route) in routes {
             let endpoint = Apps {
                 apps: Rc::clone(&apps),
+                wifi: Rc::clone(&wifi),
                 route,
             };
             context.retain(
@@ -124,9 +125,11 @@ fn status(waiting: Option<AppInfo>) -> EntryStatus {
 }
 
 /// Whether `request` came from a client on the device's setup hotspot,
-/// which only someone at the device can join.
-fn on_hotspot(request: &HttpRequest) -> bool {
-    request.local_address() == Some(IpAddr::V4(SETUP_AP_ADDRESS))
+/// which only someone near the device can join.
+fn on_hotspot(request: &HttpRequest, wifi: &WifiControl) -> bool {
+    request
+        .local_address()
+        .is_some_and(|local| wifi.status().is_setup_access_point(local))
 }
 
 #[derive(Clone, Copy)]
@@ -139,6 +142,7 @@ enum Route {
 
 struct Apps {
     apps: Rc<AppManager>,
+    wifi: Rc<WifiControl>,
     route: Route,
 }
 
@@ -190,11 +194,13 @@ impl HttpEndpoint for Apps {
                     };
                     match self.route {
                         Route::Request => self.request(&body.id).await,
-                        Route::Install | Route::Decline if !on_hotspot(&request) => error(
-                            403,
-                            "setup_hotspot_only",
-                            "只有连在设备热点上的手机或电脑能确认安装",
-                        ),
+                        Route::Install | Route::Decline if !on_hotspot(&request, &self.wifi) => {
+                            error(
+                                403,
+                                "setup_hotspot_only",
+                                "只有连在设备热点上的手机或电脑能确认安装",
+                            )
+                        }
                         Route::Install => self.install(&body).await,
                         _ => {
                             self.apps.decline_install(&body.id);
@@ -320,18 +326,6 @@ fn app_error(failure: AppError) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::net::Ipv4Addr;
-
-    #[test]
-    fn only_the_setup_hotspot_confirms() {
-        let at = |address: Ipv4Addr| {
-            HttpRequest::new(HttpMethod::Post, Vec::new())
-                .with_local_address(Some(IpAddr::V4(address)))
-        };
-        assert!(on_hotspot(&at(SETUP_AP_ADDRESS)));
-        assert!(!on_hotspot(&at(Ipv4Addr::new(192, 168, 1, 20))));
-        assert!(!on_hotspot(&HttpRequest::new(HttpMethod::Post, Vec::new())));
-    }
 
     #[test]
     fn the_portal_shows_whether_an_install_waits() {
