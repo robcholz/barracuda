@@ -1,10 +1,13 @@
-# Characters the system fonts hold besides the ones in the listed sources:
-# common words in app names and notices, so installable apps that use the
-# system fonts read well. Lines starting with # are ignored.
-计数器空气质量灯带相机姿态天气音乐时钟闹钟计时日历笔记备忘录照片地图电量温度湿度光照声音显示网络存储关于本机系统信息
-客厅门铃有人在门口打开关闭已完成失败成功提醒今天明天昨天上午下午晚上周一二三四五六日
-0123456789·…—“”‘’、，。：；！？（）《》【】×
-# Words of settings, conversations, files, and Workflows screens.
-设置与显示附近的网络媒体资源缓存存储卡芯片永不秒分钟几点个月对话你这帮你定一个工作流变化体现插入
-# What Lua packages declare they let an app do, shown on the install screen.
-控制灯光读取动作传感器联网收发数据使用相机拍照播放声音和录音读写共享文件引脚模拟输入输出信号访问设备音频总线串口直接屏幕电源发通知向你确认
+# The characters beyond ASCII that the system fonts' text slots hold: the
+# system's and the system apps' words, and common words in app names and
+# notices. This Plugin owns the list; a view whose text needs a character it
+# lacks ships its own atlas, or the character is added here. Lines starting
+# with # are ignored.
+·×—‘’“”…、。《》【】一三上下不与丢个中串主乐了二于五享亮人今件会传住体作
+你使保信储允光克入全六共关内写冷几出分刚删到制前功动勿化区午卡卸厅历及发取变口只
+可台号同名后向启周命和响器四回图在地声备夏外多天太失好姿媒存安完定客室容对小屏工
+已带帮幕应度开引张录待忘态思总息感成户手打扰拍拒拟持挂按据接控提插摄播支收改放数
+文新方无日时明昨是显晚景暂暖更月有未本机权束来林染模正此气永求污没法流消清温湿源
+灯点热照片版现用电的直相知确示秒空笔第签系线结络绝统缓网置考联脚自良芯行被装要计
+认记许设访话说请读败质资起轻载较输运近返还这连退适选通部醒里重量钟铃错键门闭问闹
+附限除需静音页频题额风麦！（），：；？

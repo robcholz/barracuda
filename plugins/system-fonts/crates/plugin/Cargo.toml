@@ -8,6 +8,8 @@ license = "Apache-2.0"
 [dependencies]
 barracuda-app-manager-plugin.workspace = true
 barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
+log.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

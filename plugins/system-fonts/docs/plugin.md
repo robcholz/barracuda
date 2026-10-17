@@ -16,20 +16,21 @@ for the font slots it ships none for.
 - Tasks: none
 - Storage: the fonts in `/resources/fonts`
 
-At registration the Plugin hands its filesystem to `app-manager` with
-`SystemFonts::read_from`, and the UI kit reads `/resources/fonts` from it
-before the first view opens. The fonts are about 2.4 MB, so they ship apart
+At registration the Plugin gives `app-manager` a `FontAtlases` source with
+`SystemFonts::load_from`; when the display starts, the source reads the
+atlases from this Plugin's own `/resources/fonts` and hands the UI kit their
+bytes, so `app-manager` never sees this Plugin's files. The fonts are about 2.4 MB, so they ship apart
 from `app-manager`: a Board with a display enables this Plugin, and one
 without leaves it out and carries none. Without it, views draw only with the
 atlases they ship, and text in other slots shows placeholder boxes.
 
 ## The fonts
 
-`resources/fonts/build.ts` bakes them from Noto Sans SC: ASCII and every
-character in the sources `resources/fonts/sources.txt` names (the
-`app-manager` Plugin's system view, system UI, app kit, and examples) and in
-`charset.txt`, at the sizes the system view and the system apps use, and the
-system icon font's glyphs at the sizes icons are drawn at. The 16 px regular
+`resources/fonts/build.ts` bakes them from Noto Sans SC: ASCII and the
+characters in `resources/fonts/charset.txt`, this Plugin's own list, at the
+sizes the system view and the system apps use, and the glyphs of the icon set
+`app-manager` publishes for building views (`resources/icons/`, the only
+files of it the build reads) at the sizes icons are drawn at. The 16 px regular
 slot is the prose slot: it also holds GB 2312's 3,755 common characters, so
 text no source names, such as an Agent's answer, a notice, or a
 conversation's title, is drawn in it. Text with characters outside an atlas
@@ -41,4 +42,5 @@ POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugi
 
 `CJK_FONT_DIR` holds `NotoSansSC-Regular.otf` and `NotoSansSC-Bold.otf`
 (github.com/notofonts/noto-cjk, `Sans/SubsetOTF/SC`). Rebuild after adding
-text with new characters to those sources or to a system app's Lua.
+a character to `charset.txt`; a view whose text needs one the list lacks
+ships its own atlas until then.

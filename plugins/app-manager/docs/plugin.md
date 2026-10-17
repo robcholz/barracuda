@@ -292,9 +292,9 @@ tests, and work without a display.
 
 The system fonts are font atlases another Plugin ships, `system-fonts` on
 device Boards, because they are about 2.4 MB and a Board without a display
-needs none. That Plugin hands its filesystem over with the `SystemFonts`
-capability while registering, and the task reads `/resources/fonts`
-(`SYSTEM_FONTS`) from it before the first view opens; `UiService::ready`
+needs none. That Plugin gives the `SystemFonts` capability a `FontAtlases`
+source while registering, and the task loads the atlases through it before
+the first view opens, never reading that Plugin's files; `UiService::ready`
 waits for them. A view that ships no atlas for a font slot draws with the
 system font for it, so the system UI and the system apps share one set and
 ship none. Without a Plugin that ships them, views draw only with their own

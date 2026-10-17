@@ -26,7 +26,6 @@ mod view;
 use alloc::rc::Rc;
 use barracuda_board_hal::display::Display;
 use barracuda_board_hal::touch::Touch;
-use barracuda_vfs::ScopedVfs;
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
 use gesture::{Recognizer, Touched};
@@ -40,8 +39,6 @@ pub use view::{MAX_ARRAY_ITEMS, ViewCall, ViewChannel, ViewError, ViewNext};
 
 /// How often the task steps an animating view and polls touch.
 const FRAME: Duration = Duration::from_micros(16_667);
-/// Where the system fonts live in this Plugin's filesystem.
-pub const SYSTEM_FONTS: &str = "/resources/fonts";
 
 /// The display views are drawn on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,20 +92,16 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
         Rc::clone(&self.service)
     }
 
-    /// Reads the system fonts from `fonts`, when a Plugin ships them, then
-    /// applies owners' writes, presses the shown view where it is tapped,
-    /// hands gestures to the system UI, and draws what changed, forever.
-    /// Whoever stops it calls [`UiService::close_all`].
-    pub async fn run(self, fonts: Option<&ScopedVfs>) {
+    /// Draws with the system font atlases `fonts`, none when no Plugin
+    /// ships them, then applies owners' writes, presses the shown view where
+    /// it is tapped, hands gestures to the system UI, and draws what changed,
+    /// forever. Whoever stops it calls [`UiService::close_all`].
+    pub async fn run(self, fonts: alloc::vec::Vec<alloc::vec::Vec<u8>>) {
         let mut runtime = self;
         let service = Rc::clone(&runtime.service);
-        let fonts = match fonts {
-            Some(filesystem) => system_fonts(filesystem).await,
-            None => {
-                log::info!("ui: no system fonts; views draw with their own atlases");
-                alloc::vec::Vec::new()
-            }
-        };
+        if fonts.is_empty() {
+            log::info!("ui: no system fonts; views draw with their own atlases");
+        }
         service.set_system_fonts(fonts);
         let mut animating = false;
         // The brightness the person picked, put back when the screen wakes.
@@ -177,28 +170,4 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
             }
         }
     }
-}
-
-/// Reads every system font atlas; a missing or unreadable one is left out.
-async fn system_fonts(filesystem: &ScopedVfs) -> alloc::vec::Vec<alloc::vec::Vec<u8>> {
-    let mut names = match filesystem.list_dir(SYSTEM_FONTS).await {
-        Ok(names) => names,
-        Err(error) => {
-            log::warn!("ui: no system fonts under {SYSTEM_FONTS}: {error:?}");
-            return alloc::vec::Vec::new();
-        }
-    };
-    names.retain(|name| name.starts_with("font-") && name.ends_with(".bin"));
-    names.sort_unstable();
-    let mut fonts = alloc::vec::Vec::with_capacity(names.len());
-    for name in names {
-        match filesystem
-            .read(&alloc::format!("{SYSTEM_FONTS}/{name}"))
-            .await
-        {
-            Ok(font) => fonts.push(font),
-            Err(error) => log::warn!("ui: cannot read system font {name}: {error:?}"),
-        }
-    }
-    fonts
 }

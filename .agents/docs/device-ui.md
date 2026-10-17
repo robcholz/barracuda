@@ -131,7 +131,7 @@ The `system-fonts` Plugin bakes the system fonts into its `/resources/fonts`
 and hands them to the UI kit with `app-manager`'s `SystemFonts`; a device
 Board enables it, and a Board without a display leaves its 2.4 MB out. They
 are Noto Sans SC at the sizes the system view and the system apps use, with
-every character in `app-manager`'s sources and in its `charset.txt`, and the system icon
+the characters in its own `charset.txt`, and the system icon
 font's glyphs at the sizes icons are drawn at. The 16 px regular slot is the
 prose slot: it also holds GB 2312's 3,755 common characters, so text no
 source names, such as an Agent's answer, a notice, or a conversation's title,

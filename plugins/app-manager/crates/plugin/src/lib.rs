@@ -58,7 +58,7 @@ pub use barracuda_appkit::{
     Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
 };
 pub use barracuda_uikit::icons;
-pub use fonts::SystemFonts;
+pub use fonts::{FontAtlases, SystemFonts};
 pub use notices::{
     DEFAULT_LABELS, MAX_LABEL_CHARS, MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications,
 };
@@ -256,8 +256,11 @@ async fn run<Panel: Display, Input: Touch>(
     let display = async {
         match screen {
             Some((ui, services)) => {
-                let fonts = fonts.source();
-                join(ui.run(fonts.as_ref()), run_system_ui(&filesystem, services)).await;
+                join(
+                    async { ui.run(fonts.load().await).await },
+                    run_system_ui(&filesystem, services),
+                )
+                .await;
             }
             None => core::future::pending().await,
         }

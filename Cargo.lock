@@ -2465,6 +2465,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-app-manager-plugin",
  "barracuda-plugin",
+ "barracuda-vfs",
+ "log",
 ]
 
 [[package]]

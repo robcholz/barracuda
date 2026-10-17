@@ -5,12 +5,12 @@
 // CJK_FONT_DIR at a directory holding NotoSansSC-Regular.otf and
 // NotoSansSC-Bold.otf, from github.com/notofonts/noto-cjk,
 // Sans/SubsetOTF/SC), monospace is the PocketJS checkout's JetBrains Mono
-// (POCKETJS_ROOT), and icons come from the app-manager Plugin's
-// resources/icons/barracuda-icons.otf.
+// (POCKETJS_ROOT), and icons come from the icon set the app-manager Plugin
+// publishes for building views, resources/icons/barracuda-icons.otf and
+// icons.json; this Plugin depends on app-manager and reads nothing else of it.
 //
 // Text slots (14, 16, and 18 px regular, 14 and 18 px bold) hold ASCII
-// and every character beyond ASCII in the sources that
-// sources.txt names and in charset.txt; the 16 px regular and 18 px bold ones
+// and the characters in charset.txt, this Plugin's own list; the 16 px regular and 18 px bold ones
 // also hold every icon. The 16 px regular slot is the prose slot: it also
 // holds GB 2312's 3,755 common characters, so views show text they cannot
 // know in advance, such as an Agent's answer, in it. Display slots hold little: 24 px bold ASCII and
@@ -18,7 +18,7 @@
 // ASCII. Text with other characters shows a placeholder box for them.
 //
 //   POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin system-fonts
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const pocket = process.env.POCKETJS_ROOT;
@@ -41,21 +41,7 @@ const lines = (file: string) =>
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
 
-// Every file under a listed directory with a listed extension.
-const sourceText: string[] = [];
-const walk = (dir: string, extensions: string[]) => {
-  if (!existsSync(dir)) return;
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) walk(path, extensions);
-    else if (extensions.some((extension) => name.endsWith(extension))) sourceText.push(readFileSync(path, "utf8"));
-  }
-};
-for (const line of lines("sources.txt")) {
-  const [dir, ...extensions] = line.split(/\s+/);
-  walk(join(plugin, dir), extensions);
-}
-sourceText.push(lines("charset.txt").join(""));
+const charset = lines("charset.txt").join("");
 
 const codepoints = (text: string) => [...new Set([...text].map((char) => char.codePointAt(0)!))];
 const ascii = Array.from({ length: 95 }, (_, index) => 32 + index);
@@ -66,7 +52,7 @@ const appIcons = Object.values(iconTable)
   .filter((layers) => layers.length > 1 || layers === iconTable.agent)
   .flat()
   .map((layer) => layer.codepoint);
-const beyond = codepoints(sourceText.join("")).filter((cp) => cp > 126 && !(cp >= 0xe000 && cp <= 0xf8ff) && !/\s/.test(String.fromCodePoint(cp)));
+const beyond = codepoints(charset).filter((cp) => cp > 126 && !(cp >= 0xe000 && cp <= 0xf8ff) && !/\s/.test(String.fromCodePoint(cp)));
 const display = codepoints(lines("display.txt").join("")).filter((cp) => cp > 126);
 const sorted = (set: number[]) => [...new Set(set)].sort((a, b) => a - b);
 
