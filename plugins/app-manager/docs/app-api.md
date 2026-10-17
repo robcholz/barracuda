@@ -88,12 +88,26 @@ install button; `app.install` answers `{"error": "incompatible", "reason": …}`
 | `api` is above the device's level | 需要更新系统（应用需要 API 2，本机是 1） |
 | `boards` does not list this Board | 只适用于 espressif-esp-vocat-v1-2 |
 | the app has a view and the device no display | 此设备没有屏幕 |
-| `view.size` or `view.shape` differs from the display | 屏幕不匹配（应用为 240×240 方屏） |
+| the display is smaller than `view.size` | 屏幕太小（应用需要 480×480） |
+| `view.shape` is `rect` and the display is round | 应用需要方屏 |
 | a capability in `requires` is missing | 此设备没有灯光 |
 | a package in `permissions` is missing | 此设备不支持 serial |
 
 An installed app that no longer fits, after a Board or system change, does
 not open; `app.open` answers `incompatible`.
+
+### Views and the display
+
+A view is laid out at the display's size, not scaled: its root fills the
+display, and the layout is flexbox, so a view that fills its parent
+(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
+right-[40px]`), and centers with `justify-center` fits displays of other
+sizes. Fixed sizes stay as written. `view.size` is the smallest display the
+view still fits, and a round view, one that keeps to the inscribed circle,
+fits a rectangular display too; a `rect` view does not fit a round one,
+whose corners it would lose. Text keeps its size: font slots are baked at
+fixed pixel sizes. A view that needs the display's size reads it from
+`app.device().display`.
 
 ## Runs
 

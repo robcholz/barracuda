@@ -5,7 +5,10 @@ local settings = require("settings")
 local view = assert(app.view())
 
 local SETTINGS, WIFI, SOUND, APPS, STORAGE, ABOUT = 0, 1, 2, 3, 4, 5
-local BAR = 256 -- the width of a level bar, in pixels
+-- The width of a level bar, in pixels: the display less the page's 40 px
+-- margins and its rows' 12 px padding.
+local DISPLAY = app.device().display
+local BAR = (DISPLAY and DISPLAY.width or 360) - 2 * 40 - 2 * 12
 local TIMEOUTS = { 15, 30, 60, 300, 0 }
 local STATES = {
   running = "运行中",

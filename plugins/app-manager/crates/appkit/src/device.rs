@@ -112,19 +112,16 @@ pub(crate) fn incompatibility(
         let Some(display) = device.display else {
             return Some(String::from("此设备没有屏幕"));
         };
-        let size = app
-            .view_size
-            .is_some_and(|[width, height]| (width, height) != (display.width, display.height));
-        let shape = app
-            .view_shape
-            .is_some_and(|shape| (shape == ViewShape::Round) != display.round);
-        if size || shape {
-            let [width, height] = app.view_size.unwrap_or([display.width, display.height]);
-            let round = app
-                .view_shape
-                .map_or(display.round, |shape| shape == ViewShape::Round);
-            let shape = if round { "圆屏" } else { "方屏" };
-            return Some(format!("屏幕不匹配（应用为 {width}×{height} {shape}）"));
+        // A view lays out at the display's size: the size it names is the
+        // least it needs, and a view for the whole frame loses its corners
+        // on a round display.
+        if let Some([width, height]) = app.view_size
+            && (display.width < width || display.height < height)
+        {
+            return Some(format!("屏幕太小（应用需要 {width}×{height}）"));
+        }
+        if app.view_shape == Some(ViewShape::Rect) && display.round {
+            return Some(String::from("应用需要方屏"));
         }
     }
     let present = |name: &str| matches!(packages.get(name), Some(Some(AppApi::Capability { .. })));

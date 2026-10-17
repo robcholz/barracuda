@@ -75,8 +75,8 @@ Other files are ignored. Directories whose names start with `.` are skipped.
 | `view.program` | with view | the BVIR view program                                      |
 | `view.styles`  | with view | the compiled stylesheet                                    |
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `view.size`    | no       | `[width, height]` the view is laid out for; the build writes it from `pocket.json` |
-| `view.shape`   | no       | `round` or `rect`, the display the view is drawn for         |
+| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
+| `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
 | `api`          | no       | the app API level the app is written for; defaults to `1`   |
 | `requires`     | no       | up to 16 app API capabilities the app cannot run without, such as `light` |
 | `uses`         | no       | up to 16 app API capabilities it uses when the device has them |

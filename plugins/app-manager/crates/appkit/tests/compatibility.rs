@@ -92,6 +92,13 @@ async fn filesystem() -> ScopedVfs {
         &format!(r#","view":{{{VIEW},"size":[360,360],"shape":"round"}}"#),
     )
     .await;
+    // A smaller view lays out at the display's size.
+    offer(
+        &fs,
+        "small",
+        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"round"}}"#),
+    )
+    .await;
     // Does not fit, and says why.
     offer(&fs, "later", r#","api":2,"requires":["teleport"]"#).await;
     offer(
@@ -104,6 +111,12 @@ async fn filesystem() -> ScopedVfs {
         &fs,
         "square",
         &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"rect"}}"#),
+    )
+    .await;
+    offer(
+        &fs,
+        "large",
+        &format!(r#","view":{{{VIEW},"size":[480,480],"shape":"round"}}"#),
     )
     .await;
     offer(&fs, "photo", r#","requires":["camera"]"#).await;
@@ -169,12 +182,14 @@ async fn scenario(spawner: Spawner) {
         [
             ("elsewhere", Some("只适用于 other-board、third-board")),
             ("lamp", None),
+            ("large", Some("屏幕太小（应用需要 480×480）")),
             ("later", Some("需要更新系统（应用需要 API 2，本机是 1）")),
             ("photo", Some("此设备没有相机")),
             ("plain", None),
             ("round", None),
             ("serial", Some("此设备不支持 serial")),
-            ("square", Some("屏幕不匹配（应用为 240×240 方屏）")),
+            ("small", None),
+            ("square", Some("应用需要方屏")),
         ]
     );
     let invalid: Vec<_> = list

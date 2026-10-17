@@ -10,25 +10,25 @@ export default function Sessions() {
       </View>
 
       <Show when={page() === 0}>
-        <View class="absolute left-[40px] top-[52px] w-[280px] flex-col">
+        <View class="absolute left-[40px] right-[40px] top-[52px] flex-col">
           <For each={sessions()} by={(session) => session.id}>
             {(session) => (
-              <View class="w-[280px] h-[74px] flex-col" focusable onPress={() => open(session().id)}>
-                <View class="w-[280px] h-[73px] flex-row items-center gap-3 px-3">
+              <View class="w-full h-[74px] flex-col" focusable onPress={() => open(session().id)}>
+                <View class="w-full h-[73px] flex-row items-center gap-3 px-3">
                   <View class="w-2 h-2" />
-                  <View class="w-[206px] flex-col overflow-hidden">
+                  <View class="flex-1 flex-col overflow-hidden">
                     <Text class="text-base text-[#FAFAFA]">{session().title}</Text>
                     <Text class="text-base text-[#A1A1AA]">{session().detail}</Text>
                   </View>
                   <Text class="shrink-0 text-lg font-bold text-[#A1A1AA]">{""}</Text>
                 </View>
-                <View class="w-[280px] h-[1px] bg-[#27272A]" />
+                <View class="w-full h-[1px] bg-[#27272A]" />
               </View>
             )}
           </For>
         </View>
         <Show when={empty()}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center gap-2">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-2">
             <Text class="text-lg text-[#FAFAFA]">还没有会话</Text>
             <Text class="text-sm text-[#A1A1AA]">和 Agent 说话后，对话会出现在这里</Text>
           </View>
