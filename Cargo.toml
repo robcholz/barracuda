@@ -105,6 +105,7 @@ barracuda-power-plugin = { path = "plugins/power/crates/plugin" }
 barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
 barracuda-sound-plugin = { path = "plugins/sound/crates/plugin" }
 barracuda-system-fonts-plugin = { path = "plugins/system-fonts/crates/plugin" }
+barracuda-system-wifi-plugin = { path = "plugins/system-wifi/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }

@@ -713,9 +713,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-appkit",
  "barracuda-board-hal",
- "barracuda-captive-portal-plugin",
  "barracuda-lua",
- "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -727,8 +725,6 @@ dependencies = [
  "barracuda-vfs-memfs",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
- "barracuda-webserver-plugin",
- "barracuda-wifi-plugin",
  "barracuda-workflow-plugin",
  "critical-section",
  "embassy-executor",
@@ -2264,6 +2260,7 @@ dependencies = [
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
+ "barracuda-system-wifi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
  "barracuda-vm-agent-plugin",
@@ -2520,6 +2517,16 @@ dependencies = [
  "serde",
  "tempfile",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-system-wifi-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-platform",
+ "barracuda-plugin",
+ "barracuda-wifi-plugin",
 ]
 
 [[package]]
