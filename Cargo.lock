@@ -2260,7 +2260,6 @@ dependencies = [
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
- "barracuda-system-wifi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
  "barracuda-vm-agent-plugin",

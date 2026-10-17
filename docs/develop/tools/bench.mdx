@@ -38,7 +38,7 @@ churn at chunk/parser boundaries. The report is written to
 `target/profiles/tape-replay.dhat.json`. Open it in DHAT's viewer and sort
 allocation points by **Total blocks** to find frequent allocate/free sites, or
 by **Total bytes** and **At t-gmax** to find high-volume and peak-live sites.
-The latest checked analysis is in [`results/tape-replay.md`](https://github.com/robcholz/barracuda/blob/master/bench/results/tape-replay.md).
+The latest checked analysis is in [Tape replay heap profile](/develop/tools/tape-replay-profile).
 
 [`barracuda-profile`](https://github.com/robcholz/barracuda/tree/master/shared/profile) is the shared profiling library;
 it has no standalone command and is not owned by the Agent component.

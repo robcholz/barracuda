@@ -13,7 +13,7 @@ boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
 |-- config/       # std-only YAML parsing, validation, and Rust generation
 |-- hal/          # named resource ownership exposed to hardware Plugins
-|-- profiles/     # the Plugin sets a Board builds; see profiles/README.md
+|-- profiles/     # the Plugin sets a Board builds; see Board profiles
 `-- configs/
     `-- <board>/
         |-- board.yml
@@ -25,7 +25,7 @@ contains the maximum common denominator: identity, canonical chip name, the
 explicit Board hardware surface, and native-layout binding. It must not contain
 a Rust Platform type or select `macos`, `linux`, `esp32`, or another Platform
 implementation. Its `profile` names the Plugin set the firmware contains,
-`headless` when it names none; [`profiles/README.md`](profiles/README.md)
+`headless` when it names none; [Board profiles](/develop/board-profiles)
 lists the profiles.
 
 The hardware surface has exactly two sections. `peripherals` describes optional

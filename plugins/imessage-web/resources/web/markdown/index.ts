@@ -1,6 +1,6 @@
 /**
  * Streaming Markdown for chat replies, framework-free and small enough to ship from a device: the
- * rendering logic of Vercel's Streamdown, rebuilt on the DOM. See README.md.
+ * rendering logic of Vercel's Streamdown, rebuilt on the DOM. See docs/develop/web/web-chat-markdown.mdx.
  *
  * {@link renderMarkdown} paints a reply into an element and paints it again as it grows:
  *
