@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "id": "sessions",
+  "name": "会话",
+  "version": "0.1.0",
+  "api": 1,
+  "icon": "chat",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "size": [
+      360,
+      360
+    ],
+    "shape": "round"
+  }
+}

@@ -5,7 +5,6 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Plugin management and scoped persistent storage for Barracuda"
-readme = "README.md"
 
 [lib]
 crate-type = ["rlib"]

@@ -90,3 +90,13 @@ export const ICON_MESSAGE_SQUARE_DASHED =
   '<path d="M10 17H7l-4 4v-7"></path><path d="M14 17h1"></path><path d="M14 3h1"></path><path d="M19 3a2 2 0 0 1 2 2"></path><path d="M21 14v1a2 2 0 0 1-2 2"></path><path d="M21 9v1"></path><path d="M3 9v1"></path><path d="M5 3a2 2 0 0 0-2 2"></path><path d="M9 3h1"></path>';
 export const ICON_PENCIL =
   '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path>';
+export const ICON_PAPERCLIP =
+  '<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>';
+export const ICON_UPLOAD =
+  '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line>';
+export const ICON_PLAY = '<polygon points="6 3 20 12 6 21 6 3"></polygon>';
+export const ICON_PAUSE =
+  '<rect x="14" y="4" width="4" height="16" rx="1"></rect><rect x="6" y="4" width="4" height="16" rx="1"></rect>';
+export const ICON_FILE_IMAGE =
+  '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><circle cx="10" cy="12" r="2"></circle><path d="m20 17-1.296-1.296a2.41 2.41 0 0 0-3.408 0L9 22"></path>';
+export const ICON_CHEVRON_LEFT = '<path d="m15 18-6-6 6-6"></path>';

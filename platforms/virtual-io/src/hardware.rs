@@ -13,7 +13,7 @@ use crate::{
     clock::Clock,
     device::{DeviceContext, I2cDevice, RegisterRangeError, RuleViolation},
     i2c::{VirtualI2cBus, VirtualI2cError},
-    spi::{SpiDevice, VirtualSpiBus, VirtualSpiError},
+    spi::{Frame, SpiDevice, VirtualSpiBus, VirtualSpiError},
 };
 
 /// Number of recorded events kept; older events are dropped first.
@@ -92,6 +92,27 @@ pub struct BusSnapshot {
     pub frequency_hz: Option<u32>,
     /// Attached devices.
     pub devices: Vec<DeviceSnapshot>,
+}
+
+/// One display panel on an SPI controller.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DisplaySnapshot {
+    /// SPI controller the panel sits on.
+    pub bus: &'static str,
+    /// Board peripheral name, when the Board declared the panel.
+    pub peripheral: Option<String>,
+    /// Panel model name.
+    pub model: &'static str,
+    /// Width in pixels.
+    pub width: u16,
+    /// Height in pixels.
+    pub height: u16,
+    /// Whether the panel shows anything.
+    pub visible: bool,
+    /// Whether the glass is round.
+    pub round: bool,
+    /// Changes whenever the picture changes.
+    pub revision: u64,
 }
 
 /// One attached device.
@@ -190,10 +211,13 @@ pub enum EventDetail {
     Spi {
         /// Controller name.
         bus: &'static str,
-        /// Bytes clocked out on MOSI.
+        /// Bytes clocked out on MOSI, at most the first
+        /// [`SPI_EVENT_BYTES`].
         write: String,
-        /// Bytes clocked in on MISO.
+        /// Bytes clocked in on MISO, at most the first [`SPI_EVENT_BYTES`].
         read: String,
+        /// Length of the whole transfer in bytes.
+        length: usize,
         /// `ok` or the injected fault.
         result: &'static str,
         /// Whether the failure came from an injected fault.
@@ -267,6 +291,9 @@ pub enum HardwareError {
     /// No device is attached to the SPI bus.
     #[error("SPI bus `{0}` has no device")]
     NoSpiDevice(&'static str),
+    /// The device on the SPI bus is not a display panel.
+    #[error("SPI bus `{0}` has no display panel")]
+    NoDisplay(&'static str),
     /// No device answers the address.
     #[error("{bus} has no device at address {address:#04x}")]
     NoDevice {
@@ -349,6 +376,8 @@ struct BusState {
 struct SpiBusState {
     name: &'static str,
     device: Option<Box<dyn SpiDevice>>,
+    /// Board peripheral name of the device, when the Board declared it.
+    peripheral: Option<String>,
 }
 
 struct Hardware {
@@ -415,9 +444,11 @@ impl VirtualHardware {
     /// Adds SPI controllers with the given names.
     #[must_use]
     pub fn with_spi(self, buses: &[&'static str]) -> Self {
-        self.lock()
-            .spi
-            .extend(buses.iter().map(|name| SpiBusState { name, device: None }));
+        self.lock().spi.extend(buses.iter().map(|name| SpiBusState {
+            name,
+            device: None,
+            peripheral: None,
+        }));
         self
     }
 
@@ -426,10 +457,31 @@ impl VirtualHardware {
     /// # Errors
     ///
     /// Returns [`HardwareError::UnknownBus`] for an unknown controller.
-    pub fn attach_spi(
+    pub fn attach_spi(&self, bus: &str, device: Box<dyn SpiDevice>) -> Result<(), HardwareError> {
+        self.attach_spi_device(bus, device, None)
+    }
+
+    /// Attaches the device behind a Board-declared peripheral to an SPI
+    /// controller; unlike [`VirtualHardware::attach_spi`], it survives
+    /// [`VirtualHardware::reset`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HardwareError::UnknownBus`] for an unknown controller.
+    pub fn attach_spi_peripheral(
+        &self,
+        bus: &str,
+        device: Box<dyn SpiDevice>,
+        peripheral: &str,
+    ) -> Result<(), HardwareError> {
+        self.attach_spi_device(bus, device, Some(peripheral))
+    }
+
+    fn attach_spi_device(
         &self,
         bus: &str,
         mut device: Box<dyn SpiDevice>,
+        peripheral: Option<&str>,
     ) -> Result<(), HardwareError> {
         let now = self.clock.now();
         let mut hardware = self.lock();
@@ -441,6 +493,7 @@ impl VirtualHardware {
         let notes = context.into_notes();
         let model = device.model();
         hardware.spi[index].device = Some(device);
+        hardware.spi[index].peripheral = peripheral.map(String::from);
         hardware.record_notes(now, name, 0, model, notes);
         hardware.record_violations(0, micros(now), name, 0, model, violations);
         Ok(())
@@ -502,8 +555,9 @@ impl VirtualHardware {
                 now,
                 EventDetail::Spi {
                     bus: name,
-                    write: hex(write),
+                    write: hex(event_bytes(write)),
                     read: String::new(),
+                    length: write.len(),
                     result: error.label(),
                     injected: true,
                 },
@@ -516,8 +570,9 @@ impl VirtualHardware {
         let mut model = None;
         // MISO floats high without a device on the bus.
         read.fill(0xff);
+        let pins = hardware.pins.iter().map(PinState::level).collect();
         if let Some(device) = hardware.spi[bus].device.as_mut() {
-            let mut context = DeviceContext::new(now, &mut violations);
+            let mut context = DeviceContext::new(now, &mut violations).with_pins(pins);
             device.transfer(&mut context, frequency_hz, write, read);
             notes = context.into_notes();
             model = Some(device.model());
@@ -526,8 +581,9 @@ impl VirtualHardware {
             now,
             EventDetail::Spi {
                 bus: name,
-                write: hex(write),
-                read: hex(read),
+                write: hex(event_bytes(write)),
+                read: hex(event_bytes(read)),
+                length: write.len(),
                 result: "ok",
                 injected: false,
             },
@@ -537,6 +593,54 @@ impl VirtualHardware {
             hardware.record_violations(seq, micros(now), name, 0, model, violations);
         }
         Ok(())
+    }
+
+    /// Chip index of the pin with this Board or chip name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HardwareError::UnknownPin`] for an unknown pin.
+    pub fn pin_index(&self, name: &str) -> Result<usize, HardwareError> {
+        pin_index(&self.lock(), name)
+    }
+
+    /// The display panels on the SPI controllers, without their pixels.
+    #[must_use]
+    pub fn displays(&self) -> Vec<DisplaySnapshot> {
+        self.lock()
+            .spi
+            .iter()
+            .filter_map(|bus| {
+                let device = bus.device.as_ref()?;
+                let frame = device.frame()?;
+                Some(DisplaySnapshot {
+                    bus: bus.name,
+                    peripheral: bus.peripheral.clone(),
+                    model: device.model(),
+                    width: frame.width,
+                    height: frame.height,
+                    visible: frame.visible,
+                    round: frame.round,
+                    revision: frame.revision,
+                })
+            })
+            .collect()
+    }
+
+    /// What the display panel on an SPI controller shows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown controller or one without a panel.
+    pub fn display(&self, bus: &str) -> Result<Frame, HardwareError> {
+        let hardware = self.lock();
+        let index = spi_index(&hardware, bus)?;
+        let state = &hardware.spi[index];
+        state
+            .device
+            .as_ref()
+            .and_then(|device| device.frame())
+            .ok_or(HardwareError::NoDisplay(state.name))
     }
 
     /// Clock that timestamps this model's events.
@@ -852,7 +956,9 @@ impl VirtualHardware {
                 .retain(|address, _device| declared.contains_key(address));
         }
         for bus in &mut hardware.spi {
-            bus.device = None;
+            if bus.peripheral.is_none() {
+                bus.device = None;
+            }
         }
         for pin in &mut hardware.pins {
             pin.driven = None;
@@ -875,6 +981,20 @@ impl VirtualHardware {
     pub(crate) fn claim_digital(&self, pin: usize) {
         if let Some(pin) = self.lock().pins.get_mut(pin) {
             pin.function = Some(String::from("digital"));
+        }
+    }
+
+    pub(crate) fn claim_spi<const PINS: usize>(&self, bus: usize, pins: [(usize, &str); PINS]) {
+        let mut hardware = self.lock();
+        let Some(name) = hardware.spi.get(bus).map(|bus| bus.name) else {
+            return;
+        };
+        for (pin, role) in pins {
+            if let Some(pin) = hardware.pins.get_mut(pin) {
+                pin.function = Some(format!("{name} {role}"));
+                pin.mode = PinMode::Output;
+                pin.drive = PinDrive::PushPull;
+            }
         }
     }
 
@@ -1169,6 +1289,14 @@ fn spi_index(hardware: &Hardware, name: &str) -> Result<usize, HardwareError> {
         .iter()
         .position(|bus| bus.name == name)
         .ok_or_else(|| HardwareError::UnknownBus(String::from(name)))
+}
+
+/// Bytes of one SPI transfer kept in its event; a display streams kilobytes
+/// per transfer, which the log need not hold.
+pub const SPI_EVENT_BYTES: usize = 32;
+
+fn event_bytes(bytes: &[u8]) -> &[u8] {
+    &bytes[..bytes.len().min(SPI_EVENT_BYTES)]
 }
 
 fn seven_bit(address: u64) -> Result<u8, HardwareError> {

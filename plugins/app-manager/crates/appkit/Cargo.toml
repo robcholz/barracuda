@@ -1,0 +1,52 @@
+[package]
+name = "barracuda-appkit"
+version = "0.1.0"
+edition = "2024"
+description = "Lists, installs, launches, and supervises Lua apps and their views"
+license = "Apache-2.0"
+
+[dependencies]
+async-channel.workspace = true
+barracuda-runtime-utils.workspace = true
+barracuda-uikit = { path = "../uikit" }
+futures-util = { workspace = true, features = ["alloc", "async-await"] }
+portable-atomic.workspace = true
+portable-atomic-util.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
+barracuda-vm-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+critical-section = "1"
+embassy-executor.workspace = true
+embedded-io-async = "0.7"
+embassy-futures.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+json-validator.workspace = true
+log.workspace = true
+# App packages: their digest and P-256 signatures.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+futures-lite = "2"
+barracuda-lua = { path = "../../../vm/crates/lua", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+barracuda-vfs-memfs.workspace = true
+critical-section = { version = "1", features = ["std"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

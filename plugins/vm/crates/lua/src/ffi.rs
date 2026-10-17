@@ -133,6 +133,7 @@ unsafe extern "C-unwind" {
     pub fn lua_close(state: *mut lua_State);
     pub fn lua_newthread(state: *mut lua_State) -> *mut lua_State;
     pub fn lua_resetthread(state: *mut lua_State) -> c_int;
+    pub fn lua_gc(state: *mut lua_State, what: c_int, ...) -> c_int;
 
     pub fn lua_gettop(state: *mut lua_State) -> c_int;
     pub fn lua_settop(state: *mut lua_State, index: c_int);
@@ -169,6 +170,7 @@ unsafe extern "C-unwind" {
     pub fn lua_getfield(state: *mut lua_State, index: c_int, key: *const c_char) -> c_int;
     pub fn lua_rawget(state: *mut lua_State, index: c_int) -> c_int;
     pub fn lua_rawgeti(state: *mut lua_State, index: c_int, key: lua_Integer) -> c_int;
+    pub fn lua_next(state: *mut lua_State, index: c_int) -> c_int;
     pub fn lua_createtable(state: *mut lua_State, array: c_int, hash: c_int);
     pub fn lua_newuserdatauv(state: *mut lua_State, size: usize, values: c_int) -> *mut c_void;
 

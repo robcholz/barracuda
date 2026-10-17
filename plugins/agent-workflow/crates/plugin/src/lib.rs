@@ -6,14 +6,14 @@ extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 
-use barracuda_agent_message::json;
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
-        ToolOutput, ToolSpec,
+        EmptyArgs, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
+        ToolInvokeError, ToolOutput, ToolSpec,
     },
 };
+use barracuda_json_writer as json;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_workflow_plugin::{
@@ -57,7 +57,10 @@ impl Plugin for AgentWorkflowPlugin {
                     Tool::new(LoadTool {
                         service: Rc::clone(&service),
                     }),
-                    Tool::new(UnloadTool { service }),
+                    Tool::new(UnloadTool {
+                        service: Rc::clone(&service),
+                    }),
+                    Tool::new(SwitchTool { service }),
                 ],
             ))
             .map_err(PluginError::registration)
@@ -75,12 +78,12 @@ impl ToolSpec for ActionsTool {
 impl ToolHandler for ActionsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            Ok(ToolOutput {
-                content: render_actions(&self.actions.descriptors()),
-                ok: true,
-            })
+            Ok(ToolOutput::new(
+                render_actions(&self.actions.descriptors()),
+                true,
+            ))
         })
     }
 }
@@ -118,15 +121,19 @@ impl ToolSpec for ListTool {
 impl ToolHandler for ListTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let workflows = self
-                .service
-                .definitions()
-                .into_iter()
+            let definitions = self.service.definitions();
+            let workflows = definitions
+                .iter()
                 .map(|definition| String::from(definition.id().as_str()))
                 .collect();
-            encode(&ListResponse { workflows }, true)
+            let off = definitions
+                .iter()
+                .filter(|definition| !self.service.is_enabled(definition.id()))
+                .map(|definition| String::from(definition.id().as_str()))
+                .collect();
+            encode(&ListResponse { workflows, off }, true)
         })
     }
 }
@@ -134,6 +141,7 @@ impl ToolHandler for ListTool {
 #[derive(Serialize)]
 struct ListResponse {
     workflows: Vec<String>,
+    off: Vec<String>,
 }
 
 struct LoadTool {
@@ -147,7 +155,7 @@ impl ToolSpec for LoadTool {
 impl ToolHandler for LoadTool {
     type Args = WorkflowValue;
 
-    fn invoke<'a>(&'a self, definition: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, definition: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let definition = serde_json::to_string(&definition).map_err(|_error| {
                 ToolError::InvokeRejected(String::from("failed to encode Workflow definition"))
@@ -171,7 +179,7 @@ impl ToolSpec for UnloadTool {
 impl ToolHandler for UnloadTool {
     type Args = UnloadRequest;
 
-    fn invoke<'a>(&'a self, request: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let id = match WorkflowId::try_from(request.id) {
                 Ok(id) => id,
@@ -196,6 +204,42 @@ impl ToolHandler for UnloadTool {
 #[serde(deny_unknown_fields)]
 struct UnloadRequest {
     id: String,
+}
+
+struct SwitchTool {
+    service: Rc<WorkflowService>,
+}
+
+impl ToolSpec for SwitchTool {
+    barracuda_agent_plugin::tools::tool_metadata!("workflow_switch");
+}
+
+impl ToolHandler for SwitchTool {
+    type Args = SwitchRequest;
+
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let Ok(id) = WorkflowId::try_from(request.id) else {
+                return encode(
+                    &ErrorResponse {
+                        error: "invalid_workflow_id",
+                    },
+                    false,
+                );
+            };
+            match self.service.set_enabled(&id, request.enabled).await {
+                Ok(()) => encode(&EmptyResponse {}, true),
+                Err(error) => encode(&ErrorResponse::from(error), false),
+            }
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SwitchRequest {
+    id: String,
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -242,7 +286,7 @@ fn encode(response: &impl Serialize, ok: bool) -> Result<ToolOutput, ToolInvokeE
     let content = serde_json::to_string(response).map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode Workflow Tool response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }
 
 #[cfg(test)]

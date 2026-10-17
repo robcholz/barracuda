@@ -1,4 +1,4 @@
-//! Thin System-to-reqwless construction boundary, plus the dedicated
+//! Thin Embassy-to-reqwless construction boundary, plus the dedicated
 //! connection slots of long-lived receive loops.
 #![no_std]
 
@@ -33,12 +33,12 @@ const TCP_RX_BYTES: usize = 4 * 1024;
 pub type Tcp = TcpClient<'static, TCP_CONNECTIONS, TCP_TX_BYTES, TCP_RX_BYTES>;
 type TcpState = TcpClientState<TCP_CONNECTIONS, TCP_TX_BYTES, TCP_RX_BYTES>;
 
-/// The System's TCP connection pool, socket buffers included, placed in static
+/// The first factory's TCP connection pool, socket buffers included, placed in static
 /// memory at link time instead of being allocated from the heap at startup.
 static TCP_STATE: ConstStaticCell<TcpState> = ConstStaticCell::new(TcpState::new());
 pub type Resolver = DnsSocket<'static>;
 
-/// System-owned resources from which consumers create reqwless clients.
+/// Network resources from which consumers create reqwless clients.
 pub struct ClientFactory<'net, T = Tcp, D = Resolver> {
     tcp: &'net T,
     resolver: &'net D,
@@ -80,7 +80,7 @@ impl ClientFactory<'static> {
         stack: Stack<'static>,
         #[cfg(feature = "mbedtls")] tls: Option<Rc<barracuda_tls::Tls>>,
     ) -> Self {
-        // The System builds one factory. Further factories in one process
+        // A firmware builds one factory. Further factories in one process
         // (host tests) fall back to a leaked heap pool.
         let state: &'static TcpState = match TCP_STATE.try_take() {
             Some(state) => state,

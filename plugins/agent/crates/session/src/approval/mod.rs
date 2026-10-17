@@ -14,7 +14,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_agent_tool::ToolSetError;
+use barracuda_agent_tool::{ToolContext, ToolSetError};
 use barracuda_model_api::{Error as ModelError, InitError, ToolCall};
 use tracing::Instrument as _;
 
@@ -31,8 +31,11 @@ pub(super) type ApprovalFuture =
     Pin<Box<dyn Future<Output = Result<ApprovalDecision, ApprovalResolverError>>>>;
 
 pub(super) trait ApprovalResolver {
+    /// Resolves `reply` to `tool_call`'s request; any Tool the resolution
+    /// runs gets `context`.
     async fn resolve(
         self: Rc<Self>,
+        context: ToolContext,
         tool_call: ToolCall,
         reason: String,
         reply: Message,
@@ -92,6 +95,8 @@ pub(super) enum ApprovalRespondError {
 
 pub(super) struct ApprovalFlow<Resolver> {
     resolver: Rc<Resolver>,
+    /// The session's Tool context, for the resolver's Tools.
+    context: ToolContext,
     next_request: u32,
     state: Option<ApprovalState>,
     queued: VecDeque<ApprovalRequest>,
@@ -101,9 +106,10 @@ impl<Resolver> ApprovalFlow<Resolver>
 where
     Resolver: ApprovalResolver + 'static,
 {
-    pub(super) fn new(resolver: Rc<Resolver>) -> Self {
+    pub(super) fn new(resolver: Rc<Resolver>, context: ToolContext) -> Self {
         Self {
             resolver,
+            context,
             next_request: 1,
             state: None,
             queued: VecDeque::new(),
@@ -166,7 +172,7 @@ where
         } = request;
         let future: ApprovalFuture = Box::pin(
             Rc::clone(&self.resolver)
-                .resolve(tool_call, reason, message)
+                .resolve(self.context, tool_call, reason, message)
                 .instrument(tracing::info_span!("approval.resolve")),
         );
         self.state = Some(ApprovalState::Resolving {
@@ -271,6 +277,7 @@ mod tests {
     impl ApprovalResolver for ImmediateResolver {
         async fn resolve(
             self: Rc<Self>,
+            _context: ToolContext,
             _tool_call: ToolCall,
             _reason: String,
             _reply: Message,
@@ -281,7 +288,10 @@ mod tests {
 
     #[test]
     fn approvals_are_displayed_fifo_across_agents() {
-        let mut flow = ApprovalFlow::new(Rc::new(ImmediateResolver));
+        let mut flow = ApprovalFlow::new(
+            Rc::new(ImmediateResolver),
+            ToolContext::new(crate::SessionId::new(1)),
+        );
         let first = flow
             .request(
                 AgentId(1),
@@ -308,7 +318,10 @@ mod tests {
 
     #[test]
     fn subtree_cancellation_removes_only_matching_queued_approvals() {
-        let mut flow = ApprovalFlow::new(Rc::new(ImmediateResolver));
+        let mut flow = ApprovalFlow::new(
+            Rc::new(ImmediateResolver),
+            ToolContext::new(crate::SessionId::new(1)),
+        );
         let _ = flow.request(
             AgentId(1),
             ToolCallId::new(1),

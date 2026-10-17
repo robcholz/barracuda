@@ -82,6 +82,7 @@ function open(lang: "zh" | "en" = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: () => {},
+    has: () => true,
     status: () => null,
     refreshStatus: async () => {},
     badge: (badge) => badges.push(badge),
@@ -363,6 +364,53 @@ test("renders an Agent turn: reasoning, tool card, streamed reply and an icon fo
   expect(root.textContent).not.toContain("weather_forecast");
 });
 
+test("a reply streams in as Markdown; its code blocks carry Copy and replies quote the source", () => {
+  // reduced motion: streamed text lands at once rather than over animation frames
+  Object.assign(browser.window, {
+    matchMedia: (query: string) => ({ matches: query.includes("reduce") }),
+  });
+  const { root, socket, button, submit } = open();
+  const ws = socket();
+  ws.open();
+  submit("示例");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", {
+    text: "## 用法\n\n运行 `make`：\n\n```sh\nmake ",
+  });
+  // streaming: the fence is open, so the block is incomplete and the caret hides, as Streamdown's does
+  const reply = root.querySelector(".bc-reply.bc-md")!;
+  expect(reply.querySelector("h2")!.textContent).toBe("用法");
+  expect(reply.querySelector("p code")!.textContent).toBe("make");
+  // healing drops the trailing space, as remend does
+  expect(reply.querySelector("pre code")!.textContent).toBe("make");
+  const block = reply.querySelector(".bc-md-code")!;
+  expect(block.hasAttribute("data-incomplete")).toBe(true);
+  expect(reply.querySelector(".bc-caret")).toBeNull();
+  ws.agent("web-1", "output_delta", { text: "all\n```\n完成 **了**" });
+  // the fence closed: the same block, complete, and the caret ends the last line
+  expect(reply.querySelector(".bc-md-code")).toBe(block);
+  expect(block.hasAttribute("data-incomplete")).toBe(false);
+  expect(reply.querySelector("pre code")!.textContent).toBe("make all");
+  expect(reply.querySelector("p:last-of-type > .bc-caret")).not.toBeNull();
+  expect(reply.querySelector("p:last-of-type strong")!.textContent).toBe("了");
+  ws.agent("web-1", "output_ended");
+  ws.emit("message.end", { error: null, message_id: "web-1" });
+  expect(root.querySelector(".bc-caret")).toBeNull();
+  // the code block's head names its language and holds its own Copy
+  const head = reply.querySelector(".bc-md-code__head")!;
+  expect(head.firstElementChild!.textContent).toBe("sh");
+  expect(head.querySelector('[aria-label="复制"]')).not.toBeNull();
+  button("回复").click();
+  submit("为什么？");
+  const quoted = JSON.parse(sent.at(-1)!).text as string;
+  expect(quoted).toContain("## 用法");
+  expect(quoted).toContain("```sh");
+});
+
 test("a long quote is cut to 512 bytes, whole characters, ending in an ellipsis", () => {
   const { socket, submit, button } = open();
   const ws = socket();
@@ -447,7 +495,7 @@ test("stop interrupts the running turn, which ends 「已停止」 and keeps its
   ws.emit("message.end", { error: null, message_id: "web-1" });
   const status = root.querySelector(".bc-status.bc-muted")!;
   expect(status.textContent).toBe("已停止");
-  expect(root.querySelector(".bc-reply")!.textContent).toBe("1. 断电恢复");
+  expect(root.querySelector(".bc-reply ol > li")!.textContent).toBe("断电恢复");
   // its footer follows the status line
   expect(
     status.nextElementSibling?.querySelector('[aria-label="复制"]'),
@@ -769,7 +817,7 @@ test("a permission request is answered by the next message", () => {
   expect(input.placeholder).toBe("给设备发一条消息");
 });
 
-test("shows lag, turn errors, interrupted messages and attachments", async () => {
+test("shows lag, turn errors, interrupted messages and attachments", () => {
   const { root, socket } = open();
   const ws = socket();
   ws.open();
@@ -794,29 +842,26 @@ test("shows lag, turn errors, interrupted messages and attachments", async () =>
       ?.firstElementChild?.textContent,
   ).toBe("这一轮出错");
 
+  // a file is one event naming where the device keeps it
   ws.emit("message.file", {
     caption: "路线",
     filename: "ride.gpx",
     message_id: "web-4",
     mime_type: "application/gpx+xml",
-    phase: "start",
     reply_to: null,
+    size: 5,
+    url: "/api/web/media/1a2b3c4d-0",
   });
-  expect(root.textContent).toContain("接收中");
-  ws.emit("message.file", {
-    data: btoa("hello"),
-    message_id: "web-4",
-    phase: "delta",
-  });
-  ws.emit("message.file", { error: null, message_id: "web-4", phase: "end" });
   const file = root.querySelector(".bc-card > .bc-card__row")!;
+  expect(file.querySelector(".bc-option-icon svg")).not.toBeNull();
   expect(file.querySelector(".bc-option-title")?.textContent).toBe("ride.gpx");
   expect(file.querySelector(".bc-caption.bc-muted")?.textContent).toBe(
     "application/gpx+xml · 5 B · 已接收",
   );
   const link = root.querySelector<HTMLAnchorElement>("a[download]")!;
   expect(link.getAttribute("download")).toBe("ride.gpx");
-  expect(await (await fetch(link.href)).text()).toBe("hello");
+  expect(link.getAttribute("href")).toBe("/api/web/media/1a2b3c4d-0");
+  expect(link.textContent).toBe("下载");
   expect(root.textContent).toContain("路线");
 });
 
@@ -875,4 +920,138 @@ test("closes the socket and empties the page when it goes away", async () => {
   expect(socket().readyState).toBe(3);
   socket().dispatchEvent(new NativeEvent("close"));
   expect(toasts).toHaveLength(0);
+});
+
+test("a saved session's conversation comes back from the browser's copy after a reload", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("第一行\n第二行");
+  reply(ws, "web-1", "web-in-1", "**好的**\n\n- 一\n- 二");
+  first.controller.abort();
+  first.cleanup?.();
+
+  const again = open();
+  const next = again.socket();
+  next.open();
+  const before = listings;
+  listed(next, {});
+  // drawn as it was, without the device being asked for anything
+  expect(listings).toBe(before);
+  expect(again.root.querySelector(".bc-empty")).toBeNull();
+  expect(again.root.querySelector(".bc-bubble")?.textContent).toBe(
+    "第一行\n第二行",
+  );
+  expect(again.root.querySelector(".bc-reply strong")?.textContent).toBe(
+    "好的",
+  );
+  expect(again.root.querySelectorAll(".bc-reply li")).toHaveLength(2);
+  // ids restart with the connection and the device's boot: the new turn stands apart
+  again.submit("再来");
+  reply(next, "web-1", "web-in-1", "第二次");
+  expect(
+    [...again.root.querySelectorAll(".bc-bubble")].map((n) => n.textContent),
+  ).toEqual(["第一行\n第二行", "再来"]);
+  expect(
+    [...again.root.querySelectorAll(".bc-reply")].map((n) => n.textContent),
+  ).toEqual(["好的一二", "第二次"]);
+  // another session starts empty; coming back draws both turns
+  listed(next, { current: "session-2", notice: { kind: "switched" } });
+  expect(again.root.querySelector(".bc-bubble")).toBeNull();
+  listed(next, { current: "session-3", notice: { kind: "switched" } });
+  expect(
+    [...again.root.querySelectorAll(".bc-bubble")].map((n) => n.textContent),
+  ).toEqual(["第一行\n第二行", "再来"]);
+  expect(
+    [...again.root.querySelectorAll(".bc-reply")].map((n) => n.textContent),
+  ).toEqual(["好的一二", "第二次"]);
+  // and again: each drawing keeps its replies
+  listed(next, { current: "session-2", notice: { kind: "switched" } });
+  listed(next, { current: "session-3", notice: { kind: "switched" } });
+  expect(again.root.querySelectorAll(".bc-reply")).toHaveLength(2);
+});
+
+test("a new session keeps its first turn, sent before the device named it", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, { current: null, notice: { kind: "created" } });
+  first.submit("首条");
+  reply(ws, "web-1", "web-in-1", "收到");
+  listed(ws, { current: "session-4" });
+  first.controller.abort();
+
+  const again = open();
+  again.socket().open();
+  listed(again.socket(), { current: "session-4" });
+  expect(again.root.querySelector(".bc-bubble")?.textContent).toBe("首条");
+  expect(again.root.querySelector(".bc-reply")?.textContent).toBe("收到");
+});
+
+test("a turn cut off by the reload stays as far as it got", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("看看");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-1",
+    reply_to: "web-in-1",
+  });
+  ws.agent("web-1", "output_delta", { text: "写到一半" });
+  first.controller.abort();
+
+  const again = open();
+  again.socket().open();
+  listed(again.socket(), {});
+  expect(again.root.textContent).toContain("写到一半");
+  expect(again.root.querySelector(".bc-caret")).toBeNull();
+  expect(again.send().getAttribute("aria-label")).toBe("发送");
+});
+
+test("a temporary chat and a rewound message leave nothing in the browser", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, { current: null, temporary: true });
+  first.submit("临时");
+  reply(ws, "web-1", "web-in-1", "嗯");
+  listed(ws, { notice: { kind: "switched" } });
+  first.submit("撤回我");
+  ws.emit("message.start", {
+    kind: "reply",
+    message_id: "web-2",
+    reply_to: "web-in-2",
+  });
+  first.button("撤回").click();
+  first.controller.abort();
+  expect(
+    Object.keys(browser.window.localStorage).filter((key) =>
+      key.startsWith("barracuda.chat."),
+    ),
+  ).toEqual([]);
+});
+
+test("a session the device no longer lists loses its copy", () => {
+  const first = open();
+  const ws = first.socket();
+  ws.open();
+  listed(ws, {});
+  first.submit("要删的");
+  reply(ws, "web-1", "web-in-1", "好");
+  listed(ws, { current: "session-2", notice: { kind: "switched" } });
+  expect(
+    browser.window.localStorage.getItem("barracuda.chat.session-3"),
+  ).not.toBeNull();
+  listed(ws, {
+    current: "session-2",
+    sessions: [
+      { session: "session-2", title: null, updated_at: null, running: false },
+    ],
+  });
+  expect(
+    browser.window.localStorage.getItem("barracuda.chat.session-3"),
+  ).toBeNull();
 });

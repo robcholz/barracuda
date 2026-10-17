@@ -333,6 +333,13 @@ impl LuaPackage for AgentLuaPackage {
         "agent"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "使用 Agent",
+        })
+    }
+
     fn revoke(&self) {
         self.state.revoke();
     }
@@ -677,5 +684,11 @@ mod tests {
         .expect("run Lua");
         assert!(missing);
         assert_eq!(error, "Agent runtime is not available");
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let (package, _requests) = AgentLuaPackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

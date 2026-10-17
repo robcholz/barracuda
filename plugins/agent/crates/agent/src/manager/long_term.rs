@@ -2,6 +2,7 @@ use alloc::{borrow::ToOwned, collections::BTreeMap, string::String};
 use core::cell::RefCell;
 
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory};
+use barracuda_agent_tool::ToolContext;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -15,7 +16,8 @@ use super::layout::join_storage_path;
 const GLOBAL_LONG_TERM_DIR: &str = "g";
 const AGENT_LONG_TERM_DIR: &str = "a";
 
-type BuildProvider = dyn Fn(LongTermMemory, LongTermMemory) -> LongTermMemoryContextProvider;
+type BuildProvider =
+    dyn Fn(LongTermMemory, LongTermMemory, ToolContext) -> LongTermMemoryContextProvider;
 
 pub(super) struct LongTermDeps {
     global: LongTermMemory,
@@ -82,6 +84,7 @@ impl LongTermDeps {
     pub(super) fn provider(
         &self,
         kind: &str,
+        context: ToolContext,
     ) -> Result<LongTermMemoryContextProvider, LongTermInitError> {
         let agent = self.agent_stores.get(kind).ok_or_else(|| {
             // Every baked kind is preloaded during manager construction.
@@ -90,7 +93,7 @@ impl LongTermDeps {
                 source: barracuda_vfs::FsError::NotFound,
             }
         })?;
-        Ok((self.build_provider)(agent, self.global.clone()))
+        Ok((self.build_provider)(agent, self.global.clone(), context))
     }
 }
 

@@ -1,5 +1,6 @@
-use alloc::{boxed::Box, rc::Rc, string::String};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 
+use barracuda_agent_plugin::Attachment;
 use barracuda_plugin::manager::PluginStorage;
 use barracuda_workflow_plugin::{
     WorkflowActionFuture, WorkflowActionHandler, WorkflowActionSchema, workflow_action_schema,
@@ -25,10 +26,15 @@ pub(crate) struct RouteRequest {
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub(crate) enum ToAgentRequest {
+    /// The complete `gateway.message.received` document. The text and the
+    /// attachments it references reach the session through `session.append`
+    /// or `session.respond`; resolving reads only the route.
     Resolve {
         route: RouteRequest,
         message_id: String,
         text: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
     },
     Bind {
         route: RouteRequest,
@@ -139,8 +145,9 @@ where
             route: route_request,
             message_id,
             text,
+            attachments,
         } => {
-            let _complete_message = text;
+            let _complete_message = (text, attachments);
             log::info!(
                 "IMessage Bridge resolving `{}` conversation `{}` for inbound message `{message_id}`",
                 route_request.channel,
@@ -258,7 +265,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute};
+    use alloc::string::String;
+
+    use barracuda_imessage_gateway_plugin::{
+        Attachment, GatewayInboundMessage, GatewayRoute, MediaKind,
+    };
     use barracuda_workflow_plugin::{WorkflowActionSchema, workflow_action_schema};
 
     const TO_AGENT: WorkflowActionSchema = workflow_action_schema!("imessage_bridge.to_agent");
@@ -276,11 +287,39 @@ mod tests {
     }
 
     #[test]
+    fn gateway_event_with_attachments_matches_the_to_agent_resolve_schema() {
+        let message = GatewayInboundMessage {
+            route: GatewayRoute::new("telegram", "conversation"),
+            message_id: "telegram-in-1".into(),
+            text: String::new(),
+            attachments: alloc::vec![Attachment {
+                kind: MediaKind::Image,
+                path: "/workspace/cache/gateway/telegram/1.jpg".into(),
+                mime_type: "image/jpeg".into(),
+                filename: Some("cat.jpg".into()),
+                size: 3,
+            }],
+        };
+        let input = serde_json::to_value(message);
+
+        assert!(
+            input
+                .as_ref()
+                .is_ok_and(|input| TO_AGENT.request().validate(input).is_ok())
+        );
+        assert!(matches!(
+            input.and_then(serde_json::from_value::<super::ToAgentRequest>),
+            Ok(super::ToAgentRequest::Resolve { attachments, .. }) if attachments.len() == 1
+        ));
+    }
+
+    #[test]
     fn threadless_gateway_event_matches_the_to_agent_resolve_schema() {
         let message = GatewayInboundMessage {
             route: GatewayRoute::new("web", "conversation"),
             message_id: "web-in-1".into(),
             text: "hello".into(),
+            attachments: alloc::vec::Vec::new(),
         };
 
         assert!(

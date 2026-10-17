@@ -15,6 +15,7 @@ use core::fmt;
 use serde::de::{self, Deserializer, IgnoredAny, Visitor};
 use serde::{Deserialize, Serialize};
 
+use crate::media::{self, InboundMedia, RawFile, RawImage, RawVideo, RawVoice};
 use crate::WechatConfig;
 
 /// Path of the long poll below the configured API base.
@@ -41,12 +42,9 @@ pub const SESSION_EXPIRED_CODE: i64 = -14;
 /// `message_type` of a message the user sent; the bot's own are `2`.
 const USER_MESSAGE: u32 = 1;
 
-/// `item_list[].type` of a text item.
-const TEXT_ITEM: u32 = 1;
-
-/// One text message a user sent to the bot.
+/// One message a user sent to the bot: text, files, or both.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InboundText {
+pub struct InboundMessage {
     /// iLink `message_id` (a `u64`) as a decimal string, or `seq:<n>` when
     /// the message has none.
     pub message_id: String,
@@ -54,17 +52,20 @@ pub struct InboundText {
     pub from_user_id: String,
     /// Token iLink expects on replies to this user, when present.
     pub context_token: Option<String>,
-    /// The message's text items, joined.
+    /// The message's text items, joined; empty for files only.
     pub text: String,
+    /// The message's image, voice, file, and video items, not downloaded
+    /// yet.
+    pub media: Vec<InboundMedia>,
 }
 
 /// One `getupdates` reply.
 #[derive(Debug, Default)]
 pub struct Updates {
-    /// Text messages from users, in delivery order.
-    pub messages: Vec<InboundText>,
-    /// Messages skipped: the bot's own, without text, from a group, or
-    /// without a sender or id.
+    /// Messages from users, in delivery order.
+    pub messages: Vec<InboundMessage>,
+    /// Messages skipped: the bot's own, with neither text nor files, from a
+    /// group, or without a sender or id.
     pub skipped: usize,
     /// The cursor to send next, when the reply carried a non-empty one.
     pub get_updates_buf: Option<String>,
@@ -280,7 +281,7 @@ pub fn parse_updates(status: u16, body: &[u8]) -> Result<Updates, UpdatesError> 
         ..Updates::default()
     };
     for message in reply.msgs {
-        match message.into_text() {
+        match message.into_message() {
             Some(text) => updates.messages.push(text),
             None => updates.skipped = updates.skipped.saturating_add(1),
         }
@@ -334,7 +335,7 @@ struct RawMessage {
 }
 
 impl RawMessage {
-    fn into_text(self) -> Option<InboundText> {
+    fn into_message(self) -> Option<InboundMessage> {
         if self.message_type != Some(USER_MESSAGE)
             || self
                 .group_id
@@ -348,22 +349,38 @@ impl RawMessage {
             .message_id
             .or_else(|| self.seq.map(|seq| format!("seq:{seq}")))?;
         let mut text = String::new();
+        let mut files = Vec::new();
         for item in self.item_list {
-            if item.kind != Some(TEXT_ITEM) {
-                continue;
-            }
-            if let Some(part) = item.text_item.and_then(|text| text.text) {
-                text.push_str(&part);
+            match item.kind {
+                Some(media::item_type::TEXT) => {
+                    if let Some(part) = item.text_item.and_then(|text| text.text) {
+                        text.push_str(&part);
+                    }
+                }
+                Some(media::item_type::IMAGE) => {
+                    files.push(media::image(item.image_item.unwrap_or_default()));
+                }
+                Some(media::item_type::VOICE) => {
+                    files.push(media::voice(item.voice_item.unwrap_or_default()));
+                }
+                Some(media::item_type::FILE) => {
+                    files.push(media::file(item.file_item.unwrap_or_default()));
+                }
+                Some(media::item_type::VIDEO) => {
+                    files.push(media::video(item.video_item.unwrap_or_default()));
+                }
+                _ => {}
             }
         }
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && files.is_empty() {
             return None;
         }
-        Some(InboundText {
+        Some(InboundMessage {
             message_id,
             from_user_id,
             context_token: self.context_token.filter(|token| !token.is_empty()),
             text,
+            media: files,
         })
     }
 }
@@ -374,6 +391,14 @@ struct RawItem {
     kind: Option<u32>,
     #[serde(default)]
     text_item: Option<RawText>,
+    #[serde(default)]
+    image_item: Option<RawImage>,
+    #[serde(default)]
+    voice_item: Option<RawVoice>,
+    #[serde(default)]
+    file_item: Option<RawFile>,
+    #[serde(default)]
+    video_item: Option<RawVideo>,
 }
 
 #[derive(Deserialize)]
@@ -441,7 +466,7 @@ fn lossless_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Stri
 }
 
 /// Standard base64 with padding.
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let symbol = |index: u32| {
         let index = usize::try_from(index & 0x3f).unwrap_or_default();
@@ -486,12 +511,12 @@ mod tests {
     }
 
     #[test]
-    fn keeps_u64_ids_exact_and_text_messages_only() {
+    fn keeps_u64_ids_exact_and_user_messages_only() {
         let body = br#"{"ret":0,"get_updates_buf":"cursor-2","longpolling_timeout_ms":30000,"msgs":[
             {"seq":1,"message_id":18446744073709551615,"from_user_id":"u1@im.wechat","to_user_id":"b@im.bot",
              "message_type":1,"context_token":"ctx-1","item_list":[{"type":1,"text_item":{"text":"hi"}}]},
             {"message_id":7,"from_user_id":"b@im.bot","message_type":2,"item_list":[{"type":1,"text_item":{"text":"echo"}}]},
-            {"message_id":"8","from_user_id":"u1@im.wechat","message_type":1,"item_list":[{"type":2,"image_item":{"url":"x"}}]},
+            {"message_id":"8","from_user_id":"u1@im.wechat","message_type":1,"item_list":[{"type":11,"tool_call_start_item":{}}]},
             {"message_id":9,"from_user_id":"u2@im.wechat","message_type":1,"group_id":"g","item_list":[{"type":1,"text_item":{"text":"group"}}]}
         ]}"#;
 
@@ -499,16 +524,85 @@ mod tests {
 
         assert_eq!(
             updates.messages,
-            [InboundText {
+            [InboundMessage {
                 message_id: "18446744073709551615".into(),
                 from_user_id: "u1@im.wechat".into(),
                 context_token: Some("ctx-1".into()),
                 text: "hi".into(),
+                media: Vec::new(),
             }]
         );
         assert_eq!(updates.skipped, 3);
         assert_eq!(updates.get_updates_buf.as_deref(), Some("cursor-2"));
         assert_eq!(updates.longpolling_timeout_ms, Some(30_000));
+    }
+
+    #[test]
+    fn media_items_are_kept_with_their_keys_and_types() {
+        // The key 0123456789abcdef as hex, as base64 of its raw bytes, and as
+        // base64 of its hex digits.
+        let body = br#"{"ret":0,"msgs":[{"message_id":5,"from_user_id":"u1@im.wechat","message_type":1,
+            "item_list":[
+              {"type":2,"image_item":{"aeskey":"30313233343536373839616263646566",
+                "media":{"encrypt_query_param":"img","aes_key":"bm90IHRoaXMgb25l"}}},
+              {"type":3,"voice_item":{"encode_type":6,"text":"hello",
+                "media":{"encrypt_query_param":"voice","aes_key":"MDEyMzQ1Njc4OWFiY2RlZg=="}}},
+              {"type":4,"file_item":{"file_name":"a.pdf","len":"1234",
+                "media":{"full_url":"https://cdn.test/f","aes_key":"MzAzMTMyMzMzNDM1MzYzNzM4Mzk2MTYyNjM2NDY1NjY="}}},
+              {"type":5,"video_item":{"media":{"encrypt_query_param":"video"}}},
+              {"type":2,"image_item":{"media":{"encrypt_query_param":"plain"}}}
+            ]}]}"#;
+        let updates = parse_updates(200, body).expect("parses");
+        let message = &updates.messages[0];
+        assert_eq!(message.text, "");
+        let key = Some(*b"0123456789abcdef");
+        let kinds: Vec<_> = message
+            .media
+            .iter()
+            .map(|media| {
+                (
+                    media.kind,
+                    media.key,
+                    media.mime_type.as_deref(),
+                    media.fetchable(),
+                )
+            })
+            .collect();
+        use barracuda_imessage_gateway_plugin::MediaKind;
+        assert_eq!(
+            kinds,
+            [
+                (MediaKind::Image, key, None, true),
+                (MediaKind::Audio, key, Some("audio/silk"), true),
+                (MediaKind::File, key, Some("application/pdf"), true),
+                // A video without a key cannot be decrypted.
+                (MediaKind::Video, None, Some("video/mp4"), false),
+                // An image without a key is stored as sent.
+                (MediaKind::Image, None, None, true),
+            ]
+        );
+        assert_eq!(message.media[2].filename.as_deref(), Some("a.pdf"));
+        assert_eq!(message.media[2].size, Some(1234));
+    }
+
+    #[test]
+    fn an_oversized_batch_of_media_yields_only_its_cursor() {
+        let item = r#"{"type":2,"image_item":{"aeskey":"30313233343536373839616263646566","media":{"encrypt_query_param":"PARAM"}}}"#
+            .replace("PARAM", &"q".repeat(600));
+        let items = alloc::vec![item; 64].join(",");
+        let body = format!(
+            r#"{{"ret":0,"msgs":[{{"message_id":1,"from_user_id":"u","message_type":1,"item_list":[{items}]}}],"get_updates_buf":"after-media"}}"#
+        );
+        assert!(body.len() > MAX_UPDATES_BYTES);
+        let bytes = body.as_bytes();
+        let updates = parse_oversized_updates(
+            200,
+            &bytes[..MAX_UPDATES_BYTES],
+            &bytes[bytes.len() - MAX_UPDATES_TAIL_BYTES..],
+        )
+        .expect("cursor found");
+        assert!(updates.messages.is_empty());
+        assert_eq!(updates.get_updates_buf.as_deref(), Some("after-media"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 """barracuda-trace: parse barracuda-agent-trace's flat-tree ``TRACE`` format and rebuild the tree.
 
-See ``barracuda-agent-trace/docs/trace-format.md`` for the authoritative grammar.
+See ``docs/plugins/agent/trace-format.mdx`` for the authoritative grammar.
 
 Typical use::
 

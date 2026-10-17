@@ -21,7 +21,7 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{Dimensions, OriginDimensions, Size},
-    pixelcolor::{Rgb565, Rgb888, RgbColor},
+    pixelcolor::{IntoStorage, Rgb565},
     primitives::Rectangle,
 };
 use embedded_hal::{delay::DelayNs, i2c::I2c};
@@ -271,12 +271,6 @@ fn detect_panel<I2C: I2c>(
     }
 }
 
-fn rgb565(color: Rgb888) -> u16 {
-    (u16::from(color.r() & 0xf8) << 8)
-        | (u16::from(color.g() & 0xfc) << 3)
-        | (u16::from(color.b()) >> 3)
-}
-
 impl<HOST: DsiHost> OriginDimensions for Tab5DsiDisplay<HOST> {
     fn size(&self) -> Size {
         Size::new(u32::from(WIDTH), u32::from(HEIGHT))
@@ -299,8 +293,7 @@ impl<HOST: DsiHost> DrawTarget for Tab5DsiDisplay<HOST> {
             {
                 continue;
             }
-            let storage =
-                (u16::from(color.r()) << 11) | (u16::from(color.g()) << 5) | u16::from(color.b());
+            let storage = color.into_storage();
             self.host
                 .draw_rgb565(point.x as u16, point.y as u16, 1, 1, &[storage])
                 .map_err(Tab5DsiDisplayError::Host)?;
@@ -322,7 +315,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
         )
     }
 
-    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+    fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Self::RenderError> {
         let clipped = area.intersection(&self.bounding_box());
         if clipped != area || area.size.width == 0 || area.size.height == 0 {
             return Err(Tab5DsiDisplayError::InvalidPixelCount);
@@ -338,7 +331,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
         let width = area.size.width as usize;
         for (line, source) in pixels.chunks_exact(width).enumerate() {
             for (target, color) in row[..width].iter_mut().zip(source) {
-                *target = rgb565(*color);
+                *target = color.into_storage();
             }
             self.host
                 .draw_rgb565(

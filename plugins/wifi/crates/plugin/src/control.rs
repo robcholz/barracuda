@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, vec::Vec};
-use core::{cell::Cell, future::Future, pin::Pin};
+use core::{cell::Cell, future::Future, net::IpAddr, pin::Pin};
 
 use barracuda_platform::{
     AccessPointConfiguration, AccessPointState, StationConfiguration, StationState, VisibleNetwork,
@@ -9,7 +9,7 @@ use barracuda_plugin::manager::PluginStorage;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use serde::{Deserialize, Serialize};
 
-use crate::{SETUP_AP_PASSWORD, SETUP_AP_SSID};
+use crate::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD, SETUP_AP_SSID};
 
 const CONFIGURATION_STORAGE_KEY: &str = "station";
 
@@ -119,6 +119,15 @@ impl WifiStatus {
     #[must_use]
     pub const fn access_point(&self) -> &AccessPointState {
         &self.access_point
+    }
+
+    /// Whether a connection whose device end is `local` came in over the
+    /// setup access point while it runs: its client joined the open setup
+    /// hotspot, so it is near the device, though not who it is.
+    #[must_use]
+    pub fn is_setup_access_point(&self, local: IpAddr) -> bool {
+        local == IpAddr::V4(SETUP_AP_ADDRESS)
+            && matches!(self.access_point, AccessPointState::Started { .. })
     }
 }
 

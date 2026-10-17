@@ -89,14 +89,6 @@ pub(super) async fn post_stream<'h>(
     Ok(ProviderStream::new(stream, sse))
 }
 
-/// Extract the required non-empty assistant text from a media inference reply.
-pub(super) fn media_text(parsed: LlmResponse) -> Result<String, Error> {
-    match parsed.text {
-        Some(text) if !text.is_empty() => Ok(text),
-        _ => Err(Error::EmptyResponse),
-    }
-}
-
 /// Join `base_url` and `path` with exactly one slash between them.
 pub(super) fn join_url(base_url: &str, path: &str) -> String {
     let base_has_slash = base_url.ends_with('/');

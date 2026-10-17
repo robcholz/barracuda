@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "air",
+  "name": "空气质量",
+  "version": "0.1.0",
+  "api": 1,
+  "icon": "air",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "fonts": [
+      "font-1.bin",
+      "font-2.bin",
+      "font-3.bin",
+      "font-15.bin"
+    ],
+    "size": [
+      360,
+      360
+    ],
+    "shape": "round"
+  }
+}

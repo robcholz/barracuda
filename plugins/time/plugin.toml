@@ -1,3 +1,6 @@
 id = "time"
 depends-on = []
 description = "Synchronizes UTC time and publishes a typed clock capability."
+
+[peripherals.real-time-clock]
+device = { fill = "primary", optional = true }

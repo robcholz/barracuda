@@ -9,7 +9,7 @@ use embedded_io_async::{Read, Seek, Write};
 use portable_atomic::{AtomicUsize, Ordering};
 use portable_atomic_util::Arc;
 
-use crate::{DirEntry, FsError, Metadata, OpenOptions};
+use crate::{DirEntry, FsError, FsUsage, Metadata, OpenOptions};
 
 /// A boxed backend operation that may yield while hardware I/O is pending.
 pub type BackendFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -46,6 +46,11 @@ pub trait VfsBackend: Send + Sync + 'static {
     fn remove_dir<'a>(&'a self, path: &'a str) -> BackendFuture<'a, Result<(), FsError>>;
     /// Renames a path within this backend.
     fn rename<'a>(&'a self, from: &'a str, to: &'a str) -> BackendFuture<'a, Result<(), FsError>>;
+    /// Returns the whole filesystem's size and free space;
+    /// [`FsError::Unsupported`] when the backend cannot tell.
+    fn usage(&self) -> BackendFuture<'_, Result<FsUsage, FsError>> {
+        Box::pin(async { Err(FsError::Unsupported) })
+    }
 }
 
 /// Cloneable type-erased ownership of a mounted filesystem backend.

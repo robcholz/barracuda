@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "camera",
+  "name": "相机",
+  "version": "0.1.0",
+  "api": 1,
+  "requires": [
+    "camera"
+  ],
+  "icon": "camera",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "fonts": [
+      "font-2.bin"
+    ],
+    "size": [
+      360,
+      360
+    ],
+    "shape": "round"
+  }
+}

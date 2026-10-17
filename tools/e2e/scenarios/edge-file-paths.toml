@@ -1,7 +1,7 @@
 name = "File tools: path policy edge cases"
 description = "Scoped path normalization, mount routing, read-only and removable mounts, mount roots, and backend name limits for the file Tools."
 
-# Path strings go straight to the Plugin ScopedVfs (plugins/agent-file/docs/plugin.md).
+# Path strings go straight to the Plugin ScopedVfs (docs/plugins/agent-file.mdx).
 # ScopedVfs::path (shared/vfs/src/scoped.rs:33-49) prefixes relative paths with
 # "/", normalizes them (shared/vfs/src/path.rs:7-35) and picks the longest
 # matching logical mount (core/plugin/crates/manager/src/filesystem.rs:10-27).
@@ -230,7 +230,7 @@ tool_contains = [
   # With no medium inserted, the removable namespace is read-only and empty.
   'file_write{"path": "/workspace/removable/stray.txt", "content": "no medium"}{"error":"read_only","message":"filesystem is read-only"}',
   '{"path":"/workspace/removable","entries":[],"next_offset":null}',
-  # The anchor root is the MemFS root, which bare-vfs refuses to remove.
+  # The anchor root is the MemFS root, which MemFS refuses to remove.
   'file_delete{"path": "/workspace/removable"}{"error":"permission_denied","message":"permission denied"}',
 ]
 

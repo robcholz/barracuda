@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 use portable_atomic_util::Arc;
 
@@ -28,26 +28,24 @@ impl ToolSpec for DeleteSubagentTool {
 impl ToolHandler for DeleteSubagentTool {
     type Args = AgentArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let target = required_agent_id(args.agent)?;
             if self.control.get(target).is_none() {
-                return Ok(ToolOutput {
-                    content: format!(
-                        "Cannot delete {target}: it is not a subagent in your subtree."
-                    ),
-                    ok: false,
-                });
+                return Ok(ToolOutput::new(
+                    format!("Cannot delete {target}: it is not a subagent in your subtree."),
+                    false,
+                ));
             }
             match self.control.delete(target).await {
-                Ok(()) => Ok(ToolOutput {
-                    content: format!("Subagent {target} and its subtree deleted."),
-                    ok: true,
-                }),
-                Err(error) => Ok(ToolOutput {
-                    content: format!("Cannot delete {target}: {error}."),
-                    ok: false,
-                }),
+                Ok(()) => Ok(ToolOutput::new(
+                    format!("Subagent {target} and its subtree deleted."),
+                    true,
+                )),
+                Err(error) => Ok(ToolOutput::new(
+                    format!("Cannot delete {target}: {error}."),
+                    false,
+                )),
             }
         })
     }

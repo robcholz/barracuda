@@ -22,6 +22,10 @@ embedded-nal-async = "0.9"
 embedded-storage-async.workspace = true
 thiserror = { version = "2", default-features = false }
 
+[dev-dependencies]
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

@@ -10,8 +10,8 @@ use barracuda_workflow_plugin::{
 use serde::Serialize;
 
 use crate::{
-    GatewayAccepted, GatewayOperationError, GatewaySendMediaRequest, GatewaySendRequest,
-    GatewaySendResponse, GatewaySendStreamRequest, IMessageGateway,
+    GatewayAccepted, GatewayOperationError, GatewaySendMediaRequest, GatewaySendMediaResponse,
+    GatewaySendRequest, GatewaySendResponse, GatewaySendStreamRequest, IMessageGateway,
 };
 
 struct SendAction(Rc<IMessageGateway>);
@@ -46,13 +46,17 @@ struct SendMediaAction(Rc<IMessageGateway>);
 
 impl WorkflowActionHandler for SendMediaAction {
     type Request = GatewaySendMediaRequest;
-    type Response = GatewayActionResponse<GatewayAccepted>;
+    type Response = GatewayActionResponse<GatewaySendMediaResponse>;
 
     const SCHEMA: WorkflowActionSchema = workflow_action_schema!("gateway.send_media");
 
     fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
-        let response = self.0.send_media(request);
-        Box::pin(async move { Ok(GatewayActionResponse::from(response)) })
+        let gateway = Rc::clone(&self.0);
+        Box::pin(async move {
+            Ok(GatewayActionResponse::from(
+                gateway.send_media(request).await,
+            ))
+        })
     }
 }
 

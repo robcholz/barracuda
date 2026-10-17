@@ -5,7 +5,7 @@ use core::task::{Poll, Waker};
 
 use barracuda_runtime_utils::oneshot;
 use barracuda_vm_builtin_packages::BuiltinPackages;
-use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_vm_package_api::{LuaPackageRegistry, LuaPackageScope};
 use embassy_executor::Spawner;
 
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
@@ -22,6 +22,10 @@ pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
 /// One MiB holds a full 360x360 RGB565 frame or a 256 KiB PCM transfer as a
 /// Lua string with room for the script that produces or consumes it.
 pub(crate) const VM_MEMORY_BYTES_PER_RUN: usize = 1024 * 1024;
+/// Part of a run's heap kept for the script itself, with the built-ins and
+/// every package the registry can hold installed.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const SCRIPT_HEAP_RESERVE_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);
@@ -175,6 +179,7 @@ impl VmRuntime {
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
         package_registry: LuaPackageRegistry,
+        package_scope: LuaPackageScope,
     ) -> Result<VmRun, DispatchError> {
         let spawner = self
             .state
@@ -195,6 +200,7 @@ impl VmRuntime {
             limits,
             builtin_packages,
             package_registry,
+            package_scope,
             progress,
             completion,
         })

@@ -9,7 +9,7 @@ use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
-use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_vm_package_api::{LuaPackageRegistry, LuaPackageScope};
 
 use crate::memory::VmMemoryLease;
 use crate::runtime::{RunControl, VM_YIELD_DELAY_MILLIS, VmYieldSignal};
@@ -41,6 +41,7 @@ pub(crate) struct ExecutionJob {
     pub(crate) limits: VmLimits,
     pub(crate) builtin_packages: BuiltinPackages,
     pub(crate) package_registry: LuaPackageRegistry,
+    pub(crate) package_scope: LuaPackageScope,
     pub(crate) progress: VmProgressSender,
     pub(crate) completion: oneshot::Sender<VmRunCompletion>,
 }
@@ -54,6 +55,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
         limits,
         builtin_packages,
         package_registry,
+        package_scope,
         progress,
         completion,
     } = job;
@@ -70,6 +72,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
             limits,
             builtin_packages,
             package_registry,
+            package_scope,
             progress: &progress,
             yield_signal: VmYieldSignal::default(),
             memory: &memory,
@@ -132,6 +135,7 @@ struct ExecutionSetup<'a> {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
+    package_scope: LuaPackageScope,
     progress: &'a VmProgressSender,
     yield_signal: VmYieldSignal,
     memory: &'a VmMemoryLease,
@@ -151,7 +155,7 @@ async fn drive_execution(
     let (lua_input, mut output) = installed.into_io();
     setup
         .package_registry
-        .install(&mut lua)
+        .install_scoped(&mut lua, &setup.package_scope)
         .map_err(|error| ExecutionError::new(VmExecutionError::VmConfigure, error.message()))?;
     lua.set_instruction_hook(setup.limits.instruction_hook_interval(), {
         let yield_signal = setup.yield_signal.clone();

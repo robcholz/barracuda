@@ -29,6 +29,8 @@ export function pageHarness() {
       new Response(null, { status: 204 }),
     /** What `context.status(id)` answers. */
     statuses: new Map<string, EntryStatus>(),
+    /** Entry IDs `context.has(id)` denies, as when their plugin is disabled; every other ID is listed. */
+    absent: new Set<string>(),
     /** Mounts `mount` in a fresh root with a recording context. */
     async render(mount: PortalModule["mount"], lang: Lang = "zh") {
       const controller = new AbortController();
@@ -43,6 +45,7 @@ export function pageHarness() {
           if (!controller.signal.aborted) toasts.push(toast);
         },
         navigate: (id) => routes.push(id),
+        has: (id) => !harness.absent.has(id),
         status: (id = "page") => harness.statuses.get(id) ?? null,
         refreshStatus: async () => {
           if (!controller.signal.aborted) refreshes.count++;

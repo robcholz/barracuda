@@ -5,7 +5,8 @@ use alloc::{borrow::ToOwned, string::String};
 use crate::engine::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolOutput,
+    ToolSpec,
 };
 use serde::Deserialize;
 
@@ -47,7 +48,7 @@ impl ToolSpec for EnterPlanModeTool {
 impl ToolHandler for EnterPlanModeTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             store_mode(&self.storage, AgentMode::Plan);
             Ok(success("Plan Mode entered."))
@@ -70,7 +71,7 @@ impl ToolSpec for RequestClarificationTool {
 impl ToolHandler for RequestClarificationTool {
     type Args = ClarifyArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let question = args.question.trim().to_owned();
             self.effects.emit(AgentEffect::Yield { message: question });
@@ -95,7 +96,7 @@ impl ToolSpec for ExitPlanModeTool {
 impl ToolHandler for ExitPlanModeTool {
     type Args = ExitArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let output = match args {
                 ExitArgs::Execute {
@@ -121,10 +122,7 @@ impl ToolHandler for ExitPlanModeTool {
 }
 
 fn success(output: &str) -> ToolOutput {
-    ToolOutput {
-        content: output.to_owned(),
-        ok: true,
-    }
+    ToolOutput::new(output.to_owned(), true)
 }
 
 #[cfg(test)]
@@ -164,8 +162,11 @@ mod tests {
             .add_group(provider.tools(&storage).expect("plan tools exist"))
             .expect("plan tools register");
         let tools = tools.begin().expect("tool set begins");
-        let (joined, detached) = ToolRunner::new(&tools).run(vec![invocation]);
-        assert!(detached.is_none());
+        let joined = ToolRunner::new(
+            &tools,
+            barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+        )
+        .run(vec![invocation]);
         block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("tool result")

@@ -1,6 +1,6 @@
 """Line-level parser for barracuda-agent-trace's flat-tree ``TRACE`` format.
 
-The authoritative grammar lives in ``barracuda-agent-trace/docs/trace-format.md``. A line is::
+The authoritative grammar lives in ``docs/plugins/agent/trace-format.mdx``. A line is::
 
     <transport-prefix> TRACE <timestamp> <type> <tracing-context> <incremental-context>* <custom>
 

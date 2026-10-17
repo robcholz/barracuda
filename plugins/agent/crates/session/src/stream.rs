@@ -32,7 +32,7 @@ pub enum TurnOrigin {
     /// A public caller appended a message.
     #[default]
     User,
-    /// A detached tool delivered its result after the previous turn ended.
+    /// A background tool call delivered an update after the previous turn ended.
     ToolCall {
         /// The original model-requested call whose completion opened the turn.
         call: ToolCall,

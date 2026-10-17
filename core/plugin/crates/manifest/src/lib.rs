@@ -26,6 +26,174 @@ pub struct PluginManifest {
     /// Author-declared host tasks, keyed by task name.
     #[serde(default)]
     pub tasks: BTreeMap<String, PluginTask>,
+    /// Settings a Board may override in its `plugins.<id>` section, keyed by
+    /// setting name.
+    #[serde(default)]
+    pub config: BTreeMap<String, ConfigSetting>,
+    /// Peripheral slots the Plugin claims, keyed by peripheral kind and then
+    /// by the Plugin's own slot name.
+    #[serde(default)]
+    pub peripherals: BTreeMap<String, BTreeMap<String, PeripheralClaim>>,
+}
+
+/// What fills one peripheral slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PeripheralFill {
+    /// The device the Board marks primary for the slot's kind.
+    Primary,
+    /// The only device of the slot's kind that nothing else takes.
+    Any,
+    /// Every device of the slot's kind that nothing else takes.
+    Rest,
+}
+
+impl PeripheralFill {
+    /// Returns the `plugin.toml` spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Any => "any",
+            Self::Rest => "*",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "primary" => Some(Self::Primary),
+            "any" => Some(Self::Any),
+            "*" => Some(Self::Rest),
+            _ => None,
+        }
+    }
+}
+
+/// One peripheral slot a Plugin claims.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PeripheralClaim {
+    /// What fills the slot.
+    pub fill: PeripheralFill,
+    /// Whether the Plugin starts without the slot filled. A `"*"` slot is
+    /// always optional: it may receive no device.
+    pub optional: bool,
+}
+
+impl<'de> Deserialize<'de> for PeripheralClaim {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Detailed {
+            fill: String,
+            #[serde(default)]
+            optional: bool,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Fill(String),
+            Detailed(Detailed),
+        }
+        let (fill, optional) = match Raw::deserialize(deserializer)? {
+            Raw::Fill(fill) => (fill, false),
+            Raw::Detailed(Detailed { fill, optional }) => (fill, optional),
+        };
+        let fill = PeripheralFill::parse(&fill).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "peripheral slot fill `{fill}` must be \"primary\", \"any\" or \"*\""
+            ))
+        })?;
+        Ok(Self {
+            fill,
+            optional: optional || fill == PeripheralFill::Rest,
+        })
+    }
+}
+
+/// One Board-configurable Plugin setting, generated into a constant.
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSetting {
+    /// Rust type of the generated constant.
+    #[serde(rename = "type")]
+    pub kind: ConfigType,
+    /// Value used when the selected Board does not set one.
+    pub default: ConfigValue,
+    /// What the setting controls, emitted as the constant's documentation.
+    pub description: String,
+}
+
+/// Rust type of a generated Plugin setting.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigType {
+    /// `bool`.
+    Bool,
+    /// `u8`.
+    U8,
+    /// `u16`.
+    U16,
+    /// `u32`.
+    U32,
+    /// `usize`.
+    Usize,
+    /// `i32`.
+    I32,
+    /// `&'static str`.
+    Str,
+}
+
+impl ConfigType {
+    /// Returns the Rust type of the generated constant.
+    #[must_use]
+    pub const fn rust_type(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::Usize => "usize",
+            Self::I32 => "i32",
+            Self::Str => "&str",
+        }
+    }
+
+    /// Returns whether `value` is a valid value of this type.
+    #[must_use]
+    pub fn accepts(self, value: &ConfigValue) -> bool {
+        match (self, value) {
+            (Self::Bool, ConfigValue::Bool(_)) | (Self::Str, ConfigValue::String(_)) => true,
+            (Self::U8, ConfigValue::Integer(value)) => u8::try_from(*value).is_ok(),
+            (Self::U16, ConfigValue::Integer(value)) => u16::try_from(*value).is_ok(),
+            (Self::U32, ConfigValue::Integer(value)) => u32::try_from(*value).is_ok(),
+            (Self::Usize, ConfigValue::Integer(value)) => u32::try_from(*value).is_ok(),
+            (Self::I32, ConfigValue::Integer(value)) => i32::try_from(*value).is_ok(),
+            _ => false,
+        }
+    }
+}
+
+/// A Plugin setting value, as written in `plugin.toml` or a Board.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged)]
+pub enum ConfigValue {
+    /// Boolean value.
+    Bool(bool),
+    /// Integer value.
+    Integer(i64),
+    /// Text value.
+    String(String),
+}
+
+impl ConfigValue {
+    /// Returns the value as a Rust literal.
+    #[must_use]
+    pub fn rust_literal(&self) -> String {
+        match self {
+            Self::Bool(value) => value.to_string(),
+            Self::Integer(value) => value.to_string(),
+            Self::String(value) => format!("{value:?}"),
+        }
+    }
 }
 
 /// A host command; paths are relative to the Plugin root, not to `cwd`.
@@ -118,6 +286,15 @@ pub enum ManifestError {
     /// The Plugin description is empty after trimming whitespace.
     #[error("Plugin description must not be empty")]
     EmptyDescription,
+    /// A setting has an invalid name, an empty description, or a default
+    /// that does not fit its type.
+    #[error(
+        "invalid Plugin setting `{0}`: expected a lowercase name, a description and a default of its type"
+    )]
+    InvalidSetting(String),
+    /// A peripheral kind or slot name is not a lowercase name.
+    #[error("invalid peripheral slot `{0}`: expected lowercase kind and slot names")]
+    InvalidPeripheralSlot(String),
     /// The Plugin description exceeds [`MAX_DESCRIPTION_CHARS`].
     #[error("Plugin description is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}")]
     DescriptionTooLong {
@@ -153,6 +330,23 @@ pub fn parse(contents: &str) -> Result<PluginManifest, ManifestError> {
                 .any(|name| name.is_empty() || name.contains(['=', '\0', '\n', '\r']))
         {
             return Err(ManifestError::InvalidTask(name.clone()));
+        }
+    }
+    for (name, setting) in &manifest.config {
+        if !matches_plugin_id_pattern(name)
+            || setting.description.trim().is_empty()
+            || !setting.kind.accepts(&setting.default)
+        {
+            return Err(ManifestError::InvalidSetting(name.clone()));
+        }
+    }
+    for (kind, slots) in &manifest.peripherals {
+        for slot in slots.keys() {
+            if !matches_plugin_id_pattern(kind) || !matches_plugin_id_pattern(slot) {
+                return Err(ManifestError::InvalidPeripheralSlot(format!(
+                    "{kind}.{slot}"
+                )));
+            }
         }
     }
     validate_identity(&manifest.id)?;

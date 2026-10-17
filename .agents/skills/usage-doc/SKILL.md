@@ -1,6 +1,6 @@
 ---
 name: usage-doc
-description: Write or edit usage guides (usage.md) for any crate in this repo. Use when creating, reviewing, or revising a caller-facing how-to guide.
+description: Write or edit usage guides for any crate in this repo, as pages in the docs site. Use when creating, reviewing, or revising a caller-facing how-to guide.
 ---
 
 # Usage Guides
@@ -24,7 +24,7 @@ write and what happens, in plain positive sentences.
 
 Quick start first, then one numbered section per caller action, then an
 Examples list and any constraints. Adapt to the crate rather than forcing a
-template. Use `plugins/imessage-gateway/docs/usage.md` as the in-repo reference
+template. Use `docs/plugins/imessage-gateway/usage.mdx` as the in-repo reference
 for voice and shape.
 
 ## Keep in sync
@@ -34,7 +34,7 @@ for voice and shape.
 - The Examples list names what actually exists; add and remove entries as
   examples land.
 - Link the design docs for rationale and the examples for runnable versions.
-- Follow [.agents/docs/codestyle.md](.agents/docs/codestyle.md) for API surface
+- Follow [docs/architecture/codestyle.mdx](../../../docs/architecture/codestyle.mdx) for API surface
   references.
 
 The `design-doc` skill holds the shared "positive, no why-vs-why-not" writing

@@ -1,8 +1,11 @@
 //! IMessage Telegram provider Plugin.
 
 #![no_std]
+#![recursion_limit = "256"]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod channel;
 mod receive;
@@ -14,32 +17,27 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry, WebGroup, WebText};
-use barracuda_imessage_gateway_channel::{
-    entry_status, ChannelEndpoint, PairingEntropy, ReceiveRuntime, ReceiveTiming,
+use barracuda_captive_portal_plugin::{
+    CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
-use barracuda_imessage_gateway_plugin::IMessageGateway;
+use barracuda_imessage_gateway_plugin::{
+    ChannelLevel, ChannelStatus, IMessageGateway, ReceiveRuntime, ReceiveTiming,
+};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginStorage,
     PluginTaskToken,
 };
-use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
-};
+use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
 use embassy_futures::select::select;
-use http_client::{ClientFactory, ReceiveSlots};
 use serde::{Deserialize, Serialize};
 use telegram::TelegramConfig;
 
 use crate::channel::{build_channel, ConfigureError, TelegramChannel};
 
-/// HTTP path accepting Telegram configuration and reporting channel status.
+/// HTTP path accepting Telegram configuration; the Gateway serves the
+/// channel's `/status`, `/mode`, and `/owners` below it.
 pub const CONFIG_API_PATH: &str = "/api/gateway/telegram";
-/// HTTP path setting the channel mode.
-pub const MODE_API_PATH: &str = "/api/gateway/telegram/mode";
-/// HTTP path listing owners and the pairing code.
-pub const OWNERS_API_PATH: &str = "/api/gateway/telegram/owners";
 
 /// Gateway channel name.
 const CHANNEL: &str = "telegram";
@@ -50,23 +48,14 @@ const CONFIGURATION_STORAGE_KEY: &str = "configuration";
 /// channel, and receives its messages.
 #[barracuda_plugin::macros::plugin]
 pub struct IMessageTelegramPlugin {
-    http_clients: ClientFactory<'static>,
-    receive_slots: ReceiveSlots,
-    entropy: PairingEntropy,
     runtime: Option<ReceiveRuntime>,
 }
 
 impl IMessageTelegramPlugin {
-    /// Creates an unconfigured provider using Platform HTTP resources, the
-    /// receive slots, and the Platform entropy for pairing codes.
+    /// Creates the unregistered Telegram channel Plugin.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self {
-            http_clients: context.http_clients.clone(),
-            receive_slots: context.receive_slots.clone(),
-            entropy: PairingEntropy::new(context.entropy.clone()),
-            runtime: None,
-        }
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self { runtime: None }
     }
 }
 
@@ -83,18 +72,10 @@ impl Plugin for IMessageTelegramPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let portal = context.require::<CaptivePortal>("captive-portal")?;
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
+        let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
         let (channel, runtime) = build_channel(
             context.storage().clone(),
-            gateway,
-            self.http_clients.clone(),
-            self.receive_slots.clone(),
-            self.entropy.clone(),
+            Rc::clone(&gateway),
             ReceiveTiming::DEVICE,
         )?;
         let status = Rc::clone(&channel);
@@ -118,19 +99,16 @@ impl Plugin for IMessageTelegramPlugin {
                         module: "entry.js",
                     },
                     ResourceFiles::from(context.filesystem()?.clone()),
-                    move || entry_status(&*status),
+                    move || entry_status(status.gateway.channel_status(&*status)),
                 )
                 .map_err(PluginError::registration)?,
         );
-        // One route serves the configuration path and its `/mode` and `/owners`.
-        let endpoint = ChannelEndpoint::new(
-            Rc::clone(&channel),
-            CONFIG_API_PATH,
-            ConfigEndpoint { channel },
-        );
+        let config = ConfigEndpoint {
+            channel: Rc::clone(&channel),
+        };
         context.retain(
-            webserver
-                .serve_http_prefix(CONFIG_API_PATH, endpoint)
+            gateway
+                .serve_channel(CONFIG_API_PATH, channel, config)
                 .map_err(PluginError::registration)?,
         );
         self.runtime = Some(runtime);
@@ -191,21 +169,32 @@ const fn default_draft_min_delta_bytes() -> usize {
     24
 }
 
+/// The channel's portal card status.
+fn entry_status(status: ChannelStatus) -> EntryStatus {
+    let state = match status.level {
+        ChannelLevel::Off => EntryState::Off,
+        ChannelLevel::Ready => EntryState::Ready,
+        ChannelLevel::Attention => EntryState::Attention,
+    };
+    EntryStatus::new(
+        state,
+        WebText {
+            zh: status.zh,
+            en: status.en,
+        },
+    )
+}
+
 /// `POST` stores a configuration; the channel status is under `/status`.
-struct ConfigEndpoint<Storage, C: 'static, D: 'static> {
-    channel: Rc<TelegramChannel<Storage, C, D>>,
+struct ConfigEndpoint<Storage> {
+    channel: Rc<TelegramChannel<Storage>>,
 }
 
 fn response(status: u16, body: &'static [u8]) -> HttpResponse {
     HttpResponse::new(status, JSON_CONTENT_TYPE, Vec::from(body))
 }
 
-impl<Storage, C, D> HttpEndpoint for ConfigEndpoint<Storage, C, D>
-where
-    Storage: PluginStorage,
-    C: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl<Storage: PluginStorage> HttpEndpoint for ConfigEndpoint<Storage> {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match request.method() {

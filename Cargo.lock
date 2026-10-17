@@ -284,12 +284,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bare-vfs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8b435285f9068d2ec4c708f7992521dd84807cdae9724b76b31b1c1479b5212"
-
-[[package]]
 name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
@@ -297,6 +291,7 @@ dependencies = [
  "async-stream",
  "barracuda-agent-context",
  "barracuda-agent-memory",
+ "barracuda-agent-message",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-agent-skill",
@@ -370,12 +365,15 @@ name = "barracuda-agent-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-time-plugin",
  "barracuda-vfs",
+ "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -519,6 +517,7 @@ dependencies = [
  "barracuda-runtime-utils",
  "barracuda-tracing",
  "barracuda-vfs",
+ "base64 0.22.1",
  "embassy-time",
  "futures-core",
  "futures-lite",
@@ -640,6 +639,7 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-agent-tool",
  "barracuda-plugin",
+ "barracuda-runtime-utils",
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-executor",
@@ -673,8 +673,8 @@ dependencies = [
 name = "barracuda-agent-workflow-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-message",
  "barracuda-agent-plugin",
+ "barracuda-json-writer",
  "barracuda-plugin",
  "barracuda-workflow-plugin",
  "json-validator",
@@ -688,7 +688,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "portable-atomic",
  "portable-atomic-util",
@@ -706,12 +708,94 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-app-manager-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-appkit",
+ "barracuda-board-hal",
+ "barracuda-lua",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-power-plugin",
+ "barracuda-sound-plugin",
+ "barracuda-time-plugin",
+ "barracuda-uikit",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-app-portal-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-plugin",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-appkit"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-lua",
+ "barracuda-plugin",
+ "barracuda-runtime-utils",
+ "barracuda-uikit",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "futures-util",
+ "json-validator",
+ "log",
+ "p256",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "barracuda-audio-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-sound-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
  "portable-atomic",
@@ -812,6 +896,7 @@ dependencies = [
  "barracuda-peripheral-config",
  "barracuda-platform-config",
  "barracuda-platform-tool",
+ "barracuda-plugin-tool",
  "clap",
  "ctrlc",
  "dialoguer",
@@ -829,6 +914,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-builtin-app-files-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "futures-lite",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-sessions-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-time-plugin",
+ "futures-lite",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-settings-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-platform",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-wifi-plugin",
+ "futures-lite",
+ "log",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-builtin-app-workflow-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "futures-lite",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-bulk-memory"
 version = "0.1.0"
 dependencies = [
@@ -843,7 +976,10 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
  "portable-atomic",
@@ -928,7 +1064,10 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-graphics-core",
  "futures-lite",
@@ -1108,6 +1247,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-files-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-captive-portal-plugin",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-webserver-plugin",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "log",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-gdeh0154d67-display"
 version = "0.1.0"
 dependencies = [
@@ -1123,7 +1284,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "portable-atomic",
@@ -1136,10 +1299,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-bulk-memory",
  "barracuda-plugin",
+ "barracuda-tls",
  "barracuda-workflow-plugin",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "http-client",
+ "log",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1150,7 +1315,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -1165,7 +1332,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
  "portable-atomic",
@@ -1177,7 +1346,7 @@ name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-channel",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1189,48 +1358,13 @@ dependencies = [
  "bluebubbles",
  "embassy-executor",
  "embassy-futures",
- "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "futures-lite",
- "http-client",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-imessage-gateway-channel"
-version = "0.1.0"
-dependencies = [
- "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-owners",
- "barracuda-platform",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-webserver-plugin",
- "embassy-futures",
- "embassy-sync 0.7.2",
- "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "log",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-imessage-gateway-owners"
-version = "0.1.0"
-dependencies = [
- "barracuda-platform",
- "barracuda-platform-test",
- "barracuda-plugin",
- "embassy-sync 0.7.2",
- "embassy-time",
- "futures-lite",
- "log",
+ "picoserve",
+ "rusty-fork",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1240,18 +1374,30 @@ dependencies = [
 name = "barracuda-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-bulk-memory",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-runtime",
+ "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vfs",
+ "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "gateway",
- "gateway-http",
  "http-client",
+ "log",
+ "reqwless",
+ "rusty-fork",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1263,6 +1409,7 @@ dependencies = [
  "barracuda-workflow-plugin",
  "futures-lite",
  "gateway",
+ "json-validator",
  "log",
  "serde",
  "serde_json",
@@ -1274,7 +1421,7 @@ name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-channel",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1289,9 +1436,12 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "inkbox",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
 ]
@@ -1301,7 +1451,7 @@ name = "barracuda-imessage-qq-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-channel",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1312,13 +1462,17 @@ dependencies = [
  "barracuda-workflow-plugin",
  "embassy-executor",
  "embassy-futures",
+ "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
  "qq",
+ "rusty-fork",
  "serde",
  "serde_json",
  "ws-client",
@@ -1329,7 +1483,7 @@ name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-channel",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
@@ -1344,8 +1498,11 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "log",
+ "picoserve",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
  "telegram",
@@ -1357,20 +1514,7 @@ name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-plugin",
- "barracuda-plugin",
- "barracuda-plugin-build",
- "barracuda-webserver-plugin",
- "log",
- "web",
-]
-
-[[package]]
-name = "barracuda-imessage-wechat-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-captive-portal-plugin",
- "barracuda-imessage-gateway-channel",
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
  "barracuda-plugin",
@@ -1384,10 +1528,41 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "log",
+ "picoserve",
+ "rusty-fork",
+ "serde",
+ "serde_json",
+ "web",
+]
+
+[[package]]
+name = "barracuda-imessage-wechat-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-captive-portal-plugin",
+ "barracuda-http-plugin",
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-tls",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "log",
+ "picoserve",
  "portable-atomic",
  "portable-atomic-util",
+ "rusty-fork",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1400,7 +1575,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
  "portable-atomic",
@@ -1454,7 +1631,9 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "portable-atomic",
  "portable-atomic-util",
@@ -1480,6 +1659,7 @@ dependencies = [
  "barracuda-plugin",
  "barracuda-runtime-utils",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embassy-sync 0.7.2",
  "futures-lite",
@@ -1514,6 +1694,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-tracing",
+ "barracuda-vfs",
  "base64 0.22.1",
  "embassy-futures",
  "embassy-time",
@@ -1601,7 +1782,6 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1636,7 +1816,6 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1671,7 +1850,6 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1706,7 +1884,6 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-bulk-memory",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1740,7 +1917,6 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-peripheral",
  "barracuda-platform",
- "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -1928,11 +2104,13 @@ dependencies = [
  "embassy-net",
  "embassy-net-driver-channel",
  "embassy-sync 0.7.2",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "embedded-storage-async",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -1984,7 +2162,6 @@ dependencies = [
  "barracuda-target-api",
  "embassy-net",
  "embassy-time",
- "http-client",
  "portable-atomic-util",
 ]
 
@@ -1992,6 +2169,8 @@ dependencies = [
 name = "barracuda-plugin-build"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-config",
+ "barracuda-peripheral-config",
  "barracuda-plugin-manifest",
  "sha2 0.10.9",
  "tempfile",
@@ -2036,10 +2215,71 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-selection"
+version = "0.0.0"
+dependencies = [
+ "barracuda-agent-file-plugin",
+ "barracuda-agent-http-plugin",
+ "barracuda-agent-imessage-gateway-plugin",
+ "barracuda-agent-plugin",
+ "barracuda-agent-scheduler-plugin",
+ "barracuda-agent-time-plugin",
+ "barracuda-agent-vm-plugin",
+ "barracuda-agent-websearch-plugin",
+ "barracuda-agent-workflow-plugin",
+ "barracuda-analog-plugin",
+ "barracuda-app-manager-plugin",
+ "barracuda-app-portal-plugin",
+ "barracuda-audio-plugin",
+ "barracuda-builtin-app-files-plugin",
+ "barracuda-builtin-app-sessions-plugin",
+ "barracuda-builtin-app-settings-plugin",
+ "barracuda-builtin-app-workflow-plugin",
+ "barracuda-camera-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-display-plugin",
+ "barracuda-files-plugin",
+ "barracuda-gpio-plugin",
+ "barracuda-http-plugin",
+ "barracuda-i2c-plugin",
+ "barracuda-i2s-plugin",
+ "barracuda-imessage-bluebubble-plugin",
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
+ "barracuda-imessage-telegram-plugin",
+ "barracuda-imessage-web-plugin",
+ "barracuda-imessage-wechat-plugin",
+ "barracuda-imu-plugin",
+ "barracuda-led-strip-plugin",
+ "barracuda-message-queue-plugin",
+ "barracuda-power-monitor-plugin",
+ "barracuda-power-plugin",
+ "barracuda-pwm-plugin",
+ "barracuda-scheduler-plugin",
+ "barracuda-sound-plugin",
+ "barracuda-spi-plugin",
+ "barracuda-system-fonts-plugin",
+ "barracuda-time-plugin",
+ "barracuda-uart-plugin",
+ "barracuda-vm-agent-plugin",
+ "barracuda-vm-filesystem-plugin",
+ "barracuda-vm-http-plugin",
+ "barracuda-vm-plugin",
+ "barracuda-vm-systeminfo-plugin",
+ "barracuda-vm-time-plugin",
+ "barracuda-vm-webserver-plugin",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "barracuda-workflow-plugin",
+]
+
+[[package]]
 name = "barracuda-plugin-tool"
 version = "0.1.0"
 dependencies = [
  "anstream",
+ "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-plugin",
  "barracuda-plugin-build",
@@ -2049,6 +2289,7 @@ dependencies = [
  "syn 2.0.118",
  "tempfile",
  "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]
@@ -2057,9 +2298,22 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-power-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-power-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
  "portable-atomic-util",
 ]
 
@@ -2077,6 +2331,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "portable-atomic",
@@ -2145,12 +2400,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-sound-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-spi-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -2174,61 +2443,17 @@ dependencies = [
 name = "barracuda-system"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-file-plugin",
- "barracuda-agent-http-plugin",
- "barracuda-agent-imessage-gateway-plugin",
- "barracuda-agent-plugin",
- "barracuda-agent-scheduler-plugin",
- "barracuda-agent-time-plugin",
- "barracuda-agent-vm-plugin",
- "barracuda-agent-websearch-plugin",
- "barracuda-agent-workflow-plugin",
- "barracuda-analog-plugin",
- "barracuda-audio-plugin",
  "barracuda-board-hal",
- "barracuda-camera-plugin",
- "barracuda-captive-portal-plugin",
- "barracuda-display-plugin",
- "barracuda-gpio-plugin",
- "barracuda-http-plugin",
- "barracuda-i2c-plugin",
- "barracuda-i2s-plugin",
- "barracuda-imessage-bluebubble-plugin",
- "barracuda-imessage-gateway-plugin",
- "barracuda-imessage-inkbox-plugin",
- "barracuda-imessage-qq-plugin",
- "barracuda-imessage-telegram-plugin",
- "barracuda-imessage-web-plugin",
- "barracuda-imessage-wechat-plugin",
- "barracuda-imu-plugin",
- "barracuda-led-strip-plugin",
- "barracuda-message-queue-plugin",
  "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-selection",
  "barracuda-plugin-tool",
- "barracuda-power-monitor-plugin",
- "barracuda-pwm-plugin",
- "barracuda-scheduler-plugin",
- "barracuda-spi-plugin",
  "barracuda-target-api",
- "barracuda-time-plugin",
- "barracuda-tls",
- "barracuda-uart-plugin",
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "barracuda-vfs-memfs",
- "barracuda-vm-agent-plugin",
- "barracuda-vm-filesystem-plugin",
- "barracuda-vm-http-plugin",
- "barracuda-vm-plugin",
- "barracuda-vm-systeminfo-plugin",
- "barracuda-vm-time-plugin",
- "barracuda-vm-webserver-plugin",
- "barracuda-webserver-plugin",
- "barracuda-wifi-plugin",
- "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-futures",
@@ -2240,7 +2465,6 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "futures-lite",
- "http-client",
  "log",
  "portable-atomic-util",
  "thiserror 2.0.18",
@@ -2257,6 +2481,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-system-fonts-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "log",
+]
+
+[[package]]
 name = "barracuda-system-image"
 version = "0.1.0"
 dependencies = [
@@ -2265,6 +2499,7 @@ dependencies = [
  "barracuda-cli-style",
  "barracuda-platform-config",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
@@ -2281,6 +2516,16 @@ dependencies = [
  "serde",
  "tempfile",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-system-wifi-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-platform",
+ "barracuda-plugin",
+ "barracuda-wifi-plugin",
 ]
 
 [[package]]
@@ -2339,7 +2584,9 @@ dependencies = [
 name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
@@ -2380,10 +2627,39 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
  "critical-section",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-ui-runtime"
+version = "0.1.0"
+dependencies = [
+ "microts",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-uikit"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-ui-runtime",
+ "barracuda-vfs",
+ "critical-section",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-graphics-core",
+ "futures-lite",
+ "log",
  "portable-atomic",
  "portable-atomic-util",
 ]
@@ -2438,7 +2714,7 @@ dependencies = [
 name = "barracuda-vfs-memfs"
 version = "0.1.0"
 dependencies = [
- "bare-vfs",
+ "barracuda-bulk-memory",
  "barracuda-vfs",
  "critical-section",
  "embassy-futures",
@@ -2455,7 +2731,10 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-plugin",
  "barracuda-runtime-utils",
+ "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
  "embassy-executor",
  "embassy-futures",
  "futures-lite",
@@ -2502,13 +2781,9 @@ dependencies = [
  "barracuda-http-plugin",
  "barracuda-plugin",
  "barracuda-runtime-utils",
- "barracuda-vfs",
- "barracuda-vfs-memfs",
  "barracuda-vm-builtin-packages",
- "barracuda-vm-filesystem-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
- "barracuda-vm-time-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-futures",
@@ -2535,7 +2810,6 @@ name = "barracuda-vm-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
- "barracuda-platform",
  "barracuda-plugin",
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
@@ -2573,6 +2847,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
 ]
 
 [[package]]
@@ -2601,19 +2877,22 @@ name = "barracuda-vm-webserver-plugin"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-runtime-utils",
  "barracuda-vfs",
- "barracuda-vfs-memfs",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "critical-section",
+ "embassy-executor",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "picoserve",
  "portable-atomic",
  "portable-atomic-util",
  "spin 0.10.1",
@@ -2902,11 +3181,17 @@ dependencies = [
 name = "bluebubbles"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-time",
  "futures-lite",
- "http-client",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -5218,23 +5503,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-http"
-version = "0.1.0"
-dependencies = [
- "barracuda-bulk-memory",
- "barracuda-platform-test",
- "embassy-sync 0.7.2",
- "embassy-time",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "futures-lite",
- "gateway",
- "http-client",
- "reqwless",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5463,6 +5731,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
  "hash32",
+ "portable-atomic",
  "serde",
  "stable_deref_trait",
 ]
@@ -5694,10 +5963,17 @@ dependencies = [
 name = "inkbox"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
  "futures-lite",
- "http-client",
  "serde",
  "serde_json",
 ]
@@ -6024,6 +6300,17 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "microts"
+version = "0.1.0"
+dependencies = [
+ "heapless 0.8.0",
+ "libm",
+ "pocketjs-core",
+ "portable-atomic",
+ "ryu-js",
+]
 
 [[package]]
 name = "mime"
@@ -6454,10 +6741,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pocketjs-core"
+version = "0.1.0"
+dependencies = [
+ "taffy",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
+dependencies = [
+ "critical-section",
+]
 
 [[package]]
 name = "portable-atomic-util"
@@ -6558,18 +6855,30 @@ dependencies = [
 name = "qq"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
  "barracuda-tls",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io 0.7.1",
  "futures-lite",
- "http-client",
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
@@ -6901,6 +7210,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "rusty-fork"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "rustyline"
 version = "18.0.1"
 dependencies = [
@@ -6922,6 +7243,12 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 
 [[package]]
 name = "same-file"
@@ -7199,6 +7526,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "smallbox"
@@ -7479,6 +7815,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
+name = "taffy"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfde4e2f8595f222ceaae1fb16b4963952e9b33e358869dc4cd6316b0e0790cd"
+dependencies = [
+ "arrayvec",
+ "serde",
+ "slotmap",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7488,11 +7835,17 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "telegram"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-time",
  "futures-lite",
- "http-client",
  "serde",
  "serde_json",
 ]
@@ -7961,6 +8314,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8046,8 +8408,9 @@ dependencies = [
  "barracuda-bulk-memory",
  "barracuda-imessage-gateway-plugin",
  "barracuda-json-writer",
+ "barracuda-platform",
+ "barracuda-plugin",
  "barracuda-webserver-plugin",
- "base64 0.22.1",
  "embassy-sync 0.7.2",
  "futures-core",
  "futures-lite",
@@ -8061,11 +8424,22 @@ dependencies = [
 name = "wechat"
 version = "0.1.0"
 dependencies = [
+ "barracuda-http-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform",
  "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-tls",
+ "barracuda-vfs",
+ "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
- "http-client",
  "serde",
  "serde_json",
 ]

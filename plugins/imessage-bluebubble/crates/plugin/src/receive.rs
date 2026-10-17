@@ -3,23 +3,22 @@
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget,
-    SendMessageRequest,
+    Attachment, AttachmentMeta, ChannelControl, ChannelError, Classification, DownloadRequest,
+    GatewayInboundMessage, GatewayRoute, InboundDownloadError, MediaKind, MessageChannel,
+    MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession, SendMessageRequest,
+    StoreError, PAIRED_REPLY,
 };
 use barracuda_plugin::manager::PluginStorage;
-use bluebubbles::inbound::{is_body_too_large, InboundMessage, MessageQuery, Sort};
+use bluebubbles::inbound::{
+    is_body_too_large, InboundAttachment, InboundMessage, MessageQuery, Sort,
+};
 use bluebubbles::{BlueBubbles, CHANNEL};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Instant, Timer};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::channel::BlueBubblesChannel;
 use crate::state::{SecretError, HOOK_PATH};
@@ -38,28 +37,14 @@ pub(crate) const CATCH_UP_PAGE: u32 = 10;
 /// Wait before retrying after the server rate-limited the device.
 const RATE_LIMIT_RETRY: Duration = Duration::from_secs(30);
 
-/// The channel's [`ReceiveChannel`].
-pub(crate) struct Receiver<Storage, T: 'static, D: 'static>(
-    pub(crate) Rc<BlueBubblesChannel<Storage, T, D>>,
-);
-
-impl<Storage, T, D> ReceiveChannel<()> for Receiver<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+/// Webhook receiving holds no slot, so its lease is `()`.
+impl<Storage: PluginStorage> ReceiveChannel<()> for BlueBubblesChannel<Storage> {
     fn receive<'a>(&'a self, _lease: &'a mut (), session: ReceiveSession<'a>) -> ReceiveFuture<'a> {
-        Box::pin(self.0.session(session))
+        Box::pin(self.session(session))
     }
 }
 
-impl<Storage, T, D> BlueBubblesChannel<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
     /// One receive session: set up the webhook, catch up, then serve the
     /// inbox and re-check the registration until the runtime drops it.
     async fn session(&self, session: ReceiveSession<'_>) -> Result<(), ReceiveError> {
@@ -101,7 +86,7 @@ where
                         self.catch_up(&provider).await?;
                     }
                     if self.book.has_queued() {
-                        self.inbound.ready().await;
+                        self.gateway.ready().await;
                         if let Some(message) = self.book.next() {
                             self.handle(&provider, message).await;
                         }
@@ -127,10 +112,7 @@ where
 
     /// Starts a new cursor at the newest message, so a new channel does not
     /// replay the server's history.
-    async fn start_cursor(
-        &self,
-        provider: &BlueBubbles<'static, T, D>,
-    ) -> Result<(), ReceiveError> {
+    async fn start_cursor(&self, provider: &BlueBubbles) -> Result<(), ReceiveError> {
         let page = provider
             .query_messages(MessageQuery {
                 after: None,
@@ -151,7 +133,7 @@ where
     /// (an old secret or address).
     async fn register_webhook(
         &self,
-        provider: &BlueBubbles<'static, T, D>,
+        provider: &BlueBubbles,
         url: &str,
     ) -> Result<(), ReceiveError> {
         let Some(mut hook) = self.book.hook() else {
@@ -188,14 +170,14 @@ where
 
     /// Handles messages created since the cursor, oldest first: at most
     /// [`CATCH_UP_MAX`], skipping (and counting) older ones beyond that.
-    async fn catch_up(&self, provider: &BlueBubbles<'static, T, D>) -> Result<(), ReceiveError> {
+    async fn catch_up(&self, provider: &BlueBubbles) -> Result<(), ReceiveError> {
         let after = self.book.after();
         let mut offset = 0_u64;
         let mut limit = CATCH_UP_PAGE;
         let mut handled = 0_u64;
         let mut first = true;
         while handled < CATCH_UP_MAX {
-            self.inbound.ready().await;
+            self.gateway.ready().await;
             let query = MessageQuery {
                 after,
                 offset,
@@ -246,13 +228,16 @@ where
 
     /// Records `message`, then publishes it, answers a pairing, or drops it
     /// by its sender.
-    async fn handle(&self, provider: &BlueBubbles<'static, T, D>, message: InboundMessage) {
+    async fn handle(&self, provider: &BlueBubbles, message: InboundMessage) {
         self.book.record(&message);
         if message.is_from_me {
             return;
         }
-        let Some(text) = message.plain_text() else {
-            log::debug!("skipped a BlueBubbles message that is not plain text");
+        let Some(mut text) = message
+            .body()
+            .filter(|text| !text.is_empty() || message.attachments().next().is_some())
+        else {
+            log::debug!("skipped a BlueBubbles message without text or files");
             self.book.skip();
             return;
         };
@@ -265,14 +250,23 @@ where
         let Some(owners) = self.owners() else {
             return;
         };
-        match owners.classify(sender, None, text).await {
+        // Classify first: a stranger's file is never fetched.
+        match owners.classify(sender, None, &text).await {
             Classification::Owner => {
+                let mut attachments = Vec::new();
+                for attachment in message.attachments() {
+                    match self.download(provider, attachment).await {
+                        Ok(stored) => attachments.push(stored),
+                        Err(missed) => append_note(&mut text, attachment.kind(), missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, chat),
                     message_id: message.guid.clone(),
-                    text: String::from(text),
+                    text,
+                    attachments,
                 };
-                if let Err(error) = self.inbound.publish(inbound).await {
+                if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a BlueBubbles message: {error}");
                 }
             }
@@ -285,6 +279,65 @@ where
             }
             Classification::Ignored => {}
         }
+    }
+
+    /// Streams one attachment into the Gateway's attachment storage.
+    async fn download(
+        &self,
+        provider: &BlueBubbles,
+        attachment: &InboundAttachment,
+    ) -> Result<Attachment, Missed> {
+        if attachment
+            .total_bytes
+            .is_some_and(|size| size > self.gateway.attachment_max_bytes())
+        {
+            return Err(Missed::TooLarge);
+        }
+        let meta = AttachmentMeta {
+            kind: attachment.kind(),
+            mime_type: attachment.mime().map(String::from),
+            filename: attachment.name().map(String::from),
+        };
+        // The URL carries the password: never log it.
+        let url = provider.attachment_url(&attachment.guid);
+        match self
+            .gateway
+            .download_inbound(CHANNEL, DownloadRequest::get(&url), meta)
+            .await
+        {
+            Ok(stored) => Ok(stored),
+            Err(InboundDownloadError::Store(StoreError::TooLarge { .. })) => Err(Missed::TooLarge),
+            Err(error) => {
+                log::warn!("failed to download a BlueBubbles attachment: {error}");
+                Err(Missed::Failed)
+            }
+        }
+    }
+}
+
+/// Why an attachment was not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Missed {
+    /// Over the Gateway's `attachment-max-bytes`.
+    TooLarge,
+    /// The download or storing failed.
+    Failed,
+}
+
+/// Appends the line that tells the reader a file did not arrive.
+fn append_note(text: &mut String, kind: MediaKind, missed: Missed) {
+    let kind = match kind {
+        MediaKind::File => "file",
+        MediaKind::Image => "image",
+        MediaKind::Audio => "audio",
+        MediaKind::Video => "video",
+    };
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    match missed {
+        Missed::TooLarge => text.push_str(&format!("[{kind} too large, not received]")),
+        Missed::Failed => text.push_str(&format!("[{kind} not received]")),
     }
 }
 

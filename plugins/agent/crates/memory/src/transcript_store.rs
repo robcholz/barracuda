@@ -13,6 +13,11 @@
 //! }
 //! ```
 //!
+//! A user message is stored as `{"content":"…","role":"user"}`; one sent
+//! with files, like a tool result that returned files, stores its content as
+//! an array of a text part and one `media` part per [`Attachment`] reference
+//! (see `barracuda_agent_message::attachment`).
+//!
 //! The store owns committed turns, oldest-to-newest, each stamped with a
 //! monotonic [`TurnId`]. An in-progress turn belongs exclusively to its
 //! [`TurnHandle`] and is exposed to readers as the trailing turn without an id.
@@ -65,8 +70,8 @@ use alloc::{
 };
 use core::cell::{RefCell, RefMut};
 
-use barracuda_agent_message::json as message_json;
-use barracuda_agent_message::ChatMessage;
+use barracuda_agent_message::json::{self as message_json, Object};
+use barracuda_agent_message::{Attachment, ChatMessage};
 use barracuda_bulk_memory::BulkVec;
 use portable_atomic_util::Arc;
 use serde::{Deserialize, Serialize};
@@ -232,7 +237,10 @@ struct StoredGroup {
 /// Streamed text accumulates in bulk memory; finishing the message encodes it
 /// once into its shared [`ChatMessage`].
 enum MessageDraft {
-    User(BulkVec<u8>),
+    User {
+        content: BulkVec<u8>,
+        attachments: Vec<Attachment>,
+    },
     Assistant {
         content: BulkVec<u8>,
         reasoning_content: BulkVec<u8>,
@@ -243,6 +251,7 @@ enum MessageDraft {
         tool_call_id: String,
         content: BulkVec<u8>,
         is_error: bool,
+        attachments: Vec<Attachment>,
     },
 }
 
@@ -251,8 +260,11 @@ impl MessageDraft {
     /// `serde_json` object encoding used by earlier transcripts.
     fn message(&self) -> ChatMessage {
         match self {
-            Self::User(content) => ChatMessage::encode_object(|object| {
-                object.str("content", text(content));
+            Self::User {
+                content,
+                attachments,
+            } => ChatMessage::encode_object(|object| {
+                write_content(object, text(content), attachments);
                 object.str("role", "user");
             }),
             Self::Assistant {
@@ -279,14 +291,40 @@ impl MessageDraft {
                 tool_call_id,
                 content,
                 is_error,
+                attachments,
             } => ChatMessage::encode_object(|object| {
-                object.str("content", text(content));
+                write_content(object, text(content), attachments);
                 object.value("is_error", &Value::Bool(*is_error));
                 object.str("role", "tool");
                 object.str("tool_call_id", tool_call_id);
             }),
         }
     }
+}
+
+/// Writes a message `content` field: the plain string, or, with attachments,
+/// an array of the text part (when there is text) followed by one `media`
+/// part per attachment.
+fn write_content(object: &mut Object<'_>, text: &str, attachments: &[Attachment]) {
+    if attachments.is_empty() {
+        object.str("content", text);
+        return;
+    }
+    let content = object.field("content");
+    content.put(b"[");
+    if !text.is_empty() {
+        let mut part = Object::begin(content);
+        part.str("text", text);
+        part.str("type", "text");
+        part.end();
+    }
+    for (index, attachment) in attachments.iter().enumerate() {
+        if index > 0 || !text.is_empty() {
+            content.put(b",");
+        }
+        attachment.write_part(content);
+    }
+    content.put(b"]");
 }
 
 /// Draft text appended only from `&str` fragments, so always UTF-8.
@@ -858,7 +896,13 @@ pub struct TurnHandle {
 impl TurnHandle {
     /// Open a user-message scope.
     pub fn user(&self) -> Result<UserHandle<'_>, TurnError> {
-        start_message(self.state.as_ref(), MessageDraft::User(BulkVec::new()))?;
+        start_message(
+            self.state.as_ref(),
+            MessageDraft::User {
+                content: BulkVec::new(),
+                attachments: Vec::new(),
+            },
+        )?;
         Ok(UserHandle {
             state: self.state.as_ref(),
         })
@@ -888,6 +932,7 @@ impl TurnHandle {
                 tool_call_id: tool_call_id.to_owned(),
                 content: BulkVec::new(),
                 is_error,
+                attachments: Vec::new(),
             },
         )?;
         Ok(ToolHandle {
@@ -931,7 +976,7 @@ impl UserHandle<'_> {
     pub fn append(&mut self, fragment: &str) {
         let mut state = lock_state(self.state);
         let Some(OpenTurn {
-            draft: Some(MessageDraft::User(content)),
+            draft: Some(MessageDraft::User { content, .. }),
             ..
         }) = state.open_turn.as_mut()
         else {
@@ -939,6 +984,21 @@ impl UserHandle<'_> {
             return;
         };
         content.extend_from_slice(fragment.as_bytes());
+        state.invalidate_turns_cache();
+    }
+
+    /// Attach a file reference, stored as a `media` content part.
+    pub fn attach(&mut self, attachment: &Attachment) {
+        let mut state = lock_state(self.state);
+        let Some(OpenTurn {
+            draft: Some(MessageDraft::User { attachments, .. }),
+            ..
+        }) = state.open_turn.as_mut()
+        else {
+            debug_assert!(false, "user handle lost its draft");
+            return;
+        };
+        attachments.push(attachment.clone());
         state.invalidate_turns_cache();
     }
 }
@@ -1015,6 +1075,21 @@ impl ToolHandle<'_> {
             return;
         };
         content.extend_from_slice(fragment.as_bytes());
+        state.invalidate_turns_cache();
+    }
+
+    /// Attach a file reference the result shows, stored as a `media` part.
+    pub fn attach(&mut self, attachment: &Attachment) {
+        let mut state = lock_state(self.state);
+        let Some(OpenTurn {
+            draft: Some(MessageDraft::Tool { attachments, .. }),
+            ..
+        }) = state.open_turn.as_mut()
+        else {
+            debug_assert!(false, "tool handle lost its draft");
+            return;
+        };
+        attachments.push(attachment.clone());
         state.invalidate_turns_cache();
     }
 }
@@ -1585,7 +1660,10 @@ mod tests {
 #[cfg(test)]
 mod persisted_format {
     use alloc::string::ToString;
+    use alloc::vec;
     use alloc::vec::Vec;
+
+    use barracuda_agent_message::MediaKind;
 
     use super::*;
     use barracuda_platform_test::memory_vfs;
@@ -1648,6 +1726,135 @@ mod persisted_format {
                 INDEX.as_bytes()
             );
         });
+    }
+
+    /// Exact files of user messages that carry attachments: the content
+    /// becomes an array of a text part and one `media` part per file.
+    const ATTACHMENT_DATA: &str = concat!(
+        r#"{"t":"group","id":"turn-1","msgs":[{"content":[{"text":"look","type":"text"},{"filename":"cat.jpg","kind":"image","mime_type":"image/jpeg","path":"/workspace/cache/gateway/web/1.jpg","size":48213,"type":"media"},{"kind":"audio","mime_type":"audio/ogg","path":"/workspace/cache/gateway/web/2.ogg","size":7,"type":"media"}],"role":"user"},{"content":"nice","role":"assistant"}]}"#,
+        "\n",
+        r#"{"t":"group","id":"turn-2","msgs":[{"content":[{"kind":"file","mime_type":"application/pdf","path":"/workspace/media/report.pdf","size":900,"type":"media"}],"role":"user"},{"content":"read","role":"assistant"}]}"#,
+        "\n",
+    );
+    const ATTACHMENT_INDEX: &str = r#"{"version":1,"covered_len":589,"next_id":"turn-3","live":[{"t":"group","off":0,"len":377,"id":"turn-1"},{"t":"group","off":377,"len":212,"id":"turn-2"}]}"#;
+
+    fn record_attachment_turns(store: &TranscriptStore) {
+        let attachment =
+            |kind, path: &str, mime_type: &str, filename: Option<&str>, size| Attachment {
+                kind,
+                path: path.into(),
+                mime_type: mime_type.into(),
+                filename: filename.map(Into::into),
+                size,
+            };
+        let turns = [
+            (
+                "look",
+                vec![
+                    attachment(
+                        MediaKind::Image,
+                        "/workspace/cache/gateway/web/1.jpg",
+                        "image/jpeg",
+                        Some("cat.jpg"),
+                        48_213,
+                    ),
+                    attachment(
+                        MediaKind::Audio,
+                        "/workspace/cache/gateway/web/2.ogg",
+                        "audio/ogg",
+                        None,
+                        7,
+                    ),
+                ],
+                "nice",
+            ),
+            (
+                "",
+                vec![attachment(
+                    MediaKind::File,
+                    "/workspace/media/report.pdf",
+                    "application/pdf",
+                    None,
+                    900,
+                )],
+                "read",
+            ),
+        ];
+        for (text, attachments, reply) in turns {
+            let turn = store.open_turn().unwrap();
+            {
+                let mut user = turn.user().unwrap();
+                user.append(text);
+                for attachment in &attachments {
+                    user.attach(attachment);
+                }
+            }
+            {
+                let mut assistant = turn.assistant().unwrap();
+                assistant.append(AssistantFragment::Content(reply));
+            }
+        }
+    }
+
+    #[test]
+    fn user_attachments_keep_their_byte_format_and_load_back() {
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let store = TranscriptStore::new(filesystem.clone(), 6, "/a")
+                .await
+                .unwrap();
+            record_attachment_turns(&store);
+            store.flush().await.unwrap();
+            assert_eq!(
+                filesystem.read("/a/6.jsonl").await.unwrap(),
+                ATTACHMENT_DATA.as_bytes()
+            );
+            assert_eq!(
+                filesystem.read("/a/6.json").await.unwrap(),
+                ATTACHMENT_INDEX.as_bytes()
+            );
+
+            let loaded = TranscriptStore::new(filesystem, 6, "/a").await.unwrap();
+            let messages = |store: &TranscriptStore| {
+                store
+                    .turns()
+                    .iter()
+                    .flat_map(|turn| turn.messages.iter().map(ChatMessage::to_string))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(messages(&loaded), messages(&store));
+            let first = loaded.turns()[0].messages[0].to_value();
+            assert_eq!(
+                Attachment::from_part(&first["content"][1]).map(|part| part.size),
+                Some(48_213)
+            );
+        });
+    }
+
+    #[test]
+    fn tool_results_with_attachments_store_media_parts() {
+        let store = TransientTranscript::new();
+        let turn = store.open_turn().unwrap();
+        {
+            let mut user = turn.user().unwrap();
+            user.append("screenshot please");
+        }
+        {
+            let mut tool = turn.tool("c1", false).unwrap();
+            tool.append("{\"path\":\"/workspace/cache/shot.png\"}");
+            tool.attach(&Attachment {
+                kind: MediaKind::Image,
+                path: "/workspace/cache/shot.png".into(),
+                mime_type: "image/png".into(),
+                filename: None,
+                size: 9,
+            });
+        }
+        drop(turn);
+        assert_eq!(
+            store.turns()[0].messages[1].as_str(),
+            r#"{"content":[{"text":"{\"path\":\"/workspace/cache/shot.png\"}","type":"text"},{"kind":"image","mime_type":"image/png","path":"/workspace/cache/shot.png","size":9,"type":"media"}],"is_error":false,"role":"tool","tool_call_id":"c1"}"#
+        );
     }
 
     #[test]

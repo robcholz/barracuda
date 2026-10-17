@@ -1,11 +1,11 @@
 name = "VM error outcomes"
-description = "vm_run accepts scripts that fail to load, raise string and non-string errors, hit the sandboxed require, or exhaust the Lua heap; each failure arrives as a failed detached completion."
+description = "vm_run accepts scripts that fail to load, raise string and non-string errors, hit the sandboxed require, or exhaust the Lua heap; each failure arrives as a failed background completion."
 
-# Detached completions cost exactly one model call each. The syntax error
-# completes in the VM task's first poll, so a vm_list call absorbs it before
+# Background completions cost exactly one model call each. The syntax error
+# completes in the VM task's first poll, so a background_list call absorbs it before
 # the text reply. Every other script spends about 500 ms in an empty loop
 # (instruction-hook yields of 100 ms each) so its completion always lands
-# after the reply that ends the turn and starts its own detached turn.
+# after the reply that ends the turn and starts its own background turn.
 
 [model]
 mode = "scripted"
@@ -18,11 +18,11 @@ tool_calls = [{ name = "tool_load", arguments = { group_id = "vm" } }]
 tool_calls = [{ name = "vm_run", arguments = { source = "local x = = 1" } }]
 
 [[model.responses]]
-tool_calls = [{ name = "vm_list", arguments = {} }]
+tool_calls = [{ name = "background_list", arguments = {} }]
 
 [[model.responses]]
 request_contains = [
-    '[detached:failed]',
+    '[background:failed]',
     '{\"run_id\":1,\"outcome\":\"error\",\"output\":[],\"error\":\"lua_load\",\"diagnostic\":\"chunk:1: unexpected symbol near',
 ]
 text = "The syntax error was reported."

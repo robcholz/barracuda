@@ -10,8 +10,7 @@ use alloc::{
 };
 use core::fmt;
 
-use barracuda_imessage_gateway_plugin::Method;
-use http_client::ClientFactory;
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method};
 use serde_json::{json, Map, Value};
 
 /// Fields of one agent self-signup request.
@@ -74,20 +73,17 @@ impl fmt::Display for SignupError {
 }
 
 /// Client for the unauthenticated agent self-signup flow.
-pub struct InkboxSignup<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct InkboxSignup {
+    http: GatewayHttp,
     api_base: String,
 }
 
-impl<'net, T, D> InkboxSignup<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    /// Creates a client for the Inkbox service origin `api_base`, without the `/api` suffix.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, api_base: impl Into<String>) -> Self {
+impl InkboxSignup {
+    /// Creates a client sending through the Gateway's HTTP to the Inkbox
+    /// service origin `api_base`, without the `/api` suffix.
+    pub fn new(http: GatewayHttp, api_base: impl Into<String>) -> Self {
         Self {
-            http_clients,
+            http,
             api_base: api_base.into(),
         }
     }
@@ -180,18 +176,14 @@ where
         if let Some(api_key) = api_key {
             headers.push(("X-API-Key", api_key));
         }
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            method,
-            &url,
-            &headers,
-            body.as_slice(),
-        )
-        .await
-        .map_err(|error| SignupError::Unavailable {
-            code: None,
-            message: Some(error.to_string()),
-        })?;
+        let response = self
+            .http
+            .send(method, &url, &headers, body.as_slice())
+            .await
+            .map_err(|error| SignupError::Unavailable {
+                code: None,
+                message: Some(error.to_string()),
+            })?;
         let Ok(root) = serde_json::from_slice::<Value>(&response.body) else {
             return Err(SignupError::Unavailable {
                 code: None,

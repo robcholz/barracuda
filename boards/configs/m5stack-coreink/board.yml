@@ -1,4 +1,5 @@
 name: m5stack-coreink
+profile: screen
 hardware:
   chip: esp32
 toolchain:

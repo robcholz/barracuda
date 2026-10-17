@@ -1,4 +1,5 @@
-//! Typed outbound HTTP capability and Workflow Action.
+//! Outbound HTTP: the shared client factory, the typed request capability,
+//! and the `http.request` Workflow Action.
 
 #![no_std]
 
@@ -16,18 +17,31 @@ use http_client::ClientFactory;
 
 pub use http::{Http, HttpError, HttpHeader, HttpMethod, HttpRequest, HttpResponse};
 
-/// Plugin publishing outbound HTTP and registering its Workflow Action.
+/// Plugin owning outbound HTTP: the TLS engine, the connection pool, and the
+/// capabilities and Workflow Action built on them.
 #[barracuda_plugin::macros::plugin]
 pub struct HttpPlugin {
     clients: ClientFactory<'static>,
 }
 
 impl HttpPlugin {
-    /// Creates the HTTP Plugin from System's shared client factory.
+    /// Starts TLS from the Platform's entropy and the connection pool on its
+    /// IP stack. Without TLS, `https://` requests fail rather than fall back
+    /// to plaintext.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        let tls = match barracuda_tls::Tls::new(context.entropy.clone()) {
+            Ok(tls) => {
+                log::info!("initialized TLS");
+                Some(tls)
+            }
+            Err(error) => {
+                log::warn!("HTTPS is unavailable: {error}");
+                None
+            }
+        };
         Self {
-            clients: context.http_clients.clone(),
+            clients: ClientFactory::new(context.ip_stack, tls),
         }
     }
 }
@@ -45,6 +59,7 @@ impl Plugin for HttpPlugin {
         let registration = workflow::register_action(&actions, Rc::clone(&http))
             .map_err(PluginError::registration)?;
         context.retain(registration);
+        context.provide(Rc::new(self.clients.clone()))?;
         context.provide(http)
     }
 }

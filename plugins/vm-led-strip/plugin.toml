@@ -1,3 +1,6 @@
 id = "led-strip"
 depends-on = ["vm"]
 description = "Registers the built-in LED-strip Lua package."
+
+[peripherals.led-strip]
+device = { fill = "primary", optional = true }

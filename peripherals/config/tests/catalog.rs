@@ -969,6 +969,13 @@ fn host_boards_declare_their_peripherals_to_a_hal_with_device_models() {
         assert!(rust.contains(
             r#"PeripheralDeclaration { name: "power-monitor", implementation: "ina226-power-monitor", bindings: &[("i2c", "I2C2")], parameters: &[("address", "64"), ("shunt-micro-ohms", "5000")] }"#
         ));
+        // A QSPI panel names its controller and the pins its model watches.
+        assert!(
+            rust.contains(
+                r#"implementation: "st77916-qspi-display", bindings: &[("backlight", "GPIO15"), ("bus", "SPI0"), ("dc", "GPIO13"), ("power_enable", "GPIO20"), ("reset", "GPIO14")]"#
+            ),
+            "{name}"
+        );
         let last_declaration = rust.rfind("declare_peripheral").expect("declarations");
         let first_initialization = rust.find("::initialize(").expect("initializations");
         assert!(last_declaration < first_initialization, "{name}");
@@ -978,4 +985,83 @@ fn host_boards_declare_their_peripherals_to_a_hal_with_device_models() {
             "{name}"
         );
     }
+}
+
+const PANEL_MANIFEST: &str = r#"
+id: test-panel
+api-version: 1
+peripheral: display
+implementation:
+  package: test-panel
+  crate: test_panel
+  factory: "::{{crate}}::TestPanelImplementation<{{binding.enable.type}}>"
+  bindings-expression: "{{binding.enable.value}}"
+  config-expression: "()"
+bindings:
+  enable:
+    kind: digital-output
+    initial: low
+parameters: {}
+"#;
+
+fn two_device_board(implementation: &str, primary: &str) -> String {
+    format!(
+        "name: test-board\nhardware:\n  chip: stm32u5a5zj\nnative-layout:\n  artifact: memory.x\nperipherals:\n  devices:\n    front:\n      implementation: {implementation}\n{primary}      bindings:\n        enable: PB0\n    back:\n      implementation: {implementation}\n      bindings:\n        enable: PB1\n"
+    )
+}
+
+#[test]
+fn several_displays_render_one_enum_taken_by_instance() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-panel", PANEL_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board =
+        parse(&two_device_board("test-panel", "      primary: true\n")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("::barracuda_board_hal::display_set!"));
+    assert!(rust.contains("type Display = BoardDisplay;"));
+    // Instances follow the Board's device names: `back` is 0, `front` is 1.
+    assert!(rust.contains("0 => self.back.take().map(BoardDisplay::Back),"));
+    assert!(rust.contains("1 => self.front.take().map(BoardDisplay::Front),"));
+
+    let unmarked = parse(&two_device_board("test-panel", "")).expect("Board YAML");
+    let resolved = resolve_board(&unmarked, &catalog).expect("resolved composition");
+    let error = render_board_hal(&unmarked, &resolved).expect_err("ambiguous primary display");
+    assert!(
+        error
+            .to_string()
+            .contains("mark exactly one `primary: true`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn single_instance_peripherals_reject_a_second_device() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        &two_device_board("indicator-led", "")
+            .replace("enable:", "pin:")
+            .replace(
+                "        pin: PB0\n",
+                "        pin: PB0\n      parameters:\n        active-level: high\n",
+            )
+            .replace(
+                "        pin: PB1\n",
+                "        pin: PB1\n      parameters:\n        active-level: high\n",
+            ),
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+    let error = render_board_hal(&board, &resolved).expect_err("two indicators");
+    assert!(
+        error
+            .to_string()
+            .contains("only `display` supports several"),
+        "{error}"
+    );
 }

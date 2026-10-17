@@ -5,16 +5,33 @@
     clippy::unwrap_used
 )]
 
-use std::{boxed::Box, rc::Rc};
+//! The Telegram provider against a scripted Bot API, sending through a real
+//! Gateway's HTTP on a loopback network.
 
+use std::{boxed::Box, cell::RefCell, rc::Rc};
+
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_imessage_gateway_plugin::{
-    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
-    MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
+    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, GatewayHttp,
+    IMessageGateway, IMessageGatewayPlugin, MediaKind, MessageChannel, MessageTarget, ReactRequest,
+    SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
 };
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::{
+    install_global_memory_vfs, loopback_network, memory_partition, ScriptStep, ScriptedServer,
+};
+use barracuda_plugin::api::{BoardInfo, Hardware, PlatformInfo, PluginContext, TargetIdentity};
+use barracuda_plugin::manager::{
+    Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStorage,
+};
+use barracuda_webserver_plugin::WebServerPlugin;
+use barracuda_workflow_plugin::WorkflowPlugin;
+use embassy_futures::select::{select3, Either3};
 use futures_lite::{future::block_on, stream};
-use http_client::ClientFactory;
 use telegram::{Telegram, TelegramConfig};
+
+/// Port of the scripted Bot API on the loopback network.
+const PORT: u16 = 9000;
+const API_BASE: &str = "http://10.0.0.1:9000";
 
 struct Header {
     name: String,
@@ -35,36 +52,75 @@ struct Response {
     body: Vec<u8>,
 }
 
-struct MockHttp {
-    network: &'static ScriptedStack,
+/// Captures the Gateway capability during registration.
+struct Probe(Rc<RefCell<Option<Rc<IMessageGateway>>>>);
+
+impl PluginDeclaration for Probe {
+    const ID: &'static str = "telegram-provider-probe";
+    const DEPENDS_ON: &'static [&'static str] = &["imessage-gateway"];
 }
 
-impl MockHttp {
-    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
-        let steps = responses.into_iter().map(|response| {
-            ScriptStep::response(
-                response.status,
-                "application/json",
-                &response.body,
-                usize::MAX,
-            )
-        });
-        Self {
-            network: Box::leak(Box::new(ScriptedStack::new(steps))),
-        }
+impl Plugin for Probe {
+    fn register<Storage: PluginStorage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, Storage>,
+    ) -> PluginResult<()> {
+        self.0.replace(Some(
+            context.require::<IMessageGateway>("imessage-gateway")?,
+        ));
+        Ok(())
     }
+}
 
-    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
-        ClientFactory::from_network(self.network, self.network)
-    }
-
-    fn requests(&self) -> Vec<RecordedRequest> {
-        self.network
-            .requests()
-            .into_iter()
-            .map(RecordedRequest::parse)
-            .collect()
-    }
+/// Runs `test` with the HTTP of a real Gateway (beside Workflow, HTTP, and
+/// WebServer) on a loopback network, and a Bot API there answering
+/// `responses` in order.
+fn bench(
+    responses: impl IntoIterator<Item = Response>,
+    test: impl AsyncFnOnce(GatewayHttp, &ScriptedServer),
+) {
+    let network = loopback_network();
+    let stack = network.stack();
+    let server = ScriptedServer::new(responses.into_iter().map(|response| {
+        ScriptStep::response(
+            response.status,
+            "application/json",
+            &response.body,
+            usize::MAX,
+        )
+    }));
+    block_on(install_global_memory_vfs()).expect("install test VFS");
+    let partition = block_on(memory_partition(64 * 1024)).expect("test database region");
+    let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+    manager.install_vfs(block_on(barracuda_vfs::global_namespace()));
+    let identity = TargetIdentity::new(
+        PlatformInfo::new("test", "test", "test-arch", "hosted"),
+        BoardInfo::new("test-board", Hardware::new("test-chip")),
+    );
+    let mut context = PluginContext::new(identity, stack);
+    let gateway = Rc::new(RefCell::new(None));
+    manager
+        .register(WorkflowPlugin::new(&mut context))
+        .expect("register Workflow");
+    manager
+        .register(HttpPlugin::new(&mut context))
+        .expect("register HTTP");
+    manager
+        .register(WebServerPlugin::new(&mut context))
+        .expect("register WebServer");
+    manager
+        .register(IMessageGatewayPlugin::new(&mut context))
+        .expect("register Gateway");
+    manager
+        .register(Probe(Rc::clone(&gateway)))
+        .expect("register probe");
+    let http = gateway.take().expect("Gateway capability").http();
+    let outcome = block_on(select3(
+        network.run(),
+        server.run::<4>(stack, PORT),
+        test(http, &server),
+    ));
+    assert!(matches!(outcome, Either3::Third(())), "the bench stopped");
 }
 
 struct RecordedRequest {
@@ -94,6 +150,14 @@ impl RecordedRequest {
     }
 }
 
+fn requests(server: &ScriptedServer) -> Vec<RecordedRequest> {
+    server
+        .requests()
+        .into_iter()
+        .map(RecordedRequest::parse)
+        .collect()
+}
+
 fn response(body: &str) -> Response {
     Response {
         status: 200,
@@ -107,7 +171,7 @@ fn target() -> MessageTarget {
 
 fn config(token: &str) -> TelegramConfig {
     let mut config = TelegramConfig::new(token);
-    config.api_base = "http://api.telegram.test".to_owned();
+    config.api_base = API_BASE.to_owned();
     config
 }
 
@@ -117,169 +181,236 @@ fn body_json(request: &RecordedRequest) -> serde_json::Value {
 
 #[test]
 fn registers_as_the_telegram_channel_and_sends_text() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding([response(
-            r#"{"ok":true,"result":{"message_id":7}}"#,
-        )]));
-        let channel = Telegram::new(http.factory(), config("bot-token"));
+    bench(
+        [response(r#"{"ok":true,"result":{"message_id":7}}"#)],
+        async |http, server| {
+            let channel = Telegram::new(http, config("bot-token"));
 
-        let receipt = channel
-            .send_message(SendMessageRequest::text(target(), "hello"))
-            .await;
+            let receipt = channel
+                .send_message(SendMessageRequest::text(target(), "hello"))
+                .await;
 
-        assert_eq!(channel.channel(), "telegram");
-        assert!(matches!(receipt, Ok(receipt) if receipt.message_id == "7"));
-        let requests = http.requests();
-        let Some(request) = requests.first() else {
-            panic!("missing request");
-        };
-        assert_eq!(request.url, "/botbot-token/sendMessage");
-        assert_eq!(body_json(request)["chat_id"], 42);
-        assert_eq!(body_json(request)["text"], "hello");
-    });
+            assert_eq!(channel.channel(), "telegram");
+            assert!(matches!(receipt, Ok(receipt) if receipt.message_id == "7"));
+            let requests = requests(server);
+            let Some(request) = requests.first() else {
+                panic!("missing request");
+            };
+            assert_eq!(request.url, "/botbot-token/sendMessage");
+            assert_eq!(body_json(request)["chat_id"], 42);
+            assert_eq!(body_json(request)["text"], "hello");
+        },
+    );
 }
 
 #[test]
 fn maps_text_chunks_to_drafts_and_finishes_with_a_normal_message() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding([
+    bench(
+        [
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":{"message_id":9}}"#),
-        ]));
-        let mut settings = config("token");
-        settings.draft_min_delta_bytes = 1;
-        let channel = Telegram::new(http.factory(), settings);
-        let chunks = stream::iter([
-            Ok(TextChunk::inline("hel").expect("chunk fits inline storage")),
-            Ok(TextChunk::inline("lo").expect("chunk fits inline storage")),
-        ]);
+        ],
+        async |http, server| {
+            let mut settings = config("token");
+            settings.draft_min_delta_bytes = 1;
+            let channel = Telegram::new(http, settings);
+            let chunks = stream::iter([
+                Ok(TextChunk::inline("hel").expect("chunk fits inline storage")),
+                Ok(TextChunk::inline("lo").expect("chunk fits inline storage")),
+            ]);
 
-        let result = channel
-            .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
-            .await;
+            let result = channel
+                .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
+                .await;
 
-        assert!(matches!(result, Ok(receipt) if receipt.message_id == "9"));
-        let requests = http.requests();
-        assert_eq!(requests.len(), 3);
-        assert!(requests
-            .first()
-            .is_some_and(|request| request.url.ends_with("/sendMessageDraft")));
-        assert_eq!(
-            requests.first().map(body_json).unwrap_or_default()["text"],
-            "hel"
-        );
-        assert_eq!(
-            requests.get(1).map(body_json).unwrap_or_default()["text"],
-            "hello"
-        );
-        assert!(requests
-            .get(2)
-            .is_some_and(|request| request.url.ends_with("/sendMessage")));
-    });
+            assert!(matches!(result, Ok(receipt) if receipt.message_id == "9"));
+            let requests = requests(server);
+            assert_eq!(requests.len(), 3);
+            assert!(requests
+                .first()
+                .is_some_and(|request| request.url.ends_with("/sendMessageDraft")));
+            assert_eq!(
+                requests.first().map(body_json).unwrap_or_default()["text"],
+                "hel"
+            );
+            assert_eq!(
+                requests.get(1).map(body_json).unwrap_or_default()["text"],
+                "hello"
+            );
+            assert!(requests
+                .get(2)
+                .is_some_and(|request| request.url.ends_with("/sendMessage")));
+        },
+    );
 }
 
 #[test]
 fn sends_images_as_multipart_without_buffering_stream_inputs() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding([response(
-            r#"{"ok":true,"result":{"message_id":11}}"#,
-        )]));
-        let channel = Telegram::new(http.factory(), config("token"));
-        let data = stream::iter([
-            Ok(BinaryChunk::from(vec![1, 2])),
-            Ok(BinaryChunk::from(vec![3, 4])),
-        ]);
-        let request = SendMediaRequest {
-            target: target(),
-            body: BinaryBody::Stream(Box::pin(data)),
-            filename: Some("photo.jpg".to_owned()),
-            mime_type: Some("image/jpeg".to_owned()),
-            caption: Some("caption".to_owned()),
-            reply_to: None,
-        };
+    bench(
+        [response(r#"{"ok":true,"result":{"message_id":11}}"#)],
+        async |http, server| {
+            let channel = Telegram::new(http, config("token"));
+            let data = stream::iter([
+                Ok(BinaryChunk::from(vec![1, 2])),
+                Ok(BinaryChunk::from(vec![3, 4])),
+            ]);
+            let request = SendMediaRequest {
+                target: target(),
+                body: BinaryBody::Stream(Box::pin(data)),
+                size: None,
+                filename: Some("photo.jpg".to_owned()),
+                mime_type: Some("image/jpeg".to_owned()),
+                caption: Some("caption".to_owned()),
+                reply_to: None,
+            };
 
-        let result = channel.send_media(MediaKind::Image, request).await;
+            let result = channel.send_media(MediaKind::Image, request).await;
 
-        assert!(matches!(result, Ok(receipt) if receipt.message_id == "11"));
-        let requests = http.requests();
-        let Some(request) = requests.first() else {
-            panic!("missing request");
-        };
-        assert!(request.url.ends_with("/sendPhoto"));
-        assert!(request.headers.iter().any(|header| {
-            header.name == "Content-Type"
-                && header.value.starts_with("multipart/form-data; boundary=")
-        }));
-        assert!(request
-            .headers
-            .iter()
-            .any(|header| { header.name == "Transfer-Encoding" && header.value == "chunked" }));
-    });
+            assert!(matches!(result, Ok(receipt) if receipt.message_id == "11"));
+            let requests = requests(server);
+            let Some(request) = requests.first() else {
+                panic!("missing request");
+            };
+            assert!(request.url.ends_with("/sendPhoto"));
+            assert!(request.headers.iter().any(|header| {
+                header.name == "Content-Type"
+                    && header.value.starts_with("multipart/form-data; boundary=")
+            }));
+            assert!(request
+                .headers
+                .iter()
+                .any(|header| { header.name == "Transfer-Encoding" && header.value == "chunked" }));
+        },
+    );
+}
+
+fn audio(filename: Option<&str>, mime_type: Option<&str>) -> SendMediaRequest {
+    SendMediaRequest {
+        target: target(),
+        body: BinaryBody::Stream(Box::pin(stream::iter([Ok(BinaryChunk::from(vec![1, 2]))]))),
+        size: None,
+        filename: filename.map(str::to_owned),
+        mime_type: mime_type.map(str::to_owned),
+        caption: None,
+        reply_to: None,
+    }
+}
+
+#[test]
+fn ogg_audio_is_sent_as_a_voice_note_and_other_audio_as_audio() {
+    let sent = r#"{"ok":true,"result":{"message_id":12}}"#;
+    bench(
+        [
+            response(sent),
+            response(sent),
+            response(sent),
+            response(sent),
+        ],
+        async |http, server| {
+            let channel = Telegram::new(http, config("token"));
+            for request in [
+                audio(None, Some("audio/ogg")),
+                audio(Some("reply.opus"), None),
+                audio(Some("song.mp3"), Some("audio/mpeg")),
+                audio(None, None),
+            ] {
+                let result = channel.send_media(MediaKind::Audio, request).await;
+                assert!(matches!(result, Ok(receipt) if receipt.message_id == "12"));
+            }
+            let requests = requests(server);
+            let urls: Vec<&str> = requests
+                .iter()
+                .map(|request| request.url.as_str())
+                .collect();
+            assert_eq!(
+                urls,
+                [
+                    "/bottoken/sendVoice",
+                    "/bottoken/sendVoice",
+                    "/bottoken/sendAudio",
+                    "/bottoken/sendAudio"
+                ]
+            );
+            let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+            assert!(
+                body.contains(r#"name="voice"; filename="voice.ogg""#),
+                "{body}"
+            );
+            assert!(body.contains("Content-Type: audio/ogg"), "{body}");
+            let body = String::from_utf8_lossy(&requests[2].body).into_owned();
+            assert!(
+                body.contains(r#"name="audio"; filename="song.mp3""#),
+                "{body}"
+            );
+        },
+    );
 }
 
 #[test]
 fn maps_message_mutations_reactions_and_typing() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding([
+    bench(
+        [
             response(r#"{"ok":true,"result":{"message_id":7}}"#),
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":true}"#),
-        ]));
-        let channel = Telegram::new(http.factory(), config("token"));
+        ],
+        async |http, server| {
+            let channel = Telegram::new(http, config("token"));
 
-        channel
-            .edit_message(EditMessageRequest::new(target(), "7", "edited"))
-            .await
-            .expect("edit succeeds");
-        channel
-            .delete_message(DeleteMessageRequest::new(target(), "7"))
-            .await
-            .expect("delete succeeds");
-        channel
-            .react(ReactRequest::new(target(), "7", "👍"))
-            .await
-            .expect("reaction succeeds");
-        channel
-            .set_typing(SetTypingRequest::new(target(), true))
-            .await
-            .expect("typing succeeds");
-        channel
-            .set_typing(SetTypingRequest::new(target(), false))
-            .await
-            .expect("stopping typing is local");
+            channel
+                .edit_message(EditMessageRequest::new(target(), "7", "edited"))
+                .await
+                .expect("edit succeeds");
+            channel
+                .delete_message(DeleteMessageRequest::new(target(), "7"))
+                .await
+                .expect("delete succeeds");
+            channel
+                .react(ReactRequest::new(target(), "7", "👍"))
+                .await
+                .expect("reaction succeeds");
+            channel
+                .set_typing(SetTypingRequest::new(target(), true))
+                .await
+                .expect("typing succeeds");
+            channel
+                .set_typing(SetTypingRequest::new(target(), false))
+                .await
+                .expect("stopping typing is local");
 
-        let requests = http.requests();
-        let methods: Vec<&str> = requests
-            .iter()
-            .filter_map(|request| request.url.rsplit('/').next())
-            .collect();
-        assert_eq!(
-            methods,
-            [
-                "editMessageText",
-                "deleteMessage",
-                "setMessageReaction",
-                "sendChatAction"
-            ]
-        );
-        assert_eq!(body_json(&requests[0])["message_id"], 7);
-        assert_eq!(body_json(&requests[0])["text"], "edited");
-        assert_eq!(body_json(&requests[2])["reaction"][0]["emoji"], "👍");
-        assert_eq!(body_json(&requests[3])["action"], "typing");
-    });
+            let requests = requests(server);
+            let methods: Vec<&str> = requests
+                .iter()
+                .filter_map(|request| request.url.rsplit('/').next())
+                .collect();
+            assert_eq!(
+                methods,
+                [
+                    "editMessageText",
+                    "deleteMessage",
+                    "setMessageReaction",
+                    "sendChatAction"
+                ]
+            );
+            assert_eq!(body_json(&requests[0])["message_id"], 7);
+            assert_eq!(body_json(&requests[0])["text"], "edited");
+            assert_eq!(body_json(&requests[2])["reaction"][0]["emoji"], "👍");
+            assert_eq!(body_json(&requests[3])["action"], "typing");
+        },
+    );
 }
 
 #[test]
 fn maps_telegram_authentication_and_rate_limit_errors() {
-    block_on(async {
-        for (status, expected_auth) in [(401, true), (429, false)] {
-            let http = Rc::new(MockHttp::responding([Response {
-                status,
-                body: br#"{"ok":false}"#.to_vec(),
-            }]));
-            let channel = Telegram::new(http.factory(), config("token"));
+    let refused = |status| Response {
+        status,
+        body: br#"{"ok":false}"#.to_vec(),
+    };
+    bench([refused(401), refused(429)], async |http, _server| {
+        for expected_auth in [true, false] {
+            let channel = Telegram::new(http.clone(), config("token"));
             let error = channel
                 .send_message(SendMessageRequest::text(target(), "hello"))
                 .await

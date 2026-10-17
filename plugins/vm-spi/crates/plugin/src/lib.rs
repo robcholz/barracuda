@@ -133,6 +133,12 @@ where
         "spi"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "访问 SPI 设备",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -482,5 +488,13 @@ mod tests {
 
         assert!(rejected);
         assert!(!provider.busy.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = SpiPackage::new(Arc::new(TestProvider {
+            busy: Arc::new(AtomicBool::new(false)),
+        }));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

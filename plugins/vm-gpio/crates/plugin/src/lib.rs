@@ -154,6 +154,12 @@ where
         "gpio"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "控制引脚",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -488,5 +494,11 @@ mod tests {
             .eval()
             .expect("run revoked application");
         assert!(revoked);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = GpioPackage::new(Arc::new(TestProvider::new()));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

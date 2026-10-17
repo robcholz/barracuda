@@ -155,8 +155,11 @@ mod tests {
             .add_group(provider.tools(storage).expect("todo tools exist"))
             .expect("todo tools register");
         let tools = tools.begin().expect("tool set begins");
-        let (joined, detached) = ToolRunner::new(&tools).run(vec![invocation]);
-        assert!(detached.is_none());
+        let joined = ToolRunner::new(
+            &tools,
+            barracuda_agent_tool::ToolContext::new(barracuda_agent_tool::SessionId::new(1)),
+        )
+        .run(vec![invocation]);
         block_on(joined.collect::<Vec<_>>())
             .pop()
             .expect("tool result")

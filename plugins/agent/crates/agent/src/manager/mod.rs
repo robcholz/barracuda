@@ -6,13 +6,19 @@ mod error;
 mod layout;
 mod long_term;
 mod persistence;
+mod transcript;
 
-use alloc::{collections::BTreeMap, rc::Rc, string::String, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    rc::{Rc, Weak},
+    string::String,
+    vec::Vec,
+};
 use core::cell::RefCell;
 use portable_atomic_util::Arc;
 
 use crate::config::SharedApiManager;
-use barracuda_agent_memory::{ProfileStore, TranscriptStore};
+use barracuda_agent_memory::{ProfileStore, Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_persistence::{DurableState, SharedPersistence};
 use barracuda_agent_skill::SkillRegistry;
 use barracuda_agent_tool::ToolRegistry;
@@ -24,6 +30,7 @@ use self::long_term::LongTermDeps;
 pub use create::PersistenceConfig;
 pub use error::AgentCreateError;
 pub use error::AgentManagerError;
+pub use transcript::{TranscriptEntry, TranscriptRole};
 
 crate::define_prefixed_id!(AgentId, "agent-", "agent");
 crate::define_id_allocator!(
@@ -49,5 +56,35 @@ where
     skill_registry: Arc<dyn SkillRegistry>,
     persisted_agents: RefCell<BTreeMap<AgentId, DurableState<crate::AgentEngineState>>>,
     transcripts: RefCell<BTreeMap<AgentId, Rc<TranscriptStore>>>,
+    /// In-memory Agents' transcripts, while their Agent holds them.
+    transient_transcripts: RefCell<BTreeMap<AgentId, Weak<TransientTranscript>>>,
     pending_transcript_deletes: RefCell<Vec<AgentId>>,
+}
+
+impl<Tcp, Resolver> AgentManager<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    /// The last `limit` messages of Agent `id`'s conversation as a person
+    /// reads it, each cut to `max_chars` characters, or `None` when the
+    /// Agent has no transcript here.
+    #[must_use]
+    pub fn transcript(
+        &self,
+        id: AgentId,
+        limit: usize,
+        max_chars: usize,
+    ) -> Option<Vec<TranscriptEntry>> {
+        let turns = if let Some(store) = self.transcripts.borrow().get(&id) {
+            store.turns()
+        } else {
+            self.transient_transcripts
+                .borrow()
+                .get(&id)
+                .and_then(Weak::upgrade)?
+                .turns()
+        };
+        Some(transcript::entries(&turns, limit, max_chars))
+    }
 }

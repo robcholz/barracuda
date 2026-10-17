@@ -1,0 +1,273 @@
+---
+title: "IMessage WeChat Plugin"
+sidebarTitle: "Overview"
+---
+
+The IMessage WeChat Plugin adds WeChat iLink as an iMessage Gateway channel:
+it links a bot by QR login, sends text and files through iLink and its CDN,
+and receives messages and their files by long polling.
+
+- Plugin ID: `imessage-wechat`
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (for `X-WECHAT-UIN`)
+- Provided capabilities: none
+- Required capabilities: `IMessageGateway` from `imessage-gateway`,
+  `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none of its own; inbound messages from allowed accounts are published
+  through `IMessageGateway::publish` (the Gateway's `gateway.message.received`
+  Event)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-wechat`, with status; `POST
+  /api/gateway/wechat`, `GET /api/gateway/wechat/status`, `POST
+  /api/gateway/wechat/mode`, `GET /api/gateway/wechat/owners`, `POST
+  /api/gateway/wechat/owners`, `POST /api/gateway/wechat/login`, `GET
+  /api/gateway/wechat/login`, `DELETE /api/gateway/wechat/login` (see
+  [HTTP API](/plugins/imessage-wechat/http))
+- Tasks: `wechat_login_task` and `wechat_receive_task` (pool size 1 each),
+  both started in `start` and raced against the `PluginTaskToken`; the
+  receive task holds one of the Gateway's receive slots
+  (`IMessageGateway::receive_control`) while the channel is linked and in
+  `send_receive`, and none otherwise
+- Storage: Plugin-scoped KV keys:
+  - `configuration`: the complete provider configuration;
+  - `mode`: `"disabled"` or `"send_receive"` (JSON string);
+  - `owners`: the allowed accounts (JSON array of `{id,label}`);
+  - `get_updates_buf`: the last iLink `getupdates` cursor (raw bytes);
+  - `context_tokens`: the latest `context_token` of up to 16 users (JSON
+    array `[{user,token}]`, most recently used first);
+  - `bot_id`: the `ilink_bot_id` of the last confirmed QR login.
+
+`IMessageWechatPlugin::new(context)` keeps only `context.entropy`; HTTP,
+receive slots, mode, owners (and their pairing codes), routes, and status come
+from `IMessageGateway`.
+
+The Plugin starts without provider credentials when storage is empty. It
+requires the `IMessageGateway` and `WebServer` capabilities, exposes
+`/api/gateway/wechat` for runtime configuration and status, and registers the
+channel `wechat` while it is linked (a configuration is stored) and its mode
+is not `disabled`. iLink cannot quote a message, so `reply_to` is ignored
+instead of failing. Accepted configuration is persisted before activation and
+restored during Plugin registration. Malformed stored configuration fails
+registration. The allowed accounts are loaded only once a bot is linked. See
+[HTTP API](/plugins/imessage-wechat/http).
+
+## Modes
+
+WeChat offers `disabled` and `send_receive` (`ChannelMode::WITHOUT_SEND_ONLY`):
+iLink sends need the inbound `context_token` and recent user activity, so
+there is no send-only mode. A newly linked channel and a configuration stored
+before modes existed both receive; a stored `send` is read as `send_receive`.
+`disabled` drops the Gateway registration, the receive session, and the slot.
+
+## Receiving
+
+`wechat_receive_task` owns the shared receive runtime
+(`IMessageGateway::receive_runtime`). While the channel is linked and in
+`send_receive` it holds one receive-slot lease, otherwise it is parked and
+holds no connection. When every slot is in use the channel reports `no_slot`
+and waits for a freed slot, so it starts as soon as another channel frees
+one.
+
+Each receive session opens one kept-alive connection to the configured
+`api_base` over the lease with `GatewayHttp::poll` (not `GatewayHttp::send`,
+whose 30 s deadline is shorter than a long poll) and repeats:
+
+1. await `IMessageGateway::ready()`;
+2. `POST {api_base}/ilink/bot/getupdates` with
+   `{"get_updates_buf":"<cursor>","base_info":{"channel_version":"barracuda-wechat"}}`
+   and the headers `Content-Type`, `AuthorizationType: ilink_bot_token`,
+   `Authorization: Bearer <token>`, `X-WECHAT-UIN` (base64 of the decimal
+   string of a fresh random `u32` from the Platform entropy per request; the
+   configured value when there is none), `iLink-App-Id`,
+   `iLink-App-ClientVersion`, and `SKRouteTag` when configured;
+3. bound the poll by iLink's `longpolling_timeout_ms` (35 s until a reply
+   names one, kept within 5–120 s) plus 5 s. A poll that misses it is an
+   empty success: the session reports `receiving` and reopens the connection
+   at once;
+4. for each new message: keep only `message_type` 1 (user) messages without a
+   `group_id` whose `item_list` has text items (type 1) or files (image 2,
+   voice 3, file 4, video 5); the bot's own (`message_type` 2) and messages
+   with neither are skipped and counted. Message ids are `u64` on the wire
+   and are kept as decimal strings;
+5. classify the sender `from_user_id` (no label) with the owner book, on the
+   text, before any file is fetched:
+   - owner: fetch the message's files (see "Files"), then publish
+     `gateway.message.received` with route
+     `{channel:"wechat", conversation_id:<from_user_id>}` (no `thread_id`),
+     the message id, the text, and the files as `attachments`;
+   - pairing code: reply once with the paired message through the normal
+     send path;
+   - anyone else: drop and count;
+6. store the latest `context_token` of an owner or a newly paired sender
+   (strangers never take a slot), then the cursor.
+
+A reply body over 32 KiB is not buffered whole: the poll keeps its first
+32 KiB and last 4 KiB, takes `get_updates_buf` (and `longpolling_timeout_ms`)
+from them, stores that cursor at once, and counts the batch as lost with a
+warning, so the next poll moves past it. Only a reply whose cursor is in
+neither part fails the poll.
+
+A connection the server closes after a healthy poll is reopened at once.
+Other failures go through the scaffold's backoff (1 s doubling to 30 s; 30 s
+after HTTP 429). `ret` or `errcode` -14 means the bot session expired: the
+loop halts with receive state `error` and message
+`SESSION_EXPIRED_MESSAGE` ("Scan again to relink", after its Chinese half)
+until a new QR login is confirmed or the configuration or mode changes.
+
+**Files.** Every iLink file lives on the CDN (`cdn_base`, default
+`https://novac2c.cdn.weixin.qq.com/c2c`), AES-128-ECB encrypted with PKCS#7
+padding under a key of its own. An item names it by `media.full_url`, else
+`media.encrypt_query_param` (downloaded from
+`<cdn_base>/download?encrypted_query_param=<param>`), and carries the key:
+`image_item.aeskey` as 32 hex digits, else `media.aes_key` as base64 of the
+16 raw bytes or of their hex digits.
+
+| Item | Kind | MIME type |
+| --- | --- | --- |
+| `image_item` (2) | `image` | from the decrypted bytes (JPEG, PNG, GIF, WebP), else the default |
+| `voice_item` (3) | `audio` | `audio/amr` for `encode_type` 5, `audio/mpeg` for 7, else `audio/silk` (stored as sent, not transcoded) |
+| `file_item` (4) | `file` | from `file_name`'s extension; `file_name` is the attachment's `filename` |
+| `video_item` (5) | `video` | `video/mp4` |
+
+A file item's `len` over `IMessageGateway::attachment_max_bytes()` is refused
+without a request. Otherwise the download (`GatewayHttp::download` on the
+shared request pool, never the receive slot, capped at the limit plus one
+block) is decrypted read by read: a sink decrypts each read and hands the
+plaintext through a two-piece channel to `IMessageGateway::store_inbound`,
+which writes `/workspace/cache/gateway/wechat/`; the decryptor holds back the
+last block until it checks and strips the padding. An image without any key
+is stored as sent (`download_inbound`). A file that has no reference or key,
+is over the limit, or whose download, decryption, or storing fails does not
+drop the message: one line is appended to its text, `[<kind> too large, not
+received]` or `[<kind> not received]`. Strangers' and pairing messages' files
+are never fetched. CDN URLs are credentials and are never logged. Files are
+fetched one after another while the next poll waits.
+
+Media items make a batch larger (each `encrypt_query_param` is several hundred
+bytes); a batch over 32 KiB is still skipped past its cursor as below.
+
+**Sending files.** `send_media` (image, video, file; audio goes as a file
+item, as iLink's own client sends no voice) takes a file that can be read
+twice: bytes, or a source such as `gateway.send_media`'s `file` command. A
+stream is `InvalidRequest`.
+
+1. One pass computes the plaintext MD5 and length.
+2. `POST {api_base}/ilink/bot/getuploadurl` with the bot's headers and
+   `{"filekey","media_type","to_user_id","rawsize","rawfilemd5","filesize","no_need_thumb":true,"aeskey","base_info"}`:
+   `filekey` and the AES key are 16 bytes each from the Platform entropy, as
+   hex; `media_type` is 1 image, 2 video, 3 file; `filesize` is the
+   ciphertext length (the next whole 16-byte block).
+3. `POST` the file, encrypted as it is read again, to `upload_full_url`, else
+   `<cdn_base>/upload?encrypted_query_param=<upload_param>&filekey=<filekey>`,
+   as `application/octet-stream` with a `Content-Length` (never chunked, and
+   without the bot token). The CDN answers the download parameter in its
+   `x-encrypted-param` header; a non-200 answer is `Platform` with the status
+   and `x-error-message`.
+4. A caption goes first as a text message of its own; then one
+   `sendmessage` with the item: `image_item {media, mid_size}`,
+   `video_item {media, video_size}`, or `file_item {media, file_name, len}`,
+   where `media` is `{encrypt_query_param, aes_key: base64 of the key's hex
+   digits, encrypt_type: 1}`, with the recipient's context token as for text.
+
+Like every send, the upload must finish within the Gateway's 30 s
+`SEND_TIMEOUT`. iLink errors (`ret`/`errcode`) are `Platform`, 401/403
+`Authentication`, 429 `RateLimited`, a failed read of the file `Stream`.
+
+Sources: Tencent's own iLink client, `@tencent-weixin/openclaw-weixin` 2.4.10
+(npm, published by Tencent): `src/api/types.ts` (items, `getuploadurl`),
+`src/cdn/aes-ecb.ts`, `cdn-url.ts`, `cdn-upload.ts`, `upload.ts`,
+`pic-decrypt.ts` (encryption, URLs, `x-encrypted-param`, key encodings),
+`src/media/media-download.ts` and `src/messaging/send.ts`.
+
+**Sending with the context token.** The provider attaches the latest stored
+`context_token` of the recipient (`to_user_id`) to every send. A target
+`thread_id` still overrides it. The token is never put in the route's
+`thread_id`: it changes with every message and would split the route.
+
+**Dedup and cursor.** The last 32 delivered message ids are kept in RAM, so a
+batch redelivered after a reconnect or restart is published once. The cursor
+moves after a batch is handled and is written when it changes in a batch
+that had messages, otherwise at most every 5 minutes. A non-empty
+`get_updates_buf` is the only one ever stored.
+
+**Memory per receiving channel.** The lease's static 1 KiB TX and 4 KiB RX
+socket buffers, one mbedTLS session over them while connected (record buffers
+of about 2 × 16.7 KiB on the heap), a 2 KiB response-header buffer and a
+512-byte read chunk per poll, the reply body (capped at 32 KiB, plus a 4 KiB
+tail only while a larger batch is skipped), up to 32 remembered message ids, and up to 16 context tokens
+(each user id ≤ 128 bytes and token ≤ 1 KiB). While a file downloads: a
+request pool connection with the Gateway's download buffers, one AES context,
+and at most two decrypted reads in flight; an upload holds one connection, one
+AES context, and one file chunk.
+
+**Login.** The QR login keeps its own task. A confirmed login stores the
+configuration like a manual `POST`; when its `ilink_bot_id` differs from the
+stored `bot_id`, the cursor and context tokens of the old bot are cleared.
+Then receiving is synced to the mode and restarted, which also clears an
+expired-session halt.
+
+The portal entry is registered with `CaptivePortal::register_with_status`. Its
+`GET /portal/status` record is `attention` "Waiting for scan" while a QR
+login session is in `wait` or `scanned`, `attention` "Scan again to
+relink" while receiving is halted by an expired bot session, and otherwise the
+Gateway's `channel_status` of the channel: `off` "Not set up" when not linked, `off`
+"Disabled" when disabled, `ready` "Receiving" while receiving, `attention` "Connecting",
+"No slot" or "Disconnected" otherwise.
+
+The configuration can also be obtained by QR login at
+`/api/gateway/wechat/login`. Registration retains two HTTP routes: the
+configuration prefix, whose `/status`, `/mode`, and `/owners` the Gateway
+serves (`IMessageGateway::serve_channel`), and the exact login route. Both configuration paths
+store and register through one shared path, so a confirmed login writes the
+same `configuration` key and format as a manual `POST /api/gateway/wechat`:
+the iLink `bot_token` as `token`, iLink's `baseurl` (or the `api_base` used for
+the login) as `api_base`, and every other field at its default.
+
+`wechat_login_task` owns the single login session. While no session runs it is
+parked on a command signal and holds no iLink connection and no QR data. A
+`POST` wakes it to fetch a QR code; it then long-polls iLink, one request at a
+time, until the session is confirmed, expires, reaches 480 s, is cancelled by
+`DELETE` or replaced by a new `POST`. Each session's state is boxed only while
+the session runs; between sessions the task keeps only the last status. The
+task races its loop with the `PluginTaskToken`, so unload, startup rollback,
+and Plugin Manager teardown drop the running iLink request and release any
+waiting `POST` with `502`.
+
+## Portal page
+
+Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-wechat`, group `WebGroup::Channel`, order 30, title `WeChat`, a
+bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
+
+Cargo automatically runs the declared `build` task before compiling this Plugin.
+To build only its resources, run `cargo plugin run build --plugin imessage-wechat`
+from the repository root. The declaration uses the shared `tools/web/build.ts`
+script. Frontend dependencies and format/lint/check/test commands are managed
+once at the repository root; tests belong to this Plugin's `resources/web/tests/`.
+The independent browser module is
+written to this Plugin's `filesystem/resources/entry.js`. The generic image
+builder includes that directory only when this Plugin is selected. No business
+page is bundled into the portal shell. The shared UI source is a build-time
+helper, not a runtime dependency on another contributor's files.
+
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) starts
+a QR login on mount (`POST /api/gateway/wechat/login`), draws the returned `url`
+as a QR Code with a countdown from `expires_in`, polls `GET` every 2 s (wait,
+scanned, confirmed, expired or failed) and sends a `keepalive` `DELETE` when it
+goes away. A `GET` that reports `configured` with no session running shows the
+linked state with "Link again" instead of starting a login. On a phone (narrower than
+720 px) it shows the steps and a "Copy link" button instead of the code and starts no
+session. A token entered by hand under "Advanced" posts to `POST /api/gateway/wechat`;
+the footer shows only while that fold is open. After a confirmed login or an
+accepted token the page calls `context.refreshStatus()`, so the portal's
+navigation and overview follow. Secrets are password inputs,
+never persisted in browser storage, and cleared on success or unmount. Requests
+are cancelled on unmount and are never retried automatically. The HTTP
+API has no authentication or transport encryption; use only within a
+trusted provisioning network.

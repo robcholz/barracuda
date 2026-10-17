@@ -1,143 +1,22 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
-use core::cell::RefCell;
+use alloc::vec::Vec;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
 
+use barracuda_agent_message::Attachment;
 use barracuda_agent_permission::{Action, RiskClass};
-use futures_core::Stream;
-use getset::CopyGetters;
-use portable_atomic_util::{Arc, Weak};
+use portable_atomic_util::Arc;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
+use super::background::{BackgroundTool, BackgroundToolFuture};
 use super::validate;
 
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'a>>;
-pub type ToolCompletionFuture = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'static>>;
-pub type DetachedToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<DetachedTool>> + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
-
-/// Accepted, progress, and terminal values produced by a detached tool.
-///
-/// The accepted output is returned to the current model turn. Optional
-/// progress is delivered while the invocation remains in flight. Returning
-/// from the completion future implicitly completes the invocation.
-pub struct DetachedTool {
-    accepted: ToolOutput,
-    progress: Option<ToolProgressReceiver>,
-    completion: ToolCompletionFuture,
-}
-
-impl DetachedTool {
-    pub fn new(accepted: ToolOutput, completion: ToolCompletionFuture) -> Self {
-        Self {
-            accepted,
-            progress: None,
-            completion,
-        }
-    }
-
-    /// Creates a detached tool whose handler can publish non-terminal updates.
-    ///
-    /// Returning from the completion future remains the only completion
-    /// signal; the progress sender cannot complete the tool call.
-    pub fn with_progress(
-        accepted: ToolOutput,
-        completion: impl FnOnce(ToolProgressSender) -> ToolCompletionFuture,
-    ) -> Self {
-        let (sender, progress) = tool_progress_channel();
-        Self {
-            accepted,
-            progress: Some(progress),
-            completion: completion(sender),
-        }
-    }
-
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        ToolOutput,
-        Option<ToolProgressReceiver>,
-        ToolCompletionFuture,
-    ) {
-        (self.accepted, self.progress, self.completion)
-    }
-}
-
-/// Non-terminal update channel owned by a dynamically detached tool handler.
-#[derive(Clone)]
-pub struct ToolProgressSender {
-    state: Weak<ToolProgressState>,
-}
-
-impl ToolProgressSender {
-    /// Publishes one best-effort progress update.
-    ///
-    /// Updates are ignored after the owning Agent stops observing the tool.
-    pub fn send(&self, output: ToolOutput) {
-        let Some(state) = self.state.upgrade() else {
-            return;
-        };
-        let mut queued = state.queued.borrow_mut();
-        if queued.len() >= TOOL_PROGRESS_CAPACITY {
-            return;
-        }
-        queued.push_back(output);
-        drop(queued);
-        if let Some(waker) = state.waker.borrow_mut().take() {
-            waker.wake();
-        };
-    }
-}
-
-const TOOL_PROGRESS_CAPACITY: usize = 8;
-
-struct ToolProgressState {
-    queued: RefCell<VecDeque<ToolOutput>>,
-    waker: RefCell<Option<Waker>>,
-}
-
-pub(crate) struct ToolProgressReceiver {
-    state: Arc<ToolProgressState>,
-}
-
-impl Stream for ToolProgressReceiver {
-    type Item = ToolOutput;
-
-    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(output) = self.state.queued.borrow_mut().pop_front() {
-            return Poll::Ready(Some(output));
-        }
-        *self.state.waker.borrow_mut() = Some(context.waker().clone());
-        Poll::Pending
-    }
-}
-
-fn tool_progress_channel() -> (ToolProgressSender, ToolProgressReceiver) {
-    let state = Arc::new(ToolProgressState {
-        queued: RefCell::new(VecDeque::new()),
-        waker: RefCell::new(None),
-    });
-    (
-        ToolProgressSender {
-            state: Arc::downgrade(&state),
-        },
-        ToolProgressReceiver { state },
-    )
-}
-
-/// Framework-only execution configuration. It is never rendered into a tool's
-/// model-facing schema or usage text.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ToolConfig {
-    /// Return an acceptance receipt and move execution into the owning runtime.
-    pub detached: bool,
-}
 
 /// Serde projection for a schema that accepts an empty argument object.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -189,9 +68,14 @@ mod invocation_tests {
     use alloc::string::String;
     use core::cell::Cell;
 
-    use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
+    use super::{
+        SessionId, Tool, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+        ToolOutput, ToolSpec,
+    };
     use futures_lite::future::block_on;
     use serde::Deserialize;
+
+    const CONTEXT: ToolContext = ToolContext::new(SessionId::new(1));
 
     struct BusinessHandler {
         invoked: Rc<Cell<bool>>,
@@ -219,14 +103,9 @@ mod invocation_tests {
     impl ToolHandler for BusinessHandler {
         type Args = BusinessArgs;
 
-        fn invoke<'a>(&'a self, arguments: Self::Args) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, _context: ToolContext, arguments: Self::Args) -> ToolFuture<'a> {
             self.invoked.set(true);
-            Box::pin(async move {
-                Ok(ToolOutput {
-                    content: arguments.name,
-                    ok: arguments.enabled,
-                })
-            })
+            Box::pin(async move { Ok(ToolOutput::new(arguments.name, arguments.enabled)) })
         }
     }
 
@@ -261,7 +140,7 @@ mod invocation_tests {
             ToolError::ArgumentsSchema(_)
         ));
 
-        let error = block_on(tool.invoke(&invalid))
+        let error = block_on(tool.invoke(CONTEXT, &invalid))
             .err()
             .ok_or("expected error")?;
 
@@ -270,7 +149,7 @@ mod invocation_tests {
 
         let blank =
             ToolInvocation::try_new(None, "example", r#"{"name":"  \t\n","enabled":true}"#)?;
-        let error = block_on(tool.invoke(&blank))
+        let error = block_on(tool.invoke(CONTEXT, &blank))
             .err()
             .ok_or("expected error")?;
         assert!(matches!(error.error, ToolError::ArgumentsSchema(_)));
@@ -286,7 +165,7 @@ mod invocation_tests {
         });
         let valid = ToolInvocation::try_new(None, "example", r#"{"name":"lamp","enabled":true}"#)?;
 
-        let output = block_on(tool.invoke(&valid))?;
+        let output = block_on(tool.invoke(CONTEXT, &valid))?;
 
         assert!(invoked.get());
         assert_eq!(output.content, "lamp");
@@ -295,19 +174,48 @@ mod invocation_tests {
     }
 }
 
+barracuda_runtime_utils::define_prefixed_id!(SessionId, "session-", "session");
+
+/// What one Tool call runs for, handed to every invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolContext {
+    /// The Agent session the call belongs to.
+    pub session: SessionId,
+}
+
+impl ToolContext {
+    #[must_use]
+    pub const fn new(session: SessionId) -> Self {
+        Self { session }
+    }
+}
+
+/// The model-facing result of one Tool call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolOutput {
     pub content: String,
     pub ok: bool,
+    /// Files the result shows the model, by reference. The model reads the
+    /// newest images among them directly; the rest are named by path.
+    pub attachments: Vec<Attachment>,
 }
 
-/// One update emitted by an already accepted detached tool invocation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ToolDetachUpdate {
-    /// Non-terminal information; the invocation remains in flight.
-    Progress(ToolOutput),
-    /// Terminal result produced when the tool handler future returns.
-    Completed(ToolOutput),
+impl ToolOutput {
+    /// A result of `content` alone.
+    pub fn new(content: impl Into<String>, ok: bool) -> Self {
+        Self {
+            content: content.into(),
+            ok,
+            attachments: Vec::new(),
+        }
+    }
+
+    /// This result with `attachments` returned along.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> Self {
+        self.attachments = attachments;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -376,45 +284,61 @@ pub trait ToolSpec {
 pub trait ToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a>;
+    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> ToolFuture<'a>;
 }
 
-/// A tool whose accepted and completed settlements become available at
-/// different times.
-pub trait DetachedToolHandler: ToolSpec {
+/// A Tool whose call keeps running in the Agent's background pool after its
+/// accepted output returns to the model turn.
+pub trait BackgroundToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a>;
+    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> BackgroundToolFuture<'a>;
 }
 
 trait ErasedToolHandler: ToolSpec {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolFuture<'a>;
 }
 
 impl<Handler> ErasedToolHandler for Handler
 where
     Handler: ToolHandler,
 {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(args).await
+            self.invoke(context, args).await
         })
     }
 }
 
-trait ErasedDetachedToolHandler: ToolSpec {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a>;
+trait ErasedBackgroundToolHandler: ToolSpec {
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> BackgroundToolFuture<'a>;
 }
 
-impl<Handler> ErasedDetachedToolHandler for Handler
+impl<Handler> ErasedBackgroundToolHandler for Handler
 where
-    Handler: DetachedToolHandler,
+    Handler: BackgroundToolHandler,
 {
-    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
+    fn invoke_erased<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> BackgroundToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(args).await
+            self.invoke(context, args).await
         })
     }
 }
@@ -492,107 +416,94 @@ macro_rules! tool_validator {
     };
 }
 
-#[derive(Clone, CopyGetters)]
+/// One registered Tool: an ordinary Tool whose call settles in the model turn,
+/// or a background Tool whose call continues in the Agent's background pool.
+#[derive(Clone)]
 pub struct Tool {
     inner: Arc<ToolInner>,
-    #[getset(get_copy = "pub")]
-    config: ToolConfig,
 }
 
 enum ToolInner {
     Handler(Box<dyn ErasedToolHandler>),
-    Detached(Box<dyn ErasedDetachedToolHandler>),
+    Background(Box<dyn ErasedBackgroundToolHandler>),
 }
 
 impl Tool {
     pub fn new(handler: impl ToolHandler + 'static) -> Self {
         Self {
             inner: Arc::new(ToolInner::Handler(Box::new(handler))),
-            config: ToolConfig::default(),
         }
     }
 
-    pub fn from_detached(handler: impl DetachedToolHandler + 'static) -> Self {
+    pub fn background(handler: impl BackgroundToolHandler + 'static) -> Self {
         Self {
-            inner: Arc::new(ToolInner::Detached(Box::new(handler))),
-            config: ToolConfig::default(),
+            inner: Arc::new(ToolInner::Background(Box::new(handler))),
         }
     }
 
-    pub fn with_config(mut self, config: ToolConfig) -> Self {
-        self.config = config;
-        self
+    fn spec(&self) -> &dyn ToolSpec {
+        match self.inner.as_ref() {
+            ToolInner::Handler(handler) => &**handler,
+            ToolInner::Background(handler) => &**handler,
+        }
     }
 
     pub fn name(&self) -> &str {
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.name(),
-            ToolInner::Detached(handler) => handler.name(),
-        }
+        self.spec().name()
     }
 
     pub fn schema(&self) -> &str {
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.schema(),
-            ToolInner::Detached(handler) => handler.schema(),
-        }
+        self.spec().schema()
     }
 
     pub fn usage(&self) -> Option<&str> {
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.usage(),
-            ToolInner::Detached(handler) => handler.usage(),
-        }
+        self.spec().usage()
     }
 
     pub(crate) fn classify(&self, call: &ToolInvocation) -> ToolResult<Action> {
         self.validate_arguments(call)?;
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => Ok(handler.classify(call)),
-            ToolInner::Detached(handler) => Ok(handler.classify(call)),
-        }
+        Ok(self.spec().classify(call))
     }
 
-    pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
+    pub(crate) fn is_background(&self) -> bool {
+        matches!(self.inner.as_ref(), ToolInner::Background(_))
+    }
+
+    pub(crate) async fn invoke<'a>(
+        &'a self,
+        context: ToolContext,
+        call: &'a ToolInvocation,
+    ) -> ToolResult<ToolOutput> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.invoke_erased(call).await,
-            ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
-                "dynamically detached tool requires detached execution".to_owned(),
+            ToolInner::Handler(handler) => handler.invoke_erased(context, call).await,
+            ToolInner::Background(_) => Err(ToolError::InvokeRejected(
+                "background tool requires a background pool".to_owned(),
             )
             .into()),
         }
     }
 
-    pub(crate) fn is_dynamically_detached(&self) -> bool {
-        matches!(self.inner.as_ref(), ToolInner::Detached(_))
-    }
-
-    pub(crate) async fn invoke_detached<'a>(
+    pub(crate) async fn invoke_background<'a>(
         &'a self,
+        context: ToolContext,
         call: &'a ToolInvocation,
-    ) -> ToolResult<DetachedTool> {
+    ) -> ToolResult<BackgroundTool> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Detached(handler) => handler.invoke_erased(call).await,
+            ToolInner::Background(handler) => handler.invoke_erased(context, call).await,
             ToolInner::Handler(_) => Err(ToolError::InvokeRejected(
-                "tool does not support dynamic detached execution".to_owned(),
+                "tool does not run in the background".to_owned(),
             )
             .into()),
         }
     }
 
     fn validate_arguments(&self, call: &ToolInvocation) -> ToolResult<()> {
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler
-                .arguments_validator()
-                .validate_str(call.arguments_json())
-                .map_err(ToolError::from)?,
-            ToolInner::Detached(handler) => handler
-                .arguments_validator()
-                .validate_str(call.arguments_json())
-                .map_err(ToolError::from)?,
-        }
+        self.spec()
+            .arguments_validator()
+            .validate_str(call.arguments_json())
+            .map_err(ToolError::from)?;
         Ok(())
     }
 }

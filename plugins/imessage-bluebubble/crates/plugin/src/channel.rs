@@ -6,24 +6,18 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
-use core::future::Future;
-use core::pin::Pin;
 
-use barracuda_imessage_gateway_channel::{
-    load_mode, store_mode, ChannelControl, ChannelMode, ModeError, ModeFuture, OnDemand, Owners,
-    OwnersError, PairingEntropy, ReceiveControl, UnlimitedSlots,
-};
 use barracuda_imessage_gateway_plugin::{
-    GatewayError, GatewayInboundMessage, GatewayIngressError, IMessageGateway, MessageChannel,
-    MessageChannelRegistration,
+    ChannelControl, ChannelMode, GatewayError, IMessageGateway, MessageChannel,
+    MessageChannelRegistration, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
+    ReceiveControl, ReceiveRuntime, ReceiveTiming, UnlimitedSlots,
 };
 use barracuda_plugin::api::SharedEntropy;
 use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
+use barracuda_webserver_plugin::WEB_SERVER_PORT;
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{with_timeout, Duration};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::ClientFactory;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -80,58 +74,17 @@ pub(crate) fn decode_configuration(bytes: &[u8]) -> Result<ConfigRequest, serde_
     serde_json::from_slice(bytes)
 }
 
-/// Future of an [`InboundSink`] call.
-pub(crate) type SinkFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
-
-/// Where owner messages go: the Gateway's ingress.
-pub(crate) trait InboundSink: 'static {
-    /// Waits until Workflow can take another inbound message.
-    fn ready(&self) -> SinkFuture<'_, ()>;
-    /// Publishes one owner message.
-    fn publish(
-        &self,
-        message: GatewayInboundMessage,
-    ) -> SinkFuture<'_, Result<(), GatewayIngressError>>;
-}
-
-impl InboundSink for IMessageGateway {
-    fn ready(&self) -> SinkFuture<'_, ()> {
-        Box::pin(IMessageGateway::ready(self))
-    }
-
-    fn publish(
-        &self,
-        message: GatewayInboundMessage,
-    ) -> SinkFuture<'_, Result<(), GatewayIngressError>> {
-        Box::pin(IMessageGateway::publish(self, message))
-    }
-}
-
 /// The device's LAN IPv4 address as text, or `None` while unknown.
 pub(crate) type LocalAddress = Box<dyn Fn() -> Option<String>>;
 
-/// What [`BlueBubblesChannel::load`] needs.
-pub(crate) struct ChannelSetup<Storage, T: 'static, D: 'static> {
-    pub(crate) gateway: Rc<IMessageGateway>,
-    pub(crate) inbound: Rc<dyn InboundSink>,
-    pub(crate) http_clients: ClientFactory<'static, T, D>,
-    pub(crate) storage: Storage,
-    pub(crate) entropy: SharedEntropy,
-    pub(crate) address: LocalAddress,
-    /// Port the device's webserver listens on.
-    pub(crate) port: u16,
-}
-
 /// The BlueBubbles channel's state.
-pub(crate) struct BlueBubblesChannel<Storage, T: 'static, D: 'static> {
-    gateway: Rc<IMessageGateway>,
-    pub(crate) inbound: Rc<dyn InboundSink>,
-    http_clients: ClientFactory<'static, T, D>,
+pub(crate) struct BlueBubblesChannel<Storage> {
+    pub(crate) gateway: Rc<IMessageGateway>,
     pub(crate) storage: Storage,
+    /// Mints the webhook secret.
     pub(crate) entropy: SharedEntropy,
     address: LocalAddress,
-    port: u16,
-    provider: RefCell<Option<Rc<BlueBubbles<'static, T, D>>>>,
+    provider: RefCell<Option<Rc<BlueBubbles>>>,
     registration: RefCell<Option<MessageChannelRegistration>>,
     mode: Cell<ChannelMode>,
     receive: Rc<ReceiveControl<UnlimitedSlots>>,
@@ -142,81 +95,69 @@ pub(crate) struct BlueBubblesChannel<Storage, T: 'static, D: 'static> {
     changes: Mutex<NoopRawMutex, ()>,
 }
 
-impl<Storage, T, D> BlueBubblesChannel<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
-    /// Restores the stored configuration, mode, owners, and receive state,
-    /// and registers the channel with the Gateway when configured and the
-    /// mode registers.
-    pub(crate) async fn load(setup: ChannelSetup<Storage, T, D>) -> PluginResult<Self> {
-        let ChannelSetup {
-            gateway,
-            inbound,
-            http_clients,
-            storage,
-            entropy,
-            address,
-            port,
-        } = setup;
-        let config = match storage.get_bytes(CONFIGURATION_STORAGE_KEY).await? {
-            Some(bytes) => Some(decode_configuration(&bytes).map_err(PluginError::registration)?),
-            None => None,
-        };
-        let mode = load_mode(&storage, config.is_some(), ChannelMode::legacy()).await?;
-        let book = ReceiveBook::load(&storage).await?;
-        let provider =
-            config.map(|config| Rc::new(BlueBubbles::new(http_clients.clone(), config.into())));
-        let channel = Self {
-            gateway,
-            inbound,
-            http_clients,
-            storage,
-            entropy,
-            address,
-            port,
-            provider: RefCell::new(provider),
-            registration: RefCell::new(None),
-            mode: Cell::new(mode),
-            receive: Rc::new(ReceiveControl::new(UnlimitedSlots)),
-            owners: OnDemand::new(),
-            book,
-            changes: Mutex::new(()),
-        };
-        if channel.configured() {
-            channel
-                .load_owners()
-                .await
-                .map_err(PluginError::registration)?;
-        }
-        channel
-            .sync_registration()
-            .map_err(PluginError::registration)?;
-        Ok(channel)
-    }
+/// The channel and the receive runtime its Plugin's task owns.
+pub(crate) type BuiltChannel<Storage> = (Rc<BlueBubblesChannel<Storage>>, ReceiveRuntime);
 
+/// Restores the stored configuration, mode, owners, and receive state,
+/// registers the channel with the Gateway when configured and the mode
+/// registers, and builds the receive runtime the Plugin's task owns.
+pub(crate) fn build_channel<Storage: PluginStorage>(
+    storage: Storage,
+    gateway: Rc<IMessageGateway>,
+    entropy: SharedEntropy,
+    address: LocalAddress,
+    timing: ReceiveTiming,
+) -> PluginResult<BuiltChannel<Storage>> {
+    let config = embassy_futures::block_on(storage.get_bytes(CONFIGURATION_STORAGE_KEY))?
+        .map(|bytes| decode_configuration(&bytes))
+        .transpose()
+        .map_err(PluginError::registration)?;
+    let mode = embassy_futures::block_on(gateway.load_mode(
+        &storage,
+        config.is_some(),
+        ChannelMode::legacy(),
+    ))?;
+    let book = embassy_futures::block_on(ReceiveBook::load(&storage))?;
+    let provider = config.map(|config| Rc::new(BlueBubbles::new(gateway.http(), config.into())));
+    let receive = Rc::new(gateway.webhook_receive_control());
+    let channel = Rc::new(BlueBubblesChannel {
+        gateway,
+        storage,
+        entropy,
+        address,
+        provider: RefCell::new(provider),
+        registration: RefCell::new(None),
+        mode: Cell::new(mode),
+        receive: Rc::clone(&receive),
+        owners: OnDemand::new(),
+        book,
+        changes: Mutex::new(()),
+    });
+    if channel.configured() {
+        embassy_futures::block_on(channel.load_owners()).map_err(PluginError::registration)?;
+    }
+    channel
+        .sync_registration()
+        .map_err(PluginError::registration)?;
+    let runtime = channel
+        .gateway
+        .receive_runtime(receive, Rc::clone(&channel), timing);
+    // Webhook receiving holds no slot, so this never reports `no_slot`.
+    channel.gateway.sync_receive(&*channel).ok();
+    Ok((channel, runtime))
+}
+
+impl<Storage: PluginStorage> BlueBubblesChannel<Storage> {
     /// Loads the owner book, once; a configured channel needs it.
     async fn load_owners(&self) -> Result<&Owners<Storage>, OwnersError> {
         self.owners
-            .get_or_load(|| {
-                Owners::load(
-                    self.storage.clone(),
-                    PairingEntropy::new(self.entropy.clone()),
-                )
-            })
+            .get_or_load(|| self.gateway.load_owners(self.storage.clone()))
             .await
     }
 
     /// The configured provider.
-    pub(crate) fn provider(&self) -> Option<Rc<BlueBubbles<'static, T, D>>> {
+    pub(crate) fn provider(&self) -> Option<Rc<BlueBubbles>> {
         self.provider.borrow().clone()
-    }
-
-    /// The receive control shared with the runtime.
-    pub(crate) fn receive_control(&self) -> Rc<ReceiveControl<UnlimitedSlots>> {
-        Rc::clone(&self.receive)
     }
 
     /// The webhook URL for `secret`, or `None` while the device has no LAN
@@ -224,8 +165,7 @@ where
     pub(crate) fn hook_url(&self, secret: &str) -> Option<String> {
         let address = (self.address)()?;
         Some(alloc::format!(
-            "http://{address}:{}{HOOK_PATH}/{secret}",
-            self.port
+            "http://{address}:{WEB_SERVER_PORT}{HOOK_PATH}/{secret}"
         ))
     }
 
@@ -276,7 +216,7 @@ where
                 log::error!("failed to persist BlueBubbles configuration: {error}");
                 ConfigureError::Storage
             })?;
-        let provider = Rc::new(BlueBubbles::new(self.http_clients.clone(), config.into()));
+        let provider = Rc::new(BlueBubbles::new(self.gateway.http(), config.into()));
         let previous_provider = self.provider();
         if let Some(previous_provider) = previous_provider.filter(|previous_provider| {
             self.receive.is_enabled() && previous_provider.server_url() != provider.server_url()
@@ -309,7 +249,7 @@ where
 
     /// Deletes this device's webhook from `provider`'s server, best effort:
     /// a failure leaves the record so the next registration retires it.
-    pub(crate) async fn unregister_webhook(&self, provider: &BlueBubbles<'static, T, D>) {
+    pub(crate) async fn unregister_webhook(&self, provider: &BlueBubbles) {
         let Some(mut hook) = self.book.hook() else {
             return;
         };
@@ -349,12 +289,7 @@ pub(crate) enum ConfigureError {
     Registration,
 }
 
-impl<Storage, T, D> ChannelControl for BlueBubblesChannel<Storage, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ChannelControl for BlueBubblesChannel<Storage> {
     type Storage = Storage;
     type Slots = UnlimitedSlots;
 
@@ -370,14 +305,20 @@ where
         Box::pin(async move {
             let _changing = self.changes.lock().await;
             let previous = self.mode.get();
-            store_mode(&self.storage, mode)
+            self.gateway
+                .store_mode(&self.storage, mode)
                 .await
                 .map_err(|_error| ModeError::Storage)?;
             self.mode.set(mode);
             if let Err(error) = self.sync_registration() {
                 log::warn!("rejected BlueBubbles channel registration: {error}");
                 self.mode.set(previous);
-                if store_mode(&self.storage, previous).await.is_err() {
+                if self
+                    .gateway
+                    .store_mode(&self.storage, previous)
+                    .await
+                    .is_err()
+                {
                     log::error!("failed to restore the BlueBubbles channel mode");
                 }
                 return Err(ModeError::Registration);

@@ -115,6 +115,12 @@ where
     fn name(&self) -> &'static str {
         "pwm"
     }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "输出 PWM 信号",
+        })
+    }
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -280,5 +286,11 @@ mod tests {
         package.install(&mut lua).expect("install package");
         let result: bool = lua.load("local pwm = require('pwm')\nlocal output <close> = pwm.open('D1', 1000)\noutput:set_percent(25)\nreturn output:max_duty() == 1000 and output:is_open()").eval().expect("use PWM");
         assert!(result);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = PwmPackage::new(Arc::new(Provider));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

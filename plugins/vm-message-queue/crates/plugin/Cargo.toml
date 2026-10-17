@@ -16,6 +16,7 @@ futures-util = { workspace = true, features = ["alloc", "async-await"] }
 spin = { version = "0.10", default-features = false, features = ["portable_atomic", "mutex", "spin_mutex"] }
 
 [dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

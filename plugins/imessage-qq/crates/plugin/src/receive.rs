@@ -8,31 +8,33 @@
 //! cancel-safe read so a heartbeat is never late because a read is pending.
 //! `C2C_MESSAGE_CREATE` and `GROUP_AT_MESSAGE_CREATE` become Gateway
 //! messages for owners.
+//!
+//! An owner's attachments are streamed into the Gateway's attachment storage
+//! on the shared request pool, never the receive slot, while the session
+//! keeps heartbeating; one that does not arrive becomes a note in the
+//! message's text.
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    ChannelControl, Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession,
-    ReceiveSlotSource, SlotWait, PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    ChannelError, GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget,
-    SendMessageRequest,
+    Attachment, AttachmentMeta, ChannelControl, ChannelError, Classification, DownloadRequest,
+    GatewayInboundMessage, GatewayRoute, InboundDownloadError, MediaKind, MessageChannel,
+    MessageTarget, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveLease, ReceiveSession,
+    SendMessageRequest, StoreError, PAIRED_REPLY,
 };
 use barracuda_plugin::api::Entropy;
 use barracuda_plugin::manager::{PluginStorage, StorageError};
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select, select3, Either, Either3};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use embedded_io_async::{Read, Write};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ReceiveLease, ReceiveSlots, ReceiveSocket};
 use qq::gateway::{
-    self, close_action, event, op, CloseAction, Hello, InboundText, MessageEvent, Ready, Scene,
-    Skipped,
+    self, close_action, event, op, CloseAction, Hello, InboundMedia, InboundMessage, MessageEvent,
+    Ready, Scene, Skipped,
 };
 use qq::TokenError;
 use serde::{Deserialize, Serialize};
@@ -76,29 +78,6 @@ pub(crate) const WS_LIMITS: Limits = Limits {
 };
 
 const USER_AGENT: &str = "barracuda";
-
-/// The System's receive slots as the channel's slot source.
-pub(crate) struct QQSlots<C: 'static, D: 'static>(pub(crate) ReceiveSlots<C, D>);
-
-impl<C: 'static, D: 'static> ReceiveSlotSource for QQSlots<C, D> {
-    type Lease = ReceiveLease<C, D>;
-
-    fn acquire(&self) -> Option<Self::Lease> {
-        self.0.acquire()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn in_use(&self) -> usize {
-        self.0.in_use()
-    }
-
-    fn wait_available(&self) -> SlotWait<'_> {
-        Box::pin(self.0.wait_available())
-    }
-}
 
 /// The stored form of [`GatewaySession`].
 #[derive(Deserialize, Serialize)]
@@ -343,8 +322,8 @@ fn ws_error(error: WsError) -> ReceiveError {
 }
 
 /// What a connection uses of the channel: its settings and gateway state.
-struct Link<'a, T: 'static, D: 'static> {
-    settings: &'a Settings<T, D>,
+struct Link<'a> {
+    settings: &'a Settings,
     state: &'a GatewayState,
 }
 
@@ -355,16 +334,10 @@ enum Ended {
     Failed(ReceiveError),
 }
 
-impl<Storage, T, D> ReceiveChannel<ReceiveLease<ReceiveSocket, D>>
-    for QQChannel<Storage, QQSlots<ReceiveSocket, D>, T, D>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ReceiveChannel<ReceiveLease> for QQChannel<Storage> {
     fn receive<'a>(
         &'a self,
-        lease: &'a mut ReceiveLease<ReceiveSocket, D>,
+        lease: &'a mut ReceiveLease,
         session: ReceiveSession<'a>,
     ) -> ReceiveFuture<'a> {
         Box::pin(async move {
@@ -390,18 +363,12 @@ where
     }
 }
 
-impl<Storage, Slots, T, D> QQChannel<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> QQChannel<Storage> {
     /// The settings, the gateway state (loaded by the first session), and
     /// the gateway URL for the next connection.
-    pub(crate) async fn prepare(
+    async fn prepare(
         &self,
-    ) -> Result<(alloc::rc::Rc<Settings<T, D>>, String, &GatewayState), ReceiveError> {
+    ) -> Result<(alloc::rc::Rc<Settings>, String, &GatewayState), ReceiveError> {
         let Some(settings) = self.settings() else {
             return Err(ReceiveError::halt("QQ is not set up"));
         };
@@ -454,9 +421,9 @@ where
     }
 
     /// Runs the gateway protocol over an open byte stream until it ends.
-    pub(crate) async fn run<R: Read, W: Write>(
+    async fn run<R: Read, W: Write>(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         url: &str,
         reader: R,
@@ -529,7 +496,7 @@ where
     /// token until the connection ends.
     async fn connected<R: Read, W: Write, M: ws_client::MaskSource>(
         &self,
-        link: Link<'_, T, D>,
+        link: Link<'_>,
         token: &str,
         reader: &mut WsReader<R>,
         writer: &mut WsWriter<W, M>,
@@ -644,11 +611,46 @@ where
                             session.receiving();
                         }
                         Dispatch::Message(message, scene) => {
-                            self.handle(settings, state, message, scene).await;
+                            // Downloads can outlast a heartbeat interval.
+                            let handling = self.handle(settings, state, message, scene);
+                            let beating = Heartbeats {
+                                interval,
+                                at: &mut heartbeat_at,
+                                awaiting_ack: &mut awaiting_ack,
+                            };
+                            if let Err(error) =
+                                self.heartbeating(handling, writer, state, beating).await
+                            {
+                                return self.dropped(healthy, error);
+                            }
                         }
                         Dispatch::Other => {}
                     }
                     state.session.persist(&self.storage).await;
+                }
+            }
+        }
+    }
+
+    /// Runs `work` to its end, heartbeating whenever one is due meanwhile.
+    ///
+    /// Nothing is read while `work` runs, so acknowledgements wait in the
+    /// connection until the loop reads again.
+    async fn heartbeating<W: Write, M: ws_client::MaskSource>(
+        &self,
+        work: impl core::future::Future<Output = ()>,
+        writer: &mut WsWriter<W, M>,
+        state: &GatewayState,
+        beats: Heartbeats<'_>,
+    ) -> Result<(), WsError> {
+        let mut work = core::pin::pin!(work);
+        loop {
+            match select(work.as_mut(), Timer::at(*beats.at)).await {
+                Either::First(()) => return Ok(()),
+                Either::Second(()) => {
+                    self.heartbeat(writer, state).await?;
+                    *beats.awaiting_ack = true;
+                    *beats.at = beats.at.saturating_add(beats.interval).max(Instant::now());
                 }
             }
         }
@@ -678,7 +680,7 @@ where
     /// The server closed the connection with `code`.
     async fn closed(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         token: &str,
         code: Option<u16>,
@@ -712,7 +714,7 @@ where
     /// Handles one message event at most once.
     async fn handle(
         &self,
-        settings: &Settings<T, D>,
+        settings: &Settings,
         state: &GatewayState,
         message: MessageEvent,
         scene: Scene,
@@ -721,17 +723,18 @@ where
             log::debug!("dropped a redelivered QQ message");
             return;
         }
-        let InboundText {
+        let InboundMessage {
             id,
             conversation_id,
             sender,
             label,
             text,
             scene,
-        } = match message.into_text(scene) {
-            Ok(text) => text,
-            Err(Skipped::NotText) => {
-                log::debug!("ignored a QQ message without text");
+            attachments,
+        } = match message.into_message(scene) {
+            Ok(message) => message,
+            Err(Skipped::Empty) => {
+                log::debug!("ignored a QQ message without text or attachments");
                 return;
             }
             Err(Skipped::MissingSender) => {
@@ -744,12 +747,23 @@ where
         let Some(owners) = self.owners() else {
             return;
         };
+        // Classify first: a stranger's file is never fetched.
         match owners.classify(&sender, label.as_deref(), &text).await {
             Classification::Owner => {
+                let mut text = text;
+                let mut stored = Vec::new();
+                for media in attachments {
+                    let kind = media.kind;
+                    match self.download(media).await {
+                        Ok(attachment) => stored.push(attachment),
+                        Err(missed) => append_note(&mut text, kind, missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, conversation_id),
                     message_id: id,
                     text,
+                    attachments: stored,
                 };
                 if let Err(error) = self.gateway.publish(inbound).await {
                     log::warn!("failed to publish a QQ message: {error}");
@@ -770,5 +784,70 @@ where
                 log::debug!("ignored a QQ message: the sender is not an owner");
             }
         }
+    }
+
+    /// Streams one attachment into the Gateway's attachment storage.
+    async fn download(&self, media: InboundMedia) -> Result<Attachment, Missed> {
+        if media
+            .size
+            .is_some_and(|size| size > self.gateway.attachment_max_bytes())
+        {
+            return Err(Missed::TooLarge);
+        }
+        let Some(url) = media.url else {
+            log::warn!("a QQ attachment came without a URL");
+            return Err(Missed::Failed);
+        };
+        let meta = AttachmentMeta {
+            kind: media.kind,
+            mime_type: media.mime_type,
+            filename: media.filename,
+        };
+        // The URL may carry an access key: never log it.
+        match self
+            .gateway
+            .download_inbound(CHANNEL, DownloadRequest::get(&url), meta)
+            .await
+        {
+            Ok(attachment) => Ok(attachment),
+            Err(InboundDownloadError::Store(StoreError::TooLarge { .. })) => Err(Missed::TooLarge),
+            Err(error) => {
+                log::warn!("failed to download a QQ attachment: {error}");
+                Err(Missed::Failed)
+            }
+        }
+    }
+}
+
+/// The heartbeat schedule of a connection, lent to [`QQChannel::heartbeating`].
+struct Heartbeats<'a> {
+    interval: Duration,
+    at: &'a mut Instant,
+    awaiting_ack: &'a mut bool,
+}
+
+/// Why an attachment was not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Missed {
+    /// Over the Gateway's `attachment-max-bytes`.
+    TooLarge,
+    /// No URL, or the download or storing failed.
+    Failed,
+}
+
+/// Appends the line that tells the reader a file did not arrive.
+pub(crate) fn append_note(text: &mut String, kind: MediaKind, missed: Missed) {
+    let kind = match kind {
+        MediaKind::File => "file",
+        MediaKind::Image => "image",
+        MediaKind::Audio => "audio",
+        MediaKind::Video => "video",
+    };
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    match missed {
+        Missed::TooLarge => text.push_str(&format!("[{kind} too large, not received]")),
+        Missed::Failed => text.push_str(&format!("[{kind} not received]")),
     }
 }

@@ -1,1 +1,3 @@
 Use `file_read` for UTF-8 text files. `offset` and `limit` are byte counts, defaulting to 0 and 4096. When `next_offset` is present, call again with that value. A range that splits a multi-byte UTF-8 character returns `invalid_utf8`; adjust the range boundary.
+
+An image (JPEG, PNG, GIF, WebP) or a PDF is not read as text: the result is `{"path","mime_type","size"}` and the file itself is attached, so you see it with the result. Only a file below `/workspace` can be attached; any other one answers `not_shared`, so copy it below `/workspace` first. Whether you see the file's content, or only its name, depends on the model's input settings.

@@ -67,6 +67,12 @@ export interface PortalContext {
   /** Go to another entry by ID, or `"overview"` for home. */
   navigate(id: string): void;
   /**
+   * Whether the portal's manifest (`/portal/entries.json`) lists an entry with this ID now. An entry
+   * whose plugin is disabled is absent: offer a way to it (a toast action, a button) only when it
+   * is there. `"overview"` is no entry.
+   */
+  has(id: string): boolean;
+  /**
    * The latest `GET /portal/status` record for an entry (this page's own by default), or `null`
    * when the entry reports none or the portal could not read it.
    */

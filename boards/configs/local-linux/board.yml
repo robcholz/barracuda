@@ -1,4 +1,5 @@
 name: local-linux
+profile: screen
 hardware:
   chip: linux
 native-layout:
@@ -13,7 +14,36 @@ peripherals:
         scl: GPIO8
         sda: GPIO9
         frequency-hz: 400000
+    quad-spi-device:
+      display-link:
+        peripheral: SPI0
+        sck: GPIO10
+        data: [GPIO11, GPIO17, GPIO18, GPIO19]
+        chip-select: GPIO12
+        frequency-hz: 40000000
   devices:
+    # The ESP-VoCat's 360x360 round ST77916 panel and its touch controller.
+    # The virtual peripherals manager shows the panel at
+    # http://<BARRACUDA_VIRTUAL_IO_ADDR>/ and touches it where the page is
+    # clicked.
+    display:
+      implementation: st77916-qspi-display
+      bindings:
+        bus: display-link
+        dc: GPIO13
+        reset: GPIO14
+        backlight: GPIO15
+        power_enable: GPIO20
+    # CST816T at 15h on the Board's I2C bus.
+    touch:
+      implementation: cst816t-touch
+      bindings:
+        i2c: board-peripherals
+        interrupt: GPIO16
+      parameters:
+        address: 21
+        width: 360
+        height: 360
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings:
@@ -41,3 +71,7 @@ exposed-io:
     vio-5: { pin: GPIO5 }
     vio-6: { pin: GPIO6 }
     vio-7: { pin: GPIO7 }
+plugins:
+  imessage-gateway:
+    # One receive connection for each channel that holds one open.
+    receive-slots: 4

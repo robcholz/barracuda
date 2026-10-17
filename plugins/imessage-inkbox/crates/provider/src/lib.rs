@@ -16,9 +16,8 @@ use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MediaKind, MessageChannel, ReactRequest, SendMediaRequest,
     SendMessageRequest, SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{GatewayHttp, Method, Multipart, RequestBody, Response};
 use futures_lite::StreamExt as _;
-use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 pub use signup::{InkboxSignup, SignupAccount, SignupError, SignupRequest};
@@ -51,22 +50,15 @@ impl InkboxConfig {
 }
 
 /// Outbound iMessage provider backed by Inkbox.
-pub struct Inkbox<'net, T = http_client::Tcp, D = http_client::Resolver> {
-    http_clients: ClientFactory<'net, T, D>,
+pub struct Inkbox {
+    http: GatewayHttp,
     config: InkboxConfig,
 }
 
-impl<'net, T, D> Inkbox<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
-    /// Creates a provider using Platform-owned HTTP resources.
-    pub fn new(http_clients: ClientFactory<'net, T, D>, config: InkboxConfig) -> Self {
-        Self {
-            http_clients,
-            config,
-        }
+impl Inkbox {
+    /// Creates a provider sending through the Gateway's HTTP.
+    pub fn new(http: GatewayHttp, config: InkboxConfig) -> Self {
+        Self { http, config }
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -84,20 +76,21 @@ where
         content_type: &str,
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = barracuda_imessage_gateway_plugin::send(
-            &self.http_clients,
-            method,
-            url,
-            &[
-                ("Content-Type", content_type),
-                ("X-API-Key", self.config.api_key.as_str()),
-            ],
-            body,
-        )
-        .await
-        .map_err(|error| ChannelError::Transport {
-            message: error.to_string(),
-        })?;
+        let response = self
+            .http
+            .send(
+                method,
+                url,
+                &[
+                    ("Content-Type", content_type),
+                    ("X-API-Key", self.config.api_key.as_str()),
+                ],
+                body,
+            )
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)
     }
 
@@ -190,11 +183,7 @@ where
     }
 }
 
-impl<T, D> MessageChannel for Inkbox<'static, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect + 'static,
-    D: http_client::embedded_nal_async::Dns + 'static,
-{
+impl MessageChannel for Inkbox {
     fn channel(&self) -> &str {
         CHANNEL
     }

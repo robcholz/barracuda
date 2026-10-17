@@ -1,0 +1,85 @@
+---
+title: "Build and run"
+---
+
+Board selection is a persistent workspace action, separate from compilation:
+
+```bash
+cargo board select
+cargo run
+```
+
+A host Board (`local-linux`, `local-macos`) also needs the loopback address of
+its virtual peripherals manager:
+`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run` (see
+[Virtual IO](/platforms/virtual-io)).
+
+The first command opens a colored Board list. Use the arrow keys to move, type
+to fuzzy-search, and press Enter to select. It validates the Board bundle and
+records the selection in ignored local state. It resolves the matching
+self-described Platform, updates the static selected-Platform and
+selected-Board-HAL dependency blocks, and writes the target and runner
+configuration locally. The resolved Platform supplies its rustup toolchain,
+optional `build-std` policy and installer-generated environment, and the
+installation prompt used when that toolchain is unavailable. Selection
+activates the toolchain as a workspace override and imports its environment,
+so ordinary `cargo build` and `cargo run` operate directly on the standalone
+System application through native Cargo; there is no Board-aware build wrapper
+or shell setup step. Device Boards build firmware with `--release`. System, Platform, Core, and Plugin logs remain in that
+terminal.
+
+Run the external terminal Channel separately. This command is always compiled
+for the development host, even when the selected Board uses an embedded target:
+
+```bash
+cargo cli
+cargo cli configure
+```
+
+`cargo cli` opens a Local/Remote selector. Local displays and uses the active
+workspace address published by the macOS launcher, or the Linux endpoint
+`http://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6 address and
+connects to its WebServer on port 8787.
+
+`cargo cli configure` uses the same Local/Remote selector, then opens the
+Barracuda Plugin portal. The portal lists the configuration pages contributed
+by the enabled Plugins, so new Plugin configuration surfaces do not require a
+new CLI release. Pass an explicit address to skip selection:
+
+```bash
+cargo cli configure http://DEVICE_ADDRESS:8787
+```
+
+The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
+one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
+
+```bash
+BARRACUDA_LOG_LEVEL=debug cargo run
+```
+
+The selected level is validated and baked into the Platform binary; it is not
+read from the environment at runtime.
+
+Automation can bypass the prompt with `cargo board select <board-name>`.
+
+When adding a Platform or Board HAL, maintainers update the tracked registries
+once and commit the generated blocks:
+
+```bash
+cargo platform sync
+cargo board sync
+```
+
+CI can validate them without writing through the corresponding `--check`
+forms. Pulling an up-to-date commit never requires an additional sync step.
+
+Available Board names are the directory names under `boards/configs/`. A
+device Board's `toolchain.target` becomes the local Cargo build target; host
+Boards omit it.
+
+The memory profiler is an executable workload rather than a throughput
+benchmark:
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- agent-init
+```

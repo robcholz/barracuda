@@ -426,12 +426,6 @@ impl FilePackage {
     }
 }
 
-/// Creates the scoped package for cross-Plugin memory tests.
-#[cfg(feature = "test-fixture")]
-pub fn package_for_test(filesystem: ScopedVfs) -> impl LuaPackage {
-    FilePackage::new(filesystem)
-}
-
 impl Package for FilePackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
         let open_state = Arc::clone(&self.state);
@@ -472,7 +466,14 @@ impl Package for FilePackage {
 
 impl LuaPackage for FilePackage {
     fn name(&self) -> &'static str {
-        "vm-filesystem"
+        "filesystem"
+    }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "读写共享文件",
+        })
     }
 
     fn revoke(&self) {
@@ -956,7 +957,7 @@ fn ensure_active(state: &FilePackageState) -> Result<()> {
     if state.active.load(Ordering::Acquire) {
         Ok(())
     } else {
-        Err(Error::runtime("vm-filesystem package is unavailable"))
+        Err(Error::runtime("filesystem package is unavailable"))
     }
 }
 
@@ -1388,6 +1389,12 @@ mod tests {
             Ok::<_, Box<dyn core::error::Error>>(())
         })
         .expect("revoked vm-filesystem package");
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = FilePackage::new(block_on(filesystem()).expect("mount test filesystem"));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 
     mod barracuda_lua_test_fixture {

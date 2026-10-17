@@ -307,6 +307,13 @@ impl CaptivePortal {
         })
     }
 
+    /// Answers with the portal's landing page, for a Plugin that sends
+    /// clients to the portal from paths of its own, such as captive-network
+    /// detection.
+    pub async fn landing(&self) -> HttpResponse {
+        self.scaffold.serve("index.html").await
+    }
+
     /// Builds `GET /portal/status` from every status source, freshly per request.
     fn status_response(&self) -> HttpResponse {
         let registry = self.registry.borrow();

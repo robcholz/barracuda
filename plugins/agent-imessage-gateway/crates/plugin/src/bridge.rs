@@ -17,7 +17,7 @@ use embassy_sync::{
 
 use crate::{
     sessions::{SessionAction, SessionReplies, SessionStore},
-    state::{BridgeBook, PersistedRoute},
+    state::{BridgeBook, GatewayTarget, PersistedRoute},
     to_agent::ToAgentAction,
     to_gateway::ToGatewayAction,
 };
@@ -118,6 +118,11 @@ where
         })
     }
 
+    /// The conversation each session talks in, for the Agent Tools.
+    pub(crate) fn conversations(&self) -> SessionConversations<Storage> {
+        SessionConversations(self.control.clone())
+    }
+
     /// Registers the bridge's stable Workflow Action addresses until the
     /// returned guards are dropped. Session commands reach the Agent's
     /// sessions through `store` and answer through `replies`.
@@ -132,6 +137,16 @@ where
             actions.add_action(ToGatewayAction::new(self.control.clone()))?,
             actions.add_action(SessionAction::new(self.control.clone(), store, replies))?,
         ])
+    }
+}
+
+/// Looks up the conversation of a session in the bridge's route bindings.
+pub(crate) struct SessionConversations<Storage>(BridgeControl<Storage>);
+
+impl<Storage> SessionConversations<Storage> {
+    /// Where `session` reaches its user now; see [`BridgeBook::conversation_of`].
+    pub(crate) async fn of(&self, session: &str) -> Option<GatewayTarget> {
+        self.0.shared.book.lock().await.conversation_of(session)
     }
 }
 

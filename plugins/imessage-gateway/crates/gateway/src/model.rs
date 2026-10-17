@@ -1,7 +1,7 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 
 use barracuda_bulk_memory::BulkText;
-use core::{fmt, ops::Deref, pin::Pin};
+use core::{fmt, future::Future, ops::Deref, pin::Pin};
 
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -303,10 +303,36 @@ pub enum TextBody {
     Stream(TextStream),
 }
 
-/// Binary data supplied in memory or as asynchronous chunks.
+/// Local, executor-neutral future that opens one [`MediaSource`] stream.
+pub type MediaOpenFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<BinaryStream, StreamError>> + 'a>>;
+
+/// Binary content of known length that can be read again from its start.
+///
+/// A provider that must look at the whole content before it uploads (a
+/// digest, an encoded length) opens it once for that and again to send it.
+pub trait MediaSource {
+    /// Exact number of bytes every stream from [`Self::open`] yields.
+    fn len(&self) -> u64;
+
+    /// Whether the content is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Opens a new stream over the content from its first byte.
+    ///
+    /// The stream fails rather than yield more or fewer than [`Self::len`]
+    /// bytes.
+    fn open(&self) -> MediaOpenFuture<'_>;
+}
+
+/// Binary data supplied in memory, as asynchronous chunks, or as a
+/// re-openable source of known length.
 pub enum BinaryBody {
     Bytes(Vec<u8>),
     Stream(BinaryStream),
+    Source(Rc<dyn MediaSource>),
 }
 
 /// A text-message send operation.
@@ -351,6 +377,8 @@ impl SendMessageRequest {
 pub struct SendMediaRequest {
     pub target: MessageTarget,
     pub body: BinaryBody,
+    /// Length of `body` in bytes, when known before it is read.
+    pub size: Option<u64>,
     pub filename: Option<String>,
     pub mime_type: Option<String>,
     pub caption: Option<String>,
@@ -366,6 +394,7 @@ impl SendMediaRequest {
     ) -> Self {
         Self {
             target,
+            size: u64::try_from(bytes.len()).ok(),
             body: BinaryBody::Bytes(bytes),
             filename: Some(filename.into()),
             mime_type: Some(mime_type.into()),
@@ -383,6 +412,25 @@ impl SendMediaRequest {
         Self {
             target,
             body: BinaryBody::Stream(stream),
+            size: None,
+            filename: Some(filename.into()),
+            mime_type: Some(mime_type.into()),
+            caption: None,
+            reply_to: None,
+        }
+    }
+
+    /// Sends `source`, whose length becomes [`Self::size`].
+    pub fn source(
+        target: MessageTarget,
+        filename: impl Into<String>,
+        mime_type: impl Into<String>,
+        source: Rc<dyn MediaSource>,
+    ) -> Self {
+        Self {
+            target,
+            size: Some(source.len()),
+            body: BinaryBody::Source(source),
             filename: Some(filename.into()),
             mime_type: Some(mime_type.into()),
             caption: None,
@@ -478,12 +526,17 @@ impl SendReceipt {
     }
 }
 
-/// Kind of binary message selected by the Gateway facade.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Kind of binary message: how a channel presents it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MediaKind {
+    /// Generic file attachment.
     File,
+    /// Image attachment.
     Image,
+    /// Audio attachment.
     Audio,
+    /// Video attachment.
     Video,
 }
 

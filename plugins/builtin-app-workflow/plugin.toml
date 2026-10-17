@@ -1,0 +1,10 @@
+id = "builtin-app-workflow"
+depends-on = ["app-manager", "workflow"]
+description = "The Workflows system app: the loaded Workflows and what starts each."
+
+[tasks.app]
+cwd = "."
+command = ["bun", "../app-manager/resources/build-app.ts", "resources/app", "filesystem/resources/app"]
+inputs = ["resources/app"]
+outputs = ["filesystem/resources/app"]
+env = ["POCKETJS_ROOT"]

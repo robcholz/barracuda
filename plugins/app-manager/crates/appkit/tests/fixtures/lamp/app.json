@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "lamp",
+  "name": "灯带",
+  "version": "0.1.0",
+  "api": 1,
+  "requires": [
+    "light"
+  ],
+  "icon": "lamp",
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "fonts": [
+      "font-2.bin",
+      "font-3.bin",
+      "font-6.bin"
+    ],
+    "size": [
+      360,
+      360
+    ],
+    "shape": "round"
+  }
+}

@@ -8,6 +8,7 @@ use alloc::{
 };
 
 use barracuda_agent_memory::{ChatMessage, CompactError, CompactFuture, Compactor};
+use barracuda_agent_message::attachment::content_text;
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
 use http_client::embedded_nal_async::{Dns, TcpConnect};
@@ -99,9 +100,9 @@ fn render_transcript(window: &[ChatMessage]) -> String {
         let Some(role) = message.get("role").and_then(Value::as_str) else {
             continue;
         };
+        // Attachments render as their labels, such as `[image: cat.jpg]`.
         let content = match message.get("content") {
-            Some(Value::String(text)) => text.clone(),
-            Some(other) => other.to_string(),
+            Some(content) => content_text(content).unwrap_or_else(|| content.to_string()),
             None => continue,
         };
         if content.is_empty() {
@@ -113,4 +114,27 @@ fn render_transcript(window: &[ChatMessage]) -> String {
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn attachments_render_as_labels_not_json() {
+        let window = [
+            ChatMessage::new(&json!({"role": "user", "content": [
+                {"type": "text", "text": "what is this?"},
+                {"type": "media", "kind": "image", "path": "/workspace/cache/gateway/web/1.jpg",
+                 "mime_type": "image/jpeg", "filename": "cat.jpg", "size": 3},
+            ]})),
+            ChatMessage::new(&json!({"role": "assistant", "content": "a cat"})),
+        ];
+        assert_eq!(
+            render_transcript(&window),
+            "user: what is this?\n[image: cat.jpg]\nassistant: a cat\n"
+        );
+    }
 }

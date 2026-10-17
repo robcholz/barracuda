@@ -3,7 +3,7 @@ description = "A run may emit exactly 1024 lines; a 1025th line, an unterminated
 
 # Each script first spends about 500 ms in an empty loop (instruction-hook
 # yields of 100 ms each) so its completion always arrives after the reply that
-# ends the turn, costing exactly one detached-turn model call.
+# ends the turn, costing exactly one background-turn model call.
 
 [model]
 mode = "scripted"
@@ -19,7 +19,7 @@ tool_calls = [{ name = "vm_run", arguments = { source = "for _ = 1, 50000 do end
 text = "The 1024-line script is running."
 
 [[model.responses]]
-request_contains = ['[detached:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"s1\",', '\"s1023\",\"s1024\"]}']
+request_contains = ['[background:completed]', '{\"run_id\":1,\"outcome\":\"success\",\"output\":[\"s1\",', '\"s1023\",\"s1024\"]}']
 text = "All 1024 lines arrived."
 
 # Step 1: the 1025th line fails the run; the first 1024 lines are kept.

@@ -48,6 +48,7 @@ async function render(lang: Lang = "zh") {
       if (!controller.signal.aborted) toasts.push(toast);
     },
     navigate: (id) => routes.push(id),
+    has: () => true,
     status: () => deviceStatus.now,
     refreshStatus: async () => {
       refreshes.count++;
@@ -102,7 +103,18 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
     "接口协议",
     "用途",
     "连接",
+    "输入",
   ]);
+  expect(root.textContent).toContain("模型能直接看的附件");
+  expect(texts(root, ".bc-switch-row").slice(1)).toEqual([
+    "图片JPEG、PNG、GIF、WebP",
+    "PDF作为文档发给模型",
+  ]);
+  expect(
+    [...root.querySelectorAll('[role="switch"]')].map((toggle) =>
+      toggle.getAttribute("aria-checked"),
+    ),
+  ).toEqual(["true", "true", "false"]);
   expect(texts(root, ".bc-radio-card .bc-option-title")).toEqual([
     "OpenAI 兼容",
     "Anthropic 兼容",
@@ -131,10 +143,12 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
   expect(
     root.querySelector(".bc-disclosure")?.getAttribute("aria-expanded"),
   ).toBe("true");
-  expect(texts(root, ".bc-addon")).toEqual(["ms", "tokens", "bytes"]);
+  expect(texts(root, ".bc-addon")).toEqual(["ms", "tokens", "bytes", "张"]);
   expect(input("timeout_ms").value).toBe("120000");
   expect(input("max_tokens").value).toBe("8192");
   expect(input("image_max_bytes").value).toBe("524288");
+  expect(input("max_images_in_context").value).toBe("2");
+  expect(root.textContent).toContain("上下文中的图片");
   expect(root.textContent).toContain("超时与大小上限");
   expect(root.textContent).not.toContain("/api/");
   expect(texts(root, ".bc-form__footer button")).toEqual(["清空", "注册模型"]);
@@ -150,7 +164,15 @@ test("renders English copy from the context language", async () => {
     "API format",
     "Purpose",
     "Connection",
+    "Input",
   ]);
+  expect(root.textContent).toContain("Attachments the model reads directly");
+  expect(texts(root, ".bc-switch-row").slice(1)).toEqual([
+    "ImagesJPEG, PNG, GIF, WebP",
+    "PDFSent to the model as a document",
+  ]);
+  expect(root.textContent).toContain("Images in context");
+  expect(texts(root, ".bc-addon")).toEqual(["ms", "tokens", "bytes", "images"]);
   expect(texts(root, ".bc-radio-card .bc-hint")).toEqual([
     "Chat Completions; works with most providers",
     "Messages API",
@@ -193,6 +215,9 @@ test("posts one model as a batch with every field the endpoint requires", async 
   input("model").value = "claude-model";
   input("api_key").value = "sk-secret";
   input("max_tokens").value = "4096";
+  // send PDFs to the model as documents, and keep one image in context
+  root.querySelectorAll<HTMLButtonElement>('[role="switch"]')[2]!.click();
+  input("max_images_in_context").value = "1";
   await submit();
   // the accepted save reads the device's models again
   expect(calls.map(([url]) => url)).toEqual([
@@ -211,6 +236,8 @@ test("posts one model as a batch with every field the endpoint requires", async 
       timeout_ms: 120000,
       max_tokens: 4096,
       image_max_bytes: 524288,
+      max_images_in_context: 1,
+      input_modalities: { image: true, pdf: true },
     },
   ]);
   expect(toasts).toHaveLength(1);

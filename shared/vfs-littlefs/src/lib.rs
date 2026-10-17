@@ -11,8 +11,8 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use barracuda_vfs::{
-    Backend, BackendFile, BackendFuture, DirEntry, FileType, FsError, Metadata, OpenOptions,
-    SeekFrom, VfsBackend,
+    Backend, BackendFile, BackendFuture, DirEntry, FileType, FsError, FsUsage, Metadata,
+    OpenOptions, SeekFrom, VfsBackend,
 };
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use generic_array::{
@@ -385,6 +385,16 @@ impl<S: Storage + Send + 'static> VfsBackend for LittleFs<S> {
             let to = little_path(to)?;
             self.with_fs(|filesystem| filesystem.rename(&from, &to))
                 .map_err(map_error)
+        })
+    }
+
+    fn usage(&self) -> BackendFuture<'_, Result<FsUsage, FsError>> {
+        Box::pin(async move {
+            self.with_fs(|filesystem| {
+                let free = filesystem.available_space()?;
+                Ok(FsUsage::new(filesystem.total_space() as u64, free as u64))
+            })
+            .map_err(map_error)
         })
     }
 }

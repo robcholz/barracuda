@@ -1,0 +1,10 @@
+id = "builtin-app-sessions"
+depends-on = ["app-manager", "agent", "time"]
+description = "The Sessions system app: the Agent's conversations."
+
+[tasks.app]
+cwd = "."
+command = ["bun", "../app-manager/resources/build-app.ts", "resources/app", "filesystem/resources/app"]
+inputs = ["resources/app"]
+outputs = ["filesystem/resources/app"]
+env = ["POCKETJS_ROOT"]

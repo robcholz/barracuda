@@ -9,7 +9,8 @@ use alloc::{boxed::Box, rc::Rc, string::String};
 use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{
-        Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError, ToolOutput, ToolSpec,
+        Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvokeError,
+        ToolOutput, ToolSpec,
     },
 };
 use barracuda_plugin::api::PluginContext;
@@ -65,7 +66,7 @@ impl ToolSpec for ScheduleTool {
 impl ToolHandler for ScheduleTool {
     type Args = ScheduleRequest;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move { tool_output(self.scheduler.schedule(args).await) })
     }
 }
@@ -81,7 +82,7 @@ impl ToolSpec for CancelTool {
 impl ToolHandler for CancelTool {
     type Args = CancelRequest;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move { tool_output(self.scheduler.cancel(args).await) })
     }
 }
@@ -106,7 +107,7 @@ fn tool_output<Response: Serialize>(
     let content = content.map_err(|_error| {
         ToolError::InvokeRejected(String::from("failed to encode Scheduler response"))
     })?;
-    Ok(ToolOutput { content, ok })
+    Ok(ToolOutput::new(content, ok))
 }
 
 #[cfg(test)]

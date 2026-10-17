@@ -196,6 +196,13 @@ impl LuaPackage for HttpPackage {
         "http"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "联网收发数据",
+        })
+    }
+
     fn revoke(&self) {
         self.state.revoke();
     }
@@ -292,8 +299,6 @@ mod tests {
     use super::{HttpPackage, VmHttpPlugin};
     use barracuda_http_plugin::{HttpError, HttpMethod, HttpResponse};
     use barracuda_plugin::manager::PluginDeclaration;
-    use barracuda_vfs::{MountOptions, Vfs};
-    use barracuda_vfs_memfs::MemFs;
 
     #[test]
     fn plugin_declares_http_and_vm_dependencies() {
@@ -373,51 +378,8 @@ mod tests {
     }
 
     #[test]
-    fn complete_standard_capability_set_fits_one_bounded_vm_heap() -> Result<()> {
-        futures_lite::future::block_on(async {
-            let vfs = Vfs::new();
-            vfs.mount(
-                "/data",
-                MemFs::new().into_backend(),
-                MountOptions::read_write(),
-            )
-            .await
-            .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            vfs.mount(
-                "/cache",
-                MemFs::new().into_backend(),
-                MountOptions::read_write(),
-            )
-            .await
-            .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let filesystem = vfs
-                .scoped_mounts([("/data", "/data"), ("/cache", "/cache")])
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-
-            let (http, _requests) = HttpPackage::new();
-            let mut fixed = FixedMemoryLua::with_default_heap()
-                .map_err(|error| barracuda_vm_plugin::Error::runtime(error.to_string()))?;
-            let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
-                barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
-            )
-            .install(fixed.lua_mut())?;
-            barracuda_vm_filesystem_plugin::package_for_test(filesystem)
-                .install(fixed.lua_mut())?;
-            barracuda_vm_time_plugin::package_for_test().install(fixed.lua_mut())?;
-            http.install(fixed.lua_mut())?;
-            fixed
-                .lua_mut()
-                .load(
-                    "assert(type(require('http').request) == 'function') \
-                     assert(os.date('%F %T', 0) == '1970-01-01 00:00:00') \
-                     local file = assert(io.open('/data/value.txt', 'w+')) \
-                     assert(file:write('value')) \
-                     assert(file:seek('set', 0) == 0) \
-                     assert(file:read('*a') == 'value') \
-                     assert(file:close())",
-                )
-                .exec_async()
-                .await
-        })
+    fn package_fits_the_vm_package_budget() {
+        let (http, _requests) = HttpPackage::new();
+        assert!(barracuda_vm_runtime::fits_package_budget(&http));
     }
 }

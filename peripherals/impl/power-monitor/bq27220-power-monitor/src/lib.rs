@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 use barracuda_driver_bq27220::Bq27220;
 use barracuda_peripheral::{
     PeripheralImplementation,
-    power::{PowerMeasurement, PowerMonitor},
+    power::{BatteryState, PowerMeasurement, PowerMonitor},
 };
 use embedded_hal::i2c::I2c;
 
@@ -110,5 +110,13 @@ where
             current_microamps,
             power_microwatts,
         })
+    }
+
+    fn battery(&mut self) -> Result<Option<BatteryState>, Self::Error> {
+        let (percent, current) = self.chip.charge(&mut self.i2c).map_err(Bq27220Error::Bus)?;
+        Ok(Some(BatteryState {
+            percent: u8::try_from(percent.min(100)).unwrap_or(100),
+            charging: current > 0,
+        }))
     }
 }

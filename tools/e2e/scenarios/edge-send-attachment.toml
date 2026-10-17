@@ -1,0 +1,43 @@
+name = "Send attachment"
+description = "send_attachment sends a file from the shared Workspace into the chat its session talks in, completes with the message ID, and reports a missing file as not_found."
+
+[model]
+mode = "scripted"
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "file" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "tool_load", arguments = { group_id = "gateway" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "file_write", arguments = { path = "/workspace/cache/e2e/hello.txt", content = "hello" } }]
+
+# No channel or conversation: the Tool sends to the chat this session talks in.
+[[model.responses]]
+tool_calls = [{ name = "send_attachment", arguments = { path = "/workspace/cache/e2e/hello.txt", caption = "Here it is." } }]
+
+[[model.responses]]
+request_contains = ['[background:accepted]\nid: 1\n']
+tool_calls = [{ name = "background_wait", arguments = { id = 1, timeout_ms = 10000 } }]
+
+[[model.responses]]
+request_contains = ['{\"message_id\":']
+tool_calls = [{ name = "send_attachment", arguments = { path = "/workspace/cache/e2e/missing.txt" } }]
+
+[[model.responses]]
+tool_calls = [{ name = "background_wait", arguments = { id = 2, timeout_ms = 10000 } }]
+
+[[model.responses]]
+request_contains = ['{\"error\":\"not_found\"}']
+text = "Attachment sent."
+
+[[steps]]
+send = "Send me a file."
+reply_contains = ["Attachment sent."]
+tool_contains = [
+  '{"path": "/workspace/cache/e2e/hello.txt", "caption": "Here it is."}',
+  '{"message_id":',
+  '{"error":"not_found"}',
+]
+tool_errors_allowed = true

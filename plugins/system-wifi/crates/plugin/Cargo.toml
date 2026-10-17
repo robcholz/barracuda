@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-system-wifi-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin that shows Wi-Fi in the system UI"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-app-manager-plugin.workspace = true
+barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
+barracuda-wifi-plugin.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -8,7 +8,10 @@ use alloc::{boxed::Box, format, rc::Rc, string::String};
 
 use barracuda_agent_plugin::{
     AgentToolRegistry,
-    tools::{EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec},
+    tools::{
+        EmptyArgs, Tool, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolOutput,
+        ToolSpec,
+    },
 };
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -59,7 +62,7 @@ impl ToolSpec for TimeNowTool {
 impl ToolHandler for TimeNowTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let (response, ok) = match self.clock.now().and_then(format_utc) {
                 Ok(utc) => (json!({ "utc": utc }), true),
@@ -68,7 +71,7 @@ impl ToolHandler for TimeNowTool {
             let content = serde_json::to_string(&response).map_err(|_error| {
                 ToolError::InvokeRejected(String::from("failed to encode Time response"))
             })?;
-            Ok(ToolOutput { content, ok })
+            Ok(ToolOutput::new(content, ok))
         })
     }
 }

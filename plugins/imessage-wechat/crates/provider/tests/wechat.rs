@@ -5,14 +5,19 @@
     clippy::unwrap_used
 )]
 
+//! The WeChat provider against a scripted iLink service, sending through a
+//! real Gateway's HTTP on a loopback network.
+
+mod support;
+
 use std::{boxed::Box, rc::Rc};
 
 use barracuda_imessage_gateway_plugin::{
     MessageChannel, MessageTarget, SendMessageRequest, TextChunk,
 };
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
-use futures_lite::{future::block_on, stream};
-use http_client::ClientFactory;
+use barracuda_platform_test::{ScriptStep, ScriptedServer};
+use futures_lite::stream;
+use support::{bench, API_BASE};
 use wechat::{ContextTokens, Wechat, WechatConfig};
 
 struct Header {
@@ -29,29 +34,19 @@ impl Header {
     }
 }
 
-struct MockHttp {
-    network: &'static ScriptedStack,
+/// `count` accepted sends.
+fn responding(count: usize) -> Vec<ScriptStep> {
+    (0..count)
+        .map(|_| ScriptStep::json(200, r#"{"ret":0}"#))
+        .collect()
 }
 
-impl MockHttp {
-    fn responding(count: usize) -> Self {
-        let steps = (0..count).map(|_| ScriptStep::json(200, r#"{"ret":0}"#));
-        Self {
-            network: Box::leak(Box::new(ScriptedStack::new(steps))),
-        }
-    }
-
-    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
-        ClientFactory::from_network(self.network, self.network)
-    }
-
-    fn requests(&self) -> Vec<RecordedRequest> {
-        self.network
-            .requests()
-            .into_iter()
-            .map(RecordedRequest::parse)
-            .collect()
-    }
+fn requests(server: &ScriptedServer) -> Vec<RecordedRequest> {
+    server
+        .requests()
+        .into_iter()
+        .map(RecordedRequest::parse)
+        .collect()
 }
 
 struct RecordedRequest {
@@ -93,15 +88,14 @@ fn body_json(request: &RecordedRequest) -> serde_json::Value {
 
 fn config(token: &str) -> WechatConfig {
     let mut config = WechatConfig::new(token);
-    config.api_base = "http://wechat.test".to_owned();
+    config.api_base = API_BASE.to_owned();
     config
 }
 
 #[test]
 fn registers_and_maps_text_to_the_ilink_api() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding(1));
-        let channel = Wechat::new(http.factory(), config("secret-token"));
+    bench(responding(1), async |http, server| {
+        let channel = Wechat::new(http, config("secret-token"));
 
         let receipt = channel
             .send_message(SendMessageRequest::text(target(), "hello"))
@@ -110,7 +104,7 @@ fn registers_and_maps_text_to_the_ilink_api() {
 
         assert_eq!(channel.channel(), "wechat");
         assert!(receipt.message_id.starts_with("espwx-"));
-        let requests = http.requests();
+        let requests = requests(server);
         let request = requests.first().expect("one request");
         assert_eq!(request.url, "/ilink/bot/sendmessage");
         assert!(request.headers.iter().any(|header| {
@@ -129,9 +123,8 @@ fn registers_and_maps_text_to_the_ilink_api() {
 
 #[test]
 fn ignores_reply_to_and_keeps_the_context_token() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding(2));
-        let channel = Wechat::new(http.factory(), config("token"));
+    bench(responding(2), async |http, server| {
+        let channel = Wechat::new(http, config("token"));
         let mut text = SendMessageRequest::text(target(), "hello");
         text.reply_to = Some("inbound-message".to_owned());
         let chunks = stream::iter([Ok(TextChunk::from("hel")), Ok(TextChunk::from("lo"))]);
@@ -144,7 +137,7 @@ fn ignores_reply_to_and_keeps_the_context_token() {
             .await
             .expect("streamed reply succeeds");
 
-        let requests = http.requests();
+        let requests = requests(server);
         assert_eq!(requests.len(), 2);
         for request in &requests {
             let json = body_json(request);
@@ -157,9 +150,8 @@ fn ignores_reply_to_and_keeps_the_context_token() {
 
 #[test]
 fn buffers_an_async_text_stream_into_one_wechat_message() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding(1));
-        let channel = Wechat::new(http.factory(), config("token"));
+    bench(responding(1), async |http, server| {
+        let channel = Wechat::new(http, config("token"));
         let chunks = stream::iter([Ok(TextChunk::from("hel")), Ok(TextChunk::from("lo"))]);
 
         channel
@@ -167,7 +159,7 @@ fn buffers_an_async_text_stream_into_one_wechat_message() {
             .await
             .expect("send succeeds");
 
-        let requests = http.requests();
+        let requests = requests(server);
         assert_eq!(requests.len(), 1);
         assert_eq!(
             body_json(requests.first().expect("request"))["msg"]["item_list"][0]["text_item"]
@@ -179,9 +171,8 @@ fn buffers_an_async_text_stream_into_one_wechat_message() {
 
 #[test]
 fn splits_long_text_only_on_utf8_boundaries() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding(2));
-        let channel = Wechat::new(http.factory(), config("token"));
+    bench(responding(2), async |http, server| {
+        let channel = Wechat::new(http, config("token"));
         let text = format!("{}好", "a".repeat(3999));
 
         channel
@@ -189,7 +180,7 @@ fn splits_long_text_only_on_utf8_boundaries() {
             .await
             .expect("send succeeds");
 
-        let requests = http.requests();
+        let requests = requests(server);
         assert_eq!(requests.len(), 2);
         let first = body_json(requests.first().expect("first"));
         let second = body_json(requests.get(1).expect("second"));
@@ -203,11 +194,10 @@ fn splits_long_text_only_on_utf8_boundaries() {
 
 #[test]
 fn attaches_the_stored_context_token_unless_the_target_names_one() {
-    block_on(async {
-        let http = Rc::new(MockHttp::responding(3));
+    bench(responding(3), async |http, server| {
         let tokens = Rc::new(ContextTokens::new());
         tokens.remember("wx-user", "stored-token");
-        let channel = Wechat::with_context_tokens(http.factory(), config("token"), tokens);
+        let channel = Wechat::with_context_tokens(http, config("token"), tokens);
         let plain = MessageTarget::new("wechat", "wx-user");
         let unknown = MessageTarget::new("wechat", "other-user");
 
@@ -218,7 +208,7 @@ fn attaches_the_stored_context_token_unless_the_target_names_one() {
                 .expect("send succeeds");
         }
 
-        let requests = http.requests();
+        let requests = requests(server);
         assert_eq!(
             body_json(&requests[0])["msg"]["context_token"],
             "stored-token"

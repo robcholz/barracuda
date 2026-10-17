@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter};
+use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter, PluginSetting};
 use std::path::Path;
 
 const VALID: &str = r#"
@@ -20,6 +20,38 @@ fn parses_concrete_board_hardware_and_native_layout() {
     assert_eq!(board.name(), "local-macos");
     assert_eq!(board.hardware().chip(), "macos");
     assert_eq!(board.native_layout().artifact(), "file-layout.yml");
+}
+
+#[test]
+fn keeps_plugin_settings_without_interpreting_them() {
+    let yaml = format!(
+        "{VALID}profile: screen\nplugins:\n  example:\n    slots: 3\n    label: kitchen\n    enabled: true\n    peripherals:\n      display.main: front\n  other:\n    enabled: false\n"
+    );
+    let board = parse(&yaml).expect("Board with Plugin settings");
+
+    // `enabled` and `peripherals` belong to the Board's composition, not to
+    // the Plugin's own settings.
+    assert_eq!(
+        board.plugin_settings("example").collect::<Vec<_>>(),
+        [
+            ("label", &PluginSetting::String("kitchen".into())),
+            ("slots", &PluginSetting::Integer(3)),
+        ]
+    );
+    assert_eq!(board.profile(), Some("screen"));
+    assert_eq!(board.plugin_enabled("example"), Some(true));
+    assert_eq!(board.plugin_enabled("other"), Some(false));
+    assert_eq!(board.plugin_enabled("missing"), None);
+    assert_eq!(
+        board.plugin_peripherals("example").collect::<Vec<_>>(),
+        [("display.main", "front")]
+    );
+    assert_eq!(
+        board.configured_plugins().collect::<Vec<_>>(),
+        ["example", "other"]
+    );
+    assert_eq!(board.plugin_settings("other").count(), 0);
+    assert!(!render_rust(&board).contains("kitchen"));
 }
 
 #[test]
@@ -524,4 +556,20 @@ fn atom_voice_s3r_audio_data_pins_follow_controller_direction() {
         ("GPIO17", "GPIO3", "GPIO48", "GPIO4", Some("GPIO11"),)
     );
     assert_eq!(codec.binding("amplifier-enable"), Some("GPIO18"));
+}
+
+#[test]
+fn parses_plugin_profiles() {
+    let profile =
+        barracuda_board_config::parse_profile("extends: headless\nenable: [ui, app-manager]\n")
+            .expect("profile");
+    assert_eq!(profile.extends(), ["headless"]);
+    assert_eq!(profile.enable(), ["ui", "app-manager"]);
+    let both = barracuda_board_config::parse_profile("extends: [lua, network]\n")
+        .expect("profile extending two");
+    assert_eq!(both.extends(), ["lua", "network"]);
+    assert!(both.enable().is_empty());
+    let root = barracuda_board_config::parse_profile("enable: [time]\n").expect("root profile");
+    assert!(root.extends().is_empty());
+    assert!(barracuda_board_config::parse_profile("enable: [ui]\nextra: true\n").is_err());
 }

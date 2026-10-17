@@ -1,0 +1,18 @@
+# The Agent and the message gateways on top of network, still without Lua.
+extends: network
+enable:
+  - agent
+  - agent-file
+  - agent-http
+  - agent-imessage-gateway
+  - agent-scheduler
+  - agent-time
+  - agent-websearch
+  - agent-workflow
+  - imessage-bluebubble
+  - imessage-gateway
+  - imessage-inkbox
+  - imessage-qq
+  - imessage-telegram
+  - imessage-web
+  - imessage-wechat

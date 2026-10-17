@@ -125,6 +125,74 @@ fn scoped_mounts_share_storage_without_sharing_namespace() {
 }
 
 #[test]
+fn read_only_scoped_mounts_refuse_changes_to_a_writable_source() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        vfs.create_dir_all("/data/plugins/agent/notes")
+            .await
+            .unwrap();
+        vfs.write("/data/plugins/agent/notes/a.txt", b"a")
+            .await
+            .unwrap();
+        vfs.create_dir_all("/workspace").await.unwrap();
+        let view = vfs
+            .scoped_mounts_with([
+                ("/plugins/data", "/data/plugins", MountOptions::read_only()),
+                ("/media", "/workspace", MountOptions::read_write()),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            view.read("/plugins/data/agent/notes/a.txt").await.unwrap(),
+            b"a"
+        );
+        assert_eq!(
+            view.list_dir("/plugins/data/agent").await.unwrap(),
+            ["notes"]
+        );
+        let mut file = view.open("/plugins/data/agent/notes/a.txt").await.unwrap();
+        let mut byte = [0; 1];
+        file.read_exact(&mut byte).await.unwrap();
+
+        let refused = [
+            view.write("/plugins/data/agent/b.txt", b"b").await,
+            view.write_atomic("/plugins/data/agent/notes/a.txt", b"b")
+                .await,
+            view.append("/plugins/data/agent/notes/a.txt", b"b").await,
+            view.create("/plugins/data/agent/c.txt").await.map(drop),
+            view.create_dir_all("/plugins/data/agent/new").await,
+            view.remove_file("/plugins/data/agent/notes/a.txt").await,
+            view.remove_dir("/plugins/data/agent/notes").await,
+            view.rename(
+                "/plugins/data/agent/notes/a.txt",
+                "/plugins/data/agent/notes/b.txt",
+            )
+            .await,
+        ];
+        for result in refused {
+            assert_eq!(result.unwrap_err(), FsError::ReadOnly);
+        }
+        let mut options = OpenOptions::new();
+        options.write(true);
+        assert_eq!(
+            view.open_with("/plugins/data/agent/notes/a.txt", &options)
+                .await
+                .map(drop)
+                .unwrap_err(),
+            FsError::ReadOnly
+        );
+        assert_eq!(
+            vfs.read("/data/plugins/agent/notes/a.txt").await.unwrap(),
+            b"a"
+        );
+
+        // the view's other mounts stay writable
+        view.write("/media/a.txt", b"m").await.unwrap();
+        assert_eq!(vfs.read("/workspace/a.txt").await.unwrap(), b"m");
+    });
+}
+
+#[test]
 fn paths_cannot_escape_the_vfs_root() {
     embassy_futures::block_on(async {
         let vfs = mounted("/").await;

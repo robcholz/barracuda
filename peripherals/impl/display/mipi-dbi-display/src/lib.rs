@@ -12,7 +12,7 @@ use barracuda_peripheral::{
     },
 };
 use embedded_graphics_core::{
-    Pixel, draw_target::DrawTarget, geometry::OriginDimensions, pixelcolor::Rgb888,
+    Pixel, draw_target::DrawTarget, geometry::OriginDimensions, pixelcolor::Rgb565,
     primitives::Rectangle,
 };
 use embedded_hal::{delay::DelayNs, digital::OutputPin, spi::SpiDevice};
@@ -335,7 +335,7 @@ where
     DI: Interface,
     M: Model,
     M::ColorFormat: InterfacePixelFormat<DI::Word>,
-    M::ColorFormat: From<Rgb888>,
+    M::ColorFormat: From<Rgb565>,
     RST: OutputPin,
     BL: OutputPin,
     DELAY: DelayNs,
@@ -347,7 +347,7 @@ where
         self.config.descriptor()
     }
 
-    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+    fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Self::RenderError> {
         self.fill_contiguous(&area, pixels.iter().copied().map(Into::into))
     }
 

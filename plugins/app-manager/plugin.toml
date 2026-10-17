@@ -1,0 +1,29 @@
+id = "app-manager"
+depends-on = ["vm", "workflow", "time", "power", "sound"]
+description = "Runs Lua apps, and on Boards with a display shows them and the system UI."
+
+[peripherals.display]
+main = { fill = "primary", optional = true }
+
+[peripherals.touch]
+main = { fill = "primary", optional = true }
+
+[tasks.icons]
+cwd = "."
+command = ["python3", "resources/icons/build.py"]
+inputs = ["resources/icons/svg", "resources/icons/codepoints.json"]
+outputs = ["resources/icons/codepoints.json", "resources/icons/barracuda-icons.otf", "resources/icons/icons.json", "crates/uikit/src/icons.rs"]
+
+[tasks.view]
+cwd = "."
+command = ["bun", "resources/view/build.ts"]
+inputs = ["resources/view"]
+outputs = ["filesystem/resources/view"]
+env = ["POCKETJS_ROOT"]
+
+[tasks.examples]
+cwd = "."
+command = ["bun", "resources/build-app.ts", "--own-fonts", "--each", "resources/examples", "crates/appkit/tests/fixtures"]
+inputs = ["resources/examples", "resources/build-app.ts", "resources/icons/barracuda-icons.otf"]
+outputs = ["crates/appkit/tests/fixtures"]
+env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]

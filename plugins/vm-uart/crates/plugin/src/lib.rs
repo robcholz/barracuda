@@ -133,6 +133,12 @@ where
     fn name(&self) -> &'static str {
         "uart"
     }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "访问串口",
+        })
+    }
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -377,5 +383,11 @@ mod tests {
         package.install(&mut lua).expect("install UART package");
         let result: bool = futures_lite::future::block_on(lua.load("local uart = require('uart')\nlocal port <close> = uart.open('D1', 'D2', 115200, 8, 'none', 1)\nport:write('AT')\nlocal reply = port:read(16)\nreturn reply == 'OK' and port:is_open()").eval_async()).expect("use UART");
         assert!(result);
+    }
+
+    #[test]
+    fn package_fits_the_vm_package_budget() {
+        let package = UartPackage::new(Arc::new(Provider));
+        assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

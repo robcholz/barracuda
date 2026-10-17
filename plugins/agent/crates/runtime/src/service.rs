@@ -23,7 +23,8 @@ use barracuda_agent::{
 };
 use barracuda_agent_session::{
     OpenSessionError, SessionClock, SessionControl, SessionCreateError, SessionDeleteError,
-    SessionId, SessionInfo, SessionPersistence, SessionRenameError, SessionStream, WallClock,
+    SessionId, SessionInfo, SessionPersistence, SessionRenameError, SessionStream,
+    SessionTranscriptError, TranscriptEntry, WallClock,
 };
 
 use crate::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
@@ -221,6 +222,28 @@ impl RuntimeControl {
             return Vec::new();
         }
         result.await.unwrap_or_default()
+    }
+
+    /// The last `limit` messages of a live Session, each cut to
+    /// `max_chars` characters.
+    pub(crate) async fn session_transcript(
+        &self,
+        session: SessionId,
+        limit: usize,
+        max_chars: usize,
+    ) -> Result<Vec<TranscriptEntry>, SessionTranscriptError> {
+        let (ack, result) = oneshot::channel();
+        self.commands
+            .send(RuntimeCommand::SessionTranscript {
+                session,
+                limit,
+                max_chars,
+                ack,
+            })
+            .map_err(|_| SessionTranscriptError::WorkerStopped)?;
+        result
+            .await
+            .unwrap_or(Err(SessionTranscriptError::WorkerStopped))
     }
 
     /// Replace a live Session's title.

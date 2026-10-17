@@ -10,9 +10,9 @@ mod action {
     use alloc::vec::Vec;
 
     use barracuda_agent_runtime::{
-        AgentRuntime, InputRequestId, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
-        RuntimeError, SessionControlError, SessionCreateError, SessionDeleteError, SessionId,
-        SessionInfo, SessionPersistence, SessionRenameError,
+        AgentRuntime, Attachment, InputRequestId, Message, OpenSessionError, PermissionLevel,
+        ReasoningEffort, RuntimeError, SessionControlError, SessionCreateError, SessionDeleteError,
+        SessionId, SessionInfo, SessionPersistence, SessionRenameError,
     };
     use barracuda_workflow_plugin::{
         workflow_action_schema, WorkflowActionFuture, WorkflowActionHandler,
@@ -405,6 +405,8 @@ mod action {
     struct AppendRequest {
         session: String,
         text: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
     }
 
     struct AppendAction {
@@ -429,7 +431,10 @@ mod action {
                         AgentActionError::SessionNotOpen,
                     ));
                 };
-                let response = match control.append(Message::text(request.text)).await {
+                let response = match control
+                    .append(Message::text(request.text).with_attachments(request.attachments))
+                    .await
+                {
                     Ok(()) => EmptyOrErrorResponse::success(),
                     Err(error) => EmptyOrErrorResponse::error(map_control_error(error)),
                 };
@@ -444,6 +449,8 @@ mod action {
         session: String,
         request: String,
         text: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
     }
 
     struct RespondAction {
@@ -475,7 +482,13 @@ mod action {
                         AgentActionError::SessionNotOpen,
                     ));
                 };
-                let response = match control.respond(input, Message::text(request.text)).await {
+                let response = match control
+                    .respond(
+                        input,
+                        Message::text(request.text).with_attachments(request.attachments),
+                    )
+                    .await
+                {
                     Ok(()) => EmptyOrErrorResponse::success(),
                     Err(error) => EmptyOrErrorResponse::error(map_control_error(error)),
                 };
@@ -858,6 +871,52 @@ mod action {
                     "text": "x".repeat(4_096)
                 }))
                 .is_ok());
+        }
+
+        #[test]
+        fn append_and_respond_take_optional_attachment_references() {
+            let attachment = json!({
+                "kind": "image",
+                "path": "/workspace/cache/gateway/web/1.jpg",
+                "mime_type": "image/jpeg",
+                "filename": "cat.jpg",
+                "size": 3
+            });
+            let append = json!({
+                "session": "session-1",
+                "text": "",
+                "attachments": [attachment]
+            });
+            let respond = json!({
+                "session": "session-1",
+                "request": "input-1",
+                "text": "yes",
+                "attachments": [attachment]
+            });
+            assert!(AppendAction::SCHEMA.request().validate(&append).is_ok());
+            assert!(RespondAction::SCHEMA.request().validate(&respond).is_ok());
+            let decoded: super::AppendRequest =
+                serde_json::from_value(append).expect("append request decodes");
+            assert_eq!(decoded.attachments.len(), 1);
+            assert_eq!(decoded.attachments[0].name(), "cat.jpg");
+            let without: super::AppendRequest =
+                serde_json::from_value(json!({ "session": "session-1", "text": "hi" }))
+                    .expect("append request decodes");
+            assert!(without.attachments.is_empty());
+            for invalid in [
+                json!({ "kind": "sticker", "path": "/a", "mime_type": "x/y", "size": 1 }),
+                json!({ "kind": "image", "path": "/a", "mime_type": "x/y" }),
+                json!({ "kind": "image", "path": "/a", "mime_type": "x/y", "size": 1, "url": "x" }),
+            ] {
+                assert!(AppendAction::SCHEMA
+                    .request()
+                    .validate(&json!({
+                        "session": "session-1",
+                        "text": "",
+                        "attachments": [invalid]
+                    }))
+                    .is_err());
+            }
         }
 
         #[test]

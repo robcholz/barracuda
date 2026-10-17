@@ -14,6 +14,8 @@ server = ["dep:barracuda-webserver-plugin"]
 [dependencies]
 barracuda-bulk-memory.workspace = true
 barracuda-json-writer.workspace = true
+barracuda-platform.workspace = true
+barracuda-plugin.workspace = true
 barracuda-webserver-plugin = { workspace = true, optional = true }
 embassy-sync.workspace = true
 futures-core.workspace = true
@@ -25,7 +27,6 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 futures-lite = "2"
 
 [lints.rust]

@@ -31,6 +31,7 @@ struct Configuration {
 
 #[derive(Clone, Copy)]
 struct Field {
+    /// The JSON key; `object.key` sets `key` inside the object `object`.
     name: &'static str,
     label: &'static str,
     kind: FieldKind,
@@ -110,6 +111,24 @@ const CONFIGURATIONS: &[Configuration] = &[
                 .with_default(DefaultValue::Number(8_192)),
             Field::new("image_max_bytes", "图片大小上限（字节）", FieldKind::Number)
                 .with_default(DefaultValue::Number(524_288)),
+            Field::new(
+                "input_modalities.image",
+                "模型直接看图片",
+                FieldKind::Boolean,
+            )
+            .with_default(DefaultValue::Boolean(true)),
+            Field::new(
+                "input_modalities.pdf",
+                "PDF 作为文档发给模型",
+                FieldKind::Boolean,
+            )
+            .with_default(DefaultValue::Boolean(false)),
+            Field::new(
+                "max_images_in_context",
+                "上下文中的图片（张）",
+                FieldKind::Number,
+            )
+            .with_default(DefaultValue::Number(2)),
         ],
         batch: true,
     },
@@ -343,10 +362,28 @@ fn prompt_payload(configuration: &Configuration, theme: &ColorfulTheme) -> Resul
             }
         };
         if let Some(value) = value {
-            payload.insert(String::from(field.name), value);
+            insert_field(&mut payload, field.name, value)?;
         }
     }
     Ok(Value::Object(payload))
+}
+
+/// Inserts `value` at `name`, where `object.key` names `key` inside `object`.
+fn insert_field(payload: &mut Map<String, Value>, name: &str, value: Value) -> Result<()> {
+    let Some((object, key)) = name.split_once('.') else {
+        payload.insert(String::from(name), value);
+        return Ok(());
+    };
+    match payload
+        .entry(String::from(object))
+        .or_insert_with(|| Value::Object(Map::new()))
+    {
+        Value::Object(fields) => {
+            fields.insert(String::from(key), value);
+            Ok(())
+        }
+        _ => bail!("configuration field `{object}` is not an object"),
+    }
 }
 
 fn optional_value<F>(field: &Field, value: String, convert: F) -> Result<Option<Value>>
@@ -459,7 +496,9 @@ async fn collect_response(response: hyper::Response<Incoming>) -> Result<Respons
 
 #[cfg(test)]
 mod tests {
-    use super::{is_http_url, validate_input, FieldKind, CONFIGURATIONS};
+    use serde_json::{json, Map, Value};
+
+    use super::{insert_field, is_http_url, validate_input, FieldKind, CONFIGURATIONS};
 
     #[test]
     fn configuration_catalog_is_fully_cli_owned() {
@@ -488,5 +527,24 @@ mod tests {
         assert!(validate_input(FieldKind::Number, false, "4294967295").is_ok());
         assert!(validate_input(FieldKind::Number, false, "4294967296").is_err());
         assert!(validate_input(FieldKind::Url, true, "").is_ok());
+    }
+
+    #[test]
+    fn dotted_field_names_fill_one_object() {
+        let mut payload = Map::new();
+        for (name, value) in [
+            ("max_images_in_context", json!(2)),
+            ("input_modalities.image", json!(true)),
+            ("input_modalities.pdf", json!(false)),
+        ] {
+            insert_field(&mut payload, name, value).unwrap();
+        }
+        assert_eq!(
+            Value::Object(payload),
+            json!({
+                "max_images_in_context": 2,
+                "input_modalities": {"image": true, "pdf": false}
+            })
+        );
     }
 }

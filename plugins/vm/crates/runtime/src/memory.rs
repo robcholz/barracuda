@@ -111,13 +111,13 @@ impl Drop for VmMemoryLease {
 }
 
 /// Lua state backed by one owned VM memory slot for focused package tests.
-#[cfg(feature = "test-fixture")]
+#[cfg(any(test, feature = "test-fixture"))]
 pub struct FixedMemoryLua {
     lua: Lua,
     _lease: VmMemoryLease,
 }
 
-#[cfg(feature = "test-fixture")]
+#[cfg(any(test, feature = "test-fixture"))]
 impl FixedMemoryLua {
     /// Creates one Lua state with the same allocator path as a normal VM run.
     pub fn new(bytes: usize) -> Result<Self, FixedMemoryLuaError> {
@@ -138,8 +138,91 @@ impl FixedMemoryLua {
     }
 }
 
+/// Whether a Lua package fits the VM's per-package heap budgets.
+///
+/// Installed beside the built-in packages, `package` must keep at most
+/// [`LUA_PACKAGE_HEAP_BUDGET_BYTES`](barracuda_vm_package_api::LUA_PACKAGE_HEAP_BUDGET_BYTES)
+/// once garbage is collected, and its installation must succeed in the
+/// smallest heap that holds the built-ins enlarged by that budget and
+/// [`LUA_PACKAGE_INSTALL_PEAK_BYTES`](barracuda_vm_package_api::LUA_PACKAGE_INSTALL_PEAK_BYTES).
+/// A package Plugin's tests assert it for every package it registers.
+#[cfg(any(test, feature = "test-fixture"))]
+#[must_use]
+pub fn fits_package_budget(package: &impl barracuda_lua::Package) -> bool {
+    use barracuda_vm_package_api::{LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES};
+
+    let kept = retained_bytes(package);
+    let peak = builtins_floor()
+        .checked_add(LUA_PACKAGE_HEAP_BUDGET_BYTES)
+        .and_then(|bytes| bytes.checked_add(LUA_PACKAGE_INSTALL_PEAK_BYTES));
+    kept.is_some_and(|kept| kept <= LUA_PACKAGE_HEAP_BUDGET_BYTES)
+        && peak.is_some_and(|bytes| installs(bytes, Some(package)))
+}
+
+/// Bytes `package` keeps in a run's heap beside the built-ins, after a full
+/// garbage collection.
+#[cfg(any(test, feature = "test-fixture"))]
+fn retained_bytes(package: &impl barracuda_lua::Package) -> Option<usize> {
+    let mut fixed = FixedMemoryLua::with_default_heap().ok()?;
+    let _io = barracuda_vm_builtin_packages::BuiltinPackages::new(
+        barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+    )
+    .install(fixed.lua_mut())
+    .ok()?;
+    fixed.lua_mut().collect_garbage();
+    let before = fixed.lua_mut().memory_in_use();
+    package.install(fixed.lua_mut()).ok()?;
+    fixed.lua_mut().collect_garbage();
+    Some(fixed.lua_mut().memory_in_use().saturating_sub(before))
+}
+
+/// Whether the built-in packages, and `package` when given, install into a
+/// fresh heap of `bytes`.
+#[cfg(any(test, feature = "test-fixture"))]
+fn installs(bytes: usize, package: Option<&impl barracuda_lua::Package>) -> bool {
+    let Ok(mut fixed) = FixedMemoryLua::new(bytes) else {
+        return false;
+    };
+    let Ok(_io) = barracuda_vm_builtin_packages::BuiltinPackages::new(
+        barracuda_vm_builtin_packages::math::SeedSource::unavailable(),
+    )
+    .install(fixed.lua_mut()) else {
+        return false;
+    };
+    package.is_none_or(|package| package.install(fixed.lua_mut()).is_ok())
+}
+
+/// The smallest heap, to 256 bytes, that holds the built-in packages.
+#[cfg(any(test, feature = "test-fixture"))]
+pub(crate) fn builtins_floor() -> usize {
+    const STEP: usize = 256;
+    let (mut low, mut high) = (
+        MINIMUM_HEAP_BYTES / STEP,
+        crate::runtime::VM_MEMORY_BYTES_PER_RUN / STEP,
+    );
+    while low < high {
+        let middle = low.saturating_add(high.saturating_sub(low) / 2);
+        if installs(middle.saturating_mul(STEP), None::<&NoPackage>) {
+            high = middle;
+        } else {
+            low = middle.saturating_add(1);
+        }
+    }
+    high.saturating_mul(STEP)
+}
+
+#[cfg(any(test, feature = "test-fixture"))]
+struct NoPackage;
+
+#[cfg(any(test, feature = "test-fixture"))]
+impl barracuda_lua::Package for NoPackage {
+    fn install(&self, _lua: &mut Lua) -> barracuda_lua::Result<()> {
+        Ok(())
+    }
+}
+
 /// Failure constructing a fixed-memory Lua test state.
-#[cfg(feature = "test-fixture")]
+#[cfg(any(test, feature = "test-fixture"))]
 #[derive(Debug, thiserror::Error)]
 pub enum FixedMemoryLuaError {
     /// The backing memory pool could not be created.
@@ -168,7 +251,12 @@ pub enum VmMemoryPoolError {
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use barracuda_vm_package_api::{
+        LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_LUA_PACKAGES,
+    };
+
     use super::{VmMemoryPool, VmMemoryPoolError};
+    use crate::runtime::{SCRIPT_HEAP_RESERVE_BYTES, VM_MEMORY_BYTES_PER_RUN};
 
     #[test]
     fn rejects_invalid_pool_capacity() {
@@ -204,5 +292,39 @@ mod tests {
             result.map(drop).map_err(|error| error.kind()),
             Err(barracuda_lua::ErrorKind::Memory)
         ));
+    }
+
+    #[test]
+    fn a_full_registry_leaves_the_script_its_reserve() {
+        let packages = MAX_LUA_PACKAGES
+            .saturating_mul(LUA_PACKAGE_HEAP_BUDGET_BYTES)
+            .saturating_add(LUA_PACKAGE_INSTALL_PEAK_BYTES);
+        let left = VM_MEMORY_BYTES_PER_RUN
+            .saturating_sub(packages)
+            .saturating_sub(SCRIPT_HEAP_RESERVE_BYTES);
+        assert!(
+            super::builtins_floor() <= left,
+            "the built-ins need {} bytes, {left} remain beside a full registry and the script",
+            super::builtins_floor()
+        );
+    }
+
+    /// A package holding a string of the given length in its heap.
+    struct Holding(usize);
+
+    impl barracuda_lua::Package for Holding {
+        fn install(&self, lua: &mut barracuda_lua::Lua) -> barracuda_lua::Result<()> {
+            lua.load(&alloc::format!("held = string.rep('x', {})", self.0))
+                .exec()
+        }
+    }
+
+    #[test]
+    fn the_package_budget_admits_small_packages_and_refuses_large_ones() {
+        assert!(super::FixedMemoryLua::with_default_heap().is_ok());
+        assert!(super::fits_package_budget(&Holding(1024)));
+        assert!(!super::fits_package_budget(&Holding(
+            LUA_PACKAGE_HEAP_BUDGET_BYTES.saturating_mul(2)
+        )));
     }
 }

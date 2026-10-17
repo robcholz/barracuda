@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
@@ -92,7 +92,7 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
                 barracuda_plugin::api::Hardware::new("test-chip"),
             ),
         );
-        let mut plugin_context = PluginContext::new(info, stack, ClientFactory::plaintext(stack));
+        let mut plugin_context = PluginContext::new(info, stack);
         let actions = Rc::new(RefCell::new(None));
         let service = Rc::new(RefCell::new(None));
 

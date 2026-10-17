@@ -5,30 +5,25 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    load_mode, receive_runtime, store_mode, sync_receive, ChannelControl, ChannelMode, ModeError,
-    ModeFuture, OnDemand, Owners, OwnersError, PairingEntropy, ReceiveChannel, ReceiveControl,
-    ReceiveRuntime, ReceiveSlotSource, ReceiveTiming,
-};
 use barracuda_imessage_gateway_plugin::{
-    GatewayError, IMessageGateway, MessageChannel, MessageChannelRegistration,
+    ChannelControl, ChannelMode, GatewayError, IMessageGateway, MessageChannel,
+    MessageChannelRegistration, ModeError, ModeFuture, OnDemand, Owners, OwnersError,
+    ReceiveControl, ReceiveRuntime, ReceiveSlots, ReceiveTiming,
 };
 use barracuda_plugin::api::{Entropy, SharedEntropy};
 use barracuda_plugin::manager::{PluginError, PluginResult, PluginStorage};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::ClientFactory;
 use qq::QQ;
 
 use crate::receive::{GatewayState, SESSION_STORAGE_KEY};
 use crate::{load_configuration, ConfigRequest, CONFIGURATION_STORAGE_KEY};
 
 /// A stored configuration and the provider built from it.
-pub(crate) struct Settings<T: 'static, D: 'static> {
+pub(crate) struct Settings {
     pub(crate) config: ConfigRequest,
     /// Sends, and fetches tokens and the gateway URL, through the shared
     /// request pool, never a receive slot.
-    pub(crate) sender: Rc<QQ<'static, T, D>>,
+    pub(crate) sender: Rc<QQ>,
 }
 
 /// Why a configuration was not applied.
@@ -40,18 +35,17 @@ pub(crate) enum ConfigureError {
 
 /// The QQ channel: configuration, mode, Gateway registration, owners, the
 /// gateway session, and receive state.
-pub(crate) struct QQChannel<Storage, Slots: ReceiveSlotSource, T: 'static, D: 'static> {
+pub(crate) struct QQChannel<Storage> {
     pub(crate) gateway: Rc<IMessageGateway>,
     pub(crate) storage: Storage,
-    pub(crate) http_clients: ClientFactory<'static, T, D>,
-    settings: RefCell<Option<Rc<Settings<T, D>>>>,
+    settings: RefCell<Option<Rc<Settings>>>,
     mode: Cell<ChannelMode>,
     /// Present exactly while configured and the mode registers.
     registration: RefCell<Option<MessageChannelRegistration>>,
-    receive: Rc<ReceiveControl<Slots>>,
+    receive: Rc<ReceiveControl<ReceiveSlots>>,
     /// Loaded once the channel is configured.
     owners: OnDemand<Owners<Storage>>,
-    /// WebSocket keys and masks.
+    /// WebSocket keys and masks, and scan-to-bind keys.
     pub(crate) entropy: SharedEntropy,
     /// The gateway session and recent messages, loaded by the first receive
     /// session.
@@ -61,39 +55,32 @@ pub(crate) struct QQChannel<Storage, Slots: ReceiveSlotSource, T: 'static, D: 's
 }
 
 /// The channel and the receive runtime its task owns.
-pub(crate) type Built<Storage, Slots, T, D> = (Rc<QQChannel<Storage, Slots, T, D>>, ReceiveRuntime);
+pub(crate) type Built<Storage> = (Rc<QQChannel<Storage>>, ReceiveRuntime);
 
 /// Loads the channel from storage, registers it with the Gateway when its mode
 /// asks for it, and builds the receive runtime the Plugin's task owns.
-pub(crate) fn build_channel<Storage, Slots, T, D>(
+pub(crate) fn build_channel<Storage: PluginStorage>(
     storage: Storage,
     gateway: Rc<IMessageGateway>,
-    http_clients: ClientFactory<'static, T, D>,
-    slots: Slots,
     entropy: SharedEntropy,
     timing: ReceiveTiming,
-) -> PluginResult<Built<Storage, Slots, T, D>>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    QQChannel<Storage, Slots, T, D>: ReceiveChannel<Slots::Lease>,
-{
+) -> PluginResult<Built<Storage>> {
     let config = embassy_futures::block_on(load_configuration(&storage))?;
-    let mode =
-        embassy_futures::block_on(load_mode(&storage, config.is_some(), ChannelMode::legacy()))?;
+    let mode = embassy_futures::block_on(gateway.load_mode(
+        &storage,
+        config.is_some(),
+        ChannelMode::legacy(),
+    ))?;
     let settings = config.map(|config| {
         Rc::new(Settings {
-            sender: Rc::new(QQ::new(http_clients.clone(), config.clone().into())),
+            sender: Rc::new(QQ::new(gateway.http(), config.clone().into())),
             config,
         })
     });
-    let receive = Rc::new(ReceiveControl::new(slots));
+    let receive = Rc::new(gateway.receive_control());
     let channel = Rc::new(QQChannel {
         gateway,
         storage,
-        http_clients,
         settings: RefCell::new(settings),
         mode: Cell::new(mode),
         registration: RefCell::new(None),
@@ -109,34 +96,25 @@ where
     channel
         .register_for(mode)
         .map_err(PluginError::registration)?;
-    let runtime = receive_runtime(receive, Rc::clone(&channel), timing);
-    if sync_receive(&*channel).is_err() {
+    let runtime = channel
+        .gateway
+        .receive_runtime(receive, Rc::clone(&channel), timing);
+    if channel.gateway.sync_receive(&*channel).is_err() {
         log::warn!("QQ waits for a free receive slot");
     }
     Ok((channel, runtime))
 }
 
-impl<Storage, Slots, T, D> QQChannel<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> QQChannel<Storage> {
     /// The current configuration and its provider.
-    pub(crate) fn settings(&self) -> Option<Rc<Settings<T, D>>> {
+    pub(crate) fn settings(&self) -> Option<Rc<Settings>> {
         self.settings.borrow().clone()
     }
 
     /// Loads the owner book, once; a configured channel needs it.
     async fn load_owners(&self) -> Result<&Owners<Storage>, OwnersError> {
         self.owners
-            .get_or_load(|| {
-                Owners::load(
-                    self.storage.clone(),
-                    PairingEntropy::new(self.entropy.clone()),
-                )
-            })
+            .get_or_load(|| self.gateway.load_owners(self.storage.clone()))
             .await
     }
 
@@ -181,7 +159,7 @@ where
     pub(crate) async fn configure(
         &self,
         config: ConfigRequest,
-        sender: Rc<QQ<'static, T, D>>,
+        sender: Rc<QQ>,
     ) -> Result<(), ConfigureError> {
         let _change = self.changes.lock().await;
         self.load_owners().await.map_err(|error| {
@@ -213,7 +191,7 @@ where
         if let Err(error) = self.register_for(self.mode.get()) {
             log::warn!("rejected QQ gateway configuration: {error}");
             self.settings.replace(None);
-            let _no_slot = sync_receive(self);
+            let _no_slot = self.gateway.sync_receive(self);
             let restored = match previous.as_deref() {
                 Some(previous) => self.storage.put(CONFIGURATION_STORAGE_KEY, previous).await,
                 None => self.storage.delete(CONFIGURATION_STORAGE_KEY).await,
@@ -234,7 +212,7 @@ where
                 log::warn!("failed to clear the QQ gateway session: {error}");
             }
         }
-        if sync_receive(self).is_err() {
+        if self.gateway.sync_receive(self).is_err() {
             log::warn!("QQ waits for a free receive slot");
         }
         self.receive.restart();
@@ -243,15 +221,9 @@ where
     }
 }
 
-impl<Storage, Slots, T, D> ChannelControl for QQChannel<Storage, Slots, T, D>
-where
-    Storage: PluginStorage,
-    Slots: ReceiveSlotSource,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-{
+impl<Storage: PluginStorage> ChannelControl for QQChannel<Storage> {
     type Storage = Storage;
-    type Slots = Slots;
+    type Slots = ReceiveSlots;
 
     fn configured(&self) -> bool {
         self.settings.borrow().is_some()
@@ -265,13 +237,16 @@ where
         Box::pin(async move {
             let _change = self.changes.lock().await;
             let previous = self.mode.get();
-            store_mode(&self.storage, mode).await.map_err(|error| {
-                log::error!("failed to store the QQ mode: {error}");
-                ModeError::Storage
-            })?;
+            self.gateway
+                .store_mode(&self.storage, mode)
+                .await
+                .map_err(|error| {
+                    log::error!("failed to store the QQ mode: {error}");
+                    ModeError::Storage
+                })?;
             if let Err(error) = self.register_for(mode) {
                 log::warn!("the Gateway rejected the QQ channel: {error}");
-                if let Err(error) = store_mode(&self.storage, previous).await {
+                if let Err(error) = self.gateway.store_mode(&self.storage, previous).await {
                     log::error!("failed to restore the QQ mode: {error}");
                 }
                 return Err(ModeError::Registration);
@@ -281,7 +256,7 @@ where
         })
     }
 
-    fn receive(&self) -> &ReceiveControl<Slots> {
+    fn receive(&self) -> &ReceiveControl<ReceiveSlots> {
         &self.receive
     }
 

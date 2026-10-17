@@ -8,7 +8,7 @@ use barracuda_captive_portal_plugin::{
     WebText,
 };
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
@@ -183,7 +183,7 @@ async fn plugin_unload_updates_the_http_manifest_and_assets() {
             barracuda_plugin::api::Hardware::new("test-chip"),
         ),
     );
-    let mut context = PluginContext::new(info, stack, ClientFactory::plaintext(stack));
+    let mut context = PluginContext::new(info, stack);
     let resources = barracuda_vfs_memfs::MemFs::new();
     resources
         .create_dir_all("/plugins/captive-portal")
@@ -326,16 +326,19 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             Assets,
         )
         .expect("register wifi");
-    let _qq = portal
+    let _one = portal
         .register(
             WebEntry {
-                id: "imessage-qq",
+                id: "channel-one",
                 group: WebGroup::Channel,
                 order: 40,
-                title: WebText { zh: "QQ", en: "QQ" },
+                title: WebText {
+                    zh: "Bravo",
+                    en: "Bravo",
+                },
                 summary: WebText {
-                    zh: "QQ Bot 消息通道",
-                    en: "QQ bot message channel",
+                    zh: "Bravo 消息通道",
+                    en: "Bravo message channel",
                 },
                 icon: None,
                 figure: None,
@@ -343,7 +346,7 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             },
             Assets,
         )
-        .expect("register qq");
+        .expect("register one");
     let _agent = portal
         .register(
             WebEntry {
@@ -386,14 +389,14 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
                 "module": "/portal/assets/wifi/entry.js"
             },
             {
-                "id": "imessage-qq",
+                "id": "channel-one",
                 "group": "channel",
                 "order": 40,
-                "title": {"zh": "QQ", "en": "QQ"},
-                "summary": {"zh": "QQ Bot 消息通道", "en": "QQ bot message channel"},
+                "title": {"zh": "Bravo", "en": "Bravo"},
+                "summary": {"zh": "Bravo 消息通道", "en": "Bravo message channel"},
                 "icon": null,
                 "figure": null,
-                "module": "/portal/assets/imessage-qq/chunks/entry.js"
+                "module": "/portal/assets/channel-one/chunks/entry.js"
             },
             {
                 "id": "agent",
@@ -407,7 +410,7 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             }
         ])
     );
-    // Field order is part of the wire contract shown in docs/plugin.md.
+    // Field order is part of the wire contract shown in docs/plugins/captive-portal.mdx.
     let text = std::str::from_utf8(body(&response)).expect("utf-8 manifest");
     assert!(text.starts_with(
         "[{\"id\":\"wifi\",\"group\":\"device\",\"order\":10,\"title\":{\"zh\":\"Wi-Fi\",\"en\":\"Wi-Fi\"},\"summary\":"
@@ -479,7 +482,7 @@ fn icon_and_figure_are_served_by_the_entry_provider() {
         .register(
             WebEntry {
                 icon: Some("icon.png"),
-                ..entry("imessage-inkbox", "Inkbox")
+                ..entry("channel-four", "Delta")
             },
             Named("inkbox"),
         )
@@ -487,10 +490,7 @@ fn icon_and_figure_are_served_by_the_entry_provider() {
     for (path, expected) in [
         ("/portal/assets/wifi/icon.svg", &b"wifi:icon.svg"[..]),
         ("/portal/assets/wifi/figure.js", b"wifi:figure.js"),
-        (
-            "/portal/assets/imessage-inkbox/icon.png",
-            b"inkbox:icon.png",
-        ),
+        ("/portal/assets/channel-four/icon.png", b"inkbox:icon.png"),
     ] {
         let response = block_on(portal.serve(path));
         assert_eq!(response.status(), 200, "{path}");
@@ -581,7 +581,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
         })
         .expect("register agent");
     let _web = portal
-        .register_with_status(entry("imessage-web", "Web"), Assets, || EntryStatus {
+        .register_with_status(entry("chat", "Web"), Assets, || EntryStatus {
             state: EntryState::Ready,
             label: None,
             detail: None,
@@ -605,7 +605,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
             r#"{"entries":{"#,
             r#""wifi":{"state":"ready","label":{"zh":"已连接","en":"Connected"},"detail":"Home \"Net\""},"#,
             r#""agent":{"state":"off","label":{"zh":"未配置","en":"Not set up"}},"#,
-            r#""imessage-web":{"state":"ready"}"#,
+            r#""chat":{"state":"ready"}"#,
             r#"}}"#
         )
     );
@@ -619,7 +619,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
             r#"{"entries":{"#,
             r#""wifi":{"state":"off","label":{"zh":"未连接","en":"Not connected"}},"#,
             r#""agent":{"state":"ready","label":{"zh":"已配置","en":"Configured"}},"#,
-            r#""imessage-web":{"state":"ready"}"#,
+            r#""chat":{"state":"ready"}"#,
             r#"}}"#
         )
     );
@@ -634,7 +634,7 @@ async fn status_lists_entries_with_sources_and_reads_them_per_request() {
         status,
         serde_json::json!({"entries": {
             "agent": {"state": "ready", "label": {"zh": "已配置", "en": "Configured"}},
-            "imessage-web": {"state": "ready"}
+            "chat": {"state": "ready"}
         }})
     );
 

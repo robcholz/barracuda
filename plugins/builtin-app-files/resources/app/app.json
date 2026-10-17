@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "files",
+  "name": "文件",
+  "version": "0.1.0",
+  "api": 1,
+  "icon": "files",
+  "view": { "shape": "round" }
+}

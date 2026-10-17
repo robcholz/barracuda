@@ -6,7 +6,7 @@ use alloc::{
 };
 
 use barracuda_agent_plugin::tools::{
-    Action, RiskClass, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
+    Action, RiskClass, Tool, ToolContext, ToolFuture, ToolHandler, ToolInvocation, ToolSpec,
 };
 use barracuda_vfs::ScopedVfs;
 use serde::{Deserialize, Serialize};
@@ -55,7 +55,7 @@ impl ToolSpec for FileListTool {
 impl ToolHandler for FileListTool {
     type Args = ListArgs;
 
-    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _context: ToolContext, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let path = args.path.as_str();
             if args.limit == 0 || args.limit > MAX_LIST_ENTRIES {
@@ -116,7 +116,7 @@ mod tests {
     use embassy_futures::block_on;
 
     use super::{FileListTool, ListArgs};
-    use crate::tools::common::{filesystem, json};
+    use crate::tools::common::{CONTEXT, filesystem, json};
 
     #[test]
     fn is_sorted_paginated_concurrent_and_has_defaults() -> Result<(), Box<dyn core::error::Error>>
@@ -131,11 +131,14 @@ mod tests {
             };
 
             let output = tool
-                .invoke(ListArgs {
-                    path: "/src".into(),
-                    offset: 1,
-                    limit: 2,
-                })
+                .invoke(
+                    CONTEXT,
+                    ListArgs {
+                        path: "/src".into(),
+                        offset: 1,
+                        limit: 2,
+                    },
+                )
                 .await?;
 
             assert!(output.ok);

@@ -171,7 +171,7 @@ tool_contains = [
   # Unlike file_write, file_move does not create missing parents (LittleFS NOENT).
   '"to": "/data/m/nodir/src.txt"}{"error":"not_found","message":"path not found"}',
   '"to": "/cache/m/src.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',
-  # Documented in .agents/docs/platform-architecture.md "Composition and operation invariants".
+  # Documented in docs/architecture/platform-architecture.mdx "Composition and operation invariants".
   '"to": "/workspace/media/w.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',
   # The mount check runs before the read-only check (vfs.rs:304-308).
   '"to": "/workspace/resources/src.txt"}{"error":"cross_mount","message":"operation crosses a mount boundary"}',

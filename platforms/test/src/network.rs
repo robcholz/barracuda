@@ -19,7 +19,7 @@ use embedded_nal_async::{AddrType, ConnectedUdp, Dns, TcpConnect, UdpStack, Unco
 
 const EMBASSY_MTU: usize = 1500;
 const EMBASSY_PACKETS: usize = 4;
-const EMBASSY_SOCKETS: usize = 12;
+const EMBASSY_SOCKETS: usize = 40;
 type LoopbackDevice = Device<'static, EMBASSY_MTU>;
 
 /// In-process Embassy Net stack whose layer-three packets are looped back.

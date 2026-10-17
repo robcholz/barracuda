@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "camera",
+  "name": "相机",
+  "version": "0.1.0",
+  "api": 1,
+  "requires": ["camera"],
+  "icon": "camera",
+  "view": { "shape": "round" }
+}

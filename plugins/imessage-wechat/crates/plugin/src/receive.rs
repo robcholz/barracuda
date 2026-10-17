@@ -3,8 +3,9 @@
 //!
 //! One session holds one kept-alive connection and long-polls on it until
 //! the server closes it, a poll misses its deadline (an empty success: the
-//! connection is reopened at once), or a poll fails. Text messages from
-//! allowed accounts are published to the Gateway; a pairing message adds its
+//! connection is reopened at once), or a poll fails. Messages from allowed
+//! accounts are published to the Gateway, their files fetched from the CDN
+//! and decrypted first (see [`crate::media`]); a pairing message adds its
 //! sender and is answered once; everything else is dropped. A batch too large
 //! to buffer is skipped: its cursor is read from the reply's end and the loss
 //! is counted.
@@ -16,24 +17,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use barracuda_imessage_gateway_channel::{
-    Classification, ReceiveChannel, ReceiveError, ReceiveFuture, ReceiveSession, ReceiveSlotSource,
-    SlotWait, PAIRED_REPLY,
-};
 use barracuda_imessage_gateway_plugin::{
-    poll, Error as GatewayHttpError, PollEnd, PollLimits, PollRequest, Polled, Poller,
-};
-use barracuda_imessage_gateway_plugin::{
-    GatewayInboundMessage, GatewayRoute, MessageChannel, MessageTarget, SendMessageRequest,
+    Classification, Error as GatewayHttpError, GatewayInboundMessage, GatewayRoute, MessageChannel,
+    MessageTarget, PollEnd, PollLimits, PollRequest, Polled, Poller, ReceiveChannel, ReceiveError,
+    ReceiveFuture, ReceiveLease, ReceiveSession, SendMessageRequest, PAIRED_REPLY,
 };
 use barracuda_plugin::api::Entropy;
 use barracuda_plugin::manager::PluginStorage;
 use embassy_time::{Duration, Instant};
-use http_client::embedded_nal_async::{Dns, TcpConnect};
-use http_client::{ReceiveLease, ReceiveSlots};
 use wechat::{
     authorization, parse_oversized_updates, parse_updates, updates_body, updates_headers,
-    wechat_uin, ContextTokens, InboundText, Updates, UpdatesError, Wechat, WechatConfig,
+    wechat_uin, ContextTokens, InboundMessage, Updates, UpdatesError, Wechat, WechatConfig,
     DEFAULT_LONG_POLL_MS, MAX_UPDATES_BYTES, MAX_UPDATES_TAIL_BYTES, UPDATES_HEADER_BYTES,
     UPDATES_PATH,
 };
@@ -97,35 +91,6 @@ const TOO_MANY_REQUESTS: u16 = 429;
 /// Wait after a 429, which carries no `Retry-After` the poll can read.
 const RATE_LIMIT_DELAY: Duration = Duration::from_secs(30);
 
-/// The System's receive slot pool as the scaffold's slot source.
-pub(crate) struct WechatSlots<R: 'static, D: 'static>(ReceiveSlots<R, D>);
-
-impl<R, D> WechatSlots<R, D> {
-    pub(crate) const fn new(slots: ReceiveSlots<R, D>) -> Self {
-        Self(slots)
-    }
-}
-
-impl<R: 'static, D: 'static> ReceiveSlotSource for WechatSlots<R, D> {
-    type Lease = ReceiveLease<R, D>;
-
-    fn acquire(&self) -> Option<Self::Lease> {
-        self.0.acquire()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn in_use(&self) -> usize {
-        self.0.in_use()
-    }
-
-    fn wait_available(&self) -> SlotWait<'_> {
-        Box::pin(self.0.wait_available())
-    }
-}
-
 /// Receive bookkeeping kept across sessions.
 pub(crate) struct InboundState {
     /// The `get_updates_buf` to send next; empty before the first reply.
@@ -143,15 +108,12 @@ pub(crate) struct InboundState {
     /// Bumped when the linked bot changes, so a session of the old bot
     /// writes nothing more.
     epoch: Cell<u32>,
-    /// Non-text, bot, and group messages dropped since boot.
+    /// Empty, bot, and group messages dropped since boot.
     skipped: Cell<u32>,
     /// Batches skipped since boot because they exceeded
     /// [`MAX_UPDATES_BYTES`]; their messages are lost.
     oversized: Cell<u32>,
     timing: PollTiming,
-    /// Messages the Gateway accepted, for tests.
-    #[cfg(test)]
-    pub(crate) published: RefCell<alloc::vec::Vec<GatewayInboundMessage>>,
 }
 
 impl InboundState {
@@ -193,8 +155,6 @@ impl InboundState {
             skipped: Cell::new(0),
             oversized: Cell::new(0),
             timing,
-            #[cfg(test)]
-            published: RefCell::new(alloc::vec::Vec::new()),
         }
     }
 
@@ -316,38 +276,21 @@ impl InboundState {
     }
 }
 
-/// The scaffold's view of the channel: runs receive sessions over a lease.
-pub(crate) struct WechatReceiver<Storage, T: 'static, D: 'static, R: 'static>(
-    Rc<ChannelConfiguration<Storage, T, D, R>>,
-);
-
-impl<Storage, T, D, R> WechatReceiver<Storage, T, D, R> {
-    pub(crate) const fn new(configuration: Rc<ChannelConfiguration<Storage, T, D, R>>) -> Self {
-        Self(configuration)
-    }
-}
-
-impl<Storage, T, D, R> ReceiveChannel<ReceiveLease<R, D>> for WechatReceiver<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> ReceiveChannel<ReceiveLease> for ChannelConfiguration<Storage> {
     fn receive<'a>(
         &'a self,
-        lease: &'a mut ReceiveLease<R, D>,
+        lease: &'a mut ReceiveLease,
         session: ReceiveSession<'a>,
     ) -> ReceiveFuture<'a> {
-        Box::pin(self.0.receive_session(lease, session))
+        Box::pin(self.receive_session(lease, session))
     }
 }
 
 /// One session's long polls: what to ask for next and what to do with
 /// answers.
-struct WechatPoller<'a, Storage, T: 'static, D: 'static, R: 'static> {
-    channel: &'a ChannelConfiguration<Storage, T, D, R>,
-    provider: &'a Rc<Wechat<'static, T, D>>,
+struct WechatPoller<'a, Storage> {
+    channel: &'a ChannelConfiguration<Storage>,
+    provider: &'a Rc<Wechat>,
     config: &'a WechatConfig,
     authorization: String,
     /// `X-WECHAT-UIN` of the poll in flight.
@@ -357,13 +300,7 @@ struct WechatPoller<'a, Storage, T: 'static, D: 'static, R: 'static> {
     epoch: u32,
 }
 
-impl<Storage, T, D, R> Poller for WechatPoller<'_, Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> Poller for WechatPoller<'_, Storage> {
     type Error = ReceiveError;
 
     async fn next(&mut self) -> Result<PollRequest, ReceiveError> {
@@ -426,18 +363,12 @@ where
     }
 }
 
-impl<Storage, T, D, R> ChannelConfiguration<Storage, T, D, R>
-where
-    Storage: PluginStorage,
-    T: TcpConnect + 'static,
-    D: Dns + 'static,
-    R: TcpConnect + 'static,
-{
+impl<Storage: PluginStorage> ChannelConfiguration<Storage> {
     /// One receive session: one kept-alive connection, long-polled until it
     /// ends.
     async fn receive_session(
         &self,
-        lease: &ReceiveLease<R, D>,
+        lease: &ReceiveLease,
         session: ReceiveSession<'_>,
     ) -> Result<(), ReceiveError> {
         let Some(provider) = self.provider() else {
@@ -453,13 +384,10 @@ where
             session,
             epoch: self.inbound.epoch.get(),
         };
-        match poll(
-            &lease.client_factory(),
-            &config.api_base,
-            LIMITS,
-            &mut poller,
-        )
-        .await
+        let http = self.gateway.http();
+        match http
+            .poll(lease, &config.api_base, LIMITS, &mut poller)
+            .await
         {
             PollEnd::Connect(GatewayHttpError::TlsNotConfigured) => {
                 Err(ReceiveError::halt("TLS is unavailable"))
@@ -511,13 +439,7 @@ where
     /// Handles one reply: delivers new text messages, then stores the
     /// context tokens and the cursor. The cursor past a skipped batch
     /// (`oversized`) is stored at once, like one that came with messages.
-    async fn deliver(
-        &self,
-        provider: &Rc<Wechat<'static, T, D>>,
-        updates: Updates,
-        epoch: u32,
-        oversized: bool,
-    ) {
+    async fn deliver(&self, provider: &Rc<Wechat>, updates: Updates, epoch: u32, oversized: bool) {
         let Updates {
             messages,
             skipped,
@@ -532,7 +454,7 @@ where
             self.inbound
                 .skipped
                 .set(self.inbound.skipped.get().saturating_add(skipped));
-            log::debug!("skipped {skipped} WeChat messages without user text");
+            log::debug!("skipped {skipped} WeChat messages without user text or files");
         }
         self.inbound.adopt_long_poll(longpolling_timeout_ms);
         let had_messages = oversized || !messages.is_empty();
@@ -555,21 +477,19 @@ where
     }
 
     /// Classifies one message; returns whether a context token changed.
-    async fn deliver_one(
-        &self,
-        provider: &Rc<Wechat<'static, T, D>>,
-        message: InboundText,
-    ) -> bool {
-        let InboundText {
+    async fn deliver_one(&self, provider: &Rc<Wechat>, message: InboundMessage) -> bool {
+        let InboundMessage {
             message_id,
             from_user_id,
             context_token,
             text,
+            media,
         } = message;
         // A receiving channel is linked, so its owner book is loaded.
         let Some(owners) = self.owners.get() else {
             return false;
         };
+        // Classify first: a stranger's file is never fetched.
         let classification = owners.classify(&from_user_id, None, &text).await;
         if classification == Classification::Ignored {
             return false;
@@ -580,19 +500,23 @@ where
             .is_some_and(|token| self.inbound.context_tokens.remember(&from_user_id, &token));
         match classification {
             Classification::Owner => {
+                let mut text = text;
+                let mut attachments = Vec::new();
+                for file in media {
+                    let kind = file.kind;
+                    match crate::media::fetch(&self.gateway, provider, file).await {
+                        Ok(attachment) => attachments.push(attachment),
+                        Err(missed) => crate::media::append_note(&mut text, kind, missed),
+                    }
+                }
                 let inbound = GatewayInboundMessage {
                     route: GatewayRoute::new(CHANNEL, from_user_id),
                     message_id,
                     text,
+                    attachments,
                 };
-                #[cfg(test)]
-                let published = inbound.clone();
-                match self.gateway.publish(inbound).await {
-                    Ok(()) => {
-                        #[cfg(test)]
-                        self.inbound.published.borrow_mut().push(published);
-                    }
-                    Err(error) => log::warn!("failed to publish a WeChat message: {error}"),
+                if let Err(error) = self.gateway.publish(inbound).await {
+                    log::warn!("failed to publish a WeChat message: {error}");
                 }
             }
             Classification::Paired => {

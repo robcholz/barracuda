@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 /**
- * Local preview of the shell. The manifest lists the nine built-in contributors as they register
+ * Local preview of the shell. The manifest lists the ten built-in contributors as they register
  * on a device; their assets (entry.js, figure.js, icons) are served from each plugin's own build
  * output when it exists and are 404 otherwise. No device API is served: business endpoints 404,
  * so pages show what they show when the device does not answer.
@@ -29,6 +29,18 @@ const ENTRIES = [
     summary: text(
       "扫描、连接或忘记无线网络",
       "Scan, join or forget wireless networks",
+    ),
+    icon: "icon.svg",
+    figure: "figure.js",
+  },
+  {
+    id: "files",
+    group: "device",
+    order: 20,
+    title: text("文件", "Files"),
+    summary: text(
+      "查看 Agent 与脚本共用的文件",
+      "See the files the agent and scripts share",
     ),
     icon: "icon.svg",
     figure: "figure.js",
@@ -195,5 +207,5 @@ const server = Bun.serve({
   },
 });
 console.log(
-  `Portal preview: ${server.url}portal/ (${process.env.PORTAL_MANIFEST === "empty" ? "empty" : "nine-entry"} local manifest; no device API)`,
+  `Portal preview: ${server.url}portal/ (${process.env.PORTAL_MANIFEST === "empty" ? "empty" : "ten-entry"} local manifest; no device API)`,
 );

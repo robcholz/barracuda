@@ -1,0 +1,10 @@
+id = "builtin-app-settings"
+depends-on = ["app-manager", "wifi"]
+description = "The Settings system app: Wi-Fi, sound, display, apps, storage, the device."
+
+[tasks.app]
+cwd = "."
+command = ["bun", "../app-manager/resources/build-app.ts", "resources/app", "filesystem/resources/app"]
+inputs = ["resources/app"]
+outputs = ["filesystem/resources/app"]
+env = ["POCKETJS_ROOT"]

@@ -1,0 +1,10 @@
+id = "system-fonts"
+depends-on = ["app-manager"]
+description = "Ships the system fonts every view on a display draws with."
+
+[tasks.fonts]
+cwd = "."
+command = ["bun", "resources/fonts/build.ts"]
+inputs = ["resources/fonts", "../app-manager/resources/icons/barracuda-icons.otf", "../app-manager/resources/icons/icons.json"]
+outputs = ["filesystem/resources/fonts"]
+env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]

@@ -10,10 +10,12 @@ portable-atomic-util.workspace = true
 portable-atomic.workspace = true
 barracuda-board-hal.workspace = true
 barracuda-plugin.workspace = true
+barracuda-sound-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
-critical-section = "1"
 
 [dev-dependencies]
+barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

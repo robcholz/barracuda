@@ -2,7 +2,7 @@ use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use core::{cell::Cell, future::Future, pin::Pin};
 
 use barracuda_agent_runtime::{AgentRuntime, ApiPurpose, ModelApiManager};
-use barracuda_model_api::{BackendKind, InitError, ModelApiConfig};
+use barracuda_model_api::{BackendKind, InitError, InputModalities, ModelApiConfig};
 use barracuda_plugin::manager::{
     PluginError, PluginResult, PluginStorage, PluginWriteTransaction, StorageError,
 };
@@ -222,6 +222,8 @@ struct SetApiRequest {
     timeout_ms: u32,
     max_tokens: u32,
     image_max_bytes: usize,
+    input_modalities: InputModalities,
+    max_images_in_context: usize,
     backend: SetApiBackend,
     purpose: SetApiPurpose,
     default: bool,
@@ -338,6 +340,8 @@ impl SetApiRequest {
         api.timeout_ms = self.timeout_ms;
         api.max_tokens = self.max_tokens;
         api.image_max_bytes = self.image_max_bytes;
+        api.input_modalities = self.input_modalities;
+        api.max_images_in_context = self.max_images_in_context;
         (api, self.purpose.into(), self.default)
     }
 }
@@ -466,6 +470,8 @@ mod tests {
             "timeout_ms": 30000,
             "max_tokens": 4096,
             "image_max_bytes": 1048576,
+            "input_modalities": {"image": true, "pdf": false},
+            "max_images_in_context": 2,
             "backend": "openai_compatible",
             "purpose": "root_agent",
             "default": true,
@@ -477,6 +483,8 @@ mod tests {
             "timeout_ms": 30000,
             "max_tokens": 2048,
             "image_max_bytes": 1048576,
+            "input_modalities": {"image": true, "pdf": true},
+            "max_images_in_context": 3,
             "backend": "anthropic_compatible",
             "purpose": "memory",
             "default": false,
@@ -511,6 +519,41 @@ mod tests {
         assert_eq!(requests[1].0.model, "memory-model");
         assert_eq!(requests[1].1, ApiPurpose::Memory);
         assert!(!requests[1].2);
+        assert_eq!(
+            requests[0].0.input_modalities,
+            barracuda_model_api::InputModalities {
+                image: true,
+                pdf: false
+            }
+        );
+        assert_eq!(requests[0].0.max_images_in_context, 2);
+        assert!(requests[1].0.input_modalities.pdf);
+        assert_eq!(requests[1].0.max_images_in_context, 3);
+    }
+
+    #[test]
+    fn a_stored_model_without_attachment_settings_loads_with_their_defaults() {
+        let stored = br#"{"backend":"openai_compatible","api_key":"key","model":"m","base_url":"https://example.invalid/v1","timeout_ms":1,"max_tokens":2,"image_max_bytes":3}"#;
+        let api: barracuda_model_api::ModelApiConfig =
+            serde_json::from_slice(stored).expect("stored model decodes");
+        assert_eq!(
+            api.input_modalities,
+            barracuda_model_api::InputModalities::default()
+        );
+        assert!(api.input_modalities.image && !api.input_modalities.pdf);
+        assert_eq!(api.max_images_in_context, 2);
+    }
+
+    #[test]
+    fn requests_without_attachment_settings_are_rejected() {
+        let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1"}]"#;
+
+        let response = futures_lite::future::block_on(
+            endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
+        );
+
+        assert_eq!(response.status(), 400);
     }
 
     #[test]
@@ -521,8 +564,8 @@ mod tests {
             RecordingPersistence(Rc::clone(&persisted)),
             barracuda_agent_runtime::ModelApiManager::default(),
         );
-        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
-        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
+        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
+        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
 
         for body in [first.as_slice(), second.as_slice()] {
             let response = futures_lite::future::block_on(
@@ -651,7 +694,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
-        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
 
         let response = futures_lite::future::block_on(
             endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
@@ -715,7 +758,7 @@ mod tests {
 
         for base_url in ["not a url", "ftp://example.invalid/v1", "https://"] {
             let body = alloc::format!(
-                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
+                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{{"image":true,"pdf":false}},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
             );
             let response = futures_lite::future::block_on(
                 endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())),

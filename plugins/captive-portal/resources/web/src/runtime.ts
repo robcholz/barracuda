@@ -149,14 +149,18 @@ export function sortEntries(entries: readonly WebEntry[]): WebEntry[] {
   );
 }
 
-/** What the shell lends each mount; the session adds the signal and silences it once aborted. */
+/**
+ * What the shell lends each mount; the session adds the signal and silences it once aborted. The
+ * session calls these functions unbound.
+ */
 export interface SessionHost {
   lang: Lang;
-  toast(toast: Toast): void;
-  navigate(id: string): void;
-  status(id: string): EntryStatus | null;
-  refreshStatus(): Promise<void>;
-  badge(badge: PageBadge | null): void;
+  toast: (toast: Toast) => void;
+  navigate: (id: string) => void;
+  has: (id: string) => boolean;
+  status: (id: string) => EntryStatus | null;
+  refreshStatus: () => Promise<void>;
+  badge: (badge: PageBadge | null) => void;
 }
 
 export interface OpenOptions {
@@ -197,21 +201,22 @@ export class ModuleSession {
     const controller = new AbortController();
     this.controller = controller;
     const { signal } = controller;
+    /** A host call that does nothing once the page is left. */
+    const quiet =
+      <T>(call: (value: T) => void) =>
+      (value: T) => {
+        if (!signal.aborted) call(value);
+      };
     const context: PortalContext = Object.freeze({
       signal,
       lang: host.lang,
-      toast: (toast: Toast) => {
-        if (!signal.aborted) host.toast(toast);
-      },
-      navigate: (id: string) => {
-        if (!signal.aborted) host.navigate(id);
-      },
+      toast: quiet(host.toast),
+      navigate: quiet(host.navigate),
+      has: host.has,
       status: (id: string = entry.id) => host.status(id),
       refreshStatus: () =>
         signal.aborted ? Promise.resolve() : host.refreshStatus(),
-      badge: (badge: PageBadge | null) => {
-        if (!signal.aborted) host.badge(badge);
-      },
+      badge: quiet(host.badge),
     });
     const module = (await load(entry.module)) as Partial<PortalModule> | null;
     if (signal.aborted) return false;

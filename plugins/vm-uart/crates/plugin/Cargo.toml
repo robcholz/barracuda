@@ -15,6 +15,7 @@ embedded-io = "0.7"
 embedded-io-async = "0.7"
 
 [dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

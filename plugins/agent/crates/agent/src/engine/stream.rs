@@ -7,7 +7,7 @@ use core::{
 };
 
 use barracuda_agent_memory::TurnError;
-use barracuda_agent_tool::{ToolDetachHandle, ToolOutput};
+use barracuda_agent_tool::ToolOutput;
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::ToolCall;
@@ -66,7 +66,6 @@ pub enum AgentError {
 /// One event produced by the single-task AgentEngine execution core.
 pub(crate) enum AgentEngineEvent {
     Iteration(StreamPart<AgentIterationEvent>),
-    Detached(ToolDetachHandle),
     InputRequired(AgentInputRequest),
     Finished(AgentOutcome),
 }

@@ -16,7 +16,7 @@ use embedded_graphics_core::{
     Pixel,
     draw_target::DrawTarget,
     geometry::{OriginDimensions, Size},
-    pixelcolor::{Rgb888, RgbColor},
+    pixelcolor::{Rgb565, RgbColor},
     primitives::Rectangle,
 };
 use embedded_hal::{
@@ -227,11 +227,13 @@ where
         DESCRIPTOR
     }
 
-    fn draw_rgb888(&mut self, area: Rectangle, pixels: &[Rgb888]) -> Result<(), Self::RenderError> {
+    fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Self::RenderError> {
+        // Each channel on the 0..=255 scale; white from half the summed range.
+        let level = |value: u8, max: u16| u16::from(value) * 255 / max;
         self.fill_contiguous(
             &area,
             pixels.iter().map(|pixel| {
-                if u16::from(pixel.r()) + u16::from(pixel.g()) + u16::from(pixel.b()) >= 384 {
+                if level(pixel.r(), 31) + level(pixel.g(), 63) + level(pixel.b(), 31) >= 384 {
                     Color::White
                 } else {
                     Color::Black

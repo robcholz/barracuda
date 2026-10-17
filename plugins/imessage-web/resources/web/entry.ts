@@ -2,6 +2,7 @@ import {
   ICON_ARROW_DOWN,
   ICON_ARROW_UP,
   ICON_CHECK,
+  ICON_CHEVRON_LEFT,
   ICON_CHEVRON_RIGHT,
   ICON_CIRCLE_ALERT,
   ICON_CIRCLE_STOP,
@@ -10,14 +11,19 @@ import {
   ICON_COPY,
   ICON_DOWNLOAD,
   ICON_FILE,
+  ICON_FILE_IMAGE,
   ICON_LIGHTBULB,
   ICON_LOADER,
   ICON_MESSAGE_SQUARE_DASHED,
   ICON_PANEL,
+  ICON_PAPERCLIP,
+  ICON_PAUSE,
   ICON_PENCIL,
+  ICON_PLAY,
   ICON_REFRESH,
   ICON_REPLY,
   ICON_SHIELD_ALERT,
+  ICON_UPLOAD,
   ICON_WIFI_OFF,
   ICON_WRENCH,
   ICON_X,
@@ -27,9 +33,17 @@ import {
   h,
   icon,
   mark,
+  term,
   type PortalContext,
 } from "../../../captive-portal/resources/web/ui";
+import * as history from "./history";
 import { spinningMark } from "./mark";
+import {
+  MARKDOWN_CSS,
+  markdownSource,
+  renderMarkdown,
+  trailing,
+} from "./markdown";
 import {
   sessionRail,
   type SessionCommand,
@@ -39,9 +53,12 @@ import { CHAT_CSS } from "./style";
 
 /**
  * Web chat over the bridge's WebSocket `/ws/message`. The page sends `WebClientFrame` JSON
- * (`{ text }`; a reply carries its quote inside the text, see {@link withQuote}) and renders the SSE-formatted frames the bridge pushes: message
- * lifecycle (`message.start`/`delta`/`end`/`edit`/`delete`/`reaction`), the Agent's semantic
- * events inside `message.event`, attachments, typing and `stream.lagged`. Live events only.
+ * (`{ text }`; a reply carries its quote inside the text, see {@link withQuote}; files go first to
+ * `PUT /api/web/upload/<mime>/<name>` and the frame names their ids in `attachments`) and renders
+ * the SSE-formatted frames the bridge pushes: message lifecycle
+ * (`message.start`/`delta`/`end`/`edit`/`delete`/`reaction`), the Agent's semantic events inside
+ * `message.event`, media (`message.image`/`audio`/`video`/`file`, each one event naming a URL on
+ * the device), a refused frame (`message.rejected`), typing and `stream.lagged`. Live events only.
  *
  * The device runs one turn at a time. A message written while a turn runs waits in the page's
  * queue, where it can still be edited or removed, and goes out when the turn ends. Stop sends
@@ -117,9 +134,28 @@ const STRINGS = {
     session: "临时会话",
     sessionTip: "不会保存；离开这个会话后删除",
     download: "下载",
-    receiving: "接收中",
     received: "已接收",
-    mediaFailed: "接收失败",
+    attach: "添加附件",
+    drop: "松开以添加附件",
+    removeAttachment: "移除附件",
+    uploading: "上传中",
+    retryUpload: "重试上传",
+    imageFailed: "一张图片没有上传成功，点它重试或移除后再发送。",
+    fileFailed: "一个文件没有上传成功，点它重试或移除后再发送。",
+    tooBig: (name: string, mb: number) =>
+      `「${name}」超过 ${mb} MB，请换一个更小的文件。`,
+    rejected: "附件已失效，这条消息没有发出",
+    viewImage: (name: string) => `查看图片 ${name}`,
+    moreImages: (n: number) => `查看另外 ${n} 张图片`,
+    play: "播放",
+    pause: "暂停",
+    playVideo: "播放视频",
+    unavailable: "已不可用",
+    unavailableTip: "设备重启时清空了缓存中的附件",
+    sentGoneTip: "发出的文件不随会话保存在浏览器里",
+    prev: "上一张",
+    next: "下一张",
+    close: "关闭",
     reaction: "回应",
     tooLong: "消息太长，请缩短后发送。",
     notSent: "消息未发出",
@@ -192,9 +228,31 @@ const STRINGS = {
     session: "Temporary chat",
     sessionTip: "Not saved; deleted when you leave it",
     download: "Download",
-    receiving: "receiving",
     received: "received",
-    mediaFailed: "failed",
+    attach: "Attach files",
+    drop: "Drop to attach",
+    removeAttachment: "Remove attachment",
+    uploading: "Uploading",
+    retryUpload: "Retry upload",
+    imageFailed:
+      "An image didn't upload; select it to retry, or remove it before sending.",
+    fileFailed:
+      "A file didn't upload; select it to retry, or remove it before sending.",
+    tooBig: (name: string, mb: number) =>
+      `“${name}” is over ${mb} MB; choose a smaller file.`,
+    rejected: "Its attachments expired; this message wasn't sent",
+    viewImage: (name: string) => `View image ${name}`,
+    moreImages: (n: number) => `View ${n} more images`,
+    play: "Play",
+    pause: "Pause",
+    playVideo: "Play video",
+    unavailable: "Unavailable",
+    unavailableTip: "The device cleared cached attachments when it restarted",
+    sentGoneTip:
+      "Files you sent aren't kept with the conversation in this browser",
+    prev: "Previous",
+    next: "Next",
+    close: "Close",
     reaction: "Reaction",
     tooLong: "This message is too long; shorten it to send.",
     notSent: "Message not sent",
@@ -210,7 +268,15 @@ const MAX_QUOTE = 512;
 const MAX_ITEMS = 100;
 const MAX_TEXT = 65536;
 const MAX_FRAME = 262144;
-const MAX_MEDIA = 8 * 1024 * 1024;
+/** Files one message carries, as the bridge allows. */
+const MAX_FILES = 4;
+/** Pictures are drawn again at most this long on their long side before upload. */
+const MAX_SIDE = 1568;
+/** The pictures the log shows (and the device serves) as pictures. */
+const PICTURES = /^image\/(jpeg|png|gif|webp)$/;
+/** A user turn's pictures stay narrower than an Agent's. */
+const USER_MEDIA = 320;
+const AGENT_MEDIA = 440;
 /** The composer grows with its text up to this height, then scrolls. */
 const MAX_INPUT = 200;
 /**
@@ -230,6 +296,65 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 type Data = Record<string, unknown>;
 const str = (value: unknown) => (typeof value === "string" ? value : "");
+
+/** `18 KB`, `1.2 MB`. */
+function formatSize(size: number) {
+  return size < 1024
+    ? `${size} B`
+    : size < 1024 * 1024
+      ? `${Math.round(size / 1024)} KB`
+      : `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** A file's type in a word: its extension, else its MIME subtype, in capitals. */
+function typeLabel(name: string, mime: string) {
+  const dot = name.lastIndexOf(".");
+  return (
+    dot > 0 ? name.slice(dot + 1) : (mime.split("/")[1] ?? "")
+  ).toUpperCase();
+}
+
+/** `0:12`. */
+function clock(seconds: number) {
+  const whole = Number.isFinite(seconds) ? Math.floor(seconds) : 0;
+  return `${Math.floor(whole / 60)}:${pad(whole % 60)}`;
+}
+
+/**
+ * A JPEG, PNG or WebP drawn again at most {@link MAX_SIDE} long and encoded at 0.85 (JPEG stays
+ * JPEG, the others become WebP), which also drops its metadata. Anything else, or a browser that
+ * cannot, keeps the file as it is.
+ */
+async function shrink(file: File): Promise<File> {
+  if (
+    !/^image\/(jpeg|png|webp)$/.test(file.type) ||
+    typeof createImageBitmap !== "function"
+  )
+    return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas
+      .getContext("2d")!
+      .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const type = file.type === "image/jpeg" ? file.type : "image/webp";
+    const blob = await new Promise<Blob | null>((done) =>
+      canvas.toBlob(done, type, 0.85),
+    );
+    if (!blob || blob.type !== type) return file;
+    const name =
+      type === file.type
+        ? file.name
+        : file.name.replace(/\.\w+$/, "") + ".webp";
+    return new File([blob], name, { type });
+  } catch {
+    return file;
+  }
+}
 
 /** Shows or hides a node, whatever display its inline style or class gives it. */
 function show(node: HTMLElement, on: boolean) {
@@ -307,15 +432,19 @@ interface Request {
 }
 
 /**
- * One open text run. Text the device sends lands in `pending` and flows into `text` a few
+ * One open text run. Text the device sends lands in `pending` and flows into the run a few
  * characters a frame, so a reply streams in smoothly rather than in bursts; `done` runs when the
- * run closes.
+ * run closes. A reply's output is Markdown: it gathers in `source` and is painted into `node` again
+ * as it grows; any other run is plain `text`.
  */
 interface Run {
   stream: string;
-  text: Text;
+  text: Text | null;
+  source: string;
   node: HTMLElement;
   pending: string;
+  /** The reply is still streaming here: the caret follows its last line. */
+  caret?: boolean;
   done?: () => void;
 }
 
@@ -339,17 +468,40 @@ interface Agent {
   ended: boolean;
   /** The sent message this one answers, from its start. */
   replyTo: string;
-  media?: Media;
 }
 
-interface Media {
-  chunks: Uint8Array[];
-  size: number;
-  kept: boolean;
-  meta: HTMLElement;
-  slot: HTMLElement;
-  filename: string;
+/** A file the log shows: its URL (on the device, or the page's own copy), name, type and size. */
+interface Shown {
+  url: string;
+  name: string;
   mime: string;
+  size: number;
+}
+
+/** Pictures in a row of the log: one picture, or a grid of them, opening the Viewer. */
+interface Gallery {
+  node: HTMLElement;
+  items: Shown[];
+  max: number;
+  /** The last message whose picture joined it; a picture right after it joins too. */
+  last: HTMLElement;
+}
+
+/** A file in the composer, then in the message that sends it. */
+interface Upload {
+  file: File;
+  /** The page's own copy, shown in the composer and in the sent message. */
+  url: string;
+  picture: boolean;
+  shrunk: boolean;
+  /** The device's id once uploaded. */
+  id: string;
+  state: "busy" | "ready" | "error" | "refused";
+  /** The device's limit, when it refused the file as too large. */
+  limit: number;
+  progress: number;
+  request: XMLHttpRequest | null;
+  node: HTMLElement;
 }
 
 interface Sent {
@@ -360,12 +512,14 @@ interface Sent {
   quoted: { id: string; text: string } | null;
   /** 「撤回」, shown while the message's turn has not ended. */
   rewind: HTMLElement;
+  uploads: Upload[];
 }
 
 /** A message waiting in the page for the running turn to end. */
 interface Queued {
   text: string;
   replyTo: { id: string; text: string } | null;
+  uploads: Upload[];
 }
 
 /**
@@ -408,7 +562,7 @@ export const mount = definePage((context: PortalContext) => {
   const t = STRINGS[lang];
   const doc = document;
   // the page's own rules, for as long as it is mounted
-  const style = h("style", null, CHAT_CSS);
+  const style = h("style", null, CHAT_CSS + MARKDOWN_CSS);
   doc.head.append(style);
 
   // ---- layout
@@ -560,12 +714,39 @@ export const mount = definePage((context: PortalContext) => {
     iconButton(t.cancelReply, ICON_X, () => setReply(null)).button,
   );
   show(replyBar, false);
+  // files: the paperclip's picker, a pasted picture, or a drop anywhere on the page
+  const picker = h("input", {
+    type: "file",
+    multiple: true,
+    hidden: true,
+    onchange: () => {
+      void addFiles([...(picker.files ?? [])]);
+      picker.value = "";
+    },
+  });
+  const attach = iconButton(
+    t.attach,
+    ICON_PAPERCLIP,
+    () => picker.click(),
+    "bc-button bc-button--ghost bc-button--icon",
+  ).button;
+  const attachments = h("div", { class: "bc-attachments" });
+  show(attachments, false);
+  const dropZone = h(
+    "div",
+    { class: "bc-drop" },
+    icon(ICON_UPLOAD, undefined, "bc-muted"),
+    h("span", { class: "bc-small" }, t.drop),
+  );
+  show(dropZone, false);
   const composer = h(
     "div",
     { class: "bc-composer" },
     answering,
     queueList,
     replyBar,
+    attachments,
+    dropZone,
     h(
       "label",
       {
@@ -582,10 +763,12 @@ export const mount = definePage((context: PortalContext) => {
       h(
         "div",
         { class: "bc-composer__actions" },
+        attach,
         stopButton.button,
         sendButton.button,
       ),
     ),
+    picker,
   );
   const invalid = h("span", {
     class: "bc-hint bc-hint--error",
@@ -593,6 +776,12 @@ export const mount = definePage((context: PortalContext) => {
     id: "imessage-web-message-error",
   });
   show(invalid, false);
+  // one sentence per problem with the composer's files
+  const fileHints = h("div", {
+    role: "alert",
+    style: "display:flex;flex-direction:column;gap:4px",
+  });
+  show(fileHints, false);
   const offlineCount = h("span");
   const offline = h(
     "div",
@@ -645,6 +834,7 @@ export const mount = definePage((context: PortalContext) => {
       offline,
       composer,
       invalid,
+      fileHints,
       suggestions,
     ),
   );
@@ -708,12 +898,26 @@ export const mount = definePage((context: PortalContext) => {
   /** Sent messages whose turn has not started yet. */
   const awaiting = new Set<string>();
   const queue: Queued[] = [];
+  /** The composer's files, in the order added. */
+  let uploads: Upload[] = [];
+  /** The Agent's latest pictures, which the next picture of its turn joins. */
+  let gallery: Gallery | null = null;
+  let closeViewer: (() => void) | null = null;
   /** Rewound messages: their turns' messages are dropped as they arrive. */
   const withdrawn = new Set<string>();
   /** Agent messages of a rewound turn, or of a session left, ignored until they end. */
   const dropped = new Set<string>();
   /** Sent messages of a conversation cleared for another session. */
   const stale = new Set<string>();
+  /** The saved session the page shows, and the browser's copy of its conversation. */
+  let saved: string | null = null;
+  let frames: history.Frame[] = [];
+  /** The conversation shown is copied: a saved session, or a new one the device names later. */
+  let copying = false;
+  /** The copy is being drawn again: what it draws is not kept twice. */
+  let replaying = false;
+  let replays = 0;
+  let saving: ReturnType<typeof setTimeout> | undefined;
   /** A rewound message waits in the composer: the queue holds until it is sent. */
   let held = false;
   /** Stop was asked for; the turn has not ended yet. */
@@ -782,10 +986,19 @@ export const mount = definePage((context: PortalContext) => {
     text: string,
     id: string,
     quoted: { id: string; text: string } | null,
+    files: Upload[] = [],
   ) {
     const reaction = reactionBadge();
     const rewind = iconButton(t.rewind, ICON_UNDO, () => rewindTo(id)).button;
     show(rewind, false);
+    // the files sit above the bubble, shown from the page's own copies
+    const shown = files.map((upload) => ({
+      url: upload.url,
+      name: upload.file.name,
+      mime: upload.file.type,
+      size: upload.file.size,
+    }));
+    const pictures = shown.filter((item) => PICTURES.test(item.mime));
     const node = h(
       "div",
       { class: "bc-turn bc-turn--user bc-turn--new" },
@@ -800,7 +1013,11 @@ export const mount = definePage((context: PortalContext) => {
             icon(ICON_REPLY),
             h("span", { class: "bc-composer__text" }, quoted.text),
           ),
-      h("p", { class: "bc-bubble" }, text),
+      pictures.length ? galleryOf(pictures, USER_MEDIA).node : null,
+      shown
+        .filter((item) => !pictures.includes(item))
+        .map((item) => block(item, USER_MEDIA, t.sent)),
+      text.trim() ? h("p", { class: "bc-bubble" }, text) : null,
       h(
         "span",
         { class: "bc-meta", style: "gap:4px" },
@@ -816,11 +1033,632 @@ export const mount = definePage((context: PortalContext) => {
       text,
       quoted,
       rewind,
+      uploads: files,
     };
     const map = sent;
     map.set(id, record);
-    add(node, () => map.delete(id));
+    add(node, () => {
+      map.delete(id);
+      for (const upload of files) release(upload);
+    });
     return record;
+  }
+
+  // ---- media in the log
+  /** One picture or a grid of them, `max` wide at most. */
+  function galleryOf(
+    items: Shown[],
+    max: number,
+    last: HTMLElement = column,
+  ): Gallery {
+    const made: Gallery = { node: h("div"), items, max, last };
+    drawGallery(made);
+    return made;
+  }
+
+  function drawGallery(target: Gallery) {
+    const { items } = target;
+    if (!items.length) return target.node.remove();
+    const next =
+      items.length === 1
+        ? picture(target, 0, false)
+        : h(
+            "div",
+            {
+              class: "bc-media-grid",
+              style: `width:100%;max-width:${USER_MEDIA}px`,
+            },
+            items.slice(0, 4).map((_, index) => picture(target, index, true)),
+          );
+    target.node.replaceWith(next);
+    target.node = next;
+  }
+
+  /**
+   * A picture as a button that opens the Viewer: alone at its own ratio, or a square grid cell;
+   * past four, the fourth cell dims under 「+N」.
+   */
+  function picture(target: Gallery, index: number, cell: boolean) {
+    const item = target.items[index];
+    const more =
+      cell && index === 3 && target.items.length > 4
+        ? target.items.length - 3
+        : 0;
+    const image = h("img", { src: item.url, alt: "", loading: "lazy" });
+    const button = h(
+      "button",
+      {
+        class: `bc-media${more ? " bc-media--more" : ""}`,
+        type: "button",
+        "aria-label": more ? t.moreImages(more) : t.viewImage(item.name),
+        style: cell
+          ? "aspect-ratio:1"
+          : `width:100%;max-width:${target.max}px;aspect-ratio:4/3`,
+        onclick: () => viewer(target.items, index, button),
+      },
+      image,
+      more
+        ? h(
+            "span",
+            { class: "bc-media__more" },
+            h("span", { class: "bc-title bc-mono" }, `+${more}`),
+          )
+        : null,
+    );
+    image.addEventListener("load", () => {
+      if (cell || !image.naturalWidth) return;
+      button.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+      button.style.maxWidth = `${Math.min(target.max, image.naturalWidth)}px`;
+    });
+    // gone from the device (evicted, or cleared by a restart): a card says so in its place
+    image.addEventListener("error", () => {
+      const at = target.items.indexOf(item);
+      if (at < 0) return;
+      target.node.after(unavailable(item));
+      target.items.splice(at, 1);
+      drawGallery(target);
+    });
+    return button;
+  }
+
+  function unavailable(item: Shown, tip = t.unavailableTip) {
+    return fileRow(
+      ICON_FILE_IMAGE,
+      h(
+        "span",
+        { class: "bc-option-title bc-muted", style: "overflow-wrap:anywhere" },
+        item.name || "—",
+      ),
+      h(
+        "span",
+        { class: "bc-caption bc-muted" },
+        term(t.unavailable, tip, lang, { start: true }),
+      ),
+    );
+  }
+
+  /** A file card's row: the type's tile, the name over its caption, then `end`. */
+  function fileRow(
+    paths: string,
+    name: HTMLElement,
+    caption: HTMLElement,
+    end?: HTMLElement,
+  ) {
+    return h(
+      "div",
+      { class: "bc-card" },
+      h(
+        "div",
+        { class: "bc-card__row" },
+        h("span", { class: "bc-option-icon" }, icon(paths)),
+        h(
+          "span",
+          {
+            style:
+              "flex:1 1 auto;min-width:0;display:flex;flex-direction:column",
+          },
+          name,
+          caption,
+        ),
+        end,
+      ),
+    );
+  }
+
+  /** Audio, video or any other file, as its card; `status` ends a file's caption. */
+  function block(item: Shown, max: number, status: string): HTMLElement {
+    if (item.mime.startsWith("audio/")) return audioCard(item);
+    if (item.mime.startsWith("video/")) return videoBox(item, max);
+    // 「`application/gpx+xml · 18 KB` · 已接收」: the machine values mono, the state in words
+    return fileRow(
+      ICON_FILE,
+      h(
+        "span",
+        { class: "bc-option-title", style: "overflow-wrap:anywhere" },
+        item.name || "—",
+      ),
+      h(
+        "span",
+        { class: "bc-caption bc-muted" },
+        h(
+          "span",
+          { class: "bc-mono" },
+          [item.mime, formatSize(item.size)].filter(Boolean).join(" · "),
+        ),
+        ` · ${status}`,
+      ),
+      h(
+        "a",
+        {
+          class: "bc-button bc-button--outline bc-button--sm",
+          href: item.url,
+          download: item.name || "attachment",
+          style: "flex:none",
+        },
+        icon(ICON_DOWNLOAD),
+        t.download,
+      ),
+    );
+  }
+
+  /** Audio: play and pause, its name over `0:12 / 0:48`, and a 2px line at the position. */
+  function audioCard(item: Shown) {
+    const audio = h("audio", { src: item.url, preload: "metadata" });
+    show(audio, false);
+    const line = h("i", { style: "width:0%" });
+    const time = h(
+      "span",
+      { class: "bc-caption bc-mono bc-muted" },
+      "0:00 / 0:00",
+    );
+    const toggle = iconButton(
+      t.play,
+      ICON_PLAY,
+      () => (audio.paused ? playMedia(audio) : audio.pause()),
+      "bc-button bc-button--outline bc-button--icon bc-button--sm",
+    );
+    const sync = () => {
+      const length = audio.duration;
+      time.textContent = `${clock(audio.currentTime)} / ${clock(length)}`;
+      line.style.width = `${length > 0 ? Math.min(100, (audio.currentTime / length) * 100) : 0}%`;
+    };
+    for (const name of ["timeupdate", "loadedmetadata", "durationchange"])
+      audio.addEventListener(name, sync);
+    audio.addEventListener("play", () => toggle.set(t.pause, ICON_PAUSE));
+    for (const name of ["pause", "ended"])
+      audio.addEventListener(name, () => toggle.set(t.play, ICON_PLAY));
+    const card = h(
+      "div",
+      { class: "bc-card" },
+      h(
+        "div",
+        { class: "bc-card__row" },
+        toggle.button,
+        h(
+          "span",
+          {
+            style:
+              "flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px",
+          },
+          h(
+            "span",
+            {
+              class: "bc-small",
+              style:
+                "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+            },
+            item.name || "—",
+          ),
+          time,
+          h("span", { class: "bc-track" }, line, audio),
+        ),
+      ),
+    );
+    audio.addEventListener("error", () => card.replaceWith(unavailable(item)));
+    return card;
+  }
+
+  /** Video: its first frame under a centred play button; once playing, the native controls. */
+  function videoBox(item: Shown, max: number) {
+    const video = h("video", {
+      src: `${item.url}#t=0.1`,
+      preload: "metadata",
+      playsinline: true,
+    });
+    const box = h(
+      "div",
+      {
+        class: "bc-media bc-media--video",
+        style: `width:100%;max-width:${max}px;aspect-ratio:16/9`,
+      },
+      video,
+    );
+    const play = iconButton(
+      t.playVideo,
+      ICON_PLAY,
+      () => {
+        play.button.remove();
+        video.controls = true;
+        playMedia(video);
+      },
+      "bc-button bc-button--outline bc-button--icon bc-media__play",
+    );
+    box.append(play.button);
+    video.addEventListener("loadedmetadata", () => {
+      if (video.videoWidth)
+        box.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    });
+    video.addEventListener("error", () => box.replaceWith(unavailable(item)));
+    return box;
+  }
+
+  function playMedia(element: HTMLMediaElement) {
+    try {
+      void Promise.resolve(element.play()).catch(() => {});
+    } catch {
+      // nothing to play here
+    }
+  }
+
+  /** An Agent's media message: pictures join the turn's latest pictures, the rest are cards. */
+  function media(kind: string, id: string, value: Data) {
+    const record = agent(id, "media");
+    record.ended = true;
+    const target = sent.get(str(value.reply_to));
+    if (target) target.confirmed = true;
+    const item: Shown = {
+      url: str(value.url),
+      name: str(value.filename),
+      mime: str(value.mime_type),
+      size: Number(value.size) || 0,
+    };
+    if (kind === "image" && PICTURES.test(item.mime)) {
+      const joined =
+        gallery &&
+        record.root.previousElementSibling === gallery.last &&
+        gallery.node.parentElement?.lastElementChild === gallery.node;
+      if (joined) {
+        gallery!.items.push(item);
+        gallery!.last = record.root;
+        drawGallery(gallery!);
+        show(record.root, false);
+      } else {
+        gallery = galleryOf([item], AGENT_MEDIA, record.root);
+        put(record, gallery.node);
+      }
+    } else put(record, block(item, AGENT_MEDIA, t.received));
+    const caption = str(value.caption);
+    if (caption) put(record, h("p", { class: "bc-reply" }, clip(caption)));
+  }
+
+  // ---- the Viewer: one picture over the page, on the dark ground
+  function viewer(items: Shown[], start: number, opener: HTMLElement) {
+    closeViewer?.();
+    let index = start;
+    const several = items.length > 1;
+    const name = h("span", {
+      class: "bc-small",
+      style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+    });
+    const meta = h("span", { class: "bc-caption bc-mono bc-muted" });
+    const count = h("span", { class: "bc-caption bc-mono bc-muted" });
+    const image = h("img", { alt: "" });
+    const download = h(
+      "a",
+      {
+        class: "bc-button bc-button--ghost bc-button--icon bc-button--sm",
+        "aria-label": t.download,
+      },
+      icon(ICON_DOWNLOAD),
+      h("span", { class: "bc-tooltip", "aria-hidden": "true" }, t.download),
+    );
+    const close = iconButton(
+      t.close,
+      ICON_X,
+      () => done(),
+      "bc-button bc-button--ghost bc-button--icon bc-button--sm",
+    ).button;
+    const nav = (label: string, paths: string, step: number, side: string) => {
+      const button = iconButton(
+        label,
+        paths,
+        () => go(step),
+        "bc-button bc-button--outline bc-button--icon bc-viewer__nav",
+      ).button;
+      button.style.cssText = `${side}:var(--space-6)`;
+      return button;
+    };
+    const stage = h(
+      "div",
+      {
+        class: "bc-viewer__stage",
+        // a click beside the picture closes
+        onclick: (event: Event) => {
+          if (event.target === stage) done();
+        },
+      },
+      several ? nav(t.prev, ICON_CHEVRON_LEFT, -1, "left") : null,
+      h("div", { class: "bc-viewer__image" }, image),
+      several ? nav(t.next, ICON_CHEVRON_RIGHT, 1, "right") : null,
+    );
+    const node = h(
+      "div",
+      {
+        class: "bc-viewer",
+        "data-theme": "dark",
+        role: "dialog",
+        "aria-modal": "true",
+        onkeydown: (raw: Event) => {
+          const event = raw as KeyboardEvent;
+          if (event.key === "Escape") done();
+          else if (several && event.key === "ArrowLeft") go(-1);
+          else if (several && event.key === "ArrowRight") go(1);
+          else if (event.key === "Tab") {
+            // focus stays in the dialog
+            const stops = [...node.querySelectorAll<HTMLElement>("a,button")];
+            const edge = event.shiftKey ? stops[0] : stops.at(-1);
+            if (doc.activeElement === edge) {
+              event.preventDefault();
+              (event.shiftKey ? stops.at(-1) : stops[0])!.focus();
+            }
+          } else return;
+          if (event.key !== "Tab") event.preventDefault();
+        },
+      },
+      h(
+        "div",
+        { class: "bc-viewer__bar" },
+        h(
+          "span",
+          { style: "min-width:0;display:flex;flex-direction:column" },
+          name,
+          meta,
+        ),
+        h("span", { style: "flex:1 1 auto" }),
+        several ? count : null,
+        download,
+        close,
+      ),
+      stage,
+    );
+    // on a phone, a swipe pages
+    let from: number | null = null;
+    stage.addEventListener("pointerdown", (event) => (from = event.clientX));
+    stage.addEventListener("pointerup", (event) => {
+      const moved = from === null ? 0 : event.clientX - from;
+      from = null;
+      if (several && Math.abs(moved) > 40) go(moved < 0 ? 1 : -1);
+    });
+    function draw() {
+      const item = items[index];
+      node.setAttribute("aria-label", item.name || t.viewImage("").trim());
+      name.textContent = item.name;
+      meta.textContent = [
+        typeLabel(item.name, item.mime),
+        formatSize(item.size),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      count.textContent = `${pad(index + 1)} / ${pad(items.length)}`;
+      image.src = item.url;
+      image.alt = item.name;
+      download.setAttribute("href", item.url);
+      download.setAttribute("download", item.name || "image");
+    }
+    function go(step: number) {
+      index = (index + step + items.length) % items.length;
+      draw();
+    }
+    function done() {
+      node.remove();
+      closeViewer = null;
+      if (opener.isConnected) opener.focus();
+    }
+    draw();
+    doc.body.append(node);
+    closeViewer = done;
+    close.focus();
+  }
+
+  // ---- the composer's files
+  /** Adds files to the composer, up to {@link MAX_FILES}, and starts their uploads. */
+  function addFiles(files: File[]) {
+    for (const file of files) {
+      if (uploads.length >= MAX_FILES || !online()) break;
+      // an empty file has nothing to send
+      if (!file.size) continue;
+      const url = URL.createObjectURL(file);
+      urls.add(url);
+      const upload: Upload = {
+        file,
+        url,
+        picture: PICTURES.test(file.type),
+        shrunk: false,
+        id: "",
+        state: "busy",
+        limit: 0,
+        progress: 0,
+        request: null,
+        node: h("div"),
+      };
+      uploads.push(upload);
+      attachments.append(upload.node);
+      void begin(upload);
+    }
+    filesChanged();
+  }
+
+  /** Uploads one file, drawn smaller first when it is a picture, reporting its progress. */
+  async function begin(upload: Upload) {
+    upload.state = "busy";
+    upload.progress = 0;
+    drawUpload(upload);
+    filesChanged();
+    if (upload.picture && !upload.shrunk) {
+      upload.file = await shrink(upload.file);
+      upload.shrunk = true;
+    }
+    if (!uploads.includes(upload) || signal.aborted) return;
+    const request = new XMLHttpRequest();
+    upload.request = request;
+    const mime = upload.file.type || "application/octet-stream";
+    request.open(
+      "PUT",
+      new URL(
+        `/api/web/upload/${encodeURIComponent(mime)}/${encodeURIComponent(upload.file.name)}`,
+        doc.baseURI,
+      ),
+    );
+    request.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable || !event.total) return;
+      upload.progress = (event.loaded / event.total) * 100;
+      const line = upload.node.querySelector<HTMLElement>(
+        ".bc-attachment__progress > i",
+      );
+      if (line) line.style.width = `${upload.progress}%`;
+    });
+    const finished = (state: Upload["state"]) => {
+      if (upload.request !== request) return;
+      upload.request = null;
+      upload.state = state;
+      drawUpload(upload);
+      filesChanged();
+    };
+    request.addEventListener("load", () => {
+      let answer: Data = {};
+      try {
+        answer = JSON.parse(request.responseText) as Data;
+      } catch {
+        // an answer without a body says only its status
+      }
+      if (request.status === 201 && str(answer.id)) {
+        upload.id = str(answer.id);
+        return finished("ready");
+      }
+      if (request.status === 413) {
+        upload.limit = Number(answer.limit) || 0;
+        return finished("refused");
+      }
+      finished("error");
+    });
+    request.addEventListener("error", () => finished("error"));
+    request.send(upload.file);
+  }
+
+  /** The composer's chip for one file: a thumbnail or the file's name and type, then its state. */
+  function drawUpload(upload: Upload) {
+    const { state, file } = upload;
+    const busyNow = state === "busy";
+    const failed = state === "error" || state === "refused";
+    const spinner = icon(ICON_LOADER, undefined, "bc-spinner");
+    spinner.removeAttribute("aria-hidden");
+    spinner.setAttribute("role", "img");
+    spinner.setAttribute("aria-label", t.uploading);
+    const node = h(
+      "div",
+      {
+        class: `bc-attachment${upload.picture ? "" : " bc-attachment--file"}${busyNow ? " bc-attachment--busy" : ""}${failed ? " bc-attachment--error" : ""}`,
+      },
+      upload.picture
+        ? h("img", { src: upload.url, alt: file.name })
+        : [
+            icon(ICON_FILE, undefined, "bc-muted"),
+            h(
+              "span",
+              { class: "bc-attachment__name" },
+              h("span", { class: "bc-small" }, file.name),
+              h(
+                "span",
+                { class: "bc-caption bc-mono bc-muted" },
+                [typeLabel(file.name, file.type), formatSize(file.size)]
+                  .filter(Boolean)
+                  .join(" · "),
+              ),
+            ),
+          ],
+      busyNow
+        ? [
+            h("span", { class: "bc-attachment__state" }, spinner),
+            h(
+              "span",
+              { class: "bc-attachment__progress" },
+              h("i", { style: `width:${upload.progress}%` }),
+            ),
+          ]
+        : null,
+      state === "error"
+        ? iconButton(
+            t.retryUpload,
+            ICON_REFRESH,
+            () => void begin(upload),
+            "bc-icon-button bc-attachment__retry",
+          ).button
+        : null,
+      iconButton(
+        t.removeAttachment,
+        ICON_X,
+        () => {
+          uploads = uploads.filter((each) => each !== upload);
+          release(upload);
+          filesChanged();
+          input.focus();
+        },
+        "bc-icon-button bc-attachment__remove",
+      ).button,
+    );
+    upload.node.replaceWith(node);
+    upload.node = node;
+  }
+
+  /** Lets a file go: its upload stops, its chip leaves and its copy is freed. */
+  function release(upload: Upload) {
+    const request = upload.request;
+    upload.request = null;
+    request?.abort();
+    upload.node.remove();
+    URL.revokeObjectURL(upload.url);
+    urls.delete(upload.url);
+  }
+
+  /**
+   * Puts files back in the composer, as many as fit: a queued message's as they are, a rewound
+   * message's uploaded again, since the device took them with the message.
+   */
+  function restore(files: Upload[], again: boolean) {
+    const room = Math.max(0, MAX_FILES - uploads.length);
+    for (const upload of files.slice(room)) release(upload);
+    const kept = files.slice(0, room);
+    if (again) {
+      addFiles(kept.map((upload) => upload.file));
+      for (const upload of kept) release(upload);
+      return;
+    }
+    for (const upload of kept) {
+      uploads.push(upload);
+      attachments.append(upload.node);
+    }
+    filesChanged();
+  }
+
+  /** The files' row, the paperclip and the sentences on what failed. */
+  function filesChanged() {
+    show(attachments, uploads.length > 0);
+    const failed = uploads.find((upload) => upload.state === "error");
+    const lines = [
+      failed ? (failed.picture ? t.imageFailed : t.fileFailed) : "",
+      ...uploads
+        .filter((upload) => upload.state === "refused")
+        .map((upload) =>
+          t.tooBig(upload.file.name, Math.floor(upload.limit / 1048576)),
+        ),
+    ].filter(Boolean);
+    fileHints.replaceChildren(
+      ...lines.map((line) =>
+        h("span", { class: "bc-hint bc-hint--error" }, line),
+      ),
+    );
+    show(fileHints, lines.length > 0);
+    refresh();
   }
 
   function agent(id: string, kind = "reply"): Agent {
@@ -873,6 +1711,8 @@ export const mount = definePage((context: PortalContext) => {
 
   // ---- smooth streaming
   const flowing = new Set<Run>();
+  /** A reply's code blocks carry their own Copy button. */
+  const markdown = { codeActions: copyButton, keep: caret };
   let frame = 0;
 
   /** Whether text should land at once: reduced motion, or a hidden tab whose frames pause. */
@@ -901,7 +1741,7 @@ export const mount = definePage((context: PortalContext) => {
       // never split a surrogate pair across frames
       const code = run.pending.charCodeAt(n - 1);
       if (code >= 0xd800 && code <= 0xdbff) n += 1;
-      run.text.data = clip(run.text.data + run.pending.slice(0, n));
+      grow(run, run.pending.slice(0, n));
       run.pending = run.pending.slice(n);
       if (!run.pending) flowing.delete(run);
     }
@@ -910,16 +1750,50 @@ export const mount = definePage((context: PortalContext) => {
   }
 
   function settle(run: Run) {
-    if (run.pending) run.text.data = clip(run.text.data + run.pending);
+    if (run.pending) grow(run, run.pending);
     run.pending = "";
     flowing.delete(run);
+  }
+
+  /** Adds text to a run: plain text lands as it is, Markdown is painted again with the caret kept at its end. */
+  function grow(run: Run, text: string) {
+    if (run.text) {
+      run.text.data = clip(run.text.data + text);
+      return;
+    }
+    run.source = clip(run.source + text);
+    paint(run, true);
+  }
+
+  /** Paints a Markdown run: provisionally while it streams, as written once it is whole. */
+  function paint(run: Run, streaming: boolean) {
+    renderMarkdown(run.node, run.source, { ...markdown, streaming });
+    if (streaming && run.caret) placeCaret(run.node);
+  }
+
+  /**
+   * Puts the caret at the end of `node`'s last line, moving it only when it is elsewhere (a move
+   * restarts its blink). After a code block or a table, which have no last line, it hides, as
+   * Streamdown's does.
+   */
+  function placeCaret(node: HTMLElement) {
+    const end = trailing(node, caret);
+    const ended = [...node.children].some((child) => child !== caret);
+    if (end === node && ended) caret.remove();
+    else if (end.lastChild !== caret) end.append(caret);
+  }
+
+  /** Lands a run's text in full; a Markdown run is painted as written, its provisional tail gone. */
+  function finish(run: Run) {
+    settle(run);
+    if (!run.text) paint(run, false);
   }
 
   /** Closes the message's open run: its text lands in full and its `done` runs. */
   function close(record: Agent) {
     const run = record.run;
     if (!run) return;
-    settle(run);
+    finish(run);
     record.run = null;
     run.done?.();
   }
@@ -931,25 +1805,33 @@ export const mount = definePage((context: PortalContext) => {
       close(record);
       let done: (() => void) | undefined;
       let node: HTMLElement;
-      if (stream === "reasoning") ({ node, done } = reasoning(record));
+      let content: Text | null = null;
+      if (stream === "output") node = h("div", { class: "bc-reply bc-md" });
       else {
-        node = h("p", {
-          class:
-            stream === "notice" || stream === "tool"
-              ? "bc-small bc-muted"
-              : "bc-reply",
-          style: stream === "notice" || stream === "tool" ? "margin:0" : null,
-        });
-        if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+        if (stream === "reasoning") ({ node, done } = reasoning(record));
+        else {
+          node = h("p", { class: "bc-small bc-muted", style: "margin:0" });
+          if (stream === "tool") node.append(icon(ICON_WRENCH), " ");
+        }
+        content = doc.createTextNode("");
+        node.append(content);
       }
-      const content = doc.createTextNode("");
-      node.append(content);
       if (stream !== "reasoning") put(record, node);
-      record.run = { stream, text: content, node, pending: "", done };
+      record.run = {
+        stream,
+        text: content,
+        source: "",
+        node,
+        pending: "",
+        done,
+      };
     }
     const run = record.run!;
     flow(run, text);
-    if (stream === "output" && !record.ended) run.node.append(caret);
+    if (stream === "output" && !record.ended) {
+      run.caret = true;
+      placeCaret(run.node);
+    }
   }
 
   /** Adds a part to a message, above its footer. */
@@ -1105,18 +1987,11 @@ export const mount = definePage((context: PortalContext) => {
   function showFooter(record: Agent) {
     if (record.kind !== "reply") return;
     if (!record.footer) {
-      let reset: ReturnType<typeof setTimeout> | undefined;
-      const copy = iconButton(t.copy, ICON_COPY, async () => {
-        if (!(await copyText(textOf(record))) || signal.aborted) return;
-        copy.set(t.copied, ICON_CHECK);
-        clearTimeout(reset);
-        reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
-      });
       record.footer = h(
         "div",
         { class: "bc-meta", style: "gap:4px" },
         record.reaction,
-        copy.button,
+        copyButton(() => textOf(record)),
         iconButton(t.reply, ICON_REPLY, () =>
           setReply({ id: record.id, text: textOf(record) }),
         ).button,
@@ -1125,10 +2000,22 @@ export const mount = definePage((context: PortalContext) => {
     record.root.append(record.footer);
   }
 
-  /** The message's reply text, as Copy and Reply take it. */
+  /** A Copy icon button for what `read` returns; it says 「已复制」 for a moment once it copied. */
+  function copyButton(read: () => string) {
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    const copy = iconButton(t.copy, ICON_COPY, async () => {
+      if (!(await copyText(read())) || signal.aborted) return;
+      copy.set(t.copied, ICON_CHECK);
+      clearTimeout(reset);
+      reset = setTimeout(() => copy.set(t.copy, ICON_COPY), 1500);
+    });
+    return copy.button;
+  }
+
+  /** The message's reply text (its Markdown source), as Copy and Reply take it. */
   function textOf(record: Agent) {
-    return [...record.root.querySelectorAll("p.bc-reply")]
-      .map((node) => node.firstChild?.textContent ?? "")
+    return [...record.root.querySelectorAll(".bc-reply")]
+      .map((node) => markdownSource(node) ?? node.firstChild?.textContent ?? "")
       .join("\n")
       .trim();
   }
@@ -1321,6 +2208,24 @@ export const mount = definePage((context: PortalContext) => {
       return applySessions(value as unknown as SessionsState);
     const id = str(value.message_id);
     if (!id) return;
+    if (event === "message.rejected") {
+      // the device refused the frame (its files expired): no turn starts for it
+      const entry = sent.get(id);
+      if (!entry) return;
+      keep(event, value);
+      awaiting.delete(id);
+      arm();
+      entry.confirmed = true;
+      entry.root.lastElementChild!.before(
+        h(
+          "span",
+          { class: "bc-status bc-destructive" },
+          icon(ICON_CIRCLE_ALERT),
+          t.rejected,
+        ),
+      );
+      return;
+    }
     if (event === "message.start" && stale.has(str(value.reply_to))) {
       // the reply a left session still owes this page: it belongs to the conversation cleared
       dropped.add(id);
@@ -1337,6 +2242,7 @@ export const mount = definePage((context: PortalContext) => {
       if (event === "message.end") dropped.delete(id);
       return;
     }
+    keep(event, value);
     const known = agents.get(id);
     switch (event) {
       case "message.start": {
@@ -1374,7 +2280,8 @@ export const mount = definePage((context: PortalContext) => {
         known.ended = true;
         active.delete(known);
         // a finished turn may have named or started a session: ask for the list again
-        if (sessions && !active.size) control({ control: "sessions" });
+        if (sessions && !active.size && !replaying)
+          control({ control: "sessions" });
         caret.remove();
         close(known);
         if (request?.owner === known) setRequest(null);
@@ -1394,13 +2301,13 @@ export const mount = definePage((context: PortalContext) => {
       case "message.edit": {
         if (!known) return;
         close(known);
-        for (const node of known.root.querySelectorAll("p.bc-reply"))
+        for (const node of known.root.querySelectorAll(".bc-reply"))
           node.remove();
         write(known, "output", str(value.text) || " ");
         caret.remove();
         const run = known.run!;
-        settle(run);
-        run.node.append(
+        finish(run);
+        trailing(run.node).append(
           h("span", { class: "bc-caption bc-muted" }, ` · ${t.edited}`),
         );
         known.run = null;
@@ -1438,116 +2345,8 @@ export const mount = definePage((context: PortalContext) => {
       case "message.image":
       case "message.audio":
       case "message.video":
-        return media(id, value);
+        return media(event.slice(8), id, value);
     }
-  }
-
-  function media(id: string, value: Data) {
-    const phase = str(value.phase);
-    if (phase === "start") {
-      const record = agent(id, "media");
-      const filename = str(value.filename);
-      const mime = str(value.mime_type);
-      const meta = h("span", { class: "bc-caption bc-muted" });
-      const slot = h("span", { style: "flex:none;display:inline-flex" });
-      record.media = {
-        chunks: [],
-        size: 0,
-        kept: true,
-        meta,
-        slot,
-        filename,
-        mime,
-      };
-      put(
-        record,
-        h(
-          "div",
-          { class: "bc-card" },
-          h(
-            "div",
-            { class: "bc-card__row" },
-            h("span", { class: "bc-option-icon" }, icon(ICON_FILE)),
-            h(
-              "span",
-              {
-                style:
-                  "flex:1 1 auto;min-width:0;display:flex;flex-direction:column",
-              },
-              h(
-                "span",
-                { class: "bc-option-title", style: "overflow-wrap:anywhere" },
-                filename || "—",
-              ),
-              meta,
-            ),
-            slot,
-          ),
-        ),
-      );
-      const caption = str(value.caption);
-      if (caption) put(record, h("p", { class: "bc-reply" }, clip(caption)));
-      return describe(record.media, t.receiving);
-    }
-    const item = agents.get(id)?.media;
-    if (!item) return;
-    if (phase === "delta") {
-      const binary = atob(str(value.data));
-      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-      item.size += bytes.length;
-      if (item.kept && item.size <= MAX_MEDIA) item.chunks.push(bytes);
-      else {
-        item.kept = false;
-        item.chunks = [];
-      }
-      return describe(item, t.receiving);
-    }
-    if (phase === "end") {
-      const error = str(value.error);
-      if (error) {
-        item.chunks = [];
-        return describe(item, `${t.mediaFailed} · ${error}`);
-      }
-      describe(item, t.received);
-      if (!item.kept || !item.size) return;
-      const url = URL.createObjectURL(
-        new Blob(item.chunks as BlobPart[], {
-          type: item.mime || "application/octet-stream",
-        }),
-      );
-      item.chunks = [];
-      urls.add(url);
-      item.slot.replaceChildren(
-        h(
-          "a",
-          {
-            class: "bc-button bc-button--outline bc-button--sm",
-            href: url,
-            download: item.filename || "attachment",
-          },
-          icon(ICON_DOWNLOAD),
-          t.download,
-        ),
-      );
-    }
-  }
-
-  /** 「`application/gpx+xml · 18 KB` · 已接收」: the machine values mono, the state in words. */
-  function describe(item: Media, status: string) {
-    const size =
-      item.size < 1024
-        ? `${item.size} B`
-        : item.size < 1024 * 1024
-          ? `${Math.round(item.size / 1024)} KB`
-          : `${(item.size / 1024 / 1024).toFixed(1)} MB`;
-    item.meta.replaceChildren(
-      h(
-        "span",
-        { class: "bc-mono" },
-        [item.mime, size].filter(Boolean).join(" · "),
-      ),
-      ` · ${status}`,
-    );
   }
 
   // ---- turn state: the spinning marks, 「思考中」, the send button, and when the queue moves
@@ -1599,6 +2398,7 @@ export const mount = definePage((context: PortalContext) => {
     if (sendButton.button.getAttribute("aria-label") !== label)
       sendButton.set(label);
     sendButton.button.disabled = !canSend();
+    attach.disabled = uploads.length >= MAX_FILES || !online();
     // stop stands in for send while a turn runs; typed text brings send back as the primary
     const typed = !!input.value.trim();
     show(stopButton.button, busy() && online());
@@ -1616,15 +2416,21 @@ export const mount = definePage((context: PortalContext) => {
     pump();
   }
 
+  /** Text or files, within the limit, and no file still uploading or failed. */
   function canSend() {
-    return online() && !!input.value.trim() && !over();
+    return (
+      online() &&
+      (!!input.value.trim() || uploads.length > 0) &&
+      !over() &&
+      uploads.every((upload) => upload.state === "ready")
+    );
   }
 
   /** Sends the oldest queued message once the device is free. */
   function pump() {
     if (!queue.length || held || busy() || !online()) return;
     const next = queue.shift()!;
-    if (!send(next.text, next.replyTo)) queue.unshift(next);
+    if (!send(next.text, next.replyTo, next.uploads)) queue.unshift(next);
     renderQueue();
   }
 
@@ -1652,6 +2458,17 @@ export const mount = definePage((context: PortalContext) => {
           { class: "bc-mono bc-muted", style: "flex:none" },
           pad(index + 1),
         ),
+        // a message with files says how many before its text
+        item.uploads.length
+          ? [
+              icon(ICON_PAPERCLIP, undefined, "bc-muted"),
+              h(
+                "span",
+                { class: "bc-mono bc-muted", style: "flex:none" },
+                String(item.uploads.length),
+              ),
+            ]
+          : null,
         h("span", { class: "bc-composer__text" }, item.text),
         iconButton(t.editQueued, ICON_PENCIL, () => {
           const [taken] = queue.splice(queue.indexOf(item), 1);
@@ -1659,12 +2476,14 @@ export const mount = definePage((context: PortalContext) => {
             ? `${taken.text}\n${input.value}`
             : taken.text;
           if (taken.replyTo) setReply(taken.replyTo);
+          restore(taken.uploads, false);
           renderQueue();
           changed();
           input.focus();
         }).button,
         iconButton(t.removeQueued, ICON_X, () => {
-          queue.splice(queue.indexOf(item), 1);
+          const [taken] = queue.splice(queue.indexOf(item), 1);
+          for (const upload of taken.uploads) release(upload);
           renderQueue();
         }).button,
       ),
@@ -1724,41 +2543,68 @@ export const mount = definePage((context: PortalContext) => {
   }
 
   function submit() {
-    const text = input.value;
-    if (!text.trim() || over()) return input.focus();
+    const files = uploads;
+    const text = input.value.trim() || !files.length ? input.value : "";
+    if (!canSend()) return input.focus();
     // a rewound message goes ahead of the queue it held
     const first = held;
     held = false;
     // a pending question takes the message as its answer at once; otherwise a running turn
-    // queues it
+    // queues it, files and all
     if (!request && (busy() || (queue.length && !first))) {
-      queue.push({ text, replyTo });
+      queue.push({ text, replyTo, uploads: files });
       renderQueue();
-    } else if (!send(text, replyTo)) return;
+    } else if (!send(text, replyTo, files)) return;
+    // the files go with the message: their chips leave, their copies stay
+    for (const upload of files) upload.node.remove();
+    uploads = [];
     input.value = "";
     setReply(null);
     changed();
-    refresh();
+    filesChanged();
   }
 
-  function send(text: string, target: { id: string; text: string } | null) {
+  function send(
+    text: string,
+    target: { id: string; text: string } | null,
+    files: Upload[] = [],
+  ) {
     const connection = socket;
     if (!connection || connection.readyState !== WebSocket.OPEN) return false;
     if (connection.bufferedAmount > 4096) {
       context.toast({ kind: "error", title: t.notSent, body: t.busy });
       return false;
     }
+    const body = target ? withQuote(text, target.text) : text;
     try {
       connection.send(
-        JSON.stringify({ text: target ? withQuote(text, target.text) : text }),
+        JSON.stringify(
+          files.length
+            ? { text: body, attachments: files.map((upload) => upload.id) }
+            : { text: body },
+        ),
       );
     } catch {
       context.toast({ kind: "error", title: t.notSent });
       return false;
     }
-    // the bridge numbers each accepted frame on this connection: web-in-1, web-in-2, …
+    // the bridge numbers each message frame on this connection: web-in-1, web-in-2, …
     const id = `web-in-${++inbound}`;
-    const entry = addUser(text, id, target);
+    const entry = addUser(text, id, target, files);
+    if (copying) {
+      history.append(frames, [
+        "u",
+        keyed(id),
+        text,
+        target,
+        files.map((upload) => [
+          upload.file.name,
+          upload.file.type,
+          upload.file.size,
+        ]),
+      ]);
+      later();
+    }
     if (request) {
       // an answer goes on the asking turn; no turn of its own starts
       answered = { owner: request.owner, entry };
@@ -1796,8 +2642,8 @@ export const mount = definePage((context: PortalContext) => {
 
   /**
    * Takes the device's session list. A switch or a new session (from this page, another tab, or
-   * a deletion of the current one) starts the conversation view over: the device keeps the
-   * history, the page shows only what comes next.
+   * a deletion of the current one) starts the conversation view over: the page draws the
+   * browser's copy of the session, if it has one, then what comes next.
    */
   function applySessions(next: SessionsState) {
     const before = sessions;
@@ -1806,12 +2652,11 @@ export const mount = definePage((context: PortalContext) => {
     show(railToggle, true);
     rail.update(next);
     const kind = next.notice?.kind;
-    if (
+    const restarted =
       kind === "switched" ||
       kind === "created" ||
-      (!!before?.current && next.current !== before.current)
-    )
-      startOver();
+      (!!before?.current && next.current !== before.current);
+    if (restarted) startOver();
     const problem =
       kind === "unknown_session"
         ? t.sessionGone
@@ -1822,6 +2667,93 @@ export const mount = definePage((context: PortalContext) => {
             : "";
     if (problem) context.toast({ kind: "error", title: problem });
     label();
+    // a temporary chat leaves nothing behind, in the browser either
+    copying = !next.temporary;
+    const shown = copying ? next.current : null;
+    if (restarted || shown !== saved) {
+      flush();
+      // a new session is named once its first message is sent: it keeps what the page drew
+      const drawn = restarted || saved !== null ? [] : frames;
+      saved = shown;
+      frames = shown ? [...history.load(shown), ...drawn] : drawn;
+      if (!items.length) replay();
+      if (drawn.length) later();
+    }
+    history.prune(
+      new Set([...next.sessions.map((item) => item.session), shown ?? ""]),
+    );
+  }
+
+  // ---- the browser's copy of each saved session
+  /** Message ids restart with each connection and each boot: the copy keeps them apart. */
+  function keyed(id: string) {
+    return `${epoch}~${id}`;
+  }
+
+  /** Keeps a bridge event in the session's copy. */
+  function keep(event: string, value: Data) {
+    if (replaying || !copying) return;
+    const data: Data = { ...value, message_id: keyed(str(value.message_id)) };
+    if (str(value.reply_to)) data.reply_to = keyed(str(value.reply_to));
+    history.append(frames, ["e", event, data]);
+    later();
+  }
+
+  function later() {
+    saving ??= setTimeout(flush, 1000);
+  }
+
+  function flush() {
+    clearTimeout(saving);
+    saving = undefined;
+    if (saved) history.save(saved, frames);
+  }
+
+  /**
+   * Draws the session's copy again, as the conversation stood when this browser last saw it. A
+   * sent message's files are no longer on the page, so each is a card saying so; a turn the
+   * reload cut off stays as far as it got.
+   */
+  function replay() {
+    if (!frames.length) return;
+    replaying = true;
+    // each drawing's ids are its own: a session left marks the ids it drew as dropped
+    const tag = `r${++replays}:`;
+    try {
+      for (const frame of frames) {
+        if (frame[0] === "e") {
+          const data: Data = {
+            ...frame[2],
+            message_id: tag + str(frame[2].message_id),
+          };
+          if (str(data.reply_to)) data.reply_to = tag + str(data.reply_to);
+          handle(frame[1], data);
+          continue;
+        }
+        const [, id, text, quoted, files] = frame;
+        const entry = addUser(text, tag + id, quoted);
+        entry.confirmed = true;
+        const bubble =
+          entry.root.querySelector(".bc-bubble") ?? entry.root.lastElementChild;
+        for (const [name, mime, size] of files)
+          entry.root.insertBefore(
+            unavailable({ url: "", name, mime, size }, t.sentGoneTip),
+            bubble,
+          );
+      }
+    } catch {
+      // a copy this page cannot read draws what it could
+    }
+    replaying = false;
+    for (const run of [...flowing]) settle(run);
+    for (const record of agents.values()) close(record);
+    active.clear();
+    awaiting.clear();
+    caret.remove();
+    setRequest(null);
+    stuck = true;
+    refresh();
+    follow();
   }
 
   /** Clears the conversation view for another session; what the left one still sends is dropped. */
@@ -1857,6 +2789,8 @@ export const mount = definePage((context: PortalContext) => {
   function rewindTo(id: string) {
     const entry = sent.get(id);
     if (!entry) return;
+    history.cut(frames, keyed(id));
+    flush();
     withdrawn.add(id);
     awaiting.delete(id);
     arm();
@@ -1884,6 +2818,8 @@ export const mount = definePage((context: PortalContext) => {
       ? `${entry.text}\n${input.value}`
       : entry.text;
     if (entry.quoted) setReply(entry.quoted);
+    // the device took its files with it: they go up again
+    restore(entry.uploads, true);
     changed();
     input.focus();
   }
@@ -1894,6 +2830,44 @@ export const mount = definePage((context: PortalContext) => {
       event.preventDefault();
       submit();
     }
+  });
+  // a pasted picture joins the composer's files
+  input.addEventListener("paste", (event) => {
+    const pictures = [...(event.clipboardData?.files ?? [])].filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (!pictures.length) return;
+    event.preventDefault();
+    addFiles(pictures);
+  });
+  // files dragged anywhere over the page drop into the composer, which says so meanwhile
+  let dragging = 0;
+  const carriesFiles = (event: DragEvent) =>
+    [...(event.dataTransfer?.types ?? [])].includes("Files");
+  const setDrop = (on: boolean) => {
+    composer.classList.toggle("bc-composer--drop", on);
+    show(dropZone, on);
+  };
+  const listen = (name: string, handler: (event: DragEvent) => void) =>
+    window.addEventListener(name, handler as EventListener, { signal });
+  listen("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragging += 1;
+    setDrop(true);
+  });
+  listen("dragover", (event) => {
+    if (carriesFiles(event)) event.preventDefault();
+  });
+  listen("dragleave", () => {
+    if (dragging && !--dragging) setDrop(false);
+  });
+  listen("drop", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragging = 0;
+    setDrop(false);
+    addFiles([...(event.dataTransfer?.files ?? [])]);
   });
 
   // ---- scrolling: follow the conversation while the reader is at its foot
@@ -1931,6 +2905,8 @@ export const mount = definePage((context: PortalContext) => {
   // ---- connection
   let socket: WebSocket | undefined;
   let inbound = 0;
+  /** This connection, in the ids the browser's copy keeps. */
+  let epoch = "";
   let warned = false;
 
   function online() {
@@ -1953,6 +2929,7 @@ export const mount = definePage((context: PortalContext) => {
     show(offline, false);
     sent = new Map();
     inbound = 0;
+    epoch = Date.now().toString(36);
     // message ids restart with the connection, so old rewinds name nothing now
     withdrawn.clear();
     dropped.clear();
@@ -2031,6 +3008,7 @@ export const mount = definePage((context: PortalContext) => {
   signal.addEventListener(
     "abort",
     () => {
+      flush();
       const connection = socket;
       socket = undefined;
       connection?.close();
@@ -2038,6 +3016,9 @@ export const mount = definePage((context: PortalContext) => {
       clearTimeout(stall);
       flowing.clear();
       for (const each of [...groups, pending]) each.spin?.stop();
+      closeViewer?.();
+      for (const upload of uploads) upload.request?.abort();
+      uploads = [];
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
       agents.clear();
@@ -2049,6 +3030,8 @@ export const mount = definePage((context: PortalContext) => {
     { once: true },
   );
 
+  // a reload or a closed tab saves what is still waiting to be saved
+  window.addEventListener("pagehide", flush, { signal });
   column.append(empty);
   setFresh(true);
   changed();

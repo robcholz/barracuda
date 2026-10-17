@@ -8,7 +8,7 @@
 use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
-use barracuda_imessage_gateway_plugin::{ChannelError, Method, Response};
+use barracuda_imessage_gateway_plugin::{ChannelError, MediaKind, Method, Response};
 use serde::de::{Deserializer, IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 
@@ -21,7 +21,8 @@ pub const NEW_MESSAGE_EVENT: &str = "new-message";
 pub const WEBHOOK_LIST_LIMIT: usize = 8 * 1024;
 
 /// Largest catch-up page the device reads. A message without attributed
-/// body or attachments, with its chat, is about 1.5 KiB of JSON.
+/// body, with its chat, is about 1.5 KiB of JSON; each attachment adds a
+/// record of its own.
 pub const QUERY_BODY_LIMIT: usize = 16 * 1024;
 
 /// Largest create or delete answer the device reads.
@@ -33,7 +34,8 @@ const SMALL_BODY_LIMIT: usize = 2 * 1024;
 pub struct InboundMessage {
     /// Message GUID, also the reply and dedup key.
     pub guid: String,
-    /// Plain text; `null` for attachments and most system messages.
+    /// Plain text, with U+FFFC where an attachment sits; `null` for most
+    /// system messages.
     #[serde(default)]
     pub text: Option<String>,
     /// Whether this Mac's account sent it.
@@ -56,6 +58,79 @@ pub struct InboundMessage {
         deserialize_with = "not_null"
     )]
     reaction: bool,
+    /// Files sent with the message; `null` reads as none.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    attachments: Vec<InboundAttachment>,
+}
+
+/// One file of a message, reduced to the fields the device uses.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct InboundAttachment {
+    /// Attachment GUID, the download path's key.
+    pub guid: String,
+    /// MIME type the server reports; `null` for some files.
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: Option<String>,
+    /// File name the sender gave it.
+    #[serde(rename = "transferName", default)]
+    pub transfer_name: Option<String>,
+    /// Size in bytes, when reported.
+    #[serde(rename = "totalBytes", default)]
+    pub total_bytes: Option<u64>,
+}
+
+impl InboundAttachment {
+    /// How the channel presents the file. HEIC and HEIF photos are files,
+    /// since models do not take them as images.
+    #[must_use]
+    pub fn kind(&self) -> MediaKind {
+        let mime = self
+            .mime_type
+            .as_deref()
+            .and_then(|mime| mime.split(';').next())
+            .map(str::trim)
+            .unwrap_or_default();
+        let is = |prefix: &str| {
+            mime.get(..prefix.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+        };
+        if ["image/jpeg", "image/png", "image/gif", "image/webp"]
+            .iter()
+            .any(|image| image.eq_ignore_ascii_case(mime))
+        {
+            MediaKind::Image
+        } else if is("audio/") {
+            MediaKind::Audio
+        } else if is("video/") {
+            MediaKind::Video
+        } else {
+            MediaKind::File
+        }
+    }
+
+    /// The reported MIME type, when not empty.
+    #[must_use]
+    pub fn mime(&self) -> Option<&str> {
+        self.mime_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|mime| !mime.is_empty())
+    }
+
+    /// The sender's file name, when not empty.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.transfer_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+    }
+
+    /// Whether this is the hidden payload of a rich link preview, which
+    /// iMessage attaches beside a URL and which is no file of the sender's.
+    fn is_link_preview(&self) -> bool {
+        self.name()
+            .is_some_and(|name| name.ends_with(".pluginPayloadAttachment"))
+    }
 }
 
 impl InboundMessage {
@@ -77,22 +152,60 @@ impl InboundMessage {
             .filter(|guid| !guid.is_empty())
     }
 
-    /// The text of an ordinary text message: `None` for attachments,
-    /// reactions, group events, and empty text.
+    /// The text of an ordinary message, without the U+FFFC marks where its
+    /// attachments sit, trimmed and possibly empty: `None` for reactions
+    /// and group events.
     #[must_use]
-    pub fn plain_text(&self) -> Option<&str> {
+    pub fn body(&self) -> Option<String> {
         if self.item_type.is_some_and(|item_type| item_type != 0) || self.reaction {
             return None;
         }
-        // U+FFFC marks where an attachment sits in the text.
-        self.text.as_deref().filter(|text| {
-            !text
-                .trim_matches(|character: char| {
-                    character == '\u{fffc}' || character.is_whitespace()
-                })
-                .is_empty()
-        })
+        let text: String = self
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .filter(|character| *character != '\u{fffc}')
+            .collect();
+        Some(String::from(text.trim()))
     }
+
+    /// The files the sender attached, without link-preview payloads.
+    pub fn attachments(&self) -> impl Iterator<Item = &InboundAttachment> {
+        self.attachments
+            .iter()
+            .filter(|attachment| !attachment.is_link_preview())
+    }
+
+    /// Bytes the message's strings take, for bounding a queue of messages.
+    #[must_use]
+    pub fn footprint(&self) -> usize {
+        let attachments = self.attachments.iter().flat_map(|attachment| {
+            [
+                attachment.guid.len(),
+                attachment.mime_type.as_deref().map_or(0, str::len),
+                attachment.transfer_name.as_deref().map_or(0, str::len),
+            ]
+        });
+        [
+            self.guid.len(),
+            self.text.as_deref().map_or(0, str::len),
+            self.sender().map_or(0, str::len),
+            self.chat_guid().map_or(0, str::len),
+        ]
+        .into_iter()
+        .chain(attachments)
+        .fold(0_usize, usize::saturating_add)
+    }
+}
+
+/// A list that may be `null`, read as empty.
+fn null_as_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -252,11 +365,7 @@ struct QueryMetadata {
     total: Option<u64>,
 }
 
-impl<'net, T, D> BlueBubbles<'net, T, D>
-where
-    T: http_client::embedded_nal_async::TcpConnect,
-    D: http_client::embedded_nal_async::Dns,
-{
+impl BlueBubbles {
     /// Lists the server's webhooks (`GET /api/v1/webhook`).
     ///
     /// # Errors
@@ -329,7 +438,16 @@ where
         }
     }
 
-    /// Queries messages with their chats (`POST /api/v1/message/query`).
+    /// Where attachment `guid` is downloaded
+    /// (`GET /api/v1/attachment/:guid/download`). The URL carries the
+    /// password: never log it.
+    #[must_use]
+    pub fn attachment_url(&self, guid: &str) -> String {
+        self.endpoint(&format!("attachment/{}/download", encode(guid)))
+    }
+
+    /// Queries messages with their chats and attachments
+    /// (`POST /api/v1/message/query`).
     ///
     /// # Errors
     ///
@@ -338,7 +456,7 @@ where
     /// exceeds [`QUERY_BODY_LIMIT`]; ask for fewer messages then.
     pub async fn query_messages(&self, query: MessageQuery) -> Result<MessagePage, ChannelError> {
         let mut payload = serde_json::json!({
-            "with": ["chat"],
+            "with": ["chat", "attachment"],
             "sort": query.sort.as_str(),
             "limit": query.limit,
             "offset": query.offset,
@@ -373,24 +491,19 @@ where
         body: B,
         limit: usize,
     ) -> Result<Response, ChannelError> {
-        let response = barracuda_imessage_gateway_plugin::send_limited(
-            &self.http_clients,
-            method,
-            url,
-            headers,
-            body,
-            limit,
-        )
-        .await
-        .map_err(|error| match error {
-            barracuda_imessage_gateway_plugin::Error::BodyTooLarge => ChannelError::Platform {
-                code: Some(BODY_TOO_LARGE.into()),
-                message: "BlueBubbles response is too large".into(),
-            },
-            other => ChannelError::Transport {
-                message: format!("{other}"),
-            },
-        })?;
+        let response = self
+            .http
+            .send_limited(method, url, headers, body, limit)
+            .await
+            .map_err(|error| match error {
+                barracuda_imessage_gateway_plugin::Error::BodyTooLarge => ChannelError::Platform {
+                    code: Some(BODY_TOO_LARGE.into()),
+                    message: "BlueBubbles response is too large".into(),
+                },
+                other => ChannelError::Transport {
+                    message: format!("{other}"),
+                },
+            })?;
         if (200..300).contains(&response.status) {
             return Ok(response);
         }

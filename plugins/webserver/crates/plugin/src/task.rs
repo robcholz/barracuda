@@ -68,9 +68,12 @@ async fn serve_worker(webserver: Rc<WebServer>, stack: Stack<'static>, port: u16
             continue;
         }
         let remote = socket.remote_endpoint();
+        let local = socket
+            .local_endpoint()
+            .map(|endpoint| core::net::IpAddr::from(endpoint.addr));
         log::debug!("WebServer worker {worker} accepted connection from {remote:?}");
         match webserver
-            .serve_connection(EmbassyTimer, &mut http_buffer[..], socket)
+            .serve_connection_at(EmbassyTimer, &mut http_buffer[..], socket, local)
             .await
         {
             Ok(disconnection) => log::debug!(

@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "workflow_switch",
+    "description": "Turn one loaded Workflow on or off by ID, durably.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "enabled"],
+      "additionalProperties": false
+    }
+  }
+}
