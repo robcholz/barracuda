@@ -1,5 +1,5 @@
 id = "app-manager"
-depends-on = ["vm", "workflow", "time", "wifi"]
+depends-on = ["vm", "workflow", "time", "wifi", "power-monitor", "audio"]
 description = "Runs Lua apps, and on Boards with a display shows them and the system UI."
 
 [peripherals.display]

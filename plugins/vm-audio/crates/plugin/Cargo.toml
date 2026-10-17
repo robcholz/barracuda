@@ -15,6 +15,7 @@ barracuda-board-hal.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 critical-section = "1"
+log.workspace = true
 
 [dev-dependencies]
 barracuda-vm-builtin-packages = { path = "../../../vm/crates/builtin-packages", features = ["vendored"] }

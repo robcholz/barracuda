@@ -1,4 +1,5 @@
-//! Lua package for the Board's primary built-in audio codec.
+//! Lua package for the Board's primary built-in audio codec, and the
+//! device's output level for other Plugins.
 
 #![no_std]
 
@@ -8,7 +9,7 @@ mod config {
     barracuda_plugin::config!();
 }
 
-use alloc::format;
+use alloc::{boxed::Box, format, rc::Rc};
 use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
@@ -17,7 +18,7 @@ use barracuda_vm_plugin::{
     UserDataHandle, UserDataMethods,
 };
 use core::cell::RefCell;
-use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, AtomicU8, Ordering};
 use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
@@ -25,6 +26,49 @@ const MAX_WAV_HEADER_BYTES: usize = 64 * 1024;
 const MAX_WAV_BYTES: usize = MAX_TRANSFER_BYTES + MAX_WAV_HEADER_BYTES;
 /// Samples converted per codec call, staged on the stack instead of the heap.
 const PCM_CHUNK_SAMPLES: usize = 512;
+
+/// The device's output level: what the person sets for every app. An app's
+/// own `set_volume` scales it, and mute silences every app.
+pub struct AudioOutput {
+    level: Arc<Level>,
+    /// Applies the level to the codec while no app holds it.
+    apply: Box<dyn Fn()>,
+}
+
+impl AudioOutput {
+    /// Sets the output level to `volume` percent, or silence when `muted`.
+    pub fn set(&self, volume: u8, muted: bool) {
+        self.level.volume.store(volume.min(100), Ordering::Release);
+        self.level.muted.store(muted, Ordering::Release);
+        (self.apply)();
+    }
+}
+
+/// The device's output level, shared by [`AudioOutput`] and the handles.
+struct Level {
+    /// Percent, 0 through 100.
+    volume: AtomicU8,
+    muted: AtomicBool,
+}
+
+impl Level {
+    const fn new() -> Self {
+        Self {
+            volume: AtomicU8::new(100),
+            muted: AtomicBool::new(false),
+        }
+    }
+
+    /// The codec's `0..=255` output volume for an app at `app` percent.
+    fn codec_volume(&self, app: u8) -> u8 {
+        if self.muted.load(Ordering::Acquire) {
+            return 0;
+        }
+        let system = u32::from(self.volume.load(Ordering::Acquire));
+        let scaled = (system * u32::from(app.min(100)) * 255 + 5_000) / 10_000;
+        u8::try_from(scaled).unwrap_or(u8::MAX)
+    }
+}
 
 /// Owns the Board's primary audio codec and publishes playback to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -61,8 +105,22 @@ where
         let registry = context.require::<LuaPackageRegistry>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
+        let package = AudioPackage::new(self.codec.take());
+        let (codec, level) = (Arc::clone(&package.codec), Arc::clone(&package.level));
+        context.provide(Rc::new(AudioOutput {
+            level: Arc::clone(&package.level),
+            apply: Box::new(move || {
+                critical_section::with(|section| {
+                    if let Some(codec) = codec.borrow(section).borrow_mut().as_mut()
+                        && codec.set_output_volume(level.codec_volume(100)).is_err()
+                    {
+                        log::warn!("audio: cannot set the output volume");
+                    }
+                });
+            }),
+        }))?;
         let registration = registry
-            .register(AudioPackage::new(self.codec.take()))
+            .register(package)
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
@@ -73,6 +131,7 @@ struct AudioPackage<Device> {
     /// Whether the Board has the device, which makes the package a capability.
     present: bool,
     codec: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    level: Arc<Level>,
     active: Arc<AtomicBool>,
 }
 
@@ -81,6 +140,7 @@ impl<Device> AudioPackage<Device> {
         Self {
             present: codec.is_some(),
             codec: Arc::new(critical_section::Mutex::new(RefCell::new(codec))),
+            level: Arc::new(Level::new()),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -95,6 +155,7 @@ where
         let available_codec = Arc::clone(&self.codec);
         let available_active = Arc::clone(&self.active);
         let open_codec = Arc::clone(&self.codec);
+        let open_level = Arc::clone(&self.level);
         let open_active = Arc::clone(&self.active);
         lua.register_lib("audio", move |package| {
             package.register("available", move |(): ()| {
@@ -111,9 +172,11 @@ where
                     open_codec.borrow(section).borrow_mut().take()
                 });
                 Some(match codec {
-                    Some(codec) => {
-                        lua.create_userdata(AudioHandle::new(codec, Arc::clone(&open_active)))
-                    }
+                    Some(codec) => lua.create_userdata(AudioHandle::new(
+                        codec,
+                        Arc::clone(&open_level),
+                        Arc::clone(&open_active),
+                    )),
                     None => Err(Error::runtime(
                         "built-in audio codec is unavailable or already open",
                     )),
@@ -147,13 +210,21 @@ where
 
 struct AudioHandle<Device> {
     codec: Option<Device>,
+    level: Arc<Level>,
+    /// The app's own volume in percent, which scales the device's level.
+    volume: u8,
+    /// The codec volume last set, so playback sets it only on a change.
+    applied: Option<u8>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> AudioHandle<Device> {
-    fn new(codec: Device, active: Arc<AtomicBool>) -> Self {
+    fn new(codec: Device, level: Arc<Level>, active: Arc<AtomicBool>) -> Self {
         Self {
             codec: Some(codec),
+            level,
+            volume: 100,
+            applied: None,
             active,
         }
     }
@@ -230,12 +301,20 @@ where
                 "audio volume must be between 0 and 100 percent",
             ));
         }
-        let scaled = (u16::from(percent) * 255 + 50) / 100;
-        let volume =
-            u8::try_from(scaled).map_err(|_| Error::runtime("audio volume conversion failed"))?;
-        self.codec_mut()?
-            .set_output_volume(volume)
-            .map_err(codec_error)
+        self.volume = percent;
+        self.apply_level()
+    }
+
+    /// Puts the app's volume, scaled by the device's level, on the codec.
+    fn apply_level(&mut self) -> Result<()> {
+        let volume = self.level.codec_volume(self.volume);
+        if self.applied != Some(volume) {
+            self.codec_mut()?
+                .set_output_volume(volume)
+                .map_err(codec_error)?;
+            self.applied = Some(volume);
+        }
+        Ok(())
     }
 }
 
@@ -497,14 +576,18 @@ where
     Device: AudioCodec,
     Device::Error: core::fmt::Debug,
 {
-    let codec = handle.codec.as_mut().ok_or_else(closed)?;
     let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
     for chunk in bytes.chunks(PCM_CHUNK_SAMPLES * 2) {
+        // The device's level may change while a sound plays.
+        handle.apply_level()?;
         let (pairs, _remainder) = chunk.as_chunks::<2>();
         for (sample, pair) in samples.iter_mut().zip(pairs) {
             *sample = i16::from_le_bytes(*pair);
         }
-        codec
+        handle
+            .codec
+            .as_mut()
+            .ok_or_else(closed)?
             .write(&samples[..pairs.len()])
             .await
             .map_err(codec_error)?;
@@ -587,6 +670,31 @@ mod tests {
         )
         .expect("run audio application");
         assert!(result);
+    }
+
+    #[test]
+    fn the_device_level_scales_and_mutes_every_app() {
+        let level = Level::new();
+        assert_eq!(level.codec_volume(100), 255);
+        assert_eq!(level.codec_volume(50), 128);
+        level.volume.store(40, Ordering::Release);
+        assert_eq!(level.codec_volume(100), 102);
+        assert_eq!(level.codec_volume(50), 51);
+        level.muted.store(true, Ordering::Release);
+        assert_eq!(level.codec_volume(100), 0);
+
+        // Playback picks up a change of level.
+        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        let mut handle = AudioHandle::new(
+            TestCodec { volume: 0 },
+            Arc::clone(&package.level),
+            Arc::clone(&package.active),
+        );
+        futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
+        assert_eq!(handle.codec.as_ref().map(|codec| codec.volume), Some(255));
+        package.level.volume.store(20, Ordering::Release);
+        futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
+        assert_eq!(handle.codec.as_ref().map(|codec| codec.volume), Some(51));
     }
 
     #[test]

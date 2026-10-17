@@ -127,6 +127,15 @@ pub mod power {
         pub power_microwatts: i64,
     }
 
+    /// A battery's charge as its fuel gauge reports it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct BatteryState {
+        /// State of charge in percent, 0 through 100.
+        pub percent: u8,
+        /// Whether current flows into the battery.
+        pub charging: bool,
+    }
+
     /// Semantic voltage, current, and power monitor peripheral.
     pub trait PowerMonitor {
         /// Concrete register or sampling failure.
@@ -134,6 +143,12 @@ pub mod power {
 
         /// Reads one coherent electrical measurement.
         fn measure(&mut self) -> Result<PowerMeasurement, Self::Error>;
+
+        /// Reads the battery's charge; `None` from a monitor that is no
+        /// battery fuel gauge.
+        fn battery(&mut self) -> Result<Option<BatteryState>, Self::Error> {
+            Ok(None)
+        }
     }
 
     /// Move-only access to the Board's attached power monitor.

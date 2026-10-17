@@ -13,6 +13,7 @@ use barracuda_app_manager_plugin::{
     AgentState, AgentStatus, Notifications, Preferences, Screen, Services, SystemUi,
 };
 use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, Device, WIFI_SETTINGS};
+use barracuda_audio_plugin::{AudioOutput, AudioPlugin};
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::HostWifiDevice;
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
@@ -20,6 +21,7 @@ use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext,
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
+use barracuda_power_monitor_plugin::{PowerMonitorPlugin, PowerStatus};
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_uikit::{
     DEFAULT_VIEWPORT, Direction, DisplayInfo, Edge, Gesture, UiAssets, UiService, ViewCall,
@@ -27,9 +29,12 @@ use barracuda_uikit::{
 };
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
-use barracuda_vm_plugin::{AppApi, Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm};
+use barracuda_vm_plugin::{
+    AppApi, Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm, VmPlugin,
+};
 use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
+use barracuda_workflow_plugin::WorkflowPlugin;
 use embassy_executor::{Executor, Spawner};
 use embassy_time::{Instant, Timer};
 
@@ -143,12 +148,15 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     (fs, builtin)
 }
 
-/// Takes the Wi-Fi capability from the real Plugin on a host Platform.
-struct Observer(Rc<RefCell<Option<Rc<WifiControl>>>>);
+/// The capabilities the system UI takes from other Plugins.
+type Taken = (Rc<WifiControl>, Rc<PowerStatus>, Rc<AudioOutput>);
+
+/// Takes the capabilities from the real Plugins on a host Platform.
+struct Observer(Rc<RefCell<Option<Taken>>>);
 
 impl PluginDeclaration for Observer {
     const ID: &'static str = "observer";
-    const DEPENDS_ON: &'static [&'static str] = &["wifi"];
+    const DEPENDS_ON: &'static [&'static str] = &["wifi", "power-monitor", "audio"];
 }
 
 impl Plugin for Observer {
@@ -156,13 +164,16 @@ impl Plugin for Observer {
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()> {
-        self.0
-            .replace(Some(context.require::<WifiControl>(Self::DEPENDS_ON[0])?));
+        self.0.replace(Some((
+            context.require::<WifiControl>("wifi")?,
+            context.require::<PowerStatus>("power-monitor")?,
+            context.require::<AudioOutput>("audio")?,
+        )));
         Ok(())
     }
 }
 
-async fn wifi() -> Rc<WifiControl> {
+async fn taken() -> Taken {
     let stack = never_embassy_stack();
     let identity = TargetIdentity::new(
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
@@ -197,6 +208,12 @@ async fn wifi() -> Rc<WifiControl> {
         .register(CaptivePortalPlugin::new(&mut context))
         .unwrap();
     manager.register(WifiPlugin::new(&mut context)).unwrap();
+    manager.register(WorkflowPlugin::new(&mut context)).unwrap();
+    manager.register(VmPlugin::new(&mut context)).unwrap();
+    manager
+        .register(PowerMonitorPlugin::new(&mut context))
+        .unwrap();
+    manager.register(AudioPlugin::new(&mut context)).unwrap();
     let observed = Rc::new(RefCell::new(None));
     manager.register(Observer(Rc::clone(&observed))).unwrap();
     // The manager owns the Plugins' registrations; keep it for the test.
@@ -324,6 +341,9 @@ async fn scenario(spawner: Spawner) {
     updater.synchronize(SyncSample::new(1_791_888_120_000, Instant::now()));
     let notices = Rc::new(Notifications::new());
     let agent = Rc::new(AgentStatus::new());
+    let (wifi, power, audio) = taken().await;
+    // The host Board has no fuel gauge: the control center shows no battery.
+    assert_eq!(power.battery(), None);
     let mut system = SystemUi::new(
         Services {
             ui: Rc::clone(&ui),
@@ -332,7 +352,9 @@ async fn scenario(spawner: Spawner) {
             agent: Rc::clone(&agent),
             preferences: Rc::new(Preferences::default()),
             clock,
-            wifi: wifi().await,
+            wifi,
+            power,
+            audio,
         },
         &system_view(),
     )

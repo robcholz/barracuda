@@ -712,6 +712,7 @@ name = "barracuda-app-manager-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-appkit",
+ "barracuda-audio-plugin",
  "barracuda-board-hal",
  "barracuda-captive-portal-plugin",
  "barracuda-lua",
@@ -719,6 +720,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-power-monitor-plugin",
  "barracuda-time-plugin",
  "barracuda-uikit",
  "barracuda-vfs",
@@ -782,6 +784,7 @@ dependencies = [
  "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
+ "log",
  "portable-atomic",
  "portable-atomic-util",
 ]

@@ -60,6 +60,15 @@ impl Bq27220 {
         })
     }
 
+    /// Reads the state of charge in percent and the signed instantaneous
+    /// current in milliamps, positive while charging.
+    pub fn charge<I2C: I2c>(&self, i2c: &mut I2C) -> Result<(u16, i16), I2C::Error> {
+        Ok((
+            self.read_word(i2c, STATE_OF_CHARGE)?,
+            self.read_word(i2c, CURRENT)? as i16,
+        ))
+    }
+
     /// Reads the battery voltage as a low-impact presence probe.
     pub fn voltage_millivolts<I2C: I2c>(&self, i2c: &mut I2C) -> Result<u16, I2C::Error> {
         self.read_word(i2c, VOLTAGE)
@@ -130,5 +139,11 @@ mod tests {
         assert_eq!(measurement.voltage_millivolts, 3_925);
         assert_eq!(measurement.current_milliamps, -125);
         assert_eq!(measurement.state_of_charge_percent, 50);
+    }
+
+    #[test]
+    fn reads_charge_and_current() {
+        let chip = Bq27220::new(0x55).expect("valid address");
+        assert_eq!(chip.charge(&mut Bus).expect("charge"), (50, -125));
     }
 }

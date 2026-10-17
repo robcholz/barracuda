@@ -14,7 +14,9 @@ use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_appkit::{
     AppError, AppInfo, AppKind, AppManager, AppState, CAPABILITIES, RunningApp, VmRunOutcome,
 };
+use barracuda_audio_plugin::AudioOutput;
 use barracuda_platform::{AccessPointState, StationState};
+use barracuda_power_monitor_plugin::PowerStatus;
 use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::icons::{self, IconLayer};
 use barracuda_uikit::{
@@ -38,6 +40,8 @@ const CONTROL_TILES: i32 = 0;
 const CONTROL_BRIGHTNESS: i32 = 1;
 const CONTROL_PORTAL: i32 = 2;
 /// Brightness when the system starts, in percent.
+/// The battery gauge's inner width in pixels.
+const BATTERY_GAUGE: i32 = 19;
 /// The brightness bar's inner height in pixels.
 const BRIGHTNESS_BAR: i32 = 158;
 /// How long an answered or allowed result stays on screen.
@@ -123,6 +127,10 @@ pub struct Services {
     pub clock: Rc<UtcClock>,
     /// Network status and the portal's access point.
     pub wifi: Rc<WifiControl>,
+    /// The battery's charge on the control center.
+    pub power: Rc<PowerStatus>,
+    /// The speaker's volume and mute.
+    pub audio: Rc<AudioOutput>,
 }
 
 /// The system UI's state.
@@ -206,9 +214,11 @@ impl SystemUi {
         self.render();
     }
 
-    /// Puts the brightness and screen timeout on the display.
+    /// Puts the brightness and screen timeout on the display, and the
+    /// volume and mute on the speaker.
     fn apply_preferences(&self) {
         let values = self.services.preferences.get();
+        self.services.audio.set(values.volume, values.muted);
         let ui = &self.services.ui;
         ui.set_brightness(percent_to_level(i32::from(values.brightness)));
         ui.set_screen_timeout(
@@ -917,6 +927,7 @@ impl SystemUi {
         let running_ids: Vec<&str> = self.running.iter().map(|app| app.app.id.as_str()).collect();
         let foreground = self.foreground.as_deref();
         let agent = self.services.agent.state();
+        let battery = self.services.power.battery();
         let (width, height, round) = self.display();
         let rows = page_rows(width, height, round);
         let page = rows.iter().sum::<usize>();
@@ -930,8 +941,16 @@ impl SystemUi {
             ("unread", ViewValue::Bool(unread)),
             ("quiet", ViewValue::Bool(quiet)),
             ("offline", ViewValue::Bool(offline)),
-            ("battery", ViewValue::I32(-1)),
-            ("batteryFill", ViewValue::I32(0)),
+            (
+                "battery",
+                ViewValue::I32(battery.map_or(-1, |battery| i32::from(battery.percent))),
+            ),
+            (
+                "batteryFill",
+                ViewValue::I32(battery.map_or(0, |battery| {
+                    i32::from(battery.percent) * BATTERY_GAUGE / 100
+                })),
+            ),
             (
                 "agent",
                 ViewValue::I32(match agent {

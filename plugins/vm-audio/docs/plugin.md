@@ -1,13 +1,14 @@
 # Audio Plugin
 
-The Audio Plugin owns the Board's primary audio codec and exposes
-playback and recording to Lua code as the `audio` Lua package.
+The Audio Plugin owns the Board's primary audio codec, exposes playback and
+recording to Lua code as the `audio` Lua package, and publishes the device's
+output level to other Plugins as `AudioOutput`.
 
 - Plugin ID: `audio`
 - Dependencies: `vm`
 - Settings: none
 - Context resources: peripheral slot `audio-codec.device` (`primary`, optional)
-- Provided capabilities: none
+- Provided capabilities: `AudioOutput`
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
 - Agent Tools: none
@@ -33,8 +34,13 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-`set_volume` accepts an integer percentage from 0 through 100 and maps it to
-the codec capability's portable 0-through-255 output scale. `descriptor`
+`set_volume` accepts an integer percentage from 0 through 100: the app's own
+volume, which scales the device's level. `AudioOutput::set(volume, muted)`
+sets that level, as the system UI does from the person's volume and mute, and
+applies to every app: the codec's portable 0-through-255 output is the
+device's percent times the app's percent, or 0 while muted. A handle puts the
+level on the codec when its app changes its volume and before each chunk it
+plays, so a change reaches a sound that is playing. `descriptor`
 reports the required stream format.
 `play` and `record` use interleaved signed 16-bit little-endian PCM matching
 that format. `play_wav` accepts an uncompressed 16-bit integer PCM RIFF/WAVE

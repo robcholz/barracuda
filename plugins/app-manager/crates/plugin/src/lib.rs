@@ -30,6 +30,7 @@ mod words;
 mod workflow;
 
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
+use barracuda_audio_plugin::AudioOutput;
 use barracuda_board_hal::display::{Display, DisplayPeripheral};
 use barracuda_board_hal::touch::{Touch, TouchPeripheral};
 use barracuda_plugin::api::PluginContext;
@@ -37,6 +38,7 @@ use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
     PluginStartContext, PluginTaskToken,
 };
+use barracuda_power_monitor_plugin::PowerStatus;
 use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::{Ui, UiAssets};
 use barracuda_vfs::{FsError, ScopedVfs};
@@ -139,6 +141,8 @@ where
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let clock = context.require::<UtcClock>("time")?;
         let wifi = context.require::<WifiControl>("wifi")?;
+        let power = context.require::<PowerStatus>("power-monitor")?;
+        let audio = context.require::<AudioOutput>("audio")?;
         let ui = self
             .display
             .take()
@@ -191,6 +195,8 @@ where
                 preferences,
                 clock,
                 wifi,
+                power,
+                audio,
             };
             (ui, services)
         });

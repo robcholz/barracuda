@@ -1,13 +1,14 @@
 # Power Monitor Plugin
 
 Installs the `power_monitor` Lua package over the Board's primary
-power monitor.
+power monitor, and publishes the battery's charge to other Plugins as
+`PowerStatus`.
 
 - Plugin ID: `power-monitor`
 - Dependencies: `vm`
 - Settings: none
 - Context resources: peripheral slot `power-monitor.device` (`primary`, optional)
-- Provided capabilities: none
+- Provided capabilities: `PowerStatus`
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
 - Agent Tools: none
@@ -41,7 +42,13 @@ print(string.format('%.3f V %.1f mA %.1f mW', bus_uv / 1e6, current_ua / 1e3, po
 ```
 
 Boards without a power monitor still install the package; `available` returns
-false and `open` returns `nil, error`. The move-only built-in capability
-permits one handle per boot; explicit close, lexical `<close>`, collection, and
-Plugin revocation prevent further operations. The Plugin performs no
+false and `open` returns `nil, error`. One handle may be opened per boot;
+explicit close, lexical `<close>`, collection, and Plugin revocation prevent
+further operations on it.
+
+`PowerStatus::battery()` reads the battery's charge (`BatteryState` with
+`percent` and `charging`) through `PowerMonitor::battery`, which a battery
+fuel gauge such as the BQ27220 answers and other monitors answer with
+`None`. The Plugin keeps the monitor, so the capability reads it while a Lua
+handle is open too. The Plugin performs no
 background sampling and owns no long-running tasks.

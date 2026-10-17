@@ -6,7 +6,7 @@ states, the launcher, the app switcher, the notification and control
 centers, and the screens around an app's lifecycle.
 
 - Plugin ID: `app-manager`
-- Dependencies: `vm`, `workflow`, `time`, `wifi`
+- Dependencies: `vm`, `workflow`, `time`, `wifi`, `power-monitor`, `audio`
 - Settings: none
 - Context resources: peripheral slots `display.main` (`primary`, optional)
   and `touch.main` (`primary`, optional)
@@ -14,7 +14,8 @@ centers, and the screens around an app's lifecycle.
   `Preferences`
 - Required capabilities: `Vm` and `LuaPackageRegistry` from `vm`,
   `WorkflowActionRegistry` from `workflow`, `UtcClock` from `time`,
-  `WifiControl` from `wifi`
+  `WifiControl` from `wifi`, `PowerStatus` from `power-monitor`,
+  `AudioOutput` from `audio`
 - Workflow: Actions `app.list`, `app.open`, `app.install`, `app.home`,
   `app.interactive`, `app.terminate`, `app.status`, `app.tap`, `app.notify`,
   `app.confirm`, and `app.agent`, see `action.md`; Events none
@@ -387,8 +388,11 @@ disturb, and the screen timeout (`SCREEN_TIMEOUTS`). The control center and
 builtin apps, such as Settings, change the same values.
 The system UI applies the brightness and the screen timeout to the display with
 `UiService::set_brightness` and `UiService::set_screen_timeout`, and saves the
-values after every change. The volume is kept for audio output; mute and the
-microphone are the person's choice for the Agent's voice.
+values after every change. It puts the volume and mute on the speaker with
+`AudioOutput::set`: every app's sound is scaled by the volume, and mute
+silences it. The microphone is the person's choice for the Agent's voice.
+The control center shows the battery's charge from `PowerStatus::battery`
+on a Board whose power monitor is a fuel gauge, and nothing on others.
 
 ### The status bar
 
