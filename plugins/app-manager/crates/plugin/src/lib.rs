@@ -22,6 +22,7 @@ mod config {
 }
 
 mod agent;
+mod fonts;
 mod notices;
 mod notify;
 mod preferences;
@@ -57,6 +58,7 @@ pub use barracuda_appkit::{
     Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
 };
 pub use barracuda_uikit::icons;
+pub use fonts::SystemFonts;
 pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
 pub use notify::{NOTIFY, NOTIFY_API};
 pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
@@ -84,6 +86,7 @@ pub struct AppManagerPlugin<Panel, Input> {
 struct Runtime<Panel, Input> {
     filesystem: ScopedVfs,
     apps: AppManager,
+    fonts: Rc<SystemFonts>,
     /// The display and the system UI's services, on a Board with a display.
     screen: Option<(Ui<Panel, Input>, Services)>,
 }
@@ -186,6 +189,8 @@ where
         context.provide(Rc::clone(&notices))?;
         context.provide(Rc::clone(&agent))?;
         context.provide(Rc::clone(&preferences))?;
+        let fonts = Rc::new(SystemFonts::default());
+        context.provide(Rc::clone(&fonts))?;
         let screen = ui.map(|ui| {
             let services = Services {
                 ui: ui.service(),
@@ -203,6 +208,7 @@ where
         self.runtime = Some(Runtime {
             filesystem,
             apps,
+            fonts,
             screen,
         });
         Ok(())
@@ -241,14 +247,15 @@ async fn run<Panel: Display, Input: Touch>(
     let Runtime {
         filesystem,
         apps,
+        fonts,
         screen,
     } = runtime;
     let shown = screen.as_ref().map(|(ui, _)| ui.service());
     let display = async {
         match screen {
             Some((ui, services)) => {
-                let filesystem = &filesystem;
-                join(ui.run(filesystem), run_system_ui(filesystem, services)).await;
+                let fonts = fonts.source();
+                join(ui.run(fonts.as_ref()), run_system_ui(&filesystem, services)).await;
             }
             None => core::future::pending().await,
         }

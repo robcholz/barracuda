@@ -14,13 +14,6 @@ command = ["python3", "resources/icons/build.py"]
 inputs = ["resources/icons/svg", "resources/icons/codepoints.json"]
 outputs = ["resources/icons/codepoints.json", "resources/icons/barracuda-icons.otf", "resources/icons/icons.json", "crates/uikit/src/icons.rs"]
 
-[tasks.fonts]
-cwd = "."
-command = ["bun", "resources/fonts/build.ts"]
-inputs = ["resources/fonts", "resources/icons/barracuda-icons.otf"]
-outputs = ["filesystem/resources/fonts"]
-env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]
-
 [tasks.view]
 cwd = "."
 command = ["bun", "resources/view/build.ts"]

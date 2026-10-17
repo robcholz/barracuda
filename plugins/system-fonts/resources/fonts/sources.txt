@@ -1,0 +1,7 @@
+# Directories, relative to this Plugin, whose sources hold the text the
+# system fonts must cover, and the file extensions to read there: the
+# app-manager Plugin's system view, system UI, app kit, and examples.
+../app-manager/resources/view .tsx
+../app-manager/crates/plugin/src .rs
+../app-manager/crates/appkit/src .rs
+../app-manager/resources/examples .tsx .lua .json

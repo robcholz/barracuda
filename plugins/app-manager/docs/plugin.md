@@ -28,8 +28,8 @@ centers, and the screens around an app's lifecycle.
   touch, and runs the system UI
 - Storage: installed apps under the private `/media/apps`, offers under the
   shared `/workspace/media/apps` (read only); each app's key-value store and
-  files under the private `/media/data/<id>/`; the system fonts in
-  `/resources/fonts` and the system view in `/resources/view`; preferences
+  files under the private `/media/data/<id>/`; the system view in
+  `/resources/view`; preferences
   in `/data/preferences.json`
 
 ## Structure
@@ -283,14 +283,16 @@ tests, and work without a display.
 
 ## Fonts and icons
 
-The system fonts are font atlases the task reads from `/resources/fonts`
-(`SYSTEM_FONTS`) before the first view opens; `UiService::ready` waits for
-them. A view that ships no atlas for a font slot draws with the system font
-for it, so the system UI and the system apps share one set and ship none.
-`resources/fonts/build.ts` bakes them from Noto Sans SC: ASCII and every
-character in the sources `sources.txt` names at the text sizes, GB 2312's
-3,755 common characters at 16 px regular for prose no source names, a few
-headline characters at 24 px bold, and digits at 54 px bold.
+The system fonts are font atlases another Plugin ships, `system-fonts` on
+device Boards, because they are about 2.4 MB and a Board without a display
+needs none. That Plugin hands its filesystem over with the `SystemFonts`
+capability while registering, and the task reads `/resources/fonts`
+(`SYSTEM_FONTS`) from it before the first view opens; `UiService::ready`
+waits for them. A view that ships no atlas for a font slot draws with the
+system font for it, so the system UI and the system apps share one set and
+ship none. Without a Plugin that ships them, views draw only with their own
+atlases. The `system-fonts` Plugin's
+[`plugin.md`](../../system-fonts/docs/plugin.md) says what they hold.
 
 The system icon set is one font, `resources/icons/barracuda-icons.otf`,
 built from `resources/icons/svg` by `resources/icons/build.py`. Each icon is a
@@ -409,12 +411,11 @@ connected. The portal tile opens the Wi-Fi setup access point
 The Plugin's build inputs live in `resources/` and their outputs, committed,
 in `filesystem/resources/` and `crates/appkit/tests/fixtures/`. Each task
 needs a PocketJS checkout (`POCKETJS_ROOT`) for the MicroTS compiler and font
-baker, and the fonts and examples Noto Sans SC (`CJK_FONT_DIR`):
+baker, and the examples Noto Sans SC (`CJK_FONT_DIR`):
 
 | Task | Builds |
 | --- | --- |
 | `icons` | the icon font and tables from `resources/icons/svg` |
-| `fonts` | the system fonts from Noto Sans SC, holding every character in the sources `resources/fonts/sources.txt` names and in `charset.txt` |
 | `view` | the system view from `resources/view/app.tsx` and its `app.d.ts` contract; it ships no atlases |
 | `examples` | the example installable apps in `resources/examples/` into `crates/appkit/tests/fixtures/` |
 

@@ -95,14 +95,21 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
         Rc::clone(&self.service)
     }
 
-    /// Reads the system fonts from `filesystem`, then applies owners'
-    /// writes, presses the shown view where it is tapped, hands gestures to
-    /// the system UI, and draws what changed, forever. Whoever stops it
-    /// calls [`UiService::close_all`].
-    pub async fn run(self, filesystem: &ScopedVfs) {
+    /// Reads the system fonts from `fonts`, when a Plugin ships them, then
+    /// applies owners' writes, presses the shown view where it is tapped,
+    /// hands gestures to the system UI, and draws what changed, forever.
+    /// Whoever stops it calls [`UiService::close_all`].
+    pub async fn run(self, fonts: Option<&ScopedVfs>) {
         let mut runtime = self;
         let service = Rc::clone(&runtime.service);
-        service.set_system_fonts(system_fonts(filesystem).await);
+        let fonts = match fonts {
+            Some(filesystem) => system_fonts(filesystem).await,
+            None => {
+                log::info!("ui: no system fonts; views draw with their own atlases");
+                alloc::vec::Vec::new()
+            }
+        };
+        service.set_system_fonts(fonts);
         let mut animating = false;
         // The brightness the person picked, put back when the screen wakes.
         let mut level = u8::MAX;

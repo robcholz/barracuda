@@ -23,12 +23,14 @@ the Plugins' docs.
 | --- | --- |
 | `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
 | `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
+| `system-fonts` | the system fonts every view on a display draws with |
 
 The app kit needs no display. On a Board without one, the `app-manager`
 Plugin runs no UI kit and no system UI: it is an app manager for headless
 apps, and apps with views answer `no_display`. A device Board enables
-`app-manager` with the builtin apps it ships; a Board leaves a system app out
-by not enabling its Plugin.
+`app-manager` with the builtin apps it ships and `system-fonts`; a Board
+leaves a system app out by not enabling its Plugin, and a Board without a
+display enables neither the system apps nor `system-fonts`.
 
 ## Deciding the layer
 
@@ -118,9 +120,11 @@ Workspace offer stays until its author removes it.
 
 ## Fonts
 
-The `app-manager` Plugin bakes the system fonts into its `/resources/fonts`:
-Noto Sans SC at the sizes the system view and the system apps use, with every
-character in its own sources and in its `charset.txt`, and the system icon
+The `system-fonts` Plugin bakes the system fonts into its `/resources/fonts`
+and hands them to the UI kit with `app-manager`'s `SystemFonts`; a device
+Board enables it, and a Board without a display leaves its 2.4 MB out. They
+are Noto Sans SC at the sizes the system view and the system apps use, with
+every character in `app-manager`'s sources and in its `charset.txt`, and the system icon
 font's glyphs at the sizes icons are drawn at. The 16 px regular slot is the
 prose slot: it also holds GB 2312's 3,755 common characters, so text no
 source names, such as an Agent's answer, a notice, or a conversation's title,

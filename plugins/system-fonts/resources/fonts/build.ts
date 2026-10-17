@@ -5,7 +5,8 @@
 // CJK_FONT_DIR at a directory holding NotoSansSC-Regular.otf and
 // NotoSansSC-Bold.otf, from github.com/notofonts/noto-cjk,
 // Sans/SubsetOTF/SC), monospace is the PocketJS checkout's JetBrains Mono
-// (POCKETJS_ROOT), and icons come from ../icons/barracuda-icons.otf.
+// (POCKETJS_ROOT), and icons come from the app-manager Plugin's
+// resources/icons/barracuda-icons.otf.
 //
 // Text slots (14, 16, and 18 px regular, 14 and 18 px bold) hold ASCII
 // and every character beyond ASCII in the sources that
@@ -16,7 +17,7 @@
 // display.txt, 36 px the app icons, 54 px bold digits and the Agent mark. Monospace slots hold
 // ASCII. Text with other characters shows a placeholder box for them.
 //
-//   POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin app-manager
+//   POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin system-fonts
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -29,6 +30,7 @@ if (!pocket || !fonts) {
 const here = import.meta.dir;
 const plugin = resolve(here, "../..");
 const output = join(plugin, "filesystem/resources/fonts");
+const iconDir = join(plugin, "../app-manager/resources/icons");
 const { bakeSlot } = await import(join(pocket, "framework/compiler/bake-font.ts"));
 const opentype = (await import(join(pocket, "node_modules/opentype.js"))).default;
 const load = async (path: string) => opentype.parse(await Bun.file(path).arrayBuffer());
@@ -57,7 +59,7 @@ sourceText.push(lines("charset.txt").join(""));
 
 const codepoints = (text: string) => [...new Set([...text].map((char) => char.codePointAt(0)!))];
 const ascii = Array.from({ length: 95 }, (_, index) => 32 + index);
-const iconTable: Record<string, Array<{ codepoint: number }>> = JSON.parse(readFileSync(join(here, "../icons/icons.json"), "utf8"));
+const iconTable: Record<string, Array<{ codepoint: number }>> = JSON.parse(readFileSync(join(iconDir, "icons.json"), "utf8"));
 const icons = Object.values(iconTable).flat().map((layer) => layer.codepoint);
 // App icons are the two-layer ones drawn on a tile; only they are drawn large.
 const appIcons = Object.values(iconTable)
@@ -82,7 +84,7 @@ for (let row = 0xb0; row <= 0xd7; row++) {
 const regular = await load(join(fonts, "NotoSansSC-Regular.otf"));
 const bold = await load(join(fonts, "NotoSansSC-Bold.otf"));
 const mono = await load(join(pocket, "assets/fonts/JetBrainsMono-Regular.ttf"));
-const iconFace = await load(join(here, "../icons/barracuda-icons.otf"));
+const iconFace = await load(join(iconDir, "barracuda-icons.otf"));
 
 // slot -> [face, px, bold, characters]
 const text = sorted([...ascii, ...beyond]);
