@@ -1,7 +1,7 @@
 name = "File tools: path policy edge cases"
 description = "Scoped path normalization, mount routing, read-only and removable mounts, mount roots, and backend name limits for the file Tools."
 
-# Path strings go straight to the Plugin ScopedVfs (plugins/agent-file/docs/plugin.md).
+# Path strings go straight to the Plugin ScopedVfs (docs/plugins/agent-file.mdx).
 # ScopedVfs::path (shared/vfs/src/scoped.rs:33-49) prefixes relative paths with
 # "/", normalizes them (shared/vfs/src/path.rs:7-35) and picks the longest
 # matching logical mount (core/plugin/crates/manager/src/filesystem.rs:10-27).

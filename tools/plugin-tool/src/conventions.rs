@@ -1,10 +1,10 @@
 //! The shapes every Plugin keeps, checked by `cargo plugin sync`, never by a
 //! build: a document out of form fails the check, not the firmware.
 //!
-//! These are the checkable parts of `.agents/docs/plugin-api.md`: the Plugin
-//! root's layout, the schema tree, the `plugin.md` summary and its agreement
-//! with `plugin.toml`, the Action and Event documents, and crate dependencies
-//! on other Plugins. Every violation is reported at once.
+//! These are the checkable parts of `docs/architecture/plugin-api.mdx`: the Plugin
+//! root's layout, the schema tree, the Plugin page summary and its agreement
+//! with `plugin.toml`, the Action and Event pages, and crate dependencies on
+//! other Plugins. Every violation is reported at once.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -15,16 +15,15 @@ use barracuda_plugin::manifest::PluginManifest;
 use crate::CommandError;
 
 /// Names a Plugin root may hold.
-const ROOT_ENTRIES: [&str; 6] = [
+const ROOT_ENTRIES: [&str; 5] = [
     "plugin.toml",
     "crates",
     "schemas",
     "resources",
     "filesystem",
-    "docs",
 ];
 
-/// The `plugin.md` summary bullets, in order.
+/// The Plugin page summary bullets, in order.
 const SUMMARY: [&str; 12] = [
     "Plugin ID",
     "Dependencies",
@@ -57,7 +56,7 @@ pub(crate) fn check(root: &Path, plugins: &[Checked<'_>]) -> Result<(), CommandE
         let directory = root.join("plugins").join(plugin.directory);
         check_root(&directory, plugin.directory, &mut violations)?;
         check_schemas(&directory, plugin.directory, &mut violations)?;
-        check_documents(&directory, plugin, &mut violations)?;
+        check_documents(root, &directory, plugin, &mut violations)?;
         check_crate_dependencies(&directory, plugin, plugins, &packages, &mut violations)?;
     }
     if violations.is_empty() {
@@ -131,33 +130,39 @@ fn check_schemas(
     Ok(())
 }
 
+/// Checks the Plugin's pages in the docs site: `docs/plugins/<name>.mdx`, and
+/// `docs/plugins/<name>/{action,event}.mdx` beside matching schemas.
 fn check_documents(
+    root: &Path,
     directory: &Path,
     plugin: &Checked<'_>,
     violations: &mut Vec<String>,
 ) -> Result<(), CommandError> {
     let name = plugin.directory;
-    let docs = directory.join("docs");
-    for (schemas, document) in [("action", "action.md"), ("event", "event.md")] {
-        let path = directory.join("schemas").join(schemas);
-        if path.is_dir() && !entries(&path)?.is_empty() && !docs.join(document).is_file() {
+    let pages = root.join("docs").join("plugins");
+    for kind in ["action", "event"] {
+        let path = directory.join("schemas").join(kind);
+        if path.is_dir()
+            && !entries(&path)?.is_empty()
+            && !pages.join(name).join(format!("{kind}.mdx")).is_file()
+        {
             violations.push(format!(
-                "plugins/{name}/docs/{document} is missing while schemas/{schemas}/ exists"
+                "docs/plugins/{name}/{kind}.mdx is missing while plugins/{name}/schemas/{kind}/ exists"
             ));
         }
     }
-    let path = docs.join("plugin.md");
+    let path = pages.join(format!("{name}.mdx"));
     let Ok(text) = fs::read_to_string(&path) else {
-        violations.push(format!("plugins/{name}/docs/plugin.md is missing"));
+        violations.push(format!("docs/plugins/{name}.mdx is missing"));
         return Ok(());
     };
     for problem in summary_problems(&text, plugin.manifest) {
-        violations.push(format!("plugins/{name}/docs/plugin.md: {problem}"));
+        violations.push(format!("docs/plugins/{name}.mdx: {problem}"));
     }
     Ok(())
 }
 
-/// Returns what is wrong with a `plugin.md` summary.
+/// Returns what is wrong with a Plugin page summary.
 pub(crate) fn summary_problems(text: &str, manifest: &PluginManifest) -> Vec<String> {
     let bullets = summary(text);
     let keys: Vec<&str> = bullets.iter().map(|(key, _)| key.as_str()).collect();
@@ -412,7 +417,7 @@ mod tests {
         barracuda_plugin::manifest::parse(text).expect("Plugin manifest")
     }
 
-    const DOCUMENT: &str = "# Demo Plugin\n\nOwns the demo.\n\n\
+    const DOCUMENT: &str = "---\ntitle: \"Demo Plugin\"\n---\n\nOwns the demo.\n\n\
         - Plugin ID: `demo`\n\
         - Dependencies: `webserver`, `http`\n\
         - Settings: `slots` (`usize`, default `1`)\n\

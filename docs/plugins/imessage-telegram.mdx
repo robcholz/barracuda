@@ -1,0 +1,198 @@
+---
+title: "IMessage Telegram Plugin"
+sidebarTitle: "Overview"
+---
+
+The IMessage Telegram Plugin adds a Telegram Bot as an iMessage Gateway
+channel: it stores the bot configuration, sends through the Bot API, and
+receives by long polling.
+
+- Plugin ID: `imessage-telegram`
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-telegram`, with status; `POST
+  /api/gateway/telegram`, `GET /api/gateway/telegram/status`, `POST
+  /api/gateway/telegram/mode`, `GET /api/gateway/telegram/owners`, `POST
+  /api/gateway/telegram/owners` (see [HTTP API](/plugins/imessage-telegram/http))
+- Tasks: one, `telegram_receive_task` (pool size 1), which owns the receive
+  loop and holds at most one of the Gateway's receive slots, only while the
+  channel is configured and in `send_receive`
+- Storage: Plugin-scoped KV:
+  - `configuration`: the complete provider configuration;
+  - `mode`: the channel mode as a JSON string (see below);
+  - `owners`: the allowed accounts, a JSON array of `{id, label}`;
+  - `offset`: the receive cursor, the next `getUpdates` offset as a decimal
+    string.
+
+The Plugin starts without provider credentials when storage is empty. Its
+constructor takes nothing from `PluginContext`; the Gateway supplies the HTTP
+clients, the receive slots, and the Platform entropy (for binding codes).
+Registration loads the configuration and mode, and the allowed accounts only
+when configured; malformed stored data fails registration. The first receive
+session reads the cursor. The configuration path, `/mode`, and `/owners` are
+one prefix route (`IMessageGateway::serve_channel`). See [HTTP API](/plugins/imessage-telegram/http)
+for the endpoints.
+
+## Modes and registration
+
+The mode is the Gateway's `ChannelMode`:
+
+- `disabled`: no Gateway channel, no connection;
+- `send`: the `telegram` channel is registered with the Gateway and only sends;
+- `send_receive`: registered, plus the receive loop.
+
+A newly configured channel starts in `send_receive`. A configuration stored
+before modes existed loads as `send`. The `telegram` channel is registered with
+the Gateway exactly while the channel is configured and its mode is not
+`disabled`; the registration lives in the channel state the endpoints and the
+task share.
+
+## Receive loop
+
+`telegram_receive_task` is spawned once in `start` and races the receive
+runtime (`IMessageGateway::receive_runtime`) against its
+`PluginTaskToken`. While the channel is not configured or not in
+`send_receive`, the runtime is parked and holds no slot. Otherwise it holds one
+lease from the Gateway's receive slots (never the shared request pool used by
+model calls and sends); when every slot is taken it reports `no_slot` and
+starts as soon as `ReceiveSlots::wait_available` reports a freed slot.
+
+Each session opens one kept-alive connection on the lease's client factory,
+through the Gateway's poll helper (`GatewayHttp::poll`),
+and loops:
+
+1. await `IMessageGateway::ready()`;
+2. `GET /bot<token>/getUpdates?timeout=50&limit=8&allowed_updates=["message"]&offset=<cursor>`;
+3. on an `ok` answer, report `receiving` and handle each update in order.
+
+A connection that ends after a healthy poll is reopened at once; other
+failures back off from 1 s to 30 s.
+
+- **Cursor.** The offset (last `update_id` + 1) acknowledges every handled
+  update on the next poll. It lives in RAM and is written to `offset` at most
+  once every 10 s. A new bot token clears it.
+- **Duplicates.** The last 16 handled `update_id`s are remembered; an update
+  sent again, for example after a reconnect, is dropped.
+- **Messages.** A message with a sender and `text`, or with one of the media
+  below (its `caption` as the text, possibly empty), is handled. Stickers,
+  service messages and anything else are skipped with a debug log.
+- **Allowed accounts.** The sender is `from.id`, labelled `@username` or the
+  first name. `Owners::classify` decides, on the text or caption, before any
+  file is fetched:
+  - an owner's message is published as a `GatewayInboundMessage` with route
+    `{channel: "telegram", conversation_id: <chat.id>}` and `message_id`
+    `<message_id>`, so replies (and `reply_to`) land in the same chat, and
+    its file (below) as the one attachment;
+  - a new sender whose text is the binding code, or `/start <code>`, becomes an
+    owner and gets `PAIRED_REPLY` through the provider's ordinary
+    `sendMessage`;
+  - anyone else is dropped and counted.
+- **Errors.**
+  - 409 because a webhook is set: `deleteWebhook` is called once per entry into
+    `send_receive` (or new configuration), then polling resumes. Another 409,
+    including "terminated by other getUpdates request" from a second poller,
+    reports `error` with Telegram's description and backs off.
+  - 429: waits at least `parameters.retry_after`.
+  - 401 or 404 (a wrong or revoked token): reports `error` and stops until the
+    configuration or mode changes.
+- **Memory.** Per receiving channel:
+  - a 1 KiB response header buffer and a 512-byte read chunk;
+  - one response body of at most 16 KiB while a poll is decoded; it decodes
+    straight into the few fields used. A batch over the cap is fetched again
+    one update at a time, and a single update over it is acknowledged and
+    skipped with a warning;
+  - the lease's TLS session, about 35 KiB idle with the 16 KiB input and 4 KiB
+    output record buffers;
+  - the slot's static 1 KiB transmit and 4 KiB receive socket buffers.
+
+Deadlines: 30 s to connect, 70 s per poll, 30 s for `deleteWebhook`.
+
+## Media
+
+An owner's message carries at most one file, which becomes its
+`GatewayInboundMessage::attachments` entry:
+
+| Field | Kind | MIME type |
+| --- | --- | --- |
+| `photo` | `image` | `image/jpeg` |
+| `voice` | `audio` | its `mime_type`, else `audio/ogg` |
+| `audio` | `audio` | its `mime_type` |
+| `video` | `video` | its `mime_type` |
+| `video_note` | `video` | `video/mp4` |
+| `animation` (Telegram also sets `document` beside it) | `video` | its `mime_type` |
+| `document` | `image` for `image/jpeg`, `png`, `gif` or `webp`; else `file` | its `mime_type` |
+
+A field without a MIME type leaves it to the download's `Content-Type`. The
+sender's `file_name` is the attachment's `filename`. Of a photo's sizes the
+largest whose `file_size` is within the Gateway's `attachment_max_bytes()` is
+taken, else the largest of all, which the size check below refuses.
+
+1. A `file_size` over `attachment_max_bytes()` is refused without a request.
+2. `GET <api_base>/bot<token>/getFile?file_id=<file_id>` on the shared request
+   pool (its answer read up to 2 KiB) names `file_path`; a `file_size` there
+   over the limit is refused too.
+3. `IMessageGateway::download_inbound` streams
+   `<api_base>/file/bot<token>/<file_path>` into
+   `/workspace/cache/gateway/telegram/`, also on the shared request pool.
+
+A file that is refused, over the limit, or fails (an API refusal, a non-2xx
+status, a transport or storage failure) does not drop the message: one line is
+appended to its text, `[<kind> too large, not received]` or
+`[<kind> not received]`, and the message is still published. Strangers' and
+pairing messages' files are never fetched. Downloads run one at a time inside
+the update's handling, while the next poll waits; their buffers are the
+Gateway's download buffers, held only during the download.
+
+Sending audio (`send_media` with `audio`) uses `sendVoice` (field `voice`,
+default name `voice.ogg`) when its MIME type is `audio/ogg` or its file name
+ends in `.oga` or `.opus`, so Telegram shows a voice note; other audio goes
+through `sendAudio`.
+
+## Portal page
+
+Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-telegram`, group `WebGroup::Channel`, order 20, title `Telegram`, a
+bilingual summary, icon `icon.svg`, no figure, module `entry.js`, and a
+`ResourceFiles` provider. Its `GET /portal/status` record is `entry_status`
+over `IMessageGateway::channel_status`: "Not set up", "Disabled", "Send only",
+"Receiving", "Connecting", "No slot", or "Disconnected".
+Unload removes the navigation entry and resource provider.
+
+Cargo automatically runs the declared `build` task before compiling this Plugin.
+To build only its resources, run `cargo plugin run build --plugin imessage-telegram`
+from the repository root. The declaration uses the shared `tools/web/build.ts`
+script. Frontend dependencies and format/lint/check/test commands are managed
+once at the repository root; tests belong to this Plugin's `resources/web/tests/`.
+The independent browser module is
+written to this Plugin's `filesystem/resources/entry.js`. The generic image
+builder includes that directory only when this Plugin is selected. No business
+page is bundled into the portal shell. The shared UI source is a build-time
+helper, not a runtime dependency on another contributor's files.
+
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) posts
+`{token, api_base, draft_min_delta_bytes}` to `POST /api/gateway/telegram`. Its
+"Verify" button calls the Bot API's `getMe` straight from the browser (Telegram
+allows any origin) at the "Advanced" `api_base`: a bot shows its name, `@username` and
+a QR Code of `https://t.me/<username>`; Telegram's `error_code` and
+`description` are shown on the token field. When the browser has no route out (a
+phone on the device's hotspot) the page notes that the token is unverified;
+verifying never gates saving. The device's error `message` is shown in the
+toast. On mount it reads `GET /api/gateway/telegram/status`, which reports the
+channel status and never the settings; a configured channel shows as a "Channel"
+row with the configured card above the form that replaces it. The row also appears
+after a save succeeds, and the page then calls `context.refreshStatus()` so the
+portal's navigation and overview follow. It never reads settings or keys.
+Secrets are password inputs, never persisted in browser storage, and cleared on
+success or unmount. Requests are cancelled on unmount and are never retried
+automatically. The HTTP API has no authentication or transport
+encryption; use only within a trusted provisioning network.

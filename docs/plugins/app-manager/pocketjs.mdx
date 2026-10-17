@@ -1,0 +1,25 @@
+---
+title: "Vendored PocketJS crates"
+sidebarTitle: "Vendored PocketJS"
+---
+
+`pocketjs-core/` and `microts/` are copied from
+[PocketJS](https://github.com/pocket-nexus/pocketjs) at commit
+`e9e417308f094ead706754164acf91436e4d05a8`:
+
+| Directory | Upstream path |
+| --- | --- |
+| `pocketjs-core/src` | `engine/core/src` |
+| `microts/src` | `engine/crates/microts/src` |
+
+Both are MIT licensed (`LICENSE` in each directory). The library sources are
+unmodified except that three test modules are dropped because they read
+fixtures from the PocketJS repository: the out-of-line `core/src/tests.rs` and
+`core/src/physics/tests.rs` with their `mod tests;` declarations, and the
+inline `mod tests` at the end of `core/src/package.rs`. The sources are also
+reformatted with this workspace's `rustfmt`. The manifests are rewritten to
+stand alone in this workspace and silence Clippy's style lints.
+
+Update by copying the same paths from a newer commit and re-applying the three
+deletions. Keep Barracuda-specific code out of these directories; it belongs in
+`barracuda-ui-runtime`.

@@ -11,4 +11,5 @@ licensed under the Apache License, Version 2.0 (APACHE-2.0.txt).
 
 The other files in this directory are not derived from Streamdown's code; they
 follow its design (block memoization, the incomplete code block, the hidden
-caret, and streamdown-cjk's autolink boundaries), as README.md describes.
+caret, and streamdown-cjk's autolink boundaries), as
+docs/plugins/imessage-web/markdown.mdx at the repository root describes.

@@ -1,8 +1,7 @@
 [project]
 name = "barracuda-trace"
 version = "0.1.0"
-description = "Parser and tree reconstructor for barracuda-agent-trace's flat-tree TRACE format (see docs/trace-format.md)."
-readme = "scripts/README.md"
+description = "Parser and tree reconstructor for barracuda-agent-trace's flat-tree TRACE format (see docs/plugins/agent/trace-format.mdx)."
 requires-python = ">=3.11"
 dependencies = [
     "chrometrace>=0.2.1",

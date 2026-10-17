@@ -4,7 +4,7 @@
 //   bun pack-app.ts --new-key <key.jwk>                     make a signing key
 //
 // A package holds the container's manifest and the files it names, laid out
-// as `docs/app-format.md` defines. A signed one ends with the key's public
+// as `docs/plugins/app-manager/app-format.mdx` defines. A signed one ends with the key's public
 // half and its ECDSA P-256 signature over everything before; a device that
 // installed an app from a signed package takes updates only from that key,
 // so keep the key file safe and reuse it for every version. Offer the

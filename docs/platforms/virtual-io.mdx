@@ -1,0 +1,226 @@
+---
+title: "Virtual I/O"
+---
+
+Host-only virtual GPIO, I2C, and SPI hardware shared by the Linux and macOS
+Platforms. It never enters firmware.
+
+- **Platform HAL.** `barracuda_platform_virtual_io::hal` is re-exported as
+  the `hal` module of both host Platforms. It provides the virtual peripheral
+  singleton (`VirtualPeripherals`: pins `GPIO0`..`GPIO23`, I2C controllers
+  `I2C0`, `I2C1`, and `I2C2`, SPI controllers `SPI0` and `SPI1`), the
+  `RuntimePlatform` adapter behind the Board's exposed I/O, and the
+  `i2c-device`, `spi-device`, `digital-output`, and `digital-input`
+  constructors for peripheral implementations. The host Boards expose
+  `vio-0`..`vio-7` on `GPIO0`..`GPIO7` and leave `I2C0` and `I2C1` to runtime
+  I/O.
+- **Board-declared peripherals.** The host Boards declare peripherals in
+  `board.yml` like any Board. The host Platforms set `peripheral-models` in
+  their HAL manifest, so generated Board composition calls
+  `hal::declare_peripheral` for each one before initializing any; the HAL
+  attaches the chip model for its implementation at the declared bus and
+  address (see below), and the System runs the real chip driver and
+  peripheral implementation against it.
+- **Virtual peripherals manager.** One process-wide `VirtualHardware` holds
+  pin state, I2C buses with attached device models, fault rules, and a
+  timestamped event log. It listens on the loopback address in
+  `BARRACUDA_VIRTUAL_IO_ADDR`. The variable is required: a host System without
+  it, or with a non-loopback or unparsable value, exits at startup.
+- **Device models.** `I2cDevice` implementations own register behaviour and
+  may report datasheet order and timing violations. They are independent of
+  the manager and the System, so a chip driver test can run the driver over a
+  standalone `VirtualHardware` with a manual `Clock` and `VirtualDelay`.
+
+## Board-declared peripherals
+
+`declared` maps a peripheral implementation to its chip model, placed on the
+controller of the implementation's `i2c` binding at its `address` parameter,
+or on the controller of its `spi` binding:
+
+| Implementation | Model | Initial state |
+| --- | --- | --- |
+| `rx8130ce-rtc` | `rx8130ce` | kept time on its backup supply: VLF = 0, the clock running from the host's UTC time (initial power-on outside 2000–2099) |
+| `ina226-power-monitor` | `ina226` | power-on state, measuring a 5.000 V bus and 200 mA through the declared `shunt-micro-ohms` |
+| `bq27220-power-monitor` | `bq27220` | power-on state |
+| `cst816t-touch` | `cst816t` | no finger on the panel |
+| `mipi-dbi-display` | `mipi-dbi-panel` on SPI | the declared `width` × `height`, asleep and off; D/C read from the `dc` pin, addresses shifted by `offset-x`/`offset-y` |
+| `st77916-qspi-display` | `st77916` on quad SPI | a round 360 × 360 panel, asleep and off; each write's header carries the opcode and the DCS command |
+
+A peripheral without a model is logged and uses its bindings directly. The
+host Boards declare `real-time-clock` (RX8130CE at `32h`), `power-monitor`
+(INA226 at `40h`, 5 mΩ shunt), and `touch` (CST816T at `15h`, interrupt on
+`GPIO16`) on `I2C2` (`GPIO8`/`GPIO9`, 400 kHz), and `display`, the
+ESP-VoCat's round 360×360 ST77916 on quad SPI `SPI0` (`GPIO10` SCK,
+`GPIO11`/`GPIO17`/`GPIO18`/`GPIO19` data, `GPIO12` CS, `GPIO13` D/C, `GPIO14`
+reset, `GPIO15` backlight, `GPIO20` power), so the host shows the device UI
+as the round boards do. Their models are ordinary attached
+devices: the manager reads and writes their registers, injects faults at
+their addresses, and records their transactions and datasheet violations,
+which the System also logs as warnings. `buses` names the peripheral of each
+I2C device, `displays` that of each panel, and `reset` keeps them all.
+
+## Display viewer
+
+The control port also answers HTTP. Open `http://<BARRACUDA_VIRTUAL_IO_ADDR>/`
+in a browser, such as `http://127.0.0.1:7878/`, to see every display panel as
+its driver drew it; the page redraws when a panel changes and shows a panel
+that is off, asleep, or not yet initialized as dark, and a round panel as a
+circle. Clicking or dragging on a
+panel touches it through the Board's CST816T: the page writes the finger
+position to the touch model's backdoor, and the System reads it like a real
+touch, so a click taps, a drag swipes, and holding the button still
+long-presses the system UI.
+
+| Request | Answer |
+| --- | --- |
+| `GET /` | the viewer page |
+| `GET /display/<bus>` | the panel's pixels: row-major little-endian RGB565, with `X-Width`, `X-Height`, `X-Visible`, and `X-Revision` headers |
+| `POST /control` | one control request as the body, answered like a line of the TCP protocol |
+
+Every HTTP request must name a loopback `Host` (`127.0.0.1`, `[::1]`, or
+`localhost`), and `POST /control` must carry `Content-Type: application/json`
+and no other origin than the page's own, so websites the developer visits
+cannot drive the virtual hardware.
+
+## Pin model
+
+| Mode | Resolved level |
+| --- | --- |
+| output, push-pull | the output latch |
+| output, open-drain | low when the latch is low or the line is driven low; otherwise high |
+| input | the externally driven level; undriven: high with pull-up, otherwise low |
+| disabled | the externally driven level; undriven: low |
+
+An I2C claim marks SCL and SDA as open-drain outputs held high. Every change
+of a pin's mode or resolved level is recorded with its time and source
+(`system` for HAL calls, `manager` for control requests).
+
+## I2C model
+
+A transaction addressed to an absent device fails with an address NACK.
+Otherwise the device receives its phases in bus order: adjacent writes are one
+phase (no repeated START between them), and each read phase is filled by the
+device. The `registers` model has 256 bytes and an 8-bit pointer: a write
+phase sets the pointer from its first byte and stores the remaining bytes, a
+read phase returns bytes from the pointer, and both auto-increment and wrap.
+
+Fault rules apply per bus or per address before the device is addressed, the
+first matching rule wins, and a `once` rule is removed after it fires:
+
+| Fault | `embedded-hal` error kind |
+| --- | --- |
+| `nack` | `NoAcknowledge(Address)` |
+| `arbitration-loss` | `ArbitrationLoss` |
+| `timeout` | `Other` (debug text `Timeout`) |
+| `bus-error` | `Bus` |
+
+## Control protocol
+
+TCP on the configured loopback address. Each request is one JSON object on
+one line; each response is one JSON object on one line, in request order.
+Successful responses carry `"ok": true` and the fields below; failures carry
+`"ok": false` and an `"error"` message. Pins are named by Board name (`vio-0`)
+or chip name (`GPIO0`); buses by controller name (`I2C0`); byte strings are
+hex without separators.
+
+| `op` | Request fields | Response fields |
+| --- | --- | --- |
+| `pins` | | `pins`: every pin |
+| `pin` | `pin` | `pin` |
+| `set_input` | `pin`, `level`: `true`, `false`, or `null` to release | `pin` |
+| `buses` | | `buses`: controllers, their pins and clock while open, and devices (with `peripheral` for a Board-declared one) |
+| `add_device` | `bus`, `address`, `model` (default `registers`), `data` (optional initial bytes from offset 0) | |
+| `remove_device` | `bus`, `address` | |
+| `read_registers` | `bus`, `address`, `offset` (default 0), `length` | `data` |
+| `write_registers` | `bus`, `address`, `offset` (default 0), `data` | |
+| `inject_fault` | `bus`, `address` (optional), `fault`, `once` (default `true`) | `id` |
+| `clear_faults` | `bus` (optional: every bus) | `cleared` |
+| `faults` | | `faults` |
+| `events` | `since` (default 0): first sequence number | `events` |
+| `violations` | | `violations` |
+| `reset` | | |
+| `displays` | | `displays`: each display panel's `bus`, `peripheral`, `model`, `width`, `height`, `visible`, and `revision` (which changes with the picture) |
+| `display` | `bus` | `width`, `height`, `visible`, `revision`, and `data`: the pixels as row-major little-endian RGB565 |
+
+A pin is reported as `{name, chip, function, mode, pull, drive, output,
+driven, level}`. Register access through the manager has no bus side effects
+and is not recorded. `reset` removes devices, faults, external drives,
+events, and violations; pin modes, output latches, controller claims, and
+the devices behind Board-declared peripherals belong to the running System
+and stay.
+
+Events carry `seq`, `at_us` (microseconds since the manager started), and
+`kind`:
+
+```json
+{"seq":3,"at_us":1520,"kind":"gpio","pin":"vio-0","mode":"output","level":true,"source":"system"}
+{"seq":4,"at_us":1710,"kind":"i2c","bus":"I2C0","address":80,"operations":[{"write":"10"},{"read":"aabb"}],"result":"ok","injected":false}
+```
+
+A device model's notes follow its transaction as
+`{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}`.
+`result` is `ok`, `nack`, `arbitration-loss`, `timeout`, or `bus-error`. The
+log keeps the latest 4096 events. An `spi` event keeps the first 32 bytes of
+each direction and the transfer's `length`, since a display streams kilobytes
+per transfer. A violation carries the `seq` of the
+transaction that exposed it, `at_us`, `bus`, `address`, `model`, `rule`, and
+`message`.
+
+```console
+$ printf '%s\n' '{"op":"add_device","bus":"I2C0","address":80}' \
+    '{"op":"set_input","pin":"vio-2","level":true}' | nc -q1 127.0.0.1 7878
+{"ok":true}
+{"ok":true,"pin":{"name":"vio-2","chip":"GPIO2",...,"level":true}}
+```
+
+## Chip models
+
+`models` holds datasheet models of real chips reached over I2C. Every
+register behaviour, ordering rule, and timing number cites its datasheet
+(document, revision, section or table) in the model source, and each rule
+violation names that citation. Attach one through the manager with
+`add_device` and its `model` name.
+
+| `model` | Chip | Datasheet | Checks |
+| --- | --- | --- | --- |
+| `registers` | generic 256-byte register device | — | none |
+| `ina226` | TI INA226 power monitor | TI SBOS547C (2011, rev. Aug 2026) | register set, two-byte access, read-only registers, conversion timing, Equations 3 and 4 |
+| `rx8130ce` | Epson RX8130CE RTC | Epson ETM50E-10 | 30 ms power-on access wait, t_str before initial setting, user registers only, TEST bit, valid date, initialize all registers after VLF |
+| `pi4ioe5v6408` | Diodes PI4IOE5V6408 I/O expander | Diodes DS40583 Rev 3-5 | register map, pin drive from direction/output/high-Z (noted as `P<n> high/low/released` events), no burst reads |
+| `bq27220` | TI BQ27220 fuel gauge | TI SLUSCB7A, SLUUBD4A | 66 µs t(BUF) between packets, two commands per second, 250 ms tPUCD, read-only commands NACK |
+| `cst816t` | Hynitron CST816T touch controller | CST816T datasheet V1.1 | report from 01h (gesture, finger count, 12-bit X/Y with event flags), chip ID B4h at A7h; backdoor bytes 0..=4 are touched, X, Y, and a tap lifted before the host read it is still reported once |
+| `es8311`, `es7210`, `es8389` | Everest audio converters | Everest ES8311 rev 10.0, ES7210 rev 21.0, ES8389 rev 5.0 | documented register map and defaults, one-byte write format, address write before every read |
+
+Device models may also note device-side changes (such as an expander pin
+changing level) as `device` events in the log.
+
+## Virtual SPI
+
+`VirtualHardware::with_spi` adds SPI controllers for driver tests;
+`spi_bus(name, frequency_hz)` opens one at a fixed clock as an
+`embedded-hal` `SpiBus` (blocking and async). The host Platforms add `SPI0`
+and `SPI1`, and the HAL's `spi_device` wraps a controller and its
+chip-select pin in an `embedded-hal-bus` `ExclusiveDevice` for a peripheral
+implementation. Each bus operation is one full-duplex transfer recorded as
+an `spi` event; MISO reads FFh without a device. `inject_fault` accepts an
+SPI controller name (per bus, no address) and fails the next transfer. An
+`SpiDevice` model receives each transfer with its start time, the bus
+clock, and every pin's level, so a display reads its D/C line; a display
+model also reports its picture. Each controller drives one device, attached
+by the Board's declarations or a driver test.
+
+| SPI model | Chip | Datasheet | Checks |
+| --- | --- | --- | --- |
+| `Ws2812bModel` | Worldsemi WS2812B LED chain on MOSI | Worldsemi WS2812B (undated) | T0H/T0L/T1H/T1L ±150 ns from the MOSI bit stream and bus clock, RES latch above 50 µs, 24-bit GRB frames |
+| `MipiDbiPanelModel` | MIPI DBI type C panel with a D/C pin (ST7789, ILI9342C, ST7735S, GC9107, GC9A01) | MIPI DCS v1.02.00 | commands on D/C low and parameters or pixels on D/C high; sleep, display on/off, inversion, column and page windows, `RAMWR`/`RAMWRC` streaming across transfers, `MADCTL` colour order and row/column exchange (mirror bits only compensate mounting), 16-bit pixel format only |
+
+## Driver tests
+
+```rust,ignore
+let hardware = VirtualHardware::new(&[], &["I2C0"], Clock::manual());
+hardware.attach("I2C0", 0x40, Box::new(MyChipModel::new()))?;
+let bus = hardware.i2c_bus("I2C0")?;
+let delay = VirtualDelay::new(hardware.clock().clone());
+my_driver::init(bus, delay)?;
+assert!(hardware.violations().is_empty());
+```

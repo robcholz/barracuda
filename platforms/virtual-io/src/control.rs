@@ -1,6 +1,6 @@
 //! Line-delimited JSON control interface of the virtual peripherals manager.
 //!
-//! The protocol is documented in this crate's `README.md`. The same port
+//! The protocol is documented in `docs/platforms/virtual-io.mdx`. The same port
 //! answers HTTP from a browser: `GET /` serves a viewer of the display panels
 //! that also touches the panel through a touch controller model.
 

@@ -252,8 +252,8 @@ pub fn sync(root: &Path, check: bool) -> Result<(), CommandError> {
 }
 
 /// Checks every Plugin against the checkable Plugin API conventions: its
-/// root layout, schema tree, `plugin.md` summary, Action and Event documents,
-/// and crate dependencies on other Plugins.
+/// root layout, schema tree, Plugin page summary, Action and Event pages, and
+/// crate dependencies on other Plugins.
 ///
 /// # Errors
 /// Returns every violation at once, or an error when discovery fails.

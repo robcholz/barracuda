@@ -410,7 +410,7 @@ async fn manifest_carries_navigation_metadata_and_absolute_asset_urls() {
             }
         ])
     );
-    // Field order is part of the wire contract shown in docs/plugin.md.
+    // Field order is part of the wire contract shown in docs/plugins/captive-portal.mdx.
     let text = std::str::from_utf8(body(&response)).expect("utf-8 manifest");
     assert!(text.starts_with(
         "[{\"id\":\"wifi\",\"group\":\"device\",\"order\":10,\"title\":{\"zh\":\"Wi-Fi\",\"en\":\"Wi-Fi\"},\"summary\":"

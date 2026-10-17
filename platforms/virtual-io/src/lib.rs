@@ -4,7 +4,7 @@
 //! own, so host Boards declare exposed virtual pins and controllers exactly
 //! like device Boards. One process-wide [`VirtualHardware`] model sits behind
 //! them; its manager answers a line-delimited JSON control protocol on the
-//! loopback address in `BARRACUDA_VIRTUAL_IO_ADDR` (see `README.md`).
+//! loopback address in `BARRACUDA_VIRTUAL_IO_ADDR` (see `docs/platforms/virtual-io.mdx`).
 //!
 //! Device models ([`I2cDevice`]) are independent of the manager and of the
 //! System: a chip driver test can attach a model to a standalone

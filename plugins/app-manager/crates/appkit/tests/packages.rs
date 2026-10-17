@@ -19,7 +19,7 @@ use p256::ecdsa::{Signature, SigningKey, signature::Signer as _};
 
 const APPS: &str = "/workspace/media/apps";
 
-/// A package of `files` as `docs/app-format.md` lays it out, signed by
+/// A package of `files` as `docs/plugins/app-manager/app-format.mdx` lays it out, signed by
 /// `key` when given.
 fn pack(files: &[(&str, &[u8])], key: Option<&SigningKey>) -> Vec<u8> {
     let directory_end = 12 + files.len() * 40;

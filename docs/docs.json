@@ -1,0 +1,341 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Barracuda",
+  "colors": {
+    "primary": "#0E7490",
+    "light": "#22D3EE",
+    "dark": "#0E7490"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Get started",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "get-started/build-and-run",
+              "get-started/tooling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System",
+            "pages": [
+              "architecture/platform-architecture",
+              "architecture/execution-ownership",
+              "architecture/device-ui"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "architecture/plugin-api",
+              "architecture/plugin-manager"
+            ]
+          },
+          {
+            "group": "Conventions",
+            "pages": [
+              "architecture/codestyle",
+              "architecture/agent-oriented-api-design"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Plugins",
+        "groups": [
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/overview"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "plugins/files",
+              {
+                "group": "HTTP",
+                "pages": [
+                  "plugins/http",
+                  "plugins/http/action"
+                ]
+              },
+              "plugins/webserver",
+              "plugins/wifi",
+              "plugins/system-wifi",
+              {
+                "group": "Captive Portal",
+                "pages": [
+                  "plugins/captive-portal",
+                  "plugins/captive-portal/ui-kit"
+                ]
+              },
+              "plugins/app-portal",
+              "plugins/power",
+              "plugins/sound",
+              "plugins/time",
+              {
+                "group": "Scheduler",
+                "pages": [
+                  "plugins/scheduler",
+                  "plugins/scheduler/event"
+                ]
+              },
+              "plugins/system-fonts",
+              "plugins/workflow"
+            ]
+          },
+          {
+            "group": "Apps",
+            "pages": [
+              {
+                "group": "App Manager",
+                "pages": [
+                  "plugins/app-manager",
+                  "plugins/app-manager/action",
+                  "plugins/app-manager/app-format",
+                  "plugins/app-manager/app-api",
+                  "plugins/app-manager/pocketjs"
+                ]
+              },
+              "plugins/builtin-app-files",
+              "plugins/builtin-app-sessions",
+              "plugins/builtin-app-settings",
+              "plugins/builtin-app-workflow"
+            ]
+          },
+          {
+            "group": "Agent",
+            "pages": [
+              {
+                "group": "Agent",
+                "pages": [
+                  "plugins/agent",
+                  "plugins/agent/action",
+                  "plugins/agent/event",
+                  "plugins/agent/http",
+                  "plugins/agent/embassy",
+                  "plugins/agent/debugging",
+                  {
+                    "group": "Runtime",
+                    "pages": [
+                      "plugins/agent/context",
+                      "plugins/agent/context-model",
+                      "plugins/agent/memory",
+                      "plugins/agent/model-api",
+                      "plugins/agent/permission",
+                      "plugins/agent/skill",
+                      "plugins/agent/skill-design"
+                    ]
+                  },
+                  {
+                    "group": "Trace",
+                    "pages": [
+                      "plugins/agent/trace",
+                      "plugins/agent/trace-format",
+                      "plugins/agent/trace-vocabulary",
+                      "plugins/agent/trace-scripts",
+                      "plugins/agent/serial-log"
+                    ]
+                  }
+                ]
+              },
+              "plugins/agent-file",
+              "plugins/agent-http",
+              {
+                "group": "Agent IMessage Gateway",
+                "pages": [
+                  "plugins/agent-imessage-gateway",
+                  "plugins/agent-imessage-gateway/action"
+                ]
+              },
+              "plugins/agent-scheduler",
+              "plugins/agent-time",
+              "plugins/agent-vm",
+              {
+                "group": "Agent Websearch",
+                "pages": [
+                  "plugins/agent-websearch",
+                  "plugins/agent-websearch/http"
+                ]
+              },
+              "plugins/agent-workflow"
+            ]
+          },
+          {
+            "group": "Messaging channels",
+            "pages": [
+              {
+                "group": "IMessage Gateway",
+                "pages": [
+                  "plugins/imessage-gateway",
+                  "plugins/imessage-gateway/action",
+                  "plugins/imessage-gateway/event",
+                  "plugins/imessage-gateway/usage",
+                  "plugins/imessage-gateway/design",
+                  "plugins/imessage-gateway/channel-page-kit"
+                ]
+              },
+              {
+                "group": "IMessage BlueBubble",
+                "pages": [
+                  "plugins/imessage-bluebubble",
+                  "plugins/imessage-bluebubble/http"
+                ]
+              },
+              {
+                "group": "IMessage Inkbox",
+                "pages": [
+                  "plugins/imessage-inkbox",
+                  "plugins/imessage-inkbox/http"
+                ]
+              },
+              {
+                "group": "IMessage QQ",
+                "pages": [
+                  "plugins/imessage-qq",
+                  "plugins/imessage-qq/http"
+                ]
+              },
+              {
+                "group": "IMessage Telegram",
+                "pages": [
+                  "plugins/imessage-telegram",
+                  "plugins/imessage-telegram/http"
+                ]
+              },
+              {
+                "group": "IMessage Web",
+                "pages": [
+                  "plugins/imessage-web",
+                  "plugins/imessage-web/markdown"
+                ]
+              },
+              {
+                "group": "IMessage WeChat",
+                "pages": [
+                  "plugins/imessage-wechat",
+                  "plugins/imessage-wechat/http"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Lua VM",
+            "pages": [
+              {
+                "group": "VM",
+                "pages": [
+                  "plugins/vm",
+                  "plugins/vm/action",
+                  "plugins/vm/environment",
+                  "plugins/vm/musl"
+                ]
+              },
+              "plugins/vm-agent",
+              "plugins/vm-analog",
+              "plugins/vm-audio",
+              "plugins/vm-camera",
+              "plugins/vm-display",
+              "plugins/vm-filesystem",
+              "plugins/vm-gpio",
+              "plugins/vm-http",
+              "plugins/vm-i2c",
+              "plugins/vm-i2s",
+              "plugins/vm-imu",
+              "plugins/vm-led-strip",
+              "plugins/vm-message-queue",
+              "plugins/vm-power-monitor",
+              "plugins/vm-pwm",
+              "plugins/vm-spi",
+              "plugins/vm-systeminfo",
+              "plugins/vm-time",
+              "plugins/vm-uart",
+              "plugins/vm-webserver"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Boards",
+        "groups": [
+          {
+            "group": "Boards",
+            "pages": [
+              "boards/overview",
+              "boards/profiles"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "boards/peripherals",
+              "boards/exposed-io",
+              "boards/drivers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Platforms",
+        "groups": [
+          {
+            "group": "Host Platforms",
+            "pages": [
+              "platforms/linux",
+              "platforms/macos",
+              "platforms/macos-network-gateway",
+              "platforms/virtual-io"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Shared & Tools",
+        "groups": [
+          {
+            "group": "Shared crates",
+            "pages": [
+              "shared/http-client",
+              "shared/runtime-utils"
+            ]
+          },
+          {
+            "group": "TLS",
+            "pages": [
+              "shared/tls/c-runtime",
+              "shared/tls/roots",
+              "shared/tls/mbedtls-rs"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "tools/e2e",
+              "tools/llm-tape",
+              "tools/system-image",
+              "tools/cli-rustyline"
+            ]
+          },
+          {
+            "group": "Bench",
+            "pages": [
+              "tools/bench",
+              "tools/bench-tapes",
+              "tools/tape-replay-profile"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

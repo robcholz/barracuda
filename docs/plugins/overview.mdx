@@ -1,0 +1,88 @@
+---
+title: "Plugins"
+sidebarTitle: "All Plugins"
+---
+
+Every capability on a Barracuda device is a Plugin. Each page lists the Plugin's ID, dependencies, settings, capabilities, Workflow Actions and Events, Agent Tools, Lua packages, web surfaces, tasks, and storage, then describes its behavior.
+
+The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how it is built.
+
+## System
+
+| Plugin | What it owns |
+| --- | --- |
+| [Files](/plugins/files) | Browses Workspace files and shows every Plugin's private files read-only. |
+| [HTTP](/plugins/http) | The HTTP Plugin owns outbound HTTP: the TLS engine, the connection pool, the typed request capability, and the `http.request` Workflow Action. |
+| [WebServer](/plugins/webserver) | The WebServer Plugin owns the portable HTTP and WebSocket server and lets dependent Plugins host routes on it through the typed `WebServer` capability. |
+| [Wi-Fi](/plugins/wifi) | Owns Wi-Fi policy: station and setup access-point lifecycle, persisted station credentials, and the provisioning page and API. |
+| [System Wi-Fi](/plugins/system-wifi) | Shows Wi-Fi in the system UI: the link on the status bar, the home screen's offline card, and the control center's Wi-Fi tile, and the setup hotspot the portal tile opens. |
+| [Captive Portal](/plugins/captive-portal) | Aggregates pluggable web entries and resource providers into the portal shell. |
+| [App Portal](/plugins/app-portal) | Adds the Apps page to the portal: the install waiting for the person, with what it asks for and who signed it, and the apps the Workspace offers. |
+| [Power](/plugins/power) | Owns the Board's primary power monitor and publishes its readings and the battery's charge to other Plugins as `Power`. |
+| [Sound](/plugins/sound) | Owns the Board's primary audio codec, lends it to one borrower at a time as `Sound`, and keeps the device's output level, which the person sets for every sound, as `Volume`. |
+| [Time](/plugins/time) | The Time Plugin synchronizes UTC time over SNTP, keeps the Board's real-time clock, and publishes the time as a typed, read-only clock capability. |
+| [Scheduler](/plugins/scheduler) | The Scheduler Plugin owns persistent schedules and emits a Workflow Event when one becomes due. |
+| [System Fonts](/plugins/system-fonts) | Ships the system fonts: the font atlases every view on a display draws with for the font slots it ships none for. |
+| [Workflow](/plugins/workflow) | Owns durable Workflow definitions, Event matching, and cooperative execution, and publishes the registry other Plugins add Workflow Actions to. |
+
+## Apps
+
+| Plugin | What it owns |
+| --- | --- |
+| [App Manager](/plugins/app-manager) | Runs Lua apps with optional MicroTS views and, on a Board with a display, shows them and the device's system UI: the home screen and the Agent's states, the launcher, the app switcher, the notification and control centers, and the screens around an app's lifecycle. |
+| [Builtin App Files](/plugins/builtin-app-files) | Ships Files, a system app that shows the files in the shared Workspace. |
+| [Builtin App Sessions](/plugins/builtin-app-sessions) | Ships Sessions, a system app that lists the Agent's conversations. |
+| [Builtin App Settings](/plugins/builtin-app-settings) | Ships Settings, a system app for Wi-Fi, sound and display, installed apps, storage, and the device. |
+| [Builtin App Workflow](/plugins/builtin-app-workflow) | Ships Workflows, a system app that lists the loaded Workflows, what starts each, and a switch that turns each on or off. |
+
+## Agent
+
+| Plugin | What it owns |
+| --- | --- |
+| [Agent](/plugins/agent) | Runs conversational Agents and exposes model configuration over HTTP and a portal page. |
+| [Agent File](/plugins/agent-file) | Exposes the Plugin filesystem to Agents as bounded native file Tools. |
+| [Agent HTTP](/plugins/agent-http) | Exposes the `http` Plugin's `Http` capability to Agents as a native Tool. |
+| [Agent IMessage Gateway](/plugins/agent-imessage-gateway) | Exposes iMessage Agent Tools, the Workflow Actions that bridge Gateway conversations to Agent sessions, and session commands. |
+| [Agent Scheduler](/plugins/agent-scheduler) | Exposes the `scheduler` Plugin's `Scheduler` capability to Agents as native Tools. |
+| [Agent Time](/plugins/agent-time) | Exposes the `time` Plugin's `UtcClock` capability to Agents as a native Tool. |
+| [Agent VM](/plugins/agent-vm) | Exposes the `vm` Plugin's `Vm` capability to Agents as a native background Tool. |
+| [Agent Websearch](/plugins/agent-websearch) | Registers Tavily-backed Web Search directly with the Agent runtime, with a portal page for the Tavily configuration. |
+| [Agent Workflow](/plugins/agent-workflow) | Exposes Workflow discovery and durable control as native Agent Tools. |
+
+## Messaging channels
+
+| Plugin | What it owns |
+| --- | --- |
+| [IMessage Gateway](/plugins/imessage-gateway) | The IMessage Gateway Plugin routes messages between channel Plugins and Workflow, and owns what every channel Plugin shares: mode, owners, receive loops and slots, their HTTP routes and status, HTTP helpers, and the files users send. |
+| [IMessage BlueBubble](/plugins/imessage-bluebubble) | The IMessage BlueBubble Plugin adds a BlueBubbles server as an iMessage Gateway channel: it sends through the BlueBubbles API and receives through a webhook the server posts to the device's own webserver. |
+| [IMessage Inkbox](/plugins/imessage-inkbox) | The IMessage Inkbox Plugin adds Inkbox as an iMessage Gateway channel: it configures an Inkbox agent by API key or self-signup, sends through the Inkbox API, and receives by polling. |
+| [IMessage QQ](/plugins/imessage-qq) | The IMessage QQ Plugin adds a QQ Bot as an iMessage Gateway channel: it binds the bot by scan or configuration, sends text and files through the QQ OpenAPI, and receives messages and their files over the QQ gateway WebSocket. |
+| [IMessage Telegram](/plugins/imessage-telegram) | The IMessage Telegram Plugin adds a Telegram Bot as an iMessage Gateway channel: it stores the bot configuration, sends through the Bot API, and receives by long polling. |
+| [IMessage Web](/plugins/imessage-web) | The IMessage Web Plugin adds the built-in Web conversation as an iMessage Gateway channel, bridged to the browser over a WebSocket. |
+| [IMessage WeChat](/plugins/imessage-wechat) | The IMessage WeChat Plugin adds WeChat iLink as an iMessage Gateway channel: it links a bot by QR login, sends text and files through iLink and its CDN, and receives messages and their files by long polling. |
+
+## Lua VM
+
+| Plugin | What it owns |
+| --- | --- |
+| [VM](/plugins/vm) | The VM Plugin owns isolated Lua execution: it publishes the typed `Vm` capability, the `LuaPackageRegistry` that VM package Plugins extend, and the Workflow Actions that run Lua scripts. |
+| [VM Agent](/plugins/vm-agent) | The VM Agent Plugin exposes isolated, non-persistent Agent asks to Lua code as the require-only `agent` Lua package. |
+| [Analog](/plugins/vm-analog) | The Analog Plugin exposes analog input and output on the Board's exposed pins to Lua code as the `analog` Lua package. |
+| [Audio](/plugins/vm-audio) | The Audio Plugin exposes playback and recording on the Board's audio codec, which the `sound` Plugin owns, to Lua code as the `audio` Lua package. |
+| [Camera](/plugins/vm-camera) | The Camera Plugin owns the Board's primary camera and exposes frame capture to Lua code as the `camera` Lua package. |
+| [Display](/plugins/vm-display) | The Display Plugin owns every Board display no other Plugin claims and exposes drawing and panel control to Lua code as the `display` Lua package. |
+| [VM Filesystem](/plugins/vm-filesystem) | The VM Filesystem Plugin exposes its Plugin-scoped VFS to Lua code through Lua's standard `io` and `os` file APIs. |
+| [GPIO](/plugins/vm-gpio) | The GPIO Plugin exposes digital input and output on the Board's exposed pins to Lua code as the `gpio` Lua package. |
+| [VM HTTP](/plugins/vm-http) | The VM HTTP Plugin exposes the HTTP Plugin's bounded outbound requests to Lua code as the require-only `http` Lua package. |
+| [I2C](/plugins/vm-i2c) | The I2C Plugin exposes I2C bus transfers on the Board's exposed pins to Lua code as the `i2c` Lua package. |
+| [I2S](/plugins/vm-i2s) | The I2S Plugin exposes I2S PCM streaming on the Board's exposed pins to Lua code as the `i2s` Lua package. |
+| [IMU](/plugins/vm-imu) | Installs the `motion` Lua package over the Board's primary IMU. |
+| [LED Strip](/plugins/vm-led-strip) | Installs the `light` Lua package over the Board's primary LED strip. |
+| [Message Queue](/plugins/vm-message-queue) | Installs the require-only `message_queue` Lua package: bounded, shared FIFO queues that independent Lua executions use to exchange messages. |
+| [Power Monitor](/plugins/vm-power-monitor) | Installs the `power_monitor` Lua package over the Board's power monitor, which the `power` Plugin owns. |
+| [PWM](/plugins/vm-pwm) | Installs the `pwm` Lua package over the Board's exposed I/O pins. |
+| [SPI](/plugins/vm-spi) | Installs the require-only `spi` Lua package over the Board's exposed I/O pins. |
+| [VM System Info](/plugins/vm-systeminfo) | Exposes the selected Platform and Board identity to Lua as the require-only `systeminfo` package. |
+| [VM Time](/plugins/vm-time) | Exposes the Time Plugin's UTC clock to Lua through the standard `os` time functions. |
+| [UART](/plugins/vm-uart) | Installs the `uart` Lua package over the Board's exposed I/O pins. |
+| [VM WebServer](/plugins/vm-webserver) | Lets Lua executions handle inbound HTTP requests below `/vm` and stream VM files as responses, through the require-only `webserver` package. |

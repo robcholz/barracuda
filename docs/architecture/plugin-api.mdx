@@ -1,0 +1,623 @@
+---
+title: "Plugin API"
+---
+
+This is the authoritative contract for writing a Barracuda Plugin. Each topic
+has exactly one approved way, and the
+[`create-plugin`](https://github.com/robcholz/barracuda/blob/master/.agents/skills/create-plugin/SKILL.md) skill applies these rules
+step by step. Code that disagrees with this document is migration work, not
+precedent.
+
+## Stability
+
+Barracuda is 0.x. The Plugin API may change in any release, and there is no
+compatibility layer, deprecation period, or version check for Plugins.
+
+A change to the Plugin API lands as one change set: core, every affected
+Plugin, this document, the `create-plugin` skill, and the
+`cargo plugin sync --check` rules change together. The repository is never
+left with some Plugins on the old way and some on the new one.
+
+Compatibility guarantees become a goal only once Plugins are maintained
+outside this repository.
+
+## Scope
+
+Barracuda is built from Plugins, and two rules decide where code belongs.
+
+**A disabled Plugin leaves no trace.** Disable any Plugin, and its feature
+must vanish from the build: nothing outside that Plugin and the Plugins that
+depend on it names it or carries code, configuration, or text for it.
+
+- Core, System, composition, Platforms, Boards, `shared/` libraries, and
+  applications are Plugin-neutral. They offer generic mechanisms, never a
+  service, a limit, a constant, or a comment for one Plugin.
+- A `shared/` library is a library: it holds no process-wide service, and the
+  Plugin that needs the service builds it (the `http` Plugin builds the
+  request pool from `http-client`; the TLS engine from `barracuda-tls`).
+- The only places outside Plugins that name Plugins are the Board profiles
+  in `boards/profiles/` and a Board's `plugins.<id>` section, which
+  `cargo plugin sync --check` validates against each Plugin's declaration,
+  and the generated selection package that registers the enabled set.
+
+**Plugins meet only through capabilities.** A Plugin uses another Plugin
+only through that Plugin's published capability types, and only after
+listing it in `depends-on`. It never reaches into another Plugin's internal
+crates, routes, files, or storage, and never guesses at a Plugin it does not
+depend on. The same holds at build time: a page imports another Plugin's web
+code only from a Plugin it depends on.
+
+When a feature seems to need a Plugin-specific hook outside Plugins, the
+feature belongs in a Plugin and the hook in that Plugin's capability.
+
+## One way per topic
+
+| Topic | The approved way |
+| --- | --- |
+| Construction | `pub fn new(context: &mut PluginContext<Builtins, Io>) -> Self`, nothing else |
+| Platform and Board resources | Fields of `PluginContext`, assigned by System |
+| Which Plugins a Board builds | A profile in `boards/profiles/`, overridden by a Board's `plugins.<id>.enabled` |
+| Per-Board settings | `[config.<name>]` in `plugin.toml`, set in a Board's `plugins.<id>` |
+| Board peripherals | Slots under `[peripherals.<kind>]` in `plugin.toml`, taken by their `config::peripherals` constant |
+| Plugin-to-Plugin calls | A typed capability: `provide` in the provider, `require` in the consumer |
+| HTTP clients | `http_client::ClientFactory` required from `http` |
+| Workflow integration | A Workflow Action or Event, with its schema under `schemas/` |
+| Model-facing operations | An Agent Tool in an adapter Plugin |
+| Lua-facing operations | A Lua package registered in the `vm` Plugin's `LuaPackageRegistry` |
+| Portal page | `CaptivePortal::register_with_status` with a status, or `register` without one |
+| Plugin HTTP API | The Plugin's own routes on `WebServer`; their paths and bodies are private to the Plugin and its page |
+| Settings and credentials users change | Plugin-scoped KV storage |
+| Files | The Plugin's `ScopedVfs`, on the mount chosen by the file's lifecycle |
+| Bundled files | `filesystem/resources/` and `filesystem/workspace/resources/` |
+| Documentation | `docs/plugins/<id>.mdx` in the docs site, from the template below |
+
+## Directory layout
+
+The framework owns every name at the root of `plugins/<id>/`. A Plugin uses
+only the entries it needs and adds nothing else at the root:
+
+```text
+plugins/<id>/
+├── plugin.toml                    # identity, dependencies, settings, host tasks
+├── crates/
+│   ├── plugin/                    # package barracuda-<id>-plugin, the entry point
+│   │   └── build.rs               # only with settings, peripheral slots, or a build task
+│   └── <crate>/                   # optional runtime or domain crates
+│       └── resources/tools/<tool>/
+│           ├── schema.json        # Agent Tool input schema
+│           └── usage.md           # Agent Tool usage text
+├── schemas/
+│   ├── action/<address>/
+│   │   ├── request.json
+│   │   └── response.json
+│   └── event/<event-id>.json
+├── resources/                     # author-owned build inputs, such as web/
+└── filesystem/                    # build outputs and assets bundled into the image
+    ├── resources/                 # -> the Plugin's /resources
+    └── workspace/resources/       # -> the shared /workspace/resources
+```
+
+The Plugin's documentation lives in the docs site, beside every other page:
+
+```text
+docs/plugins/
+├── <id>.mdx                       # required
+└── <id>/
+    ├── action.mdx                 # required when schemas/action/ exists
+    ├── event.mdx                  # required when schemas/event/ exists
+    └── <topic>.mdx                # optional, such as http.mdx
+```
+
+Add each page to the Plugin's category in `docs/docs.json`.
+
+- `crates/plugin` holds the type annotated with
+  `#[barracuda_plugin::macros::plugin]` and its `impl Plugin`. Add another
+  crate only when a runtime or domain boundary owns substantial state,
+  several contracts, a reusable API, or focused tests. Do not add a
+  schema-only or transport-only crate. Other Plugins use only the
+  `-plugin` crate's public items.
+- Files under `crates/<crate>/resources/` are compile-time inputs of that
+  crate, such as Agent Tool definitions. They are never bundled.
+- `resources/` holds sources the Plugin's build task turns into
+  `filesystem/resources/`, such as `resources/web/entry.ts`. Authors organize
+  its inside freely. It is unrelated to the runtime `/resources` mount.
+- `filesystem/` never contains `data/`, `cache/`, `media/`, or a mutable
+  subtree under `workspace/`.
+
+## `plugin.toml`
+
+`plugin.toml` is the single source of the Plugin's identity:
+
+```toml
+id = "example"
+depends-on = ["webserver", "captive-portal"]
+description = "One sentence on what the Plugin owns."
+```
+
+The ID and every `depends-on` entry match `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+`depends-on` lists every Plugin whose capability or crate the Plugin uses,
+directly; the dependencies of those Plugins are not repeated. The `plugin`
+macro bakes the ID and dependencies into `PluginDeclaration`; Rust code never
+repeats them. Run `cargo plugin sync` after adding, renaming, or removing a
+Plugin, or changing its dependencies.
+
+### Settings
+
+A value that differs between Boards but is fixed for a build, such as how
+many connections of some kind a Board can afford, is a setting:
+
+```toml
+[config.receive-slots]
+type = "usize"
+default = 1
+description = "Long-lived connections the Plugin holds at once."
+```
+
+`type` is one of `bool`, `u8`, `u16`, `u32`, `usize`, `i32`, or `str`, and
+`default` must be a value of that type. A Board overrides it in its
+`board.yml`:
+
+```yaml
+plugins:
+  example:
+    receive-slots: 3
+```
+
+`enabled` and `peripherals` are reserved keys of `plugins.<id>` (see
+[Enablement per Board](#enablement-per-board) and
+[Peripherals](#peripherals)); a setting never uses those names.
+
+`cargo plugin sync --check` rejects a Board that sets a setting its Plugin
+does not declare, or a value of the wrong type. The Plugin's `build.rs` calls
+`barracuda_plugin_build::build()`, and the crate includes the resolved values
+as constants, named in SCREAMING_SNAKE_CASE:
+
+```rust,ignore
+mod config {
+    barracuda_plugin::config!();
+}
+
+static BUFFERS: ReceiveBuffers<{ config::RECEIVE_SLOTS }> = ReceiveBuffers::new();
+```
+
+A setting is never a Platform or Board field, and System never reads it. A
+value the user changes at run time is not a setting; it lives in KV storage.
+
+### Peripherals
+
+A Plugin that drives a Board peripheral declares a slot for it, one table per
+peripheral kind, with slot names chosen by the Plugin:
+
+```toml
+[peripherals.display]
+main = "primary"                               # the Board's primary display
+
+[peripherals.touch]
+main = { fill = "primary", optional = true }   # starts without touch
+```
+
+| Fill | The slot receives |
+| --- | --- |
+| `"primary"` | the device the Board marks primary for that kind |
+| `"any"` | the only device of that kind no other slot takes |
+| `"*"` | every device of that kind no other slot takes, as a list |
+
+A slot is required unless it says `optional = true`; a `"*"` slot is always
+optional. A Plugin may declare several slots of one kind. Kinds are the
+`peripheral:` names of `peripherals/impl/`: `display`, `touch`, `buttons`,
+`indicator`, `led-strip`, `camera`, `audio-codec`, `inertial-measurement`,
+`power-monitor`, and `real-time-clock`. Removable storage is System-owned and
+never claimed.
+
+The Board supplies named devices under `peripherals.devices`, marking one
+`primary: true` when it has several of a kind, and wires a slot only to
+override the default or resolve an ambiguity:
+
+```yaml
+plugins:
+  example:
+    peripherals:
+      display.main: back-eink
+```
+
+Each Board resolves every slot of every enabled Plugin at build time: a wired
+slot takes its device, then `"primary"` slots, then `"any"` slots, then the
+one `"*"` slot of a kind takes what is left in device-name order. A device
+taken twice, two `"*"` slots of one kind, an `"any"` slot with several
+candidates, a required slot left empty, or wiring naming an unknown device,
+a device of another kind, or an undeclared slot fails the build, and the
+error prints the `plugins.<id>.peripherals` lines that would resolve it.
+
+The Plugin's `build.rs` calls `barracuda_plugin_build::build()`, and
+`config!()` defines one constant per slot in `config::peripherals`, named
+`<KIND>_<SLOT>`: an `Option<Instance>` for one device, or a
+`&[(&str, Instance)]` of device names and instances for `"*"`. The Plugin
+takes its devices by those constants; it never names a Board device.
+
+### Host tasks
+
+A Plugin that generates files declares a named host task:
+
+```toml
+[tasks.build]
+cwd = "."
+command = ["bun", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "../../package.json", "../../bun.lock"]
+outputs = ["filesystem/resources/entry.js"]
+```
+
+- `cargo plugin run <task>` runs the task for every enabled Plugin that has
+  it, in directory order, or for one Plugin with `--plugin <id>`.
+- A Plugin whose resources must be generated before compilation installs a
+  `build.rs` that calls `barracuda_plugin_build::build()`; Cargo then runs its
+  `build` task, fingerprinting the declared inputs and outputs and skipping
+  unchanged work. Inputs may name shared source paths, such as another
+  Plugin's web kit it depends on; outputs and `cwd` stay inside the Plugin.
+- Tasks run trusted repository code with the developer's permissions, never
+  re-enter Cargo, never install tools, and stay in the foreground.
+  `depends-on` is not a task graph.
+
+Frontend tooling is repository-wide: one root `package.json`, `bun.lock`,
+TypeScript configuration, formatter, and linter (`bun run format`, `lint`,
+`check`, `test` at the root). Web sources and their tests stay in the
+Plugin's `resources/web/`; shared builders and test helpers live in
+`tools/web/`.
+
+## Enablement per Board
+
+Which Plugins a firmware contains is a property of its Board. A profile in
+`boards/profiles/<name>.yml` names a Plugin set and may extend other
+profiles, one or a list; a profile reached twice counts once, and a profile
+that extends itself fails:
+
+```yaml
+# boards/profiles/gateway.yml
+extends: network
+enable: [agent, imessage-gateway, imessage-telegram]
+```
+
+```yaml
+# boards/profiles/screen-offline.yml
+extends: [lua, ui]
+```
+
+The profiles are layers, from `minimal` (no network, no Lua) to `screen`;
+[Board profiles](/boards/profiles) lists them and
+says which to pick.
+
+A Board names its profile (`headless` when it names none) and overrides single
+Plugins in `plugins.<id>`:
+
+```yaml
+profile: gateway
+plugins:
+  imessage-telegram:
+    enabled: false
+  camera:
+    enabled: true
+```
+
+The enabled set is the profile chain, then the Board's overrides, then every
+Plugin an enabled Plugin depends on, transitively. A Board that disables a
+dependency of a Plugin it enables fails, as does an enabled Plugin whose
+required peripheral slot the Board cannot fill. The ignored
+`.barracuda/disabled-plugins` file disables Plugins on one developer's
+machine only; it disables their dependents too, and sync says so.
+
+`cargo board select` writes the enabled set into the local selection package
+under `.barracuda/selection/plugins`, which System depends on to register
+exactly those Plugins. Every Plugin stays in `Cargo.lock`, so switching
+Boards changes no committed file.
+
+## Construction
+
+Every Plugin has exactly this constructor, and System calls it as
+`<Type>::new(&mut plugin_context)`:
+
+```rust,ignore
+impl ExamplePlugin {
+    #[must_use]
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        let clock = config::peripherals::REAL_TIME_CLOCK_MAIN
+            .and_then(|instance| context.hal.peripherals.take_real_time_clock(instance));
+        Self { clock }
+    }
+}
+```
+
+- The parameter is the only one. A Plugin needing a Platform or Board
+  resource reads it from the context; there are no Plugin-specific
+  arguments and no special cases in the generated registration.
+- Use `const fn` when clippy asks for it. A Plugin generic over its device
+  type may fix `Io` or bind `Builtins` with `where` clauses.
+- Construction only moves resources out of the context and builds the
+  Plugin's own values from them. It never registers, spawns, or touches
+  storage; that belongs to `register` and `start`.
+- The Plugin never stores the context or a reference to it.
+
+`PluginContext` carries only raw resources of the Platform and Board, which
+exist whether or not any Plugin uses them:
+
+| Field | Use |
+| --- | --- |
+| `target_identity` | Copy |
+| `ip_stack` | Copy |
+| `entropy` | Clone the `SharedEntropy` |
+| `wifi` | `take()` by the one Plugin that owns Wi-Fi policy |
+| `hal.peripherals` | `take_<peripheral>(instance)` with the Plugin's `config::peripherals` constants |
+| `hal.exposed_io` | Clone the `Arc` |
+
+A new field is a Plugin API change and needs a raw Platform or Board
+resource. A service built on these resources, such as TLS or an HTTP pool, is
+built by the Plugin that owns it and published as its capability.
+
+## Lifecycle
+
+`Plugin::REQUIREMENTS` declares the filesystem the Plugin needs:
+`PluginFilesystem::None` (the default), `Private`, or `Inspect`. Portal
+entries, file storage, and bundled resources need `Private`.
+
+`Plugin::register` runs synchronously in dependency order. It:
+
+1. requires capabilities from Plugins listed in `depends-on`;
+2. constructs the complete capability and service graph;
+3. publishes every provided capability with `provide`;
+4. installs Workflow Actions, Agent Tools, Lua packages, portal entries, and
+   HTTP routes;
+5. keeps every registration guard alive with `context.retain(...)`.
+
+`Plugin::start` runs after every Plugin has registered. It only spawns
+long-running work through `context.task_spawner()`, giving every permanent
+task its own `context.task_token()`. It cannot publish capabilities. Work that
+needs every Plugin registered, such as loading bundled Workflows, starts
+here. Task ownership, capacity, and cancellation follow
+[Execution ownership](/architecture/execution-ownership).
+
+Plugin Manager owns rollback and unload. A Plugin never adds its own
+lifecycle or global registry.
+
+## Collaboration contracts
+
+Choose the contract by the caller:
+
+| Caller | Contract |
+| --- | --- |
+| Another Plugin | Typed capability |
+| A Workflow | Workflow Action, or Workflow Event for an asynchronous fact |
+| The model | Agent Tool |
+| Lua code in the VM | Lua package |
+
+One service may expose several of these views. The typed capability stays the
+direct machine-oriented API. Every other view is a thin adapter over it, and
+provider-only mutation handles stay private to the provider.
+
+### Typed capabilities
+
+The provider publishes `Rc<T>` with `PluginRegisterContext::provide`. The
+consumer lists the provider in `depends-on` and obtains the same value with
+`require::<T>("<provider-id>")`. No JSON, string lookup, or runtime discovery
+sits between them.
+
+A capability is the provider's whole public surface for other Plugins: the
+methods a consumer calls and the types those methods take and return. When a
+consumer needs a service the provider owns (a client, a connection slot, a
+route mounted on its behalf), the capability hands it out; the consumer never
+builds the provider's service itself.
+
+### Workflow Actions
+
+An Action implements `WorkflowActionHandler`, registers in
+`WorkflowActionRegistry`, and embeds its schemas with
+`workflow_action_schema!("<address>")`, which reads
+`schemas/action/<address>/request.json` and `response.json`:
+
+```rust,ignore
+impl WorkflowActionHandler for SendMessage {
+    type Request = SendRequest;
+    type Response = SendResponse;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("message.send");
+
+    fn invoke(&self, request: SendRequest) -> WorkflowActionFuture<'_, SendResponse> {
+        Box::pin(async move { send(request).await })
+    }
+}
+```
+
+The runtime validates the request before decoding it and the response before
+returning it. A success with no value is `{}`. A stable business failure is
+an ordinary response such as `{"error":"not_found"}` and appears in the
+response schema; `WorkflowActionError` is only for infrastructure failures.
+
+### Workflow Events
+
+An Event type implements `Event` with a stable `ID` and is emitted through
+`WorkflowService::emit`, or `emit_to` when a Topic is part of matching. Its
+payload is a bounded Serde value described by `schemas/event/<event-id>.json`.
+A logical stream is a sequence of Events carrying correlation, ordering, and a
+terminal outcome, with capacity and backpressure owned by the producer.
+
+A Workflow that connects two Plugins ships with the Plugin that depends on
+both, in its `/resources/workflows.json`, loaded transiently through
+`WorkflowService` from `start`.
+
+### Agent Tools
+
+A Tool registers through `AgentToolRegistry`. Any Tool beyond the Agent's
+own lives in an adapter Plugin named `agent-<name>`, which translates the
+call into the provider's typed capability or a Workflow operation, so the
+provider stays usable without `agent`. Its definition lives beside the crate
+that registers it, in `crates/<crate>/resources/tools/<tool>/schema.json` and
+`usage.md`. Prompting, response encoding, and Tool errors stay in the
+adapter, and Tools follow
+[Agent-oriented API design](/architecture/agent-oriented-api-design).
+
+### Lua packages
+
+A Lua package beyond the VM's built-ins registers in the
+`LuaPackageRegistry` required from `vm`, from a Plugin named `vm-<name>`.
+Dropping the registration revokes the package's callbacks and invalidates its
+handles.
+
+A package says what it promises with `LuaPackage::interface`: ambient (it
+gives code nothing it could misuse), stable with a version that counts the
+additions to its functions and a line saying what code may do with it, or
+Board-specific; `None` promises nothing. A Plugin that decides which code gets
+which packages reads these from the registry and names no package it does not
+register itself. A package that needs a Board device promises nothing while
+the Board lacks it.
+
+Every run's Lua heap holds the built-ins, every registered package, and the
+script. The VM owns that budget: it holds at most `MAX_LUA_PACKAGES` packages,
+and proves the built-ins, that many packages keeping
+`LUA_PACKAGE_HEAP_BUDGET_BYTES` each, and one installation's transient
+`LUA_PACKAGE_INSTALL_PEAK_BYTES` leave the script its reserve. Each package
+Plugin's tests assert
+`barracuda_vm_runtime::fits_package_budget(&package)` for every package it
+registers. Any selection of packages then fits, and no test names another
+package Plugin.
+
+## Portal and HTTP
+
+A Plugin with a configuration page registers one `WebEntry` with
+`CaptivePortal`:
+
+- `register_with_status(entry, files, || EntryStatus)` when its card shows a
+  status. The closure is synchronous and cheap: it reads state the Plugin
+  already holds, never touches a device or the network, and never calls the
+  portal.
+- `register(entry, files)` when it has no status.
+
+`files` is `ResourceFiles::from(context.filesystem()?.clone())`, serving the
+entry's module and assets from the Plugin's `/resources`. The page's sources
+live in `resources/web/` and build into `filesystem/resources/`, importing the
+portal UI kit from `captive-portal` and any other web kit only from a Plugin
+it depends on. A page links to another entry only after `context.has(id)`
+says the entry exists. A Plugin that sends clients to the portal from routes
+of its own answers them with `CaptivePortal::landing()`.
+
+A Plugin's own HTTP API is served with `WebServer::serve_http` and retained like
+any registration. Its paths, methods, and bodies are the Plugin's private
+contract with its page, documented on the Plugin page or its `http` page. A route never
+returns credentials.
+
+## Storage and files
+
+Classify state by lifecycle, not size:
+
+| State | Home |
+| --- | --- |
+| Settings, credentials, and small structured state | Plugin-scoped KV storage, `context.storage()` |
+| Files required for correctness | `/data` |
+| Reproducible files System may delete | `/cache` |
+| Large durable runtime content | `/media` |
+| Files shipped with the image | `/resources`, read-only |
+| Immutable files shared by every Plugin | `/workspace/resources`, read-only |
+| Files exchanged between Plugins for a run | `/workspace/cache` |
+| Shared files that outlive their run | `/workspace/media` |
+| Currently inserted removable media | `/workspace/removable/<slot-id>` |
+
+For example, a bundled model belongs in `/resources`, a re-downloadable one
+in `/cache`, a user upload in `/media`, and a script's output handed to
+another Plugin in `/workspace/cache`.
+
+A Plugin receives an ordinary `ScopedVfs` from `context.filesystem()`. It
+never mounts, selects a filesystem, reaches System paths, or touches another
+Plugin's namespace, and it never writes at `/` or `/workspace` directly.
+Shared state required for correctness keeps one owner and lives in that
+owner's KV storage or `/data`.
+
+Mount policy enforces the contract: writes below `/resources` and
+`/workspace/resources` fail with `ReadOnly`, a rename across mounts fails with
+`CrossMount`, paths cannot escape the scope, and unload keeps `/data`,
+`/media`, and `/workspace/media`. `/cache` and `/workspace/cache` may vanish
+at any time. Mutable defaults are read from `/resources` and copied into
+`/data` only when absent.
+
+Bundled files map directly:
+
+```text
+plugins/<id>/filesystem/resources/index.html
+-> /resources/index.html                     (the Plugin's own view)
+plugins/<id>/filesystem/workspace/resources/models/common.bin
+-> /workspace/resources/models/common.bin   (every Plugin's view)
+```
+
+Shared contributions merge by path, and a collision fails the image build.
+How System backs these mounts is in
+[Platform architecture](/architecture/platform-architecture#filesystems-and-database).
+
+## Tests
+
+Tests exercise the production API and never shape it: no constructor,
+parameter, feature, or public item exists only so a test can inject a fake.
+A Plugin's tests register the real Plugins of its dependency graph, with
+`barracuda-platform-test` standing in for the Platform (loopback networking,
+memory flash, scripted servers), and run each test that needs process-wide
+resources, such as statically sized buffers, in its own process with
+`rusty_fork_test!`. A test may depend on the Plugins its Plugin depends on,
+directly or through them, and on no other Plugin.
+
+## Plugin documentation
+
+Every Plugin has a page, `docs/plugins/<id>.mdx`, in this form:
+
+````markdown
+---
+title: "<Name> Plugin"
+---
+
+<One or two sentences on what the Plugin owns.>
+
+- Plugin ID: `<id>`
+- Dependencies: `<id>`, `<id>`
+- Settings: `<name>` (`<type>`, default `<value>`)
+- Context resources: `<field>`, peripheral slot `<kind>.<slot>` (`<fill>`)
+- Provided capabilities: `<Type>`
+- Required capabilities: `<Type>` from `<id>`
+- Workflow: Actions `<address>`, see [Actions](/plugins/<id>/action); Events `<event-id>`, see [Events](/plugins/<id>/event)
+- Agent Tools: `<tool>`
+- Lua packages: `<package>`
+- Web: portal entry `<entry-id>`, with status; `GET <path>`, `PUT <path>`
+- Tasks: <each owned long-running task and its capacity>
+- Storage: <KV keys and file paths>
+
+<Free-form sections, in any order, for everything else.>
+````
+
+- All twelve bullets appear in this order, before the first `##` heading,
+  each starting at the beginning of a line. Write `none` for an empty one. A
+  value may wrap onto indented continuation lines.
+- `Plugin ID` and `Dependencies` match `plugin.toml` exactly, dependencies
+  in its order, and `Settings` names exactly its `[config.*]` settings.
+- Describe the current contract only. History belongs in version control.
+
+The `action` page lists every Action address, its request and response, its
+stable business errors, and its schema path. The `event` page lists every
+Event ID, its payload, schema path, Topic, emission condition, and bounds.
+
+Pages are MDX: write `<`, `{`, and `}` in prose as `\<`, `\{`, and `\}`, or
+inside code spans.
+
+## Checks
+
+`cargo plugin sync --check`, which runs in CI, rejects:
+
+- a Plugin root holding a name outside the layout above;
+- a `schemas/` entry other than `action/<address>/{request,response}.json`
+  and `event/<event-id>.json`;
+- a missing `docs/plugins/<id>.mdx`, a missing or misplaced summary bullet, or one
+  that disagrees with `plugin.toml` on the ID, dependencies, or settings;
+- a missing `docs/plugins/<id>/action.mdx` or `docs/plugins/<id>/event.mdx`
+  while the matching schemas exist;
+- a Plugin crate that depends on another Plugin's crate without listing that
+  Plugin in `depends-on` (a test may use the Plugins it depends on
+  transitively);
+- a Board setting its Plugin does not declare, or of the wrong type;
+- a profile or Board naming an unknown profile or Plugin, a Board that
+  disables a dependency of a Plugin it enables, and any Board whose
+  peripheral slots fail to resolve.
+
+The generated registration constructs every Plugin with
+`new(&mut plugin_context)`, so another constructor fails to compile. The
+check covers only these shapes; the scope rules above are reviewed.

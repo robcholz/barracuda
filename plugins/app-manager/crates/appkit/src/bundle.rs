@@ -1,5 +1,5 @@
 //! App containers: one directory per app, or in the Workspace one `.bapp`
-//! package, in the format `docs/app-format.md` defines and
+//! package, in the format `docs/plugins/app-manager/app-format.mdx` defines and
 //! `resources/app-manifest.json` checks.
 //!
 //! Where a container lives decides what kind of app it is: builtin apps'
