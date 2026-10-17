@@ -50,6 +50,7 @@ pub use engine::{
 };
 pub use instance::Agent;
 pub use manager::{
-    AgentCreateError, AgentId, AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig,
+    AgentCreateError, AgentId, AgentIdAllocator, AgentManager, AgentManagerError,
+    PersistenceConfig, TranscriptEntry, TranscriptRole,
 };
 pub use message::{sniff_media_type, Attachment, MediaKind, Message, SNIFF_BYTES};

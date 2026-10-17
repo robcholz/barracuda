@@ -114,6 +114,7 @@ where
             skill_registry,
             persisted_agents: RefCell::new(persisted_agents),
             transcripts: RefCell::new(transcripts),
+            transient_transcripts: RefCell::new(BTreeMap::new()),
             pending_transcript_deletes: RefCell::new(Vec::new()),
         };
         manager.purge_dead().await?;

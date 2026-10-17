@@ -18,19 +18,25 @@ Ships 会话 (Sessions), a system app that lists the Agent's conversations.
 
 The app is a builtin app, see the `app-manager` Plugin's
 [`plugin.md`](../../app-manager/docs/plugin.md#builtin-apps). Its first page
-lists conversations, most recently used first; opening one shows what was
-first asked in it and the Agent's latest words on this device. The Agent
-runtime keeps no transcript a view can read, so a conversation's full history
-is not shown.
+lists conversations, most recently used first; opening one shows its latest
+messages from `AgentRuntime::session_transcript`: the person's on the right,
+the Agent's on the left (an Agent message that only called Tools names
+them), and a spinner while the Agent is still answering. Older messages go
+off the top of the page.
 
 ## Lua API
 
 ~~~lua
 local sessions = require("sessions")
 
-sessions.list()   -- { { id, title, when = "10:31" | "昨天" | "周一" | "9月15日" }, ... }
-sessions.agent()  -- { state = "standby" | "listening" | "thinking" | "answering", question, answer }
+sessions.list()          -- { { id, title, when = "10:31" | "昨天" | "周一" | "9月15日" }, ... }
+sessions.transcript(id)  -- { { mine, text, tools = { name, ... }, open }, ... }, oldest first
+sessions.agent()         -- { state = "standby" | "listening" | "thinking" | "answering", question, answer }
 ~~~
+
+`transcript` returns a conversation's last 6 messages, each cut to 160
+characters; `mine` marks the person's, and `open` the messages of the turn
+the Agent is still answering. An unknown `id` returns `nil` and a message.
 
 Times are UTC, like the status bar's clock. A conversation without a title
 is 新对话.

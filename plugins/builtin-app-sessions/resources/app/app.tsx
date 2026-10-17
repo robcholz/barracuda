@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 import { For, Text, View } from "@pocketjs/framework/solid/components";
-import { asked, clock, empty, open, page, said, sessions, thinking, when } from "./app";
+import { clock, empty, messages, open, page, sessions, thinking, title } from "./app";
 
 export default function Sessions() {
   return (
@@ -36,22 +36,31 @@ export default function Sessions() {
       </Show>
 
       <Show when={page() === 1}>
-        <View class="absolute left-[40px] top-[82px] w-[280px] flex-col">
-          <View class="w-[280px] flex-row justify-end">
-            <View class="max-w-[220px] px-[14px] py-[8px] rounded-lg bg-[#18181B] border border-[#27272A]">
-              <Text class="text-base text-[#FAFAFA]">{asked()}</Text>
-            </View>
-          </View>
-          <View class="mt-[14px] flex-row items-center gap-2">
-            <View class="w-[24px] h-[24px] rounded-[6px] bg-[#232327] items-center justify-center">
-              <Text class="text-sm font-bold text-[#CCFF00]">{""}</Text>
-            </View>
-            <Text class="text-sm text-[#A1A1AA]">{when()}</Text>
-            <Show when={thinking()}>
-              <Text class="text-sm text-[#A1A1AA] animate-spin">{""}</Text>
-            </Show>
-          </View>
-          <Text class="mt-[8px] w-[280px] text-base text-[#FAFAFA]">{said()}</Text>
+        {/* The latest messages, the newest at the bottom; older ones go off the top. */}
+        <View class="absolute left-[40px] right-[40px] top-[44px] bottom-[40px] flex-col justify-end gap-[12px] overflow-hidden">
+          <For each={messages()} by={(message) => message.id}>
+            {(message) => (
+              <View class={message().mine ? "w-full flex-row justify-end" : "w-full flex-col gap-[6px]"}>
+                <Show when={message().mine}>
+                  <View class="max-w-[220px] px-[14px] py-[8px] rounded-lg bg-[#18181B] border border-[#27272A]">
+                    <Text class="text-base text-[#FAFAFA]">{message().text}</Text>
+                  </View>
+                </Show>
+                <Show when={!message().mine}>
+                  <View class="w-[24px] h-[24px] rounded-[6px] bg-[#232327] items-center justify-center">
+                    <Text class="text-sm font-bold text-[#CCFF00]">{""}</Text>
+                  </View>
+                  <Text class="w-full text-base text-[#FAFAFA]">{message().text}</Text>
+                </Show>
+              </View>
+            )}
+          </For>
+          <Show when={thinking()}>
+            <Text class="text-sm text-[#A1A1AA] animate-spin">{""}</Text>
+          </Show>
+        </View>
+        <View class="absolute left-[60px] right-[60px] bottom-[14px] flex-row justify-center overflow-hidden">
+          <Text class="text-sm text-[#A1A1AA]">{title()}</Text>
         </View>
       </Show>
     </View>

@@ -63,6 +63,16 @@ from `UtcClock`, which registration installs through
 value is kept. Persistent sessions store both fields with the rest of their
 session state; ephemeral sessions keep them in memory.
 
+`AgentRuntime::session_transcript(session, limit, max_chars)` reads a live
+session's conversation the way a person reads it: the last `limit` user and
+Agent messages, oldest first, each a `TranscriptEntry` with its
+`TranscriptRole`, its text cut to `max_chars` characters, the names of the
+Tools an Agent message called, and whether it belongs to the turn still in
+progress. Reasoning, Tool results, and the runtime's own background-update
+messages are left out. It reads the transcript the root Agent already keeps,
+in memory for an ephemeral session; a session with no message yet, or whose
+ephemeral Agent is gone, has none.
+
 The Plugin owns and drives `RuntimeService` directly. Alongside it, the
 Agent-to-Workflow adapter only forwards open-session output as `session.event`;
 it does not own or run either the Agent runtime or the Workflow runtime.

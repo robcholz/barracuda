@@ -19,7 +19,9 @@ use http_client::embedded_nal_async::{Dns, TcpConnect};
 use portable_atomic_util::Arc;
 
 use barracuda_agent::SharedApiManager;
-use barracuda_agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
+use barracuda_agent::{
+    AgentCreateError, AgentId, AgentManager, AgentManagerError, TranscriptEntry,
+};
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
@@ -97,6 +99,15 @@ pub struct SessionInfo {
     /// Unix milliseconds of the last appended user message, when the wall
     /// clock was synchronized at that time.
     pub updated_at: Option<u64>,
+}
+
+/// Failure reading one Session's transcript.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SessionTranscriptError {
+    #[error("session not found: {0}")]
+    SessionNotFound(SessionId),
+    #[error("agent runtime is not running")]
+    WorkerStopped,
 }
 
 /// Failure renaming one Session.
@@ -310,6 +321,32 @@ where
             entry.state.get_mut().title = Some(title);
         }
         Ok(())
+    }
+
+    /// The last `limit` messages of Session `session` as a person reads
+    /// them, each cut to `max_chars` characters; empty before its first
+    /// message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionTranscriptError::SessionNotFound`] for an unknown
+    /// Session.
+    pub fn transcript(
+        &self,
+        session: SessionId,
+        limit: usize,
+        max_chars: usize,
+    ) -> Result<Vec<TranscriptEntry>, SessionTranscriptError> {
+        let entry = self
+            .sessions
+            .get(&session)
+            .ok_or(SessionTranscriptError::SessionNotFound(session))?;
+        Ok(entry
+            .state
+            .get()
+            .root_agent
+            .and_then(|agent| self.agent_manager.transcript(agent, limit, max_chars))
+            .unwrap_or_default())
     }
 
     pub fn open(

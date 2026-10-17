@@ -31,11 +31,12 @@ mod state;
 mod stream;
 
 pub use approval::ApprovalResolverError;
+pub use barracuda_agent::{TranscriptEntry, TranscriptRole};
 pub use clock::{SessionClock, WallClock};
 pub use control::{SessionControl, SessionControlError};
 pub use manager::{
     OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionInfo,
-    SessionPersistence, SessionRenameError,
+    SessionPersistence, SessionRenameError, SessionTranscriptError,
 };
 pub use manager::{SessionManager, SessionManagerInitError};
 pub use stream::{

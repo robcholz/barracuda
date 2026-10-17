@@ -32,8 +32,9 @@ pub use barracuda_agent_session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
     SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId, SessionInfo,
-    SessionInputError, SessionPersistence, SessionRenameError, SessionStream, SessionTurnError,
-    TurnEvent, TurnEventError, TurnId, TurnOrigin, TurnOutcome, WallClock,
+    SessionInputError, SessionPersistence, SessionRenameError, SessionStream,
+    SessionTranscriptError, SessionTurnError, TranscriptEntry, TranscriptRole, TurnEvent,
+    TurnEventError, TurnId, TurnOrigin, TurnOutcome, WallClock,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
 use barracuda_model_api::InitError;
@@ -381,6 +382,27 @@ impl AgentRuntime {
         title: &str,
     ) -> Result<(), SessionRenameError> {
         self.control.rename_session(session, title.into()).await
+    }
+
+    /// The last `limit` messages of a live conversation session as a person
+    /// reads them: what the person and the Agent said, and which Tools the
+    /// Agent called, without reasoning, Tool results, or the runtime's own
+    /// messages. Each text is cut to `max_chars` characters. A session with
+    /// no message yet, or whose in-memory Agent is gone, has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionTranscriptError`] when the session is missing or the
+    /// runtime has stopped.
+    pub async fn session_transcript(
+        &self,
+        session: SessionId,
+        limit: usize,
+        max_chars: usize,
+    ) -> Result<Vec<TranscriptEntry>, SessionTranscriptError> {
+        self.control
+            .session_transcript(session, limit, max_chars)
+            .await
     }
 
     /// Install the wall clock that stamps each session's last-used time.

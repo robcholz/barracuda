@@ -137,7 +137,14 @@ where
                     .clone();
                 Ok(Box::new(transcript) as Box<dyn Transcript>)
             }
-            PersistenceConfig::InMemory => Ok(Box::new(TransientTranscript::new())),
+            PersistenceConfig::InMemory => {
+                let transcript = Rc::new(TransientTranscript::new());
+                let mut live = self.transient_transcripts.borrow_mut();
+                // Forget the transcripts whose Agents are gone.
+                live.retain(|_id, transcript| transcript.strong_count() > 0);
+                live.insert(id, Rc::downgrade(&transcript));
+                Ok(Box::new(transcript) as Box<dyn Transcript>)
+            }
         }
     }
 

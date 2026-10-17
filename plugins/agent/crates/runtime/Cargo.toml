@@ -17,6 +17,9 @@ name = "embassy_runtime"
 [[test]]
 name = "attachments"
 
+[[test]]
+name = "transcript"
+
 [features]
 # Concepts:
 # - target selection and concrete HAL adapters belong to the application, not
