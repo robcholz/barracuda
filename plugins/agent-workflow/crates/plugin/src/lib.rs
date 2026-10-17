@@ -57,7 +57,10 @@ impl Plugin for AgentWorkflowPlugin {
                     Tool::new(LoadTool {
                         service: Rc::clone(&service),
                     }),
-                    Tool::new(UnloadTool { service }),
+                    Tool::new(UnloadTool {
+                        service: Rc::clone(&service),
+                    }),
+                    Tool::new(SwitchTool { service }),
                 ],
             ))
             .map_err(PluginError::registration)
@@ -120,13 +123,17 @@ impl ToolHandler for ListTool {
 
     fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let workflows = self
-                .service
-                .definitions()
-                .into_iter()
+            let definitions = self.service.definitions();
+            let workflows = definitions
+                .iter()
                 .map(|definition| String::from(definition.id().as_str()))
                 .collect();
-            encode(&ListResponse { workflows }, true)
+            let off = definitions
+                .iter()
+                .filter(|definition| !self.service.is_enabled(definition.id()))
+                .map(|definition| String::from(definition.id().as_str()))
+                .collect();
+            encode(&ListResponse { workflows, off }, true)
         })
     }
 }
@@ -134,6 +141,7 @@ impl ToolHandler for ListTool {
 #[derive(Serialize)]
 struct ListResponse {
     workflows: Vec<String>,
+    off: Vec<String>,
 }
 
 struct LoadTool {
@@ -196,6 +204,42 @@ impl ToolHandler for UnloadTool {
 #[serde(deny_unknown_fields)]
 struct UnloadRequest {
     id: String,
+}
+
+struct SwitchTool {
+    service: Rc<WorkflowService>,
+}
+
+impl ToolSpec for SwitchTool {
+    barracuda_agent_plugin::tools::tool_metadata!("workflow_switch");
+}
+
+impl ToolHandler for SwitchTool {
+    type Args = SwitchRequest;
+
+    fn invoke<'a>(&'a self, _context: ToolContext, request: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let Ok(id) = WorkflowId::try_from(request.id) else {
+                return encode(
+                    &ErrorResponse {
+                        error: "invalid_workflow_id",
+                    },
+                    false,
+                );
+            };
+            match self.service.set_enabled(&id, request.enabled).await {
+                Ok(()) => encode(&EmptyResponse {}, true),
+                Err(error) => encode(&ErrorResponse::from(error), false),
+            }
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SwitchRequest {
+    id: String,
+    enabled: bool,
 }
 
 #[derive(Serialize)]

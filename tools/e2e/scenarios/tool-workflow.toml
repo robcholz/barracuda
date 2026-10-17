@@ -1,5 +1,5 @@
 name = "Workflow tools"
-description = "The Agent inspects Workflow Actions, loads a user Workflow, lists it, and unloads it."
+description = "The Agent inspects Workflow Actions, loads a user Workflow, switches it off, lists it, and unloads it."
 
 [model]
 mode = "scripted"
@@ -14,6 +14,9 @@ tool_calls = [{ name = "workflow_actions", arguments = {} }]
 tool_calls = [{ name = "workflow_load", arguments = { id = "e2e-flow", match = { event = "scheduler.triggered" }, steps = [{ call = "vm.run", arguments = { source = "print('scheduled')" } }] } }]
 
 [[model.responses]]
+tool_calls = [{ name = "workflow_switch", arguments = { id = "e2e-flow", enabled = false } }]
+
+[[model.responses]]
 tool_calls = [{ name = "workflow_list", arguments = {} }]
 
 [[model.responses]]
@@ -25,7 +28,7 @@ text = "The Workflow round-trip finished."
 [[steps]]
 send = "Manage a workflow."
 reply_contains = ["The Workflow round-trip finished."]
-tool_contains = ["vm.run", "e2e-flow"]
+tool_contains = ["vm.run", "e2e-flow", '"off":["e2e-flow"]']
 
 [memory]
 # Host ordinary-heap peak was 231 KiB locally when this budget was set

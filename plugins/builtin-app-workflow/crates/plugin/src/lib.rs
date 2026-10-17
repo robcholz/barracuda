@@ -11,7 +11,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
-use barracuda_workflow_plugin::WorkflowService;
+use barracuda_workflow_plugin::{WorkflowId, WorkflowService};
 use core::{future::Future, pin::Pin};
 use serde_json::{Value, json};
 
@@ -70,7 +70,7 @@ impl BuiltinBackend for Workflows {
     fn call<'a>(
         &'a self,
         call: &'a str,
-        _args: Vec<Option<String>>,
+        args: Vec<Option<String>>,
     ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>> {
         Box::pin(async move {
             match call {
@@ -83,10 +83,25 @@ impl BuiltinBackend for Workflows {
                                 "id": definition.id().as_str(),
                                 "event": definition.event().as_str(),
                                 "trigger": trigger(definition.event().as_str()),
+                                "enabled": self.0.is_enabled(definition.id()),
                             })
                         })
                         .collect(),
                 )),
+                "set_enabled" => {
+                    let id = args
+                        .first()
+                        .cloned()
+                        .flatten()
+                        .and_then(|id| WorkflowId::try_from(id).ok())
+                        .ok_or_else(|| String::from("workflows.set_enabled needs a Workflow ID"))?;
+                    let enabled = args.get(1).cloned().flatten().as_deref() == Some("true");
+                    self.0
+                        .set_enabled(&id, enabled)
+                        .await
+                        .map_err(|error| format!("{error}"))?;
+                    Ok(Value::Bool(enabled))
+                }
                 _ => Err(format!("workflows.{call} does not exist")),
             }
         })

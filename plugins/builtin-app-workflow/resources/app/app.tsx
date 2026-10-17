@@ -1,8 +1,8 @@
 import { Show } from "solid-js";
 import { For, Text, View } from "@pocketjs/framework/solid/components";
-import { clock, empty, flows } from "./app";
+import { clock, empty, flows, toggle } from "./app";
 
-// The loaded Workflows and what starts each; a loaded Workflow is on.
+// The loaded Workflows, what starts each, and a switch for each.
 export default function Workflows() {
   return (
     <View class="w-full h-full relative overflow-hidden bg-[#09090B]">
@@ -20,6 +20,8 @@ export default function Workflows() {
                   <Text class="text-sm text-[#A1A1AA]">{flow().detail}</Text>
                 </View>
                 <View
+                  focusable
+                  onPress={() => toggle(flow().id)}
                   class={
                     flow().on
                       ? "shrink-0 w-[46px] h-[28px] rounded-full bg-[#FAFAFA] flex-row items-center justify-end px-[3px]"

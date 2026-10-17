@@ -109,6 +109,9 @@ struct WorkflowPlan {
 
 struct SharedState {
     definitions: Vec<Rc<WorkflowDefinition>>,
+    /// Workflows no Event starts, by ID; kept while one is unloaded, so a
+    /// definition loaded again under the same ID stays off.
+    disabled: Vec<WorkflowId>,
     pending: VecDeque<WorkflowExecution>,
     runtime_waker: Option<Waker>,
     /// Queued or running executions per triggering Event.
@@ -169,9 +172,28 @@ impl RuntimeShared {
         Ok(Rc::try_unwrap(definition).unwrap_or_else(|definition| definition.as_ref().clone()))
     }
 
+    fn is_enabled(&self, workflow_id: &WorkflowId) -> bool {
+        !self.state.borrow().disabled.contains(workflow_id)
+    }
+
+    fn set_enabled(&self, workflow_id: &WorkflowId, enabled: bool) {
+        let disabled = &mut self.state.borrow_mut().disabled;
+        let at = disabled.iter().position(|id| id == workflow_id);
+        match (enabled, at) {
+            (true, Some(index)) => {
+                disabled.swap_remove(index);
+            }
+            (false, None) => disabled.push(workflow_id.clone()),
+            _ => {}
+        }
+    }
+
     fn has_listener(&self, event_id: &str) -> bool {
-        self.state.borrow().definitions.iter().any(|definition| {
-            definition.event().matches_str(event_id) && definition.topic().is_none()
+        let state = self.state.borrow();
+        state.definitions.iter().any(|definition| {
+            definition.event().matches_str(event_id)
+                && definition.topic().is_none()
+                && !state.disabled.contains(definition.id())
         })
     }
 
@@ -223,8 +245,8 @@ impl RuntimeShared {
     }
 
     fn matching_plans(&self, event_id: &EventId, topic: Option<&Topic>) -> Vec<WorkflowPlan> {
-        self.state
-            .borrow()
+        let state = self.state.borrow();
+        state
             .definitions
             .iter()
             .filter(|definition| {
@@ -232,6 +254,7 @@ impl RuntimeShared {
                     && definition
                         .topic()
                         .is_none_or(|required| topic == Some(required))
+                    && !state.disabled.contains(definition.id())
             })
             .map(|definition| WorkflowPlan {
                 definition: Rc::clone(definition),
@@ -330,6 +353,13 @@ impl WorkflowRuntimeControl {
         self.shared.load(definition)
     }
 
+    /// Turns Workflow `workflow_id` on or off. No Event starts a Workflow
+    /// that is off, whether or not it is loaded; executions already running
+    /// finish.
+    pub fn set_enabled(&self, workflow_id: &WorkflowId, enabled: bool) {
+        self.shared.set_enabled(workflow_id, enabled);
+    }
+
     /// Unloads a definition without cancelling running execution snapshots.
     pub fn unload(
         &self,
@@ -404,6 +434,12 @@ impl WorkflowRuntimeView {
         self.shared.definitions()
     }
 
+    /// Returns whether Events start Workflow `workflow_id`.
+    #[must_use]
+    pub fn is_enabled(&self, workflow_id: &WorkflowId) -> bool {
+        self.shared.is_enabled(workflow_id)
+    }
+
     /// Returns current execution counters and the latest failure.
     #[must_use]
     pub fn info(&self) -> WorkflowInfo {
@@ -429,6 +465,7 @@ impl WorkflowRuntime {
             shared: Rc::new(RuntimeShared {
                 state: RefCell::new(SharedState {
                     definitions: Vec::new(),
+                    disabled: Vec::new(),
                     pending: VecDeque::new(),
                     runtime_waker: None,
                     backlog: Vec::new(),
@@ -1142,6 +1179,49 @@ mod tests {
                 super::EVENT_BACKLOG_LIMIT
             );
             assert!(poll_once(&mut ready).await.is_some(), "backlog drained");
+        });
+    }
+
+    #[test]
+    fn disabled_workflows_do_not_start() {
+        block_on(async {
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let actions = WorkflowActionRegistry::new();
+            let _registration = actions
+                .add_action(YieldOnceAction::<0> {
+                    name: "a.first",
+                    trace: Rc::clone(&trace),
+                })
+                .expect("register a.first");
+            let mut runtime = WorkflowRuntime::new(actions);
+            let control = runtime.control();
+            let definition =
+                r#"{"id":"a","match":{"event":"test.*"},"steps":[{"call":"a.first"}]}"#;
+            control
+                .load(parse_definition(definition).expect("parse a"))
+                .expect("load a");
+            let id = crate::WorkflowId::try_from("a").expect("id");
+
+            control.set_enabled(&id, false);
+            assert!(!runtime.view().is_enabled(&id));
+            assert!(!control.has_listener::<Trigger>());
+            control.emit::<Trigger>(json!({})).expect("emit");
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert!(trace.borrow().is_empty(), "no execution while off");
+
+            // Off survives an unload and a load under the same ID.
+            control.unload(&id).expect("unload a");
+            control
+                .load(parse_definition(definition).expect("parse a"))
+                .expect("load a again");
+            assert!(!control.has_listener::<Trigger>());
+
+            control.set_enabled(&id, true);
+            assert!(control.has_listener::<Trigger>());
+            control.emit::<Trigger>(json!({})).expect("emit");
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert!(poll_once(&mut runtime).await.is_none());
+            assert_eq!(runtime.view().info().completed_count, 1);
         });
     }
 
