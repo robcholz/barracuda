@@ -1,0 +1,32 @@
+# System Wi-Fi Plugin
+
+Shows Wi-Fi in the system UI: the link on the status bar, the home screen's
+offline card, and the control center's Wi-Fi tile, and the setup hotspot the
+portal tile opens.
+
+- Plugin ID: `system-wifi`
+- Dependencies: `app-manager`, `wifi`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `SystemNetwork` from `app-manager`, `WifiControl` from `wifi`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
+
+At registration the Plugin gives `SystemNetwork` a `NetworkSource` over
+`WifiControl`:
+
+- the station's link becomes the `NetworkState` (`Connected` with the
+  network's name, `Connecting`, or `Offline`); host Boards whose network the
+  host manages are always connected;
+- the setup hotspot is open while the access point is starting or started;
+- the portal tile opens the access point `SETUP_AP_SSID` with
+  `SETUP_AP_PASSWORD` and shows how to reach the portal at
+  `SETUP_AP_ADDRESS`, and closes it again.
+
+A device Board that goes online enables this Plugin with `app-manager`; one
+built without networking leaves it out, and the system UI shows no network.

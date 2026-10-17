@@ -8,15 +8,15 @@ states, the launcher, the app switcher, the notification and control
 centers, and the screens around an app's lifecycle.
 
 - Plugin ID: `app-manager`
-- Dependencies: `vm`, `workflow`, `time`, `wifi`, `power`, `sound`
+- Dependencies: `vm`, `workflow`, `time`, `power`, `sound`
 - Settings: none
 - Context resources: peripheral slots `display.main` (`primary`, optional)
   and `touch.main` (`primary`, optional)
 - Provided capabilities: `AppManager`, `Notifications`, `AgentStatus`,
-  `Preferences`
+  `Preferences`, `SystemFonts`, `SystemNetwork`
 - Required capabilities: `Vm` and `LuaPackageRegistry` from `vm`,
   `WorkflowActionRegistry` from `workflow`, `UtcClock` from `time`,
-  `WifiControl` from `wifi`, `Power` from `power`, `Volume` from `sound`
+  `Power` from `power`, `Volume` from `sound`
 - Workflow: Actions `app.list`, `app.open`, `app.install`, `app.home`,
   `app.interactive`, `app.terminate`, `app.status`, `app.tap`, `app.notify`,
   `app.confirm`, and `app.agent`, see [Actions](/plugins/app-manager/action); Events none
@@ -409,10 +409,12 @@ on a Board whose power monitor is a fuel gauge, and nothing on others.
 The clock is UTC from the `time` Plugin's `UtcClock`, redrawn every 15
 seconds: from the Board's real-time clock at boot when it has one, then from
 network time, and empty on a Board without one until network time arrives. Do not disturb and
-offline show as icons beside it. The home screen's offline card follows
-`WifiControl::status`; host Boards whose network the host manages are always
-connected. The portal tile opens the Wi-Fi setup access point
-(`SETUP_AP_SSID`) and shows its address.
+offline show as icons beside it. The network is whatever a Plugin shows
+with `SystemNetwork::show`, a `NetworkSource`: `system-wifi` shows Wi-Fi. It
+drives the home screen's offline card, the control center's Wi-Fi tile, and
+the portal tile, which opens the source's setup hotspot and shows its
+`hotspot_hint`. A device that shows no network, such as one built without
+networking, has no Wi-Fi or portal tile and is never offline.
 
 ## Building
 

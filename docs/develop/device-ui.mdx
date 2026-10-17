@@ -26,13 +26,19 @@ the Plugins' docs.
 | `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
 | `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
 | `system-fonts` | the system fonts every view on a display draws with |
+| `system-wifi` | Wi-Fi in the system UI: the link, the offline card, and the setup hotspot the portal tile opens, through `app-manager`'s `SystemNetwork` |
 
 The app kit needs no display. On a Board without one, the `app-manager`
 Plugin runs no UI kit and no system UI: it is an app manager for headless
-apps, and apps with views answer `no_display`. A device Board enables
-`app-manager` with the builtin apps it ships and `system-fonts`; a Board
-leaves a system app out by not enabling its Plugin, and a Board without a
-display enables neither the system apps nor `system-fonts`.
+apps, and apps with views answer `no_display`. The system UI needs no
+network either: it shows a network only when a Plugin shows one with
+`SystemNetwork`, as `system-wifi` does. A Board with a screen names the
+`screen` profile, or `screen-offline` for a product that never goes online
+(no Wi-Fi, portal, Agent, Sessions, or Settings); both take the `ui` layer:
+`app-manager`, `system-fonts`, and the builtin apps that need no network. The
+profiles are in [`boards/profiles/README.md`](../../boards/profiles/README.md). A Board leaves a system app out by not enabling its Plugin, and a
+Board without a display enables neither the system apps nor
+`system-fonts`.
 
 ## Deciding the layer
 

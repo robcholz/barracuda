@@ -28,8 +28,8 @@ fn plugin(root: &Path, id: &str, depends_on: &[&str], extra: &str) {
     write(root, &format!("plugins/{id}/crates/plugin/Cargo.toml"), "");
 }
 
-/// A workspace with a display and a touch implementation, a `base` and a
-/// `device` profile, and Plugins shaped like the real ones.
+/// A workspace with a display and a touch implementation, a `headless` and a
+/// `screen` profile, and Plugins shaped like the real ones.
 fn workspace() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path();
@@ -51,13 +51,13 @@ fn workspace() -> tempfile::TempDir {
     }
     write(
         root_path,
-        "boards/profiles/base.yml",
+        "boards/profiles/headless.yml",
         "enable: [workflow]\n",
     );
     write(
         root_path,
-        "boards/profiles/device.yml",
-        "extends: base\nenable: [app-manager, display]\n",
+        "boards/profiles/screen.yml",
+        "extends: headless\nenable: [app-manager, display]\n",
     );
     plugin(root_path, "workflow", &[], "");
     plugin(
@@ -122,7 +122,7 @@ fn profiles_overrides_and_dependencies_decide_the_enabled_set() {
     let root = workspace();
     let selection = run(
         root.path(),
-        &format!("{ONE_DISPLAY}profile: device\nplugins:\n  workflow:\n    enabled: true\n"),
+        &format!("{ONE_DISPLAY}profile: screen\nplugins:\n  workflow:\n    enabled: true\n"),
         &[],
     )
     .unwrap();
@@ -134,7 +134,7 @@ fn profiles_overrides_and_dependencies_decide_the_enabled_set() {
 
     let error = run(
         root.path(),
-        &format!("{ONE_DISPLAY}profile: device\nplugins:\n  ui:\n    enabled: false\n"),
+        &format!("{ONE_DISPLAY}profile: screen\nplugins:\n  ui:\n    enabled: false\n"),
         &[],
     )
     .unwrap_err();
@@ -150,11 +150,52 @@ fn profiles_overrides_and_dependencies_decide_the_enabled_set() {
 }
 
 #[test]
+fn a_profile_extends_several_and_each_counts_once() {
+    let root = workspace();
+    write(
+        root.path(),
+        "boards/profiles/ui.yml",
+        "enable: [app-manager]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/lua.yml",
+        "extends: headless\nenable: [display]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/both.yml",
+        "extends: [lua, ui, headless]\n",
+    );
+    let selection = run(root.path(), &format!("{ONE_DISPLAY}profile: both\n"), &[]).unwrap();
+    assert_eq!(
+        selection.enabled(),
+        ["app-manager", "display", "ui", "workflow"]
+    );
+
+    write(
+        root.path(),
+        "boards/profiles/loop-a.yml",
+        "extends: [headless, loop-b]\n",
+    );
+    write(
+        root.path(),
+        "boards/profiles/loop-b.yml",
+        "extends: loop-a\n",
+    );
+    let error = run(root.path(), "profile: loop-a\n", &[]).unwrap_err();
+    assert!(
+        error.contains("profile `loop-a` extends itself through `loop-a`, `loop-b`"),
+        "{error}"
+    );
+}
+
+#[test]
 fn the_local_override_disables_dependents_too() {
     let root = workspace();
     let selection = run(
         root.path(),
-        &format!("{ONE_DISPLAY}profile: device\n"),
+        &format!("{ONE_DISPLAY}profile: screen\n"),
         &["ui"],
     )
     .unwrap();
@@ -168,7 +209,7 @@ fn the_local_override_disables_dependents_too() {
 #[test]
 fn the_system_ui_takes_the_primary_screen_and_lua_the_rest() {
     let root = workspace();
-    let selection = run(root.path(), &format!("{ONE_DISPLAY}profile: device\n"), &[]).unwrap();
+    let selection = run(root.path(), &format!("{ONE_DISPLAY}profile: screen\n"), &[]).unwrap();
     assert_eq!(
         claims(&selection, "ui"),
         [
@@ -187,7 +228,7 @@ fn the_system_ui_takes_the_primary_screen_and_lua_the_rest() {
 
     let selection = run(
         root.path(),
-        &format!("{THREE_DISPLAYS}profile: device\n"),
+        &format!("{THREE_DISPLAYS}profile: screen\n"),
         &[],
     )
     .unwrap();
@@ -226,7 +267,7 @@ fn wiring_overrides_defaults_and_is_checked() {
     let root = workspace();
     let selection = run(
         root.path(),
-        &format!("{THREE_DISPLAYS}profile: device\nplugins:\n  ui:\n    peripherals:\n      display.main: status\n"),
+        &format!("{THREE_DISPLAYS}profile: screen\nplugins:\n  ui:\n    peripherals:\n      display.main: status\n"),
         &[],
     )
     .unwrap();
@@ -246,7 +287,7 @@ fn wiring_overrides_defaults_and_is_checked() {
     ] {
         let error = run(
             root.path(),
-            &format!("{THREE_DISPLAYS}profile: device\nplugins:\n  ui:\n    peripherals:\n      {wiring}\n"),
+            &format!("{THREE_DISPLAYS}profile: screen\nplugins:\n  ui:\n    peripherals:\n      {wiring}\n"),
             &[],
         )
         .unwrap_err();
@@ -261,7 +302,7 @@ fn conflicts_and_missing_devices_fail_the_build() {
     let error = run(
         root.path(),
         &format!(
-            "{}profile: device\n",
+            "{}profile: screen\n",
             THREE_DISPLAYS.replace("      primary: true\n", "")
         ),
         &[],
@@ -273,7 +314,7 @@ fn conflicts_and_missing_devices_fail_the_build() {
     );
 
     // A required slot the Board cannot fill.
-    let error = run(root.path(), "profile: device\n", &[]).unwrap_err();
+    let error = run(root.path(), "profile: screen\n", &[]).unwrap_err();
     assert!(
         error
             .contains("enables `ui`, but its required slot `display.main` (primary) has no device"),
@@ -289,7 +330,7 @@ fn conflicts_and_missing_devices_fail_the_build() {
     );
     let error = run(
         root.path(),
-        &format!("{ONE_DISPLAY}profile: device\nplugins:\n  mirror:\n    enabled: true\n"),
+        &format!("{ONE_DISPLAY}profile: screen\nplugins:\n  mirror:\n    enabled: true\n"),
         &[],
     )
     .unwrap_err();
@@ -316,7 +357,7 @@ fn conflicts_and_missing_devices_fail_the_build() {
     // Two slots wired to one device.
     let error = run(
         root.path(),
-        &format!("{THREE_DISPLAYS}profile: device\nplugins:\n  ui:\n    peripherals:\n      display.main: status\n  side:\n    enabled: true\n    peripherals:\n      display.screen: status\n"),
+        &format!("{THREE_DISPLAYS}profile: screen\nplugins:\n  ui:\n    peripherals:\n      display.main: status\n  side:\n    enabled: true\n    peripherals:\n      display.screen: status\n"),
         &[],
     )
     .unwrap_err();

@@ -1,0 +1,9 @@
+# The smallest firmware: no network and no Lua. Workflows, time, the
+# scheduler, and the Board's power monitor and audio codec. Every other
+# profile starts here.
+enable:
+  - power
+  - scheduler
+  - sound
+  - time
+  - workflow

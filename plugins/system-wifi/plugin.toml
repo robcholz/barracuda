@@ -1,0 +1,3 @@
+id = "system-wifi"
+depends-on = ["app-manager", "wifi"]
+description = "Shows Wi-Fi and the setup hotspot in the system UI."

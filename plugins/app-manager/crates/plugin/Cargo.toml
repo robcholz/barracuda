@@ -11,7 +11,6 @@ barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
 [dependencies]
 barracuda-appkit = { path = "../appkit" }
 barracuda-board-hal.workspace = true
-barracuda-platform.workspace = true
 barracuda-plugin.workspace = true
 barracuda-time-plugin.workspace = true
 barracuda-power-plugin.workspace = true
@@ -19,7 +18,6 @@ barracuda-sound-plugin.workspace = true
 barracuda-uikit = { path = "../uikit" }
 barracuda-vm-plugin.workspace = true
 barracuda-vfs.workspace = true
-barracuda-wifi-plugin.workspace = true
 barracuda-workflow-plugin.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true
@@ -32,9 +30,7 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-barracuda-captive-portal-plugin.workspace = true
 barracuda-platform-test.workspace = true
-barracuda-webserver-plugin.workspace = true
 barracuda-lua = { path = "../../../vm/crates/lua", features = ["vendored"] }
 barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
 barracuda-vfs-memfs.workspace = true

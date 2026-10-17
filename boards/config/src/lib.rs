@@ -1614,26 +1614,40 @@ pub fn parse(yaml: &str) -> Result<BoardDefinition, ConfigError> {
 pub const PROFILES_PATH: &str = "boards/profiles";
 
 /// Profile used by a Board that names none.
-pub const DEFAULT_PROFILE: &str = "base";
+pub const DEFAULT_PROFILE: &str = "headless";
 
-/// A named Plugin set Boards start from, optionally extending one other.
+/// A named Plugin set Boards start from, optionally extending others.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileDefinition {
     #[serde(default)]
-    extends: Option<String>,
+    extends: Extends,
     #[serde(default)]
     enable: Vec<String>,
 }
 
+/// `extends`: one profile's name, or a list of them.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Extends {
+    #[default]
+    None,
+    One(String),
+    Many(Vec<String>),
+}
+
 impl ProfileDefinition {
-    /// Returns the profile this one extends, if any.
+    /// Returns the profiles this one extends, in the order written.
     #[must_use]
-    pub fn extends(&self) -> Option<&str> {
-        self.extends.as_deref()
+    pub fn extends(&self) -> &[String] {
+        match &self.extends {
+            Extends::None => &[],
+            Extends::One(name) => core::slice::from_ref(name),
+            Extends::Many(names) => names,
+        }
     }
 
-    /// Returns the Plugin identities this profile enables on top of the one
+    /// Returns the Plugin identities this profile enables on top of the ones
     /// it extends.
     #[must_use]
     pub fn enable(&self) -> &[String] {
@@ -1653,7 +1667,7 @@ pub fn parse_profile(yaml: &str) -> Result<ProfileDefinition, ConfigError> {
         return Err(ConfigError::DocumentCount(documents.len()));
     }
     let profile = documents.pop().ok_or(ConfigError::DocumentCount(0))?;
-    if let Some(parent) = &profile.extends {
+    for parent in profile.extends() {
         validate_resource_name("profile", parent)?;
     }
     Ok(profile)

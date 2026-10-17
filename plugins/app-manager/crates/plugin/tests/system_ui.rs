@@ -1,5 +1,5 @@
 //! Drives the system UI the way a person does, with gestures and presses on
-//! the system view, over a real VM, App Manager, and Wi-Fi Plugin.
+//! the system view, over a real VM and App Manager.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic, missing_docs)]
 #![recursion_limit = "256"]
@@ -10,13 +10,12 @@ use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
 use barracuda_app_manager_plugin::{
-    AgentState, AgentStatus, Notifications, Preferences, Screen, Services, SystemUi,
+    AgentState, AgentStatus, HotspotFuture, NetworkSource, NetworkState, Notifications,
+    Preferences, Screen, Services, SystemNetwork, SystemUi,
 };
 use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, Device, WIFI_SETTINGS};
-use barracuda_captive_portal_plugin::CaptivePortalPlugin;
-use barracuda_platform::HostWifiDevice;
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
-use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext, TargetIdentity};
+use barracuda_plugin::api::{Hardware, PlatformInfo, PluginContext, TargetIdentity};
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
@@ -32,8 +31,6 @@ use barracuda_vfs_memfs::MemFs;
 use barracuda_vm_plugin::{
     Lua, LuaPackage, LuaPackageRegistry, Package, PackageInterface, SeedSource, Vm, VmPlugin,
 };
-use barracuda_webserver_plugin::WebServerPlugin;
-use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
 use barracuda_workflow_plugin::WorkflowPlugin;
 use embassy_executor::{Executor, Spawner};
 use embassy_time::{Instant, Timer};
@@ -149,14 +146,47 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
 }
 
 /// The capabilities the system UI takes from other Plugins.
-type Taken = (Rc<WifiControl>, Rc<Power>, Rc<Volume>);
+type Taken = (Rc<Power>, Rc<Volume>);
+
+/// A network that is always online, with a setup hotspot that opens and
+/// closes.
+#[derive(Default)]
+struct Online {
+    hotspot: std::cell::Cell<bool>,
+}
+
+impl NetworkSource for Online {
+    fn state(&self) -> NetworkState {
+        NetworkState::Connected {
+            name: Some(String::from("HomeNet")),
+        }
+    }
+
+    fn hotspot_open(&self) -> bool {
+        self.hotspot.get()
+    }
+
+    fn hotspot_hint(&self) -> String {
+        String::from("连接热点“Setup”")
+    }
+
+    fn open_hotspot(&self) -> HotspotFuture<'_> {
+        self.hotspot.set(true);
+        Box::pin(async { Ok(()) })
+    }
+
+    fn close_hotspot(&self) -> HotspotFuture<'_> {
+        self.hotspot.set(false);
+        Box::pin(async { Ok(()) })
+    }
+}
 
 /// Takes the capabilities from the real Plugins on a host Platform.
 struct Observer(Rc<RefCell<Option<Taken>>>);
 
 impl PluginDeclaration for Observer {
     const ID: &'static str = "observer";
-    const DEPENDS_ON: &'static [&'static str] = &["wifi", "power", "sound"];
+    const DEPENDS_ON: &'static [&'static str] = &["power", "sound"];
 }
 
 impl Plugin for Observer {
@@ -165,7 +195,6 @@ impl Plugin for Observer {
         context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()> {
         self.0.replace(Some((
-            context.require::<WifiControl>("wifi")?,
             context.require::<Power>("power")?,
             context.require::<Volume>("sound")?,
         )));
@@ -180,7 +209,6 @@ async fn taken() -> Taken {
         barracuda_plugin::api::BoardInfo::new("test-board", Hardware::new("test-chip")),
     );
     let mut context = PluginContext::new(identity, stack);
-    context.wifi = Some(PlatformWifi::new(HostWifiDevice::new(stack)));
     let filesystem = Vfs::new();
     filesystem
         .mount(
@@ -201,13 +229,6 @@ async fn taken() -> Taken {
     let partition = memory_partition(64 * 1024).await.unwrap();
     let mut manager = PluginManager::open(partition).await.unwrap();
     manager.install_vfs(filesystem);
-    manager
-        .register(WebServerPlugin::new(&mut context))
-        .unwrap();
-    manager
-        .register(CaptivePortalPlugin::new(&mut context))
-        .unwrap();
-    manager.register(WifiPlugin::new(&mut context)).unwrap();
     manager.register(WorkflowPlugin::new(&mut context)).unwrap();
     manager.register(VmPlugin::new(&mut context)).unwrap();
     manager.register(PowerPlugin::new(&mut context)).unwrap();
@@ -339,7 +360,8 @@ async fn scenario(spawner: Spawner) {
     updater.synchronize(SyncSample::new(1_791_888_120_000, Instant::now()));
     let notices = Rc::new(Notifications::new());
     let agent = Rc::new(AgentStatus::new());
-    let (wifi, power, audio) = taken().await;
+    let (power, audio) = taken().await;
+    let network = Rc::new(SystemNetwork::default());
     // The host Board has no fuel gauge: the control center shows no battery.
     assert_eq!(power.battery(), None);
     let mut system = SystemUi::new(
@@ -350,7 +372,7 @@ async fn scenario(spawner: Spawner) {
             agent: Rc::clone(&agent),
             preferences: Rc::new(Preferences::default()),
             clock,
-            wifi,
+            network: Rc::clone(&network),
             power,
             audio,
         },
@@ -471,6 +493,30 @@ async fn scenario(spawner: Spawner) {
         .gesture(swipe(Direction::Up, Some(Edge::Bottom)))
         .await;
     assert_eq!(system.screen(), Some(Screen::Control));
+    // A device that shows no network has no Wi-Fi or portal tile.
+    let control = texts(&system);
+    assert!(
+        !control.contains("Wi-Fi") && !control.contains("门户") && control.contains("勿扰"),
+        "{control}"
+    );
+    network.show(Rc::new(Online::default()));
+    system.refresh();
+    let control = texts(&system);
+    assert!(
+        control.contains("Wi-Fi|HomeNet") && control.contains("门户|关"),
+        "{control}"
+    );
+    // The portal tile opens the source's hotspot and shows how to reach it.
+    system.call(press("toggle", Some(5))).await;
+    let control = texts(&system);
+    assert!(control.contains("连接热点“Setup”"), "{control}");
+    system.call(press("closeControl", None)).await;
+    system
+        .gesture(swipe(Direction::Up, Some(Edge::Bottom)))
+        .await;
+    assert!(texts(&system).contains("门户|开"), "{}", texts(&system));
+    system.call(press("toggle", Some(5))).await;
+    assert!(texts(&system).contains("门户|关"), "{}", texts(&system));
     system.call(press("toggle", Some(3))).await;
     let control = texts(&system);
     assert!(control.contains("勿扰|开"), "{control}");

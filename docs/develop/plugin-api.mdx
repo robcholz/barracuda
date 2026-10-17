@@ -266,16 +266,26 @@ Plugin's `resources/web/`; shared builders and test helpers live in
 ## Enablement per Board
 
 Which Plugins a firmware contains is a property of its Board. A profile in
-`boards/profiles/<name>.yml` names a Plugin set and may extend one other
-profile:
+`boards/profiles/<name>.yml` names a Plugin set and may extend other
+profiles, one or a list; a profile reached twice counts once, and a profile
+that extends itself fails:
 
 ```yaml
 # boards/profiles/gateway.yml
-extends: minimal
+extends: network
 enable: [agent, imessage-gateway, imessage-telegram]
 ```
 
-A Board names its profile (`base` when it names none) and overrides single
+```yaml
+# boards/profiles/screen-offline.yml
+extends: [lua, ui]
+```
+
+The profiles are layers, from `minimal` (no network, no Lua) to `screen`;
+[`boards/profiles/README.md`](../../boards/profiles/README.md) lists them and
+says which to pick.
+
+A Board names its profile (`headless` when it names none) and overrides single
 Plugins in `plugins.<id>`:
 
 ```yaml
