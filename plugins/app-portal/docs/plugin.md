@@ -1,0 +1,47 @@
+# App Portal Plugin
+
+Adds 应用 (Apps) to the portal: the install waiting for the person, with
+what it asks for and who signed it, and the apps the Workspace offers. Only
+a client on the device's setup hotspot may install or decline, so a Board
+without a display installs apps from a phone next to the device.
+
+- Plugin ID: `app-portal`
+- Dependencies: `app-manager`, `webserver`, `captive-portal`, `wifi`
+- Settings: none
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `AppManager` from `app-manager`, `WebServer` from
+  `webserver`, `CaptivePortal` from `captive-portal`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: the `apps` portal entry, and the routes below
+- Tasks: none
+- Storage: the page in `/resources`
+
+The entry's status is 待确认 with the app's name while an install waits
+(`AppManager::install_request`), else 无待安装.
+
+## HTTP API
+
+| Route | Does |
+| --- | --- |
+| `GET /api/apps` | `{"waiting": {id, name, version, digest, signer, asks} \| null, "offers": [{id, name, version, incompatible?}]}`; `asks` are the install screen's lines (`AppManager::asks`) |
+| `POST /api/apps/request` `{"id"}` | asks to install an offer (`AppManager::request_install`), which then waits; `204`, or `409 incompatible` with the reason as `message` |
+| `POST /api/apps/install` `{"id", "digest"}` | installs the waiting app when `id` and `digest` are the ones waiting, so the install takes what the page showed (`409 changed` otherwise); answers the installed `{id, name, version}` |
+| `POST /api/apps/decline` `{"id"}` | declines the waiting app; `204` |
+
+Install and decline answer `403 setup_hotspot_only` unless the request came
+in over the setup hotspot, which `WifiStatus::is_setup_access_point` tells
+from the connection's device end (`HttpRequest::local_address`). That keeps the decision with someone in Wi-Fi
+range of the device while its hotspot runs, which is while Wi-Fi is not set
+up or after the person opens the portal: nobody on the home network or the
+internet can install. It is nearness, not identity: the setup hotspot is
+open, so anyone in range while it runs can reach the page. Asking works
+from any network, like the `app.install` Action. Failures are
+`{"error", "message"}`, with the message in the person's words.
+
+## Building
+
+`resources/web/entry.ts` builds into `filesystem/resources/entry.js` with
+the `build` task (`bun ../../tools/web/build.ts`).

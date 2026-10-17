@@ -20,5 +20,5 @@ pub use global::{
     open_with, read, read_dir, remove_dir, remove_file, rename, unmount, write,
 };
 pub use scoped::ScopedVfs;
-pub use types::{DirEntry, FileType, Metadata, MountOptions, OpenOptions, ReadDir};
+pub use types::{DirEntry, FileType, FsUsage, Metadata, MountOptions, OpenOptions, ReadDir};
 pub use vfs::Vfs;

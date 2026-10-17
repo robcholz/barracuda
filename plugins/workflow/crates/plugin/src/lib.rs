@@ -5,6 +5,7 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -20,6 +21,8 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 pub use barracuda_workflow_runtime::*;
 
 const WORKFLOW_CATALOG_PATH: &str = "/data/workflows.json";
+/// The IDs of the Workflows that are off, as a JSON array of strings.
+const WORKFLOW_OFF_PATH: &str = "/data/workflows-off.json";
 
 #[derive(Clone)]
 struct PersistedWorkflow {
@@ -35,6 +38,8 @@ pub struct WorkflowService {
     control: WorkflowRuntimeControl,
     view: WorkflowRuntimeView,
     catalog: Rc<RefCell<Vec<PersistedWorkflow>>>,
+    /// The Workflows that are off, as stored.
+    off: Rc<RefCell<Vec<WorkflowId>>>,
     restored: Rc<Mutex<NoopRawMutex, bool>>,
 }
 
@@ -51,6 +56,7 @@ impl WorkflowService {
             control,
             view,
             catalog: Rc::new(RefCell::new(Vec::new())),
+            off: Rc::new(RefCell::new(Vec::new())),
             restored: Rc::new(Mutex::new(false)),
         }
     }
@@ -116,7 +122,58 @@ impl WorkflowService {
             .unload(workflow_id)
             .map_err(|_error| WorkflowServiceError::Rejected(WorkflowControlRejection::NotFound))?;
         *self.catalog.borrow_mut() = next_catalog;
+        // A Workflow loaded later under the same ID starts out on.
+        if self.off.borrow().contains(workflow_id) {
+            self.set_off(workflow_id, true).await?;
+        }
         Ok(())
+    }
+
+    /// Durably turns loaded Workflow `workflow_id` on or off. No Event
+    /// starts a Workflow that is off; executions already running finish.
+    /// Being off holds for a transient Workflow too, across restarts.
+    pub async fn set_enabled(
+        &self,
+        workflow_id: &WorkflowId,
+        enabled: bool,
+    ) -> Result<(), WorkflowServiceError> {
+        let mut restored = self.restored.lock().await;
+        self.ensure_restored(&mut restored).await?;
+        if !self.control.contains(workflow_id) {
+            return Err(WorkflowServiceError::Rejected(
+                WorkflowControlRejection::NotFound,
+            ));
+        }
+        self.set_off(workflow_id, enabled).await
+    }
+
+    /// Stores and applies whether `workflow_id` is on.
+    async fn set_off(
+        &self,
+        workflow_id: &WorkflowId,
+        enabled: bool,
+    ) -> Result<(), WorkflowServiceError> {
+        let mut off = self.off.borrow().clone();
+        off.retain(|id| id != workflow_id);
+        if !enabled {
+            off.push(workflow_id.clone());
+        }
+        let ids: Vec<&str> = off.iter().map(WorkflowId::as_str).collect();
+        let json = serde_json::to_vec(&ids).map_err(|_error| {
+            WorkflowServiceError::InvalidCatalog(WorkflowControlRejection::InvalidJson)
+        })?;
+        self.filesystem
+            .write_atomic(WORKFLOW_OFF_PATH, &json)
+            .await?;
+        self.control.set_enabled(workflow_id, enabled);
+        *self.off.borrow_mut() = off;
+        Ok(())
+    }
+
+    /// Returns whether Events start Workflow `workflow_id`.
+    #[must_use]
+    pub fn is_enabled(&self, workflow_id: &WorkflowId) -> bool {
+        self.view.is_enabled(workflow_id)
     }
 
     /// Returns loaded definitions in load order.
@@ -184,6 +241,7 @@ impl WorkflowService {
     }
 
     async fn restore_catalog(&self) -> Result<(), WorkflowServiceError> {
+        self.restore_off().await?;
         let bytes = match self.filesystem.read(WORKFLOW_CATALOG_PATH).await {
             Ok(bytes) => bytes,
             Err(FsError::NotFound) => {
@@ -214,6 +272,27 @@ impl WorkflowService {
             catalog.push(PersistedWorkflow { id, json });
         }
         *self.catalog.borrow_mut() = catalog;
+        Ok(())
+    }
+
+    async fn restore_off(&self) -> Result<(), WorkflowServiceError> {
+        let bytes = match self.filesystem.read(WORKFLOW_OFF_PATH).await {
+            Ok(bytes) => bytes,
+            Err(FsError::NotFound) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        let ids: Vec<String> = serde_json::from_slice(&bytes).map_err(|_error| {
+            WorkflowServiceError::InvalidCatalog(WorkflowControlRejection::InvalidJson)
+        })?;
+        let mut off = Vec::with_capacity(ids.len());
+        for id in ids {
+            let id = WorkflowId::try_from(id).map_err(|_error| {
+                WorkflowServiceError::InvalidCatalog(WorkflowControlRejection::InvalidJson)
+            })?;
+            self.control.set_enabled(&id, false);
+            off.push(id);
+        }
+        *self.off.borrow_mut() = off;
         Ok(())
     }
 
@@ -437,6 +516,68 @@ mod tests {
                     .expect("user catalog"),
                 alloc::format!("[{user}]").as_bytes()
             );
+        });
+    }
+
+    #[test]
+    fn workflows_turned_off_stay_off_across_restarts() {
+        block_on(async {
+            let root = memory_vfs_root().await.expect("memory filesystem");
+            let filesystem = root.scoped("/workflow-off").expect("scope");
+            let start = || {
+                let actions = WorkflowActionRegistry::new();
+                let runtime = WorkflowRuntime::new(actions.clone());
+                WorkflowService::new(
+                    filesystem.clone(),
+                    actions,
+                    runtime.control(),
+                    runtime.view(),
+                )
+            };
+            let saved = r#"{"id":"saved","match":{"event":"test"},"steps":[{"return":{}}]}"#;
+            let bundled = r#"{"id":"bundled","match":{"event":"test"},"steps":[{"return":{}}]}"#;
+            let saved_id = WorkflowId::try_from("saved").expect("Workflow ID");
+            let bundled_id = WorkflowId::try_from("bundled").expect("Workflow ID");
+
+            let service = start();
+            service.load(saved).await.expect("load saved");
+            service.load_transient(bundled).await.expect("load bundled");
+            assert!(service.is_enabled(&saved_id));
+            service
+                .set_enabled(&saved_id, false)
+                .await
+                .expect("turn saved off");
+            service
+                .set_enabled(&bundled_id, false)
+                .await
+                .expect("turn bundled off");
+            let missing = WorkflowId::try_from("missing").expect("Workflow ID");
+            assert!(matches!(
+                service.set_enabled(&missing, false).await,
+                Err(WorkflowServiceError::Rejected(
+                    WorkflowControlRejection::NotFound
+                ))
+            ));
+
+            // After a restart both stay off, the bundled one once it loads
+            // again.
+            let service = start();
+            service.restore().await.expect("restore");
+            service.load_transient(bundled).await.expect("load bundled");
+            assert!(!service.is_enabled(&saved_id));
+            assert!(!service.is_enabled(&bundled_id));
+            service
+                .set_enabled(&bundled_id, true)
+                .await
+                .expect("turn bundled on");
+
+            // Deleting a Workflow forgets that it was off.
+            service.unload(&saved_id).await.expect("unload saved");
+            assert!(service.is_enabled(&saved_id));
+            let service = start();
+            service.restore().await.expect("restore");
+            assert!(service.is_enabled(&saved_id));
+            assert!(service.is_enabled(&bundled_id));
         });
     }
 }

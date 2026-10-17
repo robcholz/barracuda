@@ -64,6 +64,8 @@ where
 }
 
 struct ImuPackage<Device> {
+    /// Whether the Board has the device, which makes the package a capability.
+    present: bool,
     imu: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
     active: Arc<AtomicBool>,
 }
@@ -71,6 +73,7 @@ struct ImuPackage<Device> {
 impl<Device> ImuPackage<Device> {
     fn new(imu: Option<Device>) -> Self {
         Self {
+            present: imu.is_some(),
             imu: Arc::new(critical_section::Mutex::new(RefCell::new(imu))),
             active: Arc::new(AtomicBool::new(true)),
         }
@@ -87,7 +90,7 @@ where
         let available_active = Arc::clone(&self.active);
         let open_imu = Arc::clone(&self.imu);
         let open_active = Arc::clone(&self.active);
-        lua.register_lib("imu", move |package| {
+        lua.register_lib("motion", move |package| {
             package.register("available", move |(): ()| {
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
@@ -117,7 +120,15 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn name(&self) -> &'static str {
-        "imu"
+        "motion"
+    }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        self.present
+            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
+                version: 1,
+                purpose: "读取动作传感器",
+            })
     }
 
     fn revoke(&self) {
@@ -274,7 +285,7 @@ mod tests {
         package.install(&mut lua).expect("install package");
 
         let result: bool = futures_lite::future::block_on(
-            lua.load("local imus = require('imu')\nlocal device <close> = imus.open()\nlocal ar, gr, afs, gfs, temp = device:descriptor()\nlocal ax, ay, az, gx, gy, gz, t = device:read()\nreturn ar == 100 and gr == 100 and afs == 4000 and gfs == 500000 and temp and ax == 1 and ay == 2 and az == 3 and gx == 4 and gy == 5 and gz == 6 and t == 25000")
+            lua.load("local imus = require('motion')\nlocal device <close> = imus.open()\nlocal ar, gr, afs, gfs, temp = device:descriptor()\nlocal ax, ay, az, gx, gy, gz, t = device:read()\nreturn ar == 100 and gr == 100 and afs == 4000 and gfs == 500000 and temp and ax == 1 and ay == 2 and az == 3 and gx == 4 and gy == 5 and gz == 6 and t == 25000")
                 .eval_async(),
         )
         .expect("read IMU sample");

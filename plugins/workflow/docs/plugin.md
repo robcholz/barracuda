@@ -15,7 +15,8 @@ and publishes the registry other Plugins add Workflow Actions to.
 - Web: none
 - Tasks: one Workflow runtime task (`workflow_task`, pool size 1) that restores the
   catalog and then polls executions
-- Storage: user-created definitions in `/data/workflows.json`
+- Storage: user-created definitions in `/data/workflows.json`, and the IDs
+  of the Workflows that are off in `/data/workflows-off.json`
 
 The Plugin declares a private filesystem. It registers no Workflow Actions or
 Events of its own. A single execution awaits its Actions in document order;
@@ -74,3 +75,11 @@ restoration first and serialize with catalog changes, so a persisted user
 definition takes precedence over a transient definition with the same ID.
 Removing a definition prevents later Events from starting it and does not
 cancel execution snapshots that already started.
+
+`WorkflowService::set_enabled(id, false)` turns a loaded Workflow off: it
+stays loaded and listed, but no Event starts it (`has_listener` ignores it
+too), and executions already running finish. The Plugin keeps the IDs of
+the Workflows that are off in `/data/workflows-off.json`, restored with the
+catalog, so a transient Workflow loaded again at the next boot is still off.
+Removing a user-created Workflow forgets that it was off.
+`WorkflowService::is_enabled(id)` reads the switch.

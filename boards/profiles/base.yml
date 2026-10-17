@@ -32,9 +32,11 @@ enable:
   - imu
   - led-strip
   - message-queue
+  - power
   - power-monitor
   - pwm
   - scheduler
+  - sound
   - spi
   - time
   - uart

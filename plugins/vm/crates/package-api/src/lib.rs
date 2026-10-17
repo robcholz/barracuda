@@ -28,10 +28,44 @@ pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 12 * 1024;
 /// such peak is ever live.
 pub const LUA_PACKAGE_INSTALL_PEAK_BYTES: usize = 32 * 1024;
 
+/// What a package promises the code that requires it, for any consumer of
+/// the registry that decides which code gets which packages. The VM itself
+/// grants every registered package.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackageInterface {
+    /// Gives code nothing it could misuse, such as reading the time: any code
+    /// may have it without being granted it.
+    Ambient {
+        /// Counts the additions to its functions; it starts at 1.
+        version: u32,
+    },
+    /// Works the same wherever it is registered: no function is removed,
+    /// renamed, or given other arguments or results.
+    Stable {
+        /// Counts the additions to its functions; it starts at 1.
+        version: u32,
+        /// What code may do with it, in a few plain words for a person.
+        purpose: &'static str,
+    },
+    /// Reaches a Board's pins, buses, or a peripheral directly, so what it
+    /// does depends on the Board's wiring.
+    BoardSpecific {
+        /// What code may do with it, in a few plain words for a person.
+        purpose: &'static str,
+    },
+}
+
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
     /// Returns the stable name accepted by Lua's `require` function.
     fn name(&self) -> &'static str;
+
+    /// What the package promises; `None` when it promises nothing, such as a
+    /// package whose interface may change with any update, or a device's
+    /// package on a Board without the device.
+    fn interface(&self) -> Option<PackageInterface> {
+        None
+    }
 
     /// Revokes resources captured by callbacks already installed into a Lua state.
     ///
@@ -112,6 +146,17 @@ impl LuaPackageRegistry {
             }
         }
         Ok(())
+    }
+
+    /// Every registered package's name and what it promises.
+    #[must_use]
+    pub fn packages(&self) -> Vec<(&'static str, Option<PackageInterface>)> {
+        self.state
+            .lock()
+            .entries
+            .iter()
+            .map(|entry| (entry.package.name(), entry.package.interface()))
+            .collect()
     }
 
     /// Returns whether no packages are registered.

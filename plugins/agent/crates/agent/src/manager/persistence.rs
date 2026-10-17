@@ -53,6 +53,7 @@ where
             .remove(&agent_instance(id)?)?;
         self.persisted_agents.borrow_mut().remove(&id);
         self.transcripts.borrow_mut().remove(&id);
+        self.transient_transcripts.borrow_mut().remove(&id);
         self.pending_transcript_deletes.borrow_mut().push(id);
         Ok(())
     }

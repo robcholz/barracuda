@@ -1,0 +1,119 @@
+# App API
+
+The app API is what an installable app can count on from one device to the
+next: the Lua packages it may use, what it may ask the device, and the rules
+that keep both stable. It has two parts. The `app` package, this Plugin's,
+has a version, the **API level**; this system implements level 1, and an app
+names the level it is written for in its manifest's `api` (see
+[`app-format.md`](app-format.md)). Every other package is whatever the
+device registers, each saying what it promises.
+
+System apps are not bound by the app API: they ship in the image and may
+`require` every package.
+
+## Packages
+
+A Plugin that registers a Lua package declares what it promises with
+`LuaPackage::interface`, and the install screen's line for it. This Plugin
+reads those declarations from the `LuaPackageRegistry`; it names no other
+Plugin's package, so what a device offers apps is exactly what its enabled
+Plugins register. Each package's own Plugin documents its functions and the
+version each arrived in.
+
+| Interface | How an app gets it | Same on every device |
+| --- | --- | --- |
+| Ambient | always, without asking | yes |
+| Stable, with a version | `requires` or `uses` in the manifest, as `name` or `name@version` | yes, where the device has it |
+| Board-specific | `permissions`, with `boards` | no: it talks to one Board's hardware |
+| None | `permissions` | no promise |
+
+A package that needs a Board device declares nothing while the Board lacks
+the device, so on such a Board an app that requires it is not installed.
+
+This Plugin's own packages:
+
+| Package | Interface | Lua API |
+| --- | --- | --- |
+| `app` | ambient, version 1 | the app itself: events, view, storage, `app.device()` ([`app-format.md`](app-format.md#api)) |
+| `notify` | stable, version 2 | `notify.post`, `notify.ask` (below) |
+
+### `notify`
+
+- `notify.post(title [, body]) -> id` adds a notice to the notification
+  center.
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
+  a card listed before every notice and waits for the answer: `true` when
+  they allow it, `false` when they deny or dismiss it. From version 2,
+  `allow` and `deny` name the card's two buttons (允许 and 拒绝 unless given,
+  at most 6 characters each), as in `notify.ask("开灯？", nil, "现在开", "等会儿")`.
+
+Failures return `nil` and a message.
+
+## Install check
+
+The system checks an offered app against the device before installing it,
+in this order, and stops at the first reason. `app.list` reports the reason
+as the app's `incompatible`; the install screen shows it and disables the
+install button; `app.install` answers `{"error": "incompatible", "reason": …}`.
+
+| Check | Reason |
+| --- | --- |
+| `api` is above the device's level | 需要更新系统（应用需要 API 2，本机是 1） |
+| `boards` does not list this Board | 只适用于 espressif-esp-vocat-v1-2 |
+| the app has a view and the device no display | 此设备没有屏幕 |
+| the display is smaller than `view.size` | 屏幕太小（应用需要 480×480） |
+| `view.shape` is `rect` and the display is round | 应用需要方屏 |
+| a package in `requires` is not a stable package here | 此设备没有 notify |
+| its version here is below the one `requires` names | 需要更新系统（应用需要 notify 第 2 版，本机是第 1 版） |
+| a package in `permissions` is missing | 此设备不支持 serial |
+
+An installed app that no longer fits, after a Board or system change, does
+not open; `app.open` answers `incompatible`.
+
+### Views and the display
+
+A view is laid out at the display's size, not scaled: its root fills the
+display, and the layout is flexbox, so a view that fills its parent
+(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
+right-[40px]`), and centers with `justify-center` fits displays of other
+sizes. Fixed sizes stay as written. `view.size` is the smallest display the
+view still fits, and a round view, one that keeps to the inscribed circle,
+fits a rectangular display too; a `rect` view does not fit a round one,
+whose corners it would lose. Text keeps its size: font slots are baked at
+fixed pixel sizes. A view that needs the display's size reads it from
+`app.device().display`.
+
+## Runs
+
+A run of an installable app may `require` the ambient packages and every
+package its manifest names in `requires`, `uses`, and `permissions`. A
+package the app did not name is not there, and `require` fails. A package in
+`uses` may be missing or older than the app would like: check
+`app.device().capabilities` before requiring it, or call
+`pcall(require, name)`.
+
+`app.device()` describes the device; `capabilities` maps each stable package
+to its version:
+
+```lua
+{
+  api = 1,
+  board = "espressif-esp-vocat-v1-2",
+  display = { width = 360, height = 360, round = true },  -- nil without one
+  touch = true,
+  capabilities = { notify = 2, ... },
+}
+```
+
+## Versioning
+
+- A stable package's interface never changes once it is declared: no
+  function is removed, renamed, or given other arguments or results.
+- Adding functions raises the package's version; its Plugin documents what
+  each version added.
+- An incompatible change is a new package with a new name; the old one
+  stays.
+- The `app` package follows the same rules with the API level as its
+  version.
+- A Board-specific package, or one that promises nothing, may change with any
+  system update; that is why apps that use them name their Boards.

@@ -11,7 +11,7 @@ Lua's standard `io` and `os` file APIs.
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
 - Agent Tools: none
-- Lua packages: `vm-filesystem`, which extends the built-in `io` and `os`
+- Lua packages: `filesystem`, which extends the built-in `io` and `os`
   tables
 - Web: none
 - Tasks: none

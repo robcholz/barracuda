@@ -14,7 +14,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
     Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    UserDataHandle, UserDataMethods, Variadic,
 };
 use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
@@ -23,6 +23,11 @@ use portable_atomic_util::Arc;
 /// Largest frame returned to Lua; it must fit the 1 MiB per-run Lua heap with
 /// room to process it (an SVGA JPEG or a full QVGA RGB565 frame).
 const MAX_CAPTURE_BYTES: usize = 512 * 1024;
+/// The room `camera.snap()` gives a frame unless the app asks for more.
+const SNAP_BYTES: i64 = 128 * 1024;
+
+/// The camera while no handle holds it; a handle gives it back when it closes.
+type SharedCamera<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
 
 /// Owns the Board's primary camera capability and publishes it to Lua.
 #[barracuda_plugin::macros::plugin]
@@ -68,13 +73,16 @@ where
 }
 
 struct CameraPackage<Device> {
-    camera: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    /// Whether the Board has the device, which makes the package a capability.
+    present: bool,
+    camera: SharedCamera<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> CameraPackage<Device> {
     fn new(camera: Option<Device>) -> Self {
         Self {
+            present: camera.is_some(),
             camera: Arc::new(critical_section::Mutex::new(RefCell::new(camera))),
             active: Arc::new(AtomicBool::new(true)),
         }
@@ -91,7 +99,15 @@ where
         let available_active = Arc::clone(&self.active);
         let open_camera = Arc::clone(&self.camera);
         let open_active = Arc::clone(&self.active);
+        let snap_camera = Arc::clone(&self.camera);
+        let snap_active = Arc::clone(&self.active);
         lua.register_lib("camera", move |package| {
+            package.register_async("snap", move |args: Variadic<i64>| {
+                let camera = Arc::clone(&snap_camera);
+                let active = Arc::clone(&snap_active);
+                let capacity = args.first().copied().unwrap_or(SNAP_BYTES);
+                async move { Some(snap(camera, active, capacity).await) }
+            })?;
             package.register("available", move |(): ()| {
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
@@ -106,9 +122,11 @@ where
                     open_camera.borrow(section).borrow_mut().take()
                 });
                 Some(match camera {
-                    Some(camera) => {
-                        lua.create_userdata(CameraHandle::new(camera, Arc::clone(&open_active)))
-                    }
+                    Some(camera) => lua.create_userdata(CameraHandle::new(
+                        camera,
+                        Arc::clone(&open_camera),
+                        Arc::clone(&open_active),
+                    )),
                     None => Err(Error::runtime(
                         "built-in camera is unavailable or already open",
                     )),
@@ -127,6 +145,14 @@ where
         "camera"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        self.present
+            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
+                version: 2,
+                purpose: "使用相机拍照",
+            })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }
@@ -134,19 +160,26 @@ where
 
 struct CameraHandle<Device> {
     camera: Option<Device>,
+    /// Where the camera goes back when the handle closes.
+    home: SharedCamera<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> CameraHandle<Device> {
-    fn new(camera: Device, active: Arc<AtomicBool>) -> Self {
+    fn new(camera: Device, home: SharedCamera<Device>, active: Arc<AtomicBool>) -> Self {
         Self {
             camera: Some(camera),
+            home,
             active,
         }
     }
 
     fn close(&mut self) {
-        self.camera.take();
+        if let Some(camera) = self.camera.take() {
+            critical_section::with(|section| {
+                self.home.borrow(section).replace(Some(camera));
+            });
+        }
     }
 }
 
@@ -205,6 +238,36 @@ where
     Device: Camera + Send + 'static,
     Device::Error: core::fmt::Debug,
 {
+    let mut handle = handle.borrow_mut()?;
+    capture_into(&mut handle, capacity).await
+}
+
+/// Takes one frame with the camera while no handle holds it, and names its
+/// format.
+async fn snap<Device>(
+    camera: SharedCamera<Device>,
+    active: Arc<AtomicBool>,
+    capacity: i64,
+) -> Result<(Bytes, &'static str)>
+where
+    Device: Camera,
+    Device::Error: core::fmt::Debug,
+{
+    ensure_active(&active)?;
+    let device = critical_section::with(|section| camera.borrow(section).borrow_mut().take())
+        .ok_or_else(|| Error::runtime("built-in camera is unavailable or open in a handle"))?;
+    // The handle gives the camera back however the capture ends.
+    let mut handle = CameraHandle::new(device, camera, active);
+    let frame = capture_into(&mut handle, capacity).await?;
+    let (_, _, format) = descriptor_values(handle.descriptor()?);
+    Ok((frame, format))
+}
+
+async fn capture_into<Device>(handle: &mut CameraHandle<Device>, capacity: i64) -> Result<Bytes>
+where
+    Device: Camera,
+    Device::Error: core::fmt::Debug,
+{
     let capacity = usize::try_from(capacity)
         .map_err(|_| Error::runtime("camera capture capacity must be non-negative"))?;
     if capacity == 0 || capacity > MAX_CAPTURE_BYTES {
@@ -213,7 +276,6 @@ where
         ));
     }
     let mut frame = Bytes::zeroed(capacity)?;
-    let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
     let camera = handle
         .camera
@@ -292,6 +354,30 @@ mod tests {
                 .eval_async(),
         )
         .expect("capture frame");
+        assert!(result);
+    }
+
+    #[test]
+    fn snap_captures_while_no_handle_holds_the_camera() {
+        let package = CameraPackage::new(Some(TestCamera));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load(
+                "local camera = require('camera')\n\
+                 local frame, format = camera.snap()\n\
+                 assert(#frame == 3 and format == 'jpeg')\n\
+                 local held = camera.open()\n\
+                 local busy, err = camera.snap()\n\
+                 assert(busy == nil and err:find('open in a handle'))\n\
+                 held:close()\n\
+                 local small = camera.snap(8)\n\
+                 return #small == 3 and camera.available()",
+            )
+            .eval_async(),
+        )
+        .expect("snap");
         assert!(result);
     }
 

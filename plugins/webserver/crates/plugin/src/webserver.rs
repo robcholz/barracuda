@@ -9,6 +9,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::future::Future;
+use core::net::IpAddr;
 use core::pin::Pin;
 use core::task::Poll;
 
@@ -97,6 +98,7 @@ pub struct HttpRequest {
     method: HttpMethod,
     path: String,
     body: Vec<u8>,
+    local: Option<IpAddr>,
 }
 
 impl HttpRequest {
@@ -107,13 +109,33 @@ impl HttpRequest {
             method,
             path: String::new(),
             body,
+            local: None,
         }
     }
 
     /// Creates a request with its encoded URL path, excluding the query string.
     #[must_use]
     pub fn with_path(method: HttpMethod, path: String, body: Vec<u8>) -> Self {
-        Self { method, path, body }
+        Self {
+            method,
+            path,
+            body,
+            local: None,
+        }
+    }
+
+    /// Records the device address the request's connection was accepted on.
+    #[must_use]
+    pub const fn with_local_address(mut self, local: Option<IpAddr>) -> Self {
+        self.local = local;
+        self
+    }
+
+    /// The device address the request's connection was accepted on, which
+    /// says which network the client is on; `None` for a synthetic request.
+    #[must_use]
+    pub const fn local_address(&self) -> Option<IpAddr> {
+        self.local
     }
 
     /// Returns the encoded path. Synthetic requests created with `new` have an empty path.
@@ -440,6 +462,8 @@ struct RegisteredEndpoint {
 struct EndpointRouter<'a> {
     endpoints: Rc<RefCell<Vec<RegisteredEndpoint>>>,
     stream_error: &'a Cell<Option<HttpStreamError>>,
+    /// The device address the connection was accepted on.
+    local: Option<IpAddr>,
 }
 
 fn resolve(endpoints: &[RegisteredEndpoint], path: &str) -> Option<RegisteredEndpoint> {
@@ -543,11 +567,10 @@ impl PathRouterService for EndpointRouter<'_> {
                     }
                 };
                 let response = endpoint
-                    .handle(HttpRequest::with_path(
-                        method,
-                        path.encoded().to_string(),
-                        body,
-                    ))
+                    .handle(
+                        HttpRequest::with_path(method, path.encoded().to_string(), body)
+                            .with_local_address(self.local),
+                    )
                     .await;
                 let response = Response::new(
                     StatusCode::new(response.status),
@@ -986,6 +1009,27 @@ impl WebServer {
         T: Timer<Runtime>,
         S: picoserve::io::Socket<Runtime>,
     {
+        self.serve_connection_at(timer, http_buffer, socket, None)
+            .await
+    }
+
+    /// Serves one connection like [`serve_connection`](Self::serve_connection),
+    /// telling endpoints the device address `local` it was accepted on.
+    ///
+    /// # Errors
+    ///
+    /// As [`serve_connection`](Self::serve_connection).
+    pub async fn serve_connection_at<Runtime, T, S>(
+        &self,
+        timer: T,
+        http_buffer: &mut [u8],
+        socket: S,
+        local: Option<IpAddr>,
+    ) -> Result<DisconnectionInfo<NoGracefulShutdown>, ServeConnectionError<S::Error>>
+    where
+        T: Timer<Runtime>,
+        S: picoserve::io::Socket<Runtime>,
+    {
         if self.endpoints.borrow().is_empty() {
             return Err(ServeConnectionError::EndpointMissing);
         }
@@ -993,6 +1037,7 @@ impl WebServer {
         let app = Router::from_service(EndpointRouter {
             endpoints: Rc::clone(&self.endpoints),
             stream_error: &stream_error,
+            local,
         });
         let server = Server::custom(&app, timer, &self.config, http_buffer);
         let error =

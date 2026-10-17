@@ -8,7 +8,8 @@ use portable_atomic_util::Arc;
 
 use crate::path::{backend_path, matches_mount, normalize};
 use crate::{
-    DirEntry, File, FileType, FsError, Metadata, MountOptions, OpenOptions, ReadDir, SeekFrom, Vfs,
+    DirEntry, File, FileType, FsError, FsUsage, Metadata, MountOptions, OpenOptions, ReadDir,
+    SeekFrom, Vfs,
 };
 
 static TEMP_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
@@ -252,6 +253,16 @@ impl ScopedVfs {
                 result => result,
             },
             Location::Above(_) => Ok(DIRECTORY),
+        }
+    }
+
+    /// Returns the size and free space of the filesystem that holds `path`,
+    /// such as `/media` or `/workspace/media`. Mounts that share one
+    /// filesystem report the same figures.
+    pub async fn usage(&self, path: &str) -> Result<FsUsage, FsError> {
+        match self.locate(path)? {
+            Location::Mounted { path, .. } => self.vfs.usage(&path).await,
+            Location::Above(_) => Err(FsError::Unsupported),
         }
     }
 

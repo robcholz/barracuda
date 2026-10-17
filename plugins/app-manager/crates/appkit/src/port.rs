@@ -89,6 +89,8 @@ pub(crate) struct Port {
     pub(crate) version: String,
     pub(crate) view: Option<ViewChannel>,
     pub(crate) storage: Storage,
+    /// What `app.device()` returns, as JSON.
+    pub(crate) device: String,
     state: critical_section::Mutex<RefCell<PortState>>,
 }
 
@@ -99,11 +101,13 @@ impl Port {
         version: String,
         view: Option<ViewChannel>,
         storage: Storage,
+        device: String,
         state: AppState,
     ) -> Self {
         Self {
             id,
             name,
+            device,
             version,
             view,
             storage,

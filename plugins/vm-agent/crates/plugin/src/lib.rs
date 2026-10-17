@@ -333,6 +333,13 @@ impl LuaPackage for AgentLuaPackage {
         "agent"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "使用 Agent",
+        })
+    }
+
     fn revoke(&self) {
         self.state.revoke();
     }

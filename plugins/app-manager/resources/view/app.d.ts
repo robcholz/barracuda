@@ -7,9 +7,11 @@ import type { i32 } from "@pocketjs/framework/solid/std";
 export interface Icon { base: string; accent: string; dim: string }
 export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; offered: boolean; x: i32; y: i32 }
 export interface RunItem { id: i32; name: string; icon: Icon; letter: string; detail: string; active: boolean }
-export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean }
+export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean; allow: string; deny: string }
 export interface Tile { id: i32; label: string; detail: string; glyph: string; on: boolean }
 export interface Line { id: i32; text: string; glyph: string }
+/** One launcher page; `on` is the page on the display. */
+export interface Dot { id: i32; on: boolean }
 
 /**
  * 0 home, 1 apps, 2 running, 3 notices, 4 control, 5 launching, 6 exited,
@@ -37,6 +39,8 @@ export declare const cardGlyph: Accessor<string>;
 export declare const cardTone: Accessor<i32>;
 
 export declare const apps: Accessor<AppItem[]>;
+/** The launcher's pages when it has more than one; swipe up and down to turn. */
+export declare const dots: Accessor<Dot[]>;
 export declare const running: Accessor<RunItem[]>;
 export declare const anyRunning: Accessor<boolean>;
 export declare const notices: Accessor<Notice[]>;
@@ -59,6 +63,8 @@ export declare const lines: Accessor<Line[]>;
 export declare const primary: Accessor<string>;
 export declare const secondary: Accessor<string>;
 export declare const removable: Accessor<boolean>;
+/** The app cannot run on this device: the install button is shown disabled. */
+export declare const blocked: Accessor<boolean>;
 
 export declare function openApp(id: i32): void;
 export declare function switchTo(id: i32): void;

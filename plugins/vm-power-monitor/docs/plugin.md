@@ -1,14 +1,14 @@
 # Power Monitor Plugin
 
-Installs the `power_monitor` Lua package over the Board's primary
-power monitor.
+Installs the `power_monitor` Lua package over the Board's power monitor,
+which the `power` Plugin owns.
 
 - Plugin ID: `power-monitor`
-- Dependencies: `vm`
+- Dependencies: `vm`, `power`
 - Settings: none
-- Context resources: peripheral slot `power-monitor.device` (`primary`, optional)
+- Context resources: none
 - Provided capabilities: none
-- Required capabilities: `LuaPackageRegistry` from `vm`
+- Required capabilities: `LuaPackageRegistry` from `vm`, `Power` from `power`
 - Workflow: none
 - Agent Tools: none
 - Lua packages: `power_monitor`
@@ -16,10 +16,9 @@ power monitor.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `PowerMonitor` capability
-exactly once and installs the `power_monitor` Lua package. I2C ownership, chip
-initialization, calibration, and conversion to integer SI subunits remain owned
-by the selected implementation and generated Board HAL.
+This Plugin installs the `power_monitor` Lua package over `Power`. The
+monitor, its drivers, and the battery's charge for other Plugins belong to
+the `power` Plugin.
 
 Lua API:
 
@@ -41,7 +40,10 @@ print(string.format('%.3f V %.1f mA %.1f mW', bus_uv / 1e6, current_ua / 1e3, po
 ```
 
 Boards without a power monitor still install the package; `available` returns
-false and `open` returns `nil, error`. The move-only built-in capability
-permits one handle per boot; explicit close, lexical `<close>`, collection, and
-Plugin revocation prevent further operations. The Plugin performs no
-background sampling and owns no long-running tasks.
+false and `open` returns `nil, error`. One handle may be opened per boot;
+explicit close, lexical `<close>`, collection, and Plugin revocation prevent
+further operations on it.
+
+A handle reads through the shared `Power`, so other Plugins read the
+monitor while a handle is open. The Plugin performs no background sampling
+and owns no long-running tasks.

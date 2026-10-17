@@ -1,5 +1,6 @@
-//! App containers: one directory per app, in the format `docs/app-format.md`
-//! defines and `resources/app-manifest.json` checks.
+//! App containers: one directory per app, or in the Workspace one `.bapp`
+//! package, in the format `docs/app-format.md` defines and
+//! `resources/app-manifest.json` checks.
 //!
 //! Where a container lives decides what kind of app it is: builtin apps'
 //! containers, each in the Plugin that ships it, are system apps, and
@@ -7,6 +8,8 @@
 //! launchable; they are what an install copies into [`INSTALLED_APPS`].
 
 use crate::AppError;
+use crate::bapp::{PACKAGE_EXTENSION, Package, PackageError, Seal};
+use crate::device::{self, Device, Packages, ViewShape};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -15,9 +18,11 @@ use alloc::{
 };
 use barracuda_uikit::UiAssets;
 use barracuda_vfs::{FsError, ScopedVfs};
+use barracuda_vm_plugin::PackageInterface;
 use core::cell::RefCell;
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 /// Where a builtin app's container is, in the filesystem of the Plugin that
 /// ships it.
@@ -27,7 +32,8 @@ pub const INSTALLED_APPS: &str = "/media/apps";
 /// Containers that Agents, the portal, and other Plugins offer for
 /// installation, in the shared Workspace.
 pub const WORKSPACE_APPS: &str = "/workspace/media/apps";
-/// The most Lua packages a manifest may ask for.
+/// The most Lua packages each of a manifest's `requires`, `uses`, and
+/// `permissions` may list.
 pub const MAX_PERMISSIONS: usize = 16;
 /// The package every app program uses, granted without being asked for.
 pub const APP_PACKAGE: &str = "app";
@@ -112,12 +118,40 @@ pub struct AppInfo {
     pub kind: AppKind,
     /// Whether the app has a view; apps without one run headless.
     pub has_view: bool,
-    /// The Lua packages the manifest asks for besides `app`. Only an
-    /// installable app is limited to them.
+    /// The version of the `app` package the app is written for.
+    pub api: u32,
+    /// The stable packages the app cannot run without, each with an optional
+    /// `@version`, the least it needs.
+    pub requires: Vec<String>,
+    /// The stable packages the app uses when the device has them, written as
+    /// in `requires`.
+    pub uses: Vec<String>,
+    /// The other Lua packages the app asks for: Board-specific
+    /// ones and others. Only an installable app is limited to its packages.
     pub permissions: Vec<String>,
+    /// The Boards the app is for; empty when it is for any.
+    pub boards: Vec<String>,
+    /// The size its view was built for, if it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_size: Option<[u32; 2]>,
+    /// The shape its view was built for, if it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_shape: Option<ViewShape>,
     /// The name of the system icon the app is shown with, if it picked one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Why the app cannot run on this device, in the words the install
+    /// screen shows; only for installable apps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incompatible: Option<String>,
+    /// SHA-256 of the offered files, in hex: what an install asked for is
+    /// pinned to. Only on an install request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    /// The short name of the key that signed an offered package, when it
+    /// is signed. Only on an install request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -153,10 +187,22 @@ struct Manifest {
     entry: Option<String>,
     #[serde(default)]
     view: Option<ViewFiles>,
+    #[serde(default = "first_level")]
+    api: u32,
+    #[serde(default)]
+    requires: Vec<String>,
+    #[serde(default)]
+    uses: Vec<String>,
     #[serde(default)]
     permissions: Vec<String>,
     #[serde(default)]
+    boards: Vec<String>,
+    #[serde(default)]
     icon: Option<String>,
+}
+
+const fn first_level() -> u32 {
+    1
 }
 
 #[derive(Deserialize)]
@@ -165,19 +211,89 @@ struct ViewFiles {
     styles: String,
     #[serde(default)]
     fonts: Vec<String>,
+    #[serde(default)]
+    size: Option<[u32; 2]>,
+    #[serde(default)]
+    shape: Option<ViewShape>,
+}
+
+/// Where a container's files are.
+pub(crate) enum Source {
+    /// Files in directory `dir`.
+    Dir { filesystem: ScopedVfs, dir: String },
+    /// Files in a package.
+    Package {
+        filesystem: ScopedVfs,
+        package: Package,
+    },
+}
+
+impl Source {
+    /// Reads file `name`, refusing one larger than `limit` bytes.
+    pub(crate) async fn read(&self, name: &str, limit: u64) -> Result<Vec<u8>, Problem> {
+        match self {
+            Self::Dir { filesystem, dir } => read_limited(filesystem, dir, name, limit).await,
+            Self::Package {
+                filesystem,
+                package,
+            } => Ok(package.read(filesystem, name, limit).await?),
+        }
+    }
+
+    async fn require(&self, name: &str) -> Result<(), Problem> {
+        match self {
+            Self::Dir { filesystem, dir } => require_file(filesystem, dir, name).await,
+            Self::Package { package, .. } if package.has(name) => Ok(()),
+            Self::Package { .. } => Err(invalid(format!("{name} is missing"))),
+        }
+    }
+}
+
+impl From<PackageError> for Problem {
+    fn from(error: PackageError) -> Self {
+        match error {
+            PackageError::Storage => Problem::Storage,
+            PackageError::Invalid(message) => Problem::Invalid(message),
+        }
+    }
 }
 
 /// A container checked against the app format.
 pub(crate) struct Container {
     pub(crate) info: AppInfo,
-    /// The filesystem the container is in.
-    filesystem: ScopedVfs,
-    pub(crate) dir: String,
+    pub(crate) source: Source,
     entry: String,
     view: Option<ViewFiles>,
 }
 
 impl Container {
+    /// What the container's files hash to, and who signed them: a
+    /// package's signature, checked; a directory's files, each preceded by
+    /// its name and length, are unsigned.
+    pub(crate) async fn seal(&self) -> Result<Seal, AppError> {
+        if let Source::Package {
+            filesystem,
+            package,
+        } = &self.source
+        {
+            return Ok(package.seal(filesystem).await.map_err(Problem::from)?);
+        }
+        let mut files = self.files();
+        files.sort_unstable();
+        let mut hasher = Sha256::new();
+        for name in files {
+            let bytes = self.source.read(name, MAX_VIEW_BYTES).await?;
+            hasher.update(name.as_bytes());
+            hasher.update([0]);
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(&bytes);
+        }
+        Ok(Seal {
+            digest: hasher.finalize().into(),
+            signer: None,
+        })
+    }
+
     /// Every file the container consists of: the manifest and what it names.
     pub(crate) fn files(&self) -> Vec<&str> {
         let mut files = alloc::vec![MANIFEST_FILE, self.entry.as_str()];
@@ -196,7 +312,7 @@ pub(crate) struct Bundle {
     pub(crate) view: Option<UiAssets>,
 }
 
-enum Problem {
+pub(crate) enum Problem {
     Storage,
     Invalid(String),
 }
@@ -270,9 +386,8 @@ async fn read_container(
             "the directory name is not an app ID: use 1-32 of a-z, 0-9, and -",
         ));
     }
-    let (filesystem, dir) = shelf.place(location, name).ok_or(Problem::Storage)?;
-    let filesystem = &filesystem;
-    let bytes = read_limited(filesystem, &dir, MANIFEST_FILE, MAX_MANIFEST_BYTES).await?;
+    let source = shelf.source(location, name).await?;
+    let bytes = source.read(MANIFEST_FILE, MAX_MANIFEST_BYTES).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| invalid(format!("{MANIFEST_FILE} is not JSON")))?;
     MANIFEST_SCHEMA
@@ -288,22 +403,11 @@ async fn read_container(
     }
     if manifest.id != name {
         return Err(invalid(format!(
-            "{MANIFEST_FILE}: id \"{}\" does not match the directory name",
+            "{MANIFEST_FILE}: id \"{}\" does not match the container's name",
             manifest.id
         )));
     }
-    for (index, permission) in manifest.permissions.iter().enumerate() {
-        if manifest.permissions[..index].contains(permission) {
-            return Err(invalid(format!(
-                "{MANIFEST_FILE}: permission \"{permission}\" is listed twice"
-            )));
-        }
-        if location.kind() == AppKind::Installable && shelf.builtins.reserves(permission) {
-            return Err(invalid(format!(
-                "{MANIFEST_FILE}: permission \"{permission}\" is only for builtin apps"
-            )));
-        }
-    }
+    check_packages(&manifest, location, shelf)?;
     let entry = manifest
         .entry
         .unwrap_or_else(|| String::from(DEFAULT_ENTRY));
@@ -319,10 +423,9 @@ async fn read_container(
                 "{MANIFEST_FILE}: \"{file}\" is not a file name in the container"
             )));
         }
-        require_file(filesystem, &dir, file).await?;
+        source.require(file).await?;
     }
-    Ok(Container {
-        filesystem: filesystem.clone(),
+    let mut container = Container {
         info: AppInfo {
             id: manifest.id,
             name: manifest.name,
@@ -330,17 +433,99 @@ async fn read_container(
             location,
             kind: location.kind(),
             has_view: manifest.view.is_some(),
-            permissions: manifest
-                .permissions
-                .into_iter()
-                .filter(|permission| permission != APP_PACKAGE)
-                .collect(),
+            api: manifest.api,
+            requires: manifest.requires,
+            uses: manifest.uses,
+            permissions: manifest.permissions,
+            boards: manifest.boards,
+            view_size: manifest.view.as_ref().and_then(|view| view.size),
+            view_shape: manifest.view.as_ref().and_then(|view| view.shape),
             icon: manifest.icon,
+            incompatible: None,
+            digest: None,
+            signer: None,
         },
-        dir,
+        source,
         entry,
         view: manifest.view,
-    })
+    };
+    if location.kind() == AppKind::Installable {
+        container.info.incompatible =
+            device::incompatibility(&container.info, shelf.device, &shelf.packages);
+    }
+    Ok(container)
+}
+
+/// Checks the packages a manifest asks for against what the registered
+/// packages promise: stable ones in `requires` and `uses`, with an optional
+/// `@version`, everything else in `permissions`, each once, and `boards` for
+/// packages that reach a Board's hardware. A package this device lacks is
+/// checked by the device where it is installed.
+fn check_packages(
+    manifest: &Manifest,
+    location: AppLocation,
+    shelf: &Shelf<'_>,
+) -> Result<(), Problem> {
+    let lists = [
+        ("requires", &manifest.requires),
+        ("uses", &manifest.uses),
+        ("permissions", &manifest.permissions),
+    ];
+    let mut seen = BTreeSet::new();
+    for (list, entries) in lists {
+        for entry in entries {
+            let (name, version) = if list == "permissions" {
+                (entry.as_str(), 1)
+            } else {
+                device::requirement(entry)
+            };
+            let bad_name = name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte));
+            if bad_name || version == 0 || (list == "permissions" && entry.contains('@')) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{entry}\" is not a package name, with a version after @ only in requires and uses"
+                )));
+            }
+            if !seen.insert(name) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is listed twice"
+                )));
+            }
+            if device::is_ambient(&shelf.packages, name) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is a package every app has"
+                )));
+            }
+            if location.kind() == AppKind::Installable && shelf.builtins.reserves(name) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{name}\" is only for builtin apps"
+                )));
+            }
+            match (list, shelf.packages.get(name)) {
+                ("permissions", Some(Some(PackageInterface::Stable { .. }))) => {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" is a stable package: list it in requires or uses"
+                    )));
+                }
+                ("requires" | "uses", Some(Some(PackageInterface::BoardSpecific { .. }))) => {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" is not a stable package: list it in permissions"
+                    )));
+                }
+                (_, Some(Some(PackageInterface::BoardSpecific { .. })))
+                    if manifest.boards.is_empty() =>
+                {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" talks to a Board's hardware: list the boards the app is for"
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Builtin apps, each registered by the Plugin that ships it, and the Lua
@@ -395,10 +580,14 @@ impl Builtins {
     }
 }
 
-/// Where containers are: this Plugin's filesystem and the builtin apps'.
+/// Where containers are, this Plugin's filesystem and the builtin apps', and
+/// the device installable apps are checked against.
 pub(crate) struct Shelf<'a> {
     pub(crate) filesystem: &'a ScopedVfs,
     pub(crate) builtins: &'a Builtins,
+    pub(crate) device: &'a Device,
+    /// The registered Lua packages.
+    pub(crate) packages: Packages,
 }
 
 impl Shelf<'_> {
@@ -415,6 +604,29 @@ impl Shelf<'_> {
                 self.filesystem.clone(),
                 format!("{}/{name}", location.root()),
             )),
+        }
+    }
+
+    /// Where container `name`'s files are at `location`: its directory, or
+    /// in the Workspace its package when no directory has the name.
+    async fn source(&self, location: AppLocation, name: &str) -> Result<Source, Problem> {
+        let (filesystem, dir) = self.place(location, name).ok_or(Problem::Storage)?;
+        if location != AppLocation::Workspace {
+            return Ok(Source::Dir { filesystem, dir });
+        }
+        let package = format!("{dir}{PACKAGE_EXTENSION}");
+        let is_dir = filesystem
+            .metadata(&dir)
+            .await
+            .is_ok_and(|metadata| metadata.is_dir());
+        let is_package = filesystem.exists(&package).await.unwrap_or(false);
+        match (is_dir, is_package) {
+            (true, true) => Err(invalid("offered both as a directory and as a package")),
+            (false, true) => Ok(Source::Package {
+                package: Package::open(&filesystem, &package).await?,
+                filesystem,
+            }),
+            _ => Ok(Source::Dir { filesystem, dir }),
         }
     }
 }
@@ -434,12 +646,23 @@ async fn container_names(shelf: &Shelf<'_>, location: AppLocation) -> Vec<String
             return Vec::new();
         }
     };
+    let packages = location == AppLocation::Workspace;
     let mut names: Vec<String> = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.metadata().is_dir() && !entry.file_name().starts_with('.'))
-        .map(|entry| String::from(entry.file_name()))
+        .filter(|entry| !entry.file_name().starts_with('.'))
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            if entry.metadata().is_dir() {
+                Some(String::from(name))
+            } else if packages {
+                name.strip_suffix(PACKAGE_EXTENSION).map(String::from)
+            } else {
+                None
+            }
+        })
         .collect();
     names.sort_unstable();
+    names.dedup();
     names
 }
 
@@ -523,7 +746,11 @@ pub(crate) async fn offered(shelf: &Shelf<'_>, id: &str) -> Result<Container, Ap
         return Err(AppError::NotFound);
     }
     let manifest = format!("{WORKSPACE_APPS}/{id}/{MANIFEST_FILE}");
-    if !shelf.filesystem.exists(&manifest).await.unwrap_or(false) {
+    let package = format!("{WORKSPACE_APPS}/{id}{PACKAGE_EXTENSION}");
+    let filesystem = shelf.filesystem;
+    if !filesystem.exists(&manifest).await.unwrap_or(false)
+        && !filesystem.exists(&package).await.unwrap_or(false)
+    {
         return Err(AppError::NotFound);
     }
     Ok(read_container(shelf, AppLocation::Workspace, id).await?)
@@ -532,17 +759,13 @@ pub(crate) async fn offered(shelf: &Shelf<'_>, id: &str) -> Result<Container, Ap
 /// Reads everything needed to launch app `id`.
 pub(crate) async fn load(shelf: &Shelf<'_>, id: &str) -> Result<Bundle, AppError> {
     let container = find(shelf, id).await?;
-    let filesystem = &container.filesystem;
-    let source = read_limited(
-        filesystem,
-        &container.dir,
-        &container.entry,
-        MAX_SOURCE_BYTES,
-    )
-    .await?;
+    let source = container
+        .source
+        .read(&container.entry, MAX_SOURCE_BYTES)
+        .await?;
     let source = String::from_utf8(source).map_err(|_| AppError::InvalidBundle)?;
     let view = match &container.view {
-        Some(files) => Some(load_view(filesystem, &container.dir, files).await?),
+        Some(files) => Some(load_view(&container.source, files).await?),
         None => None,
     };
     Ok(Bundle {
@@ -552,14 +775,10 @@ pub(crate) async fn load(shelf: &Shelf<'_>, id: &str) -> Result<Bundle, AppError
     })
 }
 
-async fn load_view(
-    filesystem: &ScopedVfs,
-    dir: &str,
-    files: &ViewFiles,
-) -> Result<UiAssets, Problem> {
+async fn load_view(source: &Source, files: &ViewFiles) -> Result<UiAssets, Problem> {
     let mut budget = MAX_VIEW_BYTES;
     let mut take = async |name: &str| -> Result<Vec<u8>, Problem> {
-        let bytes = read_limited(filesystem, dir, name, budget).await?;
+        let bytes = source.read(name, budget).await?;
         budget = budget
             .checked_sub(bytes.len() as u64)
             .ok_or_else(|| invalid("the view is larger than its budget"))?;

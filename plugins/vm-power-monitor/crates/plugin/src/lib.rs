@@ -1,49 +1,34 @@
-//! Lua package for the Board's primary attached power monitor.
+//! Lua package over the Board's power monitor, which the `power` Plugin
+//! owns.
 
 #![no_std]
 
 extern crate alloc;
 
-mod config {
-    barracuda_plugin::config!();
-}
-
 use alloc::string::String;
-use barracuda_board_hal::power::{PowerMeasurement, PowerMonitor, PowerMonitorPeripheral};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_power_plugin::{Power, PowerMeasurement};
 use barracuda_vm_plugin::{
     Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataMethods,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
-/// Owns the Board's primary power-monitor capability and publishes it to Lua.
+/// Publishes the `power` Plugin's power monitor to Lua.
 #[barracuda_plugin::macros::plugin]
-pub struct PowerMonitorPlugin<Monitor> {
-    monitor: Option<Monitor>,
-}
+pub struct PowerMonitorPlugin;
 
-impl<Monitor> PowerMonitorPlugin<Monitor> {
-    /// Takes the built-in power monitor from the generated Board capability set.
+impl PowerMonitorPlugin {
+    /// Creates the unregistered package.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
-    where
-        Builtins: PowerMonitorPeripheral<PowerMonitor = Monitor>,
-    {
-        Self {
-            monitor: config::peripherals::POWER_MONITOR_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_power_monitor(instance)),
-        }
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self
     }
 }
 
-impl<Monitor> Plugin for PowerMonitorPlugin<Monitor>
-where
-    Monitor: PowerMonitor + Send + 'static,
-{
+impl Plugin for PowerMonitorPlugin {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
@@ -51,46 +36,46 @@ where
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
-        let registry = context.require::<LuaPackageRegistry>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
+        let registry = context.require::<LuaPackageRegistry>("vm")?;
+        let power = context.require::<Power>("power")?;
         let registration = registry
-            .register(PowerMonitorPackage::new(self.monitor.take()))
+            .register(PowerMonitorPackage::new(Power::clone(&power)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-struct PowerMonitorPackage<Monitor> {
-    monitor: Arc<critical_section::Mutex<RefCell<Option<Monitor>>>>,
+struct PowerMonitorPackage {
+    power: Power,
+    /// Whether a Lua handle took the monitor; one may per boot.
+    taken: Arc<AtomicBool>,
     active: Arc<AtomicBool>,
 }
 
-impl<Monitor> PowerMonitorPackage<Monitor> {
-    fn new(monitor: Option<Monitor>) -> Self {
+impl PowerMonitorPackage {
+    fn new(power: Power) -> Self {
         Self {
-            monitor: Arc::new(critical_section::Mutex::new(RefCell::new(monitor))),
+            power,
+            taken: Arc::new(AtomicBool::new(false)),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
 }
 
-impl<Monitor> Package for PowerMonitorPackage<Monitor>
-where
-    Monitor: PowerMonitor + Send + 'static,
-{
+impl Package for PowerMonitorPackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_monitor = Arc::clone(&self.monitor);
+        let present = self.power.is_present();
+        let available_taken = Arc::clone(&self.taken);
         let available_active = Arc::clone(&self.active);
-        let open_monitor = Arc::clone(&self.monitor);
+        let open_power = self.power.clone();
+        let open_taken = Arc::clone(&self.taken);
         let open_active = Arc::clone(&self.active);
         lua.register_lib("power_monitor", move |package| {
             package.register("available", move |(): ()| {
                 Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_monitor.borrow(section).borrow().is_some()
-                    })))
+                    && present
+                    && !available_taken.load(Ordering::Acquire)))
             })?;
             package.register_with("open", move |lua, (): ()| {
                 if !open_active.load(Ordering::Acquire) {
@@ -98,29 +83,29 @@ where
                         "power-monitor package has been revoked",
                     )));
                 }
-                let monitor = critical_section::with(|section| {
-                    open_monitor.borrow(section).borrow_mut().take()
-                });
-                Some(match monitor {
-                    Some(monitor) => lua.create_userdata(PowerMonitorHandle::new(
-                        monitor,
-                        Arc::clone(&open_active),
-                    )),
-                    None => Err(Error::runtime(
+                if !present || open_taken.swap(true, Ordering::AcqRel) {
+                    return Some(Err(Error::runtime(
                         "built-in power monitor is unavailable or already open",
-                    )),
-                })
+                    )));
+                }
+                Some(lua.create_userdata(PowerMonitorHandle::new(
+                    open_power.clone(),
+                    Arc::clone(&open_active),
+                )))
             })
         })
     }
 }
 
-impl<Monitor> LuaPackage for PowerMonitorPackage<Monitor>
-where
-    Monitor: PowerMonitor + Send + 'static,
-{
+impl LuaPackage for PowerMonitorPackage {
     fn name(&self) -> &'static str {
         "power_monitor"
+    }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "读取电源数据",
+        })
     }
 
     fn revoke(&self) {
@@ -128,28 +113,25 @@ where
     }
 }
 
-struct PowerMonitorHandle<Monitor> {
-    monitor: Option<Monitor>,
+struct PowerMonitorHandle {
+    power: Option<Power>,
     active: Arc<AtomicBool>,
 }
 
-impl<Monitor> PowerMonitorHandle<Monitor> {
-    fn new(monitor: Monitor, active: Arc<AtomicBool>) -> Self {
+impl PowerMonitorHandle {
+    fn new(power: Power, active: Arc<AtomicBool>) -> Self {
         Self {
-            monitor: Some(monitor),
+            power: Some(power),
             active,
         }
     }
 
     fn close(&mut self) {
-        self.monitor.take();
+        self.power.take();
     }
 }
 
-impl<Monitor> UserData for PowerMonitorHandle<Monitor>
-where
-    Monitor: PowerMonitor + Send + 'static,
-{
+impl UserData for PowerMonitorHandle {
     fn add_methods(methods: &mut UserDataMethods<'_, Self>) {
         methods.add_method_mut("measure", |handle, (): ()| {
             Some(
@@ -160,7 +142,7 @@ where
         });
         methods.add_method("is_open", |handle, (): ()| {
             Some(Ok(
-                handle.active.load(Ordering::Acquire) && handle.monitor.is_some()
+                handle.active.load(Ordering::Acquire) && handle.power.is_some()
             ))
         });
         methods.add_method_mut("close", |handle, (): ()| {
@@ -174,25 +156,23 @@ where
     }
 }
 
-impl<Monitor> PowerMonitorHandle<Monitor>
-where
-    Monitor: PowerMonitor,
-{
+impl PowerMonitorHandle {
     fn measure(&mut self) -> Result<PowerMeasurement> {
         ensure_active(&self.active)?;
-        self.monitor
-            .as_mut()
+        self.power
+            .as_ref()
             .ok_or_else(|| Error::runtime("power-monitor handle is closed"))?
             .measure()
             .map_err(|error| {
                 Error::runtime(alloc::format!(
-                    "power-monitor measurement failed: {error:?}"
+                    "power-monitor measurement failed: {}",
+                    error.0
                 ))
             })
     }
 }
 
-impl<Monitor> Drop for PowerMonitorHandle<Monitor> {
+impl Drop for PowerMonitorHandle {
     fn drop(&mut self) {
         self.close();
     }
@@ -224,6 +204,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use barracuda_board_hal::power::{BatteryState, PowerMonitor};
 
     #[derive(Debug)]
     struct BusFault;
@@ -241,7 +222,7 @@ mod tests {
     }
 
     fn install(monitor: Option<TestMonitor>) -> Lua {
-        let package = PowerMonitorPackage::new(monitor);
+        let package = PowerMonitorPackage::new(Power::from_monitor(monitor));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
         lua
@@ -305,9 +286,41 @@ mod tests {
         assert!(result);
     }
 
+    struct Gauge;
+
+    impl PowerMonitor for Gauge {
+        type Error = BusFault;
+
+        fn measure(&mut self) -> core::result::Result<PowerMeasurement, Self::Error> {
+            Err(BusFault)
+        }
+
+        fn battery(&mut self) -> core::result::Result<Option<BatteryState>, Self::Error> {
+            Ok(Some(BatteryState {
+                percent: 76,
+                charging: true,
+            }))
+        }
+    }
+
+    #[test]
+    fn the_battery_reads_while_lua_holds_the_monitor() {
+        let power = Power::from_monitor(Some(Gauge));
+        let package = PowerMonitorPackage::new(power.clone());
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+        let open: bool = lua
+            .load("monitor = require('power_monitor').open()\nreturn monitor:is_open()")
+            .eval()
+            .expect("open the monitor");
+        assert!(open);
+        assert_eq!(power.battery().map(|battery| battery.percent), Some(76));
+    }
+
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = PowerMonitorPackage::new(Some(TestMonitor { result: Err(()) }));
+        let package =
+            PowerMonitorPackage::new(Power::from_monitor(Some(TestMonitor { result: Err(()) })));
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

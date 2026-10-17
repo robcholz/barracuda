@@ -1,5 +1,6 @@
 -- Sessions, a builtin app: the Agent's conversations, newest first. Opening
--- one shows what was first asked in it and the Agent's latest words here.
+-- one shows its latest messages, the person's on the right and the Agent's
+-- on the left, while the Agent is still answering too.
 local app = require("app")
 local sessions = require("sessions")
 local view = assert(app.view())
@@ -18,6 +19,11 @@ local function set(name, value)
   assert(view:set(name, value))
 end
 
+-- What an Agent message that only called Tools shows.
+local function tools(names)
+  return "调用了 " .. table.concat(names, "、")
+end
+
 local function publish()
   set("clock", clock())
   set("page", page)
@@ -31,17 +37,23 @@ local function publish()
     set("sessions", rows)
     set("empty", #rows == 0)
   elseif current then
-    set("asked", current.title)
-    set("when", current.when ~= "" and current.when or "Agent")
-    local agent = sessions.agent() or {}
-    set("said", agent.answer or "")
-    set("thinking", agent.state == "thinking")
+    local rows, thinking = {}, false
+    for index, message in ipairs(sessions.transcript(current.id) or {}) do
+      local text = message.text
+      if text == "" then text = tools(message.tools) end
+      rows[index] = { id = index, mine = message.mine, text = text }
+      thinking = thinking or message.open
+    end
+    set("title", current.title)
+    set("messages", rows)
+    set("thinking", thinking)
   end
 end
 
 set("sessions", {})
+set("messages", {})
 publish()
-for event, value in app.events({ every = 15000 }) do
+for event, value in app.events({ every = 5000 }) do
   if event == "open" then
     current = list[value]
     if current then
@@ -51,6 +63,7 @@ for event, value in app.events({ every = 15000 }) do
     end
   elseif event == "app:back" then
     page = LIST
+    current = nil
     app.navigation(0)
     publish()
   elseif event == "app:tick" or event == "app:foreground" then

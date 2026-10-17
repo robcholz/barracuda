@@ -225,3 +225,25 @@ fn littlefs_backend_keeps_any_utf8_name() {
         );
     });
 }
+
+#[test]
+fn littlefs_reports_its_size_and_free_space() {
+    embassy_futures::block_on(async {
+        let storage = Storage::new(MemoryFlash::new()).unwrap();
+        let littlefs = LittleFs::format(storage).unwrap();
+        let vfs = Vfs::new();
+        vfs.mount("/data", littlefs.into_backend(), MountOptions::read_write())
+            .await
+            .unwrap();
+        let empty = vfs.usage("/data").await.unwrap();
+        assert_eq!(empty.total(), CAPACITY as u64);
+        assert!(empty.free() < empty.total(), "metadata takes blocks");
+
+        // A file larger than an inline one takes blocks of its own.
+        vfs.write("/data/blob", &[7; 1024]).await.unwrap();
+        let written = vfs.usage("/data/blob").await.unwrap();
+        assert_eq!(written.total(), CAPACITY as u64);
+        assert!(written.free() < empty.free());
+        assert_eq!(written.used(), written.total() - written.free());
+    });
+}

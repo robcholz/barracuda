@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "workflow_list",
-    "description": "List the IDs of currently loaded Workflows.",
+    "description": "List the IDs of currently loaded Workflows, and which of them are off.",
     "parameters": {
       "type": "object",
       "properties": {},

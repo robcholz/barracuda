@@ -11,7 +11,7 @@ functions.
 - Required capabilities: `UtcClock` from `time`, `LuaPackageRegistry` from `vm`
 - Workflow: none
 - Agent Tools: none
-- Lua packages: `vm-time`, which extends the standard `os` table
+- Lua packages: `time`, which extends the standard `os` table
 - Web: none
 - Tasks: one cancellable UTC request bridge task (`vm_time_task`, pool size 1), fed
   by a request queue of depth 4

@@ -1,7 +1,7 @@
 # Builtin App Workflow Plugin
 
-Ships 工作流 (Workflows), a system app that lists the loaded Workflows and
-what starts each.
+Ships 工作流 (Workflows), a system app that lists the loaded Workflows,
+what starts each, and a switch that turns each on or off.
 
 - Plugin ID: `builtin-app-workflow`
 - Dependencies: `app-manager`, `workflow`
@@ -18,19 +18,21 @@ what starts each.
 - Storage: the app's container in `/resources/app`
 
 The app is a builtin app, see the `app-manager` Plugin's
-[`plugin.md`](../../app-manager/docs/plugin.md#builtin-apps). A loaded
-Workflow shows as on; the Workflow runtime has no switch to turn one off, so
-the switches only show the state.
+[`plugin.md`](../../app-manager/docs/plugin.md#builtin-apps). Each switch
+calls `WorkflowService::set_enabled`, so a Workflow turned off stays off
+across restarts.
 
 ## Lua API
 
 ~~~lua
 local workflows = require("workflows")
 
-workflows.list()  -- { { id, event, trigger = "定时" | "网络变化时" | ... }, ... }
+workflows.list()                  -- { { id, event, trigger = "定时" | ..., enabled }, ... }
+workflows.set_enabled(id, enabled) -- enabled, or nil and a message
 ~~~
 
 `event` is the Workflow's Event rule and `trigger` says it in words.
+`enabled` is false for a Workflow no Event starts.
 
 ## Building
 

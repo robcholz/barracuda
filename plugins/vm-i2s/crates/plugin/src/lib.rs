@@ -132,6 +132,12 @@ where
     fn name(&self) -> &'static str {
         "i2s"
     }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "访问 I2S 音频总线",
+        })
+    }
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

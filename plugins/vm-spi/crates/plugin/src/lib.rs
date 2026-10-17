@@ -133,6 +133,12 @@ where
         "spi"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "访问 SPI 设备",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

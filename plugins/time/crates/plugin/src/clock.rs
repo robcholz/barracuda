@@ -86,9 +86,19 @@ impl TimeConfig {
     }
 }
 
+/// Where the clock's current time came from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClockSource {
+    /// The Board's real-time clock, read at boot before network time.
+    RealTimeClock,
+    /// Network time.
+    Network,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ClockAnchor {
     sample: SyncSample,
+    source: ClockSource,
 }
 
 struct ClockState {
@@ -169,6 +179,12 @@ impl UtcClock {
                 .saturating_add(elapsed.as_millis()),
         ))
     }
+
+    /// Where the current time came from, or `None` before any.
+    #[must_use]
+    pub fn source(&self) -> Option<ClockSource> {
+        self.state.borrow().anchor.map(|anchor| anchor.source)
+    }
 }
 
 /// Time Plugin-owned write side of a [`UtcClock`].
@@ -179,7 +195,22 @@ pub struct UtcClockUpdater {
 impl UtcClockUpdater {
     /// Replaces the authoritative network anchor.
     pub fn synchronize(&self, sample: SyncSample) {
-        self.clock.state.borrow_mut().anchor = Some(ClockAnchor { sample });
+        self.clock.state.borrow_mut().anchor = Some(ClockAnchor {
+            sample,
+            source: ClockSource::Network,
+        });
+    }
+
+    /// Starts the clock from the Board's real-time clock until network time
+    /// arrives; it never replaces network time.
+    pub fn seed(&self, sample: SyncSample) {
+        let mut state = self.clock.state.borrow_mut();
+        if state.anchor.is_none() {
+            state.anchor = Some(ClockAnchor {
+                sample,
+                source: ClockSource::RealTimeClock,
+            });
+        }
     }
 
     fn config(&self) -> TimeConfig {
@@ -200,9 +231,22 @@ pub fn utc_clock(config: TimeConfig) -> (Rc<UtcClock>, UtcClockUpdater) {
 }
 
 /// Runs the network synchronization loop owned by the Time Plugin task.
-pub async fn synchronize_clock<Source>(mut source: Source, updater: UtcClockUpdater)
+pub async fn synchronize_clock<Source>(source: Source, updater: UtcClockUpdater)
 where
     Source: TimeSource,
+{
+    synchronize_clock_into(source, updater, |_sample| {}).await;
+}
+
+/// Runs the network synchronization loop, and hands every accepted sample
+/// to `synchronized` too, such as to keep the Board's real-time clock.
+pub async fn synchronize_clock_into<Source, Synchronized>(
+    mut source: Source,
+    updater: UtcClockUpdater,
+    mut synchronized: Synchronized,
+) where
+    Source: TimeSource,
+    Synchronized: FnMut(SyncSample),
 {
     // Only the previous outcome is logged so a persistent failure is reported
     // once instead of on every retry.
@@ -212,6 +256,7 @@ where
         let synchronized = match source.synchronize().await {
             Ok(sample) => {
                 updater.synchronize(sample);
+                synchronized(sample);
                 if !ever_synchronized || last_failure.is_some() {
                     log::info!("UTC clock synchronized from network time");
                 }

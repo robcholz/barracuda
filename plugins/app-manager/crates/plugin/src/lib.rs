@@ -22,7 +22,9 @@ mod config {
 }
 
 mod agent;
+mod fonts;
 mod notices;
+mod notify;
 mod preferences;
 mod system;
 mod words;
@@ -36,6 +38,8 @@ use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
     PluginStartContext, PluginTaskToken,
 };
+use barracuda_power_plugin::Power;
+use barracuda_sound_plugin::Volume;
 use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::{Ui, UiAssets};
 use barracuda_vfs::{FsError, ScopedVfs};
@@ -49,12 +53,16 @@ use embassy_time::{Duration, Timer};
 
 pub use agent::{AgentState, AgentStatus};
 pub use barracuda_appkit::{
-    APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation, AppManager,
-    AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage, InvalidApp,
-    RunningApp, VmRunOutcome,
+    API_LEVEL, APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation,
+    AppManager, AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage,
+    Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
 };
 pub use barracuda_uikit::icons;
-pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
+pub use fonts::{FontAtlases, SystemFonts};
+pub use notices::{
+    DEFAULT_LABELS, MAX_LABEL_CHARS, MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications,
+};
+pub use notify::{NOTIFY, NOTIFY_INTERFACE};
 pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
 pub use system::{Screen, Services, SystemUi, WIFI_SETTINGS};
 
@@ -70,6 +78,8 @@ const CLOCK_PERIOD: Duration = Duration::from_secs(15);
 /// runs apps, and the system UI when the Board has a display.
 #[barracuda_plugin::macros::plugin]
 pub struct AppManagerPlugin<Panel, Input> {
+    /// The Board's stable name, which apps' `boards` list.
+    board: &'static str,
     display: Option<Panel>,
     touch: Option<Input>,
     runtime: Option<Runtime<Panel, Input>>,
@@ -78,6 +88,7 @@ pub struct AppManagerPlugin<Panel, Input> {
 struct Runtime<Panel, Input> {
     filesystem: ScopedVfs,
     apps: AppManager,
+    fonts: Rc<SystemFonts>,
     /// The display and the system UI's services, on a Board with a display.
     screen: Option<(Ui<Panel, Input>, Services)>,
 }
@@ -89,8 +100,10 @@ impl<Panel, Input> AppManagerPlugin<Panel, Input> {
     where
         Builtins: DisplayPeripheral<Display = Panel> + TouchPeripheral<Touch = Input>,
     {
+        let board = context.target_identity.board().name();
         let peripherals = &mut context.hal.peripherals;
         Self {
+            board,
             display: config::peripherals::DISPLAY_MAIN
                 .and_then(|instance| peripherals.take_display(instance)),
             touch: config::peripherals::TOUCH_MAIN
@@ -133,14 +146,22 @@ where
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let clock = context.require::<UtcClock>("time")?;
         let wifi = context.require::<WifiControl>("wifi")?;
+        let power = context.require::<Power>("power")?;
+        let audio = context.require::<Volume>("sound")?;
         let ui = self
             .display
             .take()
             .map(|display| Ui::new(display, self.touch.take()));
+        let device = Device {
+            board: self.board,
+            display: ui.as_ref().map(Ui::display),
+            touch: ui.as_ref().is_some_and(Ui::touch),
+        };
         let (apps, registration) = AppManager::register(
             filesystem.clone(),
             vm,
             ui.as_ref().map(Ui::service),
+            device,
             &packages,
         )
         .map_err(PluginError::registration)?;
@@ -153,6 +174,14 @@ where
         let notices = Rc::new(Notifications::new());
         let agent = Rc::new(AgentStatus::new());
         let preferences = Rc::new(Preferences::default());
+        let registration = apps
+            .add_package(
+                NOTIFY,
+                NOTIFY_INTERFACE,
+                Rc::new(notify::Notify(Rc::clone(&notices))),
+            )
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
         for registration in workflow::register_actions(&actions, &notices, &agent)
             .map_err(PluginError::registration)?
         {
@@ -162,6 +191,8 @@ where
         context.provide(Rc::clone(&notices))?;
         context.provide(Rc::clone(&agent))?;
         context.provide(Rc::clone(&preferences))?;
+        let fonts = Rc::new(SystemFonts::default());
+        context.provide(Rc::clone(&fonts))?;
         let screen = ui.map(|ui| {
             let services = Services {
                 ui: ui.service(),
@@ -171,12 +202,15 @@ where
                 preferences,
                 clock,
                 wifi,
+                power,
+                audio,
             };
             (ui, services)
         });
         self.runtime = Some(Runtime {
             filesystem,
             apps,
+            fonts,
             screen,
         });
         Ok(())
@@ -215,14 +249,18 @@ async fn run<Panel: Display, Input: Touch>(
     let Runtime {
         filesystem,
         apps,
+        fonts,
         screen,
     } = runtime;
     let shown = screen.as_ref().map(|(ui, _)| ui.service());
     let display = async {
         match screen {
             Some((ui, services)) => {
-                let filesystem = &filesystem;
-                join(ui.run(filesystem), run_system_ui(filesystem, services)).await;
+                join(
+                    async { ui.run(fonts.load().await).await },
+                    run_system_ui(&filesystem, services),
+                )
+                .await;
             }
             None => core::future::pending().await,
         }

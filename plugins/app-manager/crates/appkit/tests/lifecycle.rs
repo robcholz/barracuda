@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use barracuda_appkit::{
     AppError, AppKind, AppLocation, AppManager, AppState, BuiltinApp, BuiltinBackend,
-    BuiltinPackage,
+    BuiltinPackage, Device,
 };
-use barracuda_uikit::{DEFAULT_VIEWPORT, UiService};
+use barracuda_uikit::{DEFAULT_VIEWPORT, DisplayInfo, UiService};
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_vm_plugin::{
@@ -379,8 +379,22 @@ async fn scenario(spawner: Spawner) {
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
     let (filesystem, builtin) = filesystem().await;
-    let (manager, _registration) =
-        AppManager::register(filesystem, vm, Some(Rc::clone(&ui)), &packages).unwrap();
+    let (manager, _registration) = AppManager::register(
+        filesystem,
+        vm,
+        Some(Rc::clone(&ui)),
+        Device {
+            board: "test-board",
+            display: Some(DisplayInfo {
+                width: 360,
+                height: 360,
+                round: true,
+            }),
+            touch: true,
+        },
+        &packages,
+    )
+    .unwrap();
     let _probe = manager
         .add_builtin(BuiltinApp {
             id: "system",
@@ -433,7 +447,7 @@ async fn scenario(spawner: Spawner) {
         ("future", "$.format"),
         ("greedy", "only for builtin apps"),
         ("nomain", "main.lua is missing"),
-        ("stray", "does not match the directory name"),
+        ("stray", "does not match the container's name"),
         ("system", "belongs to a system app"),
     ]) {
         assert_eq!(*dir, expected_dir);

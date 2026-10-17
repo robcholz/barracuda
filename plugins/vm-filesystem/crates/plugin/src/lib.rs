@@ -466,7 +466,14 @@ impl Package for FilePackage {
 
 impl LuaPackage for FilePackage {
     fn name(&self) -> &'static str {
-        "vm-filesystem"
+        "filesystem"
+    }
+
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "读写共享文件",
+        })
     }
 
     fn revoke(&self) {
@@ -950,7 +957,7 @@ fn ensure_active(state: &FilePackageState) -> Result<()> {
     if state.active.load(Ordering::Acquire) {
         Ok(())
     } else {
-        Err(Error::runtime("vm-filesystem package is unavailable"))
+        Err(Error::runtime("filesystem package is unavailable"))
     }
 }
 

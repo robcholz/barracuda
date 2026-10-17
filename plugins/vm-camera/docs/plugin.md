@@ -24,12 +24,21 @@ Lua API:
 
 - `camera.available() -> boolean`
 - `camera.open() -> handle`
+- `camera.snap([capacity]) -> bytes, pixel_format` takes one frame, with room
+  for 128 KiB unless given
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards without a camera
-report unavailable. The move-only built-in capability permits one handle per
-boot; explicit close, lexical `<close>`, collection, and Plugin revocation
-prevent further operations.
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2; version 2 added `camera.snap`.
+
+`snap`, from version 2, uses the camera while no handle holds it and
+returns `nil, error` while one does.
+
+Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards
+without a camera report unavailable. One handle is open at a time: explicit
+close, lexical `<close>`, and collection prevent further operations on it and
+give the camera back, so `open` works again; Plugin revocation prevents every
+further operation.

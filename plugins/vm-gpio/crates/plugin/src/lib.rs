@@ -154,6 +154,12 @@ where
         "gpio"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
+            purpose: "控制引脚",
+        })
+    }
+
     fn revoke(&self) {
         self.active.store(false, Ordering::Release);
     }

@@ -95,6 +95,10 @@ The server does not decode paths or assign filesystem meaning to them. A
 consumer implementing URL-to-resource mapping must validate that mapping and
 enforce its own resource scope. `HttpRequest::new` is available for
 synthetic requests without a path; `with_path` supplies one explicitly.
+`HttpRequest::local_address()` is the device address the connection was
+accepted on, which tells a route the network the client is on, such as the
+setup hotspot's; it is `None` for a synthetic request, and
+`serve_connection_at` serves a connection with it.
 
 `HttpResponse::new` returns buffered bytes. `HttpResponse::stream` accepts an
 owned `embedded_io_async::Read` (0.7) source and an exact byte length. The server

@@ -7,7 +7,7 @@
 //! taking input until the screen closes.
 
 use crate::agent::{AgentState, AgentStatus};
-use crate::notices::Notifications;
+use crate::notices::{DEFAULT_LABELS, Notifications};
 use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
@@ -15,6 +15,8 @@ use barracuda_appkit::{
     AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
 };
 use barracuda_platform::{AccessPointState, StationState};
+use barracuda_power_plugin::Power;
+use barracuda_sound_plugin::Volume;
 use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::icons::{self, IconLayer};
 use barracuda_uikit::{
@@ -38,6 +40,8 @@ const CONTROL_TILES: i32 = 0;
 const CONTROL_BRIGHTNESS: i32 = 1;
 const CONTROL_PORTAL: i32 = 2;
 /// Brightness when the system starts, in percent.
+/// The battery gauge's inner width in pixels.
+const BATTERY_GAUGE: i32 = 19;
 /// The brightness bar's inner height in pixels.
 const BRIGHTNESS_BAR: i32 = 158;
 /// How long an answered or allowed result stays on screen.
@@ -45,12 +49,11 @@ const ANSWER_SHOWN: Duration = Duration::from_secs(9);
 const RESULT_SHOWN: Duration = Duration::from_secs(30);
 const DONE_SHOWN: Duration = Duration::from_millis(1600);
 /// The launcher's grid: tile column width and gap, row height and gap, in
-/// pixels, on the 360 px display.
+/// pixels.
 const COLUMN: i32 = 78;
 const COLUMN_GAP: i32 = 6;
 const ROW: i32 = 86;
 const ROW_GAP: i32 = 10;
-const VIEWPORT: i32 = 360;
 
 /// A system screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -124,6 +127,10 @@ pub struct Services {
     pub clock: Rc<UtcClock>,
     /// Network status and the portal's access point.
     pub wifi: Rc<WifiControl>,
+    /// The battery's charge on the control center.
+    pub power: Rc<Power>,
+    /// The speaker's volume and mute.
+    pub audio: Rc<Volume>,
 }
 
 /// The system UI's state.
@@ -137,6 +144,8 @@ pub struct SystemUi {
     /// Which of its views the control center shows.
     control: i32,
     entries: Vec<Entry>,
+    /// The launcher page on the display.
+    page: usize,
     running: Vec<RunningApp>,
     /// The app a launching, exited, install, info, or menu screen is about.
     subject: Option<AppInfo>,
@@ -169,6 +178,7 @@ impl SystemUi {
             below: None,
             control: CONTROL_TILES,
             entries: Vec::new(),
+            page: 0,
             running: Vec::new(),
             subject: None,
             exit_reason: "",
@@ -204,9 +214,11 @@ impl SystemUi {
         self.render();
     }
 
-    /// Puts the brightness and screen timeout on the display.
+    /// Puts the brightness and screen timeout on the display, and the
+    /// volume and mute on the speaker.
     fn apply_preferences(&self) {
         let values = self.services.preferences.get();
+        self.services.audio.set(values.volume, values.muted);
         let ui = &self.services.ui;
         ui.set_brightness(percent_to_level(i32::from(values.brightness)));
         ui.set_screen_timeout(
@@ -221,6 +233,34 @@ impl SystemUi {
             .iter()
             .map(|entry| entry.info.name.as_str())
             .collect()
+    }
+
+    /// The display's size in view pixels, and whether it is round.
+    fn display(&self) -> (i32, i32, bool) {
+        let (width, height) = self.services.ui.viewport();
+        let round = self
+            .services
+            .apps
+            .device()
+            .display
+            .is_some_and(|display| display.round);
+        (width as i32, height as i32, round)
+    }
+
+    /// The launcher's page count; an empty launcher still has one page.
+    fn pages(&self) -> usize {
+        let (width, height, round) = self.display();
+        let page = page_rows(width, height, round).iter().sum::<usize>();
+        self.entries.len().div_ceil(page).max(1)
+    }
+
+    /// Moves the launcher `by` pages, staying within the first and last.
+    fn turn_page(&mut self, by: isize) {
+        let page = self.page.saturating_add_signed(by).min(self.pages() - 1);
+        if page != self.page {
+            self.page = page;
+            self.render();
+        }
     }
 
     /// Re-reads the app list.
@@ -245,6 +285,7 @@ impl SystemUi {
                 (_, false) => 1,
                 (_, true) => 2,
             });
+        self.page = self.page.min(self.pages() - 1);
     }
 
     /// Puts `screen` on the display, or uncovers the foreground app.
@@ -265,6 +306,10 @@ impl SystemUi {
 
     async fn go(&mut self, screen: Screen) {
         if matches!(screen, Screen::Apps | Screen::Running) {
+            if self.screen == Some(Screen::Home) {
+                // The launcher opens on its first page from home.
+                self.page = 0;
+            }
             self.reload().await;
             self.running = self.services.apps.running();
         }
@@ -313,6 +358,8 @@ impl SystemUi {
                     self.close_panel();
                 }
                 (Some(Screen::Home), Direction::Left) => self.go(Screen::Apps).await,
+                (Some(Screen::Apps), Direction::Up) => self.turn_page(1),
+                (Some(Screen::Apps), Direction::Down) => self.turn_page(-1),
                 (Some(Screen::Apps), Direction::Left) => self.go(Screen::Running).await,
                 (Some(Screen::Apps), Direction::Right) => self.go(Screen::Home).await,
                 (Some(Screen::Running), Direction::Right) => self.go(Screen::Apps).await,
@@ -367,6 +414,20 @@ impl SystemUi {
                 let (info, offered) = (entry.info.clone(), entry.offered);
                 self.subject = Some(info.clone());
                 if offered {
+                    // Asking checks and pins what the person is shown, so
+                    // the install takes exactly that.
+                    let apps = &self.services.apps;
+                    let subject = match apps.request_install(&info.id).await {
+                        Ok(requested) => requested,
+                        Err(AppError::Incompatible) => {
+                            apps.install_offer(&info.id).await.unwrap_or(info)
+                        }
+                        Err(error) => AppInfo {
+                            incompatible: Some(String::from(words::open_error(error))),
+                            ..info
+                        },
+                    };
+                    self.subject = Some(subject);
                     self.show(Some(Screen::Install));
                 } else {
                     self.launch(info).await;
@@ -405,7 +466,12 @@ impl SystemUi {
                 if let Some(notice) = notice
                     && self.services.notices.decide(notice.id, allowed)
                 {
-                    let verdict = if allowed { "已允许" } else { "已拒绝" };
+                    let label = if allowed { &notice.allow } else { &notice.deny };
+                    let verdict = match (allowed, label.as_str()) {
+                        (true, label) if label == DEFAULT_LABELS.0 => "已允许",
+                        (false, label) if label == DEFAULT_LABELS.1 => "已拒绝",
+                        (_, label) => label,
+                    };
                     self.done = Some((format!("{verdict} · {}", notice.title), Instant::now()));
                 }
                 self.render();
@@ -506,12 +572,14 @@ impl SystemUi {
             return;
         };
         match self.screen {
+            // An app that cannot run here is never installed.
+            Some(Screen::Install) if subject.incompatible.is_some() => {}
             Some(Screen::Install) => {
                 if let Err(error) = self.services.apps.install(&subject.id).await {
                     log::warn!("system ui: cannot install {}: {error}", subject.id);
                     self.services.notices.post(
                         &format!("无法安装“{}”", subject.name),
-                        "应用文件有问题",
+                        words::open_error(error),
                         Some("apps"),
                     );
                 }
@@ -697,6 +765,27 @@ impl SystemUi {
         )
     }
 
+    /// What an app asks to be allowed, in the words of the Plugins that
+    /// provide it, with its icons; what it uses only when the device has it
+    /// is marked optional.
+    fn permissions(&self, subject: Option<&AppInfo>) -> Vec<(String, String)> {
+        let Some(info) = subject else {
+            return Vec::new();
+        };
+        let permissions: Vec<(String, String)> = self
+            .services
+            .apps
+            .asks(info)
+            .into_iter()
+            .map(|(package, line)| (line, glyph(words::permission_icon(&package))))
+            .collect();
+        if permissions.is_empty() {
+            vec![(String::from("不需要额外权限"), glyph("check"))]
+        } else {
+            permissions
+        }
+    }
+
     /// Writes every value of the system view.
     fn render(&self) {
         let Some(screen) = self.screen else {
@@ -765,13 +854,27 @@ impl SystemUi {
                 "重新打开",
                 "回到主页",
             ),
-            Screen::Install => (
-                format!("安装“{subject_name}”？"),
-                String::from("来自工作区"),
-                permissions(subject),
-                "安装",
-                "取消",
-            ),
+            Screen::Install => match subject.and_then(|info| info.incompatible.as_ref()) {
+                Some(reason) => (
+                    format!("无法安装“{subject_name}”"),
+                    reason.clone(),
+                    self.permissions(subject),
+                    "安装",
+                    "返回",
+                ),
+                None => (
+                    format!("安装“{subject_name}”？"),
+                    match subject.and_then(|info| info.signer.as_deref()) {
+                        Some(signer) => {
+                            format!("来自工作区 · 已签名 {}", signer.get(..8).unwrap_or(signer))
+                        }
+                        None => String::from("来自工作区 · 未签名"),
+                    },
+                    self.permissions(subject),
+                    "安装",
+                    "取消",
+                ),
+            },
             Screen::Info => (
                 String::from(subject_name),
                 format!(
@@ -782,7 +885,7 @@ impl SystemUi {
                 if system {
                     Vec::new()
                 } else {
-                    permissions(subject)
+                    self.permissions(subject)
                 },
                 if system { "" } else { "卸载" },
                 "返回",
@@ -824,15 +927,30 @@ impl SystemUi {
         let running_ids: Vec<&str> = self.running.iter().map(|app| app.app.id.as_str()).collect();
         let foreground = self.foreground.as_deref();
         let agent = self.services.agent.state();
-        let positions = grid(self.entries.len());
+        let battery = self.services.power.battery();
+        let (width, height, round) = self.display();
+        let rows = page_rows(width, height, round);
+        let page = rows.iter().sum::<usize>();
+        let first = self.page * page;
+        let shown = &self.entries[first.min(self.entries.len())..];
+        let shown = &shown[..shown.len().min(page)];
+        let positions = grid(shown.len(), &rows, width, height);
         let values = [
             ("screen", ViewValue::I32(screen.code())),
             ("clock", ViewValue::Str(clock)),
             ("unread", ViewValue::Bool(unread)),
             ("quiet", ViewValue::Bool(quiet)),
             ("offline", ViewValue::Bool(offline)),
-            ("battery", ViewValue::I32(-1)),
-            ("batteryFill", ViewValue::I32(0)),
+            (
+                "battery",
+                ViewValue::I32(battery.map_or(-1, |battery| i32::from(battery.percent))),
+            ),
+            (
+                "batteryFill",
+                ViewValue::I32(battery.map_or(0, |battery| {
+                    i32::from(battery.percent) * BATTERY_GAUGE / 100
+                })),
+            ),
             (
                 "agent",
                 ViewValue::I32(match agent {
@@ -851,14 +969,16 @@ impl SystemUi {
             (
                 "apps",
                 ViewValue::List(
-                    self.entries
+                    shown
                         .iter()
                         .zip(positions)
                         .enumerate()
                         .map(|(index, (entry, (x, y)))| {
                             let (icon, letter) = app_icon(&entry.info);
                             item([
-                                ViewValue::I32(index as i32),
+                                // The index into the whole launcher, which
+                                // `openApp` answers with.
+                                ViewValue::I32((first + index) as i32),
                                 ViewValue::Str(entry.info.name.clone()),
                                 icon,
                                 ViewValue::Str(letter),
@@ -897,6 +1017,21 @@ impl SystemUi {
             ),
             ("anyRunning", ViewValue::Bool(!self.running.is_empty())),
             (
+                "dots",
+                ViewValue::List(if self.pages() > 1 {
+                    (0..self.pages())
+                        .map(|page| {
+                            item([
+                                ViewValue::I32(page as i32),
+                                ViewValue::Bool(page == self.page),
+                            ])
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }),
+            ),
+            (
                 "notices",
                 ViewValue::List(
                     notices
@@ -914,6 +1049,8 @@ impl SystemUi {
                                 icon,
                                 ViewValue::Str(letter),
                                 ViewValue::Bool(notice.question),
+                                ViewValue::Str(notice.allow.clone()),
+                                ViewValue::Str(notice.deny.clone()),
                             ])
                         })
                         .collect(),
@@ -983,6 +1120,13 @@ impl SystemUi {
             ("primary", ViewValue::Str(String::from(primary))),
             ("secondary", ViewValue::Str(String::from(secondary))),
             ("removable", ViewValue::Bool(!system)),
+            (
+                "blocked",
+                ViewValue::Bool(
+                    screen == Screen::Install
+                        && subject.is_some_and(|info| info.incompatible.is_some()),
+                ),
+            ),
         ];
         let channel = self.session.channel();
         for (name, value) in values {
@@ -993,25 +1137,49 @@ impl SystemUi {
     }
 }
 
-/// Positions of `count` launcher tiles in alternating rows of two and
-/// three, centered on the display.
-fn grid(count: usize) -> Vec<(i32, i32)> {
+/// The tiles in each row of a full launcher page on a `width` by `height`
+/// display: honeycomb rows that alternate one tile narrower and wider, as
+/// many as fit. A round display shows only its inscribed circle, so its
+/// rows keep to the middle.
+fn page_rows(width: i32, height: i32, round: bool) -> Vec<usize> {
+    let (span, tall) = if round {
+        (width * 3 / 4, height * 4 / 5)
+    } else {
+        // Room for the status bar and the screen's edges.
+        (width - 16, height - 40)
+    };
+    let wide = usize::try_from((span + COLUMN_GAP) / (COLUMN + COLUMN_GAP))
+        .unwrap_or(0)
+        .max(1);
+    let narrow = wide.saturating_sub(1).max(1);
+    let rows = usize::try_from((tall + ROW_GAP) / (ROW + ROW_GAP))
+        .unwrap_or(0)
+        .max(1);
+    (0..rows)
+        .map(|row| if row % 2 == 0 { narrow } else { wide })
+        .collect()
+}
+
+/// Positions of `count` launcher tiles filling `page`'s rows in order,
+/// centered on a `width` by `height` display.
+fn grid(count: usize, page: &[usize], width: i32, height: i32) -> Vec<(i32, i32)> {
     let mut rows = Vec::new();
     let mut left = count;
-    let mut wide = false;
-    while left > 0 {
-        let width = if wide { 3 } else { 2 }.min(left);
-        rows.push(width);
-        left -= width;
-        wide = !wide;
+    for &tiles in page {
+        if left == 0 {
+            break;
+        }
+        let tiles = tiles.min(left);
+        rows.push(tiles);
+        left -= tiles;
     }
-    let height = rows.len() as i32 * ROW + (rows.len() as i32 - 1).max(0) * ROW_GAP;
-    let top = (VIEWPORT - height) / 2 + 4;
+    let tall = rows.len() as i32 * ROW + (rows.len() as i32 - 1).max(0) * ROW_GAP;
+    let top = (height - tall) / 2 + 4;
     let mut positions = Vec::with_capacity(count);
-    for (row, width) in rows.into_iter().enumerate() {
-        let span = width as i32 * COLUMN + (width as i32 - 1) * COLUMN_GAP;
-        let start = (VIEWPORT - span) / 2;
-        for column in 0..width as i32 {
+    for (row, tiles) in rows.into_iter().enumerate() {
+        let span = tiles as i32 * COLUMN + (tiles as i32 - 1) * COLUMN_GAP;
+        let start = (width - span) / 2;
+        for column in 0..tiles as i32 {
             positions.push((
                 start + column * (COLUMN + COLUMN_GAP),
                 top + row as i32 * (ROW + ROW_GAP),
@@ -1069,24 +1237,32 @@ fn index(call: &ViewCall) -> Option<usize> {
     }
 }
 
-/// What an app asks to be allowed, in the person's words, with its icons.
-fn permissions(subject: Option<&AppInfo>) -> Vec<(String, String)> {
-    let permissions: Vec<(String, String)> = subject
-        .map(|info| {
-            info.permissions
-                .iter()
-                .map(|package| {
-                    (
-                        words::permission(package),
-                        glyph(words::permission_icon(package)),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if permissions.is_empty() {
-        vec![(String::from("不需要额外权限"), glyph("check"))]
-    } else {
-        permissions
+#[cfg(test)]
+mod tests {
+    use super::{grid, page_rows};
+
+    #[test]
+    fn launcher_pages_fit_the_display() {
+        // The design's round panel: the 2-3-2 honeycomb.
+        assert_eq!(page_rows(360, 360, true), [2, 3, 2]);
+        // Smaller and rectangular panels hold fewer, wider rows.
+        assert_eq!(page_rows(240, 240, true), [1, 2]);
+        assert_eq!(page_rows(320, 240, false), [2, 3]);
+        assert_eq!(page_rows(135, 240, false), [1, 1]);
+        // Every tile of a full page lies on the display.
+        for (width, height, round) in [(360, 360, true), (320, 240, false), (720, 1280, false)] {
+            let rows = page_rows(width, height, round);
+            let count = rows.iter().sum();
+            for (x, y) in grid(count, &rows, width, height) {
+                assert!(
+                    x >= 0 && x + super::COLUMN <= width,
+                    "{width}x{height}: x {x}"
+                );
+                assert!(
+                    y >= 0 && y + super::ROW <= height,
+                    "{width}x{height}: y {y}"
+                );
+            }
+        }
     }
 }

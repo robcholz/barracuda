@@ -1,0 +1,36 @@
+# Sound Plugin
+
+Owns the Board's primary audio codec, lends it to one borrower at a time as
+`Sound`, and keeps the device's output level, which the person sets for
+every sound, as `Volume`.
+
+- Plugin ID: `sound`
+- Dependencies: none
+- Settings: none
+- Context resources: peripheral slot `audio-codec.device` (`primary`, optional)
+- Provided capabilities: `Sound`, `Volume`
+- Required capabilities: none
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `AudioCodec` exactly once. Codec
+register control stays in the ES8311/ES8389 implementation; the I2S
+controller, DMA, and bounded buffers stay in the Platform HAL composition.
+
+- `Sound::lend()` borrows the codec until the returned `Lease` drops, and
+  `None` without a codec or while someone else borrows it. `is_present()`
+  says whether the Board has one, `is_idle()` whether it is there to borrow.
+- `Lease::codec_volume(own)` is the codec's `0..=255` output volume for a
+  sound at `own` percent of the device's level, or 0 while muted. A borrower
+  sets it before each chunk it plays, so a change of level reaches a sound
+  that is playing.
+- `Volume::set(volume, muted)` sets the device's level, as the system UI
+  does from the person's volume and mute, and puts it on the codec at once
+  while nobody borrows it.
+
+`Sound` is cheap to clone, and a clone may be kept in any task. The Plugin
+performs no background work and owns no long-running tasks.

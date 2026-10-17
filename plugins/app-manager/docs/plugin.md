@@ -6,7 +6,7 @@ states, the launcher, the app switcher, the notification and control
 centers, and the screens around an app's lifecycle.
 
 - Plugin ID: `app-manager`
-- Dependencies: `vm`, `workflow`, `time`, `wifi`
+- Dependencies: `vm`, `workflow`, `time`, `wifi`, `power`, `sound`
 - Settings: none
 - Context resources: peripheral slots `display.main` (`primary`, optional)
   and `touch.main` (`primary`, optional)
@@ -14,20 +14,21 @@ centers, and the screens around an app's lifecycle.
   `Preferences`
 - Required capabilities: `Vm` and `LuaPackageRegistry` from `vm`,
   `WorkflowActionRegistry` from `workflow`, `UtcClock` from `time`,
-  `WifiControl` from `wifi`
+  `WifiControl` from `wifi`, `Power` from `power`, `Volume` from `sound`
 - Workflow: Actions `app.list`, `app.open`, `app.install`, `app.home`,
   `app.interactive`, `app.terminate`, `app.status`, `app.tap`, `app.notify`,
   `app.confirm`, and `app.agent`, see `action.md`; Events none
 - Agent Tools: none
-- Lua packages: `app`, and each builtin app's package
+- Lua packages: `app` (ambient) and `notify` (stable, version 2), and each
+  builtin app's package
 - Web: none
 - Tasks: one task that supervises up to `MAX_APP_RUNS` (3) app runs, answers
   builtin apps' package calls, and, with a display, draws views, reads
   touch, and runs the system UI
 - Storage: installed apps under the private `/media/apps`, offers under the
   shared `/workspace/media/apps` (read only); each app's key-value store and
-  files under the private `/media/data/<id>/`; the system fonts in
-  `/resources/fonts` and the system view in `/resources/view`; preferences
+  files under the private `/media/data/<id>/`; the system view in
+  `/resources/view`; preferences
   in `/data/preferences.json`
 
 ## Structure
@@ -62,12 +63,18 @@ Where a container lives decides its `AppKind`, as
   registered Lua package, `uninstall` refuses them, and no installed app may
   take their IDs.
 - **Installable apps** are installed under the private `/media/apps`. Their
-  runs get `LuaPackageScope::Only` the `app` package and the `permissions`
-  their manifest asks for, through `Vm::run_scoped`.
+  runs get `LuaPackageScope::Only` the ambient packages and the
+  packages their manifest names, through `Vm::run_scoped`.
 - **Offers** are containers under the shared `/workspace/media/apps`, written
   by the portal, Agents, or other Plugins. They are not launchable; `open`
-  answers `NotInstalled`. `AppManager::install` copies an offer into
-  `/media/apps`, replacing an installed app at another version, and
+  answers `NotInstalled`. `AppManager::install` copies an offer, a
+  directory or a `.bapp` package, into `/media/apps`, replacing an installed
+  app at another version; it takes only what the pending request pinned
+  (`Changed` otherwise) and, for an app installed from a signed package,
+  only that signer's packages. `AppManager::install_offer` describes an
+  offer as an install would take it, with its `digest`, its `signer`, and
+  why it cannot be installed, if it cannot. The format is in
+  [`app-format.md`](app-format.md#packages), and
   `AppManager::uninstall` deletes an installed app and its data. Only the
   system UI calls them, after asking the person; `AppManager::request_install`
   (the `app.install` Action) asks the system UI to show an offer, and
@@ -93,6 +100,24 @@ backend, which returns a JSON value Lua receives as tables, or a message Lua
 receives as `nil, message`. At most `MAX_BUILTIN_CALLS` (8) calls wait at once,
 and calls that wait on the person, such as a question, hold up no others.
 `AppManager::serve_builtins` runs the answering loop.
+
+## App API
+
+[`app-api.md`](app-api.md) is the contract between installable apps and the
+device. This Plugin hands `AppManager::register` the `Device` apps are
+checked against: the Board's stable name, the display's size and shape from
+the UI kit (`DisplayFeatures::ROUND` marks a round panel), and whether it
+reads touch. Every listing reads the packages' tiers from
+`LuaPackageRegistry::packages`, so a package Plugin registered after this
+one counts, and fills each installable app's `incompatible`; `request_install`,
+`install`, and `open` refuse an app that has one with `Incompatible`.
+`AppManager::purpose` is the install screen's line for a package, as its
+Plugin declared it in `LuaPackage::interface`; this Plugin names no other
+Plugin's package and learns them all from the registry.
+
+The `notify` package is this Plugin's: `AppManager::add_package`
+registers it with the same bridge builtin apps' packages use, and its backend
+posts to `Notifications`.
 
 ## Lifecycle
 
@@ -264,14 +289,16 @@ tests, and work without a display.
 
 ## Fonts and icons
 
-The system fonts are font atlases the task reads from `/resources/fonts`
-(`SYSTEM_FONTS`) before the first view opens; `UiService::ready` waits for
-them. A view that ships no atlas for a font slot draws with the system font
-for it, so the system UI and the system apps share one set and ship none.
-`resources/fonts/build.ts` bakes them from Noto Sans SC: ASCII and every
-character in the sources `sources.txt` names at the text sizes, GB 2312's
-3,755 common characters at 16 px regular for prose no source names, a few
-headline characters at 24 px bold, and digits at 54 px bold.
+The system fonts are font atlases another Plugin ships, `system-fonts` on
+device Boards, because they are about 2.4 MB and a Board without a display
+needs none. That Plugin gives the `SystemFonts` capability a `FontAtlases`
+source while registering, and the task loads the atlases through it before
+the first view opens, never reading that Plugin's files; `UiService::ready`
+waits for them. A view that ships no atlas for a font slot draws with the
+system font for it, so the system UI and the system apps share one set and
+ship none. Without a Plugin that ships them, views draw only with their own
+atlases. The `system-fonts` Plugin's
+[`plugin.md`](../../system-fonts/docs/plugin.md) says what they hold.
 
 The system icon set is one font, `resources/icons/barracuda-icons.otf`,
 built from `resources/icons/svg` by `resources/icons/build.py`. Each icon is a
@@ -301,14 +328,14 @@ the person.
 | Screen        | Shows                                                         | Gets there                                  |
 | ------------- | ------------------------------------------------------------- | ------------------------------------------- |
 | Home          | the clock and status icons, the Agent in its state, and one card: offline, else a pending question, else what was just done | at boot, when no app is in the foreground, and swiping right from the launcher |
-| Apps          | the honeycomb launcher: builtin apps first, then installed apps, then Workspace apps offered for installation, dimmed; a dot on running ones | swiping left on home, or right inside an app at its first page |
+| Apps          | the honeycomb launcher: builtin apps first, then installed apps, then Workspace apps offered for installation, dimmed; a dot on running ones. A page holds the rows that fit the display (2-3-2 on the 360 px round panel); further pages are a swipe up away, with a dot per page | swiping left on home, or right inside an app at its first page |
 | Menu          | an app's name over the dimmed launcher: app info, and uninstall for installable apps | long-pressing an app in the launcher |
 | Running       | the app switcher: each running app, its state, and a close button | swiping left in the launcher             |
 | Notices       | the notification center: questions first with allow and deny, then notices newest first, dismiss, clear all | swiping down from the top edge, anywhere; swipe up to close |
 | Control       | tiles for Wi-Fi, microphone, mute, do not disturb, brightness, and the portal; the brightness slider; the portal's address | swiping up from the bottom edge, anywhere; swipe down to close |
 | Launching     | the app's icon and name while it starts                        | tapping an app                              |
 | Exited        | the app on the display ended unexpectedly; reopen or go home   | the foreground app failing or being cancelled |
-| Install       | the offered app and its permissions in plain words; install or cancel | tapping an offered app, or an `app.install` request |
+| Install       | the offered app and what it asks for in its Plugins' words; install or cancel, or, for an app this device cannot run, why, with install disabled | tapping an offered app, or an `app.install` request |
 | Info          | an app's version and kind; installable apps list their permissions | the menu's app info                    |
 
 Home shows the Agent's `AgentStatus`: standby; listening, with a level meter
@@ -332,6 +359,7 @@ edge, over 280 ms.
 | Swipe down from the top edge | anywhere          | notification center                    |
 | Swipe up from the bottom edge | anywhere         | control center                         |
 | Swipe left / right          | home, apps, running | move between them                     |
+| Swipe up / down             | apps               | the launcher's next / previous page    |
 | Swipe right                 | inside an app      | back (`AppManager::back`): the app's previous page, or the launcher from its first page |
 | Swipe right                 | menu, install, info, exited | cancel                         |
 
@@ -368,13 +396,17 @@ disturb, and the screen timeout (`SCREEN_TIMEOUTS`). The control center and
 builtin apps, such as Settings, change the same values.
 The system UI applies the brightness and the screen timeout to the display with
 `UiService::set_brightness` and `UiService::set_screen_timeout`, and saves the
-values after every change. The volume is kept for audio output; mute and the
-microphone are the person's choice for the Agent's voice.
+values after every change. It puts the volume and mute on the speaker with
+`Volume::set`: every app's sound is scaled by the volume, and mute
+silences it. The microphone is the person's choice for the Agent's voice.
+The control center shows the battery's charge from `Power::battery`
+on a Board whose power monitor is a fuel gauge, and nothing on others.
 
 ### The status bar
 
 The clock is UTC from the `time` Plugin's `UtcClock`, redrawn every 15
-seconds, and empty until the clock is synchronized. Do not disturb and
+seconds: from the Board's real-time clock at boot when it has one, then from
+network time, and empty on a Board without one until network time arrives. Do not disturb and
 offline show as icons beside it. The home screen's offline card follows
 `WifiControl::status`; host Boards whose network the host manages are always
 connected. The portal tile opens the Wi-Fi setup access point
@@ -385,12 +417,11 @@ connected. The portal tile opens the Wi-Fi setup access point
 The Plugin's build inputs live in `resources/` and their outputs, committed,
 in `filesystem/resources/` and `crates/appkit/tests/fixtures/`. Each task
 needs a PocketJS checkout (`POCKETJS_ROOT`) for the MicroTS compiler and font
-baker, and the fonts and examples Noto Sans SC (`CJK_FONT_DIR`):
+baker, and the examples Noto Sans SC (`CJK_FONT_DIR`):
 
 | Task | Builds |
 | --- | --- |
 | `icons` | the icon font and tables from `resources/icons/svg` |
-| `fonts` | the system fonts from Noto Sans SC, holding every character in the sources `resources/fonts/sources.txt` names and in `charset.txt` |
 | `view` | the system view from `resources/view/app.tsx` and its `app.d.ts` contract; it ships no atlases |
 | `examples` | the example installable apps in `resources/examples/` into `crates/appkit/tests/fixtures/` |
 

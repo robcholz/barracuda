@@ -59,14 +59,22 @@ pub(crate) struct TapResponse {
 #[serde(untagged)]
 pub(crate) enum Response<T> {
     Success(T),
-    Error { error: AppError },
+    Error {
+        error: AppError,
+        /// Why an incompatible app cannot run on this device.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 impl<T> From<Result<T, AppError>> for Response<T> {
     fn from(result: Result<T, AppError>) -> Self {
         match result {
             Ok(response) => Self::Success(response),
-            Err(error) => Self::Error { error },
+            Err(error) => Self::Error {
+                error,
+                reason: None,
+            },
         }
     }
 }
@@ -107,8 +115,19 @@ impl WorkflowActionHandler for InstallAction {
 
     fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
         Box::pin(async move {
-            let result = self.0.request_install(&request.id).await;
-            Ok(result.map(|requested| InstallResponse { requested }).into())
+            Ok(match self.0.request_install(&request.id).await {
+                Ok(requested) => Response::Success(InstallResponse { requested }),
+                Err(AppError::Incompatible) => Response::Error {
+                    error: AppError::Incompatible,
+                    reason: self
+                        .0
+                        .install_offer(&request.id)
+                        .await
+                        .ok()
+                        .and_then(|app| app.incompatible),
+                },
+                Err(error) => Err::<InstallResponse, _>(error).into(),
+            })
         })
     }
 }
@@ -218,6 +237,7 @@ mod tests {
 
     use super::*;
     use crate::bundle::{AppKind, AppLocation, InvalidApp};
+    use crate::device::ViewShape;
     use crate::port::AppState;
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
@@ -233,8 +253,17 @@ mod tests {
                 location: AppLocation::Installed,
                 kind: AppKind::Installable,
                 has_view: true,
+                api: 1,
+                requires: vec!["light".into()],
+                uses: vec!["http".into()],
                 permissions: vec!["gpio".into()],
+                boards: vec!["espressif-esp-vocat-v1-2".into()],
+                view_size: Some([360, 360]),
+                view_shape: Some(ViewShape::Round),
                 icon: Some("lamp".into()),
+                incompatible: Some("此设备没有灯光".into()),
+                digest: Some("0".repeat(64)),
+                signer: Some("0123456789abcdef".into()),
             },
             run_id: 3,
             state,
@@ -280,6 +309,10 @@ mod tests {
         for error in [AppError::NotFound, AppError::SystemApp] {
             check::<InstallAction>(Response::<InstallResponse>::from(Err(error)));
         }
+        check::<InstallAction>(Response::<InstallResponse>::Error {
+            error: AppError::Incompatible,
+            reason: Some("只适用于 espressif-esp-vocat-v1-2".into()),
+        });
         check::<HomeAction>(AppResponse { app: None });
         check::<HomeAction>(AppResponse {
             app: Some(running(AppState::Background)),

@@ -9,6 +9,7 @@ import {
   apps,
   battery,
   batteryFill,
+  blocked,
   brightness,
   brightnessFill,
   cancel,
@@ -25,6 +26,7 @@ import {
   control,
   deny,
   detail,
+  dots,
   dismiss,
   done,
   icon,
@@ -50,8 +52,10 @@ import {
   unread,
 } from "./app";
 
-// The device UI's system screens on the 360 px round display, laid out as the
-// design draws them. Icons are glyphs of the system icon font, one Text per
+// The device UI's system screens, laid out as the design draws them for the
+// 360 px round display and sized by the display they show on: full-screen
+// layers fill it, columns keep their margins, and the slides between screens
+// fade as they move so a larger display never shows a layer that left. Icons are glyphs of the system icon font, one Text per
 // color layer stacked in place. Colors are the portal's dark tokens:
 // background #09090B, muted #18181B, border #27272A, input #63636B, muted text
 // #A1A1AA, foreground #FAFAFA, signal #CCFF00, warning #ED8E04, destructive
@@ -63,8 +67,8 @@ export default function System() {
       <View
         class={
           screen() === 1 || screen() === 2 || screen() === 9
-            ? "absolute left-0 top-0 w-[360px] h-[360px] translate-x-[-360px] transition-transform duration-280 ease-out"
-            : "absolute left-0 top-0 w-[360px] h-[360px] translate-x-0 transition-transform duration-280 ease-out"
+            ? "absolute left-0 top-0 w-full h-full translate-x-[-360px] opacity-0 transition-all duration-280 ease-out"
+            : "absolute left-0 top-0 w-full h-full translate-x-0 opacity-100 transition-all duration-280 ease-out"
         }
       >
         <View class="absolute left-0 right-0 top-[16px] flex-row justify-center items-center gap-2">
@@ -77,11 +81,13 @@ export default function System() {
           </Show>
         </View>
         <Show when={unread()}>
-          <View class="absolute left-[176px] top-[6px] w-2 h-2 rounded-full bg-[#FAFAFA]" />
+          <View class="absolute left-0 right-0 top-[6px] flex-row justify-center">
+            <View class="w-2 h-2 rounded-full bg-[#FAFAFA]" />
+          </View>
         </Show>
 
         <Show when={agent() === 0}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px]">
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px]">{"\uE008"}</Text>
             <Text class="text-2xl font-bold text-[#FAFAFA]">待命</Text>
             <Text class="text-sm text-[#A1A1AA]">按住 Agent 键说话</Text>
@@ -102,7 +108,7 @@ export default function System() {
           </View>
         </Show>
         <Show when={agent() === 1}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px]">
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px]">{"\uE008"}</Text>
             <View class="flex-row items-end gap-1 mt-[4px] h-[20px]">
               <View class="w-1 h-[8px] rounded-full bg-[#CCFF00] animate-pulse" />
@@ -115,14 +121,14 @@ export default function System() {
           </View>
         </Show>
         <Show when={agent() === 2}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px]">
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px] animate-pulse">{"\uE008"}</Text>
             <Text class="text-base text-[#A1A1AA] mt-[6px]">{question()}</Text>
             <Text class="text-base text-[#FAFAFA]">思考中</Text>
           </View>
         </Show>
         <Show when={agent() === 3}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center pt-[6px] px-[56px]" focusable onPress={() => cardTap()}>
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px] px-[56px]" focusable onPress={() => cardTap()}>
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px]">{"\uE008"}</Text>
             <Text class="text-base text-[#A1A1AA] mt-[6px]">{question()}</Text>
             <Text class="text-base text-[#FAFAFA] text-center mt-[4px]">{answer()}</Text>
@@ -130,17 +136,17 @@ export default function System() {
         </Show>
       </View>
 
-      {/* The launcher, 2-3-2 rows of app tiles placed by the Plugin. */}
+      {/* The launcher: pages of 2-3-2 app tiles placed by the Plugin. */}
       <View
         class={
           screen() === 1 || screen() === 9
-            ? "absolute left-0 top-0 w-[360px] h-[360px] translate-x-0 transition-transform duration-280 ease-out"
+            ? "absolute left-0 top-0 w-full h-full translate-x-0 opacity-100 transition-all duration-280 ease-out"
             : screen() === 2
-              ? "absolute left-0 top-0 w-[360px] h-[360px] translate-x-[-360px] transition-transform duration-280 ease-out"
-              : "absolute left-0 top-0 w-[360px] h-[360px] translate-x-[360px] transition-transform duration-280 ease-out"
+              ? "absolute left-0 top-0 w-full h-full translate-x-[-360px] opacity-0 transition-all duration-280 ease-out"
+              : "absolute left-0 top-0 w-full h-full translate-x-[360px] opacity-0 transition-all duration-280 ease-out"
         }
       >
-        <View class={screen() === 9 ? "absolute left-0 top-0 w-[360px] h-[360px] opacity-20" : "absolute left-0 top-0 w-[360px] h-[360px]"}>
+        <View class={screen() === 9 ? "absolute left-0 top-0 w-full h-full opacity-20" : "absolute left-0 top-0 w-full h-full"}>
           <For each={apps()} by={(app) => app.id}>
             {(app) => (
               <View
@@ -166,9 +172,14 @@ export default function System() {
               </View>
             )}
           </For>
+          <View class="absolute right-[14px] top-0 bottom-0 flex-col justify-center gap-[6px]">
+            <For each={dots()} by={(dot) => dot.id}>
+              {(dot) => <View class={dot().on ? "w-[6px] h-[6px] rounded-full bg-[#CCFF00]" : "w-[6px] h-[6px] rounded-full bg-[#52525B]"} />}
+            </For>
+          </View>
         </View>
         <Show when={screen() === 9}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center gap-[10px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
             <Text class="text-lg font-bold text-[#FAFAFA] mb-[4px]">{title()}</Text>
             <View class="w-[200px] h-[44px] rounded-md border border-[#63636B] bg-[#09090B] items-center justify-center" focusable onPress={() => info()}>
               <Text class="text-base text-[#FAFAFA]">应用信息</Text>
@@ -186,17 +197,17 @@ export default function System() {
       <View
         class={
           screen() === 2
-            ? "absolute left-0 top-0 w-[360px] h-[360px] translate-x-0 transition-transform duration-280 ease-out"
-            : "absolute left-0 top-0 w-[360px] h-[360px] translate-x-[360px] transition-transform duration-280 ease-out"
+            ? "absolute left-0 top-0 w-full h-full translate-x-0 opacity-100 transition-all duration-280 ease-out"
+            : "absolute left-0 top-0 w-full h-full translate-x-[360px] opacity-0 transition-all duration-280 ease-out"
         }
       >
         <View class="absolute left-0 right-0 top-[16px] flex-row justify-center">
           <Text class="text-sm font-bold text-[#FAFAFA]">运行中</Text>
         </View>
-        <View class="absolute left-[38px] top-[56px] w-[284px] flex-col gap-2">
+        <View class="absolute left-[38px] right-[38px] top-[56px] flex-col gap-2">
           <For each={running()} by={(app) => app.id}>
             {(app) => (
-              <View class="w-[284px] h-[60px] rounded-lg border border-[#27272A] bg-[#09090B] flex-row items-center gap-[10px] pl-[16px] pr-[6px]">
+              <View class="w-full h-[60px] rounded-lg border border-[#27272A] bg-[#09090B] flex-row items-center gap-[10px] pl-[16px] pr-[6px]">
                 <View class="flex-1 flex-row items-center gap-[10px] h-[58px]" focusable onPress={() => switchTo(app().id)}>
                   <View class="w-[30px] h-[30px] rounded-[7px] bg-[#232327] items-center justify-center">
                     <View class="w-[16px] h-[22px] relative">
@@ -223,7 +234,7 @@ export default function System() {
             )}
           </For>
           <Show when={!anyRunning()}>
-            <View class="w-[284px] h-[200px] items-center justify-center">
+            <View class="w-full h-[200px] items-center justify-center">
               <Text class="text-sm text-[#A1A1AA]">没有运行中的应用</Text>
             </View>
           </Show>
@@ -232,7 +243,7 @@ export default function System() {
 
       {/* Launching, exited, install, and app info: one centered column. */}
       <Show when={screen() >= 5 && screen() <= 8}>
-        <View class="absolute left-0 top-0 w-[360px] h-[360px] bg-[#09090B] flex-col items-center justify-center">
+        <View class="absolute left-0 top-0 w-full h-full bg-[#09090B] flex-col items-center justify-center">
           <View
             class={
               screen() === 5
@@ -286,13 +297,18 @@ export default function System() {
               <View class="w-[100px] h-12 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => cancel()}>
                 <Text class="text-lg font-bold text-[#FAFAFA]">{secondary()}</Text>
               </View>
-              <Show when={primary() !== ""}>
+              <Show when={primary() !== "" && !blocked()}>
                 <View
                   class={screen() === 8 ? "w-[124px] h-12 rounded-md bg-[#FF7878] items-center justify-center" : "w-[124px] h-12 rounded-md bg-[#CCFF00] items-center justify-center"}
                   focusable
                   onPress={() => confirm()}
                 >
                   <Text class="text-lg font-bold text-[#09090B]">{primary()}</Text>
+                </View>
+              </Show>
+              <Show when={blocked()}>
+                <View class="w-[124px] h-12 rounded-md bg-[#27272A] items-center justify-center">
+                  <Text class="text-lg font-bold text-[#63636B]">{primary()}</Text>
                 </View>
               </Show>
             </View>
@@ -304,23 +320,23 @@ export default function System() {
       <View
         class={
           screen() === 3
-            ? "absolute left-0 top-0 w-[360px] h-[360px] bg-[#09090B] translate-y-0 transition-transform duration-280 ease-out"
-            : "absolute left-0 top-0 w-[360px] h-[360px] bg-[#09090B] translate-y-[-360px] transition-transform duration-280 ease-out"
+            ? "absolute left-0 top-0 w-full h-full bg-[#09090B] translate-y-0 opacity-100 transition-all duration-280 ease-out"
+            : "absolute left-0 top-0 w-full h-full bg-[#09090B] translate-y-[-360px] opacity-0 transition-all duration-280 ease-out"
         }
       >
         <View class="absolute left-0 right-0 top-[22px] flex-row justify-center">
           <Text class="text-lg font-bold text-[#FAFAFA]">通知</Text>
         </View>
-        <View class="absolute left-[54px] top-[58px] w-[252px] flex-col gap-2">
+        <View class="absolute left-[54px] right-[54px] top-[58px] flex-col gap-2">
           <Show when={done() !== ""}>
-            <View class="w-[252px] rounded-lg border border-[#27272A] flex-row items-center gap-2 px-[14px] py-[10px]">
+            <View class="w-full rounded-lg border border-[#27272A] flex-row items-center gap-2 px-[14px] py-[10px]">
               <Text class="text-base text-[#FAFAFA]">{"\uE020"}</Text>
               <Text class="text-base text-[#FAFAFA]">{done()}</Text>
             </View>
           </Show>
           <For each={notices()} by={(notice) => notice.id}>
             {(notice) => (
-              <View class="w-[252px] rounded-lg border border-[#27272A] flex-col">
+              <View class="w-full rounded-lg border border-[#27272A] flex-col">
                 <Show when={notice().confirm}>
                   <View class="flex-col px-[14px] pt-[12px] pb-[10px]">
                     <View class="flex-row items-center gap-2">
@@ -329,13 +345,13 @@ export default function System() {
                     </View>
                     <Text class="text-base text-[#A1A1AA] mt-[2px]">{notice().body}</Text>
                   </View>
-                  <View class="w-[250px] h-[1px] bg-[#27272A]" />
+                  <View class="w-full h-[1px] bg-[#27272A]" />
                   <View class="flex-row gap-2 px-[14px] py-[10px]">
                     <View class="w-[94px] h-10 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => deny(notice().id)}>
-                      <Text class="text-sm font-bold text-[#FAFAFA]">拒绝</Text>
+                      <Text class="text-sm font-bold text-[#FAFAFA]">{notice().deny}</Text>
                     </View>
                     <View class="w-[124px] h-10 rounded-md bg-[#CCFF00] items-center justify-center" focusable onPress={() => allow(notice().id)}>
-                      <Text class="text-sm font-bold text-[#09090B]">允许</Text>
+                      <Text class="text-sm font-bold text-[#09090B]">{notice().allow}</Text>
                     </View>
                   </View>
                 </Show>
@@ -369,22 +385,26 @@ export default function System() {
           </Show>
         </View>
         <Show when={!anyNotice() && done() === ""}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] items-center justify-center">
+          <View class="absolute left-0 top-0 w-full h-full items-center justify-center">
             <Text class="text-sm text-[#A1A1AA]">没有新通知</Text>
           </View>
         </Show>
-        <View class="absolute left-[162px] bottom-[12px] w-9 h-1 rounded-sm bg-[#52525B]" />
+        <View class="absolute left-0 right-0 bottom-[12px] flex-row justify-center">
+          <View class="w-9 h-1 rounded-sm bg-[#52525B]" />
+        </View>
       </View>
 
       {/* The control center, pulled up from the bottom edge. */}
       <View
         class={
           screen() === 4
-            ? "absolute left-0 top-0 w-[360px] h-[360px] bg-[#09090B] translate-y-0 transition-transform duration-280 ease-out"
-            : "absolute left-0 top-0 w-[360px] h-[360px] bg-[#09090B] translate-y-[360px] transition-transform duration-280 ease-out"
+            ? "absolute left-0 top-0 w-full h-full bg-[#09090B] translate-y-0 opacity-100 transition-all duration-280 ease-out"
+            : "absolute left-0 top-0 w-full h-full bg-[#09090B] translate-y-[360px] opacity-0 transition-all duration-280 ease-out"
         }
       >
-        <View class="absolute left-[162px] top-[12px] w-9 h-1 rounded-sm bg-[#52525B]" />
+        <View class="absolute left-0 right-0 top-[12px] flex-row justify-center">
+          <View class="w-9 h-1 rounded-sm bg-[#52525B]" />
+        </View>
         <Show when={control() === 0}>
           <Show when={battery() >= 0}>
             <View class="absolute left-0 right-0 top-[24px] flex-row justify-center items-center gap-2">
@@ -394,7 +414,7 @@ export default function System() {
               </View>
             </View>
           </Show>
-          <View class="absolute left-[48px] top-[86px] w-[264px] flex-row flex-wrap gap-2">
+          <View class="absolute left-[16px] right-[16px] top-[86px] flex-row flex-wrap justify-center gap-2">
             <For each={tiles()} by={(tile) => tile.id}>
               {(tile) => (
                 <View
@@ -417,7 +437,7 @@ export default function System() {
           </View>
         </Show>
         <Show when={control() === 1}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center gap-[10px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
             <Text class="text-lg font-bold text-[#FAFAFA]">亮度</Text>
             <View class="w-[64px] h-[160px] rounded-lg border border-[#63636B] overflow-hidden relative">
               <View class="absolute left-0 bottom-0 w-[62px] bg-[#FAFAFA]" style={{ height: brightnessFill() }} />
@@ -439,7 +459,7 @@ export default function System() {
           </View>
         </Show>
         <Show when={control() === 2}>
-          <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center gap-[10px]">
+          <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
             <Text class="text-lg font-bold text-[#FAFAFA]">门户已开启</Text>
             <View class="w-[128px] h-[128px] rounded-md bg-[#FAFAFA] items-center justify-center px-2">
               <Text class="text-sm text-[#09090B] text-center">{portal()}</Text>

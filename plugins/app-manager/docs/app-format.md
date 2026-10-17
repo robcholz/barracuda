@@ -5,8 +5,9 @@ container in this format from each of its locations, so a container written
 by the image build, the portal, or an Agent is the same thing; where it lives
 decides what kind of app it is (see
 [`device-ui.md`](../../../.agents/docs/device-ui.md)).
-`crates/plugin/resources/app-manifest.json` is the machine-readable form of the manifest
-rules below.
+`crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
+rules below. What an app may use, and how a device decides it fits, is the
+app API, in [`app-api.md`](app-api.md).
 
 ## Locations
 
@@ -14,7 +15,7 @@ rules below.
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
 | `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
 | `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
 
 A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
 own scope holds the other two; it only reads the Workspace. Builtin and
@@ -40,6 +41,46 @@ files it names, side by side:
 
 Other files are ignored. Directories whose names start with `.` are skipped.
 
+## Packages
+
+In the Workspace an app may also be offered as one file,
+`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
+signed. An ID offered both as a directory and as a package is invalid.
+`resources/pack-app.ts` writes packages:
+
+```sh
+bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
+bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built container
+bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
+```
+
+All numbers are little-endian:
+
+| Offset | Size | What |
+| --- | --- | --- |
+| 0 | 4 | `BAPP` |
+| 4 | 1 | format version, 1 |
+| 5 | 1 | file count, 1 to 64 |
+| 6 | 1 | flags: bit 0, a signature block follows |
+| 7 | 1 | 0 |
+| 8 | 4 | the content's length: this header, the directory, and the files |
+| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
+| … | | the files, each where its entry says |
+| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
+
+Listing reads only the header and the directory. When an install is asked
+for, the device hashes the content with SHA-256 and verifies the signature:
+a package whose signature fails is invalid, and the install screen shows a
+signed package's signer by the first bytes of its key's SHA-256, or says it
+is unsigned. The install takes exactly what the person was shown: the
+digest is pinned, and an offer that changed since answers `Changed`. A
+directory offer is pinned the same way, by the SHA-256 of its files.
+
+An app installed from a signed package keeps its signer's key beside its
+container, and from then on takes only packages that key signed: another
+key's package, an unsigned one, or a directory offers no update and says
+why. An app installed unsigned takes any update.
+
 ## Manifest
 
 ```json
@@ -48,13 +89,16 @@ Other files are ignored. Directories whose names start with `.` are skipped.
   "id": "counter",
   "name": "计数器",
   "version": "0.1.0",
+  "api": 1,
+  "requires": ["notify@2"],
   "entry": "main.lua",
   "view": {
     "program": "view.bvir",
     "styles": "styles.bin",
-    "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"]
-  },
-  "permissions": ["led_strip", "http"]
+    "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"],
+    "size": [360, 360],
+    "shape": "round"
+  }
 }
 ```
 
@@ -70,19 +114,35 @@ Other files are ignored. Directories whose names start with `.` are skipped.
 | `view.program` | with view | the BVIR view program                                      |
 | `view.styles`  | with view | the compiled stylesheet                                    |
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `permissions`  | no       | up to 16 distinct Lua package names besides `app`, such as `gpio` or `http`; defaults to none |
+| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
+| `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
+| `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
+| `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
+| `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
+| `permissions`  | no       | up to 16 other Lua packages: Board-specific ones and those that promise nothing |
+| `boards`       | with a Board-specific package | the Boards the app is for, by their stable name |
 
 Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
 `0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
 are rejected so a typo is reported, not ignored. The manifest is at most
 4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
 
-An installable app's runs can `require` only `app` and its `permissions`; a
-package it did not ask for is not there, and `require` fails. The system UI
-lists the permissions in plain words before the person installs the app. A
-system app may `require` every registered package, so its manifest needs
-none. A builtin app's own package, such as `settings`, is only for builtin
-apps: an installable app that asks for one is not valid.
+Each package is named once across `requires`, `uses`, and `permissions`:
+stable packages in the first two, everything else in the third; ambient
+packages, which every app has, in none. A Board-specific package without
+`boards` is not valid. Whether a package is stable, ambient, or
+Board-specific is what it declares on the device reading the manifest
+(`LuaPackage::interface`), so a package that device lacks is checked by the
+device where the app is installed.
+
+An installable app's runs can `require` the ambient packages and the packages
+its manifest names; a package it did not name is not there, and `require`
+fails. Before the person installs the app, the install screen lists what it
+asks for in the words each package's Plugin declares, or says why this
+device cannot run it ([`app-api.md`](app-api.md#install-check)). A system app
+may `require` every registered package, so its manifest needs none. A
+builtin app's own package, such as `settings`, is only for builtin apps: an
+installable app that asks for one is not valid.
 
 A container that breaks a rule is not launchable. `app.list` reports it under
 `invalid` with the location, directory name, and the problem, for example
@@ -136,6 +196,7 @@ Headless apps never enter the foreground. They run as services and only see
 | Call | Result |
 | ---- | ------ |
 | `app.id`, `app.name`, `app.version` | From the manifest. |
+| `app.device()` | The `app` package's version, the Board, display, touch, and the stable packages with their versions ([`app-api.md`](app-api.md#runs)). |
 | `app.view()` | The view, or `nil` for a headless app. |
 | `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
 | `app.exit()` | Ends the event loop. |
@@ -160,9 +221,10 @@ updates and restarts, and is never visible to other apps.
 
 ## Views
 
-`view.program`, `view.styles`, and `view.fonts` are build outputs: the MicroTS
-compiler turns `app.tsx` and its `app.d.ts` contract into View IR, `ui-link`
-links it into BVIR, and the font baker produces the atlases. An Agent that
+`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
+outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
+into View IR, `ui-link` links it into BVIR, and the font baker produces the
+atlases. A source manifest's `view` holds only the `shape`. An Agent that
 cannot run that toolchain writes a headless app, or copies the view files of
 an existing build next to its own entry program.
 
@@ -186,7 +248,7 @@ print("hello from " .. app.id .. ", run " .. runs)
 Offer it with `app.install` and `{"id":"hello"}`: the device shows the
 install screen, and once the person installs it, open it with `app.open` and
 `{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/plugin/tests/fixtures/` holds built
+`["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
 example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
-`air` (空气质量, no packages), `lamp` (灯带, `led_strip`), `camera` (相机,
-`camera`), and `counter` (计数器, no packages).
+`air` (空气质量, no packages), `lamp` (灯带, requires `light`), `camera`
+(相机, requires `camera`), and `counter` (计数器, no packages).

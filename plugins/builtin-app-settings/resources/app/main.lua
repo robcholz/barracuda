@@ -5,7 +5,10 @@ local settings = require("settings")
 local view = assert(app.view())
 
 local SETTINGS, WIFI, SOUND, APPS, STORAGE, ABOUT = 0, 1, 2, 3, 4, 5
-local BAR = 256 -- the width of a level bar, in pixels
+-- The width of a level bar, in pixels: the display less the page's 40 px
+-- margins and its rows' 12 px padding.
+local DISPLAY = app.device().display
+local BAR = (DISPLAY and DISPLAY.width or 360) - 2 * 40 - 2 * 12
 local TIMEOUTS = { 15, 30, 60, 300, 0 }
 local STATES = {
   running = "运行中",
@@ -104,8 +107,12 @@ end
 local function publish_storage()
   local storage = assert(settings.storage())
   set("used", storage.label .. " 已用")
-  set("usedNote", "媒体、应用与缓存")
-  local total = math.max(storage.used, 1)
+  if storage.total then
+    set("usedNote", storage.free_label .. " 可用，共 " .. storage.total_label)
+  else
+    set("usedNote", "媒体、应用与缓存")
+  end
+  local total = math.max(storage.total or storage.used, storage.used, 1)
   local fills = {}
   local rows = {}
   local glyphs = { image = "\u{E03C}", package = "\u{E060}", memory = "\u{E050}" }
@@ -126,7 +133,7 @@ local function publish_about()
   set("rows", {
     { id = 1, label = "系统版本", value = device.version, glyph = "\u{E040}", mono = true },
     { id = 2, label = "芯片", value = device.chip, glyph = "\u{E050}", mono = true },
-    { id = 3, label = "存储", value = storage.label .. " 已用", glyph = "\u{E034}", mono = false },
+    { id = 3, label = "存储", value = storage.free_label and (storage.free_label .. " 可用") or (storage.label .. " 已用"), glyph = "\u{E034}", mono = false },
   })
 end
 

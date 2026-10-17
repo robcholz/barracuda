@@ -422,4 +422,25 @@ mod tests {
             json!({"state": "off", "label": {"zh": "未连接", "en": "Not connected"}})
         );
     }
+
+    #[test]
+    fn only_the_running_setup_hotspot_is_the_setup_access_point() {
+        use core::net::{IpAddr, Ipv4Addr};
+        let at = |access_point| {
+            WifiStatus::from_parts(
+                WifiCapabilities::managed(),
+                StationState::Disconnected,
+                access_point,
+            )
+        };
+        let running = at(AccessPointState::Started {
+            ssid: String::from("Barracuda Setup"),
+        });
+        assert!(running.is_setup_access_point(IpAddr::V4(super::SETUP_AP_ADDRESS)));
+        assert!(!running.is_setup_access_point(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))));
+        assert!(
+            !at(AccessPointState::Stopped)
+                .is_setup_access_point(IpAddr::V4(super::SETUP_AP_ADDRESS))
+        );
+    }
 }

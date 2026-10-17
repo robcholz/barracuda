@@ -11,6 +11,10 @@ use serde::Serialize;
 pub const MAX_NOTICES: usize = 8;
 /// The longest title or body kept, in characters; longer text is cut.
 pub const MAX_NOTICE_CHARS: usize = 64;
+/// The longest answer label kept, in characters; longer labels are cut.
+pub const MAX_LABEL_CHARS: usize = 6;
+/// What a question's buttons say unless its asker names them.
+pub const DEFAULT_LABELS: (&str, &str) = ("允许", "拒绝");
 /// How often an unanswered question is checked for an answer.
 const ANSWER_POLL: Duration = Duration::from_millis(100);
 
@@ -28,6 +32,12 @@ pub struct Notice {
     pub icon: Option<String>,
     /// Whether it asks the person to allow or deny something.
     pub question: bool,
+    /// What a question's allow button says; empty for other notices.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub allow: String,
+    /// What a question's deny button says; empty for other notices.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub deny: String,
 }
 
 /// The notification center's notices; published by the `app-manager` Plugin.
@@ -65,7 +75,13 @@ impl Notifications {
         }
     }
 
-    fn add(&self, title: &str, body: &str, icon: Option<&str>, question: bool) -> u32 {
+    fn add(
+        &self,
+        title: &str,
+        body: &str,
+        icon: Option<&str>,
+        labels: Option<(&str, &str)>,
+    ) -> u32 {
         let id = self.next_id.get();
         self.next_id.set(id.wrapping_add(1).max(1));
         let mut notices = self.notices.borrow_mut();
@@ -78,7 +94,9 @@ impl Notifications {
             title: cut(title),
             body: cut(body),
             icon: icon.map(String::from),
-            question,
+            question: labels.is_some(),
+            allow: labels.map_or_else(String::new, |(allow, _)| label(allow, DEFAULT_LABELS.0)),
+            deny: labels.map_or_else(String::new, |(_, deny)| label(deny, DEFAULT_LABELS.1)),
         });
         drop(notices);
         self.unread.set(true);
@@ -90,14 +108,21 @@ impl Notifications {
     /// [`MAX_NOTICE_CHARS`] is cut; beyond [`MAX_NOTICES`], the oldest notice
     /// is dropped. `icon` names a system icon.
     pub fn post(&self, title: &str, body: &str, icon: Option<&str>) -> u32 {
-        self.add(title, body, icon, false)
+        self.add(title, body, icon, None)
     }
 
     /// Asks the person to allow or deny what `title` describes, on a card
     /// listed before every other notice, and returns its ID for
     /// [`Notifications::answer`].
     pub fn ask(&self, title: &str, body: &str) -> u32 {
-        let id = self.add(title, body, None, true);
+        self.ask_with(title, body, DEFAULT_LABELS)
+    }
+
+    /// Asks as [`Notifications::ask`] does, with buttons that say `labels`
+    /// (allow, deny). A label longer than [`MAX_LABEL_CHARS`] is cut; an
+    /// empty one says what the default does.
+    pub fn ask_with(&self, title: &str, body: &str, labels: (&str, &str)) -> u32 {
+        let id = self.add(title, body, None, Some(labels));
         self.answers.borrow_mut().insert(id, None);
         id
     }
@@ -205,4 +230,13 @@ impl Notifications {
 
 fn cut(text: &str) -> String {
     text.chars().take(MAX_NOTICE_CHARS).collect()
+}
+
+fn label(text: &str, default: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        String::from(default)
+    } else {
+        text.chars().take(MAX_LABEL_CHARS).collect()
+    }
 }

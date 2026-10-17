@@ -31,14 +31,64 @@
         "has_view": {
           "type": "boolean"
         },
+        "api": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "uses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "permissions": {
           "type": "array",
           "items": {
             "type": "string"
           }
         },
+        "boards": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "view_size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "view_shape": {
+          "enum": [
+            "round",
+            "rect"
+          ]
+        },
         "icon": {
           "type": "string"
+        },
+        "incompatible": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "signer": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 16
         }
       },
       "required": [
@@ -48,7 +98,11 @@
         "location",
         "kind",
         "has_view",
-        "permissions"
+        "api",
+        "requires",
+        "uses",
+        "permissions",
+        "boards"
       ],
       "additionalProperties": false
     },
@@ -99,8 +153,12 @@
             "view_rejected",
             "no_display",
             "runtime_unavailable",
-            "busy"
+            "busy",
+            "incompatible"
           ]
+        },
+        "reason": {
+          "type": "string"
         }
       },
       "required": [

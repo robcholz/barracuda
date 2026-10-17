@@ -30,7 +30,8 @@ use workflow::AgentWorkflowAdapter;
 pub use barracuda_agent_runtime::{
     sniff_media_type, stream, tools, AgentRuntime, AgentToolRegistry, Attachment, IterationEvent,
     MediaKind, Message, PermissionLevel, SessionDeleteError, SessionEvent, SessionId, SessionInfo,
-    SessionPersistence, SessionRenameError, TurnEvent, WallClock, SNIFF_BYTES,
+    SessionPersistence, SessionRenameError, SessionTranscriptError, TranscriptEntry,
+    TranscriptRole, TurnEvent, WallClock, SNIFF_BYTES,
 };
 pub use model_api_http::{SET_API_PATH, STATUS_API_PATH};
 

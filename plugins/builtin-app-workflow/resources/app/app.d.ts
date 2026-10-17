@@ -7,3 +7,5 @@ export interface Flow { id: i32; name: string; detail: string; glyph: string; on
 export declare const clock: Accessor<string>;
 export declare const flows: Accessor<Flow[]>;
 export declare const empty: Accessor<boolean>;
+/** Turns Workflow row `id` on or off. */
+export declare function toggle(id: i32): void;

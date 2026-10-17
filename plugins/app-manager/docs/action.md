@@ -5,18 +5,23 @@ The `app-manager` Plugin registers `app.list`, `app.open`, `app.install`, `app.h
 `app.install`, which only asks, they are the same operations the system UI
 performs; see [the lifecycle](plugin.md#lifecycle).
 Their request and response contracts live at `schemas/action/<address>/`.
-Rejections return `{"error":"<code>"}` so a Workflow can branch on them.
+Rejections return `{"error":"<code>"}` so a Workflow can branch on them;
+`incompatible` also carries the `reason` the device shows.
 
 A running app is reported as:
 
 ```json
 {"app":{"id":"counter","name":"计数器","version":"0.1.0","location":"installed",
-        "kind":"installable","has_view":true,"permissions":[]},
+        "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
+        "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
  "run_id":1,"state":"active"}
 ```
 
 `kind` is `system` for an app in the image and `installable` for one the
-person installed; `permissions` are the Lua packages its manifest asks for.
+person installed. `api`, `requires`, `uses`, `permissions`, `boards`,
+`view_size`, and `view_shape` are from its manifest, as
+[`app-api.md`](app-api.md) explains; `incompatible`, present only for an
+installable app this device cannot run, says why.
 
 `state` is `active`, `inactive`, `background`, `suspended`, `running` (a
 headless app), or `terminating`.
@@ -31,7 +36,9 @@ the reason, so its author can fix it. `location` is `builtin`, `installed`, or
 {"apps":[{"id":"settings","name":"设置","version":"0.1.0","location":"builtin",
           "kind":"system","has_view":true,"permissions":[]}],
  "installable":[{"id":"lamp","name":"灯带","version":"1","location":"workspace",
-                 "kind":"installable","has_view":true,"permissions":["led_strip"]}],
+                 "kind":"installable","has_view":true,"api":1,"requires":["light"],
+                 "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
+                 "view_shape":"round","incompatible":"此设备没有灯光"}],
  "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
 ```
 
@@ -39,15 +46,24 @@ the reason, so its author can fix it. `location` is `builtin`, `installed`, or
 returns the running app once its program has started, and fails with
 `not_found`, `not_installed` (the app is only offered in the Workspace),
 `invalid_bundle`, `storage`, `view_rejected`, `no_display` (the app has a
-view and the Board no display), `runtime_unavailable`, or
-`busy`.
+view and the Board no display), `incompatible` (the installed app no longer
+fits this device), `runtime_unavailable`, or `busy`.
 
 `app.install` takes `{"id":"lamp"}` and asks the system UI to offer that
 Workspace container for installation. It returns at once with
 `{"requested": <app>}`; the person installs or declines on the device, and
 `app.list` shows the outcome. A newer request replaces one still unanswered.
-It fails with `not_found`, `system_app` (the ID belongs to a system app),
-`invalid_bundle`, or `storage`.
+The requested app also carries `digest`, the SHA-256 of its files that the
+install is pinned to, and `signer`, the short name of the key that signed a
+`.bapp` package ([`app-format.md`](app-format.md#packages)). It fails with
+`not_found`, `system_app` (the ID belongs to a system app), `invalid_bundle`
+(also a package whose signature fails), `storage`, or `incompatible` with
+the reason this device cannot run the app, or that an app installed from a
+signed package takes updates only from its signer:
+
+```json
+{"error":"incompatible","reason":"此设备没有灯光"}
+```
 
 `app.home` takes `{}` and returns `{"app": <running app or null>}`: the app
 that moved to the background.

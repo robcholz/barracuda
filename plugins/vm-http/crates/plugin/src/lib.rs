@@ -196,6 +196,13 @@ impl LuaPackage for HttpPackage {
         "http"
     }
 
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 1,
+            purpose: "联网收发数据",
+        })
+    }
+
     fn revoke(&self) {
         self.state.revoke();
     }

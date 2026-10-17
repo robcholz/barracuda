@@ -719,6 +719,8 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
+ "barracuda-power-plugin",
+ "barracuda-sound-plugin",
  "barracuda-time-plugin",
  "barracuda-uikit",
  "barracuda-vfs",
@@ -742,6 +744,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-app-portal-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-plugin",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-appkit"
 version = "0.1.0"
 dependencies = [
@@ -760,14 +777,17 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "futures-util",
  "json-validator",
  "log",
+ "p256",
  "portable-atomic",
  "portable-atomic-util",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -776,7 +796,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
- "barracuda-plugin-build",
+ "barracuda-sound-plugin",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
@@ -2213,6 +2233,7 @@ dependencies = [
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
  "barracuda-app-manager-plugin",
+ "barracuda-app-portal-plugin",
  "barracuda-audio-plugin",
  "barracuda-builtin-app-files-plugin",
  "barracuda-builtin-app-sessions-plugin",
@@ -2237,9 +2258,12 @@ dependencies = [
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-power-monitor-plugin",
+ "barracuda-power-plugin",
  "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
+ "barracuda-sound-plugin",
  "barracuda-spi-plugin",
+ "barracuda-system-fonts-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
  "barracuda-vm-agent-plugin",
@@ -2278,11 +2302,22 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
- "barracuda-plugin-build",
+ "barracuda-power-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
  "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-power-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
  "portable-atomic-util",
 ]
 
@@ -2369,6 +2404,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-sound-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-spi-plugin"
 version = "0.1.0"
 dependencies = [
@@ -2434,6 +2482,16 @@ dependencies = [
  "barracuda-target",
  "embassy-executor",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-system-fonts-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "log",
 ]
 
 [[package]]
@@ -2520,7 +2578,9 @@ dependencies = [
 name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",

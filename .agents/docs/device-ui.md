@@ -12,7 +12,7 @@ the Plugins' docs.
 | What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container the person installed |
 | Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | the `app-manager` Plugin's `/media/apps/<id>` |
 | Runs as | the `app-manager` task | a Lua run with a MicroTS view, under the app lifecycle | the same |
-| Lua packages | none | every registered package, its own package included | `app` and the permissions it asked for at install; never a builtin app's package |
+| Lua packages | none | every registered package, its own package included | the ambient packages and those its manifest names; never a builtin app's package |
 | Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
 | Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | 会话 (Sessions), 工作流 (Workflows), 文件 (Files), 设置 (Settings) | 空气质量, 灯带, 相机, 计数器 |
@@ -23,12 +23,14 @@ the Plugins' docs.
 | --- | --- |
 | `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
 | `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
+| `system-fonts` | the system fonts every view on a display draws with |
 
 The app kit needs no display. On a Board without one, the `app-manager`
 Plugin runs no UI kit and no system UI: it is an app manager for headless
 apps, and apps with views answer `no_display`. A device Board enables
-`app-manager` with the builtin apps it ships; a Board leaves a system app out
-by not enabling its Plugin.
+`app-manager` with the builtin apps it ships and `system-fonts`; a Board
+leaves a system app out by not enabling its Plugin, and a Board without a
+display enables neither the system apps nor `system-fonts`.
 
 ## Deciding the layer
 
@@ -52,8 +54,9 @@ the portal, an Agent, or another Plugin, and the person installs it.
 ## The system
 
 The `app-manager` Plugin's system UI is the system. It is the only caller
-that switches, installs, and uninstalls apps for the person and the only
-owner of the system gestures. Its view sits on the system layer, above the
+that switches and uninstalls apps for the person, the only owner of the
+system gestures, and, with the `app-portal` Plugin's portal page on the
+device's setup hotspot, the only way the person installs apps. Its view sits on the system layer, above the
 app layer: while an app is in the foreground and no system screen covers it,
 the app's view shows; any system screen covers the app and stops its input
 (`AppManager::set_interactive`) until the screen closes.
@@ -101,20 +104,34 @@ no atlases of their own.
 ## Installable apps
 
 An installable app starts as a container offered in the Workspace under
-`/workspace/media/apps/<id>`; it is not launchable there. Its manifest lists
-`permissions`: the Lua packages it wants besides `app`. The system's install
-screen shows them in plain words; when the person installs it, the
+`/workspace/media/apps/<id>`; it is not launchable there. It is written
+against the app API
+([`app-api.md`](../../plugins/app-manager/docs/app-api.md)): its manifest
+names the `app` package version, the stable packages it requires or uses
+with the least version it needs, other packages it asks for, and the Boards
+it is for when it talks to their hardware. The
+system checks it against the device; one that cannot run here shows why and
+cannot be installed. Otherwise the install screen lists what it asks for in
+the words each package's Plugin declares; when the person installs it, the
 `app-manager` Plugin copies the container into its private `/media/apps/<id>`,
-and from then on every run of it may `require` only `app` and those packages.
+and from then on every run of it may `require` only the ambient packages and
+those it named.
 A Workflow or Agent asks for an install with `app.install`; only the person
-completes it. Uninstalling deletes the container and the app's data; the
+completes it, on the device's install screen or, on the portal's 应用 page,
+from a phone on the device's setup hotspot, which is how a Board without a
+display installs apps. Either way the install takes exactly what the person
+was shown: the offer's digest is pinned when the install is asked for. An
+offer may be a signed `.bapp` package; an app installed from one takes
+updates only from the same signer. Uninstalling deletes the container and the app's data; the
 Workspace offer stays until its author removes it.
 
 ## Fonts
 
-The `app-manager` Plugin bakes the system fonts into its `/resources/fonts`:
-Noto Sans SC at the sizes the system view and the system apps use, with every
-character in its own sources and in its `charset.txt`, and the system icon
+The `system-fonts` Plugin bakes the system fonts into its `/resources/fonts`
+and hands them to the UI kit with `app-manager`'s `SystemFonts`; a device
+Board enables it, and a Board without a display leaves its 2.4 MB out. They
+are Noto Sans SC at the sizes the system view and the system apps use, with
+the characters in its own `charset.txt`, and the system icon
 font's glyphs at the sizes icons are drawn at. The 16 px regular slot is the
 prose slot: it also holds GB 2312's 3,755 common characters, so text no
 source names, such as an Agent's answer, a notice, or a conversation's title,

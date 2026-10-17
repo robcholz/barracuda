@@ -197,6 +197,38 @@ impl Metadata {
     }
 }
 
+/// How much a mounted filesystem holds and how much of it is free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FsUsage {
+    total: u64,
+    free: u64,
+}
+
+impl FsUsage {
+    /// Creates usage for a filesystem of `total` bytes with `free` bytes free.
+    pub const fn new(total: u64, free: u64) -> Self {
+        Self {
+            total,
+            free: if free < total { free } else { total },
+        }
+    }
+
+    /// Returns the filesystem's size in bytes.
+    pub const fn total(self) -> u64 {
+        self.total
+    }
+
+    /// Returns the bytes new files can still take.
+    pub const fn free(self) -> u64 {
+        self.free
+    }
+
+    /// Returns the bytes in use.
+    pub const fn used(self) -> u64 {
+        self.total - self.free
+    }
+}
+
 /// One immediate child returned by [`ReadDir`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirEntry {

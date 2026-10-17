@@ -19,7 +19,7 @@ use barracuda_agent::SharedApiManager;
 use barracuda_agent_session::{
     OpenSessionError, SessionClock, SessionControl, SessionCreateError, SessionDeleteError,
     SessionId, SessionInfo, SessionManager, SessionManagerInitError, SessionPersistence,
-    SessionRenameError, SessionStream,
+    SessionRenameError, SessionStream, SessionTranscriptError, TranscriptEntry,
 };
 
 use crate::service::RuntimeBuildError;
@@ -43,6 +43,12 @@ pub(super) enum RuntimeCommand {
     OpenSession {
         session: SessionId,
         ack: oneshot::Sender<Result<(SessionControl, SessionStream), OpenSessionError>>,
+    },
+    SessionTranscript {
+        session: SessionId,
+        limit: usize,
+        max_chars: usize,
+        ack: oneshot::Sender<Result<Vec<TranscriptEntry>, SessionTranscriptError>>,
     },
     DeleteSession {
         session: SessionId,
@@ -148,6 +154,14 @@ where
             Some(RuntimeCommand::OpenSession { session, ack }) => {
                 let _ = ack.send(self.session_manager.open(session));
             }
+            Some(RuntimeCommand::SessionTranscript {
+                session,
+                limit,
+                max_chars,
+                ack,
+            }) => {
+                let _ = ack.send(self.session_manager.transcript(session, limit, max_chars));
+            }
             Some(RuntimeCommand::DeleteSession { session, ack }) => {
                 self.session_manager.delete(session, ack);
             }
@@ -175,6 +189,9 @@ where
                 }
                 RuntimeCommand::OpenSession { ack, .. } => {
                     let _ = ack.send(Err(OpenSessionError::WorkerStopped));
+                }
+                RuntimeCommand::SessionTranscript { ack, .. } => {
+                    let _ = ack.send(Err(SessionTranscriptError::WorkerStopped));
                 }
                 RuntimeCommand::DeleteSession { ack, .. } => {
                     let _ = ack.send(Err(SessionDeleteError::WorkerStopped));

@@ -439,6 +439,14 @@ A Lua package beyond the VM's built-ins registers in the
 Dropping the registration revokes the package's callbacks and invalidates its
 handles.
 
+A package says what it promises with `LuaPackage::interface`: ambient (it
+gives code nothing it could misuse), stable with a version that counts the
+additions to its functions and a line saying what code may do with it, or
+Board-specific; `None` promises nothing. A Plugin that decides which code gets
+which packages reads these from the registry and names no package it does not
+register itself. A package that needs a Board device promises nothing while
+the Board lacks it.
+
 Every run's Lua heap holds the built-ins, every registered package, and the
 script. The VM owns that budget: it holds at most `MAX_LUA_PACKAGES` packages,
 and proves the built-ins, that many packages keeping

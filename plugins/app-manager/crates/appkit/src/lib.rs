@@ -13,8 +13,10 @@
 
 extern crate alloc;
 
+mod bapp;
 mod builtin;
 mod bundle;
+mod device;
 mod manager;
 mod package;
 mod port;
@@ -22,6 +24,7 @@ mod storage;
 mod view;
 mod workflow;
 
+pub use bapp::{MAX_PACKAGE_FILES, PACKAGE_EXTENSION, PUBLIC_KEY_BYTES, Seal};
 /// How an app run ended, as [`AppExit::outcome`] reports it.
 pub use barracuda_vm_plugin::VmRunOutcome;
 pub use builtin::{
@@ -32,6 +35,7 @@ pub use bundle::{
     FORMAT_VERSION, INSTALLED_APPS, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES,
     MAX_VIEW_BYTES, WORKSPACE_APPS,
 };
+pub use device::{API_LEVEL, Device, ViewShape, requirement};
 pub use manager::{
     AppError, AppExit, AppManager, BuiltinError, GRACE, MAX_APP_RUNS, MAX_EXIT_OUTPUT_LINES,
     MAX_SUSPENDED, RunningApp,

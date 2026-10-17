@@ -12,7 +12,7 @@ use std::time::Duration;
 use barracuda_app_manager_plugin::{
     AgentState, AgentStatus, Notifications, Preferences, Screen, Services, SystemUi,
 };
-use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, WIFI_SETTINGS};
+use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, Device, WIFI_SETTINGS};
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::HostWifiDevice;
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
@@ -20,15 +20,21 @@ use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext,
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
+use barracuda_power_plugin::{Power, PowerPlugin};
+use barracuda_sound_plugin::{SoundPlugin, Volume};
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_uikit::{
-    DEFAULT_VIEWPORT, Direction, Edge, Gesture, UiAssets, UiService, ViewCall, ViewValue,
+    DEFAULT_VIEWPORT, Direction, DisplayInfo, Edge, Gesture, UiAssets, UiService, ViewCall,
+    ViewValue,
 };
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
-use barracuda_vm_plugin::{LuaPackageRegistry, SeedSource, Vm};
+use barracuda_vm_plugin::{
+    Lua, LuaPackage, LuaPackageRegistry, Package, PackageInterface, SeedSource, Vm, VmPlugin,
+};
 use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
+use barracuda_workflow_plugin::WorkflowPlugin;
 use embassy_executor::{Executor, Spawner};
 use embassy_time::{Instant, Timer};
 
@@ -85,17 +91,39 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     )
     .await;
     put(&builtin, "/resources/app/main.lua", b"").await;
-    // An offered app, and one that asks for packages.
+    // An offered app, one that asks for capabilities, and one this device
+    // lacks a capability for.
     for (name, bytes) in COUNTER {
         put(&fs, &format!("/workspace/media/apps/counter/{name}"), bytes).await;
     }
     put(
         &fs,
         "/workspace/media/apps/lamp/app.json",
-        br#"{"format":1,"id":"lamp","name":"Lamp","version":"1","permissions":["led_strip","http"]}"#,
+        br#"{"format":1,"id":"lamp","name":"Lamp","version":"1","requires":["light"],"uses":["http"]}"#,
     )
     .await;
     put(&fs, "/workspace/media/apps/lamp/main.lua", b"").await;
+    put(
+        &fs,
+        "/workspace/media/apps/photo/app.json",
+        br#"{"format":1,"id":"photo","name":"Photo","version":"1","requires":["camera"]}"#,
+    )
+    .await;
+    put(&fs, "/workspace/media/apps/photo/main.lua", b"").await;
+    // More offers than one launcher page holds.
+    for id in ["x1", "x2", "x3"] {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}/app.json"),
+            format!(
+                r#"{{"format":1,"id":"{id}","name":"{}","version":"1"}}"#,
+                id.to_uppercase()
+            )
+            .as_bytes(),
+        )
+        .await;
+        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), b"").await;
+    }
     // An installed app that fails once it is on the display.
     for (name, bytes) in COUNTER
         .iter()
@@ -120,12 +148,15 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     (fs, builtin)
 }
 
-/// Takes the Wi-Fi capability from the real Plugin on a host Platform.
-struct Observer(Rc<RefCell<Option<Rc<WifiControl>>>>);
+/// The capabilities the system UI takes from other Plugins.
+type Taken = (Rc<WifiControl>, Rc<Power>, Rc<Volume>);
+
+/// Takes the capabilities from the real Plugins on a host Platform.
+struct Observer(Rc<RefCell<Option<Taken>>>);
 
 impl PluginDeclaration for Observer {
     const ID: &'static str = "observer";
-    const DEPENDS_ON: &'static [&'static str] = &["wifi"];
+    const DEPENDS_ON: &'static [&'static str] = &["wifi", "power", "sound"];
 }
 
 impl Plugin for Observer {
@@ -133,13 +164,16 @@ impl Plugin for Observer {
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()> {
-        self.0
-            .replace(Some(context.require::<WifiControl>(Self::DEPENDS_ON[0])?));
+        self.0.replace(Some((
+            context.require::<WifiControl>("wifi")?,
+            context.require::<Power>("power")?,
+            context.require::<Volume>("sound")?,
+        )));
         Ok(())
     }
 }
 
-async fn wifi() -> Rc<WifiControl> {
+async fn taken() -> Taken {
     let stack = never_embassy_stack();
     let identity = TargetIdentity::new(
         PlatformInfo::new("test", "test", "test-arch", "hosted"),
@@ -174,6 +208,10 @@ async fn wifi() -> Rc<WifiControl> {
         .register(CaptivePortalPlugin::new(&mut context))
         .unwrap();
     manager.register(WifiPlugin::new(&mut context)).unwrap();
+    manager.register(WorkflowPlugin::new(&mut context)).unwrap();
+    manager.register(VmPlugin::new(&mut context)).unwrap();
+    manager.register(PowerPlugin::new(&mut context)).unwrap();
+    manager.register(SoundPlugin::new(&mut context)).unwrap();
     let observed = Rc::new(RefCell::new(None));
     manager.register(Observer(Rc::clone(&observed))).unwrap();
     // The manager owns the Plugins' registrations; keep it for the test.
@@ -243,14 +281,51 @@ fn state_of(apps: &AppManager, id: &str) -> Option<AppState> {
         .map(|app| app.state)
 }
 
+/// The `light` capability, without a light behind it.
+struct Light;
+
+impl Package for Light {
+    fn install(&self, lua: &mut Lua) -> barracuda_vm_plugin::Result<()> {
+        lua.register_lib("light", |_package| Ok(()))
+    }
+}
+
+impl LuaPackage for Light {
+    fn name(&self) -> &'static str {
+        "light"
+    }
+
+    fn interface(&self) -> Option<PackageInterface> {
+        Some(PackageInterface::Stable {
+            version: 1,
+            purpose: "控制灯光",
+        })
+    }
+}
+
 async fn scenario(spawner: Spawner) {
     let packages = LuaPackageRegistry::new();
+    let _light = packages.register(Light).unwrap();
     let ui = Rc::new(UiService::new(DEFAULT_VIEWPORT));
     let vm = Rc::new(Vm::new(packages.clone(), SeedSource::unavailable()).unwrap());
     vm.start(spawner).unwrap();
     let (filesystem, builtin) = app_filesystem().await;
-    let (apps, _registration) =
-        AppManager::register(filesystem, vm, Some(Rc::clone(&ui)), &packages).unwrap();
+    let (apps, _registration) = AppManager::register(
+        filesystem,
+        vm,
+        Some(Rc::clone(&ui)),
+        Device {
+            board: "test-board",
+            display: Some(DisplayInfo {
+                width: 360,
+                height: 360,
+                round: true,
+            }),
+            touch: true,
+        },
+        &packages,
+    )
+    .unwrap();
     apps.add_builtin(BuiltinApp {
         id: "system",
         filesystem: builtin,
@@ -264,6 +339,9 @@ async fn scenario(spawner: Spawner) {
     updater.synchronize(SyncSample::new(1_791_888_120_000, Instant::now()));
     let notices = Rc::new(Notifications::new());
     let agent = Rc::new(AgentStatus::new());
+    let (wifi, power, audio) = taken().await;
+    // The host Board has no fuel gauge: the control center shows no battery.
+    assert_eq!(power.battery(), None);
     let mut system = SystemUi::new(
         Services {
             ui: Rc::clone(&ui),
@@ -272,7 +350,9 @@ async fn scenario(spawner: Spawner) {
             agent: Rc::clone(&agent),
             preferences: Rc::new(Preferences::default()),
             clock,
-            wifi: wifi().await,
+            wifi,
+            power,
+            audio,
         },
         &system_view(),
     )
@@ -289,9 +369,24 @@ async fn scenario(spawner: Spawner) {
     system.gesture(swipe(Direction::Left, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
     let launcher = texts(&system);
-    for name in ["Crash", "System", "计数器", "Lamp"] {
+    for name in ["Crash", "System", "计数器", "Lamp", "Photo"] {
         assert!(launcher.contains(name), "{launcher}");
     }
+    // The round display's page holds 2-3-2 tiles; the eighth app is on the
+    // next page, an upward swipe away.
+    assert!(!launcher.contains("X3"), "{launcher}");
+    system.gesture(swipe(Direction::Up, None)).await;
+    let second = texts(&system);
+    assert!(
+        second.contains("X3") && !second.contains("Photo"),
+        "{second}"
+    );
+    let (_, x3) = icon(&system, "X3");
+    assert_eq!(x3, 7);
+    system.gesture(swipe(Direction::Up, None)).await;
+    assert!(texts(&system).contains("X3"), "the last page stays");
+    system.gesture(swipe(Direction::Down, None)).await;
+    assert!(texts(&system).contains("Photo"));
 
     // A long press opens a system app's menu; its info offers no
     // uninstall.
@@ -318,12 +413,33 @@ async fn scenario(spawner: Spawner) {
     let install = texts(&system);
     assert!(
         install.contains("安装“Lamp”？")
-            && install.contains("控制灯带")
-            && install.contains("联网收发数据"),
+            && install.contains("控制灯光")
+            && install.contains("使用 http（可选）"),
         "{install}"
     );
     system.call(press("cancel", None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
+
+    // An app this device cannot run says why and cannot be installed.
+    let (_, photo) = icon(&system, "Photo");
+    system.call(press("openApp", Some(photo))).await;
+    assert_eq!(system.screen(), Some(Screen::Install));
+    let install = texts(&system);
+    assert!(
+        install.contains("无法安装“Photo”") && install.contains("此设备没有 camera"),
+        "{install}"
+    );
+    system.call(press("confirm", None)).await;
+    assert_eq!(system.screen(), Some(Screen::Install));
+    system.call(press("cancel", None)).await;
+    assert_eq!(system.screen(), Some(Screen::Apps));
+    assert!(
+        apps.list()
+            .await
+            .installable
+            .iter()
+            .any(|app| app.id == "photo")
+    );
 
     // Installing the counter, then opening it: the app's view shows.
     let (_, counter) = icon(&system, "计数器");
