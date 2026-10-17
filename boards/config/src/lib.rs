@@ -1614,7 +1614,7 @@ pub fn parse(yaml: &str) -> Result<BoardDefinition, ConfigError> {
 pub const PROFILES_PATH: &str = "boards/profiles";
 
 /// Profile used by a Board that names none.
-pub const DEFAULT_PROFILE: &str = "base";
+pub const DEFAULT_PROFILE: &str = "headless";
 
 /// A named Plugin set Boards start from, optionally extending others.
 #[derive(Debug, Deserialize, PartialEq, Eq)]

@@ -1,5 +1,5 @@
 name: m5stack-fire
-profile: device
+profile: screen
 hardware:
   chip: esp32
 toolchain:

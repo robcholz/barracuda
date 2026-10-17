@@ -1,5 +1,5 @@
-# The Agent and the message gateways on top of connected, still without Lua.
-extends: connected
+# The Agent and the message gateways on top of network, still without Lua.
+extends: network
 enable:
   - agent
   - agent-file

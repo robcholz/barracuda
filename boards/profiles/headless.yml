@@ -1,0 +1,9 @@
+# The Plugins a Board builds unless it names another profile: every Plugin
+# that needs no screen, as lua and ai plus the Lua packages that need both.
+# Boards with a screen name `screen`. See README.md for every profile.
+extends: [lua, ai]
+enable:
+  - agent-vm
+  - vm-agent
+  - vm-http
+  - vm-webserver

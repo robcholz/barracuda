@@ -1,6 +1,6 @@
-# Online without Lua: core plus Wi-Fi, the web server, the portal, HTTP, and
+# Online without Lua: minimal plus Wi-Fi, the web server, the portal, HTTP, and
 # the portal's file manager.
-extends: core
+extends: minimal
 enable:
   - captive-portal
   - files

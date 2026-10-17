@@ -1,6 +1,6 @@
-# Offline scripting: core plus the Lua VM and the Lua packages that need no
+# Offline scripting: minimal plus the Lua VM and the Lua packages that need no
 # network, including those for the Board's hardware.
-extends: core
+extends: minimal
 enable:
   - analog
   - audio

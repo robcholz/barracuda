@@ -262,23 +262,20 @@ that extends itself fails:
 
 ```yaml
 # boards/profiles/gateway.yml
-extends: connected
+extends: network
 enable: [agent, imessage-gateway, imessage-telegram]
 ```
 
 ```yaml
-# boards/profiles/offline-device.yml
-extends: [scripting, screen]
+# boards/profiles/screen-offline.yml
+extends: [lua, ui]
 ```
 
-The profiles are layers. `core` has no network and no Lua; `scripting` adds
-the VM and the Lua packages that need no network; `connected` adds Wi-Fi, the
-web server, the portal, and HTTP; `assistant` adds the Agent and the message
-gateways to `connected`; `base`, the default, is `scripting` and `assistant`
-with the Lua packages that need both. `screen` is a layer for the system UI,
-taken by `device` (with `base`) and `offline-device` (with `scripting`).
+The profiles are layers, from `minimal` (no network, no Lua) to `screen`;
+[`boards/profiles/README.md`](../../boards/profiles/README.md) lists them and
+says which to pick.
 
-A Board names its profile (`base` when it names none) and overrides single
+A Board names its profile (`headless` when it names none) and overrides single
 Plugins in `plugins.<id>`:
 
 ```yaml

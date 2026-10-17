@@ -1,8 +1,9 @@
-# A layer, not a product: the app manager with the system UI on the Board's
-# primary display, the system fonts, and the builtin apps that need no
-# network. A screen profile extends it together with a non-screen one.
+# Products with a screen: the base set and the system UI, with what needs the
+# network too: Wi-Fi in the system UI, installing from the portal, and the
+# Sessions and Settings apps.
+extends: [headless, ui]
 enable:
-  - app-manager
-  - builtin-app-files
-  - builtin-app-workflow
-  - system-fonts
+  - app-portal
+  - builtin-app-sessions
+  - builtin-app-settings
+  - system-wifi

@@ -31,10 +31,10 @@ Plugin runs no UI kit and no system UI: it is an app manager for headless
 apps, and apps with views answer `no_display`. The system UI needs no
 network either: it shows a network only when a Plugin shows one with
 `SystemNetwork`, as `system-wifi` does. A Board with a screen names the
-`device` profile, or `offline-device` for a product that never goes online
-(no Wi-Fi, portal, Agent, Sessions, or Settings); both take the `screen`
-layer: `app-manager`, `system-fonts`, and the builtin apps that need no
-network. A Board leaves a system app out by not enabling its Plugin, and a
+`screen` profile, or `screen-offline` for a product that never goes online
+(no Wi-Fi, portal, Agent, Sessions, or Settings); both take the `ui` layer:
+`app-manager`, `system-fonts`, and the builtin apps that need no network. The
+profiles are in [`boards/profiles/README.md`](../../boards/profiles/README.md). A Board leaves a system app out by not enabling its Plugin, and a
 Board without a display enables neither the system apps nor
 `system-fonts`.
 
