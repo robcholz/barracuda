@@ -26,6 +26,8 @@ Lua API:
 
 - `audio.available() -> boolean`
 - `audio.open() -> handle`
+- `audio.beep([hz [, ms]]) -> true` plays a square-wave tone, 880 Hz for
+  150 ms unless given, 20 to 20000 Hz for at most 2000 ms
 - `handle:descriptor() -> sample_rate_hz, channels, bits_per_sample`
 - `handle:set_volume(percent)`
 - `handle:play(pcm_le_bytes)`
@@ -53,7 +55,10 @@ The package is the app API's `audio` capability
 ([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
 device.
 
-Boards without a built-in codec report unavailable. The move-only built-in
-capability permits one handle per boot; explicit close, lexical `<close>`,
-collection, and Plugin revocation prevent further operations and do not
-recreate the physical codec token.
+`beep`, app API level 2, plays at the device's level while no handle holds
+the codec and returns `nil, error` while one does.
+
+Boards without a built-in codec report unavailable. One handle is open at a
+time: explicit close, lexical `<close>`, and collection prevent further
+operations on it and give the codec back, so `open` works again; Plugin
+revocation prevents every further operation.

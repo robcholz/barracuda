@@ -24,6 +24,8 @@ Lua API:
 
 - `camera.available() -> boolean`
 - `camera.open() -> handle`
+- `camera.snap([capacity]) -> bytes, pixel_format` takes one frame, with room
+  for 128 KiB unless given
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`
@@ -33,7 +35,11 @@ The package is the app API's `camera` capability
 ([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
 device.
 
-Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards without a camera
-report unavailable. The move-only built-in capability permits one handle per
-boot; explicit close, lexical `<close>`, collection, and Plugin revocation
-prevent further operations.
+`snap`, app API level 2, uses the camera while no handle holds it and
+returns `nil, error` while one does.
+
+Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards
+without a camera report unavailable. One handle is open at a time: explicit
+close, lexical `<close>`, and collection prevent further operations on it and
+give the camera back, so `open` works again; Plugin revocation prevents every
+further operation.

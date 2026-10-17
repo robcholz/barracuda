@@ -59,7 +59,9 @@ pub use barracuda_appkit::{
 };
 pub use barracuda_uikit::icons;
 pub use fonts::SystemFonts;
-pub use notices::{MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications};
+pub use notices::{
+    DEFAULT_LABELS, MAX_LABEL_CHARS, MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications,
+};
 pub use notify::{NOTIFY, NOTIFY_API};
 pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
 pub use system::{Screen, Services, SystemUi, WIFI_SETTINGS};

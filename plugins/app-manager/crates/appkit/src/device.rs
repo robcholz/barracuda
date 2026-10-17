@@ -19,7 +19,7 @@ use barracuda_vm_plugin::AppApi;
 use serde_json::{Value, json};
 
 /// The app API level this system implements.
-pub const API_LEVEL: u32 = 1;
+pub const API_LEVEL: u32 = 2;
 
 /// The app API's core packages: every app has them without asking.
 pub const CORE_PACKAGES: [&str; 2] = ["app", "time"];

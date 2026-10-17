@@ -15,7 +15,7 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
     Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    UserDataHandle, UserDataMethods, Variadic,
 };
 use core::cell::RefCell;
 use portable_atomic::{AtomicBool, AtomicU8, Ordering};
@@ -127,10 +127,16 @@ where
     }
 }
 
+/// The codec while no handle holds it; a handle gives it back when it closes.
+type SharedCodec<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
+
+/// The longest beep, in milliseconds.
+const MAX_BEEP_MS: i64 = 2000;
+
 struct AudioPackage<Device> {
     /// Whether the Board has the device, which makes the package a capability.
     present: bool,
-    codec: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    codec: SharedCodec<Device>,
     level: Arc<Level>,
     active: Arc<AtomicBool>,
 }
@@ -157,7 +163,18 @@ where
         let open_codec = Arc::clone(&self.codec);
         let open_level = Arc::clone(&self.level);
         let open_active = Arc::clone(&self.active);
+        let beep_codec = Arc::clone(&self.codec);
+        let beep_level = Arc::clone(&self.level);
+        let beep_active = Arc::clone(&self.active);
         lua.register_lib("audio", move |package| {
+            package.register_async("beep", move |args: Variadic<i64>| {
+                let codec = Arc::clone(&beep_codec);
+                let level = Arc::clone(&beep_level);
+                let active = Arc::clone(&beep_active);
+                let hz = args.first().copied().unwrap_or(880);
+                let ms = args.get(1).copied().unwrap_or(150);
+                async move { Some(beep(codec, level, active, hz, ms).await.map(|()| true)) }
+            })?;
             package.register("available", move |(): ()| {
                 Some(Ok(available_active.load(Ordering::Acquire)
                     && critical_section::with(|section| {
@@ -174,6 +191,7 @@ where
                 Some(match codec {
                     Some(codec) => lua.create_userdata(AudioHandle::new(
                         codec,
+                        Arc::clone(&open_codec),
                         Arc::clone(&open_level),
                         Arc::clone(&open_active),
                     )),
@@ -210,6 +228,8 @@ where
 
 struct AudioHandle<Device> {
     codec: Option<Device>,
+    /// Where the codec goes back when the handle closes.
+    home: SharedCodec<Device>,
     level: Arc<Level>,
     /// The app's own volume in percent, which scales the device's level.
     volume: u8,
@@ -219,9 +239,15 @@ struct AudioHandle<Device> {
 }
 
 impl<Device> AudioHandle<Device> {
-    fn new(codec: Device, level: Arc<Level>, active: Arc<AtomicBool>) -> Self {
+    fn new(
+        codec: Device,
+        home: SharedCodec<Device>,
+        level: Arc<Level>,
+        active: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             codec: Some(codec),
+            home,
             level,
             volume: 100,
             applied: None,
@@ -230,8 +256,63 @@ impl<Device> AudioHandle<Device> {
     }
 
     fn close(&mut self) {
-        self.codec.take();
+        if let Some(codec) = self.codec.take() {
+            critical_section::with(|section| {
+                self.home.borrow(section).replace(Some(codec));
+            });
+        }
     }
+}
+
+/// Plays a square-wave tone of `hz` for `ms` milliseconds on the codec while
+/// no handle holds it.
+async fn beep<Device>(
+    codec: SharedCodec<Device>,
+    level: Arc<Level>,
+    active: Arc<AtomicBool>,
+    hz: i64,
+    ms: i64,
+) -> Result<()>
+where
+    Device: AudioCodec,
+    Device::Error: core::fmt::Debug,
+{
+    ensure_active(&active)?;
+    if !(20..=20_000).contains(&hz) || !(1..=MAX_BEEP_MS).contains(&ms) {
+        return Err(Error::runtime(format!(
+            "a beep is 20 to 20000 Hz for 1 to {MAX_BEEP_MS} ms"
+        )));
+    }
+    let device = critical_section::with(|section| codec.borrow(section).borrow_mut().take())
+        .ok_or_else(|| Error::runtime("built-in audio codec is unavailable or open in a handle"))?;
+    // The handle gives the codec back however the beep ends.
+    let mut handle = AudioHandle::new(device, codec, level, active);
+    let descriptor = handle.codec()?.descriptor();
+    let rate = u64::from(descriptor.sample_rate_hz());
+    let channels = usize::from(descriptor.channels()).max(1);
+    let frames = rate * u64::try_from(ms).unwrap_or(0) / 1000;
+    let half_period = (rate / (2 * u64::try_from(hz).unwrap_or(1))).max(1);
+    let mut chunk = [0_u8; PCM_CHUNK_SAMPLES * 2];
+    let per_chunk = (PCM_CHUNK_SAMPLES / channels) as u64;
+    let mut frame = 0;
+    while frame < frames {
+        let count = per_chunk.min(frames - frame);
+        let mut at = 0;
+        for index in frame..frame + count {
+            let sample: i16 = if (index / half_period) % 2 == 0 {
+                6000
+            } else {
+                -6000
+            };
+            for _ in 0..channels {
+                chunk[at..at + 2].copy_from_slice(&sample.to_le_bytes());
+                at += 2;
+            }
+        }
+        write_pcm_le(&mut handle, &chunk[..at]).await?;
+        frame += count;
+    }
+    Ok(())
 }
 
 impl<Device> UserData for AudioHandle<Device>
@@ -687,6 +768,7 @@ mod tests {
         let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
         let mut handle = AudioHandle::new(
             TestCodec { volume: 0 },
+            Arc::clone(&package.codec),
             Arc::clone(&package.level),
             Arc::clone(&package.active),
         );
@@ -695,6 +777,32 @@ mod tests {
         package.level.volume.store(20, Ordering::Release);
         futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
         assert_eq!(handle.codec.as_ref().map(|codec| codec.volume), Some(51));
+    }
+
+    #[test]
+    fn beep_plays_while_no_handle_holds_the_codec() {
+        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install audio package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load(
+                "local audio = require('audio')\n\
+                 assert(audio.beep())\n\
+                 assert(audio.beep(440, 50))\n\
+                 local ok, err = audio.beep(5, 50)\n\
+                 assert(ok == nil and err:find('20 to 20000 Hz'))\n\
+                 local player = audio.open()\n\
+                 local busy, held = audio.beep()\n\
+                 assert(busy == nil and held:find('open in a handle'))\n\
+                 player:close()\n\
+                 assert(audio.available())\n\
+                 return audio.beep(1000, 10)",
+            )
+            .eval_async(),
+        )
+        .expect("beep");
+        assert!(result);
     }
 
     #[test]

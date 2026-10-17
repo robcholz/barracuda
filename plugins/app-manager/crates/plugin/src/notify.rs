@@ -1,8 +1,9 @@
 //! The `notify` Lua package: an app's way to the notification center.
 //!
 //! `notify.post(title, body)` posts a notice and returns its ID;
-//! `notify.ask(title, body)` asks the person and returns whether they
-//! allowed it, `false` when the card was dismissed unanswered.
+//! `notify.ask(title, body[, allow, deny])` asks the person, on buttons
+//! that say `allow` and `deny` when given, and returns whether they allowed
+//! it, `false` when the card was dismissed unanswered.
 
 use crate::notices::Notifications;
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
@@ -44,7 +45,16 @@ impl BuiltinBackend for Notify {
                 "ask" => {
                     let title = text(0, "title")?;
                     let body = args.get(1).cloned().flatten().unwrap_or_default();
-                    let id = self.0.ask(&title, &body);
+                    let label = |index: usize| args.get(index).cloned().flatten();
+                    let (allow, deny) = (label(2), label(3));
+                    let id = self.0.ask_with(
+                        &title,
+                        &body,
+                        (
+                            allow.as_deref().unwrap_or(""),
+                            deny.as_deref().unwrap_or(""),
+                        ),
+                    );
                     Ok(Value::Bool(self.0.answer(id).await.unwrap_or(false)))
                 }
                 _ => Err(format!("notify.{call} does not exist")),
@@ -85,6 +95,32 @@ mod tests {
         ))
         .0;
         assert_eq!(answered, Ok(Value::Bool(true)));
+        let labelled = block_on(embassy_futures::join::join(
+            notify.call(
+                "ask",
+                alloc::vec![
+                    Some("Lamp".to_string()),
+                    None,
+                    Some("Turn it on now".to_string()),
+                    Some("Later".to_string()),
+                ],
+            ),
+            async {
+                let question = notices
+                    .list()
+                    .into_iter()
+                    .find(|notice| notice.question)
+                    .unwrap();
+                assert_eq!(
+                    (question.allow.as_str(), question.deny.as_str()),
+                    ("Turn i", "Later")
+                );
+                notices.decide(question.id, false);
+            },
+        ))
+        .0;
+        assert_eq!(labelled, Ok(Value::Bool(false)));
+        assert_eq!(notices.list()[0].allow, "");
         assert!(block_on(notify.call("post", alloc::vec![None])).is_err());
         assert!(block_on(notify.call("shout", Vec::new())).is_err());
     }

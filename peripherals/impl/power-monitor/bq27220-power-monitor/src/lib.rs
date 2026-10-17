@@ -113,10 +113,7 @@ where
     }
 
     fn battery(&mut self) -> Result<Option<BatteryState>, Self::Error> {
-        let (percent, current) = self
-            .chip
-            .charge(&mut self.i2c)
-            .map_err(Bq27220Error::Bus)?;
+        let (percent, current) = self.chip.charge(&mut self.i2c).map_err(Bq27220Error::Bus)?;
         Ok(Some(BatteryState {
             percent: u8::try_from(percent.min(100)).unwrap_or(100),
             charging: current > 0,

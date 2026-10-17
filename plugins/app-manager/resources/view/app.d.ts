@@ -7,7 +7,7 @@ import type { i32 } from "@pocketjs/framework/solid/std";
 export interface Icon { base: string; accent: string; dim: string }
 export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; offered: boolean; x: i32; y: i32 }
 export interface RunItem { id: i32; name: string; icon: Icon; letter: string; detail: string; active: boolean }
-export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean }
+export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean; allow: string; deny: string }
 export interface Tile { id: i32; label: string; detail: string; glyph: string; on: boolean }
 export interface Line { id: i32; text: string; glyph: string }
 /** One launcher page; `on` is the page on the display. */

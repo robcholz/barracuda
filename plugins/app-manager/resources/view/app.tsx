@@ -348,10 +348,10 @@ export default function System() {
                   <View class="w-full h-[1px] bg-[#27272A]" />
                   <View class="flex-row gap-2 px-[14px] py-[10px]">
                     <View class="w-[94px] h-10 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => deny(notice().id)}>
-                      <Text class="text-sm font-bold text-[#FAFAFA]">拒绝</Text>
+                      <Text class="text-sm font-bold text-[#FAFAFA]">{notice().deny}</Text>
                     </View>
                     <View class="w-[124px] h-10 rounded-md bg-[#CCFF00] items-center justify-center" focusable onPress={() => allow(notice().id)}>
-                      <Text class="text-sm font-bold text-[#09090B]">允许</Text>
+                      <Text class="text-sm font-bold text-[#09090B]">{notice().allow}</Text>
                     </View>
                   </View>
                 </Show>

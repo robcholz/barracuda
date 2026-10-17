@@ -3,7 +3,7 @@
 The app API is what an installable app can count on from one device to the
 next: the Lua packages it may use, what it may ask the device, and the rules
 that keep both stable. It is versioned by one number, the **API level**; this
-system implements level 1. An app names the level it is written for in its
+system implements level 2. An app names the level it is written for in its
 manifest's `api` (see [`app-format.md`](app-format.md)), and a device whose
 level is lower refuses to install it.
 
@@ -15,7 +15,7 @@ System apps are not bound by the app API: they ship in the image and may
 Every Lua package places itself in one of four tiers. A Plugin declares its
 package's tier with `LuaPackage::app_api`, and the capability's purpose there
 is the line the install screen shows; `crates/appkit/src/device.rs` holds the
-level-1 list the install check uses, so a device can name a capability no
+list the install check uses, so a device can name a capability no
 Plugin on it provides.
 
 | Tier | How an app gets it | Same on every device |
@@ -37,13 +37,17 @@ Plugin on it provides.
 | Package | Since | Install screen | Lua API |
 | --- | --- | --- | --- |
 | `agent` | 1 | 使用 Agent | `agent.ask(text, stream)` ([`vm-agent`](../../vm-agent/docs/plugin.md)) |
-| `audio` | 1 | 播放声音和录音 | `audio.available()`, `audio.open()` ([`audio`](../../vm-audio/docs/plugin.md)) |
-| `camera` | 1 | 使用相机拍照 | `camera.available()`, `camera.open()` ([`camera`](../../vm-camera/docs/plugin.md)) |
+| `audio` | 1 | 播放声音和录音 | `audio.available()`, `audio.open()`; since 2 `audio.beep([hz [, ms]])` ([`audio`](../../vm-audio/docs/plugin.md)) |
+| `camera` | 1 | 使用相机拍照 | `camera.available()`, `camera.open()`; since 2 `camera.snap([capacity])` ([`camera`](../../vm-camera/docs/plugin.md)) |
 | `filesystem` | 1 | 读写共享文件 | the standard `io` and `os` file functions over the shared Workspace ([`vm-filesystem`](../../vm-filesystem/docs/plugin.md)) |
 | `http` | 1 | 联网收发数据 | `http.request(...)` ([`vm-http`](../../vm-http/docs/plugin.md)) |
-| `light` | 1 | 控制灯光 | `light.available()`, `light.open()` ([`led-strip`](../../vm-led-strip/docs/plugin.md)) |
+| `light` | 1 | 控制灯光 | `light.available()`, `light.open()`; since 2 `light.fill(color)`, `light.off()` ([`led-strip`](../../vm-led-strip/docs/plugin.md)) |
 | `motion` | 1 | 读取动作传感器 | `motion.available()`, `motion.open()` ([`imu`](../../vm-imu/docs/plugin.md)) |
-| `notify` | 1 | 发通知、向你确认 | `notify.post(title, body)`, `notify.ask(title, body)` (below) |
+| `notify` | 1 | 发通知、向你确认 | `notify.post(title, body)`, `notify.ask(title, body)`; since 2 `notify.ask(title, body, allow, deny)` (below) |
+
+The level-2 helpers do the common thing in one call: `light.fill("warm")`,
+`audio.beep()`, `local frame, format = camera.snap()`. Each uses the device
+while no handle holds it, and fails while the app holds one open.
 
 A device has a capability when its Plugin is enabled and, for the hardware
 ones (`audio`, `camera`, `light`, `motion`), the Board has the device: on a
@@ -56,9 +60,11 @@ The `app-manager` Plugin provides it.
 
 - `notify.post(title [, body]) -> id` adds a notice to the notification
   center.
-- `notify.ask(title [, body]) -> allowed` asks the person on a card listed
-  before every notice and waits for the answer: `true` when they allow it,
-  `false` when they deny or dismiss it.
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
+  a card listed before every notice and waits for the answer: `true` when
+  they allow it, `false` when they deny or dismiss it. Since level 2, `allow`
+  and `deny` name the card's two buttons (允许 and 拒绝 unless given, at most
+  6 characters each), as in `notify.ask("灯", nil, "现在开", "等会儿")`.
 
 Failures return `nil` and a message.
 
@@ -85,7 +91,7 @@ install button; `app.install` answers `{"error": "incompatible", "reason": …}`
 
 | Check | Reason |
 | --- | --- |
-| `api` is above the device's level | 需要更新系统（应用需要 API 2，本机是 1） |
+| `api` is above the device's level | 需要更新系统（应用需要 API 3，本机是 2） |
 | `boards` does not list this Board | 只适用于 espressif-esp-vocat-v1-2 |
 | the app has a view and the device no display | 此设备没有屏幕 |
 | the display is smaller than `view.size` | 屏幕太小（应用需要 480×480） |
@@ -121,7 +127,7 @@ it, or call `pcall(require, name)`.
 
 ```lua
 {
-  api = 1,
+  api = 2,
   board = "espressif-esp-vocat-v1-2",
   display = { width = 360, height = 360, round = true },  -- nil without one
   touch = true,

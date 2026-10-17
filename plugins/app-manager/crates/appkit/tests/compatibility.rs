@@ -100,7 +100,7 @@ async fn filesystem() -> ScopedVfs {
     )
     .await;
     // Does not fit, and says why.
-    offer(&fs, "later", r#","api":2,"requires":["teleport"]"#).await;
+    offer(&fs, "later", r#","api":3,"requires":["teleport"]"#).await;
     offer(
         &fs,
         "elsewhere",
@@ -183,7 +183,7 @@ async fn scenario(spawner: Spawner) {
             ("elsewhere", Some("只适用于 other-board、third-board")),
             ("lamp", None),
             ("large", Some("屏幕太小（应用需要 480×480）")),
-            ("later", Some("需要更新系统（应用需要 API 2，本机是 1）")),
+            ("later", Some("需要更新系统（应用需要 API 3，本机是 2）")),
             ("photo", Some("此设备没有相机")),
             ("plain", None),
             ("round", None),
@@ -238,7 +238,7 @@ async fn scenario(spawner: Spawner) {
         exit.output,
         [
             "true\ttrue\tfalse\ttrue\tfalse",
-            "1\ttest-board\t360\t360\ttrue\ttrue\tlight",
+            "2\ttest-board\t360\t360\ttrue\ttrue\tlight",
         ],
         "{exit:?}"
     );

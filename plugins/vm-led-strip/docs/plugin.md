@@ -23,6 +23,9 @@ Lua API:
 
 - `light.available() -> boolean`
 - `light.open() -> handle`
+- `light.fill(color) -> true` sets every pixel to `color`, `"#RRGGBB"` or
+  one of `white`, `warm`, `red`, `green`, `blue`, `off`, `black`
+- `light.off() -> true` turns every pixel off
 - `handle:len() -> integer`
 - `handle:write(rgb_bytes)` where each pixel is three consecutive RGB bytes
 - `handle:clear()`
@@ -33,7 +36,11 @@ The package is the app API's `light` capability
 ([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
 device.
 
+`fill` and `off`, app API level 2, use the strip while no handle holds it
+and return `nil, error` while one does.
+
 Boards without a built-in LED strip still install the package; `available`
-returns false and `open` returns `nil, error`. The capability is move-only, so
-only one handle can be opened during a boot. Explicit close, lexical `<close>`,
-collection, and Plugin revocation prevent further operations.
+returns false and `open` returns `nil, error`. One handle is open at a time:
+explicit close, lexical `<close>`, and collection prevent further operations
+on it and give the strip back, so `open` works again; Plugin revocation
+prevents every further operation.

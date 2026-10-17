@@ -7,7 +7,7 @@
 //! taking input until the screen closes.
 
 use crate::agent::{AgentState, AgentStatus};
-use crate::notices::Notifications;
+use crate::notices::{DEFAULT_LABELS, Notifications};
 use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
@@ -466,7 +466,12 @@ impl SystemUi {
                 if let Some(notice) = notice
                     && self.services.notices.decide(notice.id, allowed)
                 {
-                    let verdict = if allowed { "已允许" } else { "已拒绝" };
+                    let label = if allowed { &notice.allow } else { &notice.deny };
+                    let verdict = match (allowed, label.as_str()) {
+                        (true, label) if label == DEFAULT_LABELS.0 => "已允许",
+                        (false, label) if label == DEFAULT_LABELS.1 => "已拒绝",
+                        (_, label) => label,
+                    };
                     self.done = Some((format!("{verdict} · {}", notice.title), Instant::now()));
                 }
                 self.render();
@@ -1044,6 +1049,8 @@ impl SystemUi {
                                 icon,
                                 ViewValue::Str(letter),
                                 ViewValue::Bool(notice.question),
+                                ViewValue::Str(notice.allow.clone()),
+                                ViewValue::Str(notice.deny.clone()),
                             ])
                         })
                         .collect(),
