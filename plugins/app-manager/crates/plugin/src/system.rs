@@ -12,7 +12,7 @@ use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_appkit::{
-    AppError, AppInfo, AppKind, AppManager, AppState, CAPABILITIES, RunningApp, VmRunOutcome,
+    AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
 };
 use barracuda_audio_plugin::AudioOutput;
 use barracuda_platform::{AccessPointState, StationState};
@@ -767,36 +767,12 @@ impl SystemUi {
         let Some(info) = subject else {
             return Vec::new();
         };
-        let permissions: Vec<(String, String)> = info
-            .requires
-            .iter()
-            .chain(&info.uses)
-            .chain(&info.permissions)
-            .map(|package| {
-                // A capability this device lacks goes by its name in the
-                // app API; any other package by its own.
-                let purpose = self.services.apps.purpose(package).map_or_else(
-                    || {
-                        CAPABILITIES
-                            .iter()
-                            .find(|(name, _, _)| name == package)
-                            .map_or_else(
-                                || format!("使用 {package}"),
-                                |(_, _, noun)| {
-                                    let gap = if noun.is_ascii() { " " } else { "" };
-                                    format!("使用{gap}{noun}")
-                                },
-                            )
-                    },
-                    String::from,
-                );
-                let text = if info.uses.contains(package) {
-                    format!("{purpose}（可选）")
-                } else {
-                    purpose
-                };
-                (text, glyph(words::permission_icon(package)))
-            })
+        let permissions: Vec<(String, String)> = self
+            .services
+            .apps
+            .asks(info)
+            .into_iter()
+            .map(|(package, line)| (line, glyph(words::permission_icon(&package))))
             .collect();
         if permissions.is_empty() {
             vec![(String::from("不需要额外权限"), glyph("check"))]

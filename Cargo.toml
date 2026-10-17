@@ -86,6 +86,7 @@ barracuda-agent-vm-plugin = { path = "plugins/agent-vm/crates/plugin" }
 barracuda-agent-websearch-plugin = { path = "plugins/agent-websearch/crates/plugin" }
 barracuda-agent-workflow-plugin = { path = "plugins/agent-workflow/crates/plugin" }
 barracuda-app-manager-plugin = { path = "plugins/app-manager/crates/plugin" }
+barracuda-app-portal-plugin = { path = "plugins/app-portal/crates/plugin" }
 barracuda-builtin-app-files-plugin = { path = "plugins/builtin-app-files/crates/plugin" }
 barracuda-builtin-app-sessions-plugin = { path = "plugins/builtin-app-sessions/crates/plugin" }
 barracuda-builtin-app-settings-plugin = { path = "plugins/builtin-app-settings/crates/plugin" }

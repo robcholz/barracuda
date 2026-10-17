@@ -4,6 +4,7 @@
 extends: base
 enable:
   - app-manager
+  - app-portal
   - builtin-app-files
   - builtin-app-sessions
   - builtin-app-settings

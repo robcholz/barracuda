@@ -54,8 +54,9 @@ the portal, an Agent, or another Plugin, and the person installs it.
 ## The system
 
 The `app-manager` Plugin's system UI is the system. It is the only caller
-that switches, installs, and uninstalls apps for the person and the only
-owner of the system gestures. Its view sits on the system layer, above the
+that switches and uninstalls apps for the person, the only owner of the
+system gestures, and, with the `app-portal` Plugin's portal page on the
+device's setup hotspot, the only way the person installs apps. Its view sits on the system layer, above the
 app layer: while an app is in the foreground and no system screen covers it,
 the app's view shows; any system screen covers the app and stops its input
 (`AppManager::set_interactive`) until the screen closes.
@@ -115,7 +116,12 @@ the words each package's Plugin declares; when the person installs it, the
 and from then on every run of it may `require` only the core packages and
 those it named.
 A Workflow or Agent asks for an install with `app.install`; only the person
-completes it. Uninstalling deletes the container and the app's data; the
+completes it, on the device's install screen or, on the portal's 应用 page,
+from a phone on the device's setup hotspot, which is how a Board without a
+display installs apps. Either way the install takes exactly what the person
+was shown: the offer's digest is pinned when the install is asked for. An
+offer may be a signed `.bapp` package; an app installed from one takes
+updates only from the same signer. Uninstalling deletes the container and the app's data; the
 Workspace offer stays until its author removes it.
 
 ## Fonts

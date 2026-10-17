@@ -335,6 +335,43 @@ impl AppManager {
         device::purpose(&self.packages(), name)
     }
 
+    /// What app `info` asks to be allowed, as the install screen and the
+    /// portal show it: one line per package it names, in the words the
+    /// package's Plugin declared, or for a capability this device lacks in
+    /// the app API's name for it, with packages it only uses marked
+    /// optional. Each line comes with its package.
+    #[must_use]
+    pub fn asks(&self, info: &AppInfo) -> Vec<(String, String)> {
+        info.requires
+            .iter()
+            .chain(&info.uses)
+            .chain(&info.permissions)
+            .map(|package| {
+                let purpose = self.purpose(package).map_or_else(
+                    || {
+                        device::CAPABILITIES
+                            .iter()
+                            .find(|(name, _, _)| name == package)
+                            .map_or_else(
+                                || format!("使用 {package}"),
+                                |(_, _, noun)| {
+                                    let gap = if noun.is_ascii() { " " } else { "" };
+                                    format!("使用{gap}{noun}")
+                                },
+                            )
+                    },
+                    String::from,
+                );
+                let line = if info.uses.contains(package) {
+                    format!("{purpose}（可选）")
+                } else {
+                    purpose
+                };
+                (package.clone(), line)
+            })
+            .collect()
+    }
+
     /// Registers a Lua package of the app API answered by `backend` on the
     /// app manager's task, the way builtin apps' packages are. Keep the
     /// registration for as long as the package is offered.

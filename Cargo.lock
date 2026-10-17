@@ -744,6 +744,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-app-portal-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-app-manager-plugin",
+ "barracuda-captive-portal-plugin",
+ "barracuda-plugin",
+ "barracuda-webserver-plugin",
+ "barracuda-wifi-plugin",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-appkit"
 version = "0.1.0"
 dependencies = [
@@ -2219,6 +2234,7 @@ dependencies = [
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
  "barracuda-app-manager-plugin",
+ "barracuda-app-portal-plugin",
  "barracuda-audio-plugin",
  "barracuda-builtin-app-files-plugin",
  "barracuda-builtin-app-sessions-plugin",
