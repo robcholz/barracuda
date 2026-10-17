@@ -1,50 +1,130 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "sequoia",
   "name": "Barracuda",
+  "description": "The agentic platform for embedded devices: everything is a Plugin, and an agent helps at every step.",
   "colors": {
-    "primary": "#0E7490",
-    "light": "#22D3EE",
-    "dark": "#0E7490"
+    "primary": "#5A7301",
+    "light": "#CCFF00",
+    "dark": "#CCFF00"
+  },
+  "background": {
+    "color": {
+      "light": "#FAFAFB",
+      "dark": "#09090B"
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "system"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "styling": {
+    "eyebrows": "section",
+    "codeblocks": {
+      "theme": {
+        "light": "github-light",
+        "dark": "github-dark"
+      }
+    }
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/robcholz/barracuda"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "claude",
+      "chatgpt",
+      "cursor",
+      "mcp"
+    ]
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Get started",
+        "tab": "Guides",
         "groups": [
           {
-            "group": "Get started",
+            "group": "Start",
             "pages": [
               "index",
+              "product/experience-ladder",
+              "product/three-agents",
+              "product/plugins",
+              "product/glossary"
+            ]
+          },
+          {
+            "group": "02 · Configure",
+            "pages": [
               "get-started/build-and-run",
-              "get-started/tooling"
+              "boards/profiles",
+              "platforms/virtual-io"
+            ]
+          },
+          {
+            "group": "03 · Build apps",
+            "pages": [
+              "architecture/device-ui",
+              "plugins/app-manager/app-format",
+              "plugins/app-manager/app-api",
+              "plugins/app-manager/pocketjs"
+            ]
+          },
+          {
+            "group": "Product",
+            "pages": [
+              "product/overview",
+              "product/vision",
+              "product/surfaces",
+              "product/audiences",
+              "product/positioning"
             ]
           }
         ]
       },
       {
-        "tab": "Architecture",
+        "tab": "Develop",
         "groups": [
           {
-            "group": "System",
+            "group": "Start developing",
             "pages": [
-              "architecture/platform-architecture",
-              "architecture/execution-ownership",
-              "architecture/device-ui"
+              "architecture/repository",
+              "get-started/tooling",
+              "architecture/codestyle",
+              "architecture/agent-oriented-api-design",
+              "architecture/execution-ownership"
             ]
           },
           {
-            "group": "Plugins",
+            "group": "04 · Create Plugins",
             "pages": [
               "architecture/plugin-api",
               "architecture/plugin-manager"
             ]
           },
           {
-            "group": "Conventions",
+            "group": "05 · Boards and Platforms",
             "pages": [
-              "architecture/codestyle",
-              "architecture/agent-oriented-api-design"
+              "architecture/platform-architecture",
+              "boards/overview",
+              "boards/peripherals",
+              "boards/exposed-io",
+              "boards/drivers",
+              "platforms/linux",
+              "platforms/macos",
+              "platforms/macos-network-gateway"
             ]
           }
         ]
@@ -101,10 +181,7 @@
                 "group": "App Manager",
                 "pages": [
                   "plugins/app-manager",
-                  "plugins/app-manager/action",
-                  "plugins/app-manager/app-format",
-                  "plugins/app-manager/app-api",
-                  "plugins/app-manager/pocketjs"
+                  "plugins/app-manager/action"
                 ]
               },
               "plugins/builtin-app-files",
@@ -152,7 +229,7 @@
               "plugins/agent-file",
               "plugins/agent-http",
               {
-                "group": "Agent IMessage Gateway",
+                "group": "Agent Gateway",
                 "pages": [
                   "plugins/agent-imessage-gateway",
                   "plugins/agent-imessage-gateway/action"
@@ -162,7 +239,7 @@
               "plugins/agent-time",
               "plugins/agent-vm",
               {
-                "group": "Agent Websearch",
+                "group": "Agent web search",
                 "pages": [
                   "plugins/agent-websearch",
                   "plugins/agent-websearch/http"
@@ -175,7 +252,7 @@
             "group": "Messaging channels",
             "pages": [
               {
-                "group": "IMessage Gateway",
+                "group": "Gateway",
                 "pages": [
                   "plugins/imessage-gateway",
                   "plugins/imessage-gateway/action",
@@ -186,42 +263,42 @@
                 ]
               },
               {
-                "group": "IMessage BlueBubble",
+                "group": "BlueBubbles",
                 "pages": [
                   "plugins/imessage-bluebubble",
                   "plugins/imessage-bluebubble/http"
                 ]
               },
               {
-                "group": "IMessage Inkbox",
+                "group": "Inkbox",
                 "pages": [
                   "plugins/imessage-inkbox",
                   "plugins/imessage-inkbox/http"
                 ]
               },
               {
-                "group": "IMessage QQ",
+                "group": "QQ",
                 "pages": [
                   "plugins/imessage-qq",
                   "plugins/imessage-qq/http"
                 ]
               },
               {
-                "group": "IMessage Telegram",
+                "group": "Telegram",
                 "pages": [
                   "plugins/imessage-telegram",
                   "plugins/imessage-telegram/http"
                 ]
               },
               {
-                "group": "IMessage Web",
+                "group": "Web chat",
                 "pages": [
                   "plugins/imessage-web",
                   "plugins/imessage-web/markdown"
                 ]
               },
               {
-                "group": "IMessage WeChat",
+                "group": "WeChat",
                 "pages": [
                   "plugins/imessage-wechat",
                   "plugins/imessage-wechat/http"
@@ -266,41 +343,7 @@
         ]
       },
       {
-        "tab": "Boards",
-        "groups": [
-          {
-            "group": "Boards",
-            "pages": [
-              "boards/overview",
-              "boards/profiles"
-            ]
-          },
-          {
-            "group": "Hardware",
-            "pages": [
-              "boards/peripherals",
-              "boards/exposed-io",
-              "boards/drivers"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Platforms",
-        "groups": [
-          {
-            "group": "Host Platforms",
-            "pages": [
-              "platforms/linux",
-              "platforms/macos",
-              "platforms/macos-network-gateway",
-              "platforms/virtual-io"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Shared & Tools",
+        "tab": "Reference",
         "groups": [
           {
             "group": "Shared crates",
@@ -337,5 +380,10 @@
         ]
       }
     ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/robcholz/barracuda"
+    }
   }
 }

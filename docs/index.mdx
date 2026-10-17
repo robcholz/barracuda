@@ -1,73 +1,75 @@
 ---
-title: "Overview"
-sidebarTitle: "Overview"
+title: "Barracuda"
+sidebarTitle: "Introduction"
+description: "The agentic platform for embedded devices: everything is a Plugin, and an agent helps at every step."
 ---
 
-Barracuda is a plugin-based embedded runtime: every capability on a device is a
-Plugin, composed into one firmware for a selected Board and Platform. To build
-and run it, see [Build and run](/get-started/build-and-run).
+Barracuda is a plugin-based embedded runtime and an agentic platform. Every
+capability on a device is a Plugin, and every step of building for a device is
+done together with an agent. The same `no_std` System runs on ESP32 and STM32
+microcontrollers and on Linux and macOS; the Board and the Platform are selected
+independently.
 
-## Layout
+<CardGroup cols={2}>
+  <Card title="Build and run" icon="terminal" href="/get-started/build-and-run">
+    Select a Board, build, flash, and open the portal. No board yet? Run it on
+    your computer.
+  </Card>
+  <Card title="The ladder" icon="layers" href="/product/experience-ladder">
+    Six levels, from out of the box to fully custom firmware. Start at the one
+    your project needs.
+  </Card>
+  <Card title="Write a Plugin" icon="puzzle" href="/architecture/plugin-api">
+    The Plugin contract: one way per topic, checked by `cargo plugin`.
+  </Card>
+  <Card title="All Plugins" icon="blocks" href="/plugins/overview">
+    Capabilities, Agent Tools, Workflow Actions and Events, and Lua packages of
+    every built-in Plugin.
+  </Card>
+</CardGroup>
 
-- `plugins/` contains every system-managed Plugin together with its private
-  runtime and support crates under that Plugin's `crates/` directory.
-- Every Plugin documents its capabilities, Agent Tools, Workflow Actions and
-  Events, errors, and lifecycle on its page under [Plugins](/plugins/overview).
-- `shared/` contains crates shared across Plugins and applications.
-- `bench/` contains project-wide measurement and profiling workloads, including
-  workload-specific harnesses and shared recording fixtures.
-- `tools/` contains project-wide development utilities such as the LLM API
-  recorder and deterministic replay proxy.
-- `apps/barracuda-system/` owns the portable application lifecycle selected by
-  ordinary `cargo run`; the selected Platform supplies only the compile-time
-  ABI and executor entry wrapper.
-- `apps/barracuda-cli/` is an external terminal Channel that connects to a
-  running Gateway; it never constructs the System.
+## The ladder
 
-## System composition
+Each level is useful on its own, and each one gives more freedom than the one
+below it. The docs follow the same levels.
 
-Barracuda separates portable system behavior from runtime implementations and
-platform implementations:
+| Level | What you do | Where | Who helps |
+| --- | --- | --- | --- |
+| 01 · Out of the box | Install, then ask the board to do things | Browser, phone, device | The on-board agent writes and runs scripts |
+| 02 · Configure | Choose the Plugins in the firmware, build, flash | Your computer | A command, a file, or your coding agent |
+| 03 · Build apps | Describe an app, get its logic and UI, install it | Browser and device | The in-browser agent |
+| 04 · Create Plugins | Add a capability to the runtime | Your computer | Coding agent with `create-plugin` |
+| 05 · Boards and Platforms | Bring up a new board or chip family | Your computer | Coding agent with `create-board`, `create-platform` |
+| 06 · Fully customize | Fit a firmware to a chip and a resource budget | Your computer | Coding agent with `fully-customize` |
 
-- **Boards** live under `boards/`. Their YAML files contain product-fixed
-  flash layout and storage mappings; the Board config crate validates and
-  generates a static, platform-neutral description at build time.
-- **Platform contract** lives in `platforms/api`. It defines the
-  compile-time initialization boundary and the resources consumed by System.
-- **Concrete Platforms** live under `platforms/<name>`. Host and device
-  Platforms use the same Embassy executor, task, timer, and lifecycle model;
-  only their low-level network, filesystem, flash, and HAL adapters differ.
-- **Board and Platform are selected independently** by build configuration.
-  A Board Rust type never selects or depends on a Platform type.
-- **System** is the `no_std` aggregation layer. It receives low-level platform
-  capabilities, constructs the fixed Plugin set, registers every Plugin in
-  dependency order, and then starts the complete set. System and Plugins never
-  select a host/device executor, filesystem, network stack, or listener and do not
-  construct a Plugin's private services.
-- **Plugins** own their typed capabilities, Workflow integrations, runtime
-  tasks, and other Plugin-scoped resources. Built-in Plugins establish their
-  own defaults instead of receiving an assembled service bundle from Host.
-  Higher-level crates depend on traits and portable services, not on a
-  particular concrete Platform.
+## Three agents
 
-```text
-Embassy entry
-     |
-Board YAML + Platform YAML
-     |
-Selected Platform realizes generated Board settings
-     |
-System application
-     |
-   System
-     |
-Plugins [capabilities + Workflow + resources]
-```
+Light work happens on the device, at run time. Heavy work happens in the browser
+and on your computer, at build time. All three work through Plugin contracts.
 
-Cross-platform services remain single portable implementations. For example,
-`WebServer` is built on picoserve and is shared by host and device Platforms.
-Plugins register endpoints during their lifecycle; the selected Platform
-supplies the network stack, listener, and sockets that drive that same server.
-Platform selection must not be encoded as separate `WebServer`
-implementations, scattered `cfg` branches, or a different application executor
-in portable system code.
+| | Where it runs | When | What it does | What it produces |
+| --- | --- | --- | --- | --- |
+| On-board agent | On the device, as the [Agent](/plugins/agent) Plugin | Run time | Writes Lua scripts and runs them against the hardware | A script that runs now |
+| In-browser agent | In the browser | Build time | Generates apps and their UI | An app on the device |
+| Coding agents | Your computer: Claude Code, Cursor, Codex | Build time | Creates Plugins, Boards, Platforms, custom firmware | Source code built into firmware |
+
+See [Three agents](/product/three-agents) for how they hand work to each other.
+
+## Four layers
+
+Read these four and you can read the repository.
+
+| Layer | Owns | Directory |
+| --- | --- | --- |
+| Board | YAML for the chip, toolchain target, flash layout, peripherals, and Plugin profile | `boards/` |
+| Platform | Executor entry, network stack, filesystem, flash, and HAL adapters | `platforms/` |
+| System | The `no_std` aggregation layer that registers every Plugin in dependency order, then starts them | `core/system/` |
+| Plugins | Typed capabilities, Workflow Actions and Events, Agent Tools, portal pages, runtime tasks | `plugins/` |
+
+The [repository layout](/architecture/repository) and
+[platform architecture](/architecture/platform-architecture) pages go deeper.
+
+<Tip>
+  No board? Select `local-linux` or `local-macos`. The same System runs on your
+  computer, with peripherals simulated by [Virtual IO](/platforms/virtual-io).
+</Tip>

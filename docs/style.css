@@ -1,0 +1,43 @@
+/* Barracuda design system on Mintlify's Sequoia theme. Only Mintlify's
+   documented selectors are used: #sidebar, #topbar-cta-button, #banner,
+   .card, .callout, .code-block, .accordion-group, .step, .toc-item, .eyebrow. */
+
+/* System fonts, with a CJK fallback chain the `fonts` key cannot express. */
+body, .mdx-content {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Noto Sans SC", "Segoe UI", Roboto, sans-serif;
+}
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+/* Lime buttons carry ink text. */
+#topbar-cta-button a { color: #09090B; }
+#banner { background: #CCFF00; color: #09090B; }
+
+/* Selection is a neutral fill, not colored text. */
+#sidebar a[data-active] {
+  background: #F0F0F2; color: #09090B; font-weight: 500; border-radius: 6px;
+}
+.dark #sidebar a[data-active] { background: #18181B; color: #FAFAFA; }
+
+/* Hairlines instead of shadows. */
+.card, .callout, .code-block, .accordion-group {
+  border: 1px solid #E1E1E5; border-radius: 8px; box-shadow: none;
+}
+.dark .card, .dark .callout, .dark .code-block, .dark .accordion-group {
+  border-color: #27272A;
+}
+
+/* Step numbers: monospace digits in a square. */
+.step [data-component-part="step-number"] {
+  border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Table of contents: the active item is ink, not the accent. */
+.toc-item[data-active-deepest] { color: #09090B; font-weight: 500; }
+.dark .toc-item[data-active-deepest] { color: #FAFAFA; }
+
+/* A lime square before each eyebrow. */
+.eyebrow::before {
+  content: ""; display: inline-block; width: 6px; height: 6px;
+  margin-right: 8px; background: #CCFF00;
+}
