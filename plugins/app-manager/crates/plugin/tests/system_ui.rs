@@ -105,6 +105,20 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     )
     .await;
     put(&fs, "/workspace/media/apps/photo/main.lua", b"").await;
+    // More offers than one launcher page holds.
+    for id in ["x1", "x2", "x3"] {
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}/app.json"),
+            format!(
+                r#"{{"format":1,"id":"{id}","name":"{}","version":"1"}}"#,
+                id.to_uppercase()
+            )
+            .as_bytes(),
+        )
+        .await;
+        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), b"").await;
+    }
     // An installed app that fails once it is on the display.
     for (name, bytes) in COUNTER
         .iter()
@@ -338,6 +352,21 @@ async fn scenario(spawner: Spawner) {
     for name in ["Crash", "System", "计数器", "Lamp", "Photo"] {
         assert!(launcher.contains(name), "{launcher}");
     }
+    // The round display's page holds 2-3-2 tiles; the eighth app is on the
+    // next page, an upward swipe away.
+    assert!(!launcher.contains("X3"), "{launcher}");
+    system.gesture(swipe(Direction::Up, None)).await;
+    let second = texts(&system);
+    assert!(
+        second.contains("X3") && !second.contains("Photo"),
+        "{second}"
+    );
+    let (_, x3) = icon(&system, "X3");
+    assert_eq!(x3, 7);
+    system.gesture(swipe(Direction::Up, None)).await;
+    assert!(texts(&system).contains("X3"), "the last page stays");
+    system.gesture(swipe(Direction::Down, None)).await;
+    assert!(texts(&system).contains("Photo"));
 
     // A long press opens a system app's menu; its info offers no
     // uninstall.

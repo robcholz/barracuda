@@ -26,6 +26,7 @@ import {
   control,
   deny,
   detail,
+  dots,
   dismiss,
   done,
   icon,
@@ -131,7 +132,7 @@ export default function System() {
         </Show>
       </View>
 
-      {/* The launcher, 2-3-2 rows of app tiles placed by the Plugin. */}
+      {/* The launcher: pages of 2-3-2 app tiles placed by the Plugin. */}
       <View
         class={
           screen() === 1 || screen() === 9
@@ -167,6 +168,11 @@ export default function System() {
               </View>
             )}
           </For>
+          <View class="absolute right-[14px] top-0 h-[360px] flex-col justify-center gap-[6px]">
+            <For each={dots()} by={(dot) => dot.id}>
+              {(dot) => <View class={dot().on ? "w-[6px] h-[6px] rounded-full bg-[#CCFF00]" : "w-[6px] h-[6px] rounded-full bg-[#52525B]"} />}
+            </For>
+          </View>
         </View>
         <Show when={screen() === 9}>
           <View class="absolute left-0 top-0 w-[360px] h-[360px] flex-col items-center justify-center gap-[10px]">

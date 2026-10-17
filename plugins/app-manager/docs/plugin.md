@@ -319,7 +319,7 @@ the person.
 | Screen        | Shows                                                         | Gets there                                  |
 | ------------- | ------------------------------------------------------------- | ------------------------------------------- |
 | Home          | the clock and status icons, the Agent in its state, and one card: offline, else a pending question, else what was just done | at boot, when no app is in the foreground, and swiping right from the launcher |
-| Apps          | the honeycomb launcher: builtin apps first, then installed apps, then Workspace apps offered for installation, dimmed; a dot on running ones | swiping left on home, or right inside an app at its first page |
+| Apps          | the honeycomb launcher: builtin apps first, then installed apps, then Workspace apps offered for installation, dimmed; a dot on running ones. A page holds the rows that fit the display (2-3-2 on the 360 px round panel); further pages are a swipe up away, with a dot per page | swiping left on home, or right inside an app at its first page |
 | Menu          | an app's name over the dimmed launcher: app info, and uninstall for installable apps | long-pressing an app in the launcher |
 | Running       | the app switcher: each running app, its state, and a close button | swiping left in the launcher             |
 | Notices       | the notification center: questions first with allow and deny, then notices newest first, dismiss, clear all | swiping down from the top edge, anywhere; swipe up to close |
@@ -350,6 +350,7 @@ edge, over 280 ms.
 | Swipe down from the top edge | anywhere          | notification center                    |
 | Swipe up from the bottom edge | anywhere         | control center                         |
 | Swipe left / right          | home, apps, running | move between them                     |
+| Swipe up / down             | apps               | the launcher's next / previous page    |
 | Swipe right                 | inside an app      | back (`AppManager::back`): the app's previous page, or the launcher from its first page |
 | Swipe right                 | menu, install, info, exited | cancel                         |
 
