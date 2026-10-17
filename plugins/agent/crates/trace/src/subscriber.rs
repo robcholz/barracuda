@@ -34,7 +34,7 @@
 //! Each line is `TRACE <timestamp> <type> <tracing-context> <incremental-context>*
 //! <custom-context>`, where the structural blocks are angle-bracketed and their
 //! `key=value` tokens never contain spaces; everything after the blocks is the
-//! free-form custom context. See `docs/internals/agent/trace-format.mdx` for the authoritative
+//! free-form custom context. See `docs/plugins/agent/trace-format.mdx` for the authoritative
 //! specification — this module implements it.
 //!
 //! ```text

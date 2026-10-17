@@ -1,12 +1,13 @@
 ---
 title: "App Format"
+sidebarTitle: "App format"
 ---
 
 This is the format of an app container, version 1. The `app-manager` Plugin loads any
 container in this format from each of its locations, so a container written
 by the image build, the portal, or an Agent is the same thing; where it lives
 decides what kind of app it is (see
-[Device UI](/develop/device-ui)).
+[Device UI](/architecture/device-ui)).
 `crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
 rules below. What an app may use, and how a device decides it fits, is the
 app API, in [App API](/plugins/app-manager/app-api).

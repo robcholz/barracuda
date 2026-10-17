@@ -1,4 +1,4 @@
-"""Line-parser tests against the grammar in docs/internals/agent/trace-format.mdx."""
+"""Line-parser tests against the grammar in docs/plugins/agent/trace-format.mdx."""
 
 from __future__ import annotations
 

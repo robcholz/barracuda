@@ -5,7 +5,7 @@ description: Create, migrate, or update a Barracuda Plugin with typed capabiliti
 
 # Create Plugin
 
-[Plugin API](../../../docs/develop/plugin-api.mdx) is the contract; this skill
+[Plugin API](../../../docs/architecture/plugin-api.mdx) is the contract; this skill
 applies it in order. Read the contract first. Inspect the implementation and
 its real callers before changing an existing contract.
 
@@ -56,7 +56,7 @@ service graph, `provide` each capability, install Workflow Actions, Agent
 Tools, Lua packages, portal entries, and routes, and `retain` every guard. In
 `start`, spawn each long-running task with its own task token, cancellation
 safe on every await path, following
-[Execution ownership](../../../docs/develop/execution-ownership.mdx).
+[Execution ownership](../../../docs/architecture/execution-ownership.mdx).
 
 ## 5. Add the contracts its callers need
 

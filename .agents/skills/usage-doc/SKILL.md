@@ -34,7 +34,7 @@ for voice and shape.
 - The Examples list names what actually exists; add and remove entries as
   examples land.
 - Link the design docs for rationale and the examples for runnable versions.
-- Follow [docs/develop/codestyle.mdx](../../../docs/develop/codestyle.mdx) for API surface
+- Follow [docs/architecture/codestyle.mdx](../../../docs/architecture/codestyle.mdx) for API surface
   references.
 
 The `design-doc` skill holds the shared "positive, no why-vs-why-not" writing

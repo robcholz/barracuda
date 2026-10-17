@@ -1,6 +1,6 @@
 /**
  * The portal UI kit: bundled into each contributor at build time, never loaded by the shell at
- * runtime. Documented in docs/develop/web/portal-ui-kit.mdx.
+ * runtime. Documented in docs/plugins/captive-portal/ui-kit.mdx.
  */
 export type {
   Cleanup,

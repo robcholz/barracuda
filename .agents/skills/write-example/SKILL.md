@@ -27,7 +27,7 @@ throwaway snippets.
 - Examples inherit the crate's lints. This repo commonly denies `unwrap`,
   `expect`, `panic`, slice indexing, and `+`/`-` arithmetic in `[lints.clippy]`,
   so use `?`, `saturating_*`, and destructuring.
-- Follow [docs/develop/codestyle.mdx](../../../docs/develop/codestyle.mdx) for the Rust API
+- Follow [docs/architecture/codestyle.mdx](../../../docs/architecture/codestyle.mdx) for the Rust API
   surface (getset, From/TryFrom).
 
 ## Observable state

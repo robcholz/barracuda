@@ -1,0 +1,87 @@
+---
+title: "Board profiles"
+---
+
+A profile names the Plugins a firmware contains. Every Board builds one
+profile: the one its `board.yml` names, or `headless` when it names none.
+A Plugin that no profile and no Board enables is not in the firmware at all:
+no code, no settings, no text.
+
+The rules (how the enabled set is computed, what fails, the local override)
+are in [`plugin-api.md`](/architecture/plugin-api#enablement-per-board).
+This page says which profiles exist and how to pick or add one.
+
+## The profiles
+
+The profiles are layers. Each one adds Plugins to the ones it extends, and
+the dependencies of every listed Plugin come along on their own.
+
+| Profile | Extends | Adds | Network | Lua |
+| --- | --- | --- | --- | --- |
+| `minimal` | — | workflows, time, the scheduler, power, sound | no | no |
+| `lua` | `minimal` | the VM and the Lua packages that need no network, among them those for the Board's hardware | no | yes |
+| `network` | `minimal` | Wi-Fi, the web server, the captive portal, HTTP, the portal's file manager | yes | no |
+| `ai` | `network` | the Agent, its tools, and the message gateways | yes | no |
+| `headless` | `lua`, `ai` | the Lua packages that need the network or the Agent | yes | yes |
+| `ui` | — | the app manager with the system UI, the system fonts, the Files and Workflows apps | no | yes |
+| `screen-offline` | `lua`, `ui` | nothing more | no | yes |
+| `screen` | `headless`, `ui` | Wi-Fi in the system UI, installing apps from the portal, the Sessions and Settings apps | yes | yes |
+
+```text
+                 minimal
+                /       \
+             lua         network
+              |  \          |
+              |   \         ai
+              |    \       /
+              |    headless          (the default)
+              |        \
+              |       screen = headless + ui + …
+              |
+       screen-offline = lua + ui
+```
+
+`ui` is a layer, not a product: it has no Lua packages for the hardware and
+no way online. A Board with a screen names `screen` or `screen-offline`.
+
+`screen-offline` has no Settings or Sessions app: Settings depends on Wi-Fi
+and Sessions on the Agent. Volume and brightness are in the control center.
+
+## Picking one
+
+A Board names its profile in `board.yml`:
+
+```yaml
+profile: screen-offline
+plugins:
+  camera:
+    enabled: false
+```
+
+- A product with a screen names `screen`, or `screen-offline` when it never
+  goes online.
+- A product without one names nothing and builds `headless`, or a narrower
+  layer: `minimal`, `lua`, `network`, or `ai`.
+- One Plugin more or less goes in `plugins.<id>.enabled` on the Board, not in
+  a new profile.
+
+## Adding one
+
+A new profile is a file here. Name it for what the product does, extend the
+layers it builds on, and list only what it adds:
+
+```yaml
+# boards/profiles/gateway.yml
+extends: network
+enable:
+  - agent
+  - imessage-gateway
+  - imessage-telegram
+```
+
+`extends` takes one profile or a list; a profile reached twice counts once,
+and a profile that extends itself fails. `enable` only adds: a narrower
+product extends a narrower layer instead of removing Plugins.
+
+Run `cargo plugin sync` after changing a profile or a Board, and
+`cargo plugin sync --check` before committing.

@@ -1,7 +1,7 @@
 /**
  * The channel page kit: bundled at build time into each channel's portal entry, beside the portal
  * UI kit, for the JSON the Gateway serves under every channel's config path. Documented in
- * docs/develop/web/channel-page-kit.mdx.
+ * docs/plugins/imessage-gateway/channel-page-kit.mdx.
  */
 export {
   configuredRow,

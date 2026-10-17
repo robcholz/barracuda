@@ -1,7 +1,7 @@
 //! The shapes every Plugin keeps, checked by `cargo plugin sync`, never by a
 //! build: a document out of form fails the check, not the firmware.
 //!
-//! These are the checkable parts of `docs/develop/plugin-api.mdx`: the Plugin
+//! These are the checkable parts of `docs/architecture/plugin-api.mdx`: the Plugin
 //! root's layout, the schema tree, the Plugin page summary and its agreement
 //! with `plugin.toml`, the Action and Event pages, and crate dependencies on
 //! other Plugins. Every violation is reported at once.

@@ -11,7 +11,7 @@
 //!
 //! Builtin apps are system apps that other Plugins ship: they add themselves
 //! with [`AppManager::add_builtin`]. The device UI's three layers, the system,
-//! system apps, and installable apps, are in `docs/develop/device-ui.mdx`.
+//! system apps, and installable apps, are in `docs/architecture/device-ui.mdx`.
 
 #![no_std]
 

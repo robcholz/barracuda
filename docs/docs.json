@@ -16,15 +16,35 @@
             "group": "Get started",
             "pages": [
               "index",
-              "get-started/build-and-run"
+              "get-started/build-and-run",
+              "get-started/tooling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System",
+            "pages": [
+              "architecture/platform-architecture",
+              "architecture/execution-ownership",
+              "architecture/device-ui"
             ]
           },
           {
-            "group": "Build apps",
+            "group": "Plugins",
             "pages": [
-              "plugins/app-manager/app-format",
-              "plugins/app-manager/app-api",
-              "plugins/vm/environment"
+              "architecture/plugin-api",
+              "architecture/plugin-manager"
+            ]
+          },
+          {
+            "group": "Conventions",
+            "pages": [
+              "architecture/codestyle",
+              "architecture/agent-oriented-api-design"
             ]
           }
         ]
@@ -52,7 +72,13 @@
               "plugins/webserver",
               "plugins/wifi",
               "plugins/system-wifi",
-              "plugins/captive-portal",
+              {
+                "group": "Captive Portal",
+                "pages": [
+                  "plugins/captive-portal",
+                  "plugins/captive-portal/ui-kit"
+                ]
+              },
               "plugins/app-portal",
               "plugins/power",
               "plugins/sound",
@@ -75,7 +101,10 @@
                 "group": "App Manager",
                 "pages": [
                   "plugins/app-manager",
-                  "plugins/app-manager/action"
+                  "plugins/app-manager/action",
+                  "plugins/app-manager/app-format",
+                  "plugins/app-manager/app-api",
+                  "plugins/app-manager/pocketjs"
                 ]
               },
               "plugins/builtin-app-files",
@@ -93,7 +122,31 @@
                   "plugins/agent",
                   "plugins/agent/action",
                   "plugins/agent/event",
-                  "plugins/agent/http"
+                  "plugins/agent/http",
+                  "plugins/agent/embassy",
+                  "plugins/agent/debugging",
+                  {
+                    "group": "Runtime",
+                    "pages": [
+                      "plugins/agent/context",
+                      "plugins/agent/context-model",
+                      "plugins/agent/memory",
+                      "plugins/agent/model-api",
+                      "plugins/agent/permission",
+                      "plugins/agent/skill",
+                      "plugins/agent/skill-design"
+                    ]
+                  },
+                  {
+                    "group": "Trace",
+                    "pages": [
+                      "plugins/agent/trace",
+                      "plugins/agent/trace-format",
+                      "plugins/agent/trace-vocabulary",
+                      "plugins/agent/trace-scripts",
+                      "plugins/agent/serial-log"
+                    ]
+                  }
                 ]
               },
               "plugins/agent-file",
@@ -128,7 +181,8 @@
                   "plugins/imessage-gateway/action",
                   "plugins/imessage-gateway/event",
                   "plugins/imessage-gateway/usage",
-                  "plugins/imessage-gateway/design"
+                  "plugins/imessage-gateway/design",
+                  "plugins/imessage-gateway/channel-page-kit"
                 ]
               },
               {
@@ -159,7 +213,13 @@
                   "plugins/imessage-telegram/http"
                 ]
               },
-              "plugins/imessage-web",
+              {
+                "group": "IMessage Web",
+                "pages": [
+                  "plugins/imessage-web",
+                  "plugins/imessage-web/markdown"
+                ]
+              },
               {
                 "group": "IMessage WeChat",
                 "pages": [
@@ -176,7 +236,9 @@
                 "group": "VM",
                 "pages": [
                   "plugins/vm",
-                  "plugins/vm/action"
+                  "plugins/vm/action",
+                  "plugins/vm/environment",
+                  "plugins/vm/musl"
                 ]
               },
               "plugins/vm-agent",
@@ -204,114 +266,72 @@
         ]
       },
       {
-        "tab": "Develop",
+        "tab": "Boards",
         "groups": [
           {
-            "group": "Workspace",
+            "group": "Boards",
             "pages": [
-              "develop/tooling",
-              "develop/debugging"
-            ]
-          },
-          {
-            "group": "Architecture",
-            "pages": [
-              "develop/platform-architecture",
-              "develop/device-ui",
-              "develop/execution-ownership"
-            ]
-          },
-          {
-            "group": "Writing Plugins",
-            "pages": [
-              "develop/plugin-api",
-              "develop/codestyle",
-              "develop/agent-oriented-api-design"
-            ]
-          },
-          {
-            "group": "Boards and Platforms",
-            "pages": [
-              "develop/boards",
-              "develop/board-profiles",
-              "develop/platforms/linux",
-              "develop/platforms/macos",
-              "develop/platforms/macos-network-gateway",
-              "develop/platforms/virtual-io"
-            ]
-          },
-          {
-            "group": "Web",
-            "pages": [
-              "develop/web/portal-ui-kit",
-              "develop/web/channel-page-kit",
-              "develop/web/web-chat-markdown"
-            ]
-          },
-          {
-            "group": "Tools",
-            "pages": [
-              "develop/tools/e2e",
-              "develop/tools/llm-tape",
-              "develop/tools/system-image",
-              "develop/tools/bench",
-              "develop/tools/bench-tapes",
-              "develop/tools/tape-replay-profile",
-              "develop/tools/trace-scripts",
-              "develop/tools/serial-log"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Internals",
-        "groups": [
-          {
-            "group": "Runtime",
-            "pages": [
-              "internals/embassy-integration",
-              "internals/plugin-manager",
-              "internals/http-client",
-              "internals/runtime-utils"
+              "boards/overview",
+              "boards/profiles"
             ]
           },
           {
             "group": "Hardware",
             "pages": [
-              "internals/board-hal",
-              "internals/drivers",
-              "internals/peripherals"
+              "boards/peripherals",
+              "boards/exposed-io",
+              "boards/drivers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Platforms",
+        "groups": [
+          {
+            "group": "Host Platforms",
+            "pages": [
+              "platforms/linux",
+              "platforms/macos",
+              "platforms/macos-network-gateway",
+              "platforms/virtual-io"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Shared & Tools",
+        "groups": [
+          {
+            "group": "Shared crates",
+            "pages": [
+              "shared/http-client",
+              "shared/runtime-utils"
             ]
           },
           {
-            "group": "Agent",
+            "group": "TLS",
             "pages": [
-              "internals/agent/context",
-              "internals/agent/context-model",
-              "internals/agent/memory",
-              "internals/agent/model-api",
-              "internals/agent/permission",
-              "internals/agent/skill",
-              "internals/agent/skill-design",
-              "internals/agent/trace",
-              "internals/agent/trace-format",
-              "internals/agent/trace-vocabulary"
+              "shared/tls/c-runtime",
+              "shared/tls/roots",
+              "shared/tls/mbedtls-rs"
             ]
           },
           {
-            "group": "C runtime and TLS",
+            "group": "Tools",
             "pages": [
-              "internals/lua-musl",
-              "internals/tls-c-runtime",
-              "internals/tls-roots"
+              "tools/e2e",
+              "tools/llm-tape",
+              "tools/system-image",
+              "tools/cli-rustyline"
             ]
           },
           {
-            "group": "Vendored code",
+            "group": "Bench",
             "pages": [
-              "internals/vendored/pocketjs",
-              "internals/vendored/mbedtls-rs",
-              "internals/vendored/rustyline"
+              "tools/bench",
+              "tools/bench-tapes",
+              "tools/tape-replay-profile"
             ]
           }
         ]

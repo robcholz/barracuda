@@ -1,5 +1,6 @@
 ---
 title: "App Manager Plugin"
+sidebarTitle: "Overview"
 ---
 
 Runs Lua apps with optional MicroTS views and, on a Board with a display,
@@ -46,7 +47,7 @@ The Plugin assembles two kits, its own crates:
 On a Board without a display, no UI kit runs: the Plugin is an app manager
 for headless apps. The device UI's three layers, the system, system apps,
 and installable apps, are in
-[Device UI](/develop/device-ui); this Plugin is the
+[Device UI](/architecture/device-ui); this Plugin is the
 system, and runs the other two.
 
 ## Apps
@@ -57,7 +58,7 @@ manifest, and the `app` Lua API;
 `crates/appkit/resources/app-manifest.json` checks the manifest.
 
 Where a container lives decides its `AppKind`, as
-[Device UI](/develop/device-ui) defines:
+[Device UI](/architecture/device-ui) defines:
 
 - **System apps** are builtin apps that other Plugins ship, each at
   `/resources/app` in its own filesystem; the Plugin adds itself with
@@ -237,7 +238,7 @@ pixel per display pixel.
 Views sit on one of two layers. `Layer::App` holds apps' views and
 `Layer::System` the system UI's; each layer shows at most one view, and the
 display shows the system layer's view when it has one and the app layer's
-otherwise (see [Device UI](/develop/device-ui)). An owner
+otherwise (see [Device UI](/architecture/device-ui)). An owner
 puts its view on its layer with `UiSession::show`, which replaces the layer's
 previous view, and takes it off with `UiSession::hide`; suspending or dropping
 the session hides it too. So the system UI covers and uncovers an app without

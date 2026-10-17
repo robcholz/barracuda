@@ -1,5 +1,6 @@
 ---
 title: "Captive Portal Plugin"
+sidebarTitle: "Overview"
 ---
 
 Aggregates pluggable web entries and resource providers into the portal shell.
@@ -294,7 +295,7 @@ signal and runs cleanup before removing the module's root. Every mount gets its
 own DOM root; stale imports cannot mount into a new screen. Modules must handle
 cancellation and avoid modifying the shell's global DOM. Modules are trusted
 same-origin plugin code, not sandboxed third party content. Pages are built with
-the shared UI kit in `resources/web/ui/` (documented in [Portal UI kit](/develop/web/portal-ui-kit)):
+the shared UI kit in `resources/web/ui/` (documented in [Portal UI kit](/plugins/captive-portal/ui-kit)):
 it is bundled into each contributor at build time and never shared at runtime.
 Load any module-specific CSS inside the contributor (and remove owned styles on
 cleanup); the shell does not discover extra CSS files. Relative imports resolve
