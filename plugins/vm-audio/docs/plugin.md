@@ -1,15 +1,14 @@
 # Audio Plugin
 
-The Audio Plugin owns the Board's primary audio codec, exposes playback and
-recording to Lua code as the `audio` Lua package, and publishes the device's
-output level to other Plugins as `AudioOutput`.
+The Audio Plugin exposes playback and recording on the Board's audio codec,
+which the `sound` Plugin owns, to Lua code as the `audio` Lua package.
 
 - Plugin ID: `audio`
-- Dependencies: `vm`
+- Dependencies: `vm`, `sound`
 - Settings: none
-- Context resources: peripheral slot `audio-codec.device` (`primary`, optional)
-- Provided capabilities: `AudioOutput`
-- Required capabilities: `LuaPackageRegistry` from `vm`
+- Context resources: none
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`, `Sound` from `sound`
 - Workflow: none
 - Agent Tools: none
 - Lua packages: `audio`
@@ -17,10 +16,9 @@ output level to other Plugins as `AudioOutput`.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `AudioCodec` capability exactly
-once and installs the `audio` Lua package. Codec register control stays in the
-ES8311/ES8389 implementation, while I2S controller, DMA, and bounded buffers stay in
-the Platform HAL composition.
+This Plugin installs the `audio` Lua package over `Sound`: a handle borrows
+the codec with `Sound::lend` and gives it back when it closes. The codec, its
+drivers, and the device's output level belong to the `sound` Plugin.
 
 Lua API:
 
@@ -37,10 +35,9 @@ Lua API:
 - `handle:close()`
 
 `set_volume` accepts an integer percentage from 0 through 100: the app's own
-volume, which scales the device's level. `AudioOutput::set(volume, muted)`
-sets that level, as the system UI does from the person's volume and mute, and
-applies to every app: the codec's portable 0-through-255 output is the
-device's percent times the app's percent, or 0 while muted. A handle puts the
+volume, which scales the device's level that the `sound` Plugin keeps (its
+`Volume`): the codec's portable 0-through-255 output is the device's percent
+times the app's percent, or 0 while muted. A handle puts the
 level on the codec when its app changes its volume and before each chunk it
 plays, so a change reaches a sound that is playing. `descriptor`
 reports the required stream format.

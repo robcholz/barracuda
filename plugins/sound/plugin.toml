@@ -1,0 +1,6 @@
+id = "sound"
+depends-on = []
+description = "Owns the Board's audio codec and the device's output level."
+
+[peripherals.audio-codec]
+device = { fill = "primary", optional = true }

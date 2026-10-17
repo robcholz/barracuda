@@ -101,7 +101,9 @@ barracuda-imessage-qq-plugin = { path = "plugins/imessage-qq/crates/plugin" }
 barracuda-imessage-telegram-plugin = { path = "plugins/imessage-telegram/crates/plugin" }
 barracuda-imessage-web-plugin = { path = "plugins/imessage-web/crates/plugin" }
 barracuda-imessage-wechat-plugin = { path = "plugins/imessage-wechat/crates/plugin" }
+barracuda-power-plugin = { path = "plugins/power/crates/plugin" }
 barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
+barracuda-sound-plugin = { path = "plugins/sound/crates/plugin" }
 barracuda-system-fonts-plugin = { path = "plugins/system-fonts/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }

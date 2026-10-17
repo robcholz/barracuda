@@ -14,9 +14,9 @@ use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_appkit::{
     AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
 };
-use barracuda_audio_plugin::AudioOutput;
 use barracuda_platform::{AccessPointState, StationState};
-use barracuda_power_monitor_plugin::PowerStatus;
+use barracuda_power_plugin::Power;
+use barracuda_sound_plugin::Volume;
 use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::icons::{self, IconLayer};
 use barracuda_uikit::{
@@ -128,9 +128,9 @@ pub struct Services {
     /// Network status and the portal's access point.
     pub wifi: Rc<WifiControl>,
     /// The battery's charge on the control center.
-    pub power: Rc<PowerStatus>,
+    pub power: Rc<Power>,
     /// The speaker's volume and mute.
-    pub audio: Rc<AudioOutput>,
+    pub audio: Rc<Volume>,
 }
 
 /// The system UI's state.

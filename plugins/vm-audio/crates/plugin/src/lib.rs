@@ -1,24 +1,21 @@
-//! Lua package for the Board's primary built-in audio codec, and the
-//! device's output level for other Plugins.
+//! Lua package over the Board's audio codec, which the `sound` Plugin owns
+//! and lends.
 
 #![no_std]
 
 extern crate alloc;
 
-mod config {
-    barracuda_plugin::config!();
-}
-
-use alloc::{boxed::Box, format, rc::Rc};
+use alloc::format;
 use barracuda_board_hal::audio::{AudioCodec, AudioCodecPeripheral, AudioDescriptor};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_sound_plugin::{Lease, Sound};
 use barracuda_vm_plugin::{
     Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
     UserDataHandle, UserDataMethods, Variadic,
 };
-use core::cell::RefCell;
-use portable_atomic::{AtomicBool, AtomicU8, Ordering};
+use core::marker::PhantomData;
+use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
 const MAX_TRANSFER_BYTES: usize = 256 * 1024;
@@ -27,65 +24,21 @@ const MAX_WAV_BYTES: usize = MAX_TRANSFER_BYTES + MAX_WAV_HEADER_BYTES;
 /// Samples converted per codec call, staged on the stack instead of the heap.
 const PCM_CHUNK_SAMPLES: usize = 512;
 
-/// The device's output level: what the person sets for every app. An app's
-/// own `set_volume` scales it, and mute silences every app.
-pub struct AudioOutput {
-    level: Arc<Level>,
-    /// Applies the level to the codec while no app holds it.
-    apply: Box<dyn Fn()>,
-}
-
-impl AudioOutput {
-    /// Sets the output level to `volume` percent, or silence when `muted`.
-    pub fn set(&self, volume: u8, muted: bool) {
-        self.level.volume.store(volume.min(100), Ordering::Release);
-        self.level.muted.store(muted, Ordering::Release);
-        (self.apply)();
-    }
-}
-
-/// The device's output level, shared by [`AudioOutput`] and the handles.
-struct Level {
-    /// Percent, 0 through 100.
-    volume: AtomicU8,
-    muted: AtomicBool,
-}
-
-impl Level {
-    const fn new() -> Self {
-        Self {
-            volume: AtomicU8::new(100),
-            muted: AtomicBool::new(false),
-        }
-    }
-
-    /// The codec's `0..=255` output volume for an app at `app` percent.
-    fn codec_volume(&self, app: u8) -> u8 {
-        if self.muted.load(Ordering::Acquire) {
-            return 0;
-        }
-        let system = u32::from(self.volume.load(Ordering::Acquire));
-        let scaled = (system * u32::from(app.min(100)) * 255 + 5_000) / 10_000;
-        u8::try_from(scaled).unwrap_or(u8::MAX)
-    }
-}
-
-/// Owns the Board's primary audio codec and publishes playback to Lua.
+/// Publishes the `sound` Plugin's codec to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct AudioPlugin<Device> {
-    codec: Option<Device>,
+    device: PhantomData<fn() -> Device>,
 }
 
 impl<Device> AudioPlugin<Device> {
-    /// Takes the built-in audio codec from the generated Board capability set.
+    /// Creates the unregistered package for the Board's codec type.
     #[must_use]
-    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: AudioCodecPeripheral<AudioCodec = Device>,
     {
         Self {
-            codec: config::peripherals::AUDIO_CODEC_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_audio_codec(instance)),
+            device: PhantomData,
         }
     }
 }
@@ -102,51 +55,28 @@ where
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
-        let registry = context.require::<LuaPackageRegistry>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let package = AudioPackage::new(self.codec.take());
-        let (codec, level) = (Arc::clone(&package.codec), Arc::clone(&package.level));
-        context.provide(Rc::new(AudioOutput {
-            level: Arc::clone(&package.level),
-            apply: Box::new(move || {
-                critical_section::with(|section| {
-                    if let Some(codec) = codec.borrow(section).borrow_mut().as_mut()
-                        && codec.set_output_volume(level.codec_volume(100)).is_err()
-                    {
-                        log::warn!("audio: cannot set the output volume");
-                    }
-                });
-            }),
-        }))?;
+        let registry = context.require::<LuaPackageRegistry>("vm")?;
+        let sound = context.require::<Sound<Device>>("sound")?;
         let registration = registry
-            .register(package)
+            .register(AudioPackage::new(Sound::clone(&sound)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-/// The codec while no handle holds it; a handle gives it back when it closes.
-type SharedCodec<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
-
 /// The longest beep, in milliseconds.
 const MAX_BEEP_MS: i64 = 2000;
 
 struct AudioPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    codec: SharedCodec<Device>,
-    level: Arc<Level>,
+    sound: Sound<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> AudioPackage<Device> {
-    fn new(codec: Option<Device>) -> Self {
+    fn new(sound: Sound<Device>) -> Self {
         Self {
-            present: codec.is_some(),
-            codec: Arc::new(critical_section::Mutex::new(RefCell::new(codec))),
-            level: Arc::new(Level::new()),
+            sound,
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -158,43 +88,33 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_codec = Arc::clone(&self.codec);
+        let available_sound = self.sound.clone();
         let available_active = Arc::clone(&self.active);
-        let open_codec = Arc::clone(&self.codec);
-        let open_level = Arc::clone(&self.level);
+        let open_sound = self.sound.clone();
         let open_active = Arc::clone(&self.active);
-        let beep_codec = Arc::clone(&self.codec);
-        let beep_level = Arc::clone(&self.level);
+        let beep_sound = self.sound.clone();
         let beep_active = Arc::clone(&self.active);
         lua.register_lib("audio", move |package| {
             package.register_async("beep", move |args: Variadic<i64>| {
-                let codec = Arc::clone(&beep_codec);
-                let level = Arc::clone(&beep_level);
+                let sound = beep_sound.clone();
                 let active = Arc::clone(&beep_active);
                 let hz = args.first().copied().unwrap_or(880);
                 let ms = args.get(1).copied().unwrap_or(150);
-                async move { Some(beep(codec, level, active, hz, ms).await.map(|()| true)) }
+                async move { Some(beep(&sound, active, hz, ms).await.map(|()| true)) }
             })?;
             package.register("available", move |(): ()| {
-                Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_codec.borrow(section).borrow().is_some()
-                    })))
+                Some(Ok(
+                    available_active.load(Ordering::Acquire) && available_sound.is_idle()
+                ))
             })?;
             package.register_with("open", move |lua, (): ()| {
                 if !open_active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("audio package has been revoked")));
                 }
-                let codec = critical_section::with(|section| {
-                    open_codec.borrow(section).borrow_mut().take()
-                });
-                Some(match codec {
-                    Some(codec) => lua.create_userdata(AudioHandle::new(
-                        codec,
-                        Arc::clone(&open_codec),
-                        Arc::clone(&open_level),
-                        Arc::clone(&open_active),
-                    )),
+                Some(match open_sound.lend() {
+                    Some(lease) => {
+                        lua.create_userdata(AudioHandle::new(lease, Arc::clone(&open_active)))
+                    }
                     None => Err(Error::runtime(
                         "built-in audio codec is unavailable or already open",
                     )),
@@ -214,7 +134,8 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
+        self.sound
+            .is_present()
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
                 version: 2,
                 purpose: "播放声音和录音",
@@ -227,10 +148,8 @@ where
 }
 
 struct AudioHandle<Device> {
-    codec: Option<Device>,
-    /// Where the codec goes back when the handle closes.
-    home: SharedCodec<Device>,
-    level: Arc<Level>,
+    /// The borrowed codec; dropping it gives the codec back.
+    codec: Option<Lease<Device>>,
     /// The app's own volume in percent, which scales the device's level.
     volume: u8,
     /// The codec volume last set, so playback sets it only on a change.
@@ -239,16 +158,9 @@ struct AudioHandle<Device> {
 }
 
 impl<Device> AudioHandle<Device> {
-    fn new(
-        codec: Device,
-        home: SharedCodec<Device>,
-        level: Arc<Level>,
-        active: Arc<AtomicBool>,
-    ) -> Self {
+    fn new(codec: Lease<Device>, active: Arc<AtomicBool>) -> Self {
         Self {
             codec: Some(codec),
-            home,
-            level,
             volume: 100,
             applied: None,
             active,
@@ -256,19 +168,14 @@ impl<Device> AudioHandle<Device> {
     }
 
     fn close(&mut self) {
-        if let Some(codec) = self.codec.take() {
-            critical_section::with(|section| {
-                self.home.borrow(section).replace(Some(codec));
-            });
-        }
+        self.codec.take();
     }
 }
 
 /// Plays a square-wave tone of `hz` for `ms` milliseconds on the codec while
 /// no handle holds it.
 async fn beep<Device>(
-    codec: SharedCodec<Device>,
-    level: Arc<Level>,
+    sound: &Sound<Device>,
     active: Arc<AtomicBool>,
     hz: i64,
     ms: i64,
@@ -283,10 +190,11 @@ where
             "a beep is 20 to 20000 Hz for 1 to {MAX_BEEP_MS} ms"
         )));
     }
-    let device = critical_section::with(|section| codec.borrow(section).borrow_mut().take())
+    let lease = sound
+        .lend()
         .ok_or_else(|| Error::runtime("built-in audio codec is unavailable or open in a handle"))?;
     // The handle gives the codec back however the beep ends.
-    let mut handle = AudioHandle::new(device, codec, level, active);
+    let mut handle = AudioHandle::new(lease, active);
     let descriptor = handle.codec()?.descriptor();
     let rate = u64::from(descriptor.sample_rate_hz());
     let channels = usize::from(descriptor.channels()).max(1);
@@ -362,12 +270,18 @@ where
 {
     fn codec(&self) -> Result<&Device> {
         ensure_active(&self.active)?;
-        self.codec.as_ref().ok_or_else(closed)
+        self.codec
+            .as_ref()
+            .and_then(Lease::codec)
+            .ok_or_else(closed)
     }
 
     fn codec_mut(&mut self) -> Result<&mut Device> {
         ensure_active(&self.active)?;
-        self.codec.as_mut().ok_or_else(closed)
+        self.codec
+            .as_mut()
+            .and_then(Lease::codec_mut)
+            .ok_or_else(closed)
     }
 
     fn descriptor(&self) -> Result<AudioDescriptor> {
@@ -388,7 +302,11 @@ where
 
     /// Puts the app's volume, scaled by the device's level, on the codec.
     fn apply_level(&mut self) -> Result<()> {
-        let volume = self.level.codec_volume(self.volume);
+        let volume = self
+            .codec
+            .as_ref()
+            .ok_or_else(closed)?
+            .codec_volume(self.volume);
         if self.applied != Some(volume) {
             self.codec_mut()?
                 .set_output_volume(volume)
@@ -415,7 +333,7 @@ where
     }
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
-    let descriptor = handle.codec.as_ref().ok_or_else(closed)?.descriptor();
+    let descriptor = handle.codec()?.descriptor();
     validate_pcm(&bytes, descriptor.channels())?;
     write_pcm_le(&mut handle, &bytes).await
 }
@@ -435,7 +353,7 @@ where
     let pcm = &bytes[wav.data_start..wav.data_start + wav.data_len];
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
-    let descriptor = handle.codec.as_ref().ok_or_else(closed)?.descriptor();
+    let descriptor = handle.codec()?.descriptor();
     validate_wav_format(wav, descriptor)?;
     validate_pcm(pcm, descriptor.channels())?;
     write_pcm_le(&mut handle, pcm).await
@@ -448,7 +366,7 @@ where
 {
     let mut handle = handle.borrow_mut()?;
     ensure_active(&handle.active)?;
-    let descriptor = handle.codec.as_ref().ok_or_else(closed)?.descriptor();
+    let descriptor = handle.codec()?.descriptor();
     let frames = usize::try_from(frames)
         .map_err(|_| Error::runtime("audio frame count must be non-negative"))?;
     let samples_len = frames
@@ -461,7 +379,7 @@ where
         return Err(Error::runtime("audio recording exceeds 262144 bytes"));
     }
     let mut bytes = Bytes::with_capacity(byte_len)?;
-    let codec = handle.codec.as_mut().ok_or_else(closed)?;
+    let codec = handle.codec_mut()?;
     let mut samples = [0_i16; PCM_CHUNK_SAMPLES];
     let mut encoded = [0_u8; PCM_CHUNK_SAMPLES * 2];
     let mut remaining = samples_len;
@@ -666,9 +584,7 @@ where
             *sample = i16::from_le_bytes(*pair);
         }
         handle
-            .codec
-            .as_mut()
-            .ok_or_else(closed)?
+            .codec_mut()?
             .write(&samples[..pairs.len()])
             .await
             .map_err(codec_error)?;
@@ -741,7 +657,7 @@ mod tests {
 
     #[test]
     fn lua_application_plays_pcm_and_wav_then_records() {
-        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        let package = AudioPackage::new(Sound::from_codec(Some(TestCodec { volume: 0 })));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install audio package");
 
@@ -754,34 +670,33 @@ mod tests {
     }
 
     #[test]
-    fn the_device_level_scales_and_mutes_every_app() {
-        let level = Level::new();
-        assert_eq!(level.codec_volume(100), 255);
-        assert_eq!(level.codec_volume(50), 128);
-        level.volume.store(40, Ordering::Release);
-        assert_eq!(level.codec_volume(100), 102);
-        assert_eq!(level.codec_volume(50), 51);
-        level.muted.store(true, Ordering::Release);
-        assert_eq!(level.codec_volume(100), 0);
-
-        // Playback picks up a change of level.
-        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
-        let mut handle = AudioHandle::new(
-            TestCodec { volume: 0 },
-            Arc::clone(&package.codec),
-            Arc::clone(&package.level),
-            Arc::clone(&package.active),
-        );
+    fn playback_picks_up_a_change_of_the_device_level() {
+        let sound = Sound::from_codec(Some(TestCodec { volume: 0 }));
+        let volume = sound.volume();
+        let lease = sound.lend().expect("lend the codec");
+        let mut handle = AudioHandle::new(lease, Arc::new(AtomicBool::new(true)));
+        let applied = |handle: &AudioHandle<TestCodec>| {
+            handle
+                .codec
+                .as_ref()
+                .and_then(Lease::codec)
+                .map(|codec| codec.volume)
+        };
         futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
-        assert_eq!(handle.codec.as_ref().map(|codec| codec.volume), Some(255));
-        package.level.volume.store(20, Ordering::Release);
+        assert_eq!(applied(&handle), Some(255));
+        volume.set(20, false);
         futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
-        assert_eq!(handle.codec.as_ref().map(|codec| codec.volume), Some(51));
+        assert_eq!(applied(&handle), Some(51));
+        volume.set(20, true);
+        futures_lite::future::block_on(write_pcm_le(&mut handle, &[1, 0])).expect("play");
+        assert_eq!(applied(&handle), Some(0));
+        handle.close();
+        assert!(sound.is_idle());
     }
 
     #[test]
     fn beep_plays_while_no_handle_holds_the_codec() {
-        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        let package = AudioPackage::new(Sound::from_codec(Some(TestCodec { volume: 0 })));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install audio package");
 
@@ -831,7 +746,7 @@ mod tests {
 
     #[test]
     fn unavailable_board_reports_false_and_rejects_open() {
-        let package = AudioPackage::new(None::<TestCodec>);
+        let package = AudioPackage::new(Sound::from_codec(None::<TestCodec>));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install audio package");
 
@@ -892,7 +807,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = AudioPackage::new(Some(TestCodec { volume: 0 }));
+        let package = AudioPackage::new(Sound::from_codec(Some(TestCodec { volume: 0 })));
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

@@ -712,7 +712,6 @@ name = "barracuda-app-manager-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-appkit",
- "barracuda-audio-plugin",
  "barracuda-board-hal",
  "barracuda-captive-portal-plugin",
  "barracuda-lua",
@@ -720,7 +719,8 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-plugin-build",
- "barracuda-power-monitor-plugin",
+ "barracuda-power-plugin",
+ "barracuda-sound-plugin",
  "barracuda-time-plugin",
  "barracuda-uikit",
  "barracuda-vfs",
@@ -796,13 +796,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
- "barracuda-plugin-build",
+ "barracuda-sound-plugin",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
  "futures-lite",
- "log",
  "portable-atomic",
  "portable-atomic-util",
 ]
@@ -2259,8 +2258,10 @@ dependencies = [
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-power-monitor-plugin",
+ "barracuda-power-plugin",
  "barracuda-pwm-plugin",
  "barracuda-scheduler-plugin",
+ "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
  "barracuda-time-plugin",
@@ -2301,11 +2302,22 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-plugin",
- "barracuda-plugin-build",
+ "barracuda-power-plugin",
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
  "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-power-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
  "portable-atomic-util",
 ]
 
@@ -2387,6 +2399,19 @@ dependencies = [
  "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-sound-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "critical-section",
+ "log",
  "portable-atomic",
  "portable-atomic-util",
 ]

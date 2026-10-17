@@ -13,7 +13,6 @@ use barracuda_app_manager_plugin::{
     AgentState, AgentStatus, Notifications, Preferences, Screen, Services, SystemUi,
 };
 use barracuda_app_manager_plugin::{AppManager, AppState, BuiltinApp, Device, WIFI_SETTINGS};
-use barracuda_audio_plugin::{AudioOutput, AudioPlugin};
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_platform::HostWifiDevice;
 use barracuda_platform_test::{memory_partition, never_embassy_stack};
@@ -21,7 +20,8 @@ use barracuda_plugin::api::{Hardware, PlatformInfo, PlatformWifi, PluginContext,
 use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
-use barracuda_power_monitor_plugin::{PowerMonitorPlugin, PowerStatus};
+use barracuda_power_plugin::{Power, PowerPlugin};
+use barracuda_sound_plugin::{SoundPlugin, Volume};
 use barracuda_time_plugin::{SyncSample, TimeConfig, utc_clock};
 use barracuda_uikit::{
     DEFAULT_VIEWPORT, Direction, DisplayInfo, Edge, Gesture, UiAssets, UiService, ViewCall,
@@ -149,14 +149,14 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
 }
 
 /// The capabilities the system UI takes from other Plugins.
-type Taken = (Rc<WifiControl>, Rc<PowerStatus>, Rc<AudioOutput>);
+type Taken = (Rc<WifiControl>, Rc<Power>, Rc<Volume>);
 
 /// Takes the capabilities from the real Plugins on a host Platform.
 struct Observer(Rc<RefCell<Option<Taken>>>);
 
 impl PluginDeclaration for Observer {
     const ID: &'static str = "observer";
-    const DEPENDS_ON: &'static [&'static str] = &["wifi", "power-monitor", "audio"];
+    const DEPENDS_ON: &'static [&'static str] = &["wifi", "power", "sound"];
 }
 
 impl Plugin for Observer {
@@ -166,8 +166,8 @@ impl Plugin for Observer {
     ) -> PluginResult<()> {
         self.0.replace(Some((
             context.require::<WifiControl>("wifi")?,
-            context.require::<PowerStatus>("power-monitor")?,
-            context.require::<AudioOutput>("audio")?,
+            context.require::<Power>("power")?,
+            context.require::<Volume>("sound")?,
         )));
         Ok(())
     }
@@ -210,10 +210,8 @@ async fn taken() -> Taken {
     manager.register(WifiPlugin::new(&mut context)).unwrap();
     manager.register(WorkflowPlugin::new(&mut context)).unwrap();
     manager.register(VmPlugin::new(&mut context)).unwrap();
-    manager
-        .register(PowerMonitorPlugin::new(&mut context))
-        .unwrap();
-    manager.register(AudioPlugin::new(&mut context)).unwrap();
+    manager.register(PowerPlugin::new(&mut context)).unwrap();
+    manager.register(SoundPlugin::new(&mut context)).unwrap();
     let observed = Rc::new(RefCell::new(None));
     manager.register(Observer(Rc::clone(&observed))).unwrap();
     // The manager owns the Plugins' registrations; keep it for the test.

@@ -1,0 +1,6 @@
+id = "power"
+depends-on = []
+description = "Owns the Board's power monitor and publishes its readings."
+
+[peripherals.power-monitor]
+device = { fill = "primary", optional = true }
