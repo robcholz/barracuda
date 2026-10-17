@@ -20,7 +20,7 @@ use alloc::{
 use async_channel::{Receiver, Sender};
 use barracuda_runtime_utils::{oneshot, unordered::Unordered};
 use barracuda_vfs::ScopedVfs;
-use barracuda_vm_plugin::{AppApi, Error, Lua, LuaPackage, Package, Result};
+use barracuda_vm_plugin::{Error, Lua, LuaPackage, Package, PackageInterface, Result};
 use core::{cell::RefCell, future::Future, pin::Pin};
 use futures_util::stream::StreamExt as _;
 use portable_atomic::{AtomicBool, Ordering};
@@ -91,18 +91,18 @@ impl Backends {
     }
 
     /// Adds `backend` and returns the Lua package that reaches it as `name`,
-    /// placed in the app API at `api`.
+    /// promising `interface`.
     pub(crate) fn add(
         &self,
         name: &'static str,
-        api: Option<AppApi>,
+        interface: Option<PackageInterface>,
         backend: Rc<dyn BuiltinBackend>,
     ) -> BackendPackage {
         let mut backends = self.backends.borrow_mut();
         backends.push(backend);
         BackendPackage {
             name,
-            api,
+            interface,
             backend: backends.len() - 1,
             jobs: self.jobs.clone(),
             active: Arc::new(AtomicBool::new(true)),
@@ -140,7 +140,7 @@ impl Backends {
 /// A builtin app's Lua package, as the VM installs it.
 pub(crate) struct BackendPackage {
     name: &'static str,
-    api: Option<AppApi>,
+    interface: Option<PackageInterface>,
     backend: usize,
     jobs: Sender<Job>,
     active: Arc<AtomicBool>,
@@ -213,8 +213,8 @@ impl LuaPackage for BackendPackage {
         self.name
     }
 
-    fn app_api(&self) -> Option<AppApi> {
-        self.api
+    fn interface(&self) -> Option<PackageInterface> {
+        self.interface
     }
 
     fn revoke(&self) {

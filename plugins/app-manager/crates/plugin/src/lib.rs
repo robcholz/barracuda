@@ -62,7 +62,7 @@ pub use fonts::SystemFonts;
 pub use notices::{
     DEFAULT_LABELS, MAX_LABEL_CHARS, MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications,
 };
-pub use notify::{NOTIFY, NOTIFY_API};
+pub use notify::{NOTIFY, NOTIFY_INTERFACE};
 pub use preferences::{MIN_BRIGHTNESS, PreferenceValues, Preferences, SCREEN_TIMEOUTS};
 pub use system::{Screen, Services, SystemUi, WIFI_SETTINGS};
 
@@ -177,7 +177,7 @@ where
         let registration = apps
             .add_package(
                 NOTIFY,
-                NOTIFY_API,
+                NOTIFY_INTERFACE,
                 Rc::new(notify::Notify(Rc::clone(&notices))),
             )
             .map_err(PluginError::registration)?;

@@ -1,13 +1,14 @@
 //! The app API: what an installable app can count on from one device to the
 //! next, and the check that an app fits this device.
 //!
-//! Packages place themselves in the app API with [`AppApi`]: core packages
-//! every app has, capabilities an app asks for by name, and device-specific
-//! packages that talk to a Board's hardware. `docs/app-api.md` is the
-//! contract; [`CAPABILITIES`] is the part of it this check needs, so an app
-//! can be told what this device lacks even when no Plugin here provides it.
+//! The app API is the `app` package at [`API_LEVEL`] and the packages
+//! registered on this device, each with what it promises
+//! ([`PackageInterface`]): ambient packages every app has, stable packages an
+//! app asks for by name and version, and Board-specific ones. This Plugin
+//! names no other Plugin's package: it learns them from the registry, so a
+//! device can only describe what its own Plugins register.
 
-use crate::bundle::AppInfo;
+use crate::bundle::{APP_PACKAGE, AppInfo};
 use alloc::{
     collections::BTreeMap,
     format,
@@ -15,27 +16,12 @@ use alloc::{
     vec::Vec,
 };
 use barracuda_uikit::DisplayInfo;
-use barracuda_vm_plugin::AppApi;
+use barracuda_vm_plugin::PackageInterface;
 use serde_json::{Value, json};
 
-/// The app API level this system implements.
-pub const API_LEVEL: u32 = 2;
-
-/// The app API's core packages: every app has them without asking.
-pub const CORE_PACKAGES: [&str; 2] = ["app", "time"];
-
-/// The app API's capabilities: the package name, the API level it joined
-/// at, and what the install screen calls it when this device lacks it.
-pub const CAPABILITIES: [(&str, u32, &str); 8] = [
-    ("agent", 1, "Agent"),
-    ("audio", 1, "声音"),
-    ("camera", 1, "相机"),
-    ("filesystem", 1, "共享文件"),
-    ("http", 1, "网络"),
-    ("light", 1, "灯光"),
-    ("motion", 1, "动作传感器"),
-    ("notify", 1, "通知"),
-];
+/// The version of the `app` package and the app format this system
+/// implements, which a manifest's `api` names.
+pub const API_LEVEL: u32 = 1;
 
 /// What this device offers apps besides its packages.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,26 +56,35 @@ pub enum ViewShape {
     Rect,
 }
 
-/// Whether package `name` is an app API capability at level `api` or below.
-pub(crate) fn is_capability(name: &str, api: u32) -> bool {
-    CAPABILITIES
-        .iter()
-        .any(|(capability, since, _)| *capability == name && *since <= api)
+/// A `requires` or `uses` entry: the package's name and, after `@`, the
+/// least version of its interface the app needs, 1 when it names none, and 0
+/// when the version is not a number.
+#[must_use]
+pub fn requirement(entry: &str) -> (&str, u32) {
+    match entry.split_once('@') {
+        Some((name, version)) => (name, version.parse().unwrap_or(0)),
+        None => (entry, 1),
+    }
 }
 
-/// Whether package `name` is a core package.
-pub(crate) fn is_core(name: &str) -> bool {
-    CORE_PACKAGES.contains(&name)
+/// The registered packages, by name, and what each promises.
+pub(crate) type Packages = BTreeMap<&'static str, Option<PackageInterface>>;
+
+/// The version of stable package `name` on this device.
+fn stable(packages: &Packages, name: &str) -> Option<u32> {
+    match packages.get(name) {
+        Some(Some(PackageInterface::Stable { version, .. })) => Some(*version),
+        _ => None,
+    }
 }
 
-/// The registered packages, by name, and where each stands in the app API.
-pub(crate) type Packages = BTreeMap<&'static str, Option<AppApi>>;
-
-/// The capabilities this device provides.
-fn provided(packages: &Packages) -> impl Iterator<Item = &'static str> + '_ {
-    packages
-        .iter()
-        .filter_map(|(name, api)| matches!(api, Some(AppApi::Capability { .. })).then_some(*name))
+/// Whether every app has package `name` without asking for it.
+pub(crate) fn is_ambient(packages: &Packages, name: &str) -> bool {
+    name == APP_PACKAGE
+        || matches!(
+            packages.get(name),
+            Some(Some(PackageInterface::Ambient { .. }))
+        )
 }
 
 /// Why app `app` cannot run on this device, in the words the install screen
@@ -124,13 +119,17 @@ pub(crate) fn incompatibility(
             return Some(String::from("应用需要方屏"));
         }
     }
-    let present = |name: &str| matches!(packages.get(name), Some(Some(AppApi::Capability { .. })));
-    if let Some(missing) = app.requires.iter().find(|name| !present(name)) {
-        let noun = CAPABILITIES
-            .iter()
-            .find(|(capability, _, _)| capability == missing)
-            .map_or(missing.as_str(), |(_, _, noun)| noun);
-        return Some(format!("此设备没有{noun}"));
+    for entry in &app.requires {
+        let (name, needed) = requirement(entry);
+        match stable(packages, name) {
+            None => return Some(format!("此设备没有 {name}")),
+            Some(version) if version < needed => {
+                return Some(format!(
+                    "需要更新系统（应用需要 {name} 第 {needed} 版，本机是第 {version} 版）"
+                ));
+            }
+            Some(_) => {}
+        }
     }
     if let Some(missing) = app
         .permissions
@@ -142,23 +141,30 @@ pub(crate) fn incompatibility(
     None
 }
 
-/// The packages a run of installable app `app` may require: the core
-/// packages, the capabilities it requires and uses, and its permissions.
+/// The packages a run of installable app `app` may require: the ambient
+/// packages, the packages it requires and uses, and its permissions.
 pub(crate) fn grant(app: &AppInfo, packages: &Packages) -> Vec<String> {
     packages
         .iter()
-        .filter(|(_, api)| matches!(api, Some(AppApi::Core { .. })))
+        .filter(|(_, interface)| matches!(interface, Some(PackageInterface::Ambient { .. })))
         .map(|(name, _)| (*name).to_string())
-        .chain(app.requires.iter().cloned())
-        .chain(app.uses.iter().cloned())
+        .chain(
+            app.requires
+                .iter()
+                .chain(&app.uses)
+                .map(|entry| requirement(entry).0.to_string()),
+        )
         .chain(app.permissions.iter().cloned())
         .collect()
 }
 
-/// What `app.device()` returns.
+/// What `app.device()` returns: the stable packages come with their version.
 pub(crate) fn describe(device: &Device, packages: &Packages) -> Value {
-    let capabilities: serde_json::Map<String, Value> = provided(packages)
-        .map(|name| (String::from(name), Value::Bool(true)))
+    let capabilities: serde_json::Map<String, Value> = packages
+        .keys()
+        .filter_map(|name| {
+            stable(packages, name).map(|version| (String::from(*name), Value::from(version)))
+        })
         .collect();
     json!({
         "api": API_LEVEL,
@@ -173,13 +179,13 @@ pub(crate) fn describe(device: &Device, packages: &Packages) -> Value {
     })
 }
 
-/// What each package lets an app do, in the words its Plugin declared, for
-/// the install screen; packages outside the app API have none.
+/// What package `name` lets an app do, in the words its Plugin declared,
+/// for the install screen; `None` for a package that promises nothing.
 pub(crate) fn purpose(packages: &Packages, name: &str) -> Option<&'static str> {
     match packages.get(name) {
-        Some(Some(AppApi::Capability { purpose, .. } | AppApi::DeviceSpecific { purpose })) => {
-            Some(purpose)
-        }
+        Some(Some(
+            PackageInterface::Stable { purpose, .. } | PackageInterface::BoardSpecific { purpose },
+        )) => Some(purpose),
         _ => None,
     }
 }

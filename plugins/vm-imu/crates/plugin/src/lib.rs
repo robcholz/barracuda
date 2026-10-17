@@ -123,10 +123,10 @@ where
         "motion"
     }
 
-    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         self.present
-            .then_some(barracuda_vm_plugin::AppApi::Capability {
-                since: 1,
+            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
+                version: 1,
                 purpose: "读取动作传感器",
             })
     }

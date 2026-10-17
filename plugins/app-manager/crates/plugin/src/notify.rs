@@ -8,15 +8,15 @@
 use crate::notices::Notifications;
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use barracuda_appkit::BuiltinBackend;
-use barracuda_vm_plugin::AppApi;
+use barracuda_vm_plugin::PackageInterface;
 use core::{future::Future, pin::Pin};
 use serde_json::Value;
 
 /// The package's name.
 pub const NOTIFY: &str = "notify";
-/// Where the package stands in the app API.
-pub const NOTIFY_API: AppApi = AppApi::Capability {
-    since: 1,
+/// What the package promises: `ask`'s button labels arrived at version 2.
+pub const NOTIFY_INTERFACE: PackageInterface = PackageInterface::Stable {
+    version: 2,
     purpose: "发通知、向你确认",
 };
 

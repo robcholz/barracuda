@@ -32,11 +32,10 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-The package is the app API's `light` capability
-([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
-device.
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2; version 2 added `light.fill` and `light.off`.
 
-`fill` and `off`, app API level 2, use the strip while no handle holds it
+`fill` and `off`, from version 2, use the strip while no handle holds it
 and return `nil, error` while one does.
 
 Boards without a built-in LED strip still install the package; `available`

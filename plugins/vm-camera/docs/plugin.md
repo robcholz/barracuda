@@ -31,11 +31,10 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-The package is the app API's `camera` capability
-([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
-device.
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2; version 2 added `camera.snap`.
 
-`snap`, app API level 2, uses the camera while no handle holds it and
+`snap`, from version 2, uses the camera while no handle holds it and
 returns `nil, error` while one does.
 
 Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards

@@ -439,11 +439,13 @@ A Lua package beyond the VM's built-ins registers in the
 Dropping the registration revokes the package's callbacks and invalidates its
 handles.
 
-A package installable apps may count on declares its tier in the app API with
-`LuaPackage::app_api`: core, a capability with the line the install screen
-shows, or device-specific; the tiers and the rules that keep them stable are
-in [`app-api.md`](../../plugins/app-manager/docs/app-api.md). A package that
-needs a Board device is a capability only while the Board has it.
+A package says what it promises with `LuaPackage::interface`: ambient (it
+gives code nothing it could misuse), stable with a version that counts the
+additions to its functions and a line saying what code may do with it, or
+Board-specific; `None` promises nothing. A Plugin that decides which code gets
+which packages reads these from the registry and names no package it does not
+register itself. A package that needs a Board device promises nothing while
+the Board lacks it.
 
 Every run's Lua heap holds the built-ins, every registered package, and the
 script. The VM owns that budget: it holds at most `MAX_LUA_PACKAGES` packages,

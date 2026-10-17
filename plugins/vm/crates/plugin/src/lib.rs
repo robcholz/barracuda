@@ -21,9 +21,9 @@ pub use barracuda_lua::{
     UserDataHandle, UserDataMethods, Variadic,
 };
 pub use barracuda_vm_package_api::{
-    AppApi, LuaPackage, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError,
-    LuaPackageScope, LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES,
-    MAX_LUA_PACKAGES,
+    LuaPackage, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError,
+    LuaPackageScope, PackageInterface, LUA_PACKAGE_HEAP_BUDGET_BYTES,
+    LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_LUA_PACKAGES,
 };
 pub use barracuda_vm_runtime::{
     SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse,

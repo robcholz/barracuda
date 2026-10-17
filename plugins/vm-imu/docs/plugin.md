@@ -29,9 +29,8 @@ Lua API:
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-The package is the app API's `motion` capability
-([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
-device.
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 1.
 
 Boards without an IMU report unavailable. The move-only built-in capability
 permits one handle per boot; explicit close, lexical `<close>`, collection, and

@@ -90,8 +90,7 @@ why. An app installed unsigned takes any update.
   "name": "计数器",
   "version": "0.1.0",
   "api": 1,
-  "requires": ["light"],
-  "uses": ["http"],
+  "requires": ["notify@2"],
   "entry": "main.lua",
   "view": {
     "program": "view.bvir",
@@ -117,11 +116,11 @@ why. An app installed unsigned takes any update.
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
 | `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
 | `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
-| `api`          | no       | the app API level the app is written for; defaults to `1`   |
-| `requires`     | no       | up to 16 app API capabilities the app cannot run without, such as `light` |
-| `uses`         | no       | up to 16 app API capabilities it uses when the device has them |
-| `permissions`  | no       | up to 16 Lua packages outside the app API: device-specific ones, such as `gpio`, and others |
-| `boards`       | with a device-specific package | the Boards the app is for, by their stable name |
+| `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
+| `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
+| `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
+| `permissions`  | no       | up to 16 other Lua packages: Board-specific ones and those that promise nothing |
+| `boards`       | with a Board-specific package | the Boards the app is for, by their stable name |
 
 Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
 `0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
@@ -129,11 +128,14 @@ are rejected so a typo is reported, not ignored. The manifest is at most
 4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
 
 Each package is named once across `requires`, `uses`, and `permissions`:
-capabilities in the first two, everything else in the third; core packages,
-which every app has, in none. A capability of a level above the app's `api`
-is not valid, nor is a device-specific package without `boards`.
+stable packages in the first two, everything else in the third; ambient
+packages, which every app has, in none. A Board-specific package without
+`boards` is not valid. Whether a package is stable, ambient, or
+Board-specific is what it declares on the device reading the manifest
+(`LuaPackage::interface`), so a package that device lacks is checked by the
+device where the app is installed.
 
-An installable app's runs can `require` the core packages and the packages
+An installable app's runs can `require` the ambient packages and the packages
 its manifest names; a package it did not name is not there, and `require`
 fails. Before the person installs the app, the install screen lists what it
 asks for in the words each package's Plugin declares, or says why this
@@ -194,7 +196,7 @@ Headless apps never enter the foreground. They run as services and only see
 | Call | Result |
 | ---- | ------ |
 | `app.id`, `app.name`, `app.version` | From the manifest. |
-| `app.device()` | The API level, Board, display, touch, and capabilities ([`app-api.md`](app-api.md#runs)). |
+| `app.device()` | The `app` package's version, the Board, display, touch, and the stable packages with their versions ([`app-api.md`](app-api.md#runs)). |
 | `app.view()` | The view, or `nil` for a headless app. |
 | `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
 | `app.exit()` | Ends the event loop. |

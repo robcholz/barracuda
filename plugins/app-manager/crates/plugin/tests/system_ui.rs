@@ -30,7 +30,7 @@ use barracuda_uikit::{
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_vm_plugin::{
-    AppApi, Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm, VmPlugin,
+    Lua, LuaPackage, LuaPackageRegistry, Package, PackageInterface, SeedSource, Vm, VmPlugin,
 };
 use barracuda_webserver_plugin::WebServerPlugin;
 use barracuda_wifi_plugin::{WifiControl, WifiPlugin};
@@ -297,9 +297,9 @@ impl LuaPackage for Light {
         "light"
     }
 
-    fn app_api(&self) -> Option<AppApi> {
-        Some(AppApi::Capability {
-            since: 1,
+    fn interface(&self) -> Option<PackageInterface> {
+        Some(PackageInterface::Stable {
+            version: 1,
             purpose: "控制灯光",
         })
     }
@@ -416,7 +416,7 @@ async fn scenario(spawner: Spawner) {
     assert!(
         install.contains("安装“Lamp”？")
             && install.contains("控制灯光")
-            && install.contains("使用网络（可选）"),
+            && install.contains("使用 http（可选）"),
         "{install}"
     );
     system.call(press("cancel", None)).await;
@@ -428,7 +428,7 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Install));
     let install = texts(&system);
     assert!(
-        install.contains("无法安装“Photo”") && install.contains("此设备没有相机"),
+        install.contains("无法安装“Photo”") && install.contains("此设备没有 camera"),
         "{install}"
     );
     system.call(press("confirm", None)).await;

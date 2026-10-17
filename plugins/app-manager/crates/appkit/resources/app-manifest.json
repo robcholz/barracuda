@@ -19,6 +19,18 @@
       "items": {
         "$ref": "#/$defs/package"
       }
+    },
+    "requirement": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "requirements": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/requirement"
+      }
     }
   },
   "type": "object",
@@ -96,10 +108,10 @@
       "maximum": 1000
     },
     "requires": {
-      "$ref": "#/$defs/packages"
+      "$ref": "#/$defs/requirements"
     },
     "uses": {
-      "$ref": "#/$defs/packages"
+      "$ref": "#/$defs/requirements"
     },
     "permissions": {
       "$ref": "#/$defs/packages"

@@ -198,8 +198,8 @@ where
         "display"
     }
 
-    fn app_api(&self) -> Option<barracuda_vm_plugin::AppApi> {
-        Some(barracuda_vm_plugin::AppApi::DeviceSpecific {
+    fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
+        Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
             purpose: "直接控制屏幕",
         })
     }

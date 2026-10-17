@@ -13,8 +13,8 @@ use alloc::{
     vec::Vec,
 };
 use barracuda_vm_plugin::{
-    AppApi, Context, Error, Lua, LuaPackage, LuaValue, Package, Result, UserData, UserDataHandle,
-    UserDataMethods, Variadic,
+    Context, Error, Lua, LuaPackage, LuaValue, Package, PackageInterface, Result, UserData,
+    UserDataHandle, UserDataMethods, Variadic,
 };
 use embassy_time::Duration;
 use portable_atomic::{AtomicBool, Ordering};
@@ -85,8 +85,10 @@ impl LuaPackage for AppPackage {
         "app"
     }
 
-    fn app_api(&self) -> Option<AppApi> {
-        Some(AppApi::Core { since: 1 })
+    fn interface(&self) -> Option<PackageInterface> {
+        Some(PackageInterface::Ambient {
+            version: crate::API_LEVEL,
+        })
     }
 
     fn revoke(&self) {

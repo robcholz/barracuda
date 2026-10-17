@@ -51,11 +51,10 @@ unknown chunks, and plays its `data` chunk. Compressed WAV formats are not
 decoded. One PCM operation transfers at most 256 KiB, and a WAV file may carry
 at most 64 KiB of container overhead.
 
-The package is the app API's `audio` capability
-([`app-api.md`](../../app-manager/docs/app-api.md)) while the Board has the
-device.
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2; version 2 added `audio.beep`.
 
-`beep`, app API level 2, plays at the device's level while no handle holds
+`beep`, from version 2, plays at the device's level while no handle holds
 the codec and returns `nil, error` while one does.
 
 Boards without a built-in codec report unavailable. One handle is open at a

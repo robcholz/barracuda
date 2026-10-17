@@ -3,19 +3,13 @@
 use alloc::{format, string::String};
 use barracuda_appkit::{AppError, AppExit, AppState, VmRunOutcome};
 
-/// The system icon shown beside what an app asks for: one per app API
-/// capability, and one for every other package.
+/// The system icon shown beside what an app asks for: this Plugin's own
+/// `notify` has its own, every other package the same one.
 pub(crate) fn permission_icon(package: &str) -> &'static str {
-    match package {
-        "agent" => "agent",
-        "audio" => "mic",
-        "camera" => "camera",
-        "filesystem" => "hard-drive",
-        "http" => "globe",
-        "light" => "sun",
-        "motion" => "posture",
-        "notify" => "alert",
-        _ => "activity",
+    if package == crate::NOTIFY {
+        "alert"
+    } else {
+        "activity"
     }
 }
 

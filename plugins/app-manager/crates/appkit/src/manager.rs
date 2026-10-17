@@ -23,9 +23,9 @@ use alloc::{
 use barracuda_uikit::{UiService, UiSession};
 use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_vm_plugin::{
-    AppApi, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope,
-    Vm, VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion, VmRunOutcome,
-    VmRunProgress, VmRunRequest, VmRunUpdate,
+    LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope,
+    PackageInterface, Vm, VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion,
+    VmRunOutcome, VmRunProgress, VmRunRequest, VmRunUpdate,
 };
 use core::cell::{Cell, RefCell};
 use core::future::Future;
@@ -328,7 +328,7 @@ impl AppManager {
     }
 
     /// What package `name` lets an app do, in the words its Plugin declared
-    /// for the install screen; `None` for a package outside the app API or
+    /// for the install screen; `None` for a package that promises nothing or
     /// one this device lacks.
     #[must_use]
     pub fn purpose(&self, name: &str) -> Option<&'static str> {
@@ -337,9 +337,9 @@ impl AppManager {
 
     /// What app `info` asks to be allowed, as the install screen and the
     /// portal show it: one line per package it names, in the words the
-    /// package's Plugin declared, or for a capability this device lacks in
-    /// the app API's name for it, with packages it only uses marked
-    /// optional. Each line comes with its package.
+    /// package's Plugin declared, or by its name for one this device lacks,
+    /// with packages it only uses marked optional. Each line comes with its
+    /// package's name.
     #[must_use]
     pub fn asks(&self, info: &AppInfo) -> Vec<(String, String)> {
         info.requires
@@ -347,32 +347,21 @@ impl AppManager {
             .chain(&info.uses)
             .chain(&info.permissions)
             .map(|package| {
-                let purpose = self.purpose(package).map_or_else(
-                    || {
-                        device::CAPABILITIES
-                            .iter()
-                            .find(|(name, _, _)| name == package)
-                            .map_or_else(
-                                || format!("使用 {package}"),
-                                |(_, _, noun)| {
-                                    let gap = if noun.is_ascii() { " " } else { "" };
-                                    format!("使用{gap}{noun}")
-                                },
-                            )
-                    },
-                    String::from,
-                );
+                let name = device::requirement(package).0;
+                let purpose = self
+                    .purpose(name)
+                    .map_or_else(|| format!("使用 {name}"), String::from);
                 let line = if info.uses.contains(package) {
                     format!("{purpose}（可选）")
                 } else {
                     purpose
                 };
-                (package.clone(), line)
+                (String::from(name), line)
             })
             .collect()
     }
 
-    /// Registers a Lua package of the app API answered by `backend` on the
+    /// Registers a Lua package promising `interface`, answered by `backend` on the
     /// app manager's task, the way builtin apps' packages are. Keep the
     /// registration for as long as the package is offered.
     ///
@@ -382,12 +371,12 @@ impl AppManager {
     pub fn add_package(
         &self,
         name: &'static str,
-        api: AppApi,
+        interface: PackageInterface,
         backend: Rc<dyn BuiltinBackend>,
     ) -> Result<LuaPackageRegistration, LuaPackageRegistryError> {
         self.inner
             .packages
-            .register(self.inner.backends.add(name, Some(api), backend))
+            .register(self.inner.backends.add(name, Some(interface), backend))
     }
 
     /// Adds a builtin app, a system app another Plugin ships, and registers

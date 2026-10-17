@@ -1,6 +1,7 @@
-//! Checks installable apps against the device: the app API level, the
-//! Board, the display, and the capabilities and packages they ask for; then
-//! runs one with exactly the packages it was granted.
+//! Checks installable apps against the device: the `app` package's version,
+//! the Board, the display, and the packages they ask for, as the registered
+//! packages describe themselves; then runs one with exactly the packages it
+//! was granted.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic, missing_docs)]
 
@@ -12,12 +13,14 @@ use barracuda_appkit::{AppError, AppManager, Device};
 use barracuda_uikit::{DEFAULT_VIEWPORT, DisplayInfo, UiService};
 use barracuda_vfs::{MountOptions, ScopedVfs, Vfs};
 use barracuda_vfs_memfs::MemFs;
-use barracuda_vm_plugin::{AppApi, Lua, LuaPackage, LuaPackageRegistry, Package, SeedSource, Vm};
+use barracuda_vm_plugin::{
+    Lua, LuaPackage, LuaPackageRegistry, Package, PackageInterface, SeedSource, Vm,
+};
 use embassy_executor::{Executor, Spawner};
 use embassy_time::Timer;
 
-/// A package that places itself in the app API as `api`.
-struct Fake(&'static str, Option<AppApi>);
+/// A package that promises what it is given.
+struct Fake(&'static str, Option<PackageInterface>);
 
 impl Package for Fake {
     fn install(&self, lua: &mut Lua) -> barracuda_vm_plugin::Result<()> {
@@ -30,7 +33,7 @@ impl LuaPackage for Fake {
         self.0
     }
 
-    fn app_api(&self) -> Option<AppApi> {
+    fn interface(&self) -> Option<PackageInterface> {
         self.1
     }
 }
@@ -77,8 +80,8 @@ async fn filesystem() -> ScopedVfs {
         .await
         .unwrap();
     let fs = vfs.scoped("/app").unwrap();
-    // Fits: a capability it requires, one it uses, and a Board's hardware
-    // on its Board.
+    // Fits: a stable package it requires, one it uses, and a Board's
+    // hardware on its Board.
     offer(
         &fs,
         "lamp",
@@ -100,7 +103,8 @@ async fn filesystem() -> ScopedVfs {
     )
     .await;
     // Does not fit, and says why.
-    offer(&fs, "later", r#","api":3,"requires":["teleport"]"#).await;
+    offer(&fs, "later", r#","api":2,"requires":["teleport"]"#).await;
+    offer(&fs, "dim", r#","requires":["light@2"]"#).await;
     offer(
         &fs,
         "elsewhere",
@@ -124,6 +128,15 @@ async fn filesystem() -> ScopedVfs {
     // Breaks the app format.
     offer(&fs, "loose", r#","permissions":["pins"]"#).await;
     offer(&fs, "mislabeled", r#","permissions":["light"]"#).await;
+    offer(
+        &fs,
+        "pinned",
+        r#","requires":["pins"],"boards":["test-board"]"#,
+    )
+    .await;
+    offer(&fs, "versioned", r#","requires":["light@soon"]"#).await;
+    // Names a package this device lacks, which only a device that has it
+    // can check.
     offer(&fs, "unknown", r#","requires":["teleport"]"#).await;
     offer(&fs, "core", r#","uses":["time"]"#).await;
     offer(&fs, "twice", r#","requires":["light"],"uses":["light"]"#).await;
@@ -133,17 +146,17 @@ async fn filesystem() -> ScopedVfs {
 async fn scenario(spawner: Spawner) {
     let packages = LuaPackageRegistry::new();
     let _registrations = [
-        Fake("time", Some(AppApi::Core { since: 1 })),
+        Fake("time", Some(PackageInterface::Ambient { version: 1 })),
         Fake(
             "light",
-            Some(AppApi::Capability {
-                since: 1,
+            Some(PackageInterface::Stable {
+                version: 1,
                 purpose: "控制灯光",
             }),
         ),
         Fake(
             "pins",
-            Some(AppApi::DeviceSpecific {
+            Some(PackageInterface::BoardSpecific {
                 purpose: "控制引脚",
             }),
         ),
@@ -180,16 +193,21 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(
         offered,
         [
+            (
+                "dim",
+                Some("需要更新系统（应用需要 light 第 2 版，本机是第 1 版）")
+            ),
             ("elsewhere", Some("只适用于 other-board、third-board")),
             ("lamp", None),
             ("large", Some("屏幕太小（应用需要 480×480）")),
-            ("later", Some("需要更新系统（应用需要 API 3，本机是 2）")),
-            ("photo", Some("此设备没有相机")),
+            ("later", Some("需要更新系统（应用需要 API 2，本机是 1）")),
+            ("photo", Some("此设备没有 camera")),
             ("plain", None),
             ("round", None),
             ("serial", Some("此设备不支持 serial")),
             ("small", None),
             ("square", Some("应用需要方屏")),
+            ("unknown", Some("此设备没有 teleport")),
         ]
     );
     let invalid: Vec<_> = list
@@ -197,20 +215,21 @@ async fn scenario(spawner: Spawner) {
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 5, "{invalid:#?}");
+    assert_eq!(invalid.len(), 6, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
-        ("core", "\"time\" is a core package"),
+        ("core", "\"time\" is a package every app has"),
         ("loose", "\"pins\" talks to a Board's hardware"),
-        ("mislabeled", "\"light\" is an app API capability"),
+        ("mislabeled", "\"light\" is a stable package"),
+        ("pinned", "\"pins\" is not a stable package"),
         ("twice", "\"light\" is listed twice"),
-        ("unknown", "\"teleport\" is not a capability of app API 1"),
+        ("versioned", "\"light@soon\" is not a package name"),
     ]) {
         assert_eq!(*dir, expected_dir);
         assert!(problem.contains(expected), "{dir}: {problem}");
     }
 
     // Incompatible apps are neither requested nor installed.
-    for id in ["later", "elsewhere", "square", "photo", "serial"] {
+    for id in ["later", "dim", "elsewhere", "square", "photo", "serial"] {
         assert_eq!(
             manager.request_install(id).await.err(),
             Some(AppError::Incompatible),
@@ -224,7 +243,7 @@ async fn scenario(spawner: Spawner) {
     }
     assert_eq!(manager.install_request(), None);
 
-    // A run may require the core packages and what its manifest asked for.
+    // A run may require the ambient packages and what its manifest asked for.
     manager.install("lamp").await.unwrap();
     manager.open("lamp").await.unwrap();
     for _ in 0..500 {
@@ -238,7 +257,7 @@ async fn scenario(spawner: Spawner) {
         exit.output,
         [
             "true\ttrue\tfalse\ttrue\tfalse",
-            "2\ttest-board\t360\t360\ttrue\ttrue\tlight",
+            "1\ttest-board\t360\t360\ttrue\ttrue\tlight",
         ],
         "{exit:?}"
     );

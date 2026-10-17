@@ -9,7 +9,7 @@
 
 use crate::AppError;
 use crate::bapp::{PACKAGE_EXTENSION, Package, PackageError, Seal};
-use crate::device::{self, API_LEVEL, Device, Packages, ViewShape};
+use crate::device::{self, Device, Packages, ViewShape};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -18,7 +18,7 @@ use alloc::{
 };
 use barracuda_uikit::UiAssets;
 use barracuda_vfs::{FsError, ScopedVfs};
-use barracuda_vm_plugin::AppApi;
+use barracuda_vm_plugin::PackageInterface;
 use core::cell::RefCell;
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -118,13 +118,15 @@ pub struct AppInfo {
     pub kind: AppKind,
     /// Whether the app has a view; apps without one run headless.
     pub has_view: bool,
-    /// The app API level the app is written for.
+    /// The version of the `app` package the app is written for.
     pub api: u32,
-    /// The app API capabilities the app cannot run without.
+    /// The stable packages the app cannot run without, each with an optional
+    /// `@version`, the least it needs.
     pub requires: Vec<String>,
-    /// The app API capabilities the app uses when the device has them.
+    /// The stable packages the app uses when the device has them, written as
+    /// in `requires`.
     pub uses: Vec<String>,
-    /// The Lua packages outside the app API the app asks for: device-specific
+    /// The other Lua packages the app asks for: Board-specific
     /// ones and others. Only an installable app is limited to its packages.
     pub permissions: Vec<String>,
     /// The Boards the app is for; empty when it is for any.
@@ -454,9 +456,11 @@ async fn read_container(
     Ok(container)
 }
 
-/// Checks the packages a manifest asks for against the app API: capabilities
-/// in `requires` and `uses`, everything else in `permissions`, each once, and
-/// `boards` for packages that talk to a Board's hardware.
+/// Checks the packages a manifest asks for against what the registered
+/// packages promise: stable ones in `requires` and `uses`, with an optional
+/// `@version`, everything else in `permissions`, each once, and `boards` for
+/// packages that reach a Board's hardware. A package this device lacks is
+/// checked by the device where it is installed.
 fn check_packages(
     manifest: &Manifest,
     location: AppLocation,
@@ -468,16 +472,30 @@ fn check_packages(
         ("permissions", &manifest.permissions),
     ];
     let mut seen = BTreeSet::new();
-    for (list, names) in lists {
-        for name in names {
-            if !seen.insert(name.as_str()) {
+    for (list, entries) in lists {
+        for entry in entries {
+            let (name, version) = if list == "permissions" {
+                (entry.as_str(), 1)
+            } else {
+                device::requirement(entry)
+            };
+            let bad_name = name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte));
+            if bad_name || version == 0 || (list == "permissions" && entry.contains('@')) {
+                return Err(invalid(format!(
+                    "{MANIFEST_FILE}: \"{entry}\" is not a package name, with a version after @ only in requires and uses"
+                )));
+            }
+            if !seen.insert(name) {
                 return Err(invalid(format!(
                     "{MANIFEST_FILE}: \"{name}\" is listed twice"
                 )));
             }
-            if device::is_core(name) {
+            if device::is_ambient(&shelf.packages, name) {
                 return Err(invalid(format!(
-                    "{MANIFEST_FILE}: \"{name}\" is a core package, which every app has"
+                    "{MANIFEST_FILE}: \"{name}\" is a package every app has"
                 )));
             }
             if location.kind() == AppKind::Installable && shelf.builtins.reserves(name) {
@@ -485,32 +503,25 @@ fn check_packages(
                     "{MANIFEST_FILE}: \"{name}\" is only for builtin apps"
                 )));
             }
-            let capability = device::is_capability(name, API_LEVEL);
-            match list {
-                "permissions" if capability => {
+            match (list, shelf.packages.get(name)) {
+                ("permissions", Some(Some(PackageInterface::Stable { .. }))) => {
                     return Err(invalid(format!(
-                        "{MANIFEST_FILE}: \"{name}\" is an app API capability: list it in requires or uses"
+                        "{MANIFEST_FILE}: \"{name}\" is a stable package: list it in requires or uses"
                     )));
                 }
-                // Capabilities of a later level are checked by a later system.
-                "requires" | "uses"
-                    if manifest.api <= API_LEVEL && !device::is_capability(name, manifest.api) =>
+                ("requires" | "uses", Some(Some(PackageInterface::BoardSpecific { .. }))) => {
+                    return Err(invalid(format!(
+                        "{MANIFEST_FILE}: \"{name}\" is not a stable package: list it in permissions"
+                    )));
+                }
+                (_, Some(Some(PackageInterface::BoardSpecific { .. })))
+                    if manifest.boards.is_empty() =>
                 {
                     return Err(invalid(format!(
-                        "{MANIFEST_FILE}: \"{name}\" is not a capability of app API {}",
-                        manifest.api
+                        "{MANIFEST_FILE}: \"{name}\" talks to a Board's hardware: list the boards the app is for"
                     )));
                 }
                 _ => {}
-            }
-            let hardware = matches!(
-                shelf.packages.get(name.as_str()),
-                Some(Some(AppApi::DeviceSpecific { .. }))
-            );
-            if hardware && manifest.boards.is_empty() {
-                return Err(invalid(format!(
-                    "{MANIFEST_FILE}: \"{name}\" talks to a Board's hardware: list the boards the app is for"
-                )));
             }
         }
     }

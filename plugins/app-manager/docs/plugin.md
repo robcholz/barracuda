@@ -20,8 +20,8 @@ centers, and the screens around an app's lifecycle.
   `app.interactive`, `app.terminate`, `app.status`, `app.tap`, `app.notify`,
   `app.confirm`, and `app.agent`, see `action.md`; Events none
 - Agent Tools: none
-- Lua packages: `app` (core) and `notify` (a capability) of the app API,
-  and each builtin app's package
+- Lua packages: `app` (ambient) and `notify` (stable, version 2), and each
+  builtin app's package
 - Web: none
 - Tasks: one task that supervises up to `MAX_APP_RUNS` (3) app runs, answers
   builtin apps' package calls, and, with a display, draws views, reads
@@ -64,7 +64,7 @@ Where a container lives decides its `AppKind`, as
   registered Lua package, `uninstall` refuses them, and no installed app may
   take their IDs.
 - **Installable apps** are installed under the private `/media/apps`. Their
-  runs get `LuaPackageScope::Only` the app API's core packages and the
+  runs get `LuaPackageScope::Only` the ambient packages and the
   packages their manifest names, through `Vm::run_scoped`.
 - **Offers** are containers under the shared `/workspace/media/apps`, written
   by the portal, Agents, or other Plugins. They are not launchable; `open`
@@ -113,9 +113,10 @@ reads touch. Every listing reads the packages' tiers from
 one counts, and fills each installable app's `incompatible`; `request_install`,
 `install`, and `open` refuse an app that has one with `Incompatible`.
 `AppManager::purpose` is the install screen's line for a package, as its
-Plugin declared it.
+Plugin declared it in `LuaPackage::interface`; this Plugin names no other
+Plugin's package and learns them all from the registry.
 
-The `notify` capability is this Plugin's: `AppManager::add_package`
+The `notify` package is this Plugin's: `AppManager::add_package`
 registers it with the same bridge builtin apps' packages use, and its backend
 posts to `Notifications`.
 
