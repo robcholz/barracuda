@@ -2520,7 +2520,9 @@ dependencies = [
 name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",

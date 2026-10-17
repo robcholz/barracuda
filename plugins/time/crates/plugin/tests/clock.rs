@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used)]
 
-use barracuda_time_plugin::{ClockError, SyncSample, TimeConfig, utc_clock};
+use barracuda_time_plugin::{ClockError, ClockSource, SyncSample, TimeConfig, utc_clock};
 use embassy_time::{Duration, Instant};
 
 #[test]
@@ -45,4 +45,21 @@ fn resynchronization_replaces_the_utc_anchor() {
     updater.synchronize(SyncSample::new(1_800_000_100_000, second));
     let now = clock.now_at(second).expect("resynchronized clock");
     assert_eq!(u64::from(now), 1_800_000_100_000);
+}
+
+#[test]
+fn real_time_clock_starts_the_clock_until_network_time() {
+    let (clock, updater) = utc_clock(TimeConfig::new(1_000, 60_000, 120_000));
+    assert_eq!(clock.source(), None);
+    let boot = Instant::from_millis(1_000);
+    updater.seed(SyncSample::new(1_800_000_000_000, boot));
+    assert_eq!(clock.source(), Some(ClockSource::RealTimeClock));
+    assert_eq!(clock.now_at(boot).map(u64::from), Ok(1_800_000_000_000));
+
+    // Network time replaces it, and a later seed never overrides network time.
+    let synced = Instant::from_millis(2_000);
+    updater.synchronize(SyncSample::new(1_800_000_000_500, synced));
+    updater.seed(SyncSample::new(1_700_000_000_000, synced));
+    assert_eq!(clock.source(), Some(ClockSource::Network));
+    assert_eq!(clock.now_at(synced).map(u64::from), Ok(1_800_000_000_500));
 }

@@ -393,7 +393,8 @@ microphone are the person's choice for the Agent's voice.
 ### The status bar
 
 The clock is UTC from the `time` Plugin's `UtcClock`, redrawn every 15
-seconds, and empty until the clock is synchronized. Do not disturb and
+seconds: from the Board's real-time clock at boot when it has one, then from
+network time, and empty on a Board without one until network time arrives. Do not disturb and
 offline show as icons beside it. The home screen's offline card follows
 `WifiControl::status`; host Boards whose network the host manages are always
 connected. The portal tile opens the Wi-Fi setup access point
