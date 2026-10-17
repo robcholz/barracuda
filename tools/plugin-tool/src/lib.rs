@@ -1216,10 +1216,10 @@ mod tests {
         fs::create_dir_all(&board).expect("Board directory");
         fs::create_dir_all(root.path().join("boards/profiles")).expect("profiles directory");
         fs::write(
-            root.path().join("boards/profiles/base.yml"),
+            root.path().join("boards/profiles/headless.yml"),
             "enable: [demo]\n",
         )
-        .expect("base profile");
+        .expect("default profile");
         let base =
             "name: demo-board\nhardware:\n  chip: demo\nnative-layout:\n  artifact: layout.yml\n";
         let plugins = discover(root.path()).expect("discover Plugins");

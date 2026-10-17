@@ -312,35 +312,48 @@ pub fn select(
     })
 }
 
-/// Loads a profile and the profiles it extends, root first.
+/// Loads a profile and every profile it extends, each once, the ones it
+/// extends before it.
 fn profile_chain(workspace: &Path, name: &str) -> Result<Vec<(String, Vec<String>)>, TaskError> {
     let mut chain = Vec::new();
-    let mut next = Some(name.to_owned());
-    while let Some(name) = next {
-        if chain.iter().any(|(seen, _)| seen == &name) {
-            return Err(TaskError::Task(format!(
-                "profile `{name}` extends itself through {}",
-                chain
-                    .iter()
-                    .map(|(seen, _)| format!("`{seen}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
-        }
-        let path = workspace.join(PROFILES_PATH).join(format!("{name}.yml"));
-        let text = fs::read_to_string(&path).map_err(|error| {
-            TaskError::Task(format!(
-                "unknown profile `{name}` ({}): {error}",
-                path.display()
-            ))
-        })?;
-        let profile = parse_profile(&text)
-            .map_err(|error| TaskError::Task(format!("{}: {error}", path.display())))?;
-        next = profile.extends().map(String::from);
-        chain.push((name, profile.enable().to_vec()));
-    }
-    chain.reverse();
+    load_profile(workspace, name, &mut Vec::new(), &mut chain)?;
     Ok(chain)
+}
+
+fn load_profile(
+    workspace: &Path,
+    name: &str,
+    path: &mut Vec<String>,
+    chain: &mut Vec<(String, Vec<String>)>,
+) -> Result<(), TaskError> {
+    if path.iter().any(|seen| seen == name) {
+        return Err(TaskError::Task(format!(
+            "profile `{name}` extends itself through {}",
+            path.iter()
+                .map(|seen| format!("`{seen}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    if chain.iter().any(|(loaded, _)| loaded == name) {
+        return Ok(());
+    }
+    let file = workspace.join(PROFILES_PATH).join(format!("{name}.yml"));
+    let text = fs::read_to_string(&file).map_err(|error| {
+        TaskError::Task(format!(
+            "unknown profile `{name}` ({}): {error}",
+            file.display()
+        ))
+    })?;
+    let profile = parse_profile(&text)
+        .map_err(|error| TaskError::Task(format!("{}: {error}", file.display())))?;
+    path.push(name.to_owned());
+    for parent in profile.extends() {
+        load_profile(workspace, parent, path, chain)?;
+    }
+    path.pop();
+    chain.push((name.to_owned(), profile.enable().to_vec()));
+    Ok(())
 }
 
 /// The Board's devices of each peripheral kind, in name order, with the

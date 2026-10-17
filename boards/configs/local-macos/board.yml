@@ -1,5 +1,5 @@
 name: local-macos
-profile: device
+profile: screen
 hardware:
   chip: macos
 native-layout:

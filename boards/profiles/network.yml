@@ -1,0 +1,9 @@
+# Online without Lua: minimal plus Wi-Fi, the web server, the portal, HTTP, and
+# the portal's file manager.
+extends: minimal
+enable:
+  - captive-portal
+  - files
+  - http
+  - webserver
+  - wifi

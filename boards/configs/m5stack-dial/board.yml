@@ -1,5 +1,5 @@
 name: m5stack-dial
-profile: device
+profile: screen
 hardware:
   chip: esp32s3
 toolchain:

@@ -23,6 +23,7 @@ mod config {
 
 mod agent;
 mod fonts;
+mod network;
 mod notices;
 mod notify;
 mod preferences;
@@ -44,7 +45,6 @@ use barracuda_time_plugin::UtcClock;
 use barracuda_uikit::{Ui, UiAssets};
 use barracuda_vfs::{FsError, ScopedVfs};
 use barracuda_vm_plugin::{LuaPackageRegistry, Vm};
-use barracuda_wifi_plugin::WifiControl;
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 use core::{future::Future, pin::Pin};
 use embassy_futures::join::{join, join3};
@@ -59,6 +59,7 @@ pub use barracuda_appkit::{
 };
 pub use barracuda_uikit::icons;
 pub use fonts::{FontAtlases, SystemFonts};
+pub use network::{HotspotFuture, NetworkSource, NetworkState, SystemNetwork};
 pub use notices::{
     DEFAULT_LABELS, MAX_LABEL_CHARS, MAX_NOTICE_CHARS, MAX_NOTICES, Notice, Notifications,
 };
@@ -145,7 +146,6 @@ where
         let packages = context.require::<LuaPackageRegistry>("vm")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let clock = context.require::<UtcClock>("time")?;
-        let wifi = context.require::<WifiControl>("wifi")?;
         let power = context.require::<Power>("power")?;
         let audio = context.require::<Volume>("sound")?;
         let ui = self
@@ -193,6 +193,8 @@ where
         context.provide(Rc::clone(&preferences))?;
         let fonts = Rc::new(SystemFonts::default());
         context.provide(Rc::clone(&fonts))?;
+        let network = Rc::new(SystemNetwork::default());
+        context.provide(Rc::clone(&network))?;
         let screen = ui.map(|ui| {
             let services = Services {
                 ui: ui.service(),
@@ -201,7 +203,7 @@ where
                 agent,
                 preferences,
                 clock,
-                wifi,
+                network,
                 power,
                 audio,
             };

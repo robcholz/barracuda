@@ -1,5 +1,5 @@
 name: local-linux
-profile: device
+profile: screen
 hardware:
   chip: linux
 native-layout:

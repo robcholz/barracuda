@@ -7,6 +7,7 @@
 //! taking input until the screen closes.
 
 use crate::agent::{AgentState, AgentStatus};
+use crate::network::{NetworkState, SystemNetwork};
 use crate::notices::{DEFAULT_LABELS, Notifications};
 use crate::preferences::Preferences;
 use crate::words;
@@ -14,7 +15,6 @@ use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use barracuda_appkit::{
     AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
 };
-use barracuda_platform::{AccessPointState, StationState};
 use barracuda_power_plugin::Power;
 use barracuda_sound_plugin::Volume;
 use barracuda_time_plugin::UtcClock;
@@ -22,7 +22,6 @@ use barracuda_uikit::icons::{self, IconLayer};
 use barracuda_uikit::{
     Direction, Edge, Gesture, Layer, UiAssets, UiError, UiService, UiSession, ViewCall, ViewValue,
 };
-use barracuda_wifi_plugin::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD, SETUP_AP_SSID, WifiControl};
 use embassy_time::{Duration, Instant};
 
 /// The control center's tiles, by their IDs in the view.
@@ -125,8 +124,8 @@ pub struct Services {
     pub preferences: Rc<Preferences>,
     /// The time on the status bar.
     pub clock: Rc<UtcClock>,
-    /// Network status and the portal's access point.
-    pub wifi: Rc<WifiControl>,
+    /// The network and the portal's hotspot, when a Plugin shows them.
+    pub network: Rc<SystemNetwork>,
     /// The battery's charge on the control center.
     pub power: Rc<Power>,
     /// The speaker's volume and mute.
@@ -529,19 +528,17 @@ impl SystemUi {
                 .update(|values| values.quiet = !values.quiet),
             Some(TILE_BRIGHTNESS) => self.control = CONTROL_BRIGHTNESS,
             Some(TILE_PORTAL) => {
-                let wifi = &self.services.wifi;
-                if self.portal_open() {
-                    if let Err(error) = wifi.stop_access_point().await {
-                        log::warn!("system ui: cannot close the portal's access point: {error}");
-                    }
-                } else {
-                    match wifi
-                        .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-                        .await
-                    {
-                        Ok(()) => self.control = CONTROL_PORTAL,
-                        Err(error) => {
-                            log::warn!("system ui: cannot open the portal's access point: {error}");
+                if let Some(network) = self.services.network.source() {
+                    if network.hotspot_open() {
+                        if let Err(error) = network.close_hotspot().await {
+                            log::warn!("system ui: cannot close the portal's hotspot: {error}");
+                        }
+                    } else {
+                        match network.open_hotspot().await {
+                            Ok(()) => self.control = CONTROL_PORTAL,
+                            Err(error) => {
+                                log::warn!("system ui: cannot open the portal's hotspot: {error}");
+                            }
                         }
                     }
                 }
@@ -751,18 +748,20 @@ impl SystemUi {
             .map_or_else(|| String::from(id), |info| info.name)
     }
 
+    /// Whether the device shows a network and is not on it; a device that
+    /// shows none is never offline.
     fn offline(&self) -> bool {
-        !matches!(
-            self.services.wifi.status().station(),
-            StationState::Connected { .. }
-        )
+        self.services
+            .network
+            .source()
+            .is_some_and(|network| !matches!(network.state(), NetworkState::Connected { .. }))
     }
 
     fn portal_open(&self) -> bool {
-        matches!(
-            self.services.wifi.status().access_point(),
-            AccessPointState::Started { .. } | AccessPointState::Starting
-        )
+        self.services
+            .network
+            .source()
+            .is_some_and(|network| network.hotspot_open())
     }
 
     /// What an app asks to be allowed, in the words of the Plugins that
@@ -892,32 +891,45 @@ impl SystemUi {
             ),
             _ => (String::new(), String::new(), Vec::new(), "", ""),
         };
-        let status = self.services.wifi.status();
-        let network = match status.station() {
-            StationState::Connected { ssid } => {
-                ssid.clone().unwrap_or_else(|| String::from("已连接"))
-            }
-            StationState::Connecting => String::from("连接中"),
-            StationState::Disconnected => String::from("未连接"),
-        };
+        let network = self.services.network.source();
+        let link = network.as_ref().map(|network| match network.state() {
+            NetworkState::Connected { name } => name.unwrap_or_else(|| String::from("已连接")),
+            NetworkState::Connecting => String::from("连接中"),
+            NetworkState::Offline => String::from("未连接"),
+        });
         let switch = |on: bool| String::from(if on { "开" } else { "关" });
         let tiles = [
-            ("Wi-Fi", network, "wifi", !offline),
             (
+                TILE_WIFI,
+                "Wi-Fi",
+                link.clone().unwrap_or_default(),
+                "wifi",
+                !offline,
+            ),
+            (
+                TILE_MIC,
                 "麦克风",
                 switch(preferences.microphone),
                 "mic",
                 preferences.microphone,
             ),
             (
+                TILE_MUTE,
                 "静音",
                 switch(preferences.muted),
                 "volume-x",
                 preferences.muted,
             ),
-            ("勿扰", switch(quiet), "moon", quiet),
-            ("亮度", format!("{}%", preferences.brightness), "sun", false),
+            (TILE_QUIET, "勿扰", switch(quiet), "moon", quiet),
             (
+                TILE_BRIGHTNESS,
+                "亮度",
+                format!("{}%", preferences.brightness),
+                "sun",
+                false,
+            ),
+            (
+                TILE_PORTAL,
                 "门户",
                 switch(self.portal_open()),
                 "globe",
@@ -1063,8 +1075,11 @@ impl SystemUi {
                 ViewValue::List(
                     tiles
                         .into_iter()
-                        .enumerate()
-                        .map(|(id, (label, detail, icon, on))| {
+                        // Without a network, the Wi-Fi and portal tiles go.
+                        .filter(|(id, ..)| {
+                            link.is_some() || (*id != TILE_WIFI && *id != TILE_PORTAL)
+                        })
+                        .map(|(id, label, detail, icon, on)| {
                             item([
                                 ViewValue::I32(id as i32),
                                 ViewValue::Str(String::from(label)),
@@ -1087,9 +1102,12 @@ impl SystemUi {
             ),
             (
                 "portal",
-                ViewValue::Str(format!(
-                    "连接热点“{SETUP_AP_SSID}”，打开 http://{SETUP_AP_ADDRESS}/"
-                )),
+                ViewValue::Str(
+                    network
+                        .as_ref()
+                        .map(|network| network.hotspot_hint())
+                        .unwrap_or_default(),
+                ),
             ),
             ("title", ViewValue::Str(title)),
             ("detail", ViewValue::Str(detail)),
