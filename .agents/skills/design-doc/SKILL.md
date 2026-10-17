@@ -1,6 +1,6 @@
 ---
 name: design-doc
-description: Write and maintain subsystem design docs (design.md) in this repo, and audit a crate against its design doc. Use when creating or editing a design doc, reviewing its style or tradeoffs, or checking whether code matches its doc.
+description: Write and maintain subsystem design docs in this repo's docs site, and audit a crate against its design doc. Use when creating or editing a design doc, reviewing its style or tradeoffs, or checking whether code matches its doc.
 ---
 
 # Design Docs Aligned with Code
@@ -36,7 +36,7 @@ doc must read as a design and match what the code actually does.
 A typical design doc has: scope, an architecture boundary diagram,
 the model (types and registry), call paths (unified primitive + wrappers),
 invariants, and one section per major subsystem. Adapt to the subject; do not
-force a fixed template. Use `plugins/imessage-gateway/docs/design.md` as the
+force a fixed template. Use `docs/plugins/imessage-gateway/design.mdx` as the
 in-repo reference for voice and shape.
 
 ## Doc ↔ code alignment

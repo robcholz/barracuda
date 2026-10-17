@@ -1,7 +1,7 @@
 /**
  * The channel page kit: bundled at build time into each channel's portal entry, beside the portal
  * UI kit, for the JSON the Gateway serves under every channel's config path. Documented in
- * ./README.md.
+ * docs/develop/web/channel-page-kit.mdx.
  */
 export {
   configuredRow,

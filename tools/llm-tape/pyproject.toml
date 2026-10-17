@@ -2,7 +2,6 @@
 name = "llm-tape"
 version = "0.1.0"
 description = "Content-agnostic byte recorder and deterministic replay server for LLM HTTP APIs."
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.10,<4",

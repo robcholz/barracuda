@@ -1,0 +1,516 @@
+---
+title: "IMessage Gateway Plugin"
+---
+
+The IMessage Gateway Plugin routes messages between channel Plugins and
+Workflow, and owns what every channel Plugin shares: mode, owners, receive
+loops and slots, their HTTP routes and status, HTTP helpers, and the files
+users send.
+
+- Plugin ID: `imessage-gateway`
+- Dependencies: `workflow`, `http`, `webserver`
+- Settings: `receive-slots` (`usize`, default `1`), `attachment-max-bytes`
+  (`u32`, default `8388608`)
+- Context resources: `ip_stack`, `entropy`
+- Provided capabilities: `IMessageGateway`
+- Required capabilities: `WorkflowService` from `workflow`,
+  `WorkflowActionRegistry` from `workflow`, `ClientFactory` from `http`,
+  `WebServer` from `webserver`
+- Workflow: Actions `gateway.send`, `gateway.send_stream`,
+  `gateway.send_media`, see [Actions](/plugins/imessage-gateway/action); Events `gateway.message.received`,
+  `gateway.control.received`, `gateway.send_stream.finished`,
+  `gateway.send_media.finished`, see [Events](/plugins/imessage-gateway/event)
+- Agent Tools: none
+- Lua packages: none
+- Web: none of its own; `IMessageGateway::serve_channel` mounts a channel
+  Plugin's prefix route on the `WebServer` for that Plugin
+- Tasks: four text stream workers (`gateway_event_worker`, pool size 4) and
+  four media workers (`gateway_media_worker`, pool size 4)
+- Storage: a private filesystem (`PluginFilesystem::Private`); inbound
+  attachments as files in `/workspace/cache/gateway/<channel>/`, written as
+  `.<name>.part` and renamed into place; no KV keys of its own:
+  `load_mode`, `store_mode`, and `load_owners` read and write the `mode` and
+  `owners` keys in the calling channel Plugin's storage
+
+`receive-slots` is the number of connections reserved for channel receive
+loops, each with its own statically allocated socket buffers.
+`attachment-max-bytes` is the largest single attachment the Gateway stores
+or sends; there is no total quota.
+
+The Plugin keeps its Workflow Action registrations alive for its lifetime.
+Pairing codes for channel owner books, and the per-boot prefix of attachment
+names, come from the Platform's entropy.
+
+`IMessageGateway` is the shared typed API. Provider Plugins register channels
+and publish inbound messages through it; Workflow Actions and the separate
+`agent-imessage-gateway` adapter call the same send methods.
+
+`IMessageGateway::publish_control` publishes `gateway.control.received`
+(`GatewayInboundControl`: `{ route, control, temporary?, session?, index?,
+title?, confirm? }`). A control is `interrupt` or `cancel` for the turn
+running in the conversation, or a session command: `sessions` (list), `new`
+(`temporary` for a chat that is never saved), `switch`, `rename` (`title`),
+`delete` (`confirm`), or `help` for a malformed command. Commands name a
+session by `session` id (rich channels) or by `index`, its 1-based place in
+the conversation's newest-first list. Controls do not wait on `ready`, so
+they never queue behind messages. Which sessions a route owns is the
+consumer's business; the Gateway only names the route.
+
+## Session commands for every channel
+
+`IMessageGateway::publish` turns a session text command into a control
+instead of a message (`parse_command`), so every channel manages its
+sessions as text: `/sessions`, `/new`, `/new temp`, `/switch N`,
+`/rename N title`, `/delete N` and `/delete N confirm`. Other text,
+including other slash commands, stays a message; a known command with bad
+arguments becomes `help`.
+
+The answer comes back through `IMessageGateway::send_sessions`
+(`SendSessionsRequest`: the conversation's current session, whether it is
+temporary, its saved sessions newest first with title, last use and whether a
+turn runs, what the command did, and the device's clock).
+`MessageChannel::send_sessions` defaults to one plain English message
+(`sessions_text`); the Web channel overrides it to push the list to every
+open page.
+
+## Attachments
+
+Files travel as references, never as bytes in Workflow JSON, Events, or
+transcripts. `GatewayInboundMessage::attachments` holds them, and the
+`file` command of `gateway.send_media` sends one by path.
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum MediaKind { File, Image, Audio, Video }
+pub struct Attachment {                        // {"kind","path","mime_type","filename"?,"size"}
+    pub kind: MediaKind,
+    pub path: String,                          // /workspace/cache/gateway/<channel>/<name>.<ext>
+    pub mime_type: String,
+    pub filename: Option<String>,
+    pub size: u64,
+}
+pub struct AttachmentMeta { pub kind: MediaKind, pub mime_type: Option<String>,
+    pub filename: Option<String> }
+pub enum StoreError { TooLarge { limit: u64 }, NoSpace, Filesystem(FsError), Stream(StreamError) }
+pub fn mime_extension(mime_type: &str) -> &'static str;   // "image/jpeg" -> "jpg", else "bin"
+pub fn extension_mime(path: &str) -> Option<&'static str>; // "a.png" -> "image/png"
+impl IMessageGateway {
+    pub const fn attachment_max_bytes(&self) -> u64;
+    pub async fn store_inbound(&self, channel: &str, meta: AttachmentMeta, body: BinaryStream)
+        -> Result<Attachment, StoreError>;
+    pub async fn download_inbound<B: RequestBody>(&self, channel: &str,
+        request: DownloadRequest<'_, B>, meta: AttachmentMeta)
+        -> Result<Attachment, InboundDownloadError>;   // Http, Status(u16), Store
+    pub async fn open_source(&self, path: &str) -> Result<Rc<dyn MediaSource>, StoreError>;
+}
+```
+
+- `store_inbound` writes `body` to
+  `/workspace/cache/gateway/<channel>/.<name>.part` and renames it to
+  `<name>` once the stream ends. `<channel>` keeps ASCII letters, digits,
+  `-` and `_` and turns everything else into `_`, at most 32 bytes. `<name>`
+  is a per-boot random prefix and a counter, `1a2b3c4d-0.jpg`, never one a
+  file already holds. The extension comes from the MIME type through
+  `mime_extension` (`jpg`, `png`, `gif`, `webp`, `heic`, `mp4`, `mov`, `ogg`,
+  `opus`, `mp3`, `m4a`, `wav`, `pdf`, `txt`, else `bin`); a missing type is
+  `application/octet-stream`.
+- A body over `attachment-max-bytes` fails with `StoreError::TooLarge`, a
+  failed stream with `StoreError::Stream`, a full cache with
+  `StoreError::NoSpace`, and any other filesystem failure with
+  `StoreError::Filesystem`; every failure removes the partial file. A future
+  that is dropped mid-write leaves its `.part` file in the cache.
+- `download_inbound` streams one `GatewayHttp::download` straight into
+  `store_inbound`'s file: the MIME type is `meta.mime_type`, else the
+  response's `Content-Type` without parameters. A non-2xx status stores
+  nothing (`InboundDownloadError::Status`). A `Content-Length` or body over
+  `attachment-max-bytes` is `StoreError::TooLarge`. Each wait for the server
+  is bounded by `DOWNLOAD_IDLE_TIMEOUT` (30 s), not the whole download.
+- `open_source` opens any file in the Gateway's view (`/workspace/...`, its
+  own `/data`, `/cache`, `/media`) as a `MediaSource`: its `len()` is the
+  file's size from metadata, and every `open()` reads it again from the
+  start, exactly that many bytes. A file over `attachment-max-bytes` is
+  `StoreError::TooLarge`. Senders pass it as `BinaryBody::Source`, with
+  `SendMediaRequest::size` set to its length; `Multipart::file` then keeps
+  the request's `Content-Length` known.
+- The files live in `/workspace/cache`, which may vanish at any time; on
+  boards where it is in memory they are gone after a restart.
+
+**Classify the owner before downloading.** A channel calls
+`owners.classify(sender, label, text)` first and stores or downloads a
+message's files only for `Owner`. A paired or ignored sender's files are
+never fetched or written, so a stranger cannot fill the cache.
+
+### Streaming downloads
+
+```rust
+pub struct DownloadRequest<'a, B = ()> { pub method: Method, pub url: &'a str,
+    pub headers: &'a [(&'a str, &'a str)], pub body: B }
+impl<'a> DownloadRequest<'a> { pub const fn get(url: &'a str) -> Self; }
+impl<'a, B> DownloadRequest<'a, B> { pub fn with_headers(self, headers: &'a [(&'a str, &'a str)]) -> Self; }
+pub struct DownloadLimits { pub max_bytes: u64, pub idle_timeout: Duration }
+pub struct DownloadHead { pub status: u16, pub content_type: Option<String>,
+    pub content_length: Option<u64> }
+pub trait DownloadSink {
+    type Error;
+    async fn head(&mut self, head: &DownloadHead) -> Result<(), Self::Error>;
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+impl GatewayHttp {
+    pub async fn download<B: RequestBody, S: DownloadSink>(&self, request: DownloadRequest<'_, B>,
+        limits: DownloadLimits, sink: &mut S) -> Result<DownloadHead, DownloadError<S::Error>>;
+}
+```
+
+`download` opens a fresh connection and hands the sink the head, then each
+read of the body. A `Content-Length` over `max_bytes` fails before any of the
+body, and a longer body once it passes `max_bytes`, both with
+`Error::BodyTooLarge`. `idle_timeout` bounds connecting through the response
+head, each request write, and each body read; time in the sink does not
+count. A missed wait is `Error::Timeout`.
+
+### Uploads of known length
+
+```rust
+pub struct StreamBody;                         // RequestBody, Clone
+impl StreamBody {
+    pub fn new(stream: BinaryStream, len: usize) -> Self;
+    pub fn failure(&self) -> Option<String>;
+}
+impl GatewayHttp {
+    pub async fn send_reading_headers<B: RequestBody>(&self, method: Method, url: &str,
+        headers: &[(&str, &str)], body: B, names: &[&str])
+        -> Result<(Response, Vec<Option<String>>), Error>;
+}
+```
+
+`StreamBody` sends a body a provider builds as a stream (an encoded or
+encrypted file) with a `Content-Length` of `len`, never buffering it. A stream
+that fails, or yields more or fewer than `len` bytes, ends the body early and
+`failure()` says why, so the provider checks it before trusting the answer.
+`send_reading_headers` is `send` that also returns the values of the response
+headers named in `names` (any case), `None` for a missing one. Like `send`,
+each step (connecting, each write, the response after the last write) is
+bounded by `SEND_TIMEOUT`, not the whole upload.
+
+## Ingress backpressure
+
+`IMessageGateway::ready(&self)` (async) waits until Workflow can take another
+`gateway.message.received`. It is `WorkflowService::ready_for` for that Event:
+it resolves while fewer than `EVENT_BACKLOG_LIMIT` (4) executions started by the
+Event are queued or running, and at once when no Workflow listens. It is
+cancellation-safe. Receive loops await it before fetching each batch, so a burst
+waits upstream instead of in RAM.
+
+## Channel services
+
+The `owners` and `channel` modules of this Plugin's crate hold what every
+external channel Plugin (Telegram, WeChat, QQ, BlueBubbles, Inkbox) shares. A
+channel Plugin reaches them through the `IMessageGateway` capability and the
+types the crate exports. The Gateway does not depend on the captive portal; a
+channel Plugin maps `ChannelStatus` to its own portal card.
+
+### Owners
+
+Owner book per channel: at most `MAX_OWNERS` (8) senders may command the
+device; everyone else is dropped and counted.
+
+```rust
+pub struct Owner;                              // {"id":"…","label":"…"|null}
+impl Owner {
+    pub fn new(id: &str, label: Option<&str>) -> Option<Self>; // id 1..=128 bytes
+    pub fn id(&self) -> &str;
+    pub fn label(&self) -> Option<&str>;      // trimmed, ≤ 64 bytes
+}
+pub enum Classification { Owner, Paired, Ignored }
+pub struct Owners<Storage>;                    // persisted under key "owners"
+impl IMessageGateway {
+    // codes come from the Platform entropy the Gateway holds
+    pub async fn load_owners<S: PluginStorage>(&self, storage: S) -> Result<Owners<S>, OwnersError>;
+}
+impl<Storage: PluginStorage> Owners<Storage> {
+    pub async fn classify(&self, sender: &str, label: Option<&str>, text: &str) -> Classification;
+    pub fn is_owner(&self, id: &str) -> bool;
+    pub fn count(&self) -> usize;
+    pub fn ignored(&self) -> u32;
+    pub fn owners(&self) -> Vec<Owner>;
+    pub fn pairing(&self) -> Option<PairingView>;   // mints when none is valid
+    pub fn rotate(&self) -> Result<(), EntropyUnavailable>;
+    pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
+    pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
+}
+pub const PAIRED_REPLY: &str; // "已绑定，可以开始对话了\nPaired. You can start chatting."
+```
+
+- A pairing code is six digits drawn uniformly from the entropy source, valid
+  for `PAIRING_CODE_LIFETIME` (10 minutes) and compared in constant time.
+- A message pairs when its trimmed text is the code, or `/start <code>` (also
+  `/start@bot <code>`).
+- Pairing adds the sender as an owner and retires the code; the next
+  `pairing()` mints a new one. `rotate()` mints a new one on request.
+- `MAX_PAIRING_ATTEMPTS` (5) wrong code-shaped guesses also retire the code.
+- `add` names an owner without a code, for a channel whose own setup knows who
+  set it up (QQ's scan-to-bind reports the scanner's openid). It adds nothing
+  for an existing owner or a full list.
+- No code is offered while the list is full or the Platform has no entropy.
+- The list is stored as a JSON array; the code and the ignored counter are RAM
+  only.
+- `OwnerBook` is the same logic without storage, taking the time explicitly.
+
+### Channel
+
+**Mode.**
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum ChannelMode { Disabled, Send, #[default] SendReceive }
+impl ChannelMode {
+    pub const ALL: &[Self];                  // disabled, send, send_receive
+    pub const WITHOUT_SEND_ONLY: &[Self];    // WeChat: disabled, send_receive
+    pub const fn legacy() -> Self;           // Send: configs stored before modes
+    pub const fn registers(self) -> bool;    // not Disabled
+    pub const fn receives(self) -> bool;     // SendReceive
+}
+impl IMessageGateway {
+    pub async fn load_mode<S: PluginStorage>(&self, storage: &S, configured: bool,
+        legacy: ChannelMode) -> Result<ChannelMode, StorageError>;
+    pub async fn store_mode<S: PluginStorage>(&self, storage: &S, mode: ChannelMode)
+        -> Result<(), StorageError>;
+}
+```
+
+The mode is stored under its own key, `mode`, as a JSON string. When no mode is
+stored, `load_mode` returns `legacy` for an already configured channel and
+`send_receive` for an unconfigured one, and stores the result. WeChat passes
+`ChannelMode::SendReceive` as `legacy`.
+
+**Receive-loop scaffold.**
+
+```rust
+pub trait ReceiveSlotSource: 'static {
+    type Lease: 'static;                     // dropping it frees the slot
+    fn acquire(&self) -> Option<Self::Lease>;
+    fn capacity(&self) -> usize;
+    fn in_use(&self) -> usize;               // held right now, across every channel
+    fn wait_available(&self) -> SlotWait<'_> // default: never completes
+}
+pub struct UnlimitedSlots;                   // Lease = (); webhook receivers
+pub trait ReceiveChannel<Lease>: 'static {
+    fn receive<'a>(&'a self, lease: &'a mut Lease, session: ReceiveSession<'a>)
+        -> ReceiveFuture<'a>;                // Result<(), ReceiveError>
+}
+impl ReceiveSession<'_> { pub fn receiving(&self); }
+impl ReceiveError {
+    pub fn new(message: impl Into<String>) -> Self;   // retried after backoff
+    pub fn halt(message: impl Into<String>) -> Self;  // waits for restart()
+    pub fn retry_after(self, delay: Duration) -> Self; // ≥ delay, ≤ 10 min
+}
+pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(String) }
+pub struct ReceiveControl<Slots: ReceiveSlotSource>;
+impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
+    pub fn new(slots: Slots) -> Self;
+    pub fn set_enabled(&self, enabled: bool) -> Result<(), NoSlot>;
+    pub fn restart(&self);
+    pub fn is_enabled(&self) -> bool;
+    pub fn state(&self) -> ReceiveState;
+    pub fn capacity(&self) -> usize;
+    pub fn in_use(&self) -> usize;
+}
+pub struct ReceiveTiming { initial_backoff, max_backoff, slot_retry }
+// ReceiveTiming::DEVICE = 1 s, 30 s, 5 s
+impl IMessageGateway {
+    pub fn receive_control(&self) -> ReceiveControl<ReceiveSlots>;      // the Gateway's slots
+    pub fn webhook_receive_control(&self) -> ReceiveControl<UnlimitedSlots>;
+    pub fn receive_runtime<Slots, Channel>(&self, control: Rc<ReceiveControl<Slots>>,
+        channel: Rc<Channel>, timing: ReceiveTiming) -> ReceiveRuntime;
+}
+pub struct OnDemand<T>;                      // Box<T> loaded by the first session
+impl<T> OnDemand<T> {
+    pub const fn new() -> Self;
+    pub fn get(&self) -> Option<&T>;
+    pub async fn get_or_load<E, F>(&self, load: impl FnOnce() -> F) -> Result<&T, E>
+        where F: Future<Output = Result<T, E>>;
+}
+```
+
+- The runtime parks on a signal while receiving is disabled and holds no slot.
+  The parked runtime is a small future (about 100 bytes); the loop that runs
+  while receiving is enabled is boxed only for that time.
+- A channel keeps what only a receiving channel needs (its cursor, recent
+  message ids, a gateway session) in an `OnDemand`, loaded from storage by
+  the first session, and its owner book in one loaded once the channel is
+  configured. An unconfigured channel holds one pointer for each and reads
+  none of them at boot.
+- `set_enabled(true)` takes a slot at once, so the caller can answer
+  `no_slot`. Without a free slot the control stays enabled, reports `no_slot`,
+  and the runtime retries when `wait_available` completes (an adapter over
+  `ReceiveSlots` returns `Box::pin(slots.wait_available())`) or every
+  `slot_retry`, whichever comes first.
+- While enabled, the runtime runs the channel's session over the lease. It
+  reconnects at once after a session that called `receiving()`.
+- After an error it waits 1 s, doubling to a 30 s cap; the wait resets once a
+  session reports `receiving()`.
+- `halt` errors wait for `restart()` or a mode change.
+- `set_enabled(false)` drops the session and the lease.
+- Dropping the runtime, as task cancellation does, drops the session and the
+  lease, reports `idle`, and stops the control from taking slots.
+
+The Gateway's receive slots (`http_client::ReceiveSlots`, as many as the
+`receive-slots` setting) implement `ReceiveSlotSource`, so a channel takes its
+control from `IMessageGateway::receive_control`.
+
+**HTTP surface.** The channel implements:
+
+```rust
+pub trait ChannelControl: 'static {
+    type Storage: PluginStorage;
+    type Slots: ReceiveSlotSource;
+    fn configured(&self) -> bool;
+    fn mode(&self) -> ChannelMode;
+    fn modes(&self) -> &'static [ChannelMode] { ChannelMode::ALL }
+    fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
+    fn receive(&self) -> &ReceiveControl<Self::Slots>;
+    fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
+    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `webhook`
+}
+impl IMessageGateway {
+    pub fn sync_receive<C: ChannelControl + ?Sized>(&self, channel: &C) -> Result<(), NoSlot>;
+    pub fn serve_channel<C: ChannelControl, Config: HttpEndpoint>(&self, base: &'static str,
+        channel: Rc<C>, config: Config) -> Result<WebRouteRegistration, WebServerError>;
+    pub fn channel_status<C: ChannelControl + ?Sized>(&self, channel: &C) -> ChannelStatus;
+}
+```
+
+A channel registers one prefix route for its configuration path with
+`serve_channel(base, channel, config)`, which the Gateway mounts on the
+`WebServer` with `serve_http_prefix`:
+`base` goes to the Plugin's own `config` endpoint, which takes changes only;
+`GET base/status` answers the channel status (405 for other methods);
+`base/mode` takes mode changes, `base/owners` the owner book, and any
+other path below
+`base` answers 404 `{"error":"not_found"}`. Exact routes below `base` (WeChat's
+`/login`, Inkbox's `/signup`, `/verify`, `/resend`) and longer prefixes
+(BlueBubbles' `/hook`) still take their own requests. One route per channel
+instead of four keeps the webserver's route table within its first
+allocation.
+
+| Request | Response |
+| --- | --- |
+| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`, then the channel's `status_details` |
+| `POST /api/gateway/<channel>/mode` `{"mode":"send"}` | 204 |
+| the same with `send_receive` and no free slot | 409 `{"error":"no_slot","capacity":2}` |
+| `GET /api/gateway/<channel>/owners` | 200 `{"owners":[{"id":"42","label":"Ann"}],"pairing":{"code":"012345","expires_in":600},"ignored":3}` |
+| `POST /api/gateway/<channel>/owners` `{"remove":"42"}` or `{"rotate":true}` | 204 |
+
+- `receive` is present only in `send_receive`. `state` is one of `idle`,
+  `starting`, `receiving`, `no_slot`, or `error`. `message` comes only with
+  `error`, and `capacity` only with `no_slot`. `slots`
+  (`{"in_use":n,"capacity":n}`) comes whenever the channel draws from a
+  bounded slot pool, so the portal can show 「名额 1/2」; webhook receivers
+  (`UnlimitedSlots`) have none.
+- A 409 still saves the mode; receive then reports `no_slot` until a slot
+  frees.
+- `pairing` is `null` while the owner list is full or the Platform has no
+  entropy. `GET` mints a code when none is valid.
+- Removing an unknown id is a 204 as well.
+- Errors:
+  - 400 `{"error":"invalid_request"}` for a malformed body;
+  - 400 `{"error":"unsupported_mode"}` for a mode the channel does not offer;
+  - 422 `{"error":"registration_failed"}`;
+  - 500 `{"error":"storage"}`;
+  - 503 `{"error":"entropy_unavailable"}` when a rotation cannot mint a code;
+  - 409 `{"error":"not_configured"}` from `/owners` while the channel is not
+    configured (it has no owner book yet; `owners.count` reads 0);
+  - 404 `{"error":"not_found"}` for another path below the channel's;
+  - 405 `{"error":"method_not_allowed"}` for other methods.
+
+**Portal status.** `IMessageGateway::channel_status(&channel)` gives a
+`ChannelStatus { level, zh, en }`; the channel Plugin maps `level`
+(`ChannelLevel::Off`, `Ready`, `Attention`) to its portal card's `EntryStatus`:
+
+| Channel | Status |
+| --- | --- |
+| not configured | `off` 未配置/Not set up |
+| `disabled` | `off` 已停用/Disabled |
+| `send` | `ready` 仅发送/Send only |
+| `send_receive`, receiving | `ready` 收发中/Receiving |
+| `send_receive`, idle or starting | `attention` 连接中/Connecting |
+| `send_receive`, no slot | `attention` 名额已满/No slot |
+| `send_receive`, error | `attention` 连接中断/Disconnected |
+
+**Channel page kit.** `resources/web/channel/` (documented in
+[Channel page kit](/develop/web/channel-page-kit)) is build-time TypeScript for the JSON above: `readChannel`,
+`configuredRow` and `channelInbound` (the 「模式」 and 「授权账号」 rows). A
+channel's portal entry bundles it together with the captive portal's UI kit;
+the Gateway itself serves no portal entry and does not depend on the captive
+portal. Its tests are in `resources/web/tests/`.
+
+## How a channel plugs in
+
+1. **Dependencies.** List `imessage-gateway` in `depends-on` and depend on
+   `barracuda-imessage-gateway-plugin`.
+2. **Constructor.** The channel takes nothing from `PluginContext`; the
+   Gateway holds the entropy for pairing codes and the receive slots.
+   `require::<IMessageGateway>("imessage-gateway")` in `register`. Take the
+   control from `gateway.receive_control()`; BlueBubbles, which receives by
+   webhook, takes `gateway.webhook_receive_control()` (`UnlimitedSlots`).
+3. **State.** In `register`:
+   - load the configuration;
+   - `gateway.load_mode(&storage, configured, ChannelMode::legacy())`
+     (WeChat: `ChannelMode::SendReceive`);
+   - keep the owner book in an `OnDemand<Owners<_>>`, loaded with
+     `gateway.load_owners(storage.clone())` only when the channel is
+     configured, here or before a configuration is stored;
+   - keep cursors and other receive bookkeeping in an `OnDemand` the first
+     session loads, so an unconfigured channel holds and reads none of it;
+   - register the `MessageChannel` only when `configured && mode.registers()`;
+   - build `Rc<ReceiveControl<_>>`;
+   - put all of this in one channel-state type that implements
+     `ChannelControl`. WeChat overrides `modes()` with
+     `ChannelMode::WITHOUT_SEND_ONLY`.
+4. **`apply_mode`.** Call `gateway.store_mode`, then add or drop the Gateway
+   registration so that one exists exactly when the channel is configured and
+   `mode.registers()`, then update `mode()`. Map failures to
+   `ModeError::Storage` or `ModeError::Registration`.
+5. **Receiver.** Implement `ReceiveChannel<Lease>`. Each session loops:
+   1. await `IMessageGateway::ready()`;
+   2. fetch one batch over the lease. A polling channel uses
+      `GatewayHttp::poll` (from `gateway.http()`) over the lease
+      (one kept-alive connection; `GET` or `POST`, a per-request deadline, a
+      body cap with an optional tail): only the Gateway's Plugin crate and
+      `shared/http-client` may use reqwless (`workspace_boundary`);
+   3. call `session.receiving()`;
+   4. for each new message (deduplicated), call
+      `owners.classify(sender, label, text)`:
+      - `Owner`: `gateway.publish(...)`;
+      - `Paired`: send `PAIRED_REPLY` through the channel's normal send path;
+      - `Ignored`: nothing.
+   5. persist the cursor.
+
+   Return `ReceiveError::new` for failures that a retry can fix, `halt` for
+   ones it cannot (WeChat `-14`: 「需要重新扫码」), and `.retry_after(..)` for
+   429s.
+6. **Runtime.** Build
+   `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`,
+   then call `gateway.sync_receive(&*state)`; a `NoSlot` there is already
+   reported as state. Keep the runtime for `start`.
+7. **Endpoints.**
+   - The configuration endpoint takes `POST` only; the Gateway answers
+     `GET /status`.
+   - After a successful configuration `POST`, it calls `sync_receive` and
+     `control.restart()`.
+   - Register the configuration endpoint, `/mode`, and `/owners` as one
+     prefix route: `gateway.serve_channel(CONFIG_API_PATH, state, config)`.
+8. **Portal.** `register_with_status(.., move || entry_status(gateway.channel_status(&*state)))`,
+   where the channel's `entry_status` maps `ChannelStatus` to `EntryStatus`. The
+   page imports the channel page kit and lists
+   `../imessage-gateway/resources/web/channel` in its build `inputs`.
+9. **Task.** In `start`, spawn one task that owns the runtime:
+
+   ```rust
+   #[embassy_executor::task]
+   async fn telegram_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+       let _completed = select(cancellation.cancelled(), runtime).await;
+   }
+   ```
+10. **Docs.** On the channel's Plugin page, `docs/plugins/<id>.mdx`, declare
+    the task, the endpoints, the storage keys (`mode`, `owners`, and the cursor), and the slot use.

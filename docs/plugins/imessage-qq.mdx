@@ -1,0 +1,286 @@
+---
+title: "IMessage QQ Plugin"
+---
+
+The IMessage QQ Plugin adds a QQ Bot as an iMessage Gateway channel: it binds
+the bot by scan or configuration, sends text and files through the QQ OpenAPI,
+and receives messages and their files over the QQ gateway WebSocket.
+
+- Plugin ID: `imessage-qq`
+- Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
+- Settings: none
+- Context resources: `entropy` (WebSocket keys and masks, scan-to-bind keys)
+- Provided capabilities: none
+- Required capabilities: `CaptivePortal` from `captive-portal`,
+  `IMessageGateway` from `imessage-gateway`, `WebServer` from `webserver`
+- Workflow: none (inbound messages reach Workflow as the Gateway's
+  `gateway.message.received`)
+- Agent Tools: none
+- Lua packages: none
+- Web: portal entry `imessage-qq`, with status; `POST /api/gateway/qq`,
+  `GET /api/gateway/qq/status`, `POST /api/gateway/qq/mode`, `GET
+  /api/gateway/qq/owners`, `POST /api/gateway/qq/owners`, `POST
+  /api/gateway/qq/login`, `GET /api/gateway/qq/login`, `DELETE
+  /api/gateway/qq/login` (see [HTTP API](/plugins/imessage-qq/http))
+- Tasks: `qq_receive_task` (pool size 1), one receive loop (see below) that
+  holds one of the Gateway's receive slots while the channel is configured
+  and in `send_receive`; `qq_login_task` (pool size 1), the scan-to-bind
+  session (see "Scan-to-bind")
+- Storage: Plugin-scoped KV:
+  - `configuration`: the provider configuration;
+  - `mode`: the channel mode (`ChannelMode` JSON string);
+  - `owners`: the allowed accounts (owner book);
+  - `session`: the gateway session to resume, `{"session_id","seq"}`.
+
+The Gateway channel is `qq`.
+
+The Plugin starts without provider credentials when storage is empty. It requires the `IMessageGateway`
+and `WebServer` capabilities and follows the channel plumbing of
+[`imessage-gateway`](/plugins/imessage-gateway#how-a-channel-plugs-in):
+`POST /api/gateway/qq` configures the channel and `GET /api/gateway/qq/status`
+answers the shared channel status; `/api/gateway/qq/mode` and `/api/gateway/qq/owners` are the
+shared mode and owner endpoints. The Gateway serves all of them from one prefix
+route (`IMessageGateway::serve_channel`); the Plugin registers only the exact
+login route on the `WebServer` itself. HTTP requests go through
+`IMessageGateway::http`. The allowed accounts are loaded only once the channel is
+configured, and the gateway session by the first receive session. The `qq` channel is registered with the
+Gateway exactly while it is configured and its mode is `send` or
+`send_receive`. A configuration stored before modes existed loads as `send`;
+a new configuration starts in `send_receive`. The portal entry's
+`GET /portal/status` record is 等待扫码 (`attention`) while a scan-to-bind
+session waits, otherwise the Gateway's `channel_status` of the channel (未配置, 已停用,
+仅发送, 收发中, 连接中, 名额已满, or 连接中断). See [HTTP API](/plugins/imessage-qq/http).
+
+The stored configuration is `{"app_id","app_secret","api_base","token_url"}`.
+QQ access tokens live at most two hours, so the Plugin stores the App Secret and
+never a token. Before a new configuration is persisted, the endpoint exchanges
+the App Secret for one access token at `token_url`; a rejection returns 422
+`verification_failed` and stores nothing. Accepted configuration is persisted
+before activation and restored during Plugin registration without any network
+request.
+
+The provider keeps the access token and its expiry instant in RAM only. It
+fetches a token lazily before the first send and again once fewer than 60
+seconds of its lifetime remain. When the QQ OpenAPI answers 401, it refreshes
+the token once and retries the request once. Concurrent sends share one refresh.
+OpenAPI requests carry `Authorization: QQBot <access_token>` and
+`X-Union-Appid: <app_id>`.
+
+## Receiving
+
+QQ delivers messages only over its WebSocket gateway, so the Plugin owns one
+Embassy task, `qq_receive_task`, spawned in `start` and raced against the
+Plugin's task token. It runs the Gateway's `receive_runtime`: parked
+without a slot unless the channel is configured and in `send_receive`, it
+leases one of the Gateway's receive slots through
+`IMessageGateway::receive_control` (never a request pool connection) and runs
+one gateway session at a time on it.
+
+A session:
+
+1. takes the access token through the provider's cached path (a rejected App
+   Secret halts receiving until the configuration changes);
+2. asks `GET {api_base}/gateway` for the WebSocket URL once and caches it. QQ
+   allows two such calls a minute, so a new lookup waits at least 30 s after
+   the last one, and 60 s after QQ refused one. A refused upgrade drops the
+   cached URL;
+3. opens `wss://…` through the lease's `connect_stream` and `split`, and runs
+   the `shared/ws-client` handshake (`Sec-WebSocket-Key` from the Platform
+   entropy, `Sec-WebSocket-Accept` checked, masked frames);
+4. waits for Hello (`op` 10) and sends Resume (`op` 6) when a session is
+   stored, otherwise Identify (`op` 2) with intents `1<<25`
+   (`GROUP_AND_C2C_EVENT`) and shard `[0, 1]`;
+5. heartbeats (`op` 1 with the last `s`) every `heartbeat_interval`. The timer
+   races the cancel-safe WebSocket read half, so a pending read never delays a
+   heartbeat. A heartbeat still unacknowledged (`op` 11) when the next one is
+   due ends the session, which then resumes;
+6. reports `receiving` on `READY` (whose `session_id` is stored at once) or
+   `RESUMED`;
+7. while connected also refreshes the shared access token when it enters its
+   last minute, for replies and the next login.
+
+Each dispatch's `s` is kept in RAM and stored with the session id at most every
+10 s. A close with code 4009, a server `op` 7, or a dropped connection resumes
+at once after a healthy session. `op` 9 with `d:false` and every other close
+code forget the session and identify again after the runtime's backoff; 4004
+also renews the token. Close codes 4914 (delisted, sandbox only) and 4915
+(banned) halt receiving with a bilingual message until the configuration
+changes.
+
+`C2C_MESSAGE_CREATE` becomes route `qq`/`c2c:<author.user_openid>` and
+`GROUP_AT_MESSAGE_CREATE` route `qq`/`group:<group_openid>`, the same
+conversation ids the send path takes. The sender checked against the owner book
+is `author.user_openid` for direct messages and `author.member_openid` in
+groups (QQ scopes both to the bot, so a person has a different id in each
+scene). Text is trimmed. A message with text or `attachments` (below) is
+handled, one of attachments only with empty text; a `message_type` other than
+0 (quotes, cards, forwards) and an empty message are skipped. The 16 most
+recent message ids are remembered in RAM, so a message QQ pushes again, also
+after a resume, is handled once. For each new message, classified with
+`Owners::classify` on its text before any file is fetched:
+
+- an owner's message is published as `GatewayInboundMessage` with the QQ
+  message `id` as `message_id` and its files as `attachments`;
+- a pairing code from a new sender adds them and answers 「已绑定，可以开始对话了」
+  as a passive reply to the code message;
+- anyone else is dropped and counted.
+
+Before reading the next payload the session awaits `IMessageGateway::ready()`,
+still heartbeating meanwhile.
+
+### Attachments
+
+Each entry of an owner's `attachments[]` (`content_type`, `url`, `filename`,
+`size`, and for voice `voice_wav_url`) becomes one
+`GatewayInboundMessage::attachments` entry:
+
+| `content_type` | Kind | MIME type |
+| --- | --- | --- |
+| `image/jpeg`, `image/png`, `image/gif`, `image/webp` | `image` | `content_type` |
+| `voice`, `audio/*`, or a name ending `.amr`, `.silk`, `.slk` | `audio` | `audio/wav` from `voice_wav_url` (QQ's conversion) when present; else `content_type`, or `audio/amr` / `audio/silk` by name |
+| `video/*` | `video` | `content_type` |
+| anything else, other images included | `file` | `content_type` when it is a MIME type |
+
+A type left open is the download's `Content-Type`. The sender's `filename` is
+the attachment's (`.wav` for the conversion). QQ sends some URLs without a
+scheme (`//host/…`), which get `https:`.
+
+1. A `size` over `IMessageGateway::attachment_max_bytes()` is refused without a
+   request (the WAV conversion's size is not known, so it is not checked).
+2. `IMessageGateway::download_inbound` streams the URL into
+   `/workspace/cache/gateway/qq/` on the shared request pool, never the
+   receive slot.
+
+Files are downloaded one after another inside the message's handling; the
+session keeps heartbeating meanwhile, and reads the next payload only after
+the message is published. A file that is refused, over the limit, has no URL,
+or fails (a non-2xx status, a transport or storage failure) does not drop the
+message: one line is appended to its text, `[<kind> too large, not received]`
+or `[<kind> not received]`. Strangers' and pairing messages' files are never
+fetched. The URLs may carry access keys and are never logged.
+
+### Sending files
+
+`send_media` uploads a file to a direct or group chat and sends it (see the
+`qq::media` module):
+
+1. `POST {api_base}/v2/users/<openid>/files` or
+   `/v2/groups/<group_openid>/files` with
+   `{"file_type","srv_send_msg":false,"file_name","file_data":"<base64>"}`.
+   A device has no public URL for QQ's `url` form, so the bytes go base64 in
+   `file_data`. The body is streamed (`StreamBody`) with a `Content-Length`
+   computed from the file's length (the JSON envelope plus
+   `4 * ceil(len / 3)`); the file is never buffered. QQ answers `file_info`.
+2. `POST …/messages` with `{"msg_type":7,"media":{"file_info"}}`, the caption
+   as `content`, and `msg_id`/`msg_seq` exactly as a text reply (below).
+
+`file_type` is 1 for an image (`image/jpeg`, `png`, `gif`, `webp`, `bmp`, or
+such a name), 2 for `video/mp4`, 3 for SILK audio (`audio/silk`, `.silk`,
+`.slk`), and 4 (file) for everything else: QQ plays voice only as SILK and
+video only as mp4, so other audio and video arrive as files. `file_name` is
+the sender's name, else `<kind>.<extension>`.
+
+Limits and errors: the file's length must be known (a source or bytes, or a
+stream with `size`); a stream without one is `InvalidRequest` and nothing is
+sent. QQ takes at most 5 MiB through `file_data` (`MAX_UPLOAD_BYTES`); larger
+files are `InvalidRequest` (QQ's URL and chunked uploads are not used). Guild
+channels (`channel:`) have no files endpoint: `Unsupported`. A 401 renews the
+token and uploads once more when the file can be read again; 401/403 are
+`Authentication`, 429 `RateLimited`, other refusals `Platform` with QQ's
+`code` and `message`, a failed read of the file `Stream`. Like every send,
+the upload must finish within the Gateway's 30 s `SEND_TIMEOUT`.
+
+Sources: the QQ Bot API pages on rich media
+([https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html),
+[https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html):
+`file_type` 1–4, `file_data` within 5 MB with `file_name`, `file_info`, `ttl`)
+and Tencent's `@tencent-connect/qqbot-nodejs` SDK (`file_data` as base64,
+`msg_type` 7 with `media.file_info`, inbound `attachments` with
+`voice_wav_url`).
+
+### Passive replies
+
+QQ accepts a reply to a received message for 60 minutes in a direct chat and 5
+minutes in a group, and needs a distinct `msg_seq` for each reply to the same
+message. The receive loop notes every received message with the provider; a
+send whose `reply_to` names one carries `msg_id` and the next `msg_seq` (1, 2,
+…) while its window is open and goes out as an ordinary message afterwards. A
+`reply_to` the loop never saw (one received before a restart) is still sent
+as a reply. Guild channels get `msg_id` without `msg_seq`. The provider keeps
+the 16 most recent messages.
+
+### Memory
+
+Per receiving QQ channel: the receive slot's static socket buffers (1 KiB send,
+4 KiB receive), one TLS session from the lease (about 35 KiB idle on device;
+see the Platform manifests), the WebSocket read buffer (2 KiB idle; a larger
+frame grows it up to its size, at most 64 KiB plus the header, and it shrinks
+back once drained), a short-lived buffer per sent frame, the 2 KiB handshake
+limit, about 1.5 KiB of recent message ids, the provider's reply book (16
+entries), the cached gateway URL and session id, and the boxed session future.
+While a message's files download, the Gateway's download buffers on a request
+pool connection; an upload holds one pool connection and one file chunk.
+
+## Configuration
+
+A stored configuration in the former `access_token` shape does not block boot:
+registration logs a warning and leaves the channel unconfigured until a new
+configuration is saved. Other malformed stored data fails registration.
+
+## Scan-to-bind
+
+`/api/gateway/qq/login` (an exact route) starts, reports, and cancels one
+session of QQ's scan-to-bind flow (`qq::bind`), described in
+[HTTP API](/plugins/imessage-qq/http#apigatewayqqlogin). `qq_login_task` owns the runtime: it is
+parked on a command signal and holds no connection while no session runs, and
+each session is boxed so the parked task reserves no room for a request. A
+completed binding opens the App Secret with `barracuda_tls::aes_256_gcm_open`,
+then goes through the same verification and `configure` path as a typed
+configuration, and adds the scanner's `user_openid` to the owner book with
+`Owners::add`. Neither the key nor the App Secret is logged or returned.
+
+## Portal page
+
+Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`imessage-qq`, group `WebGroup::Channel`, order 40, title `QQ`, a bilingual
+summary, icon `icon.svg`, no figure, module `entry.js`, and a `ResourceFiles`
+provider. Unload removes the navigation entry and resource provider; the page
+uses the HTTP routes above.
+
+Cargo automatically runs the declared `build` task before compiling this Plugin.
+To build only its resources, run `cargo plugin run build --plugin imessage-qq`
+from the repository root. The declaration uses the shared `tools/web/build.ts`
+script. Frontend dependencies and format/lint/check/test commands are managed
+once at the repository root; tests belong to this Plugin's `resources/web/tests/`.
+The independent browser module is
+written to this Plugin's `filesystem/resources/entry.js`. The generic image
+builder includes that directory only when this Plugin is selected. No business
+page is bundled into the portal shell. The shared UI source is a build-time
+helper, not a runtime dependency on another contributor's files.
+
+The page (`resources/web/entry.ts`, built on the captive portal's UI kit and
+the Gateway's channel page kit) binds
+by QR code, as the WeChat page does. On mount it reads `GET /api/gateway/qq/login`:
+a configured channel with no session waiting shows the 「绑定」 row with the
+「QQ 已绑定」 card (its App ID in mono) and 「重新绑定」; otherwise the page posts
+to start a session and shows the code on a light plate beside three steps
+(用 QQ 扫描二维码, 在手机上选好机器人, 绑定完成), with 「换一张二维码」. QQ reports no
+scan and no lifetime, so there is no 已扫码 state and no countdown. It polls
+`GET` every 2 s until `confirmed` (the linked card, a success toast and
+`context.refreshStatus()`), `expired` (the code dims, 「换一张二维码」 turns primary)
+or `failed` (a toast says what to do); leaving the page sends a keepalive
+`DELETE`. On a phone it shows the steps and 「复制链接」 instead of a code, since
+the phone is the one that scans. While linked, the mode (停用, 仅发送, 收发) and
+allowed accounts rows show.
+
+Under the closed 「高级」 fold (「手动填写 App ID 和 App Secret」) the page posts
+`{app_id, app_secret, api_base, token_url}` to `POST /api/gateway/qq` with
+「验证并保存」; the footer shows only while the fold is open. The device fetches one
+access token before storing anything, so a 422 `verification_failed` puts QQ's
+own `message` and `code` on the App Secret field; other errors toast the
+device's `message`. A save ends the QR session and shows the linked card. The
+page never reads the App Secret back. Secrets are password inputs, never persisted in browser storage, and
+cleared on success or unmount. Requests are cancelled on unmount and are never
+retried automatically. The HTTP API has no authentication or transport
+encryption; use only within a trusted provisioning network.

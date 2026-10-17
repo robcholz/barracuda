@@ -1,0 +1,38 @@
+---
+title: "I2S Plugin"
+---
+
+The I2S Plugin exposes I2S PCM streaming on the Board's exposed pins to Lua code as
+the `i2s` Lua package.
+
+- Plugin ID: `i2s`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `i2s`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin shares the Board's unified exposed-I/O owner and installs the
+`i2s` Lua package. It reuses the same `audio::PcmStream` contract implemented
+by Platform I2S adapters and consumed by audio-codec implementations.
+
+Lua API:
+
+- `i2s.open(bclk, ws, dout, din, mclk, sample_rate_hz, channels, bits_per_sample) -> handle`
+- `handle:format() -> sample_rate_hz, channels, bits_per_sample, master_clock_hz`
+- `handle:write(pcm_le_bytes)`
+- `handle:read(frames) -> pcm_le_bytes`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`dout`, `din`, and `mclk` may be `nil`; at least one data direction is
+required. PCM bytes are interleaved signed 16-bit little-endian samples. The
+current portable stream contract therefore accepts `bits_per_sample = 16`.
+Opening atomically consumes every signal pin from the same owner used by all
+other exposed protocols.

@@ -1,7 +1,7 @@
 //! The block taxonomy: the fixed vocabulary of context blocks and the placement
 //! metadata the builder sorts by.
 //!
-//! See `docs/context-model.md` for the authoritative model. This module encodes
+//! See `docs/internals/agent/context-model.mdx` for the authoritative model. This module encodes
 //! only *placement* (band + scope + in-band order); block *content* is injected
 //! by callers and never authored here.
 

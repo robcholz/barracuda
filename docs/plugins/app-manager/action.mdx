@@ -1,0 +1,122 @@
+---
+title: "App Manager Workflow Actions"
+---
+
+The `app-manager` Plugin registers `app.list`, `app.open`, `app.install`, `app.home`,
+`app.interactive`, `app.terminate`, `app.status`, and `app.tap`. Except for
+`app.install`, which only asks, they are the same operations the system UI
+performs; see [the lifecycle](/plugins/app-manager#lifecycle).
+Their request and response contracts live at `schemas/action/<address>/`.
+Rejections return `{"error":"<code>"}` so a Workflow can branch on them;
+`incompatible` also carries the `reason` the device shows.
+
+A running app is reported as:
+
+```json
+{"app":{"id":"counter","name":"计数器","version":"0.1.0","location":"installed",
+        "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
+        "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
+ "run_id":1,"state":"active"}
+```
+
+`kind` is `system` for an app in the image and `installable` for one the
+person installed. `api`, `requires`, `uses`, `permissions`, `boards`,
+`view_size`, and `view_shape` are from its manifest, as
+[App API](/plugins/app-manager/app-api) explains; `incompatible`, present only for an
+installable app this device cannot run, says why.
+
+`state` is `active`, `inactive`, `background`, `suspended`, `running` (a
+headless app), or `terminating`.
+
+`app.list` takes `{}` and returns every launchable app, every Workspace
+container that can be installed (a new app, or an installed one at another
+version), and every container that breaks the [app format](/plugins/app-manager/app-format) with
+the reason, so its author can fix it. `location` is `builtin`, `installed`, or
+`workspace`:
+
+```json
+{"apps":[{"id":"settings","name":"设置","version":"0.1.0","location":"builtin",
+          "kind":"system","has_view":true,"permissions":[]}],
+ "installable":[{"id":"lamp","name":"灯带","version":"1","location":"workspace",
+                 "kind":"installable","has_view":true,"api":1,"requires":["light"],
+                 "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
+                 "view_shape":"round","incompatible":"此设备没有灯光"}],
+ "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
+```
+
+`app.open` takes `{"id":"counter"}`. It resumes a running app or launches it,
+returns the running app once its program has started, and fails with
+`not_found`, `not_installed` (the app is only offered in the Workspace),
+`invalid_bundle`, `storage`, `view_rejected`, `no_display` (the app has a
+view and the Board no display), `incompatible` (the installed app no longer
+fits this device), `runtime_unavailable`, or `busy`.
+
+`app.install` takes `{"id":"lamp"}` and asks the system UI to offer that
+Workspace container for installation. It returns at once with
+`{"requested": <app>}`; the person installs or declines on the device, and
+`app.list` shows the outcome. A newer request replaces one still unanswered.
+The requested app also carries `digest`, the SHA-256 of its files that the
+install is pinned to, and `signer`, the short name of the key that signed a
+`.bapp` package ([App format](/plugins/app-manager/app-format#packages)). It fails with
+`not_found`, `system_app` (the ID belongs to a system app), `invalid_bundle`
+(also a package whose signature fails), `storage`, or `incompatible` with
+the reason this device cannot run the app, or that an app installed from a
+signed package takes updates only from its signer:
+
+```json
+{"error":"incompatible","reason":"此设备没有灯光"}
+```
+
+`app.home` takes `{}` and returns `{"app": <running app or null>}`: the app
+that moved to the background.
+
+`app.interactive` takes `{"interactive":false}` while an overlay covers the
+foreground app and `{"interactive":true}` when it closes. It returns the
+foreground app or fails with `no_foreground_app`.
+
+`app.terminate` takes `{"id":"counter"}` and returns `{"app": <running app or
+null>}`, now `terminating`.
+
+`app.status` takes `{}` and returns the foreground app, every running app most
+recently used first, the text the foreground view shows, and how the last app
+run ended:
+
+```json
+{"foreground":null,"running":[],
+ "last_exit":{"id":"counter","run_id":1,"outcome":"success","output":[],"foreground":false}}
+```
+
+`last_exit.foreground` says whether the app was in the foreground when it
+ended.
+
+`app.tap` taps the active foreground view at view coordinates and returns the
+handler it called, or `null` when nothing pressable is there:
+
+```json
+{"x":120,"y":200}
+```
+
+```json
+{"handler":"increment"}
+```
+
+It fails with `no_foreground_app` or `not_interactive`.
+
+## The system UI
+
+`app.notify` takes `{"title":"门铃","body":"有人在门口","icon":"alert"}`,
+with `body` and `icon` optional, posts the notice to the notification center,
+and returns `{"id":3}`. `icon` names a system icon; without one the notice
+shows the title's first character. Titles and bodies longer than 64
+characters are cut, and beyond eight notices the oldest is dropped.
+
+`app.confirm` takes `{"title":"打开客厅灯带？","body":"林夏 · Telegram"}`,
+with `body` optional, asks the person on a card listed before every notice
+and on the home screen, and returns once they answer:
+`{"allowed":true,"answered":true}`. A card dismissed or dropped unanswered
+returns `{"allowed":false,"answered":false}`.
+
+`app.agent` takes `{"state":"answering","question":"明天几点开会？","answer":"9:30 产品评审"}`,
+with `question` and `answer` optional, and shows the Agent's state on the
+home screen: `standby`, `listening`, `thinking`, or `answering`. It returns
+`{}`. An answer returns to standby after nine seconds or when tapped.

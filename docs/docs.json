@@ -1,0 +1,300 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Barracuda",
+  "colors": {
+    "primary": "#0E7490",
+    "light": "#22D3EE",
+    "dark": "#0E7490"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Get started",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "get-started/build-and-run"
+            ]
+          },
+          {
+            "group": "Build apps",
+            "pages": [
+              "plugins/app-manager/app-format",
+              "plugins/app-manager/app-api",
+              "plugins/vm/environment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Plugins",
+        "groups": [
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/overview"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "plugins/files",
+              {
+                "group": "HTTP",
+                "pages": [
+                  "plugins/http",
+                  "plugins/http/action"
+                ]
+              },
+              "plugins/webserver",
+              "plugins/wifi",
+              "plugins/captive-portal",
+              "plugins/app-portal",
+              "plugins/power",
+              "plugins/sound",
+              "plugins/time",
+              {
+                "group": "Scheduler",
+                "pages": [
+                  "plugins/scheduler",
+                  "plugins/scheduler/event"
+                ]
+              },
+              "plugins/system-fonts",
+              "plugins/workflow"
+            ]
+          },
+          {
+            "group": "Apps",
+            "pages": [
+              {
+                "group": "App Manager",
+                "pages": [
+                  "plugins/app-manager",
+                  "plugins/app-manager/action"
+                ]
+              },
+              "plugins/builtin-app-files",
+              "plugins/builtin-app-sessions",
+              "plugins/builtin-app-settings",
+              "plugins/builtin-app-workflow"
+            ]
+          },
+          {
+            "group": "Agent",
+            "pages": [
+              {
+                "group": "Agent",
+                "pages": [
+                  "plugins/agent",
+                  "plugins/agent/action",
+                  "plugins/agent/event",
+                  "plugins/agent/http"
+                ]
+              },
+              "plugins/agent-file",
+              "plugins/agent-http",
+              {
+                "group": "Agent IMessage Gateway",
+                "pages": [
+                  "plugins/agent-imessage-gateway",
+                  "plugins/agent-imessage-gateway/action"
+                ]
+              },
+              "plugins/agent-scheduler",
+              "plugins/agent-time",
+              "plugins/agent-vm",
+              {
+                "group": "Agent Websearch",
+                "pages": [
+                  "plugins/agent-websearch",
+                  "plugins/agent-websearch/http"
+                ]
+              },
+              "plugins/agent-workflow"
+            ]
+          },
+          {
+            "group": "Messaging channels",
+            "pages": [
+              {
+                "group": "IMessage Gateway",
+                "pages": [
+                  "plugins/imessage-gateway",
+                  "plugins/imessage-gateway/action",
+                  "plugins/imessage-gateway/event",
+                  "plugins/imessage-gateway/usage",
+                  "plugins/imessage-gateway/design"
+                ]
+              },
+              {
+                "group": "IMessage BlueBubble",
+                "pages": [
+                  "plugins/imessage-bluebubble",
+                  "plugins/imessage-bluebubble/http"
+                ]
+              },
+              {
+                "group": "IMessage Inkbox",
+                "pages": [
+                  "plugins/imessage-inkbox",
+                  "plugins/imessage-inkbox/http"
+                ]
+              },
+              {
+                "group": "IMessage QQ",
+                "pages": [
+                  "plugins/imessage-qq",
+                  "plugins/imessage-qq/http"
+                ]
+              },
+              {
+                "group": "IMessage Telegram",
+                "pages": [
+                  "plugins/imessage-telegram",
+                  "plugins/imessage-telegram/http"
+                ]
+              },
+              "plugins/imessage-web",
+              {
+                "group": "IMessage WeChat",
+                "pages": [
+                  "plugins/imessage-wechat",
+                  "plugins/imessage-wechat/http"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Lua VM",
+            "pages": [
+              {
+                "group": "VM",
+                "pages": [
+                  "plugins/vm",
+                  "plugins/vm/action"
+                ]
+              },
+              "plugins/vm-agent",
+              "plugins/vm-analog",
+              "plugins/vm-audio",
+              "plugins/vm-camera",
+              "plugins/vm-display",
+              "plugins/vm-filesystem",
+              "plugins/vm-gpio",
+              "plugins/vm-http",
+              "plugins/vm-i2c",
+              "plugins/vm-i2s",
+              "plugins/vm-imu",
+              "plugins/vm-led-strip",
+              "plugins/vm-message-queue",
+              "plugins/vm-power-monitor",
+              "plugins/vm-pwm",
+              "plugins/vm-spi",
+              "plugins/vm-systeminfo",
+              "plugins/vm-time",
+              "plugins/vm-uart",
+              "plugins/vm-webserver"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Develop",
+        "groups": [
+          {
+            "group": "Workspace",
+            "pages": [
+              "develop/tooling",
+              "develop/debugging"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "develop/platform-architecture",
+              "develop/device-ui",
+              "develop/execution-ownership"
+            ]
+          },
+          {
+            "group": "Writing Plugins",
+            "pages": [
+              "develop/plugin-api",
+              "develop/codestyle",
+              "develop/agent-oriented-api-design"
+            ]
+          },
+          {
+            "group": "Boards and Platforms",
+            "pages": [
+              "develop/boards",
+              "develop/platforms/linux",
+              "develop/platforms/macos",
+              "develop/platforms/macos-network-gateway",
+              "develop/platforms/virtual-io"
+            ]
+          },
+          {
+            "group": "Web",
+            "pages": [
+              "develop/web/portal-ui-kit",
+              "develop/web/channel-page-kit"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "develop/tools/e2e",
+              "develop/tools/llm-tape",
+              "develop/tools/system-image",
+              "develop/tools/bench",
+              "develop/tools/trace-scripts",
+              "develop/tools/serial-log"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Internals",
+        "groups": [
+          {
+            "group": "Runtime",
+            "pages": [
+              "internals/embassy-integration",
+              "internals/plugin-manager",
+              "internals/http-client",
+              "internals/runtime-utils"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "internals/board-hal",
+              "internals/drivers",
+              "internals/peripherals"
+            ]
+          },
+          {
+            "group": "Agent",
+            "pages": [
+              "internals/agent/context",
+              "internals/agent/context-model",
+              "internals/agent/memory",
+              "internals/agent/model-api",
+              "internals/agent/permission",
+              "internals/agent/skill",
+              "internals/agent/skill-design",
+              "internals/agent/trace",
+              "internals/agent/trace-format",
+              "internals/agent/trace-vocabulary"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

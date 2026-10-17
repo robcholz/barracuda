@@ -1,0 +1,219 @@
+---
+title: "Agent Plugin"
+---
+
+Runs conversational Agents and exposes model configuration over HTTP and a
+portal page.
+
+- Plugin ID: `agent`
+- Dependencies: `webserver`, `workflow`, `captive-portal`, `time`, `http`
+- Settings: none
+- Context resources: none
+- Provided capabilities: `AgentRuntime`, `AgentToolRegistry`
+- Required capabilities: `CaptivePortal` from `captive-portal`, `WebServer`
+  from `webserver`, `WorkflowActionRegistry` from `workflow`,
+  `WorkflowService` from `workflow`, `ClientFactory` from `http`, `UtcClock`
+  from `time`
+- Workflow: Actions `session.new`, `session.open`, `session.append`,
+  `session.respond`, `session.interrupt`, `session.cancel`, `session.close`,
+  `session.delete`, `session.list`, `session.rename`,
+  `session.set_permission_level`, `session.set_reasoning_effort`, see
+  [Actions](/plugins/agent/action); Events `session.event`, see [Events](/plugins/agent/event)
+- Agent Tools: `background_list`, `background_wait`, `background_input`,
+  `background_cancel`, `conversation_end`, `skill_list`, `skill_read`,
+  `skill_resource_read`, `skill_reload`, `memory_store`, `memory_recall`,
+  `memory_list`, `memory_update`, `memory_forget`, `plan_enter`, `plan_exit`,
+  `plan_clarify`, `profile_read`, `profile_replace`, `profile_clear`,
+  `todo_update`, `tool_search`, `tool_load`, `subagent_spawn`, `subagent_run`,
+  `subagent_list`, `subagent_list_spawnable`, `subagent_watch`,
+  `subagent_interrupt`, `subagent_delete`; the permission-reply resolver uses
+  `permission_resolve_reply` in its own model call
+- Lua packages: none
+- Web: portal entry `agent`, with status; `POST /api/model-api`,
+  `GET /api/model-api/status` (see [HTTP](/plugins/agent/http))
+- Tasks: one Agent task (pool size 1) that drives the Agent runtime and
+  forwards open-session output as `session.event`
+- Storage: model API records under the Plugin-scoped KV keys `default` and
+  `purpose.{root_agent,sub_agent,memory,compaction}`; persistent runtime state
+  as `.bin` files under `/data`; user-installed skills read from
+  `/workspace/media/skills` and shared bundled skills from
+  `/workspace/resources/skills`; bundled `/resources/entry.js`,
+  `/resources/figure.js`, `/resources/icon.svg`
+
+The Plugin requires a private filesystem (`PluginFilesystem::Private`).
+
+System constructs the Agent Plugin from the common `PluginContext`. During
+registration it creates and publishes `AgentRuntime`, publishes
+`AgentToolRegistry`, and registers Agent session operations as direct Workflow
+Actions. The Workflow Plugin remains independent of Agent; Agent is the
+capability consumer.
+
+Direct dependent Plugins use `AgentRuntime` for typed session collaboration.
+Transport- or environment-specific request shaping stays in those adapter
+Plugins rather than in the Agent runtime.
+
+Each session carries human-facing metadata: a title and a last-used time.
+`AgentRuntime::describe_sessions` returns a `SessionInfo` (id, persistence,
+title, `updated_at`) for every live session, and
+`AgentRuntime::rename_session` replaces a title. An untitled session takes its
+title from the first appended user message with visible text: the first
+non-empty line, trimmed, capped at 64 characters with a trailing `…` when
+cut. Renames are normalized the same way and rejected when nothing visible
+remains. Each appended user message stamps `updated_at` in Unix milliseconds
+from `UtcClock`, which registration installs through
+`AgentRuntime::set_wall_clock`; while the clock is unsynchronized, the previous
+value is kept. Persistent sessions store both fields with the rest of their
+session state; ephemeral sessions keep them in memory.
+
+`AgentRuntime::session_transcript(session, limit, max_chars)` reads a live
+session's conversation the way a person reads it: the last `limit` user and
+Agent messages, oldest first, each a `TranscriptEntry` with its
+`TranscriptRole`, its text cut to `max_chars` characters, the names of the
+Tools an Agent message called, and whether it belongs to the turn still in
+progress. Reasoning, Tool results, and the runtime's own background-update
+messages are left out. It reads the transcript the root Agent already keeps,
+in memory for an ephemeral session; a session with no message yet, or whose
+ephemeral Agent is gone, has none.
+
+The Plugin owns and drives `RuntimeService` directly. Alongside it, the
+Agent-to-Workflow adapter only forwards open-session output as `session.event`;
+it does not own or run either the Agent runtime or the Workflow runtime.
+
+Dependent Plugins may register native Agent `ToolGroup`s through
+`AgentToolRegistry` before startup. The Agent startup hook starts that complete
+Tool Registry before spawning the runtime task.
+
+## Attachments
+
+A message reaches an Agent as text plus `Attachment` references
+(`Message::with_attachments`, the `attachments` of `session.append`): a kind,
+a path in the shared filesystem view (typically `/workspace/cache/...` or
+`/workspace/media/...`), a MIME type, an optional filename and a size. The
+transcript stores a user message with attachments with array content: a
+`{"type":"text"}` part and one internal `{"type":"media",...}` part per file.
+Before each model request the Agent reads, through its `ScopedVfs`, the newest
+attachments the model configuration lets it inline (`input_modalities`,
+`max_images_in_context`, `image_max_bytes`; see [HTTP](/plugins/agent/http)), recognizing
+images by their bytes, and the request base64-encodes them into the body.
+Every other attachment, and one whose file is gone (the Workspace cache does
+not survive a restart), becomes a text line naming it by path. Tool results
+carry attachments the same way (see below), and their images count toward
+`max_images_in_context` with the user's. History
+compaction and memory extraction read attachments as labels such as
+`[image: cat.jpg]`, and the context size estimate counts an image as 1600
+tokens.
+
+## Tools and background Tools
+
+A Tool is either an ordinary Tool (`Tool::new` with a `ToolHandler`), whose call
+settles inside the model turn, or a background Tool (`Tool::background` with a
+`BackgroundToolHandler`), whose call returns an accepted output and keeps
+running. Being a background Tool is part of the Tool's definition, not a choice
+made per call.
+
+Every invocation receives a `ToolContext` beside its arguments; its `session`
+is the `SessionId` of the Agent session the call belongs to, the same for the
+root Agent and its sub-agents. An adapter Plugin uses it to act for that
+session, such as answering in the conversation it is bound to. A
+`ToolOutput` is its `content`, `ok`, and `attachments`: references to files
+the result shows the model (`ToolOutput::with_attachments`), never their
+bytes. The transcript stores them as `media` parts of the tool message, and
+each request inlines the newest ones like a user's attachments; an
+OpenAI-compatible request keeps tool messages text and adds the images in one
+user message after the tool results. A background call's progress and result
+bring their attachments into the update message that delivers them.
+
+Every Agent owns one `BackgroundToolPool`. The pool is a lower layer than
+Tools: it is the generic `barracuda_runtime_utils::background::BackgroundPool`,
+which stores tasks under pool-assigned ids beside metadata it never inspects,
+delivers their progress and completion, and lets holders wait for or remove a
+task by id. The Tool layer instantiates it with `BackgroundToolCall` metadata
+(the invocation, the Tool's control hooks, and the `toolcall` span) and owns
+every Tool-level behavior.
+
+The runner moves an accepted background call into the pool, and its accepted
+output becomes `[background:accepted]` with the pool `id`. The Agent drives the
+pool and delivers the call's progress and terminal result automatically as
+`[background:progress]`, `[background:completed]`, or `[background:failed]`
+updates; an idle Agent opens a new turn for them. The always-visible
+`background` Tool group manipulates the pool by `id`:
+
+- `background_list` snapshots every running call with its Tool and status;
+- `background_wait` blocks until one call finishes and returns its result,
+  which is then not delivered again, or times out and leaves it running;
+- `background_input` sends input or end of input to a running call;
+- `background_cancel` drops a running call; its result is never delivered.
+
+A handler attaches `BackgroundToolControl` to supply the status, accept input,
+and stop work its dropped completion future does not own. Dropping a call
+always drops its completion future, so cancelling, cancelling the Agent, or
+dropping the Agent stops every call whose work that future owns. The pool is
+runtime-only state and does not survive an Agent restart.
+
+The runtime scans `/workspace/media/skills` and `/workspace/resources/skills`
+into one catalog. Skills belong to the Agent application rather than the
+framework, so this is an Agent convention over existing Workspace mounts: any
+Plugin that writes files, such as `agent-file`, installs a skill by writing its
+package under `/workspace/media/skills`. Skill names are globally unique
+across both roots; their filesystem location has no selection priority. A
+malformed package, or every copy of a duplicated name, is left out with a
+warning and reported by `skill_reload`, so one bad package in the shared
+directory never stops the Agent. `skill_read` loads only
+the selected `SKILL.md` instructions. `skill_resource_read` resolves a bounded
+UTF-8 file path relative to that unique skill directory without exposing the
+backing path to the model.
+
+The Plugin serves `POST /api/model-api` and `GET /api/model-api/status`
+through `WebServer` (see [HTTP](/plugins/agent/http)); both read the same in-memory
+configuration. The retained route registrations are released automatically
+when the Agent Plugin unloads. Accepted model configurations are atomically persisted before they
+become active. Registration restores the complete model, purpose-binding, and
+default-model snapshot before Agent work starts. Missing storage yields an empty
+configuration; malformed stored data fails Plugin registration.
+
+The portal entry is registered with `CaptivePortal::register_with_status`; its
+`GET /portal/status` record is `EntryStatus::configured`: `ready`
+已配置/Configured while the active configuration resolves a model for at least
+one purpose (explicitly or through the default), otherwise `off` 未配置/Not set
+up. It reads a flag the endpoint updates after restore and each accepted
+`POST`.
+
+## Portal page
+
+Requires `CaptivePortal` from `captive-portal` and a private Plugin filesystem
+scope. Registration retains a `WebEntryRegistration` for a `WebEntry` with ID
+`agent`, group `WebGroup::Agent`, order 10, title `模型配置` / `Models`, a bilingual
+summary, icon `icon.svg`, figure `figure.js`, module `entry.js`, and a
+`ResourceFiles` provider. Unload removes the navigation entry and resource
+provider; no extra HTTP route is registered.
+
+Cargo automatically runs the declared `build` task before compiling this Plugin.
+To build only its resources, run `cargo plugin run build --plugin agent`
+from the repository root. The declaration uses the shared `tools/web/build.ts`
+script. Frontend dependencies and format/lint/check/test commands are managed
+once at the repository root; tests belong to this Plugin's `resources/web/tests/`.
+The independent browser module is
+written to this Plugin's `filesystem/resources/entry.js`. The generic image
+builder includes that directory only when this Plugin is selected. No business
+page is bundled into the portal shell. The shared UI source is a build-time
+helper, not a runtime dependency on another contributor's files.
+
+The page is built on the portal UI kit: a header with the live `socket` figure
+(`resources/web/figure.js`, using the shell's global `HL`), radio cards for the
+API format (`backend`) and purpose, the 设为默认模型 switch (`default`),
+connection fields (`base_url`, `model`, `api_key`), the 输入 switches 图片 and
+PDF (`input_modalities.image`, `input_modalities.pdf`), and an open 高级 fold
+with `timeout_ms`, `max_tokens`, `image_max_bytes` and
+`max_images_in_context`. It sends every field the endpoint requires, as a
+one-element batch, and renders zh or en from the portal language. `resources/web/icon.svg` is the Lucide `cpu` mark.
+
+The page submits the existing POST configuration contract and, once the device
+accepts, calls `context.refreshStatus()` so the portal's 「开始使用」 step and
+navigation follow. Its header shows the 状态 badge and, for each purpose, the
+model it uses (its own, or the default), read from `GET /api/model-api/status`
+on mount and after each accepted save. It does not claim that acceptance
+verifies the upstream service. Secrets
+are password inputs, never persisted in browser storage, and cleared on success
+or unmount. Requests are cancelled on unmount and are never retried automatically.
+The existing HTTP API has no authentication or transport encryption added here;
+use only within a trusted provisioning network.

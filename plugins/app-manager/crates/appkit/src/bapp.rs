@@ -1,5 +1,5 @@
 //! App packages: a container's files in one `.bapp` file, which its author
-//! may sign. `docs/app-format.md` defines the layout.
+//! may sign. `docs/plugins/app-manager/app-format.mdx` defines the layout.
 //!
 //! Listing reads only a package's header and directory. The digest, which
 //! pins what the person approved, and the signature are checked only when

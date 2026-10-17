@@ -1,0 +1,87 @@
+---
+title: "Workflow Plugin"
+---
+
+Owns durable Workflow definitions, Event matching, and cooperative execution,
+and publishes the registry other Plugins add Workflow Actions to.
+
+- Plugin ID: `workflow`
+- Dependencies: none
+- Settings: none
+- Context resources: none
+- Provided capabilities: `WorkflowActionRegistry`, `WorkflowService`
+- Required capabilities: none
+- Workflow: none
+- Agent Tools: none
+- Lua packages: none
+- Web: none
+- Tasks: one Workflow runtime task (`workflow_task`, pool size 1) that restores the
+  catalog and then polls executions
+- Storage: user-created definitions in `/data/workflows.json`, and the IDs
+  of the Workflows that are off in `/data/workflows-off.json`
+
+The Plugin declares a private filesystem. It registers no Workflow Actions or
+Events of its own. A single execution awaits its Actions in document order;
+different executions are polled concurrently by the Workflow task.
+
+Dependent Plugins register direct typed Actions with
+`WorkflowActionRegistry::add_action(handler)`. Each handler declares Rust
+`Request` and `Response` types plus one static schema contract. The contract
+embeds request and response JSON Schemas and compiles both validators at build
+time; the Workflow runtime owns validation and Serde conversion around the
+typed handler. Registered descriptors expose those schemas for a future Agent
+Workflow builder without turning the Action itself into an Agent Tool.
+
+Production Actions use `workflow_action_schema!("address")`, which loads
+`schemas/action/<address>/request.json` and `response.json` from the owning
+Plugin. `WorkflowService::load` and `WorkflowService::unload` manage
+user-created definitions in the durable catalog. `WorkflowService::load_transient`
+registers Plugin-owned definitions for the current boot without modifying that
+catalog. The capability also lists loaded definitions and emits Events.
+
+```rust
+#[derive(serde::Deserialize)]
+struct Request {
+    message: String,
+}
+
+#[derive(serde::Serialize)]
+struct Response {
+    delivered: bool,
+}
+
+struct SendMessage;
+
+impl WorkflowActionHandler for SendMessage {
+    type Request = Request;
+    type Response = Response;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("message.send");
+
+    fn invoke(&self, request: Request) -> WorkflowActionFuture<'_, Response> {
+        Box::pin(async move {
+            send(request.message).await?;
+            Ok(Response { delivered: true })
+        })
+    }
+}
+
+let registration = actions.add_action(SendMessage)?;
+context.retain(registration);
+```
+
+The Plugin stores only user-created definitions in `/data/workflows.json` in
+its scoped filesystem. Its Embassy task restores that catalog before it starts
+advancing emitted executions. Durable and transient load calls ensure user
+restoration first and serialize with catalog changes, so a persisted user
+definition takes precedence over a transient definition with the same ID.
+Removing a definition prevents later Events from starting it and does not
+cancel execution snapshots that already started.
+
+`WorkflowService::set_enabled(id, false)` turns a loaded Workflow off: it
+stays loaded and listed, but no Event starts it (`has_listener` ignores it
+too), and executions already running finish. The Plugin keeps the IDs of
+the Workflows that are off in `/data/workflows-off.json`, restored with the
+catalog, so a transient Workflow loaded again at the next boot is still off.
+Removing a user-created Workflow forgets that it was off.
+`WorkflowService::is_enabled(id)` reads the switch.

@@ -1,7 +1,7 @@
 """Client and scenario support for the host Platform's virtual peripherals manager.
 
 The manager speaks line-delimited JSON over loopback TCP; the protocol is
-documented in `platforms/virtual-io/README.md`.
+documented in `docs/develop/platforms/virtual-io.mdx`.
 """
 
 from __future__ import annotations

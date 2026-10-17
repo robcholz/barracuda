@@ -1,0 +1,36 @@
+---
+title: "PWM Plugin"
+---
+
+Installs the `pwm` Lua package over the Board's exposed I/O pins.
+
+- Plugin ID: `pwm`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: `hal.exposed_io`
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `pwm`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin shares the Board's unified exposed-I/O owner and installs the
+`pwm` Lua package. The returned output implements
+`embedded_hal::pwm::SetDutyCycle`; timer, channel, and pin-mux allocation remain
+inside the Platform provider.
+
+Lua API:
+
+- `pwm.available(name) -> boolean`
+- `pwm.open(name, frequency_hz) -> handle`
+- `handle:max_duty() -> integer`
+- `handle:set_duty(value)`
+- `handle:set_percent(percent)`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+Opening consumes the selected physical pin from the same owner used by every
+other exposed protocol. Unsupported routing fails before the token moves.

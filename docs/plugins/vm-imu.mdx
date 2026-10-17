@@ -1,0 +1,40 @@
+---
+title: "IMU Plugin"
+---
+
+Installs the `motion` Lua package over the Board's primary IMU.
+
+- Plugin ID: `imu`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `inertial-measurement.device` (`primary`, optional)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `motion`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `Imu` capability exactly once
+and installs the `motion` Lua package. I2C ownership, chip initialization, integer
+unit conversion, and Board-relative axis mapping remain owned by the selected
+implementation and generated Board HAL.
+
+Lua API:
+
+- `motion.available() -> boolean`
+- `motion.open() -> handle`
+- `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature`
+- `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 1.
+
+Boards without an IMU report unavailable. The move-only built-in capability
+permits one handle per boot; explicit close, lexical `<close>`, collection, and
+Plugin revocation prevent further operations. The Plugin performs no
+background sampling and owns no long-running tasks.

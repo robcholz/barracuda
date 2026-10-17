@@ -3,7 +3,7 @@
 //! The app manager starts every app program with
 //! `require("app").__bind("<ticket>");` on its first line. Binding fills the
 //! package table, so `require("app")` returns the running app everywhere in
-//! the program. `docs/app-format.md` documents the API.
+//! the program. `docs/plugins/app-manager/app-format.mdx` documents the API.
 
 use crate::port::{AppEvent, MIN_TICK_MS, Port, Ports};
 use crate::view::{LuaView, to_lua};

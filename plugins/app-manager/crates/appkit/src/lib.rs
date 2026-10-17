@@ -1,12 +1,12 @@
 //! Lists, launches, and supervises apps.
 //!
 //! An app is a Lua program with an optional compiled MicroTS view, stored as a
-//! container directory in the format `docs/app-format.md` defines: a builtin
+//! container directory in the format `docs/plugins/app-manager/app-format.mdx` defines: a builtin
 //! app's in the Plugin that ships it ([`BUILTIN_APP`]), others under
 //! [`INSTALLED_APPS`] and [`WORKSPACE_APPS`]. Opening an app runs its program
 //! on the VM with the `app` Lua package and, on a device with a display,
 //! opens its view through the UI kit. The system UI drives the lifecycle
-//! through [`AppManager`]; `docs/plugin.md` describes the states. This crate
+//! through [`AppManager`]; `docs/plugins/app-manager.mdx` describes the states. This crate
 //! needs no display: without one, it runs headless apps.
 
 #![no_std]
