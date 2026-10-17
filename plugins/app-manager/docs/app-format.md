@@ -15,7 +15,7 @@ app API, in [`app-api.md`](app-api.md).
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
 | `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
 | `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
 
 A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
 own scope holds the other two; it only reads the Workspace. Builtin and
@@ -40,6 +40,46 @@ files it names, side by side:
 ```
 
 Other files are ignored. Directories whose names start with `.` are skipped.
+
+## Packages
+
+In the Workspace an app may also be offered as one file,
+`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
+signed. An ID offered both as a directory and as a package is invalid.
+`resources/pack-app.ts` writes packages:
+
+```sh
+bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
+bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built container
+bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
+```
+
+All numbers are little-endian:
+
+| Offset | Size | What |
+| --- | --- | --- |
+| 0 | 4 | `BAPP` |
+| 4 | 1 | format version, 1 |
+| 5 | 1 | file count, 1 to 64 |
+| 6 | 1 | flags: bit 0, a signature block follows |
+| 7 | 1 | 0 |
+| 8 | 4 | the content's length: this header, the directory, and the files |
+| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
+| … | | the files, each where its entry says |
+| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
+
+Listing reads only the header and the directory. When an install is asked
+for, the device hashes the content with SHA-256 and verifies the signature:
+a package whose signature fails is invalid, and the install screen shows a
+signed package's signer by the first bytes of its key's SHA-256, or says it
+is unsigned. The install takes exactly what the person was shown: the
+digest is pinned, and an offer that changed since answers `Changed`. A
+directory offer is pinned the same way, by the SHA-256 of its files.
+
+An app installed from a signed package keeps its signer's key beside its
+container, and from then on takes only packages that key signed: another
+key's package, an unsigned one, or a directory offers no update and says
+why. An app installed unsigned takes any update.
 
 ## Manifest
 

@@ -68,8 +68,14 @@ Where a container lives decides its `AppKind`, as
   packages their manifest names, through `Vm::run_scoped`.
 - **Offers** are containers under the shared `/workspace/media/apps`, written
   by the portal, Agents, or other Plugins. They are not launchable; `open`
-  answers `NotInstalled`. `AppManager::install` copies an offer into
-  `/media/apps`, replacing an installed app at another version, and
+  answers `NotInstalled`. `AppManager::install` copies an offer, a
+  directory or a `.bapp` package, into `/media/apps`, replacing an installed
+  app at another version; it takes only what the pending request pinned
+  (`Changed` otherwise) and, for an app installed from a signed package,
+  only that signer's packages. `AppManager::install_offer` describes an
+  offer as an install would take it, with its `digest`, its `signer`, and
+  why it cannot be installed, if it cannot. The format is in
+  [`app-format.md`](app-format.md#packages), and
   `AppManager::uninstall` deletes an installed app and its data. Only the
   system UI calls them, after asking the person; `AppManager::request_install`
   (the `app.install` Action) asks the system UI to show an offer, and

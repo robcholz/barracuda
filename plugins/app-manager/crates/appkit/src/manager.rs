@@ -6,6 +6,7 @@
 //! the switcher. This module turns those into app states, lifecycle events
 //! for the program, and VM and memory budgets.
 
+use crate::bapp::{self, Seal};
 use crate::builtin::{Backends, BuiltinApp, BuiltinBackend};
 use crate::bundle::{self, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf};
 use crate::device::{self, Device, Packages};
@@ -34,6 +35,9 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use portable_atomic_util::Arc;
 use serde::Serialize;
+
+/// The key of the signer an app was installed from, beside its container.
+const SIGNER_FILE: &str = ".signer";
 
 /// Apps that may run at once. The VM has four execution slots; one stays
 /// free for Workflow and Agent runs.
@@ -66,6 +70,8 @@ pub enum AppError {
     NoDisplay,
     /// The app cannot run on this device; its `incompatible` says why.
     Incompatible,
+    /// The offered app changed after the person was asked to install it.
+    Changed,
     /// No app is in the foreground.
     NoForegroundApp,
     /// The foreground app is not taking input.
@@ -87,6 +93,7 @@ impl core::fmt::Display for AppError {
             AppError::ViewRejected => "app view rejected",
             AppError::NoDisplay => "the device has no display for the app's view",
             AppError::Incompatible => "the app cannot run on this device",
+            AppError::Changed => "the offered app changed after it was approved",
             AppError::NoForegroundApp => "no app is in the foreground",
             AppError::NotInteractive => "the foreground app is not taking input",
             AppError::RuntimeUnavailable => "VM runtime is unavailable",
@@ -449,13 +456,59 @@ impl AppManager {
     /// `id`, the ID belongs to a system app, or the app cannot run on this
     /// device.
     pub async fn request_install(&self, id: &str) -> Result<AppInfo, AppError> {
-        let offered = self.offered(id).await?;
+        let offered = self.install_offer(id).await?;
         if offered.incompatible.is_some() {
             return Err(AppError::Incompatible);
         }
         self.inner.state.borrow_mut().install_request = Some(offered.clone());
         self.inner.changed.signal(());
         Ok(offered)
+    }
+
+    /// The Workspace container offered as app `id` as an install would take
+    /// it: with the digest of its files, the signer of a signed package, and
+    /// why it cannot be installed here, if it cannot. Besides not fitting
+    /// the device, an app installed from a signed package takes updates
+    /// only from its signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when the Workspace offers no valid container
+    /// `id`, a package's signature does not verify, or the ID belongs to a
+    /// system app.
+    pub async fn install_offer(&self, id: &str) -> Result<AppInfo, AppError> {
+        let (offered, seal) = self.sealed(id).await?;
+        let mut info = offered.info;
+        if info.incompatible.is_none() && !self.trusts(id, &seal).await {
+            info.incompatible = Some(String::from("签名与已安装的版本不同"));
+        }
+        info.digest = Some(bapp::hex(&seal.digest));
+        info.signer = seal.signer.as_ref().map(bapp::fingerprint);
+        Ok(info)
+    }
+
+    /// The offered container `id` and what its files hash to.
+    async fn sealed(&self, id: &str) -> Result<(bundle::Container, Seal), AppError> {
+        let offered = bundle::offered(&self.shelf(), id).await?;
+        if self.system_app(id).await {
+            return Err(AppError::SystemApp);
+        }
+        let seal = offered.seal().await?;
+        Ok((offered, seal))
+    }
+
+    /// Whether `seal` may replace installed app `id`: one installed from a
+    /// signed package takes only packages its signer signed.
+    async fn trusts(&self, id: &str, seal: &Seal) -> bool {
+        match self
+            .inner
+            .filesystem
+            .read(&format!("{INSTALLED_APPS}/{id}/{SIGNER_FILE}"))
+            .await
+        {
+            Ok(signer) => seal.signer.is_some_and(|key| key[..] == signer[..]),
+            Err(_) => true,
+        }
     }
 
     /// The install the system UI should ask the person about.
@@ -510,12 +563,21 @@ impl AppManager {
     /// `id`, the ID belongs to a system app, the app cannot run on this
     /// device, or the copy fails.
     pub async fn install(&self, id: &str) -> Result<AppInfo, AppError> {
-        let offered = bundle::offered(&self.shelf(), id).await?;
-        if self.system_app(id).await {
-            return Err(AppError::SystemApp);
-        }
-        if offered.info.incompatible.is_some() {
+        let (offered, seal) = self.sealed(id).await?;
+        if offered.info.incompatible.is_some() || !self.trusts(id, &seal).await {
             return Err(AppError::Incompatible);
+        }
+        // What the person was asked about is what is installed.
+        let pinned = self
+            .inner
+            .state
+            .borrow()
+            .install_request
+            .as_ref()
+            .filter(|request| request.id == id)
+            .and_then(|request| request.digest.clone());
+        if pinned.is_some_and(|digest| digest != bapp::hex(&seal.digest)) {
+            return Err(AppError::Changed);
         }
         self.terminate(id);
         let filesystem = &self.inner.filesystem;
@@ -525,9 +587,18 @@ impl AppManager {
             remove_tree(filesystem, &staging).await?;
             filesystem.create_dir_all(&staging).await?;
             for file in offered.files() {
-                let bytes = filesystem.read(&format!("{}/{file}", offered.dir)).await?;
+                let bytes = offered
+                    .source
+                    .read(file, bundle::MAX_VIEW_BYTES)
+                    .await
+                    .map_err(|_| FsError::Io)?;
                 filesystem
                     .write(&format!("{staging}/{file}"), &bytes)
+                    .await?;
+            }
+            if let Some(signer) = &seal.signer {
+                filesystem
+                    .write(&format!("{staging}/{SIGNER_FILE}"), signer)
                     .await?;
             }
             remove_tree(filesystem, &target).await?;

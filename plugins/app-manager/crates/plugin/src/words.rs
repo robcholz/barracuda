@@ -44,6 +44,7 @@ pub(crate) const fn open_error(error: AppError) -> &'static str {
         AppError::InvalidBundle | AppError::ViewRejected => "应用文件有问题",
         AppError::Busy => "同时运行的应用太多了",
         AppError::Incompatible => "不适用于此设备",
+        AppError::Changed => "应用在确认后被改动了，请重新安装",
         AppError::Storage => "读取存储失败",
         _ => "暂时无法打开",
     }

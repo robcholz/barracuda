@@ -121,7 +121,7 @@ impl WorkflowActionHandler for InstallAction {
                     error: AppError::Incompatible,
                     reason: self
                         .0
-                        .offered(&request.id)
+                        .install_offer(&request.id)
                         .await
                         .ok()
                         .and_then(|app| app.incompatible),
@@ -262,6 +262,8 @@ mod tests {
                 view_shape: Some(ViewShape::Round),
                 icon: Some("lamp".into()),
                 incompatible: Some("此设备没有灯光".into()),
+                digest: Some("0".repeat(64)),
+                signer: Some("0123456789abcdef".into()),
             },
             run_id: 3,
             state,

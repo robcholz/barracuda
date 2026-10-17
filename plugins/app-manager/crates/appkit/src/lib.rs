@@ -13,6 +13,7 @@
 
 extern crate alloc;
 
+mod bapp;
 mod builtin;
 mod bundle;
 mod device;
@@ -23,6 +24,7 @@ mod storage;
 mod view;
 mod workflow;
 
+pub use bapp::{MAX_PACKAGE_FILES, PACKAGE_EXTENSION, PUBLIC_KEY_BYTES, Seal};
 /// How an app run ended, as [`AppExit::outcome`] reports it.
 pub use barracuda_vm_plugin::VmRunOutcome;
 pub use builtin::{

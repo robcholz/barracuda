@@ -414,6 +414,20 @@ impl SystemUi {
                 let (info, offered) = (entry.info.clone(), entry.offered);
                 self.subject = Some(info.clone());
                 if offered {
+                    // Asking checks and pins what the person is shown, so
+                    // the install takes exactly that.
+                    let apps = &self.services.apps;
+                    let subject = match apps.request_install(&info.id).await {
+                        Ok(requested) => requested,
+                        Err(AppError::Incompatible) => {
+                            apps.install_offer(&info.id).await.unwrap_or(info)
+                        }
+                        Err(error) => AppInfo {
+                            incompatible: Some(String::from(words::open_error(error))),
+                            ..info
+                        },
+                    };
+                    self.subject = Some(subject);
                     self.show(Some(Screen::Install));
                 } else {
                     self.launch(info).await;
@@ -560,7 +574,7 @@ impl SystemUi {
                     log::warn!("system ui: cannot install {}: {error}", subject.id);
                     self.services.notices.post(
                         &format!("无法安装“{}”", subject.name),
-                        "应用文件有问题",
+                        words::open_error(error),
                         Some("apps"),
                     );
                 }
@@ -869,7 +883,12 @@ impl SystemUi {
                 ),
                 None => (
                     format!("安装“{subject_name}”？"),
-                    String::from("来自工作区"),
+                    match subject.and_then(|info| info.signer.as_deref()) {
+                        Some(signer) => {
+                            format!("来自工作区 · 已签名 {}", signer.get(..8).unwrap_or(signer))
+                        }
+                        None => String::from("来自工作区 · 未签名"),
+                    },
                     self.permissions(subject),
                     "安装",
                     "取消",

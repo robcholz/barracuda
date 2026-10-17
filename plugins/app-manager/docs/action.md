@@ -53,9 +53,13 @@ fits this device), `runtime_unavailable`, or `busy`.
 Workspace container for installation. It returns at once with
 `{"requested": <app>}`; the person installs or declines on the device, and
 `app.list` shows the outcome. A newer request replaces one still unanswered.
-It fails with `not_found`, `system_app` (the ID belongs to a system app),
-`invalid_bundle`, `storage`, or `incompatible` with the reason this device
-cannot run the app:
+The requested app also carries `digest`, the SHA-256 of its files that the
+install is pinned to, and `signer`, the short name of the key that signed a
+`.bapp` package ([`app-format.md`](app-format.md#packages)). It fails with
+`not_found`, `system_app` (the ID belongs to a system app), `invalid_bundle`
+(also a package whose signature fails), `storage`, or `incompatible` with
+the reason this device cannot run the app, or that an app installed from a
+signed package takes updates only from its signer:
 
 ```json
 {"error":"incompatible","reason":"此设备没有灯光"}

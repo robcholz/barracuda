@@ -447,7 +447,7 @@ async fn scenario(spawner: Spawner) {
         ("future", "$.format"),
         ("greedy", "only for builtin apps"),
         ("nomain", "main.lua is missing"),
-        ("stray", "does not match the directory name"),
+        ("stray", "does not match the container's name"),
         ("system", "belongs to a system app"),
     ]) {
         assert_eq!(*dir, expected_dir);

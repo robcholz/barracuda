@@ -762,14 +762,17 @@ dependencies = [
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "futures-util",
  "json-validator",
  "log",
+ "p256",
  "portable-atomic",
  "portable-atomic-util",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

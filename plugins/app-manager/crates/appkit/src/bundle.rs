@@ -1,5 +1,6 @@
-//! App containers: one directory per app, in the format `docs/app-format.md`
-//! defines and `resources/app-manifest.json` checks.
+//! App containers: one directory per app, or in the Workspace one `.bapp`
+//! package, in the format `docs/app-format.md` defines and
+//! `resources/app-manifest.json` checks.
 //!
 //! Where a container lives decides what kind of app it is: builtin apps'
 //! containers, each in the Plugin that ships it, are system apps, and
@@ -7,6 +8,7 @@
 //! launchable; they are what an install copies into [`INSTALLED_APPS`].
 
 use crate::AppError;
+use crate::bapp::{PACKAGE_EXTENSION, Package, PackageError, Seal};
 use crate::device::{self, API_LEVEL, Device, Packages, ViewShape};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -20,6 +22,7 @@ use barracuda_vm_plugin::AppApi;
 use core::cell::RefCell;
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 /// Where a builtin app's container is, in the filesystem of the Plugin that
 /// ships it.
@@ -139,6 +142,14 @@ pub struct AppInfo {
     /// screen shows; only for installable apps.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incompatible: Option<String>,
+    /// SHA-256 of the offered files, in hex: what an install asked for is
+    /// pinned to. Only on an install request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    /// The short name of the key that signed an offered package, when it
+    /// is signed. Only on an install request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -204,17 +215,83 @@ struct ViewFiles {
     shape: Option<ViewShape>,
 }
 
+/// Where a container's files are.
+pub(crate) enum Source {
+    /// Files in directory `dir`.
+    Dir { filesystem: ScopedVfs, dir: String },
+    /// Files in a package.
+    Package {
+        filesystem: ScopedVfs,
+        package: Package,
+    },
+}
+
+impl Source {
+    /// Reads file `name`, refusing one larger than `limit` bytes.
+    pub(crate) async fn read(&self, name: &str, limit: u64) -> Result<Vec<u8>, Problem> {
+        match self {
+            Self::Dir { filesystem, dir } => read_limited(filesystem, dir, name, limit).await,
+            Self::Package {
+                filesystem,
+                package,
+            } => Ok(package.read(filesystem, name, limit).await?),
+        }
+    }
+
+    async fn require(&self, name: &str) -> Result<(), Problem> {
+        match self {
+            Self::Dir { filesystem, dir } => require_file(filesystem, dir, name).await,
+            Self::Package { package, .. } if package.has(name) => Ok(()),
+            Self::Package { .. } => Err(invalid(format!("{name} is missing"))),
+        }
+    }
+}
+
+impl From<PackageError> for Problem {
+    fn from(error: PackageError) -> Self {
+        match error {
+            PackageError::Storage => Problem::Storage,
+            PackageError::Invalid(message) => Problem::Invalid(message),
+        }
+    }
+}
+
 /// A container checked against the app format.
 pub(crate) struct Container {
     pub(crate) info: AppInfo,
-    /// The filesystem the container is in.
-    filesystem: ScopedVfs,
-    pub(crate) dir: String,
+    pub(crate) source: Source,
     entry: String,
     view: Option<ViewFiles>,
 }
 
 impl Container {
+    /// What the container's files hash to, and who signed them: a
+    /// package's signature, checked; a directory's files, each preceded by
+    /// its name and length, are unsigned.
+    pub(crate) async fn seal(&self) -> Result<Seal, AppError> {
+        if let Source::Package {
+            filesystem,
+            package,
+        } = &self.source
+        {
+            return Ok(package.seal(filesystem).await.map_err(Problem::from)?);
+        }
+        let mut files = self.files();
+        files.sort_unstable();
+        let mut hasher = Sha256::new();
+        for name in files {
+            let bytes = self.source.read(name, MAX_VIEW_BYTES).await?;
+            hasher.update(name.as_bytes());
+            hasher.update([0]);
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(&bytes);
+        }
+        Ok(Seal {
+            digest: hasher.finalize().into(),
+            signer: None,
+        })
+    }
+
     /// Every file the container consists of: the manifest and what it names.
     pub(crate) fn files(&self) -> Vec<&str> {
         let mut files = alloc::vec![MANIFEST_FILE, self.entry.as_str()];
@@ -233,7 +310,7 @@ pub(crate) struct Bundle {
     pub(crate) view: Option<UiAssets>,
 }
 
-enum Problem {
+pub(crate) enum Problem {
     Storage,
     Invalid(String),
 }
@@ -307,9 +384,8 @@ async fn read_container(
             "the directory name is not an app ID: use 1-32 of a-z, 0-9, and -",
         ));
     }
-    let (filesystem, dir) = shelf.place(location, name).ok_or(Problem::Storage)?;
-    let filesystem = &filesystem;
-    let bytes = read_limited(filesystem, &dir, MANIFEST_FILE, MAX_MANIFEST_BYTES).await?;
+    let source = shelf.source(location, name).await?;
+    let bytes = source.read(MANIFEST_FILE, MAX_MANIFEST_BYTES).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| invalid(format!("{MANIFEST_FILE} is not JSON")))?;
     MANIFEST_SCHEMA
@@ -325,7 +401,7 @@ async fn read_container(
     }
     if manifest.id != name {
         return Err(invalid(format!(
-            "{MANIFEST_FILE}: id \"{}\" does not match the directory name",
+            "{MANIFEST_FILE}: id \"{}\" does not match the container's name",
             manifest.id
         )));
     }
@@ -345,10 +421,9 @@ async fn read_container(
                 "{MANIFEST_FILE}: \"{file}\" is not a file name in the container"
             )));
         }
-        require_file(filesystem, &dir, file).await?;
+        source.require(file).await?;
     }
     let mut container = Container {
-        filesystem: filesystem.clone(),
         info: AppInfo {
             id: manifest.id,
             name: manifest.name,
@@ -365,8 +440,10 @@ async fn read_container(
             view_shape: manifest.view.as_ref().and_then(|view| view.shape),
             icon: manifest.icon,
             incompatible: None,
+            digest: None,
+            signer: None,
         },
-        dir,
+        source,
         entry,
         view: manifest.view,
     };
@@ -518,6 +595,29 @@ impl Shelf<'_> {
             )),
         }
     }
+
+    /// Where container `name`'s files are at `location`: its directory, or
+    /// in the Workspace its package when no directory has the name.
+    async fn source(&self, location: AppLocation, name: &str) -> Result<Source, Problem> {
+        let (filesystem, dir) = self.place(location, name).ok_or(Problem::Storage)?;
+        if location != AppLocation::Workspace {
+            return Ok(Source::Dir { filesystem, dir });
+        }
+        let package = format!("{dir}{PACKAGE_EXTENSION}");
+        let is_dir = filesystem
+            .metadata(&dir)
+            .await
+            .is_ok_and(|metadata| metadata.is_dir());
+        let is_package = filesystem.exists(&package).await.unwrap_or(false);
+        match (is_dir, is_package) {
+            (true, true) => Err(invalid("offered both as a directory and as a package")),
+            (false, true) => Ok(Source::Package {
+                package: Package::open(&filesystem, &package).await?,
+                filesystem,
+            }),
+            _ => Ok(Source::Dir { filesystem, dir }),
+        }
+    }
 }
 
 /// Container directory names at `location`, or builtin apps' IDs; a missing
@@ -535,12 +635,23 @@ async fn container_names(shelf: &Shelf<'_>, location: AppLocation) -> Vec<String
             return Vec::new();
         }
     };
+    let packages = location == AppLocation::Workspace;
     let mut names: Vec<String> = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.metadata().is_dir() && !entry.file_name().starts_with('.'))
-        .map(|entry| String::from(entry.file_name()))
+        .filter(|entry| !entry.file_name().starts_with('.'))
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            if entry.metadata().is_dir() {
+                Some(String::from(name))
+            } else if packages {
+                name.strip_suffix(PACKAGE_EXTENSION).map(String::from)
+            } else {
+                None
+            }
+        })
         .collect();
     names.sort_unstable();
+    names.dedup();
     names
 }
 
@@ -624,7 +735,11 @@ pub(crate) async fn offered(shelf: &Shelf<'_>, id: &str) -> Result<Container, Ap
         return Err(AppError::NotFound);
     }
     let manifest = format!("{WORKSPACE_APPS}/{id}/{MANIFEST_FILE}");
-    if !shelf.filesystem.exists(&manifest).await.unwrap_or(false) {
+    let package = format!("{WORKSPACE_APPS}/{id}{PACKAGE_EXTENSION}");
+    let filesystem = shelf.filesystem;
+    if !filesystem.exists(&manifest).await.unwrap_or(false)
+        && !filesystem.exists(&package).await.unwrap_or(false)
+    {
         return Err(AppError::NotFound);
     }
     Ok(read_container(shelf, AppLocation::Workspace, id).await?)
@@ -633,17 +748,13 @@ pub(crate) async fn offered(shelf: &Shelf<'_>, id: &str) -> Result<Container, Ap
 /// Reads everything needed to launch app `id`.
 pub(crate) async fn load(shelf: &Shelf<'_>, id: &str) -> Result<Bundle, AppError> {
     let container = find(shelf, id).await?;
-    let filesystem = &container.filesystem;
-    let source = read_limited(
-        filesystem,
-        &container.dir,
-        &container.entry,
-        MAX_SOURCE_BYTES,
-    )
-    .await?;
+    let source = container
+        .source
+        .read(&container.entry, MAX_SOURCE_BYTES)
+        .await?;
     let source = String::from_utf8(source).map_err(|_| AppError::InvalidBundle)?;
     let view = match &container.view {
-        Some(files) => Some(load_view(filesystem, &container.dir, files).await?),
+        Some(files) => Some(load_view(&container.source, files).await?),
         None => None,
     };
     Ok(Bundle {
@@ -653,14 +764,10 @@ pub(crate) async fn load(shelf: &Shelf<'_>, id: &str) -> Result<Bundle, AppError
     })
 }
 
-async fn load_view(
-    filesystem: &ScopedVfs,
-    dir: &str,
-    files: &ViewFiles,
-) -> Result<UiAssets, Problem> {
+async fn load_view(source: &Source, files: &ViewFiles) -> Result<UiAssets, Problem> {
     let mut budget = MAX_VIEW_BYTES;
     let mut take = async |name: &str| -> Result<Vec<u8>, Problem> {
-        let bytes = read_limited(filesystem, dir, name, budget).await?;
+        let bytes = source.read(name, budget).await?;
         budget = budget
             .checked_sub(bytes.len() as u64)
             .ok_or_else(|| invalid("the view is larger than its budget"))?;
