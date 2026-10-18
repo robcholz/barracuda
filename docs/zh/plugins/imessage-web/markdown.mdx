@@ -1,0 +1,96 @@
+---
+title: "Web 聊天 Markdown"
+sidebarTitle: "Markdown 渲染器"
+description: "不借助 React，在浏览器中渲染流式输出的 Markdown 聊天回复。"
+---
+
+用于聊天回复的流式 Markdown：Vercel 的 [Streamdown](https://github.com/vercel/streamdown) 的渲染逻辑，不依赖 React、remark、rehype 或 Shiki，针对 DOM 重新实现，体积小到可以从设备上直接提供（压缩后约 29 KB）。它不导入这个目录之外的任何内容。Web 聊天（`../entry.ts`）是它唯一的使用者。
+
+```ts
+import {
+  MARKDOWN_CSS,
+  markdownSource,
+  renderMarkdown,
+  trailing,
+} from "./markdown";
+
+style.textContent += MARKDOWN_CSS;
+const reply = document.createElement("div");
+reply.className = "bc-reply bc-md";
+
+// on every delta, and once more when the reply ends
+renderMarkdown(reply, text, {
+  streaming: true, // false for the last paint
+  keep: caret, // the page's caret: painting leaves it where it is
+  codeActions: (read) => copyButton(read), // read() is the block's code now
+});
+trailing(reply, caret).append(caret); // the end of the last line
+markdownSource(reply); // the Markdown last painted, for Copy and Reply
+```
+
+## 回复流式输出时它保证什么
+
+**已经显示的内容不会被收回。**一次一个字符地流式输出时，每次绘制的文本都是上一次的延续。不会出现 `**`、反引号、`[x]` 或原始 URL 先出现又消失的情况，也不会有某一行从普通文本变成列表、标题或表格。测试在两段涵盖所有块和标记的回复的每一帧上检查这一点（`../tests/markdown.test.ts`）。
+
+**DOM 是打补丁，而不是整体替换。**保留下来的元素和文本节点都会被保留，所以选区、鼠标悬停的“复制”按钮以及代码块的水平滚动位置，在每次绘制后都能保持。
+
+## 工作原理
+
+| 步骤 | 文件 | 来自 Streamdown |
+| --- | --- | --- |
+| 修复最后一个段落中未闭合的内容：`**bol` 会闭合，`` `co `` 会闭合，`[label](https://ex` 变成一个仍在输出中的链接，而 `- > 25` 不是引用 | `heal.ts` | 移植自 remend 1.4.0 |
+| 流式输出时：只有块标记（`#`、`-`、`1.`、`` ` ``、`- [x`）的最后一行会等待；表头会等待它的分隔行；围栏本身所在的行和闭合反引号会等待；末尾的一串标记会等待，直到能确定它是开启、闭合还是普通文本 | `stream.ts` | 本包自己的实现；remend 只处理行内标记 |
+| 拆分为顶层块；源码未变的块保留它的节点 | `index.ts`、`blocks.ts` | 块的记忆化 |
+| 就地修补发生变化的块 | `dom.ts` | React 的协调（reconciliation），大约 80 行 |
+| 围栏仍未闭合的代码块带有 `data-incomplete`：它的操作按钮暂不可用，光标隐藏在它之后（表格之后也一样） | `index.ts`、`style.ts` | 未完成的代码块和光标隐藏规则 |
+| 裸 URL 在 CJK 标点处结束（URL 后面紧跟 CJK 句号和 CJK 文本的情况） | `inline.ts` | streamdown-cjk 的自动链接边界 |
+| 按围栏的语言为代码着色 | `highlight.ts` | （在 Streamdown 中由 Shiki 完成）这里是一个小型扫描器 |
+
+完成的回复同样会被修复，就像 Streamdown 在流式模式下所做的那样，所以回复结束的那一刻不会有任何变化。只有最后一行的等待会被取消。
+
+### 与 remend 的不同之处
+
+`heal.ts` 修复了 remend 1.4.0 中三种会表现为闪烁的行为：
+
+- remend 把闭合标记追加到文本的最末尾。在较早段落中未闭合的标记会在最后一个段落中闭合，或者在一个未闭合的代码块内闭合（`**a\n\nb` 变成了 `**a\n\nb**`）。`heal` 只闭合最后一个段落，并把闭合标记放在末尾空白之前。
+- 链接的 URL 在遇到第一个 `)` 时就被视为完整。`[x](https://a.com/x_(y)` 会显示为原始文本。现在只有括号配平后，URL 才被视为完整。
+- 一旦修复了一个链接，remend 就停止处理。链接周围的标记保持未闭合（`*[link](https://ex` 会显示它的 `*`），链接文字内部的标记也一样。`heal` 两者都会修复。
+
+remend 对 KaTeX、HTML 标签、setext 标题和单个波浪号的处理器，以及它的选项和自定义处理器都没有移植。这个渲染器把 `$`、HTML 和 setext 下划线作为文本绘制，也不支持单波浪号删除线。
+
+### 没有移植的内容
+
+- 逐词淡入动画：Web 聊天本身已经每帧显示几个字符；
+- Mermaid、KaTeX 和原始 HTML；
+- 链接安全确认弹窗：链接只打开 `http(s):` 和 `mailto:`，并在新标签页中打开；
+- 表格和代码的下载菜单；
+- 从右到左的文字方向检测；
+- Shiki 的增量分词器：`highlight.ts` 会重新扫描不断增长的块。在 Chromium 中，5 KB 代码大约需要 0.9 ms，而一段以 5 KB 代码块结尾的回复，一次完整的流式绘制大约需要 4 ms，远在一帧之内。
+
+## 它绘制的 Markdown
+
+- 段落，单个换行保留为换行。
+- ATX 标题和分隔线。
+- 带语言标签的围栏代码。
+- 无序列表、有序列表和任务列表，按标记之后的任意缩进嵌套。
+- 块引用。
+- 带对齐的 GFM 表格。
+- 行内代码、粗体、斜体和删除线。
+- 链接、自动链接和裸 URL。
+- 图片，绘制为以替代文本命名的链接：回复不会加载任何内容。
+
+节点是构建出来的，从不从标记中解析，所以回复中的 HTML 仍然是文本。
+
+## 样式
+
+`MARKDOWN_CSS` 把所有样式限定在 `.bc-md`、`.bc-md-*` 和 `.bc-tok-*` 范围内。它读取门户设计系统的 token，所以会跟随浅色和深色主题。
+
+## 测试
+
+- `../tests/markdown.test.ts`：渲染、流式输出和高亮。
+- `../tests/heal/`：remend 自己的测试套件，针对 `heal.ts` 运行（313 个用例）。
+- `../tests/chat.test.ts`：Web 聊天中的这个包。
+
+## 许可证
+
+`heal.ts` 和 `../tests/heal/` 源自 Streamdown，Copyright 2023 Vercel, Inc.，采用 Apache License 2.0（`APACHE-2.0.txt`）。参见 `NOTICE`。

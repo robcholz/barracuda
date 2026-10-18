@@ -1,0 +1,101 @@
+---
+title: "IMessage WeChat HTTP API"
+sidebarTitle: "HTTP API"
+description: "微信消息通道的 HTTP 路由：状态、模式、所有者、设置和二维码登录。"
+---
+
+## `GET /api/gateway/wechat/status`
+
+返回 `200` 和共享的消息通道状态（`status_response`）；其他方法返回 `405`：
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":2}},
+ "owners":{"count":1}}
+```
+
+- `configured`：已绑定一个微信机器人（已保存配置）。
+- `mode`：`disabled` 或 `send_receive`。
+- `receive`（仅在 `send_receive` 时）：`state` 为 `idle`、`starting`、`receiving`、`no_slot`（带 `capacity`）或 `error`（带 `message`）。iLink 报告机器人会话过期（代码 -14）后，它会是 `{"state":"error","message":"… / Scan again to relink"}`（省略了中文部分），直到新的二维码登录被确认。
+- `owners.count`：允许的账号数。
+
+它从不返回设置或令牌；`POST /api/gateway/wechat` 只接受修改。
+
+## `POST /api/gateway/wechat/mode`
+
+请求体为 `{"mode":"disabled"}` 或 `{"mode":"send_receive"}`；不提供 `send`，因为 iLink 发送消息需要有入站活动。
+
+- `204`：已应用。`disabled` 注销消息通道并停止接收；`send_receive` 注册它（已绑定时）并开始接收。
+- `409` `{"error":"no_slot","capacity":n}`：所有接收槽位都在使用中。模式会被保存；有槽位空出后开始接收。
+- `400` `{"error":"invalid_request"}` 或 `{"error":"unsupported_mode"}`，`422` `{"error":"registration_failed"}`，`500` `{"error":"storage"}`，其他方法返回 `405`。
+
+## `GET`/`POST /api/gateway/wechat/owners`
+
+允许的账号和配对码，由 Gateway 共享的所有者路由提供。`GET` 返回 `{"owners":[{"id":"…@im.wechat","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`；`POST` `{"remove":"<id>"}` 或 `{"rotate":true}` 返回 `204`。微信所有者的 id 是发送者的 `from_user_id`；它没有标签。去掉首尾空白后文本等于当前配对码的消息会把它的发送者加为所有者，并收到一次 `PAIRED_REPLY` 回复（"Paired. You can start chatting."）。在绑定机器人之前，两者都返回 `409` `{"error":"not_configured"}`：此时还没有所有者名册。
+
+## `POST /api/gateway/wechat`
+
+配置或替换微信消息通道提供者。请求体是一个 JSON 对象，包含 `token`、`api_base`、`app_id`、`client_version`、`route_tag`、`x_wechat_uin` 和 `cdn_base`（下载和上传文件所用的 CDN，默认为 `https://novac2c.cdn.weixin.qq.com/c2c`）。有提供者默认值的字段可以省略。
+
+响应：
+
+- `204 No Content`：提供者已配置；除非模式为 `disabled`，否则也已注册。接收会以新配置重新开始。
+- `400 Bad Request` `{"error":"invalid_request"}`：JSON 请求体无效，或缺少必填字段。
+- `405 Method Not Allowed` `{"error":"method_not_allowed"}`：该端点只接受 `POST`。
+- `422 Unprocessable Content` `{"error":"registration_failed"}`：Gateway 拒绝了消息通道的注册。之前保存的配置会被恢复。
+- `500 Internal Server Error` `{"error":"storage"}`：配置无法读取、写入或回滚。
+
+凭据只在请求体中接受，从不出现在响应或日志中。
+
+## `/api/gateway/wechat/login`
+
+运行微信 iLink 二维码登录，这样就不必手动输入机器人令牌。所有 iLink 调用都由设备发起，因为 iLink 不会为门户返回 CORS 头。
+
+同一时间最多只有一个登录会话。由本插件拥有的单个任务执行 iLink 请求；`get_qrcode_status` 是一个长轮询，iLink 会保持约 31 s，所以浏览器的请求从不需要等待它。浏览器轮询 `GET`，它会根据任务最后观测到的状态立即应答。
+
+该路径接受 `POST`、`GET` 和 `DELETE`。其他任何方法都返回 `405 Method Not Allowed` `{"error":"method_not_allowed"}`。
+
+### `POST`：开始会话
+
+请求体为空或 `{}`；其他任何请求体都返回 `400 Bad Request` `{"error":"invalid_request"}`，并且不做任何改动。
+
+设备会取消任何正在运行的会话，然后用 `GET {api_base}/ilink/bot/get_bot_qrcode?bot_type=3` 请求二维码。`api_base` 是已保存配置中的 `api_base`；没有保存任何配置时为 `https://ilinkai.weixin.qq.com`。成功时会话开始，响应为：
+
+- `200 OK` `{"url":"<qrcode_img_content>","expires_in":480}`：`url` 是要渲染为二维码的页面 URL，供用户用微信扫描。`expires_in` 是会话的有效期（秒）。
+- `502 Bad Gateway` `{"error":"upstream_unavailable","message":"<text>","code":"<iLink code>"}`：iLink 无法访问（传输、DNS 或 TLS 失败），返回的不是 JSON 对象或状态码不是 2xx，缺少二维码字段，或者报告了错误。当 iLink 报告了它自己的错误（`ret` 或 `errcode` 不为 0）时，`code` 就是那个值，`message` 是它的 `errmsg`/`message`，原样传递；否则没有 `code`。之后没有会话运行，`GET` 报告 `idle`。
+
+并发的 `POST` 和 `DELETE` 请求会被串行处理。
+
+### `GET`：查看会话
+
+总是立即返回 `200 OK`：
+
+```json
+{"status":"wait","configured":false}
+```
+
+- `status` 为以下之一：
+  - `idle`：开机以来没有运行过会话，或者上一个会话已被取消；
+  - `wait`：二维码已签发，尚未被扫描；
+  - `scanned`：二维码已被扫描，等待在手机上确认（iLink 的 `scaned`）；
+  - `confirmed`：用户已确认；消息通道已保存并注册；
+  - `expired`：二维码已过期，或者会话已达到 480 s；
+  - `failed`：某次状态轮询失败或 iLink 报告了错误，或者保存或注册已确认的消息通道失败。`message` 字段描述失败原因。
+- `configured` 表示是否已绑定微信机器人（已保存配置），无论来自这次登录还是 `POST /api/gateway/wechat`，也无论会话状态或模式如何。
+
+已结束会话的最终状态在下一次 `POST` 或 `DELETE` 之前都可以读取。
+
+### `DELETE`：取消会话
+
+取消正在运行的会话（如果有），关闭它的 iLink 请求，并返回 `204 No Content`。之后 `GET` 报告 `idle`。页面关闭时会调用它。
+
+### 会话生命周期
+
+二维码签发后，任务会长轮询 `GET {api_base}/ilink/bot/get_qrcode_status?qrcode=<id>`，两次轮询之间至少等待 1 s。iLink 的状态有 `wait`、`scaned`、`confirmed` 和 `expired`；任何其他状态都会以 `failed` 结束会话。
+
+在 `confirmed` 时，iLink 返回 `bot_token`、`ilink_bot_id` 和 `baseurl`。任务通过与 `POST /api/gateway/wechat` 相同的路径保存 `{"token":"<bot_token>","api_base":"<baseurl, or the api_base used
+for the login>"}`，其他字段都取默认值：配置被持久保存，消息通道被重新注册，Gateway 拒绝时会恢复之前的配置。当 `ilink_bot_id` 与上一次登录的机器人不同时，会清除已保存的 `getupdates` 游标和上下文令牌。随后接收重新开始，这也会清除会话过期错误。然后它报告 `confirmed`；如果保存或注册失败，则报告 `failed`。
+
+会话在以下情况结束：`confirmed`、`expired`、480 s 之后、`DELETE`、新的 `POST`，或者插件停止。没有会话运行时，任务处于休眠状态，不持有任何 iLink 连接。
+
+机器人令牌从不出现在任何响应或日志中。

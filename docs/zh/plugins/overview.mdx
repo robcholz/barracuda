@@ -1,0 +1,89 @@
+---
+title: "插件"
+sidebarTitle: "全部插件"
+description: "浏览 Barracuda 设备上的每个插件，以及每个插件拥有什么。"
+---
+
+Barracuda 设备上的每项能力都是一个插件。每个插件页面都会列出该插件的 ID、依赖、设置、能力、Workflow Action 与 Event、Agent 工具、Lua 包、Web 界面、任务和存储，然后介绍它的行为。
+
+[Plugin API](/zh/architecture/plugin-api) 规定了插件可以拥有什么，以及插件如何构建。
+
+## System
+
+| 插件 | 拥有的内容 |
+| --- | --- |
+| [Files](/zh/plugins/files) | 浏览 Workspace 中的文件，并以只读方式显示每个插件的私有文件。 |
+| [HTTP](/zh/plugins/http) | HTTP 插件拥有出站 HTTP：TLS 引擎、连接池、类型化的请求能力，以及 `http.request` Workflow Action。 |
+| [WebServer](/zh/plugins/webserver) | WebServer 插件拥有可移植的 HTTP 和 WebSocket 服务器，并让依赖它的插件通过类型化的 `WebServer` 能力在上面托管路由。 |
+| [Wi-Fi](/zh/plugins/wifi) | 拥有 Wi-Fi 策略：站点（station）和配置接入点的生命周期、持久保存的站点凭据，以及配网页面和 API。 |
+| [System Wi-Fi](/zh/plugins/system-wifi) | 在系统界面中显示 Wi-Fi：状态栏上的连接、主屏幕的离线卡片、控制中心的 Wi-Fi 磁贴，以及门户磁贴打开的设置热点。 |
+| [Captive Portal](/zh/plugins/captive-portal) | 把可插拔的网页入口和资源提供者汇集到门户外壳中。 |
+| [App Portal](/zh/plugins/app-portal) | 为门户添加“应用”页面：等待用户确认的安装，包括它请求的权限和签名者，以及 Workspace 提供的应用。 |
+| [Power](/zh/plugins/power) | 拥有开发板的主电源监测器，并把它的读数和电池电量以 `Power` 的形式发布给其他插件。 |
+| [Sound](/zh/plugins/sound) | 拥有开发板的主音频编解码器，以 `Sound` 的形式一次只把它借给一个使用者，并以 `Volume` 的形式保存设备的输出音量，这个音量由用户为所有声音统一设置。 |
+| [Time](/zh/plugins/time) | Time 插件通过 SNTP 同步 UTC 时间，维护开发板的实时时钟，并把时间作为类型化的只读时钟能力发布出去。 |
+| [Scheduler](/zh/plugins/scheduler) | Scheduler 插件拥有持久的计划，并在某个计划到期时发出一个 Workflow Event。 |
+| [System Fonts](/zh/plugins/system-fonts) | 提供系统字体：对于视图没有自带字体的字体槽，显示屏上的每个视图都用这些字体图集来绘制。 |
+| [Workflow](/zh/plugins/workflow) | 拥有持久的 Workflow 定义、Event 匹配和协作式执行，并发布供其他插件添加 Workflow Action 的注册表。 |
+
+## 应用
+
+| 插件 | 拥有的内容 |
+| --- | --- |
+| [App Manager](/zh/plugins/app-manager) | 运行带可选 MicroTS 视图的 Lua 应用；在带显示屏的开发板上，显示这些应用以及设备的系统界面：主屏幕和 Agent 的状态、启动器、应用切换器、通知中心和控制中心，以及应用生命周期前后的各个界面。 |
+| [Builtin App Files](/zh/plugins/builtin-app-files) | 提供 Files，一个显示共享 Workspace 中文件的系统应用。 |
+| [Builtin App Sessions](/zh/plugins/builtin-app-sessions) | 提供 Sessions，一个列出 Agent 对话的系统应用。 |
+| [Builtin App Settings](/zh/plugins/builtin-app-settings) | 提供 Settings，一个用于 Wi-Fi、声音和显示、已安装应用、存储以及设备的系统应用。 |
+| [Builtin App Workflow](/zh/plugins/builtin-app-workflow) | 提供 Workflows，一个系统应用，列出已加载的 Workflow、启动每个 Workflow 的条件，以及打开或关闭每个 Workflow 的开关。 |
+
+## Agent
+
+| 插件 | 拥有的内容 |
+| --- | --- |
+| [Agent](/zh/plugins/agent) | 运行对话式 Agent，并通过 HTTP 和一个门户页面提供模型配置。 |
+| [Agent File](/zh/plugins/agent-file) | 把插件文件系统作为有界的原生文件工具暴露给 Agent。 |
+| [Agent HTTP](/zh/plugins/agent-http) | 把 `http` 插件的 `Http` 能力作为原生工具暴露给 Agent。 |
+| [Agent IMessage Gateway](/zh/plugins/agent-imessage-gateway) | 暴露 iMessage Agent 工具、把 Gateway 对话桥接到 Agent 会话的 Workflow Action，以及会话命令。 |
+| [Agent Scheduler](/zh/plugins/agent-scheduler) | 把 `scheduler` 插件的 `Scheduler` 能力作为原生工具暴露给 Agent。 |
+| [Agent Time](/zh/plugins/agent-time) | 把 `time` 插件的 `UtcClock` 能力作为原生工具暴露给 Agent。 |
+| [Agent VM](/zh/plugins/agent-vm) | 把 `vm` 插件的 `Vm` 能力作为原生后台工具暴露给 Agent。 |
+| [Agent Websearch](/zh/plugins/agent-websearch) | 直接向 Agent 运行时注册基于 Tavily 的网页搜索，并提供一个用于 Tavily 配置的门户页面。 |
+| [Agent Workflow](/zh/plugins/agent-workflow) | 把 Workflow 的发现和持久控制作为原生 Agent 工具暴露出来。 |
+
+## 消息通道
+
+| 插件 | 拥有的内容 |
+| --- | --- |
+| [IMessage Gateway](/zh/plugins/imessage-gateway) | IMessage Gateway 插件在消息通道插件和 Workflow 之间路由消息，并拥有所有消息通道插件共享的内容：模式、所有者、接收循环和槽位、它们的 HTTP 路由和状态、HTTP 辅助工具，以及用户发送的文件。 |
+| [IMessage BlueBubble](/zh/plugins/imessage-bluebubble) | IMessage BlueBubble 插件把 BlueBubbles 服务器添加为 iMessage Gateway 的消息通道：它通过 BlueBubbles API 发送消息，并通过服务器向设备自身 Web 服务器推送的 webhook 接收消息。 |
+| [IMessage Inkbox](/zh/plugins/imessage-inkbox) | IMessage Inkbox 插件把 Inkbox 添加为 iMessage Gateway 的消息通道：它通过 API 密钥或自助注册配置一个 Inkbox agent，通过 Inkbox API 发送消息，并通过轮询接收消息。 |
+| [IMessage QQ](/zh/plugins/imessage-qq) | IMessage QQ 插件把 QQ 机器人添加为 iMessage Gateway 的消息通道：它通过扫码或配置绑定机器人，通过 QQ OpenAPI 发送文本和文件，并通过 QQ 网关 WebSocket 接收消息及其文件。 |
+| [IMessage Telegram](/zh/plugins/imessage-telegram) | IMessage Telegram 插件把 Telegram 机器人添加为 iMessage Gateway 的消息通道：它保存机器人配置，通过 Bot API 发送消息，并通过长轮询接收消息。 |
+| [IMessage Web](/zh/plugins/imessage-web) | IMessage Web 插件把内置的 Web 聊天添加为 iMessage Gateway 的消息通道，并通过 WebSocket 桥接到浏览器。 |
+| [IMessage WeChat](/zh/plugins/imessage-wechat) | IMessage WeChat 插件把微信 iLink 添加为 iMessage Gateway 的消息通道：它通过二维码登录绑定机器人，通过 iLink 及其 CDN 发送文本和文件，并通过长轮询接收消息及其文件。 |
+
+## Lua VM
+
+| 插件 | 拥有的内容 |
+| --- | --- |
+| [VM](/zh/plugins/vm) | VM 插件拥有隔离的 Lua 执行：它发布类型化的 `Vm` 能力、供 VM 包插件扩展的 `LuaPackageRegistry`，以及运行 Lua 脚本的 Workflow Action。 |
+| [VM Agent](/zh/plugins/vm-agent) | VM Agent 插件把隔离的、不持久保存的 Agent 提问作为只能 require 的 `agent` Lua 包暴露给 Lua 代码。 |
+| [Analog](/zh/plugins/vm-analog) | Analog 插件把开发板可用引脚上的模拟输入和输出作为 `analog` Lua 包暴露给 Lua 代码。 |
+| [Audio](/zh/plugins/vm-audio) | Audio 插件把开发板音频编解码器（由 `sound` 插件拥有）上的播放和录音作为 `audio` Lua 包暴露给 Lua 代码。 |
+| [Camera](/zh/plugins/vm-camera) | Camera 插件拥有开发板的主摄像头，并把帧采集作为 `camera` Lua 包暴露给 Lua 代码。 |
+| [Display](/zh/plugins/vm-display) | Display 插件拥有所有未被其他插件占用的开发板显示屏，并把绘制和面板控制作为 `display` Lua 包暴露给 Lua 代码。 |
+| [VM Filesystem](/zh/plugins/vm-filesystem) | VM Filesystem 插件通过 Lua 标准的 `io` 和 `os` 文件 API，把它的插件作用域 VFS 暴露给 Lua 代码。 |
+| [GPIO](/zh/plugins/vm-gpio) | GPIO 插件把开发板可用引脚上的数字输入和输出作为 `gpio` Lua 包暴露给 Lua 代码。 |
+| [VM HTTP](/zh/plugins/vm-http) | VM HTTP 插件把 HTTP 插件的有界出站请求作为只能 require 的 `http` Lua 包暴露给 Lua 代码。 |
+| [I2C](/zh/plugins/vm-i2c) | I2C 插件把开发板可用引脚上的 I2C 总线传输作为 `i2c` Lua 包暴露给 Lua 代码。 |
+| [I2S](/zh/plugins/vm-i2s) | I2S 插件把开发板可用引脚上的 I2S PCM 流传输作为 `i2s` Lua 包暴露给 Lua 代码。 |
+| [IMU](/zh/plugins/vm-imu) | 基于开发板的主 IMU 安装 `motion` Lua 包。 |
+| [LED Strip](/zh/plugins/vm-led-strip) | 基于开发板的主 LED 灯带安装 `light` Lua 包。 |
+| [Message Queue](/zh/plugins/vm-message-queue) | 安装只能 require 的 `message_queue` Lua 包：一组有界的共享 FIFO 队列，相互独立的 Lua 执行用它们交换消息。 |
+| [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包。 |
+| [PWM](/zh/plugins/vm-pwm) | 基于开发板的可用 I/O 引脚安装 `pwm` Lua 包。 |
+| [SPI](/zh/plugins/vm-spi) | 基于开发板的可用 I/O 引脚安装只能 require 的 `spi` Lua 包。 |
+| [VM System Info](/zh/plugins/vm-systeminfo) | 把所选的平台和开发板标识作为只能 require 的 `systeminfo` 包暴露给 Lua。 |
+| [VM Time](/zh/plugins/vm-time) | 通过标准的 `os` 时间函数把 Time 插件的 UTC 时钟暴露给 Lua。 |
+| [UART](/zh/plugins/vm-uart) | 基于开发板的可用 I/O 引脚安装 `uart` Lua 包。 |
+| [VM WebServer](/zh/plugins/vm-webserver) | 通过只能 require 的 `webserver` 包，让 Lua 执行处理 `/vm` 下的入站 HTTP 请求，并把 VM 文件以流的形式作为响应返回。 |

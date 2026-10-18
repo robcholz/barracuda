@@ -1,0 +1,66 @@
+---
+title: "barracuda-agent-trace"
+sidebarTitle: "跟踪"
+description: "通过 `log` 门面和一个扁平树形的 `tracing` 订阅者，为主机测试和工具输出日志。"
+---
+
+供框架测试和工具使用的主机日志：[`log`] 门面的后端和一个扁平树形的 `tracing` 订阅者，两者驱动同一份输出。
+
+它提供两条相互独立、共用一种行格式的日志流：
+
+- **`log` 门面**——普通的 `log::error!`/`warn!`/`info!`/… 记录。
+- **`tracing`**——渲染为扁平树的 span/事件，带有调用方声明的继承上下文分组和逻辑异步任务通道。
+
+两者都渲染为 `<L> (<ms>) <tag>: <msg>`，并按级别着色。
+
+## 输出去向
+
+| `log` 门面 | `tracing` |
+|---|---|
+| `env_logger`（自定义格式） | 重新进入 `log` 门面 → `env_logger` |
+
+这两条流有意保持独立——没有 `tracing/log-always`，没有
+`LogTracer`——所以 `tracing` 事件永远不会作为 `log` 记录重新发出（反之亦然），从而杜绝了任何 log↔trace 循环。
+
+## 公开 API
+
+| 项 | 作用 |
+|---|---|
+| `init_logger(max_level, output)` | 安装全局 `log` 后端。`max_level` 是权威的运行时过滤器（**不会**参考 `RUST_LOG`）。 |
+| `init_tracing(config)` | 安装扁平树形的 `tracing` 订阅者；只跟踪 `barracuda*` 目标。 |
+| `LogOutput` | 输出目标选择：`Stderr`（默认）或 `File(path)`（打开时截断，不带颜色）。 |
+| `TracingConfig` | 通过 `with_context_group_keys(name, keys)` 声明继承上下文分组。让通用的跟踪层与 `barracuda_agent_runtime` 的概念保持解耦。 |
+| `InitLoggerError` | `init_logger` 的失败（`OpenLogFile`、`SetLogger`）。 |
+| `LevelFilter` | 从 `log` 重新导出。 |
+| `FlatTreeSubscriber` / `TraceSink` | 订阅者及其输出接缝（来自 `trace` 模块）。 |
+
+一个独立调度的 future 通过在它的根 span 上添加
+`trace.task = %task_id` 来开启一条稳定的逻辑通道。`FlatTreeSubscriber` 消费这个保留字段，并把该标签传播到后代 span、事件和关闭记录；物理线程名只是这类 span 之外同步工作的兜底。完整的契约参见[跟踪格式](/zh/plugins/agent/trace-format)。
+
+运行时把 `run` 注册为
+`system → session → turn → agent → iteration`。`system` 是外层的 Agent 系统作用域，供任何会话存在之前的启动/全局工作使用；它是一个固定的语义标签，而不是分配出来的 id。会话和 Agent 的 future 随后开启它们自己的逻辑任务通道。
+Python 的 [Chrome 导出器](/zh/plugins/agent/trace-scripts)把这些作用域映射为合成的
+Chrome 进程。会话需要它继承来的 system 作用域；导出器不接受旧的、没有 system 的会话形式。既不在 system 内也不在会话内的记录仍然有效，并使用 `unattributed`。
+
+Chrome 计数器是显式的：只有 `counter.<series>=<number>` 事件字段才会产生 `ph=C`。数值型的生命周期元数据仍作为普通参数保留在它的即时事件上。
+
+## 级别上限
+
+有两层限制输出的详细程度：
+
+- **编译时**（`Cargo.toml` 特性）：`log_max_*` 转发到
+  `log/release_max_level_*`，`trace_max_*` 转发到 `tracing/release_max_level_*`，在 **release** 构建中把更高级别的宏完全去掉（不格式化，不经过 FFI）。同一时间只能启用一个 `log_max_*`。默认为 `log_max_info`。
+- **运行时**：`init_logger` 的 `max_level` 参数。嘈杂的主机依赖（TLS/网络 crate）无论如何都被限制在 `Warn`，所以
+  `init_logger(Trace)` 保留第一方代码的详细输出，而不会被依赖的日志淹没。
+
+## 示例
+
+```bash
+cargo run --example fmt_demo -p barracuda-agent-trace
+```
+
+每个来源（`log` 门面和 `tracing`）各输出一行，方便你直观地检查统一的格式。通过管道（非 TTY）输出时是纯文本（自动去掉 ANSI）；在 TTY 上会按级别着色。
+
+## 说明
+
+`barracuda-agent-trace` 是一个仅用于主机的 crate。`scripts/` 目录中有一个用于读取设备输出的 serial-log 辅助工具。
