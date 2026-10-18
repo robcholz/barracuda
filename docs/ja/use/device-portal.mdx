@@ -1,0 +1,41 @@
+---
+title: "Device Portal"
+description: "Set up Wi-Fi, models, channels, files, and apps from any browser on the device's network."
+---
+
+The Device Portal is the device's own web app, served by the device at
+`/portal/`. Every enabled Plugin that has settings adds its page to it, so the
+portal always matches the firmware.
+
+## Open the portal
+
+| Where the device is | Address |
+| --- | --- |
+| A Board that has no Wi-Fi yet | Join the open `Barracuda Setup` network, then open `http://192.168.4.1/portal/` |
+| A Board on your network | `http://DEVICE_ADDRESS:8787/portal/` |
+| `local-linux` | `http://10.42.0.2:8787/portal/` |
+
+The portal follows your browser's language, Chinese or English.
+
+## Pages
+
+| Page | From Plugin | What you set |
+| --- | --- | --- |
+| Wi-Fi | [`wifi`](/plugins/wifi) | Scan and join a network; the setup hotspot |
+| Models | [`agent`](/plugins/agent) | The model service, model, and API key for each Agent purpose |
+| Web search | [`agent-websearch`](/plugins/agent-websearch) | The search service the Agent uses |
+| Web chat | [`imessage-web`](/plugins/imessage-web) | Talk to the Agent in the browser |
+| WeChat, QQ, Telegram, BlueBubbles, Inkbox | [Channels](/use/channels) | Bind the account, owners, and pairing codes |
+| Files | [`files`](/plugins/files) | Browse the Workspace and Plugin files |
+| Apps | [`app-portal`](/plugins/app-portal) | Review and install apps |
+
+A page appears only when its Plugin is in the firmware. See
+[Board profiles](/boards/profiles).
+
+<Warning>
+  The portal's HTTP APIs have no authentication or transport encryption, and
+  the setup hotspot is open. Configure the device only on a network you trust.
+</Warning>
+
+From a terminal, `cargo cli configure` fills in the same model, web search, and
+channel settings without a browser. See [Build and run](/get-started/build-and-run).

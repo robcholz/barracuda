@@ -1,0 +1,61 @@
+---
+title: "CLI"
+description: "Every cargo command Barracuda adds: board, plugin, image, platform, and cli."
+---
+
+Barracuda adds its commands as Cargo aliases, so they run from anywhere in the
+repository with no extra install.
+
+## cargo board
+
+| Command | What it does |
+| --- | --- |
+| `cargo board select [NAME]` | Select a Board, interactively when no name is given. Later `cargo build` and `cargo run` use it |
+| `cargo board target [NAME]` | Print a Board's Rust target triple; defaults to the selected Board |
+| `cargo board sync [--check]` | Validate Boards and synchronize peripheral implementations into the registry |
+
+## cargo plugin
+
+| Command | What it does |
+| --- | --- |
+| `cargo plugin info <ID>` | Show a Plugin's manifest and dependencies |
+| `cargo plugin select` | Turn enabled Plugins off on this machine only, in `.barracuda/disabled-plugins` |
+| `cargo plugin run <TASK> [--plugin <ID>]` | Run a task declared in `plugin.toml`, such as `build`, for enabled Plugins |
+| `cargo plugin sync [--check]` | Synchronize discovered Plugins into the System registry |
+
+Which Plugins a firmware contains is set by the Board's profile; see
+[Board profiles](/boards/profiles).
+
+## cargo image
+
+| Command | What it does |
+| --- | --- |
+| `cargo image build` | Build the selected Board's Plugin resource image |
+| `cargo image flash` | Flash the built image into the Board's `resources` partition |
+| `cargo image deploy` | Build and flash |
+
+See [System image](/tools/system-image).
+
+## cargo platform
+
+| Command | What it does |
+| --- | --- |
+| `cargo platform sync [--check]` | Synchronize discovered Platforms into the registry |
+
+## cargo cli
+
+The terminal channel. It always builds for your computer, whatever Board is
+selected.
+
+| Command | What it does |
+| --- | --- |
+| `cargo cli` | Chat with a running device; choose Local or Remote |
+| `cargo cli configure [ADDRESS]` | Set models, web search, and channels from the terminal |
+| `cargo cli chat ADDRESS < messages.txt` | Send messages from a file |
+
+## Environment
+
+| Variable | Used by | Meaning |
+| --- | --- | --- |
+| `BARRACUDA_VIRTUAL_IO_ADDR` | `local-linux`, `local-macos` | Loopback address of the virtual peripherals, such as `127.0.0.1:7878` |
+| `BARRACUDA_LOG_LEVEL` | `cargo build`, `cargo run` | Log level baked into the build: `off`, `error`, `warn`, `info`, `debug`, or `trace` |

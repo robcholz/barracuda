@@ -66,6 +66,14 @@ html.dark:root:root {
   --bc-danger-border: #6F101B;
 }
 
+/* Japanese pages put Japanese fonts first, so kanji take Japanese forms
+   rather than the Simplified Chinese ones in the default stack. */
+html[lang="ja"]:root:root {
+  --bc-font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Meiryo",
+    "Segoe UI", sans-serif;
+}
+
 /* The page background, also behind overscroll and below fixed layers. */
 html, body {
   background: var(--bc-background) !important;
@@ -115,15 +123,15 @@ code, pre, kbd, .font-mono {
   color: var(--bc-muted-foreground);
 }
 /* The navbar's primary button: lime with ink text in both themes. */
-#navbar a[href="/get-started/quickstart"] {
+#navbar a[href$="/get-started/quickstart"] {
   background: var(--bc-signal) !important;
   color: var(--bc-signal-foreground) !important;
   border-radius: 6px !important;
 }
-#navbar a[href="/get-started/quickstart"] * {
+#navbar a[href$="/get-started/quickstart"] * {
   color: var(--bc-signal-foreground) !important;
 }
-#navbar a[href="/get-started/quickstart"]:hover {
+#navbar a[href$="/get-started/quickstart"]:hover {
   background: #BAE634 !important;
 }
 .nav-logo {
@@ -476,7 +484,7 @@ html.dark .code-block [data-component-part="code-block-root"],
 }
 
 /* The navbar's primary button keeps full opacity on hover. */
-#navbar a[href="/get-started/quickstart"]:hover {
+#navbar a[href$="/get-started/quickstart"]:hover {
   opacity: 1 !important;
 }
 

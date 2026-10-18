@@ -1,0 +1,21 @@
+---
+title: "Automations"
+description: "Keep the device working after the chat ends with Workflow automations and schedules."
+---
+
+A script runs while you talk to the Agent. An automation keeps running after the
+conversation ends: "every morning at seven", "when a message arrives", "when a
+schedule comes due". Ask the Agent for one in plain language.
+
+| Piece | Plugin | What it does |
+| --- | --- | --- |
+| Workflow | [`workflow`](/plugins/workflow) | Stores automations durably, matches Events, and runs Actions |
+| Schedules | [`scheduler`](/plugins/scheduler) | Keeps persistent schedules and emits an Event when one is due |
+| Agent tools | [`agent-workflow`](/plugins/agent-workflow), [`agent-scheduler`](/plugins/agent-scheduler) | Let the Agent list, load, unload, and switch automations, and schedule or cancel events |
+
+The Agent's Workflow tools are `workflow_actions`, `workflow_list`,
+`workflow_load`, `workflow_unload`, and `workflow_switch`; its scheduling tools
+are `scheduler_schedule` and `scheduler_cancel`.
+
+Every Plugin documents the Workflow Actions and Events it adds on its page under
+[Plugins](/plugins/overview).

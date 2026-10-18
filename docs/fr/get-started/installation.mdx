@@ -1,0 +1,85 @@
+---
+title: "Installation"
+description: "Installez la chaîne d’outils de votre carte, puis clonez Barracuda."
+---
+
+Barracuda se compile avec Cargo. Les Plugins sont compilés dans le firmware :
+vous compilez donc sur votre propre ordinateur, avec la chaîne d’outils Rust de
+la plateforme ciblée.
+
+## Cloner le dépôt
+
+```bash terminal
+git clone https://github.com/robcholz/barracuda
+cd barracuda
+```
+
+## Installer une chaîne d’outils
+
+Installez d’abord [rustup](https://rustup.rs). Le dépôt fixe Rust 1.98.1 dans
+`rust-toolchain.toml`, ce qui suffit pour une carte hôte.
+
+<Tabs>
+  <Tab title="Linux et macOS">
+    Rien d’autre à installer. Sélectionnez `local-linux` ou `local-macos` et
+    lancez Barracuda sur votre ordinateur, avec des périphériques virtuels à la
+    place du matériel.
+
+    ```bash terminal
+    rustup show
+    ```
+  </Tab>
+  <Tab title="ESP32">
+    Les cartes ESP32 et ESP32-S3 se compilent avec la chaîne d’outils Rust
+    d’Espressif et se flashent avec `espflash` :
+
+    ```bash terminal
+    cargo install espup espflash
+    espup install --toolchain-version 1.98.1.0
+    ```
+
+    Les ESP32-C3, ESP32-C6 et ESP32-P4 demandent d’autres commandes ; consultez
+    [Plateformes ESP32](/fr/platforms/esp32).
+  </Tab>
+  <Tab title="STM32">
+    Les cartes STM32 se compilent avec Rust 1.98.1 et la cible Arm, et se
+    flashent via une sonde de débogage avec `probe-rs` :
+
+    ```bash terminal
+    rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
+    cargo install probe-rs-tools
+    ```
+  </Tab>
+</Tabs>
+
+Inutile de savoir à l’avance quelle chaîne d’outils une carte requiert. Si vous
+sélectionnez une carte dont la chaîne d’outils manque, `cargo board select`
+affiche la commande exacte pour l’installer.
+
+## Sélectionner une carte
+
+```bash terminal
+cargo board select
+```
+
+La liste est filtrable : tapez une partie d’un nom, par exemple `cores3`, puis
+appuyez sur Entrée. Votre sélection est enregistrée dans l’arbre de travail, et
+chaque `cargo build` et `cargo run` ultérieur l’utilise. Pour sélectionner sans
+invite, nommez la carte :
+
+```bash terminal
+cargo board select local-linux
+```
+
+Les noms de carte sont les noms des répertoires sous `boards/configs/`.
+
+## Étapes suivantes
+
+<CardGroup cols={2}>
+  <Card title="Démarrage rapide" icon="rocket" href="/fr/get-started/quickstart">
+    Lancez Barracuda sur votre ordinateur et parlez-lui.
+  </Card>
+  <Card title="Compiler et exécuter" icon="terminal" href="/fr/get-started/build-and-run">
+    Flashez une carte, ouvrez le canal terminal et réglez le niveau de journalisation.
+  </Card>
+</CardGroup>

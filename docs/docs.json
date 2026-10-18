@@ -34,20 +34,6 @@
       }
     }
   },
-  "navbar": {
-    "links": [
-      {
-        "label": "GitHub",
-        "href": "https://github.com/robcholz/barracuda",
-        "icon": "github"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Get started",
-      "href": "/get-started/quickstart"
-    }
-  },
   "contextual": {
     "options": [
       "copy",
@@ -60,184 +46,238 @@
     "display": "toc"
   },
   "navigation": {
-    "tabs": [
+    "languages": [
       {
-        "tab": "Guides",
-        "groups": [
+        "language": "en",
+        "default": true,
+        "tabs": [
           {
-            "group": "Get started",
-            "pages": [
-              "index",
-              "get-started/installation",
-              "get-started/quickstart",
-              "product/experience-ladder",
-              "product/three-agents",
-              "product/plugins"
-            ]
-          },
-          {
-            "group": "01 · Use your device",
-            "pages": [
-              "use/device-portal",
-              "use/channels",
-              "use/scripts",
-              "use/automations"
-            ]
-          },
-          {
-            "group": "02 · Configure",
-            "pages": [
-              "boards/profiles",
-              "get-started/build-and-run"
-            ]
-          },
-          {
-            "group": "03 · Apps",
-            "pages": [
-              "architecture/device-ui",
-              "plugins/app-manager/app-format",
-              "plugins/app-manager/app-api",
-              "plugins/app-manager/pocketjs"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Develop",
-        "groups": [
-          {
-            "group": "04 · Plugins",
-            "pages": [
-              "develop/write-a-plugin",
-              "architecture/plugin-api",
-              "architecture/plugin-manager"
-            ]
-          },
-          {
-            "group": "05 · Boards and Platforms",
-            "pages": [
-              "boards/overview",
-              "boards/peripherals",
-              "boards/exposed-io",
-              "boards/drivers",
-              "architecture/platform-architecture",
+            "tab": "Guides",
+            "groups": [
               {
-                "group": "Platforms",
+                "group": "Get started",
                 "pages": [
-                  "platforms/esp32",
-                  "platforms/stm32",
-                  "platforms/linux",
-                  "platforms/macos",
-                  "platforms/macos-network-gateway",
-                  "platforms/virtual-io"
+                  "index",
+                  "get-started/installation",
+                  "get-started/quickstart",
+                  "product/experience-ladder",
+                  "product/three-agents",
+                  "product/plugins"
                 ]
               },
               {
-                "group": "Boards",
+                "group": "01 · Use your device",
                 "pages": [
+                  "use/device-portal",
+                  "use/channels",
+                  "use/scripts",
+                  "use/automations"
+                ]
+              },
+              {
+                "group": "02 · Configure",
+                "pages": [
+                  "boards/profiles",
+                  "get-started/build-and-run"
+                ]
+              },
+              {
+                "group": "03 · Apps",
+                "pages": [
+                  "architecture/device-ui",
+                  "plugins/app-manager/app-format",
+                  "plugins/app-manager/app-api",
+                  "plugins/app-manager/pocketjs"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Develop",
+            "groups": [
+              {
+                "group": "04 · Plugins",
+                "pages": [
+                  "develop/write-a-plugin",
+                  "architecture/plugin-api",
+                  "architecture/plugin-manager"
+                ]
+              },
+              {
+                "group": "05 · Boards and Platforms",
+                "pages": [
+                  "boards/overview",
+                  "boards/peripherals",
+                  "boards/exposed-io",
+                  "boards/drivers",
+                  "architecture/platform-architecture",
                   {
-                    "group": "M5Stack",
+                    "group": "Platforms",
                     "pages": [
-                      "boards/supported/m5stack-airq",
-                      "boards/supported/m5stack-atom-display",
-                      "boards/supported/m5stack-atom-echo",
-                      "boards/supported/m5stack-atom-lite",
-                      "boards/supported/m5stack-atom-matrix",
-                      "boards/supported/m5stack-atom-psram",
-                      "boards/supported/m5stack-atom-s3",
-                      "boards/supported/m5stack-atom-s3-lite",
-                      "boards/supported/m5stack-atom-s3r",
-                      "boards/supported/m5stack-atom-s3r-cam",
-                      "boards/supported/m5stack-atom-s3r-ext",
-                      "boards/supported/m5stack-atom-s3u",
-                      "boards/supported/m5stack-atom-u",
-                      "boards/supported/m5stack-atom-voice-s3r",
-                      "boards/supported/m5stack-basic",
-                      "boards/supported/m5stack-capsule",
-                      "boards/supported/m5stack-cardputer",
-                      "boards/supported/m5stack-cardputer-adv",
-                      "boards/supported/m5stack-chain-captain",
-                      "boards/supported/m5stack-chan",
-                      "boards/supported/m5stack-core2",
-                      "boards/supported/m5stack-core2-for-aws",
-                      "boards/supported/m5stack-coreink",
-                      "boards/supported/m5stack-corep4x",
-                      "boards/supported/m5stack-cores3",
-                      "boards/supported/m5stack-cores3-se",
-                      "boards/supported/m5stack-dial",
-                      "boards/supported/m5stack-din-meter",
-                      "boards/supported/m5stack-fire",
-                      "boards/supported/m5stack-gray",
-                      "boards/supported/m5stack-m5go",
-                      "boards/supported/m5stack-m5go-lite",
-                      "boards/supported/m5stack-nanoc6",
-                      "boards/supported/m5stack-paper",
-                      "boards/supported/m5stack-paper-color",
-                      "boards/supported/m5stack-paper-diy",
-                      "boards/supported/m5stack-paper-mono",
-                      "boards/supported/m5stack-paper-s3",
-                      "boards/supported/m5stack-powerhub",
-                      "boards/supported/m5stack-stamp-c3",
-                      "boards/supported/m5stack-stamp-c3-mate",
-                      "boards/supported/m5stack-stamp-c3u",
-                      "boards/supported/m5stack-stamp-c6",
-                      "boards/supported/m5stack-stamp-p4",
-                      "boards/supported/m5stack-stamp-p4x",
-                      "boards/supported/m5stack-stamp-pico",
-                      "boards/supported/m5stack-stamp-plc",
-                      "boards/supported/m5stack-stamp-s3",
-                      "boards/supported/m5stack-stamp-s3-bat",
-                      "boards/supported/m5stack-stamp-s3-mini",
-                      "boards/supported/m5stack-station",
-                      "boards/supported/m5stack-stick-s3",
-                      "boards/supported/m5stack-stickc",
-                      "boards/supported/m5stack-stickc-plus",
-                      "boards/supported/m5stack-stickc-plus2",
-                      "boards/supported/m5stack-stopwatch",
-                      "boards/supported/m5stack-tab5",
-                      "boards/supported/m5stack-tab5x",
-                      "boards/supported/m5stack-timercam",
-                      "boards/supported/m5stack-tough",
-                      "boards/supported/m5stack-unit-c6l",
-                      "boards/supported/m5stack-unit-poep4",
-                      "boards/supported/m5stack-va-meter"
+                      "platforms/esp32",
+                      "platforms/stm32",
+                      "platforms/linux",
+                      "platforms/macos",
+                      "platforms/macos-network-gateway",
+                      "platforms/virtual-io"
                     ]
                   },
                   {
-                    "group": "Espressif",
+                    "group": "Boards",
                     "pages": [
-                      "boards/supported/esp32-devkitc-v4",
-                      "boards/supported/esp32c3-devkitc-02",
-                      "boards/supported/esp32c3-devkitm-1",
-                      "boards/supported/esp32c6-devkitc-1",
-                      "boards/supported/esp32c6-devkitm-1",
-                      "boards/supported/esp32p4-function-ev-board",
-                      "boards/supported/esp32s3-box-2",
-                      "boards/supported/esp32s3-box-3",
-                      "boards/supported/esp32s3-devkitc-1",
-                      "boards/supported/esp32s3-devkitm-1",
-                      "boards/supported/esp32s3-eye",
-                      "boards/supported/esp32s3-korvo-2",
-                      "boards/supported/espressif-esp-vocat-v1-2"
+                      {
+                        "group": "M5Stack",
+                        "pages": [
+                          "boards/supported/m5stack-airq",
+                          "boards/supported/m5stack-atom-display",
+                          "boards/supported/m5stack-atom-echo",
+                          "boards/supported/m5stack-atom-lite",
+                          "boards/supported/m5stack-atom-matrix",
+                          "boards/supported/m5stack-atom-psram",
+                          "boards/supported/m5stack-atom-s3",
+                          "boards/supported/m5stack-atom-s3-lite",
+                          "boards/supported/m5stack-atom-s3r",
+                          "boards/supported/m5stack-atom-s3r-cam",
+                          "boards/supported/m5stack-atom-s3r-ext",
+                          "boards/supported/m5stack-atom-s3u",
+                          "boards/supported/m5stack-atom-u",
+                          "boards/supported/m5stack-atom-voice-s3r",
+                          "boards/supported/m5stack-basic",
+                          "boards/supported/m5stack-capsule",
+                          "boards/supported/m5stack-cardputer",
+                          "boards/supported/m5stack-cardputer-adv",
+                          "boards/supported/m5stack-chain-captain",
+                          "boards/supported/m5stack-chan",
+                          "boards/supported/m5stack-core2",
+                          "boards/supported/m5stack-core2-for-aws",
+                          "boards/supported/m5stack-coreink",
+                          "boards/supported/m5stack-corep4x",
+                          "boards/supported/m5stack-cores3",
+                          "boards/supported/m5stack-cores3-se",
+                          "boards/supported/m5stack-dial",
+                          "boards/supported/m5stack-din-meter",
+                          "boards/supported/m5stack-fire",
+                          "boards/supported/m5stack-gray",
+                          "boards/supported/m5stack-m5go",
+                          "boards/supported/m5stack-m5go-lite",
+                          "boards/supported/m5stack-nanoc6",
+                          "boards/supported/m5stack-paper",
+                          "boards/supported/m5stack-paper-color",
+                          "boards/supported/m5stack-paper-diy",
+                          "boards/supported/m5stack-paper-mono",
+                          "boards/supported/m5stack-paper-s3",
+                          "boards/supported/m5stack-powerhub",
+                          "boards/supported/m5stack-stamp-c3",
+                          "boards/supported/m5stack-stamp-c3-mate",
+                          "boards/supported/m5stack-stamp-c3u",
+                          "boards/supported/m5stack-stamp-c6",
+                          "boards/supported/m5stack-stamp-p4",
+                          "boards/supported/m5stack-stamp-p4x",
+                          "boards/supported/m5stack-stamp-pico",
+                          "boards/supported/m5stack-stamp-plc",
+                          "boards/supported/m5stack-stamp-s3",
+                          "boards/supported/m5stack-stamp-s3-bat",
+                          "boards/supported/m5stack-stamp-s3-mini",
+                          "boards/supported/m5stack-station",
+                          "boards/supported/m5stack-stick-s3",
+                          "boards/supported/m5stack-stickc",
+                          "boards/supported/m5stack-stickc-plus",
+                          "boards/supported/m5stack-stickc-plus2",
+                          "boards/supported/m5stack-stopwatch",
+                          "boards/supported/m5stack-tab5",
+                          "boards/supported/m5stack-tab5x",
+                          "boards/supported/m5stack-timercam",
+                          "boards/supported/m5stack-tough",
+                          "boards/supported/m5stack-unit-c6l",
+                          "boards/supported/m5stack-unit-poep4",
+                          "boards/supported/m5stack-va-meter"
+                        ]
+                      },
+                      {
+                        "group": "Espressif",
+                        "pages": [
+                          "boards/supported/esp32-devkitc-v4",
+                          "boards/supported/esp32c3-devkitc-02",
+                          "boards/supported/esp32c3-devkitm-1",
+                          "boards/supported/esp32c6-devkitc-1",
+                          "boards/supported/esp32c6-devkitm-1",
+                          "boards/supported/esp32p4-function-ev-board",
+                          "boards/supported/esp32s3-box-2",
+                          "boards/supported/esp32s3-box-3",
+                          "boards/supported/esp32s3-devkitc-1",
+                          "boards/supported/esp32s3-devkitm-1",
+                          "boards/supported/esp32s3-eye",
+                          "boards/supported/esp32s3-korvo-2",
+                          "boards/supported/espressif-esp-vocat-v1-2"
+                        ]
+                      },
+                      {
+                        "group": "STMicroelectronics",
+                        "pages": [
+                          "boards/supported/nucleo-u5a5zj-q"
+                        ]
+                      },
+                      {
+                        "group": "Unexpected Maker",
+                        "pages": [
+                          "boards/supported/unexpected-maker-tinypico"
+                        ]
+                      },
+                      {
+                        "group": "Computers",
+                        "pages": [
+                          "boards/supported/local-linux",
+                          "boards/supported/local-macos"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "06 · Custom firmware",
+                "pages": [
+                  "develop/custom-firmware"
+                ]
+              },
+              {
+                "group": "Contributing",
+                "pages": [
+                  "architecture/repository",
+                  "contributing/docs",
+                  "get-started/tooling",
+                  "architecture/codestyle",
+                  "architecture/agent-oriented-api-design",
+                  "architecture/execution-ownership",
+                  {
+                    "group": "Testing and bench",
+                    "pages": [
+                      "tools/e2e",
+                      "tools/llm-tape",
+                      "tools/bench",
+                      "tools/bench-tapes",
+                      "tools/tape-replay-profile"
                     ]
                   },
                   {
-                    "group": "STMicroelectronics",
+                    "group": "Shared crates",
                     "pages": [
-                      "boards/supported/nucleo-u5a5zj-q"
+                      "shared/http-client",
+                      "shared/runtime-utils",
+                      "shared/tls/c-runtime",
+                      "shared/tls/roots",
+                      "shared/tls/mbedtls-rs",
+                      "tools/cli-rustyline"
                     ]
                   },
                   {
-                    "group": "Unexpected Maker",
+                    "group": "Product",
                     "pages": [
-                      "boards/supported/unexpected-maker-tinypico"
-                    ]
-                  },
-                  {
-                    "group": "Computers",
-                    "pages": [
-                      "boards/supported/local-linux",
-                      "boards/supported/local-macos"
+                      "product/overview",
+                      "product/vision",
+                      "product/surfaces",
+                      "product/audiences",
+                      "product/positioning"
                     ]
                   }
                 ]
@@ -245,284 +285,1712 @@
             ]
           },
           {
-            "group": "06 · Custom firmware",
-            "pages": [
-              "develop/custom-firmware"
-            ]
-          },
-          {
-            "group": "Contributing",
-            "pages": [
-              "architecture/repository",
-              "contributing/docs",
-              "get-started/tooling",
-              "architecture/codestyle",
-              "architecture/agent-oriented-api-design",
-              "architecture/execution-ownership",
+            "tab": "Plugins",
+            "groups": [
               {
-                "group": "Testing and bench",
+                "group": "Plugins",
                 "pages": [
-                  "tools/e2e",
-                  "tools/llm-tape",
-                  "tools/bench",
-                  "tools/bench-tapes",
-                  "tools/tape-replay-profile"
+                  "plugins/overview"
                 ]
               },
               {
-                "group": "Shared crates",
+                "group": "System",
                 "pages": [
-                  "shared/http-client",
-                  "shared/runtime-utils",
-                  "shared/tls/c-runtime",
-                  "shared/tls/roots",
-                  "shared/tls/mbedtls-rs",
-                  "tools/cli-rustyline"
+                  "plugins/files",
+                  {
+                    "group": "HTTP",
+                    "pages": [
+                      "plugins/http",
+                      "plugins/http/action"
+                    ]
+                  },
+                  "plugins/webserver",
+                  "plugins/wifi",
+                  "plugins/system-wifi",
+                  {
+                    "group": "Captive Portal",
+                    "pages": [
+                      "plugins/captive-portal",
+                      "plugins/captive-portal/ui-kit"
+                    ]
+                  },
+                  "plugins/app-portal",
+                  "plugins/power",
+                  "plugins/sound",
+                  "plugins/time",
+                  {
+                    "group": "Scheduler",
+                    "pages": [
+                      "plugins/scheduler",
+                      "plugins/scheduler/event"
+                    ]
+                  },
+                  "plugins/system-fonts",
+                  "plugins/workflow"
                 ]
               },
               {
-                "group": "Product",
+                "group": "Apps",
                 "pages": [
-                  "product/overview",
-                  "product/vision",
-                  "product/surfaces",
-                  "product/audiences",
-                  "product/positioning"
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Plugins",
-        "groups": [
-          {
-            "group": "Plugins",
-            "pages": [
-              "plugins/overview"
-            ]
-          },
-          {
-            "group": "System",
-            "pages": [
-              "plugins/files",
-              {
-                "group": "HTTP",
-                "pages": [
-                  "plugins/http",
-                  "plugins/http/action"
+                  {
+                    "group": "App Manager",
+                    "pages": [
+                      "plugins/app-manager",
+                      "plugins/app-manager/action"
+                    ]
+                  },
+                  "plugins/builtin-app-files",
+                  "plugins/builtin-app-sessions",
+                  "plugins/builtin-app-settings",
+                  "plugins/builtin-app-workflow"
                 ]
               },
-              "plugins/webserver",
-              "plugins/wifi",
-              "plugins/system-wifi",
-              {
-                "group": "Captive Portal",
-                "pages": [
-                  "plugins/captive-portal",
-                  "plugins/captive-portal/ui-kit"
-                ]
-              },
-              "plugins/app-portal",
-              "plugins/power",
-              "plugins/sound",
-              "plugins/time",
-              {
-                "group": "Scheduler",
-                "pages": [
-                  "plugins/scheduler",
-                  "plugins/scheduler/event"
-                ]
-              },
-              "plugins/system-fonts",
-              "plugins/workflow"
-            ]
-          },
-          {
-            "group": "Apps",
-            "pages": [
-              {
-                "group": "App Manager",
-                "pages": [
-                  "plugins/app-manager",
-                  "plugins/app-manager/action"
-                ]
-              },
-              "plugins/builtin-app-files",
-              "plugins/builtin-app-sessions",
-              "plugins/builtin-app-settings",
-              "plugins/builtin-app-workflow"
-            ]
-          },
-          {
-            "group": "Agent",
-            "pages": [
               {
                 "group": "Agent",
                 "pages": [
-                  "plugins/agent",
-                  "plugins/agent/action",
-                  "plugins/agent/event",
-                  "plugins/agent/http",
-                  "plugins/agent/embassy",
-                  "plugins/agent/debugging",
                   {
-                    "group": "Runtime",
+                    "group": "Agent",
                     "pages": [
-                      "plugins/agent/context",
-                      "plugins/agent/context-model",
-                      "plugins/agent/memory",
-                      "plugins/agent/model-api",
-                      "plugins/agent/permission",
-                      "plugins/agent/skill",
-                      "plugins/agent/skill-design"
+                      "plugins/agent",
+                      "plugins/agent/action",
+                      "plugins/agent/event",
+                      "plugins/agent/http",
+                      "plugins/agent/embassy",
+                      "plugins/agent/debugging",
+                      {
+                        "group": "Runtime",
+                        "pages": [
+                          "plugins/agent/context",
+                          "plugins/agent/context-model",
+                          "plugins/agent/memory",
+                          "plugins/agent/model-api",
+                          "plugins/agent/permission",
+                          "plugins/agent/skill",
+                          "plugins/agent/skill-design"
+                        ]
+                      },
+                      {
+                        "group": "Trace",
+                        "pages": [
+                          "plugins/agent/trace",
+                          "plugins/agent/trace-format",
+                          "plugins/agent/trace-vocabulary",
+                          "plugins/agent/trace-scripts",
+                          "plugins/agent/serial-log"
+                        ]
+                      }
+                    ]
+                  },
+                  "plugins/agent-file",
+                  "plugins/agent-http",
+                  {
+                    "group": "Agent Gateway",
+                    "pages": [
+                      "plugins/agent-imessage-gateway",
+                      "plugins/agent-imessage-gateway/action"
+                    ]
+                  },
+                  "plugins/agent-scheduler",
+                  "plugins/agent-time",
+                  "plugins/agent-vm",
+                  {
+                    "group": "Agent web search",
+                    "pages": [
+                      "plugins/agent-websearch",
+                      "plugins/agent-websearch/http"
+                    ]
+                  },
+                  "plugins/agent-workflow"
+                ]
+              },
+              {
+                "group": "Messaging channels",
+                "pages": [
+                  {
+                    "group": "Gateway",
+                    "pages": [
+                      "plugins/imessage-gateway",
+                      "plugins/imessage-gateway/action",
+                      "plugins/imessage-gateway/event",
+                      "plugins/imessage-gateway/usage",
+                      "plugins/imessage-gateway/design",
+                      "plugins/imessage-gateway/channel-page-kit"
                     ]
                   },
                   {
-                    "group": "Trace",
+                    "group": "BlueBubbles",
                     "pages": [
-                      "plugins/agent/trace",
-                      "plugins/agent/trace-format",
-                      "plugins/agent/trace-vocabulary",
-                      "plugins/agent/trace-scripts",
-                      "plugins/agent/serial-log"
+                      "plugins/imessage-bluebubble",
+                      "plugins/imessage-bluebubble/http"
+                    ]
+                  },
+                  {
+                    "group": "Inkbox",
+                    "pages": [
+                      "plugins/imessage-inkbox",
+                      "plugins/imessage-inkbox/http"
+                    ]
+                  },
+                  {
+                    "group": "QQ",
+                    "pages": [
+                      "plugins/imessage-qq",
+                      "plugins/imessage-qq/http"
+                    ]
+                  },
+                  {
+                    "group": "Telegram",
+                    "pages": [
+                      "plugins/imessage-telegram",
+                      "plugins/imessage-telegram/http"
+                    ]
+                  },
+                  {
+                    "group": "Web chat",
+                    "pages": [
+                      "plugins/imessage-web",
+                      "plugins/imessage-web/markdown"
+                    ]
+                  },
+                  {
+                    "group": "WeChat",
+                    "pages": [
+                      "plugins/imessage-wechat",
+                      "plugins/imessage-wechat/http"
                     ]
                   }
                 ]
               },
-              "plugins/agent-file",
-              "plugins/agent-http",
               {
-                "group": "Agent Gateway",
+                "group": "Lua VM",
                 "pages": [
-                  "plugins/agent-imessage-gateway",
-                  "plugins/agent-imessage-gateway/action"
-                ]
-              },
-              "plugins/agent-scheduler",
-              "plugins/agent-time",
-              "plugins/agent-vm",
-              {
-                "group": "Agent web search",
-                "pages": [
-                  "plugins/agent-websearch",
-                  "plugins/agent-websearch/http"
-                ]
-              },
-              "plugins/agent-workflow"
-            ]
-          },
-          {
-            "group": "Messaging channels",
-            "pages": [
-              {
-                "group": "Gateway",
-                "pages": [
-                  "plugins/imessage-gateway",
-                  "plugins/imessage-gateway/action",
-                  "plugins/imessage-gateway/event",
-                  "plugins/imessage-gateway/usage",
-                  "plugins/imessage-gateway/design",
-                  "plugins/imessage-gateway/channel-page-kit"
-                ]
-              },
-              {
-                "group": "BlueBubbles",
-                "pages": [
-                  "plugins/imessage-bluebubble",
-                  "plugins/imessage-bluebubble/http"
-                ]
-              },
-              {
-                "group": "Inkbox",
-                "pages": [
-                  "plugins/imessage-inkbox",
-                  "plugins/imessage-inkbox/http"
-                ]
-              },
-              {
-                "group": "QQ",
-                "pages": [
-                  "plugins/imessage-qq",
-                  "plugins/imessage-qq/http"
-                ]
-              },
-              {
-                "group": "Telegram",
-                "pages": [
-                  "plugins/imessage-telegram",
-                  "plugins/imessage-telegram/http"
-                ]
-              },
-              {
-                "group": "Web chat",
-                "pages": [
-                  "plugins/imessage-web",
-                  "plugins/imessage-web/markdown"
-                ]
-              },
-              {
-                "group": "WeChat",
-                "pages": [
-                  "plugins/imessage-wechat",
-                  "plugins/imessage-wechat/http"
+                  {
+                    "group": "VM",
+                    "pages": [
+                      "plugins/vm",
+                      "plugins/vm/action",
+                      "plugins/vm/environment",
+                      "plugins/vm/musl"
+                    ]
+                  },
+                  "plugins/vm-agent",
+                  "plugins/vm-analog",
+                  "plugins/vm-audio",
+                  "plugins/vm-camera",
+                  "plugins/vm-display",
+                  "plugins/vm-filesystem",
+                  "plugins/vm-gpio",
+                  "plugins/vm-http",
+                  "plugins/vm-i2c",
+                  "plugins/vm-i2s",
+                  "plugins/vm-imu",
+                  "plugins/vm-led-strip",
+                  "plugins/vm-message-queue",
+                  "plugins/vm-power-monitor",
+                  "plugins/vm-pwm",
+                  "plugins/vm-spi",
+                  "plugins/vm-systeminfo",
+                  "plugins/vm-time",
+                  "plugins/vm-uart",
+                  "plugins/vm-webserver"
                 ]
               }
             ]
           },
           {
-            "group": "Lua VM",
-            "pages": [
+            "tab": "Reference",
+            "groups": [
               {
-                "group": "VM",
+                "group": "Reference",
                 "pages": [
-                  "plugins/vm",
-                  "plugins/vm/action",
-                  "plugins/vm/environment",
-                  "plugins/vm/musl"
+                  "reference/cli",
+                  "tools/system-image",
+                  "product/glossary"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Changelog",
+            "href": "https://github.com/robcholz/barracuda/releases"
+          }
+        ],
+        "banner": {
+          "content": "See what's new in the latest Barracuda release. [Release notes →](https://github.com/robcholz/barracuda/releases)",
+          "dismissible": true
+        },
+        "navbar": {
+          "links": [
+            {
+              "label": "GitHub",
+              "href": "https://github.com/robcholz/barracuda",
+              "icon": "github"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "Get started",
+            "href": "/get-started/quickstart"
+          }
+        }
+      },
+      {
+        "language": "zh-Hans",
+        "tabs": [
+          {
+            "tab": "指南",
+            "groups": [
+              {
+                "group": "开始",
+                "pages": [
+                  "zh/index",
+                  "zh/get-started/installation",
+                  "zh/get-started/quickstart",
+                  "zh/product/experience-ladder",
+                  "zh/product/three-agents",
+                  "zh/product/plugins"
                 ]
               },
-              "plugins/vm-agent",
-              "plugins/vm-analog",
-              "plugins/vm-audio",
-              "plugins/vm-camera",
-              "plugins/vm-display",
-              "plugins/vm-filesystem",
-              "plugins/vm-gpio",
-              "plugins/vm-http",
-              "plugins/vm-i2c",
-              "plugins/vm-i2s",
-              "plugins/vm-imu",
-              "plugins/vm-led-strip",
-              "plugins/vm-message-queue",
-              "plugins/vm-power-monitor",
-              "plugins/vm-pwm",
-              "plugins/vm-spi",
-              "plugins/vm-systeminfo",
-              "plugins/vm-time",
-              "plugins/vm-uart",
-              "plugins/vm-webserver"
+              {
+                "group": "01 · 使用设备",
+                "pages": [
+                  "zh/use/device-portal",
+                  "zh/use/channels",
+                  "zh/use/scripts",
+                  "zh/use/automations"
+                ]
+              },
+              {
+                "group": "02 · 配置",
+                "pages": [
+                  "zh/boards/profiles",
+                  "zh/get-started/build-and-run"
+                ]
+              },
+              {
+                "group": "03 · 应用",
+                "pages": [
+                  "zh/architecture/device-ui",
+                  "zh/plugins/app-manager/app-format",
+                  "zh/plugins/app-manager/app-api",
+                  "zh/plugins/app-manager/pocketjs"
+                ]
+              }
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Reference",
-        "groups": [
+          },
           {
-            "group": "Reference",
-            "pages": [
-              "reference/cli",
-              "tools/system-image",
-              "product/glossary"
+            "tab": "开发",
+            "groups": [
+              {
+                "group": "04 · 插件",
+                "pages": [
+                  "zh/develop/write-a-plugin",
+                  "architecture/plugin-api",
+                  "architecture/plugin-manager"
+                ]
+              },
+              {
+                "group": "05 · 开发板与平台",
+                "pages": [
+                  "boards/overview",
+                  "boards/peripherals",
+                  "boards/exposed-io",
+                  "boards/drivers",
+                  "architecture/platform-architecture",
+                  {
+                    "group": "平台",
+                    "pages": [
+                      "zh/platforms/esp32",
+                      "zh/platforms/stm32",
+                      "zh/platforms/linux",
+                      "zh/platforms/macos",
+                      "platforms/macos-network-gateway",
+                      "platforms/virtual-io"
+                    ]
+                  },
+                  {
+                    "group": "开发板",
+                    "pages": [
+                      {
+                        "group": "M5Stack",
+                        "pages": [
+                          "boards/supported/m5stack-airq",
+                          "boards/supported/m5stack-atom-display",
+                          "boards/supported/m5stack-atom-echo",
+                          "boards/supported/m5stack-atom-lite",
+                          "boards/supported/m5stack-atom-matrix",
+                          "boards/supported/m5stack-atom-psram",
+                          "boards/supported/m5stack-atom-s3",
+                          "boards/supported/m5stack-atom-s3-lite",
+                          "boards/supported/m5stack-atom-s3r",
+                          "boards/supported/m5stack-atom-s3r-cam",
+                          "boards/supported/m5stack-atom-s3r-ext",
+                          "boards/supported/m5stack-atom-s3u",
+                          "boards/supported/m5stack-atom-u",
+                          "boards/supported/m5stack-atom-voice-s3r",
+                          "boards/supported/m5stack-basic",
+                          "boards/supported/m5stack-capsule",
+                          "boards/supported/m5stack-cardputer",
+                          "boards/supported/m5stack-cardputer-adv",
+                          "boards/supported/m5stack-chain-captain",
+                          "boards/supported/m5stack-chan",
+                          "boards/supported/m5stack-core2",
+                          "boards/supported/m5stack-core2-for-aws",
+                          "boards/supported/m5stack-coreink",
+                          "boards/supported/m5stack-corep4x",
+                          "boards/supported/m5stack-cores3",
+                          "boards/supported/m5stack-cores3-se",
+                          "boards/supported/m5stack-dial",
+                          "boards/supported/m5stack-din-meter",
+                          "boards/supported/m5stack-fire",
+                          "boards/supported/m5stack-gray",
+                          "boards/supported/m5stack-m5go",
+                          "boards/supported/m5stack-m5go-lite",
+                          "boards/supported/m5stack-nanoc6",
+                          "boards/supported/m5stack-paper",
+                          "boards/supported/m5stack-paper-color",
+                          "boards/supported/m5stack-paper-diy",
+                          "boards/supported/m5stack-paper-mono",
+                          "boards/supported/m5stack-paper-s3",
+                          "boards/supported/m5stack-powerhub",
+                          "boards/supported/m5stack-stamp-c3",
+                          "boards/supported/m5stack-stamp-c3-mate",
+                          "boards/supported/m5stack-stamp-c3u",
+                          "boards/supported/m5stack-stamp-c6",
+                          "boards/supported/m5stack-stamp-p4",
+                          "boards/supported/m5stack-stamp-p4x",
+                          "boards/supported/m5stack-stamp-pico",
+                          "boards/supported/m5stack-stamp-plc",
+                          "boards/supported/m5stack-stamp-s3",
+                          "boards/supported/m5stack-stamp-s3-bat",
+                          "boards/supported/m5stack-stamp-s3-mini",
+                          "boards/supported/m5stack-station",
+                          "boards/supported/m5stack-stick-s3",
+                          "boards/supported/m5stack-stickc",
+                          "boards/supported/m5stack-stickc-plus",
+                          "boards/supported/m5stack-stickc-plus2",
+                          "boards/supported/m5stack-stopwatch",
+                          "boards/supported/m5stack-tab5",
+                          "boards/supported/m5stack-tab5x",
+                          "boards/supported/m5stack-timercam",
+                          "boards/supported/m5stack-tough",
+                          "boards/supported/m5stack-unit-c6l",
+                          "boards/supported/m5stack-unit-poep4",
+                          "boards/supported/m5stack-va-meter"
+                        ]
+                      },
+                      {
+                        "group": "Espressif",
+                        "pages": [
+                          "boards/supported/esp32-devkitc-v4",
+                          "boards/supported/esp32c3-devkitc-02",
+                          "boards/supported/esp32c3-devkitm-1",
+                          "boards/supported/esp32c6-devkitc-1",
+                          "boards/supported/esp32c6-devkitm-1",
+                          "boards/supported/esp32p4-function-ev-board",
+                          "boards/supported/esp32s3-box-2",
+                          "boards/supported/esp32s3-box-3",
+                          "boards/supported/esp32s3-devkitc-1",
+                          "boards/supported/esp32s3-devkitm-1",
+                          "boards/supported/esp32s3-eye",
+                          "boards/supported/esp32s3-korvo-2",
+                          "boards/supported/espressif-esp-vocat-v1-2"
+                        ]
+                      },
+                      {
+                        "group": "STMicroelectronics",
+                        "pages": [
+                          "boards/supported/nucleo-u5a5zj-q"
+                        ]
+                      },
+                      {
+                        "group": "Unexpected Maker",
+                        "pages": [
+                          "boards/supported/unexpected-maker-tinypico"
+                        ]
+                      },
+                      {
+                        "group": "电脑",
+                        "pages": [
+                          "boards/supported/local-linux",
+                          "boards/supported/local-macos"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "06 · 定制固件",
+                "pages": [
+                  "zh/develop/custom-firmware"
+                ]
+              },
+              {
+                "group": "参与贡献",
+                "pages": [
+                  "architecture/repository",
+                  "contributing/docs",
+                  "get-started/tooling",
+                  "architecture/codestyle",
+                  "architecture/agent-oriented-api-design",
+                  "architecture/execution-ownership",
+                  {
+                    "group": "测试与基准",
+                    "pages": [
+                      "tools/e2e",
+                      "tools/llm-tape",
+                      "tools/bench",
+                      "tools/bench-tapes",
+                      "tools/tape-replay-profile"
+                    ]
+                  },
+                  {
+                    "group": "共享 crate",
+                    "pages": [
+                      "shared/http-client",
+                      "shared/runtime-utils",
+                      "shared/tls/c-runtime",
+                      "shared/tls/roots",
+                      "shared/tls/mbedtls-rs",
+                      "tools/cli-rustyline"
+                    ]
+                  },
+                  {
+                    "group": "产品",
+                    "pages": [
+                      "product/overview",
+                      "product/vision",
+                      "product/surfaces",
+                      "product/audiences",
+                      "product/positioning"
+                    ]
+                  }
+                ]
+              }
             ]
+          },
+          {
+            "tab": "插件",
+            "groups": [
+              {
+                "group": "插件",
+                "pages": [
+                  "plugins/overview"
+                ]
+              },
+              {
+                "group": "系统",
+                "pages": [
+                  "plugins/files",
+                  {
+                    "group": "HTTP",
+                    "pages": [
+                      "plugins/http",
+                      "plugins/http/action"
+                    ]
+                  },
+                  "plugins/webserver",
+                  "plugins/wifi",
+                  "plugins/system-wifi",
+                  {
+                    "group": "Captive Portal",
+                    "pages": [
+                      "plugins/captive-portal",
+                      "plugins/captive-portal/ui-kit"
+                    ]
+                  },
+                  "plugins/app-portal",
+                  "plugins/power",
+                  "plugins/sound",
+                  "plugins/time",
+                  {
+                    "group": "Scheduler",
+                    "pages": [
+                      "plugins/scheduler",
+                      "plugins/scheduler/event"
+                    ]
+                  },
+                  "plugins/system-fonts",
+                  "plugins/workflow"
+                ]
+              },
+              {
+                "group": "应用",
+                "pages": [
+                  {
+                    "group": "App Manager",
+                    "pages": [
+                      "plugins/app-manager",
+                      "plugins/app-manager/action"
+                    ]
+                  },
+                  "plugins/builtin-app-files",
+                  "plugins/builtin-app-sessions",
+                  "plugins/builtin-app-settings",
+                  "plugins/builtin-app-workflow"
+                ]
+              },
+              {
+                "group": "Agent",
+                "pages": [
+                  {
+                    "group": "Agent",
+                    "pages": [
+                      "plugins/agent",
+                      "plugins/agent/action",
+                      "plugins/agent/event",
+                      "plugins/agent/http",
+                      "plugins/agent/embassy",
+                      "plugins/agent/debugging",
+                      {
+                        "group": "运行时",
+                        "pages": [
+                          "plugins/agent/context",
+                          "plugins/agent/context-model",
+                          "plugins/agent/memory",
+                          "plugins/agent/model-api",
+                          "plugins/agent/permission",
+                          "plugins/agent/skill",
+                          "plugins/agent/skill-design"
+                        ]
+                      },
+                      {
+                        "group": "追踪",
+                        "pages": [
+                          "plugins/agent/trace",
+                          "plugins/agent/trace-format",
+                          "plugins/agent/trace-vocabulary",
+                          "plugins/agent/trace-scripts",
+                          "plugins/agent/serial-log"
+                        ]
+                      }
+                    ]
+                  },
+                  "plugins/agent-file",
+                  "plugins/agent-http",
+                  {
+                    "group": "Agent 网关",
+                    "pages": [
+                      "plugins/agent-imessage-gateway",
+                      "plugins/agent-imessage-gateway/action"
+                    ]
+                  },
+                  "plugins/agent-scheduler",
+                  "plugins/agent-time",
+                  "plugins/agent-vm",
+                  {
+                    "group": "Agent 网页搜索",
+                    "pages": [
+                      "plugins/agent-websearch",
+                      "plugins/agent-websearch/http"
+                    ]
+                  },
+                  "plugins/agent-workflow"
+                ]
+              },
+              {
+                "group": "消息通道",
+                "pages": [
+                  {
+                    "group": "网关",
+                    "pages": [
+                      "plugins/imessage-gateway",
+                      "plugins/imessage-gateway/action",
+                      "plugins/imessage-gateway/event",
+                      "plugins/imessage-gateway/usage",
+                      "plugins/imessage-gateway/design",
+                      "plugins/imessage-gateway/channel-page-kit"
+                    ]
+                  },
+                  {
+                    "group": "BlueBubbles",
+                    "pages": [
+                      "plugins/imessage-bluebubble",
+                      "plugins/imessage-bluebubble/http"
+                    ]
+                  },
+                  {
+                    "group": "Inkbox",
+                    "pages": [
+                      "plugins/imessage-inkbox",
+                      "plugins/imessage-inkbox/http"
+                    ]
+                  },
+                  {
+                    "group": "QQ",
+                    "pages": [
+                      "plugins/imessage-qq",
+                      "plugins/imessage-qq/http"
+                    ]
+                  },
+                  {
+                    "group": "Telegram",
+                    "pages": [
+                      "plugins/imessage-telegram",
+                      "plugins/imessage-telegram/http"
+                    ]
+                  },
+                  {
+                    "group": "网页聊天",
+                    "pages": [
+                      "plugins/imessage-web",
+                      "plugins/imessage-web/markdown"
+                    ]
+                  },
+                  {
+                    "group": "微信",
+                    "pages": [
+                      "plugins/imessage-wechat",
+                      "plugins/imessage-wechat/http"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Lua VM",
+                "pages": [
+                  {
+                    "group": "VM",
+                    "pages": [
+                      "plugins/vm",
+                      "plugins/vm/action",
+                      "plugins/vm/environment",
+                      "plugins/vm/musl"
+                    ]
+                  },
+                  "plugins/vm-agent",
+                  "plugins/vm-analog",
+                  "plugins/vm-audio",
+                  "plugins/vm-camera",
+                  "plugins/vm-display",
+                  "plugins/vm-filesystem",
+                  "plugins/vm-gpio",
+                  "plugins/vm-http",
+                  "plugins/vm-i2c",
+                  "plugins/vm-i2s",
+                  "plugins/vm-imu",
+                  "plugins/vm-led-strip",
+                  "plugins/vm-message-queue",
+                  "plugins/vm-power-monitor",
+                  "plugins/vm-pwm",
+                  "plugins/vm-spi",
+                  "plugins/vm-systeminfo",
+                  "plugins/vm-time",
+                  "plugins/vm-uart",
+                  "plugins/vm-webserver"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "参考",
+            "groups": [
+              {
+                "group": "参考",
+                "pages": [
+                  "zh/reference/cli",
+                  "tools/system-image",
+                  "zh/product/glossary"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "更新日志",
+            "href": "https://github.com/robcholz/barracuda/releases"
           }
-        ]
+        ],
+        "banner": {
+          "content": "看看最新版 Barracuda 有什么新内容。[发布说明 →](https://github.com/robcholz/barracuda/releases)",
+          "dismissible": true
+        },
+        "navbar": {
+          "links": [
+            {
+              "label": "GitHub",
+              "href": "https://github.com/robcholz/barracuda",
+              "icon": "github"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "开始使用",
+            "href": "/zh/get-started/quickstart"
+          }
+        }
       },
       {
-        "tab": "Changelog",
-        "href": "https://github.com/robcholz/barracuda/releases"
+        "language": "ja",
+        "tabs": [
+          {
+            "tab": "ガイド",
+            "groups": [
+              {
+                "group": "はじめに",
+                "pages": [
+                  "ja/index",
+                  "ja/get-started/installation",
+                  "ja/get-started/quickstart",
+                  "ja/product/experience-ladder",
+                  "ja/product/three-agents",
+                  "ja/product/plugins"
+                ]
+              },
+              {
+                "group": "01 · デバイスを使う",
+                "pages": [
+                  "ja/use/device-portal",
+                  "ja/use/channels",
+                  "ja/use/scripts",
+                  "ja/use/automations"
+                ]
+              },
+              {
+                "group": "02 · 構成",
+                "pages": [
+                  "ja/boards/profiles",
+                  "ja/get-started/build-and-run"
+                ]
+              },
+              {
+                "group": "03 · アプリ",
+                "pages": [
+                  "ja/architecture/device-ui",
+                  "ja/plugins/app-manager/app-format",
+                  "ja/plugins/app-manager/app-api",
+                  "ja/plugins/app-manager/pocketjs"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "開発",
+            "groups": [
+              {
+                "group": "04 · プラグイン",
+                "pages": [
+                  "ja/develop/write-a-plugin",
+                  "architecture/plugin-api",
+                  "architecture/plugin-manager"
+                ]
+              },
+              {
+                "group": "05 · ボードとプラットフォーム",
+                "pages": [
+                  "boards/overview",
+                  "boards/peripherals",
+                  "boards/exposed-io",
+                  "boards/drivers",
+                  "architecture/platform-architecture",
+                  {
+                    "group": "プラットフォーム",
+                    "pages": [
+                      "ja/platforms/esp32",
+                      "ja/platforms/stm32",
+                      "ja/platforms/linux",
+                      "ja/platforms/macos",
+                      "platforms/macos-network-gateway",
+                      "platforms/virtual-io"
+                    ]
+                  },
+                  {
+                    "group": "ボード",
+                    "pages": [
+                      {
+                        "group": "M5Stack",
+                        "pages": [
+                          "boards/supported/m5stack-airq",
+                          "boards/supported/m5stack-atom-display",
+                          "boards/supported/m5stack-atom-echo",
+                          "boards/supported/m5stack-atom-lite",
+                          "boards/supported/m5stack-atom-matrix",
+                          "boards/supported/m5stack-atom-psram",
+                          "boards/supported/m5stack-atom-s3",
+                          "boards/supported/m5stack-atom-s3-lite",
+                          "boards/supported/m5stack-atom-s3r",
+                          "boards/supported/m5stack-atom-s3r-cam",
+                          "boards/supported/m5stack-atom-s3r-ext",
+                          "boards/supported/m5stack-atom-s3u",
+                          "boards/supported/m5stack-atom-u",
+                          "boards/supported/m5stack-atom-voice-s3r",
+                          "boards/supported/m5stack-basic",
+                          "boards/supported/m5stack-capsule",
+                          "boards/supported/m5stack-cardputer",
+                          "boards/supported/m5stack-cardputer-adv",
+                          "boards/supported/m5stack-chain-captain",
+                          "boards/supported/m5stack-chan",
+                          "boards/supported/m5stack-core2",
+                          "boards/supported/m5stack-core2-for-aws",
+                          "boards/supported/m5stack-coreink",
+                          "boards/supported/m5stack-corep4x",
+                          "boards/supported/m5stack-cores3",
+                          "boards/supported/m5stack-cores3-se",
+                          "boards/supported/m5stack-dial",
+                          "boards/supported/m5stack-din-meter",
+                          "boards/supported/m5stack-fire",
+                          "boards/supported/m5stack-gray",
+                          "boards/supported/m5stack-m5go",
+                          "boards/supported/m5stack-m5go-lite",
+                          "boards/supported/m5stack-nanoc6",
+                          "boards/supported/m5stack-paper",
+                          "boards/supported/m5stack-paper-color",
+                          "boards/supported/m5stack-paper-diy",
+                          "boards/supported/m5stack-paper-mono",
+                          "boards/supported/m5stack-paper-s3",
+                          "boards/supported/m5stack-powerhub",
+                          "boards/supported/m5stack-stamp-c3",
+                          "boards/supported/m5stack-stamp-c3-mate",
+                          "boards/supported/m5stack-stamp-c3u",
+                          "boards/supported/m5stack-stamp-c6",
+                          "boards/supported/m5stack-stamp-p4",
+                          "boards/supported/m5stack-stamp-p4x",
+                          "boards/supported/m5stack-stamp-pico",
+                          "boards/supported/m5stack-stamp-plc",
+                          "boards/supported/m5stack-stamp-s3",
+                          "boards/supported/m5stack-stamp-s3-bat",
+                          "boards/supported/m5stack-stamp-s3-mini",
+                          "boards/supported/m5stack-station",
+                          "boards/supported/m5stack-stick-s3",
+                          "boards/supported/m5stack-stickc",
+                          "boards/supported/m5stack-stickc-plus",
+                          "boards/supported/m5stack-stickc-plus2",
+                          "boards/supported/m5stack-stopwatch",
+                          "boards/supported/m5stack-tab5",
+                          "boards/supported/m5stack-tab5x",
+                          "boards/supported/m5stack-timercam",
+                          "boards/supported/m5stack-tough",
+                          "boards/supported/m5stack-unit-c6l",
+                          "boards/supported/m5stack-unit-poep4",
+                          "boards/supported/m5stack-va-meter"
+                        ]
+                      },
+                      {
+                        "group": "Espressif",
+                        "pages": [
+                          "boards/supported/esp32-devkitc-v4",
+                          "boards/supported/esp32c3-devkitc-02",
+                          "boards/supported/esp32c3-devkitm-1",
+                          "boards/supported/esp32c6-devkitc-1",
+                          "boards/supported/esp32c6-devkitm-1",
+                          "boards/supported/esp32p4-function-ev-board",
+                          "boards/supported/esp32s3-box-2",
+                          "boards/supported/esp32s3-box-3",
+                          "boards/supported/esp32s3-devkitc-1",
+                          "boards/supported/esp32s3-devkitm-1",
+                          "boards/supported/esp32s3-eye",
+                          "boards/supported/esp32s3-korvo-2",
+                          "boards/supported/espressif-esp-vocat-v1-2"
+                        ]
+                      },
+                      {
+                        "group": "STMicroelectronics",
+                        "pages": [
+                          "boards/supported/nucleo-u5a5zj-q"
+                        ]
+                      },
+                      {
+                        "group": "Unexpected Maker",
+                        "pages": [
+                          "boards/supported/unexpected-maker-tinypico"
+                        ]
+                      },
+                      {
+                        "group": "コンピューター",
+                        "pages": [
+                          "boards/supported/local-linux",
+                          "boards/supported/local-macos"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "06 · カスタムファームウェア",
+                "pages": [
+                  "ja/develop/custom-firmware"
+                ]
+              },
+              {
+                "group": "コントリビュート",
+                "pages": [
+                  "architecture/repository",
+                  "contributing/docs",
+                  "get-started/tooling",
+                  "architecture/codestyle",
+                  "architecture/agent-oriented-api-design",
+                  "architecture/execution-ownership",
+                  {
+                    "group": "テストとベンチマーク",
+                    "pages": [
+                      "tools/e2e",
+                      "tools/llm-tape",
+                      "tools/bench",
+                      "tools/bench-tapes",
+                      "tools/tape-replay-profile"
+                    ]
+                  },
+                  {
+                    "group": "共有クレート",
+                    "pages": [
+                      "shared/http-client",
+                      "shared/runtime-utils",
+                      "shared/tls/c-runtime",
+                      "shared/tls/roots",
+                      "shared/tls/mbedtls-rs",
+                      "tools/cli-rustyline"
+                    ]
+                  },
+                  {
+                    "group": "プロダクト",
+                    "pages": [
+                      "product/overview",
+                      "product/vision",
+                      "product/surfaces",
+                      "product/audiences",
+                      "product/positioning"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "プラグイン",
+            "groups": [
+              {
+                "group": "プラグイン",
+                "pages": [
+                  "plugins/overview"
+                ]
+              },
+              {
+                "group": "システム",
+                "pages": [
+                  "plugins/files",
+                  {
+                    "group": "HTTP",
+                    "pages": [
+                      "plugins/http",
+                      "plugins/http/action"
+                    ]
+                  },
+                  "plugins/webserver",
+                  "plugins/wifi",
+                  "plugins/system-wifi",
+                  {
+                    "group": "Captive Portal",
+                    "pages": [
+                      "plugins/captive-portal",
+                      "plugins/captive-portal/ui-kit"
+                    ]
+                  },
+                  "plugins/app-portal",
+                  "plugins/power",
+                  "plugins/sound",
+                  "plugins/time",
+                  {
+                    "group": "Scheduler",
+                    "pages": [
+                      "plugins/scheduler",
+                      "plugins/scheduler/event"
+                    ]
+                  },
+                  "plugins/system-fonts",
+                  "plugins/workflow"
+                ]
+              },
+              {
+                "group": "アプリ",
+                "pages": [
+                  {
+                    "group": "App Manager",
+                    "pages": [
+                      "plugins/app-manager",
+                      "plugins/app-manager/action"
+                    ]
+                  },
+                  "plugins/builtin-app-files",
+                  "plugins/builtin-app-sessions",
+                  "plugins/builtin-app-settings",
+                  "plugins/builtin-app-workflow"
+                ]
+              },
+              {
+                "group": "Agent",
+                "pages": [
+                  {
+                    "group": "Agent",
+                    "pages": [
+                      "plugins/agent",
+                      "plugins/agent/action",
+                      "plugins/agent/event",
+                      "plugins/agent/http",
+                      "plugins/agent/embassy",
+                      "plugins/agent/debugging",
+                      {
+                        "group": "ランタイム",
+                        "pages": [
+                          "plugins/agent/context",
+                          "plugins/agent/context-model",
+                          "plugins/agent/memory",
+                          "plugins/agent/model-api",
+                          "plugins/agent/permission",
+                          "plugins/agent/skill",
+                          "plugins/agent/skill-design"
+                        ]
+                      },
+                      {
+                        "group": "トレース",
+                        "pages": [
+                          "plugins/agent/trace",
+                          "plugins/agent/trace-format",
+                          "plugins/agent/trace-vocabulary",
+                          "plugins/agent/trace-scripts",
+                          "plugins/agent/serial-log"
+                        ]
+                      }
+                    ]
+                  },
+                  "plugins/agent-file",
+                  "plugins/agent-http",
+                  {
+                    "group": "Agent ゲートウェイ",
+                    "pages": [
+                      "plugins/agent-imessage-gateway",
+                      "plugins/agent-imessage-gateway/action"
+                    ]
+                  },
+                  "plugins/agent-scheduler",
+                  "plugins/agent-time",
+                  "plugins/agent-vm",
+                  {
+                    "group": "Agent Web 検索",
+                    "pages": [
+                      "plugins/agent-websearch",
+                      "plugins/agent-websearch/http"
+                    ]
+                  },
+                  "plugins/agent-workflow"
+                ]
+              },
+              {
+                "group": "メッセージチャネル",
+                "pages": [
+                  {
+                    "group": "ゲートウェイ",
+                    "pages": [
+                      "plugins/imessage-gateway",
+                      "plugins/imessage-gateway/action",
+                      "plugins/imessage-gateway/event",
+                      "plugins/imessage-gateway/usage",
+                      "plugins/imessage-gateway/design",
+                      "plugins/imessage-gateway/channel-page-kit"
+                    ]
+                  },
+                  {
+                    "group": "BlueBubbles",
+                    "pages": [
+                      "plugins/imessage-bluebubble",
+                      "plugins/imessage-bluebubble/http"
+                    ]
+                  },
+                  {
+                    "group": "Inkbox",
+                    "pages": [
+                      "plugins/imessage-inkbox",
+                      "plugins/imessage-inkbox/http"
+                    ]
+                  },
+                  {
+                    "group": "QQ",
+                    "pages": [
+                      "plugins/imessage-qq",
+                      "plugins/imessage-qq/http"
+                    ]
+                  },
+                  {
+                    "group": "Telegram",
+                    "pages": [
+                      "plugins/imessage-telegram",
+                      "plugins/imessage-telegram/http"
+                    ]
+                  },
+                  {
+                    "group": "Web チャット",
+                    "pages": [
+                      "plugins/imessage-web",
+                      "plugins/imessage-web/markdown"
+                    ]
+                  },
+                  {
+                    "group": "WeChat",
+                    "pages": [
+                      "plugins/imessage-wechat",
+                      "plugins/imessage-wechat/http"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Lua VM",
+                "pages": [
+                  {
+                    "group": "VM",
+                    "pages": [
+                      "plugins/vm",
+                      "plugins/vm/action",
+                      "plugins/vm/environment",
+                      "plugins/vm/musl"
+                    ]
+                  },
+                  "plugins/vm-agent",
+                  "plugins/vm-analog",
+                  "plugins/vm-audio",
+                  "plugins/vm-camera",
+                  "plugins/vm-display",
+                  "plugins/vm-filesystem",
+                  "plugins/vm-gpio",
+                  "plugins/vm-http",
+                  "plugins/vm-i2c",
+                  "plugins/vm-i2s",
+                  "plugins/vm-imu",
+                  "plugins/vm-led-strip",
+                  "plugins/vm-message-queue",
+                  "plugins/vm-power-monitor",
+                  "plugins/vm-pwm",
+                  "plugins/vm-spi",
+                  "plugins/vm-systeminfo",
+                  "plugins/vm-time",
+                  "plugins/vm-uart",
+                  "plugins/vm-webserver"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "リファレンス",
+            "groups": [
+              {
+                "group": "リファレンス",
+                "pages": [
+                  "ja/reference/cli",
+                  "tools/system-image",
+                  "ja/product/glossary"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "変更履歴",
+            "href": "https://github.com/robcholz/barracuda/releases"
+          }
+        ],
+        "banner": {
+          "content": "Barracuda の最新リリースの新機能をご覧ください。[リリースノート →](https://github.com/robcholz/barracuda/releases)",
+          "dismissible": true
+        },
+        "navbar": {
+          "links": [
+            {
+              "label": "GitHub",
+              "href": "https://github.com/robcholz/barracuda",
+              "icon": "github"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "はじめる",
+            "href": "/ja/get-started/quickstart"
+          }
+        }
+      },
+      {
+        "language": "fr",
+        "tabs": [
+          {
+            "tab": "Guides",
+            "groups": [
+              {
+                "group": "Premiers pas",
+                "pages": [
+                  "fr/index",
+                  "fr/get-started/installation",
+                  "fr/get-started/quickstart",
+                  "fr/product/experience-ladder",
+                  "fr/product/three-agents",
+                  "fr/product/plugins"
+                ]
+              },
+              {
+                "group": "01 · Utiliser l’appareil",
+                "pages": [
+                  "fr/use/device-portal",
+                  "fr/use/channels",
+                  "fr/use/scripts",
+                  "fr/use/automations"
+                ]
+              },
+              {
+                "group": "02 · Configurer",
+                "pages": [
+                  "fr/boards/profiles",
+                  "fr/get-started/build-and-run"
+                ]
+              },
+              {
+                "group": "03 · Applications",
+                "pages": [
+                  "fr/architecture/device-ui",
+                  "fr/plugins/app-manager/app-format",
+                  "fr/plugins/app-manager/app-api",
+                  "fr/plugins/app-manager/pocketjs"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Développer",
+            "groups": [
+              {
+                "group": "04 · Plugins",
+                "pages": [
+                  "fr/develop/write-a-plugin",
+                  "architecture/plugin-api",
+                  "architecture/plugin-manager"
+                ]
+              },
+              {
+                "group": "05 · Cartes et plateformes",
+                "pages": [
+                  "boards/overview",
+                  "boards/peripherals",
+                  "boards/exposed-io",
+                  "boards/drivers",
+                  "architecture/platform-architecture",
+                  {
+                    "group": "Plateformes",
+                    "pages": [
+                      "fr/platforms/esp32",
+                      "fr/platforms/stm32",
+                      "fr/platforms/linux",
+                      "fr/platforms/macos",
+                      "platforms/macos-network-gateway",
+                      "platforms/virtual-io"
+                    ]
+                  },
+                  {
+                    "group": "Cartes",
+                    "pages": [
+                      {
+                        "group": "M5Stack",
+                        "pages": [
+                          "boards/supported/m5stack-airq",
+                          "boards/supported/m5stack-atom-display",
+                          "boards/supported/m5stack-atom-echo",
+                          "boards/supported/m5stack-atom-lite",
+                          "boards/supported/m5stack-atom-matrix",
+                          "boards/supported/m5stack-atom-psram",
+                          "boards/supported/m5stack-atom-s3",
+                          "boards/supported/m5stack-atom-s3-lite",
+                          "boards/supported/m5stack-atom-s3r",
+                          "boards/supported/m5stack-atom-s3r-cam",
+                          "boards/supported/m5stack-atom-s3r-ext",
+                          "boards/supported/m5stack-atom-s3u",
+                          "boards/supported/m5stack-atom-u",
+                          "boards/supported/m5stack-atom-voice-s3r",
+                          "boards/supported/m5stack-basic",
+                          "boards/supported/m5stack-capsule",
+                          "boards/supported/m5stack-cardputer",
+                          "boards/supported/m5stack-cardputer-adv",
+                          "boards/supported/m5stack-chain-captain",
+                          "boards/supported/m5stack-chan",
+                          "boards/supported/m5stack-core2",
+                          "boards/supported/m5stack-core2-for-aws",
+                          "boards/supported/m5stack-coreink",
+                          "boards/supported/m5stack-corep4x",
+                          "boards/supported/m5stack-cores3",
+                          "boards/supported/m5stack-cores3-se",
+                          "boards/supported/m5stack-dial",
+                          "boards/supported/m5stack-din-meter",
+                          "boards/supported/m5stack-fire",
+                          "boards/supported/m5stack-gray",
+                          "boards/supported/m5stack-m5go",
+                          "boards/supported/m5stack-m5go-lite",
+                          "boards/supported/m5stack-nanoc6",
+                          "boards/supported/m5stack-paper",
+                          "boards/supported/m5stack-paper-color",
+                          "boards/supported/m5stack-paper-diy",
+                          "boards/supported/m5stack-paper-mono",
+                          "boards/supported/m5stack-paper-s3",
+                          "boards/supported/m5stack-powerhub",
+                          "boards/supported/m5stack-stamp-c3",
+                          "boards/supported/m5stack-stamp-c3-mate",
+                          "boards/supported/m5stack-stamp-c3u",
+                          "boards/supported/m5stack-stamp-c6",
+                          "boards/supported/m5stack-stamp-p4",
+                          "boards/supported/m5stack-stamp-p4x",
+                          "boards/supported/m5stack-stamp-pico",
+                          "boards/supported/m5stack-stamp-plc",
+                          "boards/supported/m5stack-stamp-s3",
+                          "boards/supported/m5stack-stamp-s3-bat",
+                          "boards/supported/m5stack-stamp-s3-mini",
+                          "boards/supported/m5stack-station",
+                          "boards/supported/m5stack-stick-s3",
+                          "boards/supported/m5stack-stickc",
+                          "boards/supported/m5stack-stickc-plus",
+                          "boards/supported/m5stack-stickc-plus2",
+                          "boards/supported/m5stack-stopwatch",
+                          "boards/supported/m5stack-tab5",
+                          "boards/supported/m5stack-tab5x",
+                          "boards/supported/m5stack-timercam",
+                          "boards/supported/m5stack-tough",
+                          "boards/supported/m5stack-unit-c6l",
+                          "boards/supported/m5stack-unit-poep4",
+                          "boards/supported/m5stack-va-meter"
+                        ]
+                      },
+                      {
+                        "group": "Espressif",
+                        "pages": [
+                          "boards/supported/esp32-devkitc-v4",
+                          "boards/supported/esp32c3-devkitc-02",
+                          "boards/supported/esp32c3-devkitm-1",
+                          "boards/supported/esp32c6-devkitc-1",
+                          "boards/supported/esp32c6-devkitm-1",
+                          "boards/supported/esp32p4-function-ev-board",
+                          "boards/supported/esp32s3-box-2",
+                          "boards/supported/esp32s3-box-3",
+                          "boards/supported/esp32s3-devkitc-1",
+                          "boards/supported/esp32s3-devkitm-1",
+                          "boards/supported/esp32s3-eye",
+                          "boards/supported/esp32s3-korvo-2",
+                          "boards/supported/espressif-esp-vocat-v1-2"
+                        ]
+                      },
+                      {
+                        "group": "STMicroelectronics",
+                        "pages": [
+                          "boards/supported/nucleo-u5a5zj-q"
+                        ]
+                      },
+                      {
+                        "group": "Unexpected Maker",
+                        "pages": [
+                          "boards/supported/unexpected-maker-tinypico"
+                        ]
+                      },
+                      {
+                        "group": "Ordinateurs",
+                        "pages": [
+                          "boards/supported/local-linux",
+                          "boards/supported/local-macos"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "06 · Firmware sur mesure",
+                "pages": [
+                  "fr/develop/custom-firmware"
+                ]
+              },
+              {
+                "group": "Contribuer",
+                "pages": [
+                  "architecture/repository",
+                  "contributing/docs",
+                  "get-started/tooling",
+                  "architecture/codestyle",
+                  "architecture/agent-oriented-api-design",
+                  "architecture/execution-ownership",
+                  {
+                    "group": "Tests et mesures",
+                    "pages": [
+                      "tools/e2e",
+                      "tools/llm-tape",
+                      "tools/bench",
+                      "tools/bench-tapes",
+                      "tools/tape-replay-profile"
+                    ]
+                  },
+                  {
+                    "group": "Crates partagées",
+                    "pages": [
+                      "shared/http-client",
+                      "shared/runtime-utils",
+                      "shared/tls/c-runtime",
+                      "shared/tls/roots",
+                      "shared/tls/mbedtls-rs",
+                      "tools/cli-rustyline"
+                    ]
+                  },
+                  {
+                    "group": "Produit",
+                    "pages": [
+                      "product/overview",
+                      "product/vision",
+                      "product/surfaces",
+                      "product/audiences",
+                      "product/positioning"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Plugins",
+            "groups": [
+              {
+                "group": "Plugins",
+                "pages": [
+                  "plugins/overview"
+                ]
+              },
+              {
+                "group": "Système",
+                "pages": [
+                  "plugins/files",
+                  {
+                    "group": "HTTP",
+                    "pages": [
+                      "plugins/http",
+                      "plugins/http/action"
+                    ]
+                  },
+                  "plugins/webserver",
+                  "plugins/wifi",
+                  "plugins/system-wifi",
+                  {
+                    "group": "Captive Portal",
+                    "pages": [
+                      "plugins/captive-portal",
+                      "plugins/captive-portal/ui-kit"
+                    ]
+                  },
+                  "plugins/app-portal",
+                  "plugins/power",
+                  "plugins/sound",
+                  "plugins/time",
+                  {
+                    "group": "Scheduler",
+                    "pages": [
+                      "plugins/scheduler",
+                      "plugins/scheduler/event"
+                    ]
+                  },
+                  "plugins/system-fonts",
+                  "plugins/workflow"
+                ]
+              },
+              {
+                "group": "Applications",
+                "pages": [
+                  {
+                    "group": "App Manager",
+                    "pages": [
+                      "plugins/app-manager",
+                      "plugins/app-manager/action"
+                    ]
+                  },
+                  "plugins/builtin-app-files",
+                  "plugins/builtin-app-sessions",
+                  "plugins/builtin-app-settings",
+                  "plugins/builtin-app-workflow"
+                ]
+              },
+              {
+                "group": "Agent",
+                "pages": [
+                  {
+                    "group": "Agent",
+                    "pages": [
+                      "plugins/agent",
+                      "plugins/agent/action",
+                      "plugins/agent/event",
+                      "plugins/agent/http",
+                      "plugins/agent/embassy",
+                      "plugins/agent/debugging",
+                      {
+                        "group": "Exécution",
+                        "pages": [
+                          "plugins/agent/context",
+                          "plugins/agent/context-model",
+                          "plugins/agent/memory",
+                          "plugins/agent/model-api",
+                          "plugins/agent/permission",
+                          "plugins/agent/skill",
+                          "plugins/agent/skill-design"
+                        ]
+                      },
+                      {
+                        "group": "Traces",
+                        "pages": [
+                          "plugins/agent/trace",
+                          "plugins/agent/trace-format",
+                          "plugins/agent/trace-vocabulary",
+                          "plugins/agent/trace-scripts",
+                          "plugins/agent/serial-log"
+                        ]
+                      }
+                    ]
+                  },
+                  "plugins/agent-file",
+                  "plugins/agent-http",
+                  {
+                    "group": "Passerelle de l’Agent",
+                    "pages": [
+                      "plugins/agent-imessage-gateway",
+                      "plugins/agent-imessage-gateway/action"
+                    ]
+                  },
+                  "plugins/agent-scheduler",
+                  "plugins/agent-time",
+                  "plugins/agent-vm",
+                  {
+                    "group": "Recherche web de l’Agent",
+                    "pages": [
+                      "plugins/agent-websearch",
+                      "plugins/agent-websearch/http"
+                    ]
+                  },
+                  "plugins/agent-workflow"
+                ]
+              },
+              {
+                "group": "Canaux de messagerie",
+                "pages": [
+                  {
+                    "group": "Passerelle",
+                    "pages": [
+                      "plugins/imessage-gateway",
+                      "plugins/imessage-gateway/action",
+                      "plugins/imessage-gateway/event",
+                      "plugins/imessage-gateway/usage",
+                      "plugins/imessage-gateway/design",
+                      "plugins/imessage-gateway/channel-page-kit"
+                    ]
+                  },
+                  {
+                    "group": "BlueBubbles",
+                    "pages": [
+                      "plugins/imessage-bluebubble",
+                      "plugins/imessage-bluebubble/http"
+                    ]
+                  },
+                  {
+                    "group": "Inkbox",
+                    "pages": [
+                      "plugins/imessage-inkbox",
+                      "plugins/imessage-inkbox/http"
+                    ]
+                  },
+                  {
+                    "group": "QQ",
+                    "pages": [
+                      "plugins/imessage-qq",
+                      "plugins/imessage-qq/http"
+                    ]
+                  },
+                  {
+                    "group": "Telegram",
+                    "pages": [
+                      "plugins/imessage-telegram",
+                      "plugins/imessage-telegram/http"
+                    ]
+                  },
+                  {
+                    "group": "Chat web",
+                    "pages": [
+                      "plugins/imessage-web",
+                      "plugins/imessage-web/markdown"
+                    ]
+                  },
+                  {
+                    "group": "WeChat",
+                    "pages": [
+                      "plugins/imessage-wechat",
+                      "plugins/imessage-wechat/http"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Lua VM",
+                "pages": [
+                  {
+                    "group": "VM",
+                    "pages": [
+                      "plugins/vm",
+                      "plugins/vm/action",
+                      "plugins/vm/environment",
+                      "plugins/vm/musl"
+                    ]
+                  },
+                  "plugins/vm-agent",
+                  "plugins/vm-analog",
+                  "plugins/vm-audio",
+                  "plugins/vm-camera",
+                  "plugins/vm-display",
+                  "plugins/vm-filesystem",
+                  "plugins/vm-gpio",
+                  "plugins/vm-http",
+                  "plugins/vm-i2c",
+                  "plugins/vm-i2s",
+                  "plugins/vm-imu",
+                  "plugins/vm-led-strip",
+                  "plugins/vm-message-queue",
+                  "plugins/vm-power-monitor",
+                  "plugins/vm-pwm",
+                  "plugins/vm-spi",
+                  "plugins/vm-systeminfo",
+                  "plugins/vm-time",
+                  "plugins/vm-uart",
+                  "plugins/vm-webserver"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Référence",
+            "groups": [
+              {
+                "group": "Référence",
+                "pages": [
+                  "fr/reference/cli",
+                  "tools/system-image",
+                  "fr/product/glossary"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Nouveautés",
+            "href": "https://github.com/robcholz/barracuda/releases"
+          }
+        ],
+        "banner": {
+          "content": "Découvrez les nouveautés de la dernière version de Barracuda. [Notes de version →](https://github.com/robcholz/barracuda/releases)",
+          "dismissible": true
+        },
+        "navbar": {
+          "links": [
+            {
+              "label": "GitHub",
+              "href": "https://github.com/robcholz/barracuda",
+              "icon": "github"
+            }
+          ],
+          "primary": {
+            "type": "button",
+            "label": "Commencer",
+            "href": "/fr/get-started/quickstart"
+          }
+        }
       }
     ]
   },
@@ -549,10 +2017,6 @@
         ]
       }
     ]
-  },
-  "banner": {
-    "content": "See what's new in the latest Barracuda release. [Release notes →](https://github.com/robcholz/barracuda/releases)",
-    "dismissible": true
   },
   "feedback": {
     "thumbsRating": true

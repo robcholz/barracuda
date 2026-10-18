@@ -1,0 +1,83 @@
+---
+title: "Installation"
+description: "Install the toolchain for your Board, then clone Barracuda."
+---
+
+Barracuda builds with Cargo. Plugins are compiled into the firmware, so you
+build on your own computer with the Rust toolchain of the Platform you target.
+
+## Clone the repository
+
+```bash terminal
+git clone https://github.com/robcholz/barracuda
+cd barracuda
+```
+
+## Install a toolchain
+
+Install [rustup](https://rustup.rs) first. The repository pins Rust 1.98.1 in
+`rust-toolchain.toml`, which is all a host Board needs.
+
+<Tabs>
+  <Tab title="Linux and macOS">
+    Nothing else to install. Select `local-linux` or `local-macos` and run
+    Barracuda on your computer, with virtual peripherals standing in for
+    hardware.
+
+    ```bash terminal
+    rustup show
+    ```
+  </Tab>
+  <Tab title="ESP32">
+    ESP32 and ESP32-S3 Boards build with the Espressif Rust toolchain and
+    flash with `espflash`:
+
+    ```bash terminal
+    cargo install espup espflash
+    espup install --toolchain-version 1.98.1.0
+    ```
+
+    ESP32-C3, ESP32-C6, and ESP32-P4 need different commands; see
+    [ESP32 Platforms](/platforms/esp32).
+  </Tab>
+  <Tab title="STM32">
+    STM32 Boards build with Rust 1.98.1 and the Arm target, and flash through
+    a debug probe with `probe-rs`:
+
+    ```bash terminal
+    rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
+    cargo install probe-rs-tools
+    ```
+  </Tab>
+</Tabs>
+
+You do not have to know which toolchain a Board needs ahead of time. When you
+select a Board whose toolchain is missing, `cargo board select` prints the exact
+command to install it.
+
+## Select a Board
+
+```bash terminal
+cargo board select
+```
+
+The list is searchable: type part of a name, such as `cores3`, and press Enter.
+Your selection is stored in the working tree, so every later `cargo build` and
+`cargo run` uses it. To select without the prompt, name the Board:
+
+```bash terminal
+cargo board select local-linux
+```
+
+Board names are the directory names under `boards/configs/`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Run Barracuda on your computer and talk to it.
+  </Card>
+  <Card title="Build and run" icon="terminal" href="/get-started/build-and-run">
+    Flash a Board, open the terminal channel, and set the log level.
+  </Card>
+</CardGroup>

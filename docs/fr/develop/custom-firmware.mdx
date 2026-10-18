@@ -1,0 +1,42 @@
+---
+title: "Custom firmware"
+description: "Fit a firmware to a chip, a resource budget, and a job by choosing, trimming, and adding Plugins."
+---
+
+A custom firmware contains only what a product needs. You shape it from three
+pieces you already have: a Board, a profile, and the Plugin set.
+
+<Note>
+  A `fully-customize` skill that does all of this from one request is planned.
+  Until it ships, give your coding agent the steps below.
+</Note>
+
+<Steps>
+  <Step title="Pick or add the Board">
+    Start from a Board under `boards/configs/` on the same chip, or add one.
+    See [Boards](/boards/overview) and, for a new chip family,
+    [Platform architecture](/architecture/platform-architecture).
+  </Step>
+  <Step title="Pick the narrowest profile">
+    Choose the smallest [profile](/boards/profiles) that covers the job:
+    `minimal`, `lua`, `network`, `ai`, `headless`, `screen-offline`, or
+    `screen`. Add a profile under `boards/profiles/` when a product needs its
+    own layer.
+  </Step>
+  <Step title="Trim and add single Plugins">
+    Turn single Plugins on or off with `plugins.<id>.enabled` in the Board's
+    `board.yml`. A Plugin that is not enabled is not in the firmware at all.
+    Write the missing ones with [create-plugin](/develop/write-a-plugin).
+  </Step>
+  <Step title="Check the budget">
+    Build with `cargo build` and measure. The [bench](/tools/bench) page shows
+    how to measure binary size, heap, and stack.
+  </Step>
+</Steps>
+
+```yaml boards/configs/my-board/board.yml
+profile: headless
+plugins:
+  camera:
+    enabled: false
+```

@@ -1,0 +1,91 @@
+---
+title: "Démarrage rapide"
+description: "Lancez Barracuda sur votre ordinateur, connectez un modèle et demandez à l’Agent de piloter une broche."
+---
+
+Exécutez le même System qu’un appareil, sur Linux ou macOS, avec des
+périphériques virtuels à la place du matériel. Connectez ensuite un modèle et
+parlez à l’Agent embarqué.
+
+<Info>
+  Prérequis : Rust installé et le dépôt cloné. Consultez
+  [Installation](/fr/get-started/installation). Il vous faut aussi une clé d’API
+  pour un service de modèles compatible OpenAI ou Anthropic.
+</Info>
+
+<Steps>
+  <Step title="Sélectionner une carte hôte">
+    ```bash terminal
+    cargo board select local-linux   # or local-macos
+    ```
+
+    Les cartes hôtes compilent le profil `screen` : l’Agent, les scripts Lua, le
+    chat web, le portail et un écran rond virtuel.
+  </Step>
+  <Step title="Préparer le réseau (Linux uniquement)">
+    La plateforme Linux utilise une véritable interface TUN. Provisionnez-la une
+    fois par démarrage :
+
+    ```bash terminal
+    sudo sh platforms/linux/provision.sh barracuda0
+    ```
+
+    macOS ne demande aucune configuration ni `sudo`.
+  </Step>
+  <Step title="Lancer Barracuda">
+    ```bash terminal
+    BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+    ```
+
+    Ce terminal possède le System et ses journaux. `BARRACUDA_VIRTUAL_IO_ADDR`
+    est l’adresse d’écoute des périphériques virtuels ; ouvrez
+    [http://127.0.0.1:7878/](http://127.0.0.1:7878/) pour voir l’écran.
+  </Step>
+  <Step title="Connecter un modèle">
+    Dans un second terminal, lancez le configurateur, choisissez **Local**, puis
+    la configuration des modèles (`agent`) :
+
+    ```bash terminal
+    cargo cli configure
+    ```
+
+    Répondez aux questions : le format d’API (`openai_compatible` ou
+    `anthropic_compatible`), l’usage `root_agent`, l’URL de base, le modèle et
+    votre clé d’API. La clé est stockée sur l’appareil. Vous pouvez faire de
+    même sur la page **Models** du [portail de l’appareil](/fr/use/device-portal).
+  </Step>
+  <Step title="Parler à l’Agent">
+    Ouvrez le canal terminal et choisissez **Local** :
+
+    ```bash terminal
+    cargo cli
+    ```
+
+    Demandez quelque chose de physique :
+
+    ```txt
+    > Mets la broche vio-0 à l’état haut
+    ```
+
+    L’Agent écrit un court script Lua, l’exécute avec son outil `vm_run` et
+    répond avec le résultat. Les cartes hôtes exposent les broches virtuelles
+    `vio-0` à `vio-7`.
+  </Step>
+</Steps>
+
+## Étapes suivantes
+
+<CardGroup cols={2}>
+  <Card title="Scripts" icon="code" href="/fr/use/scripts">
+    Comment l’Agent écrit et exécute du Lua sur le matériel.
+  </Card>
+  <Card title="Canaux" icon="message-circle" href="/fr/use/channels">
+    Joignez le même Agent depuis le chat web, WeChat, Telegram et d’autres.
+  </Card>
+  <Card title="Choisir les Plugins" icon="list-checks" href="/fr/boards/profiles">
+    Choisissez le contenu du firmware avec les profils.
+  </Card>
+  <Card title="Flasher une carte" icon="cpu" href="/fr/get-started/build-and-run">
+    Sélectionnez une vraie carte et suivez les mêmes étapes sur le matériel.
+  </Card>
+</CardGroup>

@@ -1,0 +1,141 @@
+---
+title: "The experience ladder"
+sidebarTitle: "The ladder"
+description: "The six levels of Barracuda, from out of the box to fully custom firmware, and where each one starts in the docs."
+---
+
+Barracuda is experienced as a ladder. Each level asks a little more of the
+person and gives them much more freedom. Every level is useful on its own; no
+one has to climb higher than their project needs. At every level an agent does
+the heavy lifting.
+
+| Level | Name | Who | What they do | Where | Agent | Start here |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts | [Device Portal](/use/device-portal) |
+| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) | [Board profiles](/boards/profiles) |
+| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent | [Device UI](/architecture/device-ui) |
+| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill | [Write a Plugin](/develop/write-a-plugin) |
+| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills | [Boards](/boards/overview) |
+| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill | [Custom firmware](/develop/custom-firmware) |
+
+## Level 1 — Out of the box
+
+**In the docs:** [Device Portal](/use/device-portal) · [Channels](/use/channels) · [Scripts](/use/scripts) · [Automations](/use/automations)
+
+**Goal:** a working, talking, acting device in minutes, with no toolchain.
+
+1. Open the Web Installer, choose a board and a version, plug in USB, install.
+   Each board gets a default firmware with a default Plugin set.
+2. Join Wi-Fi from the same page; the installer hands off to the Device Portal.
+3. Register a model and bind a channel (WeChat, Telegram, QQ, iMessage, web chat,
+   or the terminal).
+4. Ask the board for something physical: "blink the LED twice a second",
+   "show the temperature on the screen", "tell me when the light level drops".
+
+The on-board agent answers by writing a short VM script and running it against
+the real hardware immediately. The script, its output, and its result appear in
+the conversation. Long-running behavior is kept alive by Workflow automations
+and schedules, so the device keeps working after the chat ends.
+
+**What makes it work:** the Web Installer, the Device Portal, the on-board
+Agent, the VM and its peripheral packages, channels, Workflow.
+
+## Level 2 — Configure
+
+**In the docs:** [Board profiles](/boards/profiles) · [Build and run](/get-started/build-and-run) · [CLI](/reference/cli)
+
+**Goal:** make the device fit the project by choosing its Plugins, without
+writing code.
+
+Plugins are compiled into the firmware, so the Plugin set is chosen on the
+developer's machine. Select the Board, choose the Plugins the project needs —
+camera, display, LED strip, sensors, web search, a messaging channel — leave out
+the rest, then build and flash. There are three ways to choose:
+
+- an interactive command that lists the Plugins to pick from;
+- a configuration file that lists the enabled Plugins, for projects kept in
+  version control;
+- the developer's coding agent, which picks the Plugins for a stated need and
+  builds the firmware.
+
+A Plugin that is left out costs no memory, flash,
+or tasks. On the device, every Plugin brings its own page in the Device Portal,
+so each capability arrives with its own settings.
+
+**What makes it work:** Plugin declarations, the host build, per-Plugin portal
+pages.
+
+## Level 3 — Build apps
+
+**In the docs:** [Device UI](/architecture/device-ui) · [App format](/plugins/app-manager/app-format) · [App API](/plugins/app-manager/app-api) · [PocketJS](/plugins/app-manager/pocketjs)
+
+**Goal:** a real device application with its own UI, without setting up a
+firmware project.
+
+In the Live Editor, the developer describes the app. The in-browser agent
+generates the app logic and its interface, the developer previews and iterates
+visually, and then flashes it to the board over USB from the same page. Apps run
+on the device under the App Manager Plugin, which installs, starts, stops, and
+updates them alongside the rest of the runtime.
+
+**What makes it work:** the Live Editor, the in-browser agent, the App Manager
+Plugin, the app runtime, browser flashing.
+
+## Level 4 — Create Plugins
+
+**In the docs:** [Write a Plugin](/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [All Plugins](/plugins/overview)
+
+**Goal:** add a new capability to Barracuda that any device can use.
+
+The developer clones the repository and asks their coding agent — Claude Code,
+Cursor, or Codex — to create a Plugin. The `create-plugin` skill gives the agent
+Barracuda's architecture: when to expose a typed capability, a Workflow Action or
+Event, or an Agent Tool; how lifecycle and task ownership work; how the Plugin
+documents itself; and which focused tests to write. The result is a Plugin that
+looks like every first-party Plugin.
+
+**What makes it work:** the Plugin contract, `plugin.toml`, agent-friendly API
+conventions, the `create-plugin` skill, per-Plugin docs.
+
+## Level 5 — Add Boards and Platforms
+
+**In the docs:** [Boards](/boards/overview) · [Peripherals](/boards/peripherals) · [Platform architecture](/architecture/platform-architecture)
+
+**Goal:** bring Barracuda to new hardware.
+
+- **A new Board** on a supported chip is a description: chip, toolchain target,
+  flash layout, and peripherals. The `create-board` skill produces it and its
+  layout, and the board appears in the Web Installer.
+- **A new Platform** brings a new chip family: executor entry, network stack,
+  filesystem, flash, and HAL adapters behind the Platform contract. The
+  `create-platform` skill guides the agent through that contract while keeping
+  the System and every Plugin unchanged.
+
+**What makes it work:** the Board YAML and Platform contract, independent Board
+and Platform selection, the `create-board` and `create-platform` skills.
+
+## Level 6 — Fully customize
+
+**In the docs:** [Custom firmware](/develop/custom-firmware)
+
+**Goal:** a product firmware shaped exactly to a chip, a resource budget, and a
+job.
+
+The builder states the target and the requirements. With the `fully-customize`
+skill, the coding agent selects or creates the Platform and Board, chooses the
+Plugin set, trims Plugins that are too heavy for the budget, creates the ones
+that are missing, and verifies that the result fits the device's memory and
+flash. The output is a firmware that contains only what the product needs.
+
+**What makes it work:** every level below it — Plugins, Boards, Platforms, and
+the skills that create them — composed by one agent with one goal.
+
+## Moving between levels
+
+- Every level hands off to the next one with something concrete: the script the
+  on-board agent wrote can become an app; an app that needs a new capability
+  becomes a Plugin; a Plugin that needs new hardware becomes a Board.
+- Nothing at a higher level breaks a lower one. A fully customized firmware still
+  installs from the browser, still has a Device Portal, and its on-board agent
+  still writes scripts.
+- The docs are organized by level, so each reader starts where they are.
