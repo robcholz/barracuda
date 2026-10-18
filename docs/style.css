@@ -181,10 +181,51 @@ code, pre, kbd, .font-mono {
   font-family: var(--bc-font-mono);
 }
 
-/* The ask box, at the foot of a page and in the assistant panel: a bordered
-   field with a lime send button. */
+/* The ask box Mintlify pins to the foot of every page gives way to the
+   floating Ask AI button from ask-ai.js, as on bun.com. */
+div:has(> .chat-assistant-floating-input) {
+  display: none !important;
+}
+#bc-ask-ai {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--bc-border);
+  border-radius: 6px;
+  background: var(--bc-background);
+  color: var(--bc-foreground);
+  font-family: var(--bc-font-sans);
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: 0 2px 10px #0000001F;
+  cursor: pointer;
+}
+#bc-ask-ai:hover {
+  background: var(--bc-muted);
+}
+#bc-ask-ai:focus-visible {
+  outline: 2px solid var(--bc-foreground);
+  outline-offset: 2px;
+}
+body:has(#chat-assistant-sheet[aria-hidden="false"]) #bc-ask-ai {
+  display: none;
+}
+@media print {
+  #bc-ask-ai {
+    display: none;
+  }
+}
+
+/* The ask box in the assistant panel: a bordered field with a lime send
+   button. */
 div:has(> div > textarea.chat-assistant-input) {
-  border: 1px solid var(--bc-border-active) !important;
+  border: 1px solid var(--bc-border) !important;
   border-radius: 12px !important;
   background: var(--bc-background) !important;
   box-shadow: 0 1px 2px #0000000D;
