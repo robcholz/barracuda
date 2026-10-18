@@ -1,89 +1,77 @@
 ---
-title: "Quickstart"
-description: "Run Barracuda on your computer, connect a model, and ask the Agent to drive a pin."
+title: "クイックスタート"
+description: "コンピューター上で Barracuda を動かし、モデルを接続して、Agent にピンを操作させます。"
 ---
 
-Run the same System a device runs, on Linux or macOS, with virtual peripherals
-in place of hardware. Then connect a model and talk to the on-board Agent.
+デバイスと同じ System を、ハードウェアの代わりに仮想ペリフェラルを使って Linux または macOS 上で動かします。そのうえでモデルを接続し、オンボード Agent と会話します。
 
 <Info>
-  Prerequisites: Rust installed and the repository cloned. See
-  [Installation](/get-started/installation). You also need an API key for an
-  OpenAI- or Anthropic-compatible model service.
+  前提条件: Rust がインストールされ、リポジトリをクローンしてあること。[インストール](/ja/get-started/installation) を参照してください。OpenAI 互換または Anthropic 互換のモデルサービスの API キーも必要です。
 </Info>
 
 <Steps>
-  <Step title="Select a host Board">
+  <Step title="ホスト向けのボードを選ぶ">
     ```bash terminal
     cargo board select local-linux   # or local-macos
     ```
 
-    Host Boards build the `screen` profile: the Agent, Lua scripts, web chat,
-    the portal, and a virtual round display.
+    ホスト向けのボードは `screen` プロファイルでビルドされます。Agent、Lua スクリプト、Web チャット、ポータル、仮想の円形ディスプレイが含まれます。
   </Step>
-  <Step title="Prepare the network (Linux only)">
-    The Linux Platform uses a real TUN interface. Provision it once per boot:
+  <Step title="ネットワークを準備する（Linux のみ）">
+    Linux プラットフォームは実際の TUN インターフェースを使います。起動ごとに一度だけ用意します。
 
     ```bash terminal
     sudo sh platforms/linux/provision.sh barracuda0
     ```
 
-    macOS needs no setup and no `sudo`.
+    macOS では準備も `sudo` も不要です。
   </Step>
-  <Step title="Run Barracuda">
+  <Step title="Barracuda を実行する">
     ```bash terminal
     BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
     ```
 
-    This terminal owns the System and its logs. `BARRACUDA_VIRTUAL_IO_ADDR` is
-    where the virtual peripherals listen; open
-    [http://127.0.0.1:7878/](http://127.0.0.1:7878/) to see the display.
+    このターミナルが System とそのログを受け持ちます。`BARRACUDA_VIRTUAL_IO_ADDR` は仮想ペリフェラルが待ち受けるアドレスです。[http://127.0.0.1:7878/](http://127.0.0.1:7878/) を開くとディスプレイを確認できます。
   </Step>
-  <Step title="Connect a model">
-    In a second terminal, start the configurator, choose **Local**, then the
-    model configuration (`agent`):
+  <Step title="モデルを接続する">
+    2 つ目のターミナルで設定ツールを起動し、**Local** を選んでから、モデルの設定（`agent`）を選びます。
 
     ```bash terminal
     cargo cli configure
     ```
 
-    Answer the prompts: the API format (`openai_compatible` or
-    `anthropic_compatible`), the purpose `root_agent`, the base URL, the model,
-    and your API key. The key is stored on the device. You can do the same on
-    the **Models** page of the [Device Portal](/use/device-portal).
+    プロンプトに従って、API 形式（`openai_compatible` または `anthropic_compatible`）、用途 `root_agent`、ベース URL、モデル、API キーを入力します。キーはデバイスに保存されます。同じことは [デバイスポータル](/ja/use/device-portal) の **Models** ページでも行えます。
   </Step>
-  <Step title="Talk to the Agent">
-    Open the terminal channel and choose **Local**:
+  <Step title="Agent と会話する">
+    ターミナルのチャネルを開き、**Local** を選びます。
 
     ```bash terminal
     cargo cli
     ```
 
-    Ask for something physical:
+    物理的な操作を頼んでみます。
 
     ```txt
-    > Set pin vio-0 high
+    > ピン vio-0 を High にして
     ```
 
-    The Agent writes a short Lua script, runs it with its `vm_run` tool, and
-    replies with the result. The host Boards expose the virtual pins `vio-0`
-    to `vio-7`.
+    Agent は短い Lua スクリプトを書き、`vm_run` ツールで実行して、その結果を返します。ホスト向けのボードは仮想ピン `vio-0` から `vio-7` を公開しています。
   </Step>
 </Steps>
 
-## Next steps
+## 次のステップ
 
 <CardGroup cols={2}>
-  <Card title="Scripts" icon="code" href="/use/scripts">
-    How the Agent writes and runs Lua against the hardware.
+  <Card title="スクリプト" icon="code" href="/ja/use/scripts">
+    Agent がハードウェアに対して Lua を書いて実行する仕組みです。
   </Card>
-  <Card title="Channels" icon="message-circle" href="/use/channels">
-    Reach the same Agent from web chat, WeChat, Telegram, and more.
+  <Card title="チャネル" icon="message-circle" href="/ja/use/channels">
+    Web チャット、WeChat、Telegram などから同じ Agent に話しかけます。
   </Card>
-  <Card title="Choose Plugins" icon="list-checks" href="/boards/profiles">
-    Pick what goes into the firmware with profiles.
+  <Card title="プラグインを選ぶ" icon="list-checks" href="/ja/boards/profiles">
+    プロファイルでファームウェアに入れるものを選びます。
   </Card>
-  <Card title="Flash a Board" icon="cpu" href="/get-started/build-and-run">
-    Select a real Board and run the same steps on hardware.
+  <Card title="ボードに書き込む" icon="cpu" href="/ja/get-started/build-and-run">
+    実際のボードを選び、同じ手順をハードウェア上で実行します。
   </Card>
 </CardGroup>

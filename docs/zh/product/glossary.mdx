@@ -1,66 +1,44 @@
 ---
-title: "Glossary"
-description: "Definitions of the terms used across Barracuda, from Agent and App to Board and Plugin."
+title: "术语表"
+description: "Barracuda 中常用术语的定义，从 Agent、App 到 Board 和 Plugin。"
 ---
 
-**Agent (on-board agent).** The Agent Plugin running on the device. It talks to
-users through channels, keeps sessions and memory, uses tools, and does in-time
-coding with the VM.
+**Agent (on-board agent)（板上 Agent）。**运行在设备上的 Agent 插件。它通过消息通道与用户对话，维护会话和记忆，使用工具，并借助 VM 进行即时编程。
 
-**Agent Tool.** A model-facing operation a Plugin gives the on-board agent.
+**Agent Tool（Agent 工具）。**插件提供给板上 Agent 的一项面向模型的操作。
 
-**App.** A device application with its own UI, built in the Live Editor and
-managed on the device by the App Manager Plugin.
+**App（应用）。**带有自己 UI 的设备应用，在 Live Editor 中构建，在设备上由 App Manager 插件管理。
 
-**App Manager.** The Plugin that installs, starts, stops, and updates apps on a
-device.
+**App Manager（应用管理器）。**在设备上安装、启动、停止和更新应用的插件。
 
-**Board.** A concrete piece of hardware described by YAML: chip, toolchain
-target, flash layout, and peripherals. Selected independently of the Platform.
+**Board（开发板）。**由 YAML 描述的一块具体硬件：芯片、工具链目标、Flash 布局和外设。它的选择与平台相互独立。
 
-**Builder.** Someone shipping a product firmware shaped to a specific target and
-job, typically with the `fully-customize` skill.
+**Builder（构建者）。**交付针对特定目标和任务定制的产品固件的人，通常会使用 `fully-customize` skill。
 
-**Channel.** A way to reach the on-board agent: WeChat, Telegram, QQ, iMessage,
-Inkbox, web chat, or the terminal. Each channel is a Plugin.
+**Channel（消息通道）。**访问板上 Agent 的途径：微信、Telegram、QQ、iMessage、Inkbox、网页聊天或终端。每个消息通道都是一个插件。
 
-**Coding agent.** An AI coding tool on the developer's machine — Claude Code,
-Cursor, or Codex — used with Barracuda's skills.
+**Coding agent（编程 Agent）。**开发者电脑上的 AI 编程工具（Claude Code、Cursor 或 Codex），配合 Barracuda 的 skill 使用。
 
-**Device Portal.** The web interface served by the device for configuration,
-status, Plugin pages, and web chat.
+**Device Portal（设备门户）。**由设备提供的网页界面，用于配置、查看状态、访问插件页面和网页聊天。
 
-**Experience ladder.** The six levels of using Barracuda: out of the box,
-configure, build apps, create Plugins, add Boards and Platforms, fully customize.
+**Experience ladder（体验阶梯）。**使用 Barracuda 的六个层级：开箱即用、配置、构建应用、创建插件、添加开发板和平台、完全定制。
 
-**In-browser agent.** The agent in the Live Editor that generates apps and their
-UI.
+**In-browser agent（浏览器里的 Agent）。**Live Editor 中生成应用及其 UI 的 Agent。
 
-**In-time coding.** The on-board agent writing a VM script and running it
-against the hardware immediately, as part of a conversation.
+**In-time coding（即时编程）。**板上 Agent 在对话中编写 VM 脚本并立即在硬件上运行。
 
-**Live Editor.** The browser-based visual, agentic editor for building and
-flashing device apps.
+**Live Editor（实时编辑器）。**基于浏览器的可视化 Agent 编辑器，用于构建和烧录设备应用。
 
-**Platform.** The implementation of the Platform contract for a chip family or a
-host OS: executor entry, network stack, filesystem, flash, and HAL adapters.
+**Platform（平台）。**针对某个芯片系列或主机操作系统的平台契约实现：执行器入口、网络栈、文件系统、Flash 和 HAL 适配器。
 
-**Plugin.** The primitive unit of capability: a declared contract of typed
-capabilities, Workflow Actions and Events, Agent Tools, VM packages, portal
-pages, resources, and tasks.
+**Plugin（插件）。**能力的基本单元：一份声明式契约，包括类型化能力、Workflow Action 与 Event、Agent Tool、VM 包、门户页面、资源和任务。
 
-**Skill.** Agent-readable instructions in the repository that teach coding agents
-how to do a Barracuda task: `create-plugin`, `create-board`, `create-platform`,
-`fully-customize`.
+**Skill（skill）。**仓库中供 Agent 阅读的说明，教编程 Agent 如何完成 Barracuda 的某项任务：`create-plugin`、`create-board`、`create-platform`、`fully-customize`。
 
-**System.** The portable, `no_std` layer that registers the Plugin set in
-dependency order and starts it. The same System runs on every Platform.
+**System（System）。**可移植的 `no_std` 层，按依赖顺序注册插件集合并启动它。同一个 System 在每个平台上运行。
 
-**VM.** The on-device Lua runtime that runs scripts written by the on-board agent
-or by Workflow, with packages that expose the hardware.
+**VM（虚拟机）。**设备上的 Lua 运行时，运行由板上 Agent 或 Workflow 编写的脚本，并通过各种包暴露硬件。
 
-**Web Installer.** The browser page that installs Barracuda onto a board over USB
-and connects it to Wi-Fi.
+**Web Installer（网页安装器）。**通过 USB 把 Barracuda 安装到开发板上并让它连上 Wi-Fi 的浏览器页面。
 
-**Workflow.** Durable automation: Events trigger Actions, so the device keeps
-working on its own.
+**Workflow（Workflow）。**持久的自动化：Event 触发 Action，让设备自行持续工作。

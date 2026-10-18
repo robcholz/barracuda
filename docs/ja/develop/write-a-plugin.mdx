@@ -1,68 +1,55 @@
 ---
-title: "Write a Plugin"
-description: "Add a capability to Barracuda with your coding agent and the create-plugin skill."
+title: "プラグインを書く"
+description: "コーディング Agent と create-plugin skill を使って、Barracuda に機能を追加します。"
 ---
 
-Every capability in Barracuda is a Plugin, so adding one is how you extend the
-runtime. Do it on your computer, in the repository, with the coding agent you
-already use: Claude Code, Cursor, or Codex.
+Barracuda のあらゆる機能はプラグインなので、ランタイムを拡張するにはプラグインを追加します。作業は自分のコンピューター上のリポジトリで、ふだん使っているコーディング Agent（Claude Code、Cursor、Codex）を使って行います。
 
-## Ask your coding agent
+## コーディング Agent に頼む
 
-The repository ships a `create-plugin` skill at
-`.agents/skills/create-plugin/SKILL.md`. It applies the
-[Plugin API](/architecture/plugin-api) contract step by step, so the result
-looks like every built-in Plugin.
+リポジトリには `.agents/skills/create-plugin/SKILL.md` に `create-plugin` skill が含まれています。この skill は [Plugin API](/architecture/plugin-api) の契約を一歩ずつ適用するので、出来上がるプラグインは組み込みのプラグインと同じ形になります。
 
 ```txt
-> Read .agents/skills/create-plugin/SKILL.md, then create a Plugin that
-  reads an SHT40 temperature and humidity sensor and exposes it to Lua.
+> .agents/skills/create-plugin/SKILL.md を読んでから、SHT40 温湿度センサーを
+  読み取って Lua に公開するプラグインを作成してください。
 ```
 
-## What the skill does
+## skill が行うこと
 
 <Steps>
-  <Step title="Decide the scope">
-    Name the feature the Plugin owns and the Plugins whose capabilities it
-    uses. Those, and only those, become its `depends-on`.
+  <Step title="スコープを決める">
+    プラグインが受け持つ機能と、その機能が使う他のプラグインを明確にします。使うプラグインだけが、そのプラグインの `depends-on` になります。
   </Step>
-  <Step title="Lay out the directory">
-    Create `plugins/<id>/plugin.toml` and `crates/plugin`, enable the Plugin in a
-    profile or on a Board, and run `cargo plugin sync`.
+  <Step title="ディレクトリを構成する">
+    `plugins/<id>/plugin.toml` と `crates/plugin` を作成し、プロファイルまたはボードでプラグインを有効にして、`cargo plugin sync` を実行します。
   </Step>
-  <Step title="Construct, register, and start">
-    One constructor, `new(&mut PluginContext)`. Register contracts in
-    `register`; spawn owned tasks in `start`.
+  <Step title="構築、登録、起動">
+    コンストラクターは `new(&mut PluginContext)` の 1 つだけです。契約は `register` で登録し、自身が所有するタスクは `start` で起動します。
   </Step>
-  <Step title="Add the contracts callers need">
-    A typed capability for other Plugins, Workflow Actions and Events, a Lua
-    package through a `vm-<name>` Plugin, or an Agent Tool through an
-    `agent-<name>` Plugin.
+  <Step title="呼び出し側が必要とする契約を追加する">
+    他のプラグイン向けの型付きケイパビリティ、Workflow の Action と Event、`vm-<name>` プラグインを通じた Lua パッケージ、`agent-<name>` プラグインを通じた Agent Tool などです。
   </Step>
-  <Step title="Test and document">
-    Focused tests for the Plugin, and its page at `docs/plugins/<id>.mdx` in the
-    required form.
+  <Step title="テストとドキュメント">
+    プラグインに絞ったテストを書き、決められた形式で `docs/plugins/<id>.mdx` にページを作成します。
   </Step>
 </Steps>
 
-## Check the result
+## 結果を確認する
 
 ```bash terminal
 cargo plugin info <id>     # manifest and dependencies
 cargo plugin sync --check  # conventions, and the generated registry is current
 ```
 
-`cargo plugin sync` first checks every Plugin against the conventions: its
-layout, schemas, page form, and crate dependencies. Run the Plugin's own
-focused tests locally; leave the full test matrix to CI.
+`cargo plugin sync` は、まずすべてのプラグインが規約（レイアウト、スキーマ、ページの形式、クレートの依存関係）に沿っているかを確認します。ローカルではそのプラグイン自身のテストだけを実行し、テストマトリクス全体は CI に任せてください。
 
-## Read next
+## 次に読む
 
 <CardGroup cols={2}>
   <Card title="Plugin API" icon="book-open" href="/architecture/plugin-api">
-    The contract: scope, layout, settings, lifecycle, and documentation.
+    契約の内容です。スコープ、レイアウト、設定、ライフサイクル、ドキュメントを扱います。
   </Card>
   <Card title="Plugin Manager" icon="workflow" href="/architecture/plugin-manager">
-    How Plugins are registered and started in dependency order.
+    プラグインがどのように登録され、依存関係の順に起動されるかを説明します。
   </Card>
 </CardGroup>

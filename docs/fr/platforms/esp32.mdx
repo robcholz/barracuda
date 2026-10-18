@@ -1,15 +1,17 @@
 ---
-title: "ESP32 Platforms"
+title: "Plateformes ESP32"
 sidebarTitle: "ESP32"
-description: "Build, flash, and run Barracuda on ESP32, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Boards."
+description: "Compilez, flashez et exécutez Barracuda sur les cartes ESP32, ESP32-S3, ESP32-C3, ESP32-C6 et ESP32-P4."
 ---
 
-Espressif chips run Barracuda on five bare-metal Platforms, one per chip. They
-share a flash tool, `espflash`, and a flash layout, an ESP-IDF partition table in
-each Board's `partitions.csv`. They differ in Rust target and toolchain: `esp` is
-Espressif's Rust toolchain, and RISC-V GCC is Espressif's `riscv32-esp-elf` GCC.
+Les puces Espressif exécutent Barracuda sur cinq plateformes bare-metal, une
+par puce. Elles partagent un outil de flashage, `espflash`, et un plan de la
+flash, une table de partitions ESP-IDF dans le `partitions.csv` de chaque carte.
+Elles diffèrent par la cible Rust et la chaîne d’outils : `esp` est la chaîne
+d’outils Rust d’Espressif, et RISC-V GCC est le GCC `riscv32-esp-elf`
+d’Espressif.
 
-| Chip (Platform) | Rust target | Toolchain | Boards |
+| Puce (plateforme) | Cible Rust | Chaîne d’outils | Cartes |
 | --- | --- | --- | --- |
 | ESP32 (`esp32`) | `xtensa-esp32-none-elf` | `esp` 1.98.1.0 | 24 |
 | ESP32-S3 (`esp32s3`) | `xtensa-esp32s3-none-elf` | `esp` 1.98.1.0 | 36 |
@@ -17,10 +19,10 @@ Espressif's Rust toolchain, and RISC-V GCC is Espressif's `riscv32-esp-elf` GCC.
 | ESP32-C6 (`esp32c6`) | `riscv32imac-unknown-none-elf` | Rust 1.98.1, RISC-V GCC | 5 |
 | ESP32-P4 (`esp32p4`) | `riscv32imafc-unknown-none-elf` | `esp` 1.98.1.0, RISC-V GCC | 7 |
 
-## Install the toolchain
+## Installer la chaîne d’outils
 
-Install `espup` once, then the toolchain for your chip. `cargo board select`
-prints the same command when the toolchain is missing.
+Installez `espup` une fois, puis la chaîne d’outils de votre puce.
+`cargo board select` affiche la même commande quand la chaîne d’outils manque.
 
 <Tabs>
   <Tab title="ESP32, ESP32-S3">
@@ -36,7 +38,7 @@ prints the same command when the toolchain is missing.
     espup install --stable-version 1.98.1 --targets esp32c3 --esp-riscv-gcc
     ```
 
-    For ESP32-C6, use `--targets esp32c6`.
+    Pour l’ESP32-C6, utilisez `--targets esp32c6`.
   </Tab>
   <Tab title="ESP32-P4">
     ```bash terminal
@@ -44,24 +46,25 @@ prints the same command when the toolchain is missing.
     espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
     ```
 
-    `espup` installs the `esp` toolchain beside an Xtensa target, so the
-    command names `esp32s3` too.
+    `espup` installe la chaîne d’outils `esp` avec une cible Xtensa : la
+    commande nomme donc aussi `esp32s3`.
   </Tab>
 </Tabs>
 
-`espup` writes `~/export-esp.sh`. Board selection imports it, so you do not
-source it yourself. Install `espflash` to flash:
+`espup` écrit `~/export-esp.sh`. La sélection de la carte l’importe : vous
+n’avez pas à le sourcer vous-même. Installez `espflash` pour flasher :
 
 ```bash terminal
 cargo install espflash
 ```
 
 <Note>
-  The ESP32-S3 Platform stays on `esp` 1.98.1.0: version 1.99.0.0 reorders
-  esp-hal's startup code so that release builds no longer link.
+  La plateforme ESP32-S3 reste sur `esp` 1.98.1.0 : la version 1.99.0.0
+  réordonne le code de démarrage d’esp-hal, si bien que les compilations en mode
+  release ne passent plus l’édition de liens.
 </Note>
 
-## Build, flash, and run
+## Compiler, flasher et exécuter
 
 ```bash terminal
 cargo board select m5stack-cores3
@@ -69,18 +72,19 @@ cargo run
 cargo image deploy
 ```
 
-- `cargo run` builds the firmware with `--release`, flashes it with
-  `espflash flash --monitor`, and keeps the serial log in the terminal.
-- `cargo image deploy` builds the Plugin resource image and writes it to the
-  `resources` partition with `espflash write-bin`.
+- `cargo run` compile le firmware avec `--release`, le flashe avec
+  `espflash flash --monitor` et garde le journal série dans le terminal.
+- `cargo image deploy` compile l’image de ressources des Plugins et l’écrit dans
+  la partition `resources` avec `espflash write-bin`.
 
-## Hardware the Platforms drive
+## Matériel piloté par les plateformes
 
-Every ESP32 Platform provides digital inputs and outputs, GPIO, SPI devices,
-SPI buses, SPI outputs, and I2C devices. Runtime I/O lets Lua scripts claim
-these controllers on a Board's exposed pins:
+Chaque plateforme ESP32 fournit des entrées et sorties numériques, le GPIO, des
+périphériques SPI, des bus SPI, des sorties SPI et des périphériques I2C. Les
+E/S à l’exécution permettent aux scripts Lua de réserver ces contrôleurs sur les
+broches exposées d’une carte :
 
-| Platform | I2C | SPI | UART | ADC |
+| Plateforme | I2C | SPI | UART | ADC |
 | --- | --- | --- | --- | --- |
 | `esp32` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
 | `esp32s3` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
@@ -88,15 +92,16 @@ these controllers on a Board's exposed pins:
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
-ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, I2S audio
-streams, and capacitive touch.
+L’ESP32-S3 ajoute les périphériques quad SPI, les cartes SD/MMC, la capture
+caméra, les flux audio I2S et le tactile capacitif.
 
-## Boards
+## Cartes
 
-See every Board for each chip under **Boards** in the sidebar, or start from
+Retrouvez toutes les cartes de chaque puce sous **Boards** dans la barre
+latérale, ou commencez par
 [M5Stack CoreS3](/boards/supported/m5stack-cores3) (ESP32-S3),
 [ESP32-DevKitC V4](/boards/supported/esp32-devkitc-v4) (ESP32),
 [ESP32-C3-DevKitM-1](/boards/supported/esp32c3-devkitm-1) (ESP32-C3),
-[ESP32-C6-DevKitC-1](/boards/supported/esp32c6-devkitc-1) (ESP32-C6), and
+[ESP32-C6-DevKitC-1](/boards/supported/esp32c6-devkitc-1) (ESP32-C6) et
 [ESP32-P4-Function-EV-Board](/boards/supported/esp32p4-function-ev-board)
 (ESP32-P4).

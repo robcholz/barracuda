@@ -1,104 +1,66 @@
 ---
 title: "App API"
 sidebarTitle: "App API"
-description: "Learn what an installable app can count on from every device: packages, install checks, and versions."
+description: "インストール可能なアプリがどのデバイスでも頼りにできるもの、つまりパッケージ、インストール時のチェック、バージョンについて説明します。"
 ---
 
-The app API is what an installable app can count on from one device to the
-next: the Lua packages it may use, what it may ask the device, and the rules
-that keep both stable. It has two parts. The `app` package, this Plugin's,
-has a version, the **API level**; this system implements level 1, and an app
-names the level it is written for in its manifest's `api` (see
-[App format](/plugins/app-manager/app-format)). Every other package is whatever the
-device registers, each saying what it promises.
+App API は、インストール可能なアプリがデバイスをまたいで頼りにできるものです。使ってよい Lua パッケージ、デバイスに問い合わせてよいこと、そしてその両方を安定させるルールからなります。App API は 2 つの部分に分かれます。このプラグインの `app` パッケージには **API レベル** というバージョンがあります。このシステムはレベル 1 を実装しており、アプリは対象とするレベルをマニフェストの `api` で指定します（[アプリの形式](/ja/plugins/app-manager/app-format) を参照）。それ以外のパッケージは、デバイスが登録しているものがそのまま使え、それぞれが何を約束するかを自ら宣言します。
 
-System apps are not bound by the app API: they ship in the image and may
-`require` every package.
+システムアプリは App API に縛られません。イメージに同梱されており、すべてのパッケージを `require` できます。
 
-## Packages
+## パッケージ
 
-A Plugin that registers a Lua package declares what it promises with
-`LuaPackage::interface`, and the install screen's line for it. This Plugin
-reads those declarations from the `LuaPackageRegistry`; it names no other
-Plugin's package, so what a device offers apps is exactly what its enabled
-Plugins register. Each package's own Plugin documents its functions and the
-version each arrived in.
+Lua パッケージを登録するプラグインは、何を約束するかを `LuaPackage::interface` で宣言し、インストール画面に表示する説明も宣言します。このプラグインは、それらの宣言を `LuaPackageRegistry` から読み取ります。他のプラグインのパッケージ名を直接指定することはないので、デバイスがアプリに提供するものは、有効なプラグインが登録したものとちょうど一致します。各パッケージの関数と、それぞれがどのバージョンで追加されたかは、パッケージを提供するプラグインのページに記載されています。
 
-| Interface | How an app gets it | Same on every device |
+| インターフェース | アプリが入手する方法 | どのデバイスでも同じか |
 | --- | --- | --- |
-| Ambient | always, without asking | yes |
-| Stable, with a version | `requires` or `uses` in the manifest, as `name` or `name@version` | yes, where the device has it |
-| Board-specific | `permissions`, with `boards` | no: it talks to one Board's hardware |
-| None | `permissions` | no promise |
+| アンビエント | 常に、要求なしで | はい |
+| 安定、バージョン付き | マニフェストの `requires` または `uses` に、`name` または `name@version` として記述 | はい（デバイスが持っている場合） |
+| ボード固有 | `permissions` と `boards` | いいえ。特定のボードのハードウェアと通信します |
+| なし | `permissions` | 約束しません |
 
-A package that needs a Board device declares nothing while the Board lacks
-the device, so on such a Board an app that requires it is not installed.
+ボードのデバイスを必要とするパッケージは、ボードにそのデバイスがない間は何も宣言しません。そのため、そのようなボードでは、そのパッケージを必須とするアプリはインストールされません。
 
-This Plugin's own packages:
+このプラグイン自身のパッケージは次のとおりです。
 
-| Package | Interface | Lua API |
+| パッケージ | インターフェース | Lua API |
 | --- | --- | --- |
-| `app` | ambient, version 1 | the app itself: events, view, storage, `app.device()` ([App format](/plugins/app-manager/app-format#api)) |
-| `notify` | stable, version 2 | `notify.post`, `notify.ask` (below) |
+| `app` | アンビエント、バージョン 1 | アプリ自身: イベント、ビュー、ストレージ、`app.device()`（[アプリの形式](/ja/plugins/app-manager/app-format)） |
+| `notify` | 安定、バージョン 2 | `notify.post`、`notify.ask`（後述） |
 
 ### `notify`
 
-- `notify.post(title [, body]) -> id` adds a notice to the notification
-  center.
-- `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
-  a card listed before every notice and waits for the answer: `true` when
-  they allow it, `false` when they deny or dismiss it. From version 2,
-  `allow` and `deny` name the card's two buttons (default labels meaning Allow and Deny
-  unless given, at most 6 characters each), as in
-  `notify.ask("Lights on?", nil, "Now", "Later")`.
+- `notify.post(title [, body]) -> id` は、通知センターにお知らせを追加します。
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` は、どのお知らせよりも前に並ぶカードで相手に尋ね、回答を待ちます。許可されると `true`、拒否または閉じられると `false` を返します。バージョン 2 からは、`allow` と `deny` でカードの 2 つのボタンの名前を指定できます（指定しない場合は「許可」と「拒否」を意味する既定のラベルになり、それぞれ最大 6 文字）。例: `notify.ask("Lights on?", nil, "Now", "Later")`。
 
-Failures return `nil` and a message.
+失敗した場合は `nil` とメッセージを返します。
 
-## Install check
+## インストール時のチェック
 
-The system checks an offered app against the device before installing it,
-in this order, and stops at the first reason. `app.list` reports the reason
-as the app's `incompatible`; the install screen shows it and disables the
-install button; `app.install` answers `{"error": "incompatible", "reason": …}`.
+システムは、提示されたアプリをインストールする前に、次の順序でデバイスとの適合をチェックし、最初に見つかった理由で停止します。`app.list` はその理由をアプリの `incompatible` として報告し、インストール画面はそれを表示してインストールボタンを無効にします。`app.install` は `{"error": "incompatible", "reason": …}` を返します。
 
-| Check | What the reason says |
+| チェック | 理由の内容 |
 | --- | --- |
-| `api` is above the device's level | update the system: the app needs API 2, this device has 1 |
-| `boards` does not list this Board | only for espressif-esp-vocat-v1-2 (the listed Boards) |
-| the app has a view and the device no display | this device has no screen |
-| the display is smaller than `view.size` | the screen is too small: the app needs 480×480 |
-| `view.shape` is `rect` and the display is round | the app needs a square screen |
-| a package in `requires` is not a stable package here | this device has no notify |
-| its version here is below the one `requires` names | update the system: the app needs notify version 2, this device has version 1 |
-| a package in `permissions` is missing | this device does not support serial |
+| `api` がデバイスのレベルより高い | システムを更新してください。アプリには API 2 が必要ですが、このデバイスは 1 です |
+| `boards` にこのボードが含まれていない | espressif-esp-vocat-v1-2 専用です（列挙されたボード） |
+| アプリにビューがあり、デバイスにディスプレイがない | このデバイスには画面がありません |
+| ディスプレイが `view.size` より小さい | 画面が小さすぎます。アプリには 480×480 が必要です |
+| `view.shape` が `rect` で、ディスプレイが円形 | アプリには四角い画面が必要です |
+| `requires` のパッケージが、このデバイスで安定パッケージになっていない | このデバイスには notify がありません |
+| このデバイスでのバージョンが `requires` で指定したものより低い | システムを更新してください。アプリには notify バージョン 2 が必要ですが、このデバイスはバージョン 1 です |
+| `permissions` のパッケージがない | このデバイスは serial に対応していません |
 
-An installed app that no longer fits, after a Board or system change, does
-not open; `app.open` answers `incompatible`.
+インストール済みのアプリが、ボードやシステムの変更によって適合しなくなった場合は、開けなくなります。`app.open` は `incompatible` を返します。
 
-### Views and the display
+### ビューとディスプレイ
 
-A view is laid out at the display's size, not scaled: its root fills the
-display, and the layout is flexbox, so a view that fills its parent
-(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
-right-[40px]`), and centers with `justify-center` fits displays of other
-sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits, and a round view, one that keeps to the inscribed circle,
-fits a rectangular display too; a `rect` view does not fit a round one,
-whose corners it would lose. Text keeps its size: font slots are baked at
-fixed pixel sizes. A view that needs the display's size reads it from
-`app.device().display`.
+ビューはスケーリングされず、ディスプレイのサイズでレイアウトされます。ルートがディスプレイ全体を占め、レイアウトは flexbox です。そのため、親を埋め（`w-full`、`h-full`）、両側の余白で列の間隔を取り（`left-[40px] right-[40px]`）、`justify-center` で中央に寄せたビューは、他のサイズのディスプレイにも収まります。固定サイズは書いたとおりのままです。`view.size` は、そのビューが収まる最小のディスプレイを表します。円形のビュー、つまり内接円の中に収まるビューは、長方形のディスプレイにも収まります。`rect` のビューは円形のディスプレイには収まりません。四隅が欠けてしまうためです。テキストのサイズは変わりません。フォントのスロットは固定のピクセルサイズで組み込まれています。ディスプレイのサイズが必要なビューは、`app.device().display` から読み取ります。
 
-## Runs
+## 実行
 
-A run of an installable app may `require` the ambient packages and every
-package its manifest names in `requires`, `uses`, and `permissions`. A
-package the app did not name is not there, and `require` fails. A package in
-`uses` may be missing or older than the app would like: check
-`app.device().capabilities` before requiring it, or call
-`pcall(require, name)`.
+インストール可能なアプリの実行では、アンビエントのパッケージと、マニフェストの `requires`、`uses`、`permissions` で指定したすべてのパッケージを `require` できます。アプリが指定していないパッケージは存在せず、`require` は失敗します。`uses` のパッケージは、存在しないか、アプリが望むより古い場合があります。`require` する前に `app.device().capabilities` を確認するか、`pcall(require, name)` を呼び出してください。
 
-`app.device()` describes the device; `capabilities` maps each stable package
-to its version:
+`app.device()` はデバイスを表し、`capabilities` は各安定パッケージをそのバージョンに対応付けます。
 
 ```lua
 {
@@ -110,15 +72,10 @@ to its version:
 }
 ```
 
-## Versioning
+## バージョン管理
 
-- A stable package's interface never changes once it is declared: no
-  function is removed, renamed, or given other arguments or results.
-- Adding functions raises the package's version; its Plugin documents what
-  each version added.
-- An incompatible change is a new package with a new name; the old one
-  stays.
-- The `app` package follows the same rules with the API level as its
-  version.
-- A Board-specific package, or one that promises nothing, may change with any
-  system update; that is why apps that use them name their Boards.
+- 安定パッケージのインターフェースは、一度宣言したら変わりません。関数の削除、名前の変更、引数や戻り値の変更は行いません。
+- 関数を追加すると、パッケージのバージョンが上がります。各バージョンで何が追加されたかは、そのプラグインが記載します。
+- 互換性のない変更は、新しい名前の新しいパッケージになります。古いパッケージは残ります。
+- `app` パッケージも同じルールに従い、API レベルをバージョンとします。
+- ボード固有のパッケージや何も約束しないパッケージは、システムの更新のたびに変わる可能性があります。そのため、それらを使うアプリは対象のボードを指定します。

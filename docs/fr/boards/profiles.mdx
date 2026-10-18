@@ -1,33 +1,34 @@
 ---
-title: "Board profiles"
-description: "Choose which Plugins a firmware contains with layered profiles, or add a new one."
+title: "Profils de carte"
+description: "Choisissez les Plugins que contient un firmware grâce à des profils en couches, ou ajoutez-en un nouveau."
 tag: "NEW"
 ---
 
-A profile names the Plugins a firmware contains. Every Board builds one
-profile: the one its `board.yml` names, or `headless` when it names none.
-A Plugin that no profile and no Board enables is not in the firmware at all:
-no code, no settings, no text.
+Un profil nomme les Plugins que contient un firmware. Chaque carte compile un
+profil : celui que nomme son `board.yml`, ou `headless` s’il n’en nomme aucun.
+Un Plugin qu’aucun profil ni aucune carte n’active est totalement absent du
+firmware : ni code, ni réglages, ni texte.
 
-The rules (how the enabled set is computed, what fails, the local override)
-are in [`plugin-api.md`](/architecture/plugin-api#enablement-per-board).
-This page says which profiles exist and how to pick or add one.
+Les règles (calcul de l’ensemble activé, cas d’échec, surcharge locale) se
+trouvent dans [`plugin-api.md`](/architecture/plugin-api#enablement-per-board).
+Cette page indique quels profils existent et comment en choisir ou en ajouter
+un.
 
-## The profiles
+## Les profils
 
-The profiles are layers. Each one adds Plugins to the ones it extends, and
-the dependencies of every listed Plugin come along on their own.
+Les profils sont des couches. Chacun ajoute des Plugins à ceux qu’il étend, et
+les dépendances de chaque Plugin listé suivent d’elles-mêmes.
 
-| Profile | Extends | Adds | Network | Lua |
+| Profil | Étend | Ajoute | Réseau | Lua |
 | --- | --- | --- | --- | --- |
-| `minimal` | — | workflows, time, the scheduler, power, sound | no | no |
-| `lua` | `minimal` | the VM and the Lua packages that need no network, among them those for the Board's hardware | no | yes |
-| `network` | `minimal` | Wi-Fi, the web server, the captive portal, HTTP, the portal's file manager | yes | no |
-| `ai` | `network` | the Agent, its tools, and the message gateways | yes | no |
-| `headless` | `lua`, `ai` | the Lua packages that need the network or the Agent | yes | yes |
-| `ui` | — | the app manager with the system UI, the system fonts, the Files and Workflows apps | no | yes |
-| `screen-offline` | `lua`, `ui` | nothing more | no | yes |
-| `screen` | `headless`, `ui` | Wi-Fi in the system UI, installing apps from the portal, the Sessions and Settings apps | yes | yes |
+| `minimal` | — | les workflows, l’heure, le planificateur, l’alimentation, le son | non | non |
+| `lua` | `minimal` | la VM et les paquets Lua qui n’ont pas besoin du réseau, dont ceux du matériel de la carte | non | oui |
+| `network` | `minimal` | le Wi-Fi, le serveur web, le portail captif, HTTP, le gestionnaire de fichiers du portail | oui | non |
+| `ai` | `network` | l’Agent, ses outils et les passerelles de messagerie | oui | non |
+| `headless` | `lua`, `ai` | les paquets Lua qui ont besoin du réseau ou de l’Agent | oui | oui |
+| `ui` | — | le gestionnaire d’applications avec l’interface système, les polices système, les applications Files et Workflows | non | oui |
+| `screen-offline` | `lua`, `ui` | rien de plus | non | oui |
+| `screen` | `headless`, `ui` | le Wi-Fi dans l’interface système, l’installation d’applications depuis le portail, les applications Sessions et Settings | oui | oui |
 
 ```text
                  minimal
@@ -43,15 +44,16 @@ the dependencies of every listed Plugin come along on their own.
        screen-offline = lua + ui
 ```
 
-`ui` is a layer, not a product: it has no Lua packages for the hardware and
-no way online. A Board with a screen names `screen` or `screen-offline`.
+`ui` est une couche, pas un produit : il n’a ni paquets Lua pour le matériel, ni
+accès au réseau. Une carte dotée d’un écran nomme `screen` ou `screen-offline`.
 
-`screen-offline` has no Settings or Sessions app: Settings depends on Wi-Fi
-and Sessions on the Agent. Volume and brightness are in the control center.
+`screen-offline` n’a pas d’application Settings ni Sessions : Settings dépend du
+Wi-Fi et Sessions de l’Agent. Le volume et la luminosité se trouvent dans le
+centre de contrôle.
 
-## Picking one
+## En choisir un
 
-A Board names its profile in `board.yml`:
+Une carte nomme son profil dans `board.yml` :
 
 ```yaml
 profile: screen-offline
@@ -60,17 +62,18 @@ plugins:
     enabled: false
 ```
 
-- A product with a screen names `screen`, or `screen-offline` when it never
-  goes online.
-- A product without one names nothing and builds `headless`, or a narrower
-  layer: `minimal`, `lua`, `network`, or `ai`.
-- One Plugin more or less goes in `plugins.<id>.enabled` on the Board, not in
-  a new profile.
+- Un produit avec écran nomme `screen`, ou `screen-offline` s’il ne se connecte
+  jamais au réseau.
+- Un produit sans écran ne nomme rien et compile `headless`, ou une couche plus
+  étroite : `minimal`, `lua`, `network` ou `ai`.
+- Un Plugin de plus ou de moins se règle dans `plugins.<id>.enabled` sur la
+  carte, pas dans un nouveau profil.
 
-## Adding one
+## En ajouter un
 
-A new profile is a file here. Name it for what the product does, extend the
-layers it builds on, and list only what it adds:
+Un nouveau profil est un fichier sous `boards/profiles/`. Nommez-le d’après ce que
+fait le produit, étendez les couches sur lesquelles il s’appuie et ne listez que
+ce qu’il ajoute :
 
 ```yaml
 # boards/profiles/gateway.yml
@@ -81,9 +84,10 @@ enable:
   - imessage-telegram
 ```
 
-`extends` takes one profile or a list; a profile reached twice counts once,
-and a profile that extends itself fails. `enable` only adds: a narrower
-product extends a narrower layer instead of removing Plugins.
+`extends` accepte un profil ou une liste ; un profil atteint deux fois ne compte
+qu’une fois, et un profil qui s’étend lui-même échoue. `enable` ne fait
+qu’ajouter : un produit plus étroit étend une couche plus étroite au lieu de
+retirer des Plugins.
 
-Run `cargo plugin sync` after changing a profile or a Board, and
-`cargo plugin sync --check` before committing.
+Lancez `cargo plugin sync` après avoir modifié un profil ou une carte, et
+`cargo plugin sync --check` avant de committer.

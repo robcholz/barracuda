@@ -1,141 +1,94 @@
 ---
-title: "The experience ladder"
-sidebarTitle: "The ladder"
-description: "The six levels of Barracuda, from out of the box to fully custom firmware, and where each one starts in the docs."
+title: "体験のはしご"
+sidebarTitle: "体験のはしご"
+description: "そのまま使う段階から完全にカスタムなファームウェアまで、Barracuda の 6 つの段階と、それぞれのドキュメント上の出発点を紹介します。"
 ---
 
-Barracuda is experienced as a ladder. Each level asks a little more of the
-person and gives them much more freedom. Every level is useful on its own; no
-one has to climb higher than their project needs. At every level an agent does
-the heavy lifting.
+Barracuda は、はしごを上るように体験していきます。段階が上がるごとに求められることは少しずつ増え、得られる自由は大きく広がります。どの段階もそれ自体で役に立つので、プロジェクトに必要な段階より上に進む必要はありません。どの段階でも、大変な作業は Agent が引き受けます。
 
-| Level | Name | Who | What they do | Where | Agent | Start here |
+| 段階 | 名前 | 対象 | やること | 場所 | Agent | 出発点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts | [Device Portal](/use/device-portal) |
-| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) | [Board profiles](/boards/profiles) |
-| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent | [Device UI](/architecture/device-ui) |
-| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill | [Write a Plugin](/develop/write-a-plugin) |
-| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills | [Boards](/boards/overview) |
-| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill | [Custom firmware](/develop/custom-firmware) |
+| 1 | そのまま使う | すべての人 | ブラウザからインストールし、ボードに作業を頼む | ブラウザ、スマートフォン、デバイス | オンボード Agent が VM スクリプトを書いて実行します | [デバイスポータル](/ja/use/device-portal) |
+| 2 | 構成 | メイカー、教育者 | ファームウェアに入れるプラグインを選び、ビルドして書き込む | 開発者のマシン | —（生成ではなく設定） | [ボードプロファイル](/ja/boards/profiles) |
+| 3 | アプリを作る | アプリ開発者 | アプリを説明し、ロジックと UI を生成して書き込む | Live Editor（ブラウザ） | ブラウザ内の Agent | [デバイス UI](/ja/architecture/device-ui) |
+| 4 | プラグインを作る | プラグイン開発者 | ランタイムに新しい機能を追加する | 開発者のマシン | コーディング Agent + `create-plugin` skill | [プラグインを書く](/ja/develop/write-a-plugin) |
+| 5 | ボードとプラットフォームを追加する | コントリビューター、ボードベンダー | 新しいボードや新しいチップファミリーに Barracuda を移植する | 開発者のマシン | コーディング Agent + `create-board`、`create-platform` skill | [ボード](/boards/overview) |
+| 6 | 完全にカスタマイズする | ビルダー | プラットフォームとボードを選ぶか作成し、プラグインを削るか作成し、ファームウェアをリソース予算に合わせる | 開発者のマシン | コーディング Agent + `fully-customize` skill | [カスタムファームウェア](/ja/develop/custom-firmware) |
 
-## Level 1 — Out of the box
+## 段階 1: そのまま使う
 
-**In the docs:** [Device Portal](/use/device-portal) · [Channels](/use/channels) · [Scripts](/use/scripts) · [Automations](/use/automations)
+**ドキュメント:** [デバイスポータル](/ja/use/device-portal) · [チャネル](/ja/use/channels) · [スクリプト](/ja/use/scripts) · [オートメーション](/ja/use/automations)
 
-**Goal:** a working, talking, acting device in minutes, with no toolchain.
+**目標:** ツールチェーンなしで、数分のうちに会話して行動するデバイスを動かします。
 
-1. Open the Web Installer, choose a board and a version, plug in USB, install.
-   Each board gets a default firmware with a default Plugin set.
-2. Join Wi-Fi from the same page; the installer hands off to the Device Portal.
-3. Register a model and bind a channel (WeChat, Telegram, QQ, iMessage, web chat,
-   or the terminal).
-4. Ask the board for something physical: "blink the LED twice a second",
-   "show the temperature on the screen", "tell me when the light level drops".
+1. Web インストーラーを開き、ボードとバージョンを選び、USB を接続してインストールします。各ボードには、既定のプラグインの組み合わせを持つ既定のファームウェアが用意されています。
+2. 同じページから Wi-Fi に接続します。インストーラーからデバイスポータルに引き継がれます。
+3. モデルを登録し、チャネル（WeChat、Telegram、QQ、iMessage、Web チャット、ターミナル）を紐付けます。
+4. ボードに物理的な操作を頼みます。たとえば「LED を 1 秒に 2 回点滅させて」「画面に温度を表示して」「明るさが下がったら教えて」などです。
 
-The on-board agent answers by writing a short VM script and running it against
-the real hardware immediately. The script, its output, and its result appear in
-the conversation. Long-running behavior is kept alive by Workflow automations
-and schedules, so the device keeps working after the chat ends.
+オンボード Agent は短い VM スクリプトを書き、すぐに実際のハードウェアに対して実行することで応えます。スクリプト、その出力、結果は会話の中に表示されます。長く続ける動作は Workflow のオートメーションとスケジュールが動かし続けるので、チャットが終わった後もデバイスは働き続けます。
 
-**What makes it work:** the Web Installer, the Device Portal, the on-board
-Agent, the VM and its peripheral packages, channels, Workflow.
+**支える仕組み:** Web インストーラー、デバイスポータル、オンボード Agent、VM とそのペリフェラルパッケージ、チャネル、Workflow。
 
-## Level 2 — Configure
+## 段階 2: 構成
 
-**In the docs:** [Board profiles](/boards/profiles) · [Build and run](/get-started/build-and-run) · [CLI](/reference/cli)
+**ドキュメント:** [ボードプロファイル](/ja/boards/profiles) · [ビルドと実行](/ja/get-started/build-and-run) · [CLI](/ja/reference/cli)
 
-**Goal:** make the device fit the project by choosing its Plugins, without
-writing code.
+**目標:** コードを書かずに、プラグインを選んでデバイスをプロジェクトに合わせます。
 
-Plugins are compiled into the firmware, so the Plugin set is chosen on the
-developer's machine. Select the Board, choose the Plugins the project needs —
-camera, display, LED strip, sensors, web search, a messaging channel — leave out
-the rest, then build and flash. There are three ways to choose:
+プラグインはファームウェアに組み込まれてコンパイルされるので、プラグインの組み合わせは開発者のマシンで選びます。ボードを選び、プロジェクトに必要なプラグイン（カメラ、ディスプレイ、LED ストリップ、センサー、Web 検索、メッセージングのチャネルなど）を選んで残りを外し、ビルドして書き込みます。選び方は 3 つあります。
 
-- an interactive command that lists the Plugins to pick from;
-- a configuration file that lists the enabled Plugins, for projects kept in
-  version control;
-- the developer's coding agent, which picks the Plugins for a stated need and
-  builds the firmware.
+- 選択肢のプラグインを一覧表示する対話型のコマンド
+- 有効なプラグインを列挙する設定ファイル（バージョン管理するプロジェクト向け）
+- 開発者のコーディング Agent。要件を伝えるとプラグインを選び、ファームウェアをビルドします
 
-A Plugin that is left out costs no memory, flash,
-or tasks. On the device, every Plugin brings its own page in the Device Portal,
-so each capability arrives with its own settings.
+外したプラグインは、メモリーもフラッシュもタスクも消費しません。デバイス上では、各プラグインがデバイスポータルに専用のページを持ち込むので、どの機能も専用の設定画面と一緒に届きます。
 
-**What makes it work:** Plugin declarations, the host build, per-Plugin portal
-pages.
+**支える仕組み:** プラグインの宣言、ホストでのビルド、プラグインごとのポータルページ。
 
-## Level 3 — Build apps
+## 段階 3: アプリを作る
 
-**In the docs:** [Device UI](/architecture/device-ui) · [App format](/plugins/app-manager/app-format) · [App API](/plugins/app-manager/app-api) · [PocketJS](/plugins/app-manager/pocketjs)
+**ドキュメント:** [デバイス UI](/ja/architecture/device-ui) · [アプリの形式](/ja/plugins/app-manager/app-format) · [App API](/ja/plugins/app-manager/app-api) · [PocketJS](/ja/plugins/app-manager/pocketjs)
 
-**Goal:** a real device application with its own UI, without setting up a
-firmware project.
+**目標:** ファームウェアのプロジェクトを用意せずに、独自の UI を持つ本物のデバイスアプリケーションを作ります。
 
-In the Live Editor, the developer describes the app. The in-browser agent
-generates the app logic and its interface, the developer previews and iterates
-visually, and then flashes it to the board over USB from the same page. Apps run
-on the device under the App Manager Plugin, which installs, starts, stops, and
-updates them alongside the rest of the runtime.
+Live Editor で、開発者がアプリを説明します。ブラウザ内の Agent がアプリのロジックとインターフェースを生成し、開発者はプレビューを見ながら視覚的に改良を重ね、同じページから USB 経由でボードに書き込みます。アプリはデバイス上で App Manager プラグインのもとで動きます。App Manager は、ランタイムの他の部分と並んでアプリのインストール、起動、停止、更新を行います。
 
-**What makes it work:** the Live Editor, the in-browser agent, the App Manager
-Plugin, the app runtime, browser flashing.
+**支える仕組み:** Live Editor、ブラウザ内の Agent、App Manager プラグイン、アプリランタイム、ブラウザからの書き込み。
 
-## Level 4 — Create Plugins
+## 段階 4: プラグインを作る
 
-**In the docs:** [Write a Plugin](/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [All Plugins](/plugins/overview)
+**ドキュメント:** [プラグインを書く](/ja/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [すべてのプラグイン](/plugins/overview)
 
-**Goal:** add a new capability to Barracuda that any device can use.
+**目標:** どのデバイスでも使える新しい機能を Barracuda に追加します。
 
-The developer clones the repository and asks their coding agent — Claude Code,
-Cursor, or Codex — to create a Plugin. The `create-plugin` skill gives the agent
-Barracuda's architecture: when to expose a typed capability, a Workflow Action or
-Event, or an Agent Tool; how lifecycle and task ownership work; how the Plugin
-documents itself; and which focused tests to write. The result is a Plugin that
-looks like every first-party Plugin.
+開発者はリポジトリをクローンし、コーディング Agent（Claude Code、Cursor、Codex）にプラグインの作成を頼みます。`create-plugin` skill は Agent に Barracuda のアーキテクチャを伝えます。型付きケイパビリティ、Workflow の Action や Event、Agent Tool のどれを公開すべきか、ライフサイクルとタスクの所有がどう機能するか、プラグインが自身をどう文書化するか、どんなテストを書くべきかです。その結果、公式のプラグインと同じ形のプラグインができあがります。
 
-**What makes it work:** the Plugin contract, `plugin.toml`, agent-friendly API
-conventions, the `create-plugin` skill, per-Plugin docs.
+**支える仕組み:** プラグインの契約、`plugin.toml`、Agent にやさしい API の規約、`create-plugin` skill、プラグインごとのドキュメント。
 
-## Level 5 — Add Boards and Platforms
+## 段階 5: ボードとプラットフォームを追加する
 
-**In the docs:** [Boards](/boards/overview) · [Peripherals](/boards/peripherals) · [Platform architecture](/architecture/platform-architecture)
+**ドキュメント:** [ボード](/boards/overview) · [ペリフェラル](/boards/peripherals) · [プラットフォームアーキテクチャ](/architecture/platform-architecture)
 
-**Goal:** bring Barracuda to new hardware.
+**目標:** 新しいハードウェアで Barracuda を動かします。
 
-- **A new Board** on a supported chip is a description: chip, toolchain target,
-  flash layout, and peripherals. The `create-board` skill produces it and its
-  layout, and the board appears in the Web Installer.
-- **A new Platform** brings a new chip family: executor entry, network stack,
-  filesystem, flash, and HAL adapters behind the Platform contract. The
-  `create-platform` skill guides the agent through that contract while keeping
-  the System and every Plugin unchanged.
+- サポート済みのチップ上の **新しいボード** は、記述だけで済みます。チップ、ツールチェーンのターゲット、フラッシュのレイアウト、ペリフェラルです。`create-board` skill がその記述とレイアウトを作成し、ボードは Web インストーラーに表示されるようになります。
+- **新しいプラットフォーム** は、新しいチップファミリーをもたらします。エグゼキューターのエントリー、ネットワークスタック、ファイルシステム、フラッシュ、HAL アダプターを、プラットフォーム契約の背後に実装します。`create-platform` skill は、System とすべてのプラグインを変えずに、この契約に沿って Agent を導きます。
 
-**What makes it work:** the Board YAML and Platform contract, independent Board
-and Platform selection, the `create-board` and `create-platform` skills.
+**支える仕組み:** ボードの YAML とプラットフォーム契約、ボードとプラットフォームの独立した選択、`create-board` と `create-platform` の skill。
 
-## Level 6 — Fully customize
+## 段階 6: 完全にカスタマイズする
 
-**In the docs:** [Custom firmware](/develop/custom-firmware)
+**ドキュメント:** [カスタムファームウェア](/ja/develop/custom-firmware)
 
-**Goal:** a product firmware shaped exactly to a chip, a resource budget, and a
-job.
+**目標:** チップ、リソース予算、用途にぴったり合わせた製品ファームウェアを作ります。
 
-The builder states the target and the requirements. With the `fully-customize`
-skill, the coding agent selects or creates the Platform and Board, chooses the
-Plugin set, trims Plugins that are too heavy for the budget, creates the ones
-that are missing, and verifies that the result fits the device's memory and
-flash. The output is a firmware that contains only what the product needs.
+ビルダーがターゲットと要件を伝えます。`fully-customize` skill を使うと、コーディング Agent がプラットフォームとボードを選ぶか作成し、プラグインの組み合わせを選び、予算に対して重すぎるプラグインを削り、足りないものを作成し、結果がデバイスのメモリーとフラッシュに収まることを確認します。出来上がるのは、製品に必要なものだけを含むファームウェアです。
 
-**What makes it work:** every level below it — Plugins, Boards, Platforms, and
-the skills that create them — composed by one agent with one goal.
+**支える仕組み:** これより下のすべての段階（プラグイン、ボード、プラットフォーム、それらを作成する skill）を、1 つの Agent が 1 つの目標のもとに組み合わせます。
 
-## Moving between levels
+## 段階間の移動
 
-- Every level hands off to the next one with something concrete: the script the
-  on-board agent wrote can become an app; an app that needs a new capability
-  becomes a Plugin; a Plugin that needs new hardware becomes a Board.
-- Nothing at a higher level breaks a lower one. A fully customized firmware still
-  installs from the browser, still has a Device Portal, and its on-board agent
-  still writes scripts.
-- The docs are organized by level, so each reader starts where they are.
+- どの段階も、具体的な成果物を次の段階に引き渡します。オンボード Agent が書いたスクリプトはアプリになり、新しい機能を必要とするアプリはプラグインになり、新しいハードウェアを必要とするプラグインはボードになります。
+- 上の段階での作業が下の段階を壊すことはありません。完全にカスタマイズしたファームウェアでも、ブラウザからインストールでき、デバイスポータルがあり、オンボード Agent はスクリプトを書きます。
+- ドキュメントは段階ごとに構成されているので、読者は自分のいる段階から始められます。

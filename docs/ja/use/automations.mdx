@@ -1,21 +1,16 @@
 ---
-title: "Automations"
-description: "Keep the device working after the chat ends with Workflow automations and schedules."
+title: "オートメーション"
+description: "Workflow のオートメーションとスケジュールで、チャットが終わった後もデバイスを動かし続けます。"
 ---
 
-A script runs while you talk to the Agent. An automation keeps running after the
-conversation ends: "every morning at seven", "when a message arrives", "when a
-schedule comes due". Ask the Agent for one in plain language.
+スクリプトは Agent と会話している間だけ動きます。オートメーションは会話が終わった後も動き続けます。たとえば「毎朝 7 時に」「メッセージが届いたら」「スケジュールの時刻になったら」といったものです。Agent にふだんの言葉で頼めば作成できます。
 
-| Piece | Plugin | What it does |
+| 要素 | プラグイン | 役割 |
 | --- | --- | --- |
-| Workflow | [`workflow`](/plugins/workflow) | Stores automations durably, matches Events, and runs Actions |
-| Schedules | [`scheduler`](/plugins/scheduler) | Keeps persistent schedules and emits an Event when one is due |
-| Agent tools | [`agent-workflow`](/plugins/agent-workflow), [`agent-scheduler`](/plugins/agent-scheduler) | Let the Agent list, load, unload, and switch automations, and schedule or cancel events |
+| Workflow | [`workflow`](/plugins/workflow) | オートメーションを永続的に保存し、Event を照合して Action を実行します |
+| スケジュール | [`scheduler`](/plugins/scheduler) | 永続的なスケジュールを保持し、時刻になると Event を発行します |
+| Agent のツール | [`agent-workflow`](/plugins/agent-workflow)、[`agent-scheduler`](/plugins/agent-scheduler) | Agent がオートメーションを一覧・ロード・アンロード・切り替えし、イベントをスケジュールまたはキャンセルできるようにします |
 
-The Agent's Workflow tools are `workflow_actions`, `workflow_list`,
-`workflow_load`, `workflow_unload`, and `workflow_switch`; its scheduling tools
-are `scheduler_schedule` and `scheduler_cancel`.
+Agent の Workflow ツールは `workflow_actions`、`workflow_list`、`workflow_load`、`workflow_unload`、`workflow_switch` で、スケジュール用のツールは `scheduler_schedule` と `scheduler_cancel` です。
 
-Every Plugin documents the Workflow Actions and Events it adds on its page under
-[Plugins](/plugins/overview).
+各プラグインが追加する Workflow の Action と Event は、[プラグイン](/plugins/overview) 配下のそれぞれのページに記載されています。

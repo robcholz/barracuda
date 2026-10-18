@@ -1,15 +1,12 @@
 ---
-title: "Scripts"
-description: "Ask for something physical and the on-board Agent writes a Lua script and runs it on the hardware."
+title: "脚本"
+description: "提出一个涉及物理世界的请求，板上 Agent 就会编写 Lua 脚本并在硬件上运行。"
 ---
 
-When a request touches the physical world, the on-board Agent writes a short Lua
-script and runs it in the device's VM with its `vm_run` tool. The script reads
-and drives the real peripherals the moment it runs, and its output comes back
-into the conversation.
+当请求涉及物理世界时，板上 Agent 会编写一段简短的 Lua 脚本，并用它的 `vm_run` 工具在设备的 VM 中运行。脚本一运行就会读取并驱动真实的外设，输出会回到对话中。
 
 ```txt
-> Set pin vio-0 high
+> 把引脚 vio-0 设为高电平
 ```
 
 ```lua
@@ -18,34 +15,28 @@ local pin = gpio.open_output("vio-0", true, "push-pull")
 print("vio-0 is high")
 ```
 
-## What scripts can use
+## 脚本可以使用什么
 
-Each Lua package comes from its own Plugin, so a script can use exactly what the
-firmware carries.
+每个 Lua 包都来自它自己的插件，所以脚本能用的正好是固件所带的内容。
 
-| Package | Plugin | For |
+| Lua 包 | 插件 | 用途 |
 | --- | --- | --- |
-| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | Digital inputs and outputs on the Board's exposed pins |
-| `i2c`, `spi`, `uart` | [`vm-i2c`](/plugins/vm-i2c), [`vm-spi`](/plugins/vm-spi), [`vm-uart`](/plugins/vm-uart) | Buses |
-| `pwm`, `analog`, `i2s` | [`vm-pwm`](/plugins/vm-pwm), [`vm-analog`](/plugins/vm-analog), [`vm-i2s`](/plugins/vm-i2s) | PWM outputs, analog inputs, and I2S audio streams |
-| `display`, `camera`, `audio` | [`vm-display`](/plugins/vm-display), [`vm-camera`](/plugins/vm-camera), [`vm-audio`](/plugins/vm-audio) | Screens, cameras, and sound |
-| `motion`, `light`, `power_monitor` | [`vm-imu`](/plugins/vm-imu), [`vm-led-strip`](/plugins/vm-led-strip), [`vm-power-monitor`](/plugins/vm-power-monitor) | Motion sensing, LED strips, and power |
-| `http`, `filesystem`, `message_queue` | [`vm-http`](/plugins/vm-http), [`vm-filesystem`](/plugins/vm-filesystem), [`vm-message-queue`](/plugins/vm-message-queue) | Requests, files, and queues |
-| `agent` | [`vm-agent`](/plugins/vm-agent) | Ask the Agent a question from inside a script |
-| `time` | [`vm-time`](/plugins/vm-time) | UTC time through `os.time` and `os.date` |
+| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | 开发板可用引脚上的数字输入和输出 |
+| `i2c`、`spi`、`uart` | [`vm-i2c`](/plugins/vm-i2c)、[`vm-spi`](/plugins/vm-spi)、[`vm-uart`](/plugins/vm-uart) | 总线 |
+| `pwm`、`analog`、`i2s` | [`vm-pwm`](/plugins/vm-pwm)、[`vm-analog`](/plugins/vm-analog)、[`vm-i2s`](/plugins/vm-i2s) | PWM 输出、模拟输入和 I2S 音频流 |
+| `display`、`camera`、`audio` | [`vm-display`](/plugins/vm-display)、[`vm-camera`](/plugins/vm-camera)、[`vm-audio`](/plugins/vm-audio) | 屏幕、摄像头和声音 |
+| `motion`、`light`、`power_monitor` | [`vm-imu`](/plugins/vm-imu)、[`vm-led-strip`](/plugins/vm-led-strip)、[`vm-power-monitor`](/plugins/vm-power-monitor) | 运动感应、LED 灯带和电源 |
+| `http`、`filesystem`、`message_queue` | [`vm-http`](/plugins/vm-http)、[`vm-filesystem`](/plugins/vm-filesystem)、[`vm-message-queue`](/plugins/vm-message-queue) | 网络请求、文件和队列 |
+| `agent` | [`vm-agent`](/plugins/vm-agent) | 在脚本中向 Agent 提问 |
+| `time` | [`vm-time`](/plugins/vm-time) | 通过 `os.time` 和 `os.date` 获取 UTC 时间 |
 
-Each package's page lists its Lua API. The [VM](/plugins/vm) page covers the runtime itself.
+每个 Lua 包的页面都列出了它的 Lua API。[VM](/plugins/vm) 页面介绍运行时本身。
 
-## Long-running scripts
+## 长时间运行的脚本
 
-`vm_run` runs in the Agent's background pool, so the conversation continues
-while a script runs.
+`vm_run` 在 Agent 的后台池中运行，所以脚本运行时对话可以继续。
 
-- A script that calls `io.read()` pauses and asks you for input; your reply is
-  fed back to it.
-- The Agent lists, answers, and cancels running scripts with its
-  `background_list`, `background_input`, and `background_cancel` tools. Ask it
-  to stop a script and it cancels the run.
+- 调用 `io.read()` 的脚本会暂停并向你索要输入；你的回复会被传回给它。
+- Agent 用 `background_list`、`background_input` 和 `background_cancel` 工具列出、回应和取消正在运行的脚本。让它停止某个脚本，它就会取消这次运行。
 
-For behavior that must outlive the conversation, such as "every morning at
-seven", the Agent uses [Automations](/use/automations).
+对于必须在对话结束后继续存在的行为（例如“每天早上七点”），Agent 会使用[自动化](/zh/use/automations)。

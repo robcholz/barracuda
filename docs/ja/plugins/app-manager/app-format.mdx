@@ -1,38 +1,24 @@
 ---
-title: "App Format"
-sidebarTitle: "App format"
-description: "Package an app: its container locations, manifest, Lua program, and views."
+title: "アプリの形式"
+sidebarTitle: "アプリの形式"
+description: "アプリをパッケージにする方法を説明します。コンテナの置き場所、マニフェスト、Lua プログラム、ビューを扱います。"
 ---
 
-This is the format of an app container, version 1. The `app-manager` Plugin loads any
-container in this format from each of its locations, so a container written
-by the image build, the portal, or an Agent is the same thing; where it lives
-decides what kind of app it is (see
-[Device UI](/architecture/device-ui)).
-`crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
-rules below. What an app may use, and how a device decides it fits, is the
-app API, in [App API](/plugins/app-manager/app-api).
+ここでは、アプリコンテナの形式（バージョン 1）を説明します。`app-manager` プラグインは、この形式のコンテナをそれぞれの置き場所から読み込みます。そのため、イメージのビルド、ポータル、Agent のどれが書いたコンテナも同じものです。置き場所によってアプリの種類が決まります（[デバイス UI](/ja/architecture/device-ui) を参照）。以下のマニフェストのルールを機械可読な形にしたものが `crates/appkit/resources/app-manifest.json` です。アプリが何を使えるか、そしてデバイスがアプリとの適合をどう判断するかは App API で定められており、[App API](/ja/plugins/app-manager/app-api) に記載されています。
 
-## Locations
+## 置き場所
 
-| Location    | Directory                     | Written by                            | Holds |
+| 置き場所    | ディレクトリ                     | 書き込むもの                            | 内容 |
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
-| `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
-| `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `builtin`   | 同梱するプラグインの `/resources/app/` | イメージのビルド（読み取り専用） | システムアプリ |
+| `installed` | `/media/apps/<id>/`           | インストール時の `app-manager` プラグイン（非公開） | インストール可能なアプリ |
+| `workspace` | `/workspace/media/apps/<id>/` または `<id>.bapp` | ポータル、Agent、その他のプラグイン（共有の Workspace） | インストール用に提示されたアプリ |
 
-A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
-own scope holds the other two; it only reads the Workspace. Builtin and
-installed apps are launchable; a Workspace container is an offer. Installing it copies
-the manifest and the files it names into `/media/apps/<id>/`, replacing an
-installed app at another version. A system app's ID belongs to it: no
-container elsewhere may use it, and `app.list` reports one that does as
-invalid.
+組み込みアプリのプラグインは自身のファイルシステムを `app-manager` プラグインに渡し、残りの 2 つは `app-manager` プラグイン自身のスコープにあります。Workspace は読み取るだけです。組み込みアプリとインストール済みのアプリは起動できますが、Workspace のコンテナは提示にすぎません。インストールすると、マニフェストとそこに記載されたファイルが `/media/apps/<id>/` にコピーされ、別のバージョンのインストール済みアプリは置き換えられます。システムアプリの ID はそのアプリ専用です。他の場所にあるコンテナはその ID を使えず、使っている場合は `app.list` が無効として報告します。
 
-## Container
+## コンテナ
 
-A container is a directory named after the app ID, holding a manifest and the
-files it names, side by side:
+コンテナは、アプリ ID を名前とするディレクトリで、マニフェストとそこに記載されたファイルを並べて置きます。
 
 ```text
 <id>/
@@ -43,14 +29,11 @@ files it names, side by side:
   font-1.bin …      its baked font atlases       ┘
 ```
 
-Other files are ignored. Directories whose names start with `.` are skipped.
+それ以外のファイルは無視されます。名前が `.` で始まるディレクトリはスキップされます。
 
-## Packages
+## パッケージ
 
-In the Workspace an app may also be offered as one file,
-`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
-signed. An ID offered both as a directory and as a package is invalid.
-`resources/pack-app.ts` writes packages:
+Workspace では、アプリを 1 つのファイル `/workspace/media/apps/<id>.bapp` として提示することもできます。このファイルは同じファイル群を含み、署名することもできます。同じ ID がディレクトリとパッケージの両方で提示されている場合は無効です。パッケージは `resources/pack-app.ts` で作成します。
 
 ```sh
 bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
@@ -58,34 +41,25 @@ bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built conta
 bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
 ```
 
-All numbers are little-endian:
+数値はすべてリトルエンディアンです。
 
-| Offset | Size | What |
+| オフセット | サイズ | 内容 |
 | --- | --- | --- |
 | 0 | 4 | `BAPP` |
-| 4 | 1 | format version, 1 |
-| 5 | 1 | file count, 1 to 64 |
-| 6 | 1 | flags: bit 0, a signature block follows |
+| 4 | 1 | 形式のバージョン（1） |
+| 5 | 1 | ファイル数（1〜64） |
+| 6 | 1 | フラグ: ビット 0 は署名ブロックが続くことを示します |
 | 7 | 1 | 0 |
-| 8 | 4 | the content's length: this header, the directory, and the files |
-| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
-| … | | the files, each where its entry says |
-| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
+| 8 | 4 | コンテンツの長さ（このヘッダー、ディレクトリ、ファイルの合計） |
+| 12 | ファイルごとに 40 | ディレクトリ: 32 バイトまで NUL で埋めたファイル名と、そのオフセットと長さ（各 4 バイト） |
+| … | | ファイル本体。それぞれエントリーが示す位置にあります |
+| コンテンツの長さ | 133 | 署名付きの場合: `BSIG`、SEC1 非圧縮形式の P-256 公開鍵（65 バイト）、SHA-256 を使ったコンテンツに対する ECDSA 署名（`r ‖ s`、64 バイト） |
 
-Listing reads only the header and the directory. When an install is asked
-for, the device hashes the content with SHA-256 and verifies the signature:
-a package whose signature fails is invalid, and the install screen shows a
-signed package's signer by the first bytes of its key's SHA-256, or says it
-is unsigned. The install takes exactly what the person was shown: the
-digest is pinned, and an offer that changed since answers `Changed`. A
-directory offer is pinned the same way, by the SHA-256 of its files.
+一覧表示ではヘッダーとディレクトリだけを読み取ります。インストールが要求されると、デバイスはコンテンツの SHA-256 ハッシュを計算して署名を検証します。署名の検証に失敗したパッケージは無効です。インストール画面は、署名付きパッケージの署名者を鍵の SHA-256 の先頭バイトで表示するか、署名がないことを表示します。インストールされるのは、利用者に表示されたものとまったく同じです。ダイジェストが固定され、その後に変更された提示には `Changed` が返ります。ディレクトリの提示も、ファイルの SHA-256 によって同じように固定されます。
 
-An app installed from a signed package keeps its signer's key beside its
-container, and from then on takes only packages that key signed: another
-key's package, an unsigned one, or a directory offers no update and says
-why. An app installed unsigned takes any update.
+署名付きパッケージからインストールしたアプリは、署名者の鍵をコンテナの隣に保持し、以降はその鍵で署名されたパッケージだけを受け付けます。別の鍵のパッケージ、署名のないパッケージ、ディレクトリは更新として扱われず、その理由が表示されます。署名なしでインストールしたアプリは、どの更新も受け付けます。
 
-## Manifest
+## マニフェスト
 
 ```json
 {
@@ -106,63 +80,41 @@ why. An app installed unsigned takes any update.
 }
 ```
 
-| Field          | Required | Rule                                                        |
+| フィールド          | 必須 | ルール                                                        |
 | -------------- | -------- | ----------------------------------------------------------- |
-| `format`       | yes      | `1`                                                         |
-| `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; equal to the directory name      |
-| `name`         | yes      | display name, 1–64 characters                               |
-| `version`      | yes      | the author's version string, 1–32 characters                |
-| `icon`         | no       | a system icon's name, such as `lamp`, shown on the launcher; without one it shows the name's first character |
-| `entry`        | no       | the Lua program to run; defaults to `main.lua`              |
-| `view`         | no       | omit for a headless app                                     |
-| `view.program` | with view | the BVIR view program                                      |
-| `view.styles`  | with view | the compiled stylesheet                                    |
-| `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
-| `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
-| `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
-| `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
-| `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
-| `permissions`  | no       | up to 16 other Lua packages: Board-specific ones and those that promise nothing |
-| `boards`       | with a Board-specific package | the Boards the app is for, by their stable name |
+| `format`       | はい      | `1`                                                         |
+| `id`           | はい      | `a-z`、`0-9`、`-` からなる 1〜32 文字。ディレクトリ名と一致すること      |
+| `name`         | はい      | 表示名。1〜64 文字                               |
+| `version`      | はい      | 作成者が付けるバージョン文字列。1〜32 文字                |
+| `icon`         | いいえ       | ランチャーに表示するシステムアイコンの名前（`lamp` など）。省略すると名前の最初の文字を表示します |
+| `entry`        | いいえ       | 実行する Lua プログラム。既定は `main.lua`              |
+| `view`         | いいえ       | ヘッドレスアプリでは省略します                                     |
+| `view.program` | ビューがある場合 | BVIR のビュープログラム                                      |
+| `view.styles`  | ビューがある場合 | コンパイル済みのスタイルシート                                    |
+| `view.fonts`   | いいえ       | 組み込み済みのフォントアトラス（最大 16 個）。既定はなし               |
+| `view.size`    | いいえ       | `[width, height]`。ビューが収まる最小のディスプレイ。ビルドが `pocket.json` から書き込みます。ビューはディスプレイのサイズでレイアウトされます |
+| `view.shape`   | いいえ       | `round` は内接円の中に収まり、どのディスプレイにも合うビュー。`rect` は長方形のディスプレイを必要とするビュー |
+| `api`          | いいえ       | アプリが対象とする `app` パッケージのバージョン。既定は `1` |
+| `requires`     | いいえ       | アプリの動作に不可欠な安定パッケージ（最大 16 個）。それぞれ `name`、または必要な最低バージョンを付けた `name@version` で記述します |
+| `uses`         | いいえ       | デバイスにあれば使う安定パッケージ（最大 16 個）。書き方は `requires` と同じです |
+| `permissions`  | いいえ       | その他の Lua パッケージ（最大 16 個）。ボード固有のものと、何も約束しないもの |
+| `boards`       | ボード固有のパッケージがある場合 | アプリの対象となるボード。安定した名前で指定します |
 
-Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
-`0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
-are rejected so a typo is reported, not ignored. The manifest is at most
-4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
+記載するファイルはすべて、コンテナ内の単純なファイル名でなければなりません。`A-Z`、`a-z`、`0-9`、`_`、`.`、`-` からなる 1〜64 文字で、`.` や `..` は使えず、ファイルが実在する必要があります。未知のフィールドは拒否されるので、タイプミスは無視されずに報告されます。マニフェストは最大 4 KiB、エントリープログラムは最大 64 KiB、ビューのファイルは合計で最大 512 KiB です。
 
-Each package is named once across `requires`, `uses`, and `permissions`:
-stable packages in the first two, everything else in the third; ambient
-packages, which every app has, in none. A Board-specific package without
-`boards` is not valid. Whether a package is stable, ambient, or
-Board-specific is what it declares on the device reading the manifest
-(`LuaPackage::interface`), so a package that device lacks is checked by the
-device where the app is installed.
+各パッケージは、`requires`、`uses`、`permissions` のいずれか 1 か所にだけ記載します。安定パッケージは最初の 2 つに、それ以外は 3 つ目に記載します。すべてのアプリが持つアンビエントのパッケージは、どこにも記載しません。`boards` のないボード固有のパッケージは無効です。パッケージが安定、アンビエント、ボード固有のどれかは、マニフェストを読むデバイス上でそのパッケージが宣言する内容（`LuaPackage::interface`）で決まります。そのため、デバイスにないパッケージは、アプリをインストールするデバイスがチェックします。
 
-An installable app's runs can `require` the ambient packages and the packages
-its manifest names; a package it did not name is not there, and `require`
-fails. Before the person installs the app, the install screen lists what it
-asks for in the words each package's Plugin declares, or says why this
-device cannot run it ([App API](/plugins/app-manager/app-api#install-check)). A system app
-may `require` every registered package, so its manifest needs none. A
-builtin app's own package, such as `settings`, is only for builtin apps: an
-installable app that asks for one is not valid.
+インストール可能なアプリの実行では、アンビエントのパッケージと、マニフェストで指定したパッケージを `require` できます。指定していないパッケージは存在せず、`require` は失敗します。利用者がアプリをインストールする前に、インストール画面は、アプリが要求する内容を各パッケージのプラグインが宣言した言葉で一覧表示するか、このデバイスで動かせない理由を表示します（[App API](/ja/plugins/app-manager/app-api)）。システムアプリは登録されたすべてのパッケージを `require` できるので、マニフェストに記載する必要はありません。`settings` のような組み込みアプリ自身のパッケージは組み込みアプリ専用で、それを要求するインストール可能なアプリは無効です。
 
-A container that breaks a rule is not launchable. `app.list` reports it under
-`invalid` with the location, directory name, and the problem, for example
-`app.json: JSON schema validation failed at $.view.program: Pattern`.
+ルールに違反したコンテナは起動できません。`app.list` はそれを `invalid` の下に、置き場所、ディレクトリ名、問題点とともに報告します。たとえば `app.json: JSON schema validation failed at $.view.program: Pattern` のようになります。
 
-## Program
+## プログラム
 
-The entry program runs on the VM like any Lua run, with the `app` package
-bound to this app. The binding shares the program's first line, so line
-numbers in errors match the file. Apps have no standard input; a read gets
-end of file.
+エントリープログラムは、他の Lua の実行と同じように VM 上で動き、`app` パッケージがこのアプリに結び付けられます。この結び付けはプログラムの 1 行目を共有するので、エラーの行番号はファイルと一致します。アプリには標準入力がなく、読み取ると EOF が返ります。
 
-### The event loop
+### イベントループ
 
-Every app is one loop over `app.events()`. View calls, lifecycle events, and
-timer ticks arrive in that one stream, in order:
+どのアプリも、`app.events()` を回す 1 つのループです。ビューからの呼び出し、ライフサイクルのイベント、タイマーのティックが、その 1 つのストリームに順番に届きます。
 
 ```lua
 local app = require("app")
@@ -176,63 +128,48 @@ for event, a, b in app.events() do
 end
 ```
 
-| Event            | When                                                                 |
+| イベント            | タイミング                                                                 |
 | ---------------- | -------------------------------------------------------------------- |
-| `app:active`     | The app is in the foreground and takes input. First event of a view app. |
-| `app:inactive`   | Still visible but not taking input: an overlay covers it or a transition runs. No view call follows until `app:active`. |
-| `app:background` | It left the foreground. Save now: a suspended app may be terminated without another event. |
-| `app:foreground` | It came back from the background; `app:active` follows.              |
-| `app:terminate`  | It is asked to exit. Return within the grace period or be cancelled. |
-| `app:tick`       | The interval set with `app.events{ every = ms }` passed (at least 100 ms). Not delivered in the background or while suspended. |
-| `app:back`       | The person swiped back while the app reported a page deeper than its first with `app.navigation`. Show the previous page and report its depth. |
+| `app:active`     | アプリが前面にあり、入力を受け付けます。ビューを持つアプリの最初のイベントです。 |
+| `app:inactive`   | 表示されたままですが、入力を受け付けません。オーバーレイに覆われているか、トランジションの最中です。`app:active` まではビューからの呼び出しは来ません。 |
+| `app:background` | 前面から外れました。ここで保存してください。サスペンドしたアプリは、別のイベントなしに終了されることがあります。 |
+| `app:foreground` | バックグラウンドから戻りました。続いて `app:active` が届きます。              |
+| `app:terminate`  | 終了を求められています。猶予期間内に戻らないとキャンセルされます。 |
+| `app:tick`       | `app.events{ every = ms }` で設定した間隔（最低 100 ms）が経過しました。バックグラウンドやサスペンド中には届きません。 |
+| `app:back`       | アプリが `app.navigation` で最初より深いページにいると報告している間に、利用者が戻るスワイプをしました。前のページを表示し、その深さを報告してください。 |
 
-After `app:background` the program must be back in `app.events()` within the
-grace period (1 s); it is then suspended: it uses no CPU, and its view tree is
-released and rebuilt from its values when it returns. A program still busy
-when the grace period ends is cancelled, as is one that ignores
-`app:terminate`. The loop ends after `app.exit()`; the program then returns.
+`app:background` の後、プログラムは猶予期間（1 秒）内に `app.events()` に戻る必要があります。戻るとサスペンドされ、CPU を使わなくなり、ビューツリーは解放されて、復帰時に値から再構築されます。猶予期間が終わってもまだ処理中のプログラムはキャンセルされます。`app:terminate` を無視したプログラムも同様です。ループは `app.exit()` の後に終わり、その後プログラムは戻ります。
 
-Headless apps never enter the foreground. They run as services and only see
-`app:tick` and `app:terminate`.
+ヘッドレスアプリは前面に出ることがありません。サービスとして動き、`app:tick` と `app:terminate` だけを受け取ります。
 
 ### API
 
-| Call | Result |
+| 呼び出し | 結果 |
 | ---- | ------ |
-| `app.id`, `app.name`, `app.version` | From the manifest. |
-| `app.device()` | The `app` package's version, the Board, display, touch, and the stable packages with their versions ([App API](/plugins/app-manager/app-api#runs)). |
-| `app.view()` | The view, or `nil` for a headless app. |
-| `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
-| `app.exit()` | Ends the event loop. |
-| `app.navigation(depth)` | Reports how many pages deep the app is; 0, the default, is its first page. A back swipe delivers `app:back` while it is above 0, and leaves the app at 0. |
-| `view:set(name, value)` | Writes a value the view's `app.d.ts` declares; checked against its type. |
-| `view:is_open()`, `view:close()` | The view's state; closing ends view calls. |
-| `app.kv.get(key)` | The stored value, or `nil`. |
-| `app.kv.set(key, value)` | Stores booleans, numbers, strings, and tables that are arrays or have string keys; `nil` deletes. |
-| `app.kv.delete(key)`, `app.kv.keys()` | Delete a key; list keys, sorted. |
-| `app.fs.read(path)`, `app.fs.write(path, data)`, `app.fs.append(path, data)` | Whole-file access; writes replace atomically. |
-| `app.fs.list([dir])` | Sorted names; directories end in `/`. |
-| `app.fs.exists(path)`, `app.fs.remove(path)`, `app.fs.mkdir(path)` | Plain file management. |
+| `app.id`、`app.name`、`app.version` | マニフェストの値です。 |
+| `app.device()` | `app` パッケージのバージョン、ボード、ディスプレイ、タッチ、安定パッケージとそのバージョンです（[App API](/ja/plugins/app-manager/app-api)）。 |
+| `app.view()` | ビュー。ヘッドレスアプリでは `nil` です。 |
+| `app.events([{ every = ms }])` | イベントのイテレーター。`every` を指定するとタイマーが始まります。 |
+| `app.exit()` | イベントループを終了します。 |
+| `app.navigation(depth)` | アプリが何ページ目の深さにいるかを報告します。既定の 0 が最初のページです。0 より大きい間は戻るスワイプで `app:back` が届き、0 のときはアプリはそのままです。 |
+| `view:set(name, value)` | ビューの `app.d.ts` が宣言した値を書き込みます。型に対してチェックされます。 |
+| `view:is_open()`、`view:close()` | ビューの状態です。閉じるとビューからの呼び出しが終わります。 |
+| `app.kv.get(key)` | 保存された値、または `nil` です。 |
+| `app.kv.set(key, value)` | 真偽値、数値、文字列、および配列または文字列キーを持つテーブルを保存します。`nil` を渡すと削除します。 |
+| `app.kv.delete(key)`、`app.kv.keys()` | キーを削除します。キーをソートして一覧表示します。 |
+| `app.fs.read(path)`、`app.fs.write(path, data)`、`app.fs.append(path, data)` | ファイル全体へのアクセスです。書き込みはアトミックに置き換えます。 |
+| `app.fs.list([dir])` | ソートされた名前です。ディレクトリは `/` で終わります。 |
+| `app.fs.exists(path)`、`app.fs.remove(path)`、`app.fs.mkdir(path)` | 基本的なファイル管理です。 |
 
-Failures return `nil` and a message instead of raising, so `assert(...)` turns
-them into errors. Keys are 1–64 bytes and the store holds at most 16 KiB of
-JSON. Files are at most 64 KiB; paths are relative to the app's own file
-tree, at most 8 names deep, with no `.` or `..`.
+失敗した場合は例外を発生させず、`nil` とメッセージを返すので、`assert(...)` でエラーに変換できます。キーは 1〜64 バイトで、ストアには最大 16 KiB の JSON を保存できます。ファイルは最大 64 KiB で、パスはアプリ自身のファイルツリーからの相対パスです。深さは最大 8 階層で、`.` や `..` は使えません。
 
-Storage belongs to the app ID, not the container: it lives in the App
-Manager's private `/media/data/<id>/` (`kv.json` and `files/`), survives
-updates and restarts, and is never visible to other apps.
+ストレージはコンテナではなくアプリ ID に属します。App Manager の非公開の `/media/data/<id>/`（`kv.json` と `files/`）に置かれ、更新や再起動を経ても残り、他のアプリからは見えません。
 
-## Views
+## ビュー
 
-`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
-outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
-into View IR, `ui-link` links it into BVIR, and the font baker produces the
-atlases. A source manifest's `view` holds only the `shape`. An Agent that
-cannot run that toolchain writes a headless app, or copies the view files of
-an existing build next to its own entry program.
+`view.program`、`view.styles`、`view.fonts`、`view.size` はビルドの成果物です。MicroTS コンパイラーが `app.tsx` とその `app.d.ts` の契約を View IR に変換し、`ui-link` がそれを BVIR にリンクし、フォントベイカーがアトラスを生成します。ソースのマニフェストの `view` には `shape` だけを書きます。このツールチェーンを実行できない Agent は、ヘッドレスアプリを書くか、既存のビルドのビューファイルを自分のエントリープログラムの隣にコピーします。
 
-## Example: a headless app an Agent can offer
+## 例: Agent が提示できるヘッドレスアプリ
 
 `/workspace/media/apps/hello/app.json`:
 
@@ -249,11 +186,4 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Offer it with `app.install` and `{"id":"hello"}`: the device shows the
-install screen, and once the person installs it, open it with `app.open` and
-`{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
-example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
-`air` (an air-quality app, no packages), `lamp` (a light-strip app, requires
-`light`), `camera` (a camera app, requires `camera`), and `counter` (a counter,
-no packages).
+`app.install` と `{"id":"hello"}` で提示すると、デバイスにインストール画面が表示されます。利用者がインストールしたら、`app.open` と `{"id":"hello"}` で開きます。すると `app.status` に、`last_exit.output` として `["hello from hello, run 1"]` が表示されます。`crates/appkit/tests/fixtures/` には、ビューを持つビルド済みのサンプルアプリがあり、それぞれ `/workspace/media/apps/<id>/` にそのままコピーできます。`air`（空気質アプリ、パッケージなし）、`lamp`（ライトストリップアプリ、`light` が必須）、`camera`（カメラアプリ、`camera` が必須）、`counter`（カウンター、パッケージなし）です。

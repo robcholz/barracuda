@@ -1,141 +1,94 @@
 ---
-title: "The experience ladder"
-sidebarTitle: "The ladder"
-description: "The six levels of Barracuda, from out of the box to fully custom firmware, and where each one starts in the docs."
+title: "体验阶梯"
+sidebarTitle: "阶梯"
+description: "Barracuda 的六个层级：从开箱即用到完全定制固件，以及每一级在文档中的起点。"
 ---
 
-Barracuda is experienced as a ladder. Each level asks a little more of the
-person and gives them much more freedom. Every level is useful on its own; no
-one has to climb higher than their project needs. At every level an agent does
-the heavy lifting.
+Barracuda 的体验就像一架阶梯。每往上一级，对使用者的要求多一点，给他们的自由却多得多。每一级都能单独发挥作用；没有人需要爬到超出项目需要的高度。在每一级，繁重的工作都由 Agent 完成。
 
-| Level | Name | Who | What they do | Where | Agent | Start here |
+| 层级 | 名称 | 适合谁 | 做什么 | 在哪里 | Agent | 从这里开始 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts | [Device Portal](/use/device-portal) |
-| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) | [Board profiles](/boards/profiles) |
-| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent | [Device UI](/architecture/device-ui) |
-| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill | [Write a Plugin](/develop/write-a-plugin) |
-| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills | [Boards](/boards/overview) |
-| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill | [Custom firmware](/develop/custom-firmware) |
+| 1 | 开箱即用 | 所有人 | 从浏览器安装，然后让开发板替你做事 | 浏览器、手机、设备 | 板上 Agent 编写并运行 VM 脚本 | [设备门户](/zh/use/device-portal) |
+| 2 | 配置 | 创客、教育者 | 选择要放进固件的插件，构建并烧录 | 开发者的电脑 | —（是配置，不是生成） | [开发板 profile（配置档）](/zh/boards/profiles) |
+| 3 | 构建应用 | 应用开发者 | 描述一个应用，生成它的逻辑和 UI，然后烧录 | Live Editor（浏览器） | 浏览器里的 Agent | [设备 UI](/zh/architecture/device-ui) |
+| 4 | 创建插件 | 插件开发者 | 为运行时添加新能力 | 开发者的电脑 | 编程 Agent + `create-plugin` skill | [编写插件](/zh/develop/write-a-plugin) |
+| 5 | 添加开发板和平台 | 贡献者、开发板厂商 | 把 Barracuda 带到新的开发板或新的芯片系列 | 开发者的电脑 | 编程 Agent + `create-board`、`create-platform` skill | [开发板](/boards/overview) |
+| 6 | 完全定制 | 构建者 | 选择或创建平台和开发板，精简或创建插件，让固件适配资源预算 | 开发者的电脑 | 编程 Agent + `fully-customize` skill | [定制固件](/zh/develop/custom-firmware) |
 
-## Level 1 — Out of the box
+## 第 1 级：开箱即用
 
-**In the docs:** [Device Portal](/use/device-portal) · [Channels](/use/channels) · [Scripts](/use/scripts) · [Automations](/use/automations)
+**相关文档：**[设备门户](/zh/use/device-portal) · [消息通道](/zh/use/channels) · [脚本](/zh/use/scripts) · [自动化](/zh/use/automations)
 
-**Goal:** a working, talking, acting device in minutes, with no toolchain.
+**目标：**几分钟内得到一台能工作、能对话、能动手的设备，无需任何工具链。
 
-1. Open the Web Installer, choose a board and a version, plug in USB, install.
-   Each board gets a default firmware with a default Plugin set.
-2. Join Wi-Fi from the same page; the installer hands off to the Device Portal.
-3. Register a model and bind a channel (WeChat, Telegram, QQ, iMessage, web chat,
-   or the terminal).
-4. Ask the board for something physical: "blink the LED twice a second",
-   "show the temperature on the screen", "tell me when the light level drops".
+1. 打开 Web Installer，选择开发板和版本，插上 USB，开始安装。每块开发板都有一个默认固件，带有一组默认插件。
+2. 在同一页面连接 Wi-Fi；安装程序随后会跳转到设备门户。
+3. 注册一个模型并绑定一个消息通道（微信、Telegram、QQ、iMessage、网页聊天或终端）。
+4. 让开发板做一件实际操作硬件的事：“让 LED 每秒闪两次”“在屏幕上显示温度”“光线变暗时告诉我”。
 
-The on-board agent answers by writing a short VM script and running it against
-the real hardware immediately. The script, its output, and its result appear in
-the conversation. Long-running behavior is kept alive by Workflow automations
-and schedules, so the device keeps working after the chat ends.
+板上 Agent 的回应方式是编写一段简短的 VM 脚本，并立即在真实硬件上运行。脚本、它的输出和结果都会显示在对话中。需要长期运行的行为由 Workflow 自动化和定时任务维持，所以聊天结束后设备仍会继续工作。
 
-**What makes it work:** the Web Installer, the Device Portal, the on-board
-Agent, the VM and its peripheral packages, channels, Workflow.
+**背后的支撑：**Web Installer、设备门户、板上 Agent、VM 及其外设包、消息通道、Workflow。
 
-## Level 2 — Configure
+## 第 2 级：配置
 
-**In the docs:** [Board profiles](/boards/profiles) · [Build and run](/get-started/build-and-run) · [CLI](/reference/cli)
+**相关文档：**[开发板 profile](/zh/boards/profiles) · [构建与运行](/zh/get-started/build-and-run) · [CLI](/zh/reference/cli)
 
-**Goal:** make the device fit the project by choosing its Plugins, without
-writing code.
+**目标：**通过选择插件让设备适合项目，无需编写代码。
 
-Plugins are compiled into the firmware, so the Plugin set is chosen on the
-developer's machine. Select the Board, choose the Plugins the project needs —
-camera, display, LED strip, sensors, web search, a messaging channel — leave out
-the rest, then build and flash. There are three ways to choose:
+插件会被编译进固件，所以插件集合要在开发者的电脑上选定。选择开发板，挑出项目需要的插件（摄像头、显示屏、LED 灯带、传感器、网页搜索、某个消息通道），去掉其余的，然后构建并烧录。有三种选择方式：
 
-- an interactive command that lists the Plugins to pick from;
-- a configuration file that lists the enabled Plugins, for projects kept in
-  version control;
-- the developer's coding agent, which picks the Plugins for a stated need and
-  builds the firmware.
+- 一条交互式命令，列出可供挑选的插件；
+- 一个列出已启用插件的配置文件，适合纳入版本控制的项目；
+- 开发者的编程 Agent，它会根据你描述的需求挑选插件并构建固件。
 
-A Plugin that is left out costs no memory, flash,
-or tasks. On the device, every Plugin brings its own page in the Device Portal,
-so each capability arrives with its own settings.
+没有选入的插件不占用任何内存、Flash 或任务。在设备上，每个插件都会在设备门户中带来自己的页面，所以每项能力都自带设置。
 
-**What makes it work:** Plugin declarations, the host build, per-Plugin portal
-pages.
+**背后的支撑：**插件声明、主机构建、每个插件的门户页面。
 
-## Level 3 — Build apps
+## 第 3 级：构建应用
 
-**In the docs:** [Device UI](/architecture/device-ui) · [App format](/plugins/app-manager/app-format) · [App API](/plugins/app-manager/app-api) · [PocketJS](/plugins/app-manager/pocketjs)
+**相关文档：**[设备 UI](/zh/architecture/device-ui) · [应用格式](/zh/plugins/app-manager/app-format) · [应用 API](/zh/plugins/app-manager/app-api) · [PocketJS](/zh/plugins/app-manager/pocketjs)
 
-**Goal:** a real device application with its own UI, without setting up a
-firmware project.
+**目标：**一个带有自己 UI 的真正设备应用，无需搭建固件项目。
 
-In the Live Editor, the developer describes the app. The in-browser agent
-generates the app logic and its interface, the developer previews and iterates
-visually, and then flashes it to the board over USB from the same page. Apps run
-on the device under the App Manager Plugin, which installs, starts, stops, and
-updates them alongside the rest of the runtime.
+开发者在 Live Editor 中描述应用。浏览器里的 Agent 生成应用逻辑和界面，开发者通过可视化方式预览和迭代，然后在同一页面通过 USB 把它烧录到开发板。应用在设备上由 App Manager 插件管理，它与运行时的其他部分一起安装、启动、停止和更新应用。
 
-**What makes it work:** the Live Editor, the in-browser agent, the App Manager
-Plugin, the app runtime, browser flashing.
+**背后的支撑：**Live Editor、浏览器里的 Agent、App Manager 插件、应用运行时、浏览器烧录。
 
-## Level 4 — Create Plugins
+## 第 4 级：创建插件
 
-**In the docs:** [Write a Plugin](/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [All Plugins](/plugins/overview)
+**相关文档：**[编写插件](/zh/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [全部插件](/plugins/overview)
 
-**Goal:** add a new capability to Barracuda that any device can use.
+**目标：**为 Barracuda 添加一项任何设备都能使用的新能力。
 
-The developer clones the repository and asks their coding agent — Claude Code,
-Cursor, or Codex — to create a Plugin. The `create-plugin` skill gives the agent
-Barracuda's architecture: when to expose a typed capability, a Workflow Action or
-Event, or an Agent Tool; how lifecycle and task ownership work; how the Plugin
-documents itself; and which focused tests to write. The result is a Plugin that
-looks like every first-party Plugin.
+开发者克隆仓库，然后让自己的编程 Agent（Claude Code、Cursor 或 Codex）创建一个插件。`create-plugin` skill 会把 Barracuda 的架构告诉 Agent：什么时候应该暴露类型化能力、Workflow Action 或 Event，或者 Agent Tool；生命周期和任务归属如何运作；插件如何为自己编写文档；以及要写哪些聚焦的测试。最终得到的插件和所有第一方插件一个样。
 
-**What makes it work:** the Plugin contract, `plugin.toml`, agent-friendly API
-conventions, the `create-plugin` skill, per-Plugin docs.
+**背后的支撑：**插件契约、`plugin.toml`、对 Agent 友好的 API 约定、`create-plugin` skill、每个插件的文档。
 
-## Level 5 — Add Boards and Platforms
+## 第 5 级：添加开发板和平台
 
-**In the docs:** [Boards](/boards/overview) · [Peripherals](/boards/peripherals) · [Platform architecture](/architecture/platform-architecture)
+**相关文档：**[开发板](/boards/overview) · [外设](/boards/peripherals) · [平台架构](/architecture/platform-architecture)
 
-**Goal:** bring Barracuda to new hardware.
+**目标：**把 Barracuda 带到新硬件上。
 
-- **A new Board** on a supported chip is a description: chip, toolchain target,
-  flash layout, and peripherals. The `create-board` skill produces it and its
-  layout, and the board appears in the Web Installer.
-- **A new Platform** brings a new chip family: executor entry, network stack,
-  filesystem, flash, and HAL adapters behind the Platform contract. The
-  `create-platform` skill guides the agent through that contract while keeping
-  the System and every Plugin unchanged.
+- **新开发板**如果使用已支持的芯片，就只是一份描述：芯片、工具链目标、Flash 布局和外设。`create-board` skill 会生成这份描述及其布局，开发板随后就会出现在 Web Installer 中。
+- **新平台**意味着新的芯片系列：在平台契约之下实现执行器入口、网络栈、文件系统、Flash 和 HAL 适配器。`create-platform` skill 会引导 Agent 完成这份契约，同时保持 System 和所有插件不变。
 
-**What makes it work:** the Board YAML and Platform contract, independent Board
-and Platform selection, the `create-board` and `create-platform` skills.
+**背后的支撑：**开发板 YAML 和平台契约、相互独立的开发板与平台选择、`create-board` 和 `create-platform` skill。
 
-## Level 6 — Fully customize
+## 第 6 级：完全定制
 
-**In the docs:** [Custom firmware](/develop/custom-firmware)
+**相关文档：**[定制固件](/zh/develop/custom-firmware)
 
-**Goal:** a product firmware shaped exactly to a chip, a resource budget, and a
-job.
+**目标：**一个完全贴合某款芯片、某个资源预算和某项任务的产品固件。
 
-The builder states the target and the requirements. With the `fully-customize`
-skill, the coding agent selects or creates the Platform and Board, chooses the
-Plugin set, trims Plugins that are too heavy for the budget, creates the ones
-that are missing, and verifies that the result fits the device's memory and
-flash. The output is a firmware that contains only what the product needs.
+构建者说明目标和需求。借助 `fully-customize` skill，编程 Agent 会选择或创建平台和开发板，确定插件集合，精简对预算来说过重的插件，创建缺失的插件，并验证结果能装进设备的内存和 Flash。最终得到的固件只包含产品需要的东西。
 
-**What makes it work:** every level below it — Plugins, Boards, Platforms, and
-the skills that create them — composed by one agent with one goal.
+**背后的支撑：**下面的每一级（插件、开发板、平台，以及创建它们的 skill），由一个 Agent 围绕一个目标组合起来。
 
-## Moving between levels
+## 在层级之间移动
 
-- Every level hands off to the next one with something concrete: the script the
-  on-board agent wrote can become an app; an app that needs a new capability
-  becomes a Plugin; a Plugin that needs new hardware becomes a Board.
-- Nothing at a higher level breaks a lower one. A fully customized firmware still
-  installs from the browser, still has a Device Portal, and its on-board agent
-  still writes scripts.
-- The docs are organized by level, so each reader starts where they are.
+- 每一级都会把一样具体的东西交给下一级：板上 Agent 写的脚本可以变成应用；需要新能力的应用会变成插件；需要新硬件的插件会变成开发板。
+- 高层级的任何东西都不会破坏低层级。完全定制的固件仍然可以从浏览器安装，仍然有设备门户，它的板上 Agent 仍然会编写脚本。
+- 文档按层级组织，每位读者都可以从自己所在的位置开始。

@@ -1,61 +1,61 @@
 ---
 title: "CLI"
-description: "Every cargo command Barracuda adds: board, plugin, image, platform, and cli."
+description: "Toutes les commandes cargo qu’ajoute Barracuda : board, plugin, image, platform et cli."
 ---
 
-Barracuda adds its commands as Cargo aliases, so they run from anywhere in the
-repository with no extra install.
+Barracuda ajoute ses commandes sous forme d’alias Cargo : elles s’exécutent
+depuis n’importe quel endroit du dépôt, sans installation supplémentaire.
 
 ## cargo board
 
-| Command | What it does |
+| Commande | Ce qu’elle fait |
 | --- | --- |
-| `cargo board select [NAME]` | Select a Board, interactively when no name is given. Later `cargo build` and `cargo run` use it |
-| `cargo board target [NAME]` | Print a Board's Rust target triple; defaults to the selected Board |
-| `cargo board sync [--check]` | Validate Boards and synchronize peripheral implementations into the registry |
+| `cargo board select [NAME]` | Sélectionne une carte, de façon interactive si aucun nom n’est donné. Les `cargo build` et `cargo run` ultérieurs l’utilisent |
+| `cargo board target [NAME]` | Affiche le triplet de cible Rust d’une carte ; par défaut, la carte sélectionnée |
+| `cargo board sync [--check]` | Valide les cartes et synchronise les implémentations de périphériques dans le registre |
 
 ## cargo plugin
 
-| Command | What it does |
+| Commande | Ce qu’elle fait |
 | --- | --- |
-| `cargo plugin info <ID>` | Show a Plugin's manifest and dependencies |
-| `cargo plugin select` | Turn enabled Plugins off on this machine only, in `.barracuda/disabled-plugins` |
-| `cargo plugin run <TASK> [--plugin <ID>]` | Run a task declared in `plugin.toml`, such as `build`, for enabled Plugins |
-| `cargo plugin sync [--check]` | Synchronize discovered Plugins into the System registry |
+| `cargo plugin info <ID>` | Affiche le manifeste et les dépendances d’un Plugin |
+| `cargo plugin select` | Désactive des Plugins activés sur cette machine uniquement, dans `.barracuda/disabled-plugins` |
+| `cargo plugin run <TASK> [--plugin <ID>]` | Exécute une tâche déclarée dans `plugin.toml`, comme `build`, pour les Plugins activés |
+| `cargo plugin sync [--check]` | Synchronise les Plugins découverts dans le registre du System |
 
-Which Plugins a firmware contains is set by the Board's profile; see
-[Board profiles](/boards/profiles).
+Les Plugins que contient un firmware sont définis par le profil de la carte ;
+consultez [Profils de carte](/fr/boards/profiles).
 
 ## cargo image
 
-| Command | What it does |
+| Commande | Ce qu’elle fait |
 | --- | --- |
-| `cargo image build` | Build the selected Board's Plugin resource image |
-| `cargo image flash` | Flash the built image into the Board's `resources` partition |
-| `cargo image deploy` | Build and flash |
+| `cargo image build` | Compile l’image de ressources des Plugins de la carte sélectionnée |
+| `cargo image flash` | Flashe l’image compilée dans la partition `resources` de la carte |
+| `cargo image deploy` | Compile et flashe |
 
-See [System image](/tools/system-image).
+Consultez [Image système](/tools/system-image).
 
 ## cargo platform
 
-| Command | What it does |
+| Commande | Ce qu’elle fait |
 | --- | --- |
-| `cargo platform sync [--check]` | Synchronize discovered Platforms into the registry |
+| `cargo platform sync [--check]` | Synchronise les plateformes découvertes dans le registre |
 
 ## cargo cli
 
-The terminal channel. It always builds for your computer, whatever Board is
-selected.
+Le canal terminal. Il est toujours compilé pour votre ordinateur, quelle que
+soit la carte sélectionnée.
 
-| Command | What it does |
+| Commande | Ce qu’elle fait |
 | --- | --- |
-| `cargo cli` | Chat with a running device; choose Local or Remote |
-| `cargo cli configure [ADDRESS]` | Set models, web search, and channels from the terminal |
-| `cargo cli chat ADDRESS < messages.txt` | Send messages from a file |
+| `cargo cli` | Discute avec un appareil en fonctionnement ; choisissez Local ou Remote |
+| `cargo cli configure [ADDRESS]` | Règle les modèles, la recherche web et les canaux depuis le terminal |
+| `cargo cli chat ADDRESS < messages.txt` | Envoie des messages depuis un fichier |
 
-## Environment
+## Environnement
 
-| Variable | Used by | Meaning |
+| Variable | Utilisée par | Signification |
 | --- | --- | --- |
-| `BARRACUDA_VIRTUAL_IO_ADDR` | `local-linux`, `local-macos` | Loopback address of the virtual peripherals, such as `127.0.0.1:7878` |
-| `BARRACUDA_LOG_LEVEL` | `cargo build`, `cargo run` | Log level baked into the build: `off`, `error`, `warn`, `info`, `debug`, or `trace` |
+| `BARRACUDA_VIRTUAL_IO_ADDR` | `local-linux`, `local-macos` | Adresse de bouclage des périphériques virtuels, comme `127.0.0.1:7878` |
+| `BARRACUDA_LOG_LEVEL` | `cargo build`, `cargo run` | Niveau de journalisation intégré à la compilation : `off`, `error`, `warn`, `info`, `debug` ou `trace` |

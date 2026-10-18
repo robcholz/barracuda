@@ -1,15 +1,12 @@
 ---
-title: "Scripts"
-description: "Ask for something physical and the on-board Agent writes a Lua script and runs it on the hardware."
+title: "スクリプト"
+description: "物理的な操作を頼むと、オンボード Agent が Lua スクリプトを書いてハードウェア上で実行します。"
 ---
 
-When a request touches the physical world, the on-board Agent writes a short Lua
-script and runs it in the device's VM with its `vm_run` tool. The script reads
-and drives the real peripherals the moment it runs, and its output comes back
-into the conversation.
+依頼が物理的な世界に関わるとき、オンボード Agent は短い Lua スクリプトを書き、`vm_run` ツールでデバイスの VM 上で実行します。スクリプトは実行した瞬間に実際のペリフェラルを読み取り、操作し、その出力が会話に返ってきます。
 
 ```txt
-> Set pin vio-0 high
+> ピン vio-0 を High にして
 ```
 
 ```lua
@@ -18,34 +15,28 @@ local pin = gpio.open_output("vio-0", true, "push-pull")
 print("vio-0 is high")
 ```
 
-## What scripts can use
+## スクリプトで使えるもの
 
-Each Lua package comes from its own Plugin, so a script can use exactly what the
-firmware carries.
+Lua パッケージはそれぞれ専用のプラグインが提供するので、スクリプトはファームウェアに含まれているものをそのまま使えます。
 
-| Package | Plugin | For |
+| パッケージ | プラグイン | 用途 |
 | --- | --- | --- |
-| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | Digital inputs and outputs on the Board's exposed pins |
-| `i2c`, `spi`, `uart` | [`vm-i2c`](/plugins/vm-i2c), [`vm-spi`](/plugins/vm-spi), [`vm-uart`](/plugins/vm-uart) | Buses |
-| `pwm`, `analog`, `i2s` | [`vm-pwm`](/plugins/vm-pwm), [`vm-analog`](/plugins/vm-analog), [`vm-i2s`](/plugins/vm-i2s) | PWM outputs, analog inputs, and I2S audio streams |
-| `display`, `camera`, `audio` | [`vm-display`](/plugins/vm-display), [`vm-camera`](/plugins/vm-camera), [`vm-audio`](/plugins/vm-audio) | Screens, cameras, and sound |
-| `motion`, `light`, `power_monitor` | [`vm-imu`](/plugins/vm-imu), [`vm-led-strip`](/plugins/vm-led-strip), [`vm-power-monitor`](/plugins/vm-power-monitor) | Motion sensing, LED strips, and power |
-| `http`, `filesystem`, `message_queue` | [`vm-http`](/plugins/vm-http), [`vm-filesystem`](/plugins/vm-filesystem), [`vm-message-queue`](/plugins/vm-message-queue) | Requests, files, and queues |
-| `agent` | [`vm-agent`](/plugins/vm-agent) | Ask the Agent a question from inside a script |
-| `time` | [`vm-time`](/plugins/vm-time) | UTC time through `os.time` and `os.date` |
+| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | ボードの公開ピンでのデジタル入出力 |
+| `i2c`、`spi`、`uart` | [`vm-i2c`](/plugins/vm-i2c)、[`vm-spi`](/plugins/vm-spi)、[`vm-uart`](/plugins/vm-uart) | バス |
+| `pwm`、`analog`、`i2s` | [`vm-pwm`](/plugins/vm-pwm)、[`vm-analog`](/plugins/vm-analog)、[`vm-i2s`](/plugins/vm-i2s) | PWM 出力、アナログ入力、I2S オーディオストリーム |
+| `display`、`camera`、`audio` | [`vm-display`](/plugins/vm-display)、[`vm-camera`](/plugins/vm-camera)、[`vm-audio`](/plugins/vm-audio) | 画面、カメラ、サウンド |
+| `motion`、`light`、`power_monitor` | [`vm-imu`](/plugins/vm-imu)、[`vm-led-strip`](/plugins/vm-led-strip)、[`vm-power-monitor`](/plugins/vm-power-monitor) | モーション検知、LED ストリップ、電源 |
+| `http`、`filesystem`、`message_queue` | [`vm-http`](/plugins/vm-http)、[`vm-filesystem`](/plugins/vm-filesystem)、[`vm-message-queue`](/plugins/vm-message-queue) | リクエスト、ファイル、キュー |
+| `agent` | [`vm-agent`](/plugins/vm-agent) | スクリプトの中から Agent に質問します |
+| `time` | [`vm-time`](/plugins/vm-time) | `os.time` と `os.date` による UTC 時刻 |
 
-Each package's page lists its Lua API. The [VM](/plugins/vm) page covers the runtime itself.
+各パッケージのページに、その Lua API が記載されています。ランタイム自体については [VM](/plugins/vm) ページを参照してください。
 
-## Long-running scripts
+## 長時間動くスクリプト
 
-`vm_run` runs in the Agent's background pool, so the conversation continues
-while a script runs.
+`vm_run` は Agent のバックグラウンドプールで実行されるので、スクリプトの実行中も会話を続けられます。
 
-- A script that calls `io.read()` pauses and asks you for input; your reply is
-  fed back to it.
-- The Agent lists, answers, and cancels running scripts with its
-  `background_list`, `background_input`, and `background_cancel` tools. Ask it
-  to stop a script and it cancels the run.
+- `io.read()` を呼び出すスクリプトは一時停止して入力を求めます。あなたの返信がスクリプトに渡されます。
+- Agent は `background_list`、`background_input`、`background_cancel` ツールで、実行中のスクリプトの一覧表示、入力への応答、キャンセルを行います。スクリプトを止めるよう頼めば、Agent が実行をキャンセルします。
 
-For behavior that must outlive the conversation, such as "every morning at
-seven", the Agent uses [Automations](/use/automations).
+「毎朝 7 時に」のように会話が終わった後も続ける必要がある動作には、Agent は [オートメーション](/ja/use/automations) を使います。

@@ -1,36 +1,39 @@
 ---
-title: "Custom firmware"
-description: "Fit a firmware to a chip, a resource budget, and a job by choosing, trimming, and adding Plugins."
+title: "Firmware sur mesure"
+description: "Adaptez un firmware à une puce, à un budget de ressources et à une tâche en choisissant, allégeant et ajoutant des Plugins."
 ---
 
-A custom firmware contains only what a product needs. You shape it from three
-pieces you already have: a Board, a profile, and the Plugin set.
+Un firmware sur mesure ne contient que ce dont un produit a besoin. Vous le
+façonnez à partir de trois éléments dont vous disposez déjà : une carte, un
+profil et l’ensemble de Plugins.
 
 <Note>
-  A `fully-customize` skill that does all of this from one request is planned.
-  Until it ships, give your coding agent the steps below.
+  Une skill `fully-customize` qui fera tout cela à partir d’une seule demande
+  est prévue. En attendant sa sortie, donnez les étapes ci-dessous à votre agent
+  de code.
 </Note>
 
 <Steps>
-  <Step title="Pick or add the Board">
-    Start from a Board under `boards/configs/` on the same chip, or add one.
-    See [Boards](/boards/overview) and, for a new chip family,
-    [Platform architecture](/architecture/platform-architecture).
+  <Step title="Choisir ou ajouter la carte">
+    Partez d’une carte sous `boards/configs/` sur la même puce, ou ajoutez-en
+    une. Consultez [Cartes](/boards/overview) et, pour une nouvelle famille de
+    puces, [Architecture des plateformes](/architecture/platform-architecture).
   </Step>
-  <Step title="Pick the narrowest profile">
-    Choose the smallest [profile](/boards/profiles) that covers the job:
-    `minimal`, `lua`, `network`, `ai`, `headless`, `screen-offline`, or
-    `screen`. Add a profile under `boards/profiles/` when a product needs its
-    own layer.
+  <Step title="Choisir le profil le plus étroit">
+    Choisissez le plus petit [profil](/fr/boards/profiles) qui couvre la tâche :
+    `minimal`, `lua`, `network`, `ai`, `headless`, `screen-offline` ou
+    `screen`. Ajoutez un profil sous `boards/profiles/` quand un produit a
+    besoin de sa propre couche.
   </Step>
-  <Step title="Trim and add single Plugins">
-    Turn single Plugins on or off with `plugins.<id>.enabled` in the Board's
-    `board.yml`. A Plugin that is not enabled is not in the firmware at all.
-    Write the missing ones with [create-plugin](/develop/write-a-plugin).
+  <Step title="Retirer et ajouter des Plugins un par un">
+    Activez ou désactivez des Plugins individuels avec `plugins.<id>.enabled`
+    dans le `board.yml` de la carte. Un Plugin non activé est totalement absent
+    du firmware. Écrivez ceux qui manquent avec
+    [create-plugin](/fr/develop/write-a-plugin).
   </Step>
-  <Step title="Check the budget">
-    Build with `cargo build` and measure. The [bench](/tools/bench) page shows
-    how to measure binary size, heap, and stack.
+  <Step title="Vérifier le budget">
+    Compilez avec `cargo build` et mesurez. La page [bench](/tools/bench)
+    explique comment mesurer la taille du binaire, le tas et la pile.
   </Step>
 </Steps>
 

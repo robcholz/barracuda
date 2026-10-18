@@ -1,40 +1,37 @@
 ---
-title: "Channels"
-description: "Reach the on-board Agent from web chat, the terminal, WeChat, QQ, Telegram, iMessage, and Inkbox."
+title: "消息通道"
+description: "通过网页聊天、终端、微信、QQ、Telegram、iMessage 和 Inkbox 访问板上 Agent。"
 ---
 
-Every channel reaches the same Agent, with the same sessions. Each channel is a
-Plugin, so a firmware carries only the channels it needs.
+每个消息通道访问的都是同一个 Agent，共享同样的会话。每个消息通道都是一个插件，所以固件只需带上它需要的消息通道。
 
-| Channel | Plugin | How to connect |
+| 消息通道 | 插件 | 如何连接 |
 | --- | --- | --- |
-| Web chat | [`imessage-web`](/plugins/imessage-web) | Open **Web chat** in the [Device Portal](/use/device-portal) |
-| Terminal | `cargo cli` | Run `cargo cli` and choose Local or Remote |
-| WeChat | [`imessage-wechat`](/plugins/imessage-wechat) | Scan the QR code on its portal page |
-| QQ | [`imessage-qq`](/plugins/imessage-qq) | Scan the QR code on its portal page |
-| Telegram | [`imessage-telegram`](/plugins/imessage-telegram) | Enter your bot token on its portal page |
-| iMessage | [`imessage-bluebubble`](/plugins/imessage-bluebubble) | Connect your BlueBubbles server on its portal page |
-| Inkbox | [`imessage-inkbox`](/plugins/imessage-inkbox) | Enter an Inkbox API key, or sign up, on its portal page |
+| 网页聊天 | [`imessage-web`](/plugins/imessage-web) | 在[设备门户](/zh/use/device-portal)中打开 **Web 聊天** |
+| 终端 | `cargo cli` | 运行 `cargo cli`，选择 Local 或 Remote |
+| 微信 | [`imessage-wechat`](/plugins/imessage-wechat) | 扫描其门户页面上的二维码 |
+| QQ | [`imessage-qq`](/plugins/imessage-qq) | 扫描其门户页面上的二维码 |
+| Telegram | [`imessage-telegram`](/plugins/imessage-telegram) | 在其门户页面上输入你的 bot token |
+| iMessage | [`imessage-bluebubble`](/plugins/imessage-bluebubble) | 在其门户页面上连接你的 BlueBubbles 服务器 |
+| Inkbox | [`imessage-inkbox`](/plugins/imessage-inkbox) | 在其门户页面上输入 Inkbox API key，或注册一个账号 |
 
-Before any channel can answer, register a model on the **Models** page.
+任何消息通道能回复之前，都需要先在 **模型配置**页面注册一个模型。
 
-## Owners
+## 所有者
 
-A messaging channel answers only its owners. To become one, send the channel
-the six-digit pairing code shown on its portal page. A code is valid for ten
-minutes; **New code** replaces it.
+消息通道只回复它的所有者。要成为所有者，把门户页面上显示的六位配对码发送给该消息通道。配对码十分钟内有效；点击 **New code** 会生成新的配对码替换它。
 
-## Sessions
+## 会话
 
-Every channel manages sessions with the same text commands:
+每个消息通道都用同样的文本命令管理会话：
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `/sessions` | List saved sessions, newest first |
-| `/new` | Start a new session |
-| `/new temp` | Start a temporary session that is not saved |
-| `/switch N` | Switch to session `N` |
-| `/rename N title` | Rename session `N` |
-| `/delete N` | Ask to delete session `N`; `/delete N confirm` deletes it |
+| `/sessions` | 列出已保存的会话，最新的在前 |
+| `/new` | 开始一个新会话 |
+| `/new temp` | 开始一个不保存的临时会话 |
+| `/switch N` | 切换到会话 `N` |
+| `/rename N title` | 重命名会话 `N` |
+| `/delete N` | 请求删除会话 `N`；`/delete N confirm` 才会真正删除 |
 
-Web chat shows the same sessions as a list.
+网页聊天会以列表形式显示同样的会话。

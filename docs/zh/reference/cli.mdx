@@ -1,61 +1,58 @@
 ---
 title: "CLI"
-description: "Every cargo command Barracuda adds: board, plugin, image, platform, and cli."
+description: "Barracuda 新增的所有 cargo 命令：board、plugin、image、platform 和 cli。"
 ---
 
-Barracuda adds its commands as Cargo aliases, so they run from anywhere in the
-repository with no extra install.
+Barracuda 以 Cargo 别名的形式添加命令，所以在仓库中任何位置都能运行，无需额外安装。
 
 ## cargo board
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `cargo board select [NAME]` | Select a Board, interactively when no name is given. Later `cargo build` and `cargo run` use it |
-| `cargo board target [NAME]` | Print a Board's Rust target triple; defaults to the selected Board |
-| `cargo board sync [--check]` | Validate Boards and synchronize peripheral implementations into the registry |
+| `cargo board select [NAME]` | 选择开发板；未给出名称时以交互方式选择。之后的 `cargo build` 和 `cargo run` 都会使用它 |
+| `cargo board target [NAME]` | 打印开发板的 Rust target triple；默认为当前所选开发板 |
+| `cargo board sync [--check]` | 校验开发板，并把外设实现同步到注册表 |
 
 ## cargo plugin
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `cargo plugin info <ID>` | Show a Plugin's manifest and dependencies |
-| `cargo plugin select` | Turn enabled Plugins off on this machine only, in `.barracuda/disabled-plugins` |
-| `cargo plugin run <TASK> [--plugin <ID>]` | Run a task declared in `plugin.toml`, such as `build`, for enabled Plugins |
-| `cargo plugin sync [--check]` | Synchronize discovered Plugins into the System registry |
+| `cargo plugin info <ID>` | 显示插件的清单和依赖 |
+| `cargo plugin select` | 仅在本机关闭已启用的插件，记录在 `.barracuda/disabled-plugins` 中 |
+| `cargo plugin run <TASK> [--plugin <ID>]` | 为已启用的插件运行 `plugin.toml` 中声明的任务，例如 `build` |
+| `cargo plugin sync [--check]` | 把发现的插件同步到 System 注册表 |
 
-Which Plugins a firmware contains is set by the Board's profile; see
-[Board profiles](/boards/profiles).
+固件包含哪些插件由开发板的 profile（配置档）决定；参见[开发板 profile](/zh/boards/profiles)。
 
 ## cargo image
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `cargo image build` | Build the selected Board's Plugin resource image |
-| `cargo image flash` | Flash the built image into the Board's `resources` partition |
-| `cargo image deploy` | Build and flash |
+| `cargo image build` | 构建所选开发板的插件资源镜像 |
+| `cargo image flash` | 把构建好的镜像烧录到开发板的 `resources` 分区 |
+| `cargo image deploy` | 构建并烧录 |
 
-See [System image](/tools/system-image).
+参见[系统镜像](/tools/system-image)。
 
 ## cargo platform
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `cargo platform sync [--check]` | Synchronize discovered Platforms into the registry |
+| `cargo platform sync [--check]` | 把发现的平台同步到注册表 |
 
 ## cargo cli
 
-The terminal channel. It always builds for your computer, whatever Board is
-selected.
+终端消息通道。无论选择了哪块开发板，它始终为你的电脑构建。
 
-| Command | What it does |
+| 命令 | 做什么 |
 | --- | --- |
-| `cargo cli` | Chat with a running device; choose Local or Remote |
-| `cargo cli configure [ADDRESS]` | Set models, web search, and channels from the terminal |
-| `cargo cli chat ADDRESS < messages.txt` | Send messages from a file |
+| `cargo cli` | 与正在运行的设备聊天；选择 Local 或 Remote |
+| `cargo cli configure [ADDRESS]` | 在终端中设置模型、网页搜索和消息通道 |
+| `cargo cli chat ADDRESS < messages.txt` | 从文件发送消息 |
 
-## Environment
+## 环境变量
 
-| Variable | Used by | Meaning |
+| 变量 | 使用方 | 含义 |
 | --- | --- | --- |
-| `BARRACUDA_VIRTUAL_IO_ADDR` | `local-linux`, `local-macos` | Loopback address of the virtual peripherals, such as `127.0.0.1:7878` |
-| `BARRACUDA_LOG_LEVEL` | `cargo build`, `cargo run` | Log level baked into the build: `off`, `error`, `warn`, `info`, `debug`, or `trace` |
+| `BARRACUDA_VIRTUAL_IO_ADDR` | `local-linux`、`local-macos` | 虚拟外设的回环地址，例如 `127.0.0.1:7878` |
+| `BARRACUDA_LOG_LEVEL` | `cargo build`、`cargo run` | 编译进构建的日志级别：`off`、`error`、`warn`、`info`、`debug` 或 `trace` |

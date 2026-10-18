@@ -1,41 +1,43 @@
 ---
-title: "Device Portal"
-description: "Set up Wi-Fi, models, channels, files, and apps from any browser on the device's network."
+title: "Portail de l’appareil"
+description: "Configurez le Wi-Fi, les modèles, les canaux, les fichiers et les applications depuis n’importe quel navigateur du réseau de l’appareil."
 ---
 
-The Device Portal is the device's own web app, served by the device at
-`/portal/`. Every enabled Plugin that has settings adds its page to it, so the
-portal always matches the firmware.
+Le portail de l’appareil est l’application web propre à l’appareil, servie par
+celui-ci à `/portal/`. Chaque Plugin activé qui possède des réglages y ajoute sa
+page : le portail correspond donc toujours au firmware.
 
-## Open the portal
+## Ouvrir le portail
 
-| Where the device is | Address |
+| Où se trouve l’appareil | Adresse |
 | --- | --- |
-| A Board that has no Wi-Fi yet | Join the open `Barracuda Setup` network, then open `http://192.168.4.1/portal/` |
-| A Board on your network | `http://DEVICE_ADDRESS:8787/portal/` |
+| Une carte qui n’a pas encore de Wi-Fi | Rejoignez le réseau ouvert `Barracuda Setup`, puis ouvrez `http://192.168.4.1/portal/` |
+| Une carte sur votre réseau | `http://DEVICE_ADDRESS:8787/portal/` |
 | `local-linux` | `http://10.42.0.2:8787/portal/` |
 
-The portal follows your browser's language, Chinese or English.
+Le portail suit la langue de votre navigateur, chinois ou anglais.
 
 ## Pages
 
-| Page | From Plugin | What you set |
+| Page | Plugin d’origine | Ce que vous réglez |
 | --- | --- | --- |
-| Wi-Fi | [`wifi`](/plugins/wifi) | Scan and join a network; the setup hotspot |
-| Models | [`agent`](/plugins/agent) | The model service, model, and API key for each Agent purpose |
-| Web search | [`agent-websearch`](/plugins/agent-websearch) | The search service the Agent uses |
-| Web chat | [`imessage-web`](/plugins/imessage-web) | Talk to the Agent in the browser |
-| WeChat, QQ, Telegram, BlueBubbles, Inkbox | [Channels](/use/channels) | Bind the account, owners, and pairing codes |
-| Files | [`files`](/plugins/files) | Browse the Workspace and Plugin files |
-| Apps | [`app-portal`](/plugins/app-portal) | Review and install apps |
+| Wi-Fi | [`wifi`](/plugins/wifi) | Rechercher et rejoindre un réseau ; le point d’accès de configuration |
+| Models | [`agent`](/plugins/agent) | Le service de modèles, le modèle et la clé d’API pour chaque usage de l’Agent |
+| Web search | [`agent-websearch`](/plugins/agent-websearch) | Le service de recherche utilisé par l’Agent |
+| Web chat | [`imessage-web`](/plugins/imessage-web) | Parler à l’Agent dans le navigateur |
+| WeChat, QQ, Telegram, BlueBubbles, Inkbox | [Canaux](/fr/use/channels) | Lier le compte, les propriétaires et les codes d’appairage |
+| Files | [`files`](/plugins/files) | Parcourir le Workspace et les fichiers des Plugins |
+| Apps | [`app-portal`](/plugins/app-portal) | Examiner et installer des applications |
 
-A page appears only when its Plugin is in the firmware. See
-[Board profiles](/boards/profiles).
+Une page n’apparaît que si son Plugin est dans le firmware. Consultez
+[Profils de carte](/fr/boards/profiles).
 
 <Warning>
-  The portal's HTTP APIs have no authentication or transport encryption, and
-  the setup hotspot is open. Configure the device only on a network you trust.
+  Les API HTTP du portail n’ont ni authentification ni chiffrement du
+  transport, et le point d’accès de configuration est ouvert. Ne configurez
+  l’appareil que sur un réseau de confiance.
 </Warning>
 
-From a terminal, `cargo cli configure` fills in the same model, web search, and
-channel settings without a browser. See [Build and run](/get-started/build-and-run).
+Depuis un terminal, `cargo cli configure` renseigne les mêmes réglages de
+modèles, de recherche web et de canaux sans navigateur. Consultez
+[Compiler et exécuter](/fr/get-started/build-and-run).

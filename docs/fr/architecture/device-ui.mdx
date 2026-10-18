@@ -1,151 +1,173 @@
 ---
-title: "Device UI"
-description: "Understand how the device UI splits into the system, system apps, and installable apps."
+title: "Interface de l’appareil"
+description: "Comprenez comment l’interface de l’appareil se répartit entre le système, les applications système et les applications installables."
 tag: "NEW"
 ---
 
-Barracuda's device UI is built from three layers: **the system**, **system
-apps**, and **installable apps**. Every screen, gesture, and app belongs to
-exactly one of them, and the layer decides who owns it, what it may do, and
-what happens when it fails. This document is authoritative for that split;
-the design of each screen lives in the device UI design, and the contracts in
-the Plugins' docs.
+L’interface de l’appareil Barracuda repose sur trois couches : **le système**,
+**les applications système** et **les applications installables**. Chaque écran,
+chaque geste et chaque application appartient à exactement une d’entre elles, et
+la couche détermine qui en est propriétaire, ce qu’il peut faire et ce qui se
+passe en cas d’échec. Ce document fait autorité pour cette répartition ; la
+conception de chaque écran se trouve dans la conception de l’interface de
+l’appareil, et les contrats dans la documentation des Plugins.
 
-| | System | System app | Installable app |
+| | Système | Application système | Application installable |
 | --- | --- | --- | --- |
-| What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container the person installed |
-| Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | the `app-manager` Plugin's `/media/apps/<id>` |
-| Runs as | the `app-manager` task | a Lua run with a MicroTS view, under the app lifecycle | the same |
-| Lua packages | none | every registered package, its own package included | the ambient packages and those its manifest names; never a builtin app's package |
-| Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
-| When it fails | the device is broken | the system shows that it exited | the same |
-| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | Sessions, Workflows, Files, Settings | the air quality, light strip, camera, and counter examples |
+| Ce que c’est | du Rust natif dans le Plugin `app-manager` | une application intégrée : un conteneur d’application fourni par un autre Plugin | un conteneur d’application installé par la personne |
+| Où elle se trouve | `/resources/view` du Plugin `app-manager` | `/resources/app` de son Plugin `builtin-app-<name>` | `/media/apps/<id>` du Plugin `app-manager` |
+| S’exécute en tant que | la tâche `app-manager` | une exécution Lua avec une vue MicroTS, sous le cycle de vie des applications | idem |
+| Paquets Lua | aucun | tous les paquets enregistrés, y compris le sien | les paquets ambiants et ceux que nomme son manifeste ; jamais le paquet d’une application intégrée |
+| Supprimable | non | non ; seulement les infos de l’application ; une carte omet son Plugin | oui ; infos de l’application et désinstallation |
+| En cas d’échec | l’appareil est hors d’usage | le système indique qu’elle s’est arrêtée | idem |
+| Exemples | l’accueil et les états de l’Agent, le lanceur, le sélecteur d’applications, les centres de notifications et de contrôle, le lancement, l’arrêt, l’installation, le menu et les infos d’application | Sessions, Workflows, Files, Settings | les exemples de qualité de l’air, de bande lumineuse, de caméra et de compteur |
 
-## The Plugins
+## Les Plugins
 
-| Plugin | Holds |
+| Plugin | Contient |
 | --- | --- |
-| `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
-| `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
-| `system-fonts` | the system fonts every view on a display draws with |
-| `system-wifi` | Wi-Fi in the system UI: the link, the offline card, and the setup hotspot the portal tile opens, through `app-manager`'s `SystemNetwork` |
+| `app-manager` | le kit d’applications (applications, installations, cycle de vie, paquet `app`), le kit d’interface (vues, écran, tactile, gestes, polices et icônes système) et le point d’entrée qui les relie et exécute l’interface système |
+| `builtin-app-<name>` | une application système : son conteneur et le backend de son propre paquet Lua |
+| `system-fonts` | les polices système avec lesquelles dessine chaque vue d’un écran |
+| `system-wifi` | le Wi-Fi dans l’interface système : la liaison, la carte hors ligne et le point d’accès de configuration qu’ouvre la tuile du portail, via `SystemNetwork` d’`app-manager` |
 
-The app kit needs no display. On a Board without one, the `app-manager`
-Plugin runs no UI kit and no system UI: it is an app manager for headless
-apps, and apps with views answer `no_display`. The system UI needs no
-network either: it shows a network only when a Plugin shows one with
-`SystemNetwork`, as `system-wifi` does. A Board with a screen names the
-`screen` profile, or `screen-offline` for a product that never goes online
-(no Wi-Fi, portal, Agent, Sessions, or Settings); both take the `ui` layer:
-`app-manager`, `system-fonts`, and the builtin apps that need no network. The
-profiles are in [Board profiles](/boards/profiles). A Board leaves a system app out by not enabling its Plugin, and a
-Board without a display enables neither the system apps nor
-`system-fonts`.
+Le kit d’applications n’a pas besoin d’écran. Sur une carte sans écran, le
+Plugin `app-manager` n’exécute ni kit d’interface ni interface système : c’est un
+gestionnaire d’applications sans interface, et les applications avec des vues
+répondent `no_display`. L’interface système n’a pas non plus besoin du réseau :
+elle n’affiche un réseau que lorsqu’un Plugin en affiche un avec
+`SystemNetwork`, comme le fait `system-wifi`. Une carte dotée d’un écran nomme le
+profil `screen`, ou `screen-offline` pour un produit qui ne se connecte jamais au
+réseau (pas de Wi-Fi, de portail, d’Agent, de Sessions ni de Settings) ; tous
+deux incluent la couche `ui` : `app-manager`, `system-fonts` et les applications
+intégrées qui n’ont pas besoin du réseau. Les profils sont décrits dans
+[Profils de carte](/fr/boards/profiles). Une carte omet une application système
+en n’activant pas son Plugin, et une carte sans écran n’active ni les
+applications système ni `system-fonts`.
 
-## Deciding the layer
+## Choisir la couche
 
-Put a feature in the **system** when any of these holds:
+Placez une fonctionnalité dans le **système** si l’une de ces conditions est
+remplie :
 
-- it must work when an app hangs or crashes, or when no app runs;
-- it arbitrates between apps: what is on the display, which app is in front,
-  which apps run;
-- it grants trust: installing, uninstalling, and what an app may use;
-- it answers input that works everywhere: edge swipes, back, long presses on
-  system surfaces, and the Board's home and Agent keys.
+- elle doit fonctionner quand une application se bloque ou plante, ou quand
+  aucune application ne tourne ;
+- elle arbitre entre les applications : ce qui est à l’écran, quelle
+  application est au premier plan, quelles applications tournent ;
+- elle accorde la confiance : installation, désinstallation et ce qu’une
+  application peut utiliser ;
+- elle répond à une saisie valable partout : balayages depuis les bords,
+  retour, appuis longs sur les surfaces système, et les touches accueil et Agent
+  de la carte.
 
-Make it a **system app** when it is a full-screen experience the device
-ships with, that needs the device's state an installable app could not get
-without asking, and that may fail without taking the device down: Settings,
-conversations, Workflows, files.
+Faites-en une **application système** s’il s’agit d’une expérience plein écran
+livrée avec l’appareil, qui a besoin d’un état de l’appareil qu’une application
+installable ne pourrait obtenir sans le demander, et qui peut échouer sans
+mettre l’appareil hors d’usage : Settings, conversations, Workflows, fichiers.
 
-Everything else is an **installable app**: it is offered in the Workspace by
-the portal, an Agent, or another Plugin, and the person installs it.
+Tout le reste est une **application installable** : elle est proposée dans le
+Workspace par le portail, un Agent ou un autre Plugin, et la personne
+l’installe.
 
-## The system
+## Le système
 
-The `app-manager` Plugin's system UI is the system. It is the only caller
-that switches and uninstalls apps for the person, the only owner of the
-system gestures, and, with the `app-portal` Plugin's portal page on the
-device's setup hotspot, the only way the person installs apps. Its view sits on the system layer, above the
-app layer: while an app is in the foreground and no system screen covers it,
-the app's view shows; any system screen covers the app and stops its input
-(`AppManager::set_interactive`) until the screen closes.
+L’interface système du Plugin `app-manager` est le système. C’est le seul
+appelant qui bascule et désinstalle des applications pour la personne, le seul
+propriétaire des gestes système et, avec la page de portail du Plugin
+`app-portal` sur le point d’accès de configuration de l’appareil, le seul moyen
+pour la personne d’installer des applications. Sa vue se trouve sur la couche
+système, au-dessus de la couche des applications : tant qu’une application est
+au premier plan et qu’aucun écran système ne la recouvre, la vue de
+l’application s’affiche ; tout écran système recouvre l’application et bloque
+ses saisies (`AppManager::set_interactive`) jusqu’à sa fermeture.
 
-The UI kit turns touch into taps, which press the view on the display, and
-long presses and swipes, which go only to the system
-(`UiService::next_gesture`). Apps never see system gestures, so no app can
-take the person's way out.
+Le kit d’interface transforme le tactile en tapotements, qui appuient sur la vue
+affichée, et en appuis longs et balayages, qui ne vont qu’au système
+(`UiService::next_gesture`). Les applications ne voient jamais les gestes
+système : aucune application ne peut donc priver la personne de son moyen de
+sortir.
 
-Notices reach the person through the system's notification center, which
-any Plugin posts to with the `Notifications` capability and Workflows with
-`app.notify`. A question that needs the person's answer
-(`Notifications::ask`, `app.confirm`) is listed first and shows on the home
-screen until answered. The home screen also shows the Agent's state
-(standby, listening, thinking, answering) from `AgentStatus` or `app.agent`.
-An app never draws over another app or over the system.
+Les avis atteignent la personne via le centre de notifications du système, où
+tout Plugin publie avec la capacité `Notifications`, et les Workflows avec
+`app.notify`. Une question qui exige une réponse de la personne
+(`Notifications::ask`, `app.confirm`) est listée en premier et reste affichée sur
+l’écran d’accueil jusqu’à ce qu’on y réponde. L’écran d’accueil affiche aussi
+l’état de l’Agent (veille, écoute, réflexion, réponse) depuis `AgentStatus` ou
+`app.agent`. Une application ne dessine jamais par-dessus une autre application
+ni par-dessus le système.
 
-The device's settings (brightness, volume, mute, microphone, do not disturb,
-and the screen timeout) are the `Preferences` capability: the control center
-and the Settings app change the same values, and the system UI applies
-brightness and the timeout to the display and keeps them across restarts.
+Les réglages de l’appareil (luminosité, volume, sourdine, microphone, ne pas
+déranger et délai de mise en veille de l’écran) relèvent de la capacité
+`Preferences` : le centre de contrôle et l’application Settings modifient les
+mêmes valeurs, et l’interface système applique la luminosité et le délai à
+l’écran et les conserve après un redémarrage.
 
-A right swipe over an app is back: an app that reported pages with
-`app.navigation(depth)` receives `app:back` while its depth is above zero;
-otherwise the app goes to the background and the launcher shows.
+Un balayage vers la droite sur une application correspond au retour : une
+application qui a signalé des pages avec `app.navigation(depth)` reçoit
+`app:back` tant que sa profondeur est supérieure à zéro ; sinon, l’application
+passe en arrière-plan et le lanceur s’affiche.
 
-## System apps
+## Applications système
 
-A system app is a builtin app: a `builtin-app-<name>` Plugin depends on
-`app-manager` and adds its container with `AppManager::add_builtin`. Only
-Plugins in the image can do that, so nothing installed can make a system app.
-System apps run under the same lifecycle as any app (active, inactive,
-background, suspended, terminating) and may `require` every registered Lua
-package without declaring it. No installed app may take a system app's ID,
-and system apps cannot be uninstalled.
+Une application système est une application intégrée : un Plugin
+`builtin-app-<name>` dépend d’`app-manager` et ajoute son conteneur avec
+`AppManager::add_builtin`. Seuls les Plugins présents dans l’image peuvent le
+faire : rien de ce qui est installé ne peut créer une application système. Les
+applications système suivent le même cycle de vie que toute application (active,
+inactive, arrière-plan, suspendue, en cours d’arrêt) et peuvent faire `require`
+sur tout paquet Lua enregistré sans le déclarer. Aucune application installée ne
+peut prendre l’ID d’une application système, et les applications système ne
+peuvent pas être désinstallées.
 
-A builtin app reaches the device through its own Lua package, such as
-`settings`, whose backend lives in its Plugin and reads only the
-capabilities that Plugin depends on. An installable app whose manifest asks
-for a builtin app's package is invalid. A builtin app may say what the system
-UI opens it for, such as `wifi` for the control center's Wi-Fi tile, so the
-system UI never names an app. System apps draw with the system fonts and ship
-no atlases of their own.
+Une application intégrée accède à l’appareil par son propre paquet Lua, comme
+`settings`, dont le backend se trouve dans son Plugin et ne lit que les
+capacités dont ce Plugin dépend. Une application installable dont le manifeste
+demande le paquet d’une application intégrée est invalide. Une application
+intégrée peut indiquer pour quoi l’interface système l’ouvre, par exemple
+`wifi` pour la tuile Wi-Fi du centre de contrôle : l’interface système ne nomme
+ainsi jamais une application. Les applications système dessinent avec les
+polices système et ne fournissent pas d’atlas propres.
 
-## Installable apps
+## Applications installables
 
-An installable app starts as a container offered in the Workspace under
-`/workspace/media/apps/<id>`; it is not launchable there. It is written
-against the app API
-([App API](/plugins/app-manager/app-api)): its manifest
-names the `app` package version, the stable packages it requires or uses
-with the least version it needs, other packages it asks for, and the Boards
-it is for when it talks to their hardware. The
-system checks it against the device; one that cannot run here shows why and
-cannot be installed. Otherwise the install screen lists what it asks for in
-the words each package's Plugin declares; when the person installs it, the
-`app-manager` Plugin copies the container into its private `/media/apps/<id>`,
-and from then on every run of it may `require` only the ambient packages and
-those it named.
-A Workflow or Agent asks for an install with `app.install`; only the person
-completes it, on the device's install screen or, on the portal's Apps page,
-from a phone on the device's setup hotspot, which is how a Board without a
-display installs apps. Either way the install takes exactly what the person
-was shown: the offer's digest is pinned when the install is asked for. An
-offer may be a signed `.bapp` package; an app installed from one takes
-updates only from the same signer. Uninstalling deletes the container and the app's data; the
-Workspace offer stays until its author removes it.
+Une application installable commence comme un conteneur proposé dans le
+Workspace sous `/workspace/media/apps/<id>` ; elle n’y est pas lançable. Elle est
+écrite pour l’API d’application
+([API d’application](/fr/plugins/app-manager/app-api)) : son manifeste nomme la
+version du paquet `app`, les paquets stables qu’elle exige ou utilise avec la
+version minimale nécessaire, les autres paquets qu’elle demande, et les cartes
+auxquelles elle est destinée lorsqu’elle dialogue avec leur matériel. Le système
+la vérifie par rapport à l’appareil ; une application qui ne peut pas s’exécuter
+ici indique pourquoi et ne peut pas être installée. Sinon, l’écran
+d’installation liste ce qu’elle demande, dans les termes que déclare le Plugin
+de chaque paquet ; quand la personne l’installe, le Plugin `app-manager` copie
+le conteneur dans son répertoire privé `/media/apps/<id>`, et dès lors chacune de
+ses exécutions ne peut faire `require` que sur les paquets ambiants et ceux
+qu’elle a nommés.
+Un Workflow ou un Agent demande une installation avec `app.install` ; seule la
+personne la mène à bien, sur l’écran d’installation de l’appareil ou, sur la
+page Apps du portail, depuis un téléphone connecté au point d’accès de
+configuration de l’appareil — c’est ainsi qu’une carte sans écran installe des
+applications. Dans les deux cas, l’installation prend exactement ce qui a été
+montré à la personne : l’empreinte de l’offre est figée au moment de la
+demande. Une offre peut être un paquet `.bapp` signé ; une application installée
+depuis un tel paquet n’accepte de mises à jour que du même signataire. La
+désinstallation supprime le conteneur et les données de l’application ; l’offre
+du Workspace reste jusqu’à ce que son auteur la retire.
 
-## Fonts
+## Polices
 
-The `system-fonts` Plugin bakes the system fonts into its `/resources/fonts`
-and hands them to the UI kit with `app-manager`'s `SystemFonts`; a device
-Board enables it, and a Board without a display leaves its 2.4 MB out. They
-are Noto Sans SC at the sizes the system view and the system apps use, with
-the characters in its own `charset.txt`, and the system icon
-font's glyphs at the sizes icons are drawn at. The 16 px regular slot is the
-prose slot: it also holds GB 2312's 3,755 common characters, so text no
-source names, such as an Agent's answer, a notice, or a conversation's title,
-is drawn in it. A view that ships no atlas for a font slot draws with the
-system font for it, so installable apps may use them too; an app that shows
-other characters bakes its own. Text with characters outside an atlas shows a
-placeholder box.
+Le Plugin `system-fonts` intègre les polices système dans son
+`/resources/fonts` et les transmet au kit d’interface via `SystemFonts`
+d’`app-manager` ; une carte d’appareil l’active, et une carte sans écran omet ses
+2,4 Mo. Il s’agit de Noto Sans SC aux tailles utilisées par la vue système et les
+applications système, avec les caractères de son propre `charset.txt`, et des
+glyphes de la police d’icônes système aux tailles où les icônes sont dessinées.
+L’emplacement 16 px regular est celui de la prose : il contient aussi les
+3 755 caractères courants de GB 2312, si bien que le texte dont aucune source
+ne fournit les caractères — réponse d’un Agent, avis, titre de conversation —
+y est dessiné. Une vue qui ne fournit pas d’atlas pour un emplacement de police
+dessine avec la police système correspondante : les applications installables
+peuvent donc aussi les utiliser ; une application qui affiche d’autres
+caractères intègre les siens. Un texte contenant des caractères absents d’un
+atlas affiche une boîte de substitution.

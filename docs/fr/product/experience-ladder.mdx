@@ -1,141 +1,158 @@
 ---
-title: "The experience ladder"
-sidebarTitle: "The ladder"
-description: "The six levels of Barracuda, from out of the box to fully custom firmware, and where each one starts in the docs."
+title: "L’échelle d’expérience"
+sidebarTitle: "L’échelle"
+description: "Les six niveaux de Barracuda, de l’usage prêt à l’emploi au firmware entièrement sur mesure, et où chacun commence dans la documentation."
 ---
 
-Barracuda is experienced as a ladder. Each level asks a little more of the
-person and gives them much more freedom. Every level is useful on its own; no
-one has to climb higher than their project needs. At every level an agent does
-the heavy lifting.
+Barracuda se vit comme une échelle. Chaque niveau demande un peu plus à la
+personne et lui donne beaucoup plus de liberté. Chaque niveau est utile en soi ;
+personne n’a besoin de monter plus haut que son projet ne l’exige. À chaque
+niveau, un agent fait le gros du travail.
 
-| Level | Name | Who | What they do | Where | Agent | Start here |
+| Niveau | Nom | Qui | Ce qu’ils font | Où | Agent | Par où commencer |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts | [Device Portal](/use/device-portal) |
-| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) | [Board profiles](/boards/profiles) |
-| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent | [Device UI](/architecture/device-ui) |
-| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill | [Write a Plugin](/develop/write-a-plugin) |
-| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills | [Boards](/boards/overview) |
-| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill | [Custom firmware](/develop/custom-firmware) |
+| 1 | Prêt à l’emploi | Tout le monde | Installer depuis le navigateur, puis demander des choses à la carte | Navigateur, téléphone, appareil | L’Agent embarqué écrit et exécute des scripts VM | [Portail de l’appareil](/fr/use/device-portal) |
+| 2 | Configurer | Makers, enseignants | Choisir les Plugins du firmware, compiler et flasher | Machine du développeur | — (configuration, pas génération) | [Profils de carte](/fr/boards/profiles) |
+| 3 | Créer des applications | Développeurs d’applications | Décrire une application, générer sa logique et son interface, la flasher | Live Editor (navigateur) | Agent du navigateur | [Interface de l’appareil](/fr/architecture/device-ui) |
+| 4 | Créer des Plugins | Développeurs de Plugins | Ajouter de nouvelles capacités au runtime | Machine du développeur | Agent de code + skill `create-plugin` | [Écrire un Plugin](/fr/develop/write-a-plugin) |
+| 5 | Ajouter des cartes et des plateformes | Contributeurs, fabricants de cartes | Porter Barracuda sur une nouvelle carte ou une nouvelle famille de puces | Machine du développeur | Agent de code + skills `create-board`, `create-platform` | [Cartes](/boards/overview) |
+| 6 | Tout personnaliser | Concepteurs de produits | Choisir ou créer la plateforme et la carte, alléger ou créer des Plugins, adapter le firmware à un budget de ressources | Machine du développeur | Agent de code + skill `fully-customize` | [Firmware sur mesure](/fr/develop/custom-firmware) |
 
-## Level 1 — Out of the box
+## Niveau 1 — Prêt à l’emploi
 
-**In the docs:** [Device Portal](/use/device-portal) · [Channels](/use/channels) · [Scripts](/use/scripts) · [Automations](/use/automations)
+**Dans la documentation :** [Portail de l’appareil](/fr/use/device-portal) · [Canaux](/fr/use/channels) · [Scripts](/fr/use/scripts) · [Automatisations](/fr/use/automations)
 
-**Goal:** a working, talking, acting device in minutes, with no toolchain.
+**Objectif :** un appareil qui fonctionne, parle et agit en quelques minutes,
+sans chaîne d’outils.
 
-1. Open the Web Installer, choose a board and a version, plug in USB, install.
-   Each board gets a default firmware with a default Plugin set.
-2. Join Wi-Fi from the same page; the installer hands off to the Device Portal.
-3. Register a model and bind a channel (WeChat, Telegram, QQ, iMessage, web chat,
-   or the terminal).
-4. Ask the board for something physical: "blink the LED twice a second",
-   "show the temperature on the screen", "tell me when the light level drops".
+1. Ouvrez le Web Installer, choisissez une carte et une version, branchez l’USB,
+   installez. Chaque carte reçoit un firmware par défaut avec un ensemble de
+   Plugins par défaut.
+2. Connectez-vous au Wi-Fi depuis la même page ; l’installateur passe la main
+   au portail de l’appareil.
+3. Enregistrez un modèle et liez un canal (WeChat, Telegram, QQ, iMessage, chat
+   web ou terminal).
+4. Demandez quelque chose de physique à la carte : « fais clignoter la LED deux
+   fois par seconde », « affiche la température à l’écran », « préviens-moi
+   quand la luminosité baisse ».
 
-The on-board agent answers by writing a short VM script and running it against
-the real hardware immediately. The script, its output, and its result appear in
-the conversation. Long-running behavior is kept alive by Workflow automations
-and schedules, so the device keeps working after the chat ends.
+L’Agent embarqué répond en écrivant un court script VM et en l’exécutant
+immédiatement sur le matériel réel. Le script, sa sortie et son résultat
+apparaissent dans la conversation. Les comportements de longue durée sont
+maintenus par les automatisations et les planifications Workflow : l’appareil
+continue de travailler après la fin de la conversation.
 
-**What makes it work:** the Web Installer, the Device Portal, the on-board
-Agent, the VM and its peripheral packages, channels, Workflow.
+**Ce qui le rend possible :** le Web Installer, le portail de l’appareil,
+l’Agent embarqué, la VM et ses paquets de périphériques, les canaux, Workflow.
 
-## Level 2 — Configure
+## Niveau 2 — Configurer
 
-**In the docs:** [Board profiles](/boards/profiles) · [Build and run](/get-started/build-and-run) · [CLI](/reference/cli)
+**Dans la documentation :** [Profils de carte](/fr/boards/profiles) · [Compiler et exécuter](/fr/get-started/build-and-run) · [CLI](/fr/reference/cli)
 
-**Goal:** make the device fit the project by choosing its Plugins, without
-writing code.
+**Objectif :** adapter l’appareil au projet en choisissant ses Plugins, sans
+écrire de code.
 
-Plugins are compiled into the firmware, so the Plugin set is chosen on the
-developer's machine. Select the Board, choose the Plugins the project needs —
-camera, display, LED strip, sensors, web search, a messaging channel — leave out
-the rest, then build and flash. There are three ways to choose:
+Les Plugins sont compilés dans le firmware : l’ensemble de Plugins se choisit
+donc sur la machine du développeur. Sélectionnez la carte, choisissez les
+Plugins dont le projet a besoin — caméra, écran, bande de LED, capteurs,
+recherche web, un canal de messagerie —, laissez le reste de côté, puis
+compilez et flashez. Il existe trois façons de choisir :
 
-- an interactive command that lists the Plugins to pick from;
-- a configuration file that lists the enabled Plugins, for projects kept in
-  version control;
-- the developer's coding agent, which picks the Plugins for a stated need and
-  builds the firmware.
+- une commande interactive qui liste les Plugins disponibles ;
+- un fichier de configuration qui liste les Plugins activés, pour les projets
+  suivis en gestion de versions ;
+- l’agent de code du développeur, qui choisit les Plugins pour un besoin donné
+  et compile le firmware.
 
-A Plugin that is left out costs no memory, flash,
-or tasks. On the device, every Plugin brings its own page in the Device Portal,
-so each capability arrives with its own settings.
+Un Plugin laissé de côté ne coûte ni mémoire, ni flash, ni tâches. Sur
+l’appareil, chaque Plugin apporte sa propre page dans le portail de l’appareil :
+chaque capacité arrive avec ses propres réglages.
 
-**What makes it work:** Plugin declarations, the host build, per-Plugin portal
-pages.
+**Ce qui le rend possible :** les déclarations de Plugins, la compilation sur
+l’hôte, les pages de portail par Plugin.
 
-## Level 3 — Build apps
+## Niveau 3 — Créer des applications
 
-**In the docs:** [Device UI](/architecture/device-ui) · [App format](/plugins/app-manager/app-format) · [App API](/plugins/app-manager/app-api) · [PocketJS](/plugins/app-manager/pocketjs)
+**Dans la documentation :** [Interface de l’appareil](/fr/architecture/device-ui) · [Format d’application](/fr/plugins/app-manager/app-format) · [API d’application](/fr/plugins/app-manager/app-api) · [PocketJS](/fr/plugins/app-manager/pocketjs)
 
-**Goal:** a real device application with its own UI, without setting up a
-firmware project.
+**Objectif :** une véritable application d’appareil avec sa propre interface,
+sans monter de projet firmware.
 
-In the Live Editor, the developer describes the app. The in-browser agent
-generates the app logic and its interface, the developer previews and iterates
-visually, and then flashes it to the board over USB from the same page. Apps run
-on the device under the App Manager Plugin, which installs, starts, stops, and
-updates them alongside the rest of the runtime.
+Dans le Live Editor, le développeur décrit l’application. L’Agent du navigateur
+génère la logique de l’application et son interface ; le développeur la
+prévisualise et l’améliore visuellement, puis la flashe sur la carte par USB
+depuis la même page. Les applications s’exécutent sur l’appareil sous le Plugin
+App Manager, qui les installe, les démarre, les arrête et les met à jour aux
+côtés du reste du runtime.
 
-**What makes it work:** the Live Editor, the in-browser agent, the App Manager
-Plugin, the app runtime, browser flashing.
+**Ce qui le rend possible :** le Live Editor, l’Agent du navigateur, le Plugin
+App Manager, le runtime d’applications, le flashage depuis le navigateur.
 
-## Level 4 — Create Plugins
+## Niveau 4 — Créer des Plugins
 
-**In the docs:** [Write a Plugin](/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [All Plugins](/plugins/overview)
+**Dans la documentation :** [Écrire un Plugin](/fr/develop/write-a-plugin) · [API des Plugins](/architecture/plugin-api) · [Tous les Plugins](/plugins/overview)
 
-**Goal:** add a new capability to Barracuda that any device can use.
+**Objectif :** ajouter à Barracuda une nouvelle capacité utilisable par
+n’importe quel appareil.
 
-The developer clones the repository and asks their coding agent — Claude Code,
-Cursor, or Codex — to create a Plugin. The `create-plugin` skill gives the agent
-Barracuda's architecture: when to expose a typed capability, a Workflow Action or
-Event, or an Agent Tool; how lifecycle and task ownership work; how the Plugin
-documents itself; and which focused tests to write. The result is a Plugin that
-looks like every first-party Plugin.
+Le développeur clone le dépôt et demande à son agent de code — Claude Code,
+Cursor ou Codex — de créer un Plugin. La skill `create-plugin` transmet à
+l’agent l’architecture de Barracuda : quand exposer une capacité typée, une
+action ou un événement Workflow, ou un outil de l’Agent ; comment fonctionnent
+le cycle de vie et la propriété des tâches ; comment le Plugin se documente ; et
+quels tests ciblés écrire. Le résultat est un Plugin qui ressemble à tous les
+Plugins officiels.
 
-**What makes it work:** the Plugin contract, `plugin.toml`, agent-friendly API
-conventions, the `create-plugin` skill, per-Plugin docs.
+**Ce qui le rend possible :** le contrat des Plugins, `plugin.toml`, des
+conventions d’API adaptées aux agents, la skill `create-plugin`, la
+documentation par Plugin.
 
-## Level 5 — Add Boards and Platforms
+## Niveau 5 — Ajouter des cartes et des plateformes
 
-**In the docs:** [Boards](/boards/overview) · [Peripherals](/boards/peripherals) · [Platform architecture](/architecture/platform-architecture)
+**Dans la documentation :** [Cartes](/boards/overview) · [Périphériques](/boards/peripherals) · [Architecture des plateformes](/architecture/platform-architecture)
 
-**Goal:** bring Barracuda to new hardware.
+**Objectif :** porter Barracuda sur un nouveau matériel.
 
-- **A new Board** on a supported chip is a description: chip, toolchain target,
-  flash layout, and peripherals. The `create-board` skill produces it and its
-  layout, and the board appears in the Web Installer.
-- **A new Platform** brings a new chip family: executor entry, network stack,
-  filesystem, flash, and HAL adapters behind the Platform contract. The
-  `create-platform` skill guides the agent through that contract while keeping
-  the System and every Plugin unchanged.
+- **Une nouvelle carte** sur une puce prise en charge est une description :
+  puce, cible de la chaîne d’outils, plan de la flash et périphériques. La skill
+  `create-board` la produit avec son plan, et la carte apparaît dans le Web
+  Installer.
+- **Une nouvelle plateforme** apporte une nouvelle famille de puces : point
+  d’entrée de l’exécuteur, pile réseau, système de fichiers, flash et
+  adaptateurs HAL derrière le contrat de plateforme. La skill `create-platform`
+  guide l’agent à travers ce contrat sans modifier le System ni aucun Plugin.
 
-**What makes it work:** the Board YAML and Platform contract, independent Board
-and Platform selection, the `create-board` and `create-platform` skills.
+**Ce qui le rend possible :** le YAML de carte et le contrat de plateforme, la
+sélection indépendante de la carte et de la plateforme, les skills
+`create-board` et `create-platform`.
 
-## Level 6 — Fully customize
+## Niveau 6 — Tout personnaliser
 
-**In the docs:** [Custom firmware](/develop/custom-firmware)
+**Dans la documentation :** [Firmware sur mesure](/fr/develop/custom-firmware)
 
-**Goal:** a product firmware shaped exactly to a chip, a resource budget, and a
-job.
+**Objectif :** un firmware de produit taillé exactement pour une puce, un budget
+de ressources et une tâche.
 
-The builder states the target and the requirements. With the `fully-customize`
-skill, the coding agent selects or creates the Platform and Board, chooses the
-Plugin set, trims Plugins that are too heavy for the budget, creates the ones
-that are missing, and verifies that the result fits the device's memory and
-flash. The output is a firmware that contains only what the product needs.
+Le concepteur indique la cible et les exigences. Avec la skill
+`fully-customize`, l’agent de code sélectionne ou crée la plateforme et la
+carte, choisit l’ensemble de Plugins, allège les Plugins trop lourds pour le
+budget, crée ceux qui manquent et vérifie que le résultat tient dans la mémoire
+et la flash de l’appareil. Le résultat est un firmware qui ne contient que ce
+dont le produit a besoin.
 
-**What makes it work:** every level below it — Plugins, Boards, Platforms, and
-the skills that create them — composed by one agent with one goal.
+**Ce qui le rend possible :** tous les niveaux inférieurs — Plugins, cartes,
+plateformes et les skills qui les créent —, assemblés par un seul agent avec un
+seul objectif.
 
-## Moving between levels
+## Passer d’un niveau à l’autre
 
-- Every level hands off to the next one with something concrete: the script the
-  on-board agent wrote can become an app; an app that needs a new capability
-  becomes a Plugin; a Plugin that needs new hardware becomes a Board.
-- Nothing at a higher level breaks a lower one. A fully customized firmware still
-  installs from the browser, still has a Device Portal, and its on-board agent
-  still writes scripts.
-- The docs are organized by level, so each reader starts where they are.
+- Chaque niveau transmet quelque chose de concret au suivant : le script écrit
+  par l’Agent embarqué peut devenir une application ; une application qui a
+  besoin d’une nouvelle capacité devient un Plugin ; un Plugin qui a besoin d’un
+  nouveau matériel devient une carte.
+- Rien à un niveau supérieur ne casse un niveau inférieur. Un firmware
+  entièrement personnalisé s’installe toujours depuis le navigateur, dispose
+  toujours d’un portail de l’appareil, et son Agent embarqué écrit toujours des
+  scripts.
+- La documentation est organisée par niveau : chaque lecteur commence là où il
+  en est.

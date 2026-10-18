@@ -1,66 +1,44 @@
 ---
-title: "Glossary"
-description: "Definitions of the terms used across Barracuda, from Agent and App to Board and Plugin."
+title: "用語集"
+description: "Agent や App から Board、Plugin まで、Barracuda 全体で使う用語の定義です。"
 ---
 
-**Agent (on-board agent).** The Agent Plugin running on the device. It talks to
-users through channels, keeps sessions and memory, uses tools, and does in-time
-coding with the VM.
+**Agent (on-board agent)（オンボード Agent）。** デバイス上で動く Agent プラグインです。チャネルを通じてユーザーと会話し、セッションとメモリーを保持し、ツールを使い、VM を使ってその場でコーディングします。
 
-**Agent Tool.** A model-facing operation a Plugin gives the on-board agent.
+**Agent Tool（Agent ツール）。** プラグインがオンボード Agent に提供する、モデル向けの操作です。
 
-**App.** A device application with its own UI, built in the Live Editor and
-managed on the device by the App Manager Plugin.
+**App（アプリ）。** 独自の UI を持つデバイスアプリケーションです。Live Editor で作成し、デバイス上では App Manager プラグインが管理します。
 
-**App Manager.** The Plugin that installs, starts, stops, and updates apps on a
-device.
+**App Manager（アプリマネージャー）。** デバイス上でアプリのインストール、起動、停止、更新を行うプラグインです。
 
-**Board.** A concrete piece of hardware described by YAML: chip, toolchain
-target, flash layout, and peripherals. Selected independently of the Platform.
+**Board（ボード）。** YAML で記述された具体的なハードウェアです。チップ、ツールチェーンのターゲット、フラッシュのレイアウト、ペリフェラルを定義します。プラットフォームとは独立して選びます。
 
-**Builder.** Someone shipping a product firmware shaped to a specific target and
-job, typically with the `fully-customize` skill.
+**Builder（ビルダー）。** 特定のターゲットと用途に合わせた製品ファームウェアを出荷する人です。通常は `fully-customize` skill を使います。
 
-**Channel.** A way to reach the on-board agent: WeChat, Telegram, QQ, iMessage,
-Inkbox, web chat, or the terminal. Each channel is a Plugin.
+**Channel（チャネル）。** オンボード Agent に話しかける手段です。WeChat、Telegram、QQ、iMessage、Inkbox、Web チャット、ターミナルがあります。各チャネルはプラグインです。
 
-**Coding agent.** An AI coding tool on the developer's machine — Claude Code,
-Cursor, or Codex — used with Barracuda's skills.
+**Coding agent（コーディング Agent）。** 開発者のマシン上で動く AI コーディングツール（Claude Code、Cursor、Codex）で、Barracuda の skill と組み合わせて使います。
 
-**Device Portal.** The web interface served by the device for configuration,
-status, Plugin pages, and web chat.
+**Device Portal（デバイスポータル）。** 設定、状態表示、プラグインのページ、Web チャットのためにデバイスが配信する Web インターフェースです。
 
-**Experience ladder.** The six levels of using Barracuda: out of the box,
-configure, build apps, create Plugins, add Boards and Platforms, fully customize.
+**Experience ladder（体験のはしご）。** Barracuda の使い方の 6 段階です。そのまま使う、構成する、アプリを作る、プラグインを作る、ボードとプラットフォームを追加する、完全にカスタマイズする、の順に進みます。
 
-**In-browser agent.** The agent in the Live Editor that generates apps and their
-UI.
+**In-browser agent（ブラウザ内の Agent）。** Live Editor の中でアプリとその UI を生成する Agent です。
 
-**In-time coding.** The on-board agent writing a VM script and running it
-against the hardware immediately, as part of a conversation.
+**In-time coding（その場のコーディング）。** 会話の一部として、オンボード Agent が VM スクリプトを書き、すぐにハードウェア上で実行することです。
 
-**Live Editor.** The browser-based visual, agentic editor for building and
-flashing device apps.
+**Live Editor（ライブエディター）。** デバイスアプリを作成して書き込むための、ブラウザベースのビジュアルかつエージェント型のエディターです。
 
-**Platform.** The implementation of the Platform contract for a chip family or a
-host OS: executor entry, network stack, filesystem, flash, and HAL adapters.
+**Platform（プラットフォーム）。** チップファミリーまたはホスト OS 向けのプラットフォーム契約の実装です。エグゼキューターのエントリー、ネットワークスタック、ファイルシステム、フラッシュ、HAL アダプターを含みます。
 
-**Plugin.** The primitive unit of capability: a declared contract of typed
-capabilities, Workflow Actions and Events, Agent Tools, VM packages, portal
-pages, resources, and tasks.
+**Plugin（プラグイン）。** 機能の基本単位です。型付きケイパビリティ、Workflow の Action と Event、Agent Tool、VM パッケージ、ポータルのページ、リソース、タスクからなる契約を宣言します。
 
-**Skill.** Agent-readable instructions in the repository that teach coding agents
-how to do a Barracuda task: `create-plugin`, `create-board`, `create-platform`,
-`fully-customize`.
+**Skill（skill）。** リポジトリ内にある Agent が読める手順書で、コーディング Agent に Barracuda の作業のやり方を教えます。`create-plugin`、`create-board`、`create-platform`、`fully-customize` があります。
 
-**System.** The portable, `no_std` layer that registers the Plugin set in
-dependency order and starts it. The same System runs on every Platform.
+**System（System）。** プラグインの組み合わせを依存関係の順に登録して起動する、移植可能な `no_std` のレイヤーです。同じ System がすべてのプラットフォームで動きます。
 
-**VM.** The on-device Lua runtime that runs scripts written by the on-board agent
-or by Workflow, with packages that expose the hardware.
+**VM（VM）。** デバイス上の Lua ランタイムです。オンボード Agent や Workflow が書いたスクリプトを、ハードウェアを公開するパッケージとともに実行します。
 
-**Web Installer.** The browser page that installs Barracuda onto a board over USB
-and connects it to Wi-Fi.
+**Web Installer（Web インストーラー）。** USB 経由でボードに Barracuda をインストールし、Wi-Fi に接続するブラウザページです。
 
-**Workflow.** Durable automation: Events trigger Actions, so the device keeps
-working on its own.
+**Workflow（Workflow）。** 永続的なオートメーションです。Event が Action を起動するので、デバイスは自律的に動き続けます。

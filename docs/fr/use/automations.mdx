@@ -1,21 +1,22 @@
 ---
-title: "Automations"
-description: "Keep the device working after the chat ends with Workflow automations and schedules."
+title: "Automatisations"
+description: "Faites travailler l’appareil après la fin de la conversation grâce aux automatisations et aux planifications Workflow."
 ---
 
-A script runs while you talk to the Agent. An automation keeps running after the
-conversation ends: "every morning at seven", "when a message arrives", "when a
-schedule comes due". Ask the Agent for one in plain language.
+Un script s’exécute pendant que vous parlez à l’Agent. Une automatisation
+continue de s’exécuter après la fin de la conversation : « tous les matins à
+sept heures », « quand un message arrive », « quand une planification arrive à
+échéance ». Demandez-en une à l’Agent en langage courant.
 
-| Piece | Plugin | What it does |
+| Élément | Plugin | Ce qu’il fait |
 | --- | --- | --- |
-| Workflow | [`workflow`](/plugins/workflow) | Stores automations durably, matches Events, and runs Actions |
-| Schedules | [`scheduler`](/plugins/scheduler) | Keeps persistent schedules and emits an Event when one is due |
-| Agent tools | [`agent-workflow`](/plugins/agent-workflow), [`agent-scheduler`](/plugins/agent-scheduler) | Let the Agent list, load, unload, and switch automations, and schedule or cancel events |
+| Workflow | [`workflow`](/plugins/workflow) | Stocke durablement les automatisations, détecte les événements et exécute les actions |
+| Planifications | [`scheduler`](/plugins/scheduler) | Conserve des planifications persistantes et émet un événement quand l’une arrive à échéance |
+| Outils de l’Agent | [`agent-workflow`](/plugins/agent-workflow), [`agent-scheduler`](/plugins/agent-scheduler) | Permettent à l’Agent de lister, charger, décharger et basculer des automatisations, et de planifier ou d’annuler des événements |
 
-The Agent's Workflow tools are `workflow_actions`, `workflow_list`,
-`workflow_load`, `workflow_unload`, and `workflow_switch`; its scheduling tools
-are `scheduler_schedule` and `scheduler_cancel`.
+Les outils Workflow de l’Agent sont `workflow_actions`, `workflow_list`,
+`workflow_load`, `workflow_unload` et `workflow_switch` ; ses outils de
+planification sont `scheduler_schedule` et `scheduler_cancel`.
 
-Every Plugin documents the Workflow Actions and Events it adds on its page under
-[Plugins](/plugins/overview).
+Chaque Plugin documente les actions et événements Workflow qu’il ajoute sur sa
+page, dans [Plugins](/plugins/overview).

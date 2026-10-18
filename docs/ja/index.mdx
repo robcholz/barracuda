@@ -1,81 +1,75 @@
 ---
-title: "Welcome to Barracuda"
-sidebarTitle: "Welcome"
-description: "The agentic platform for embedded devices: everything is a Plugin, and an agent helps at every step."
+title: "Barracuda へようこそ"
+sidebarTitle: "ようこそ"
+description: "組み込みデバイスのためのエージェント型プラットフォームです。すべてがプラグインで、あらゆる段階で Agent が手助けします。"
 ---
 
-Barracuda is a plugin-based embedded runtime and an agentic platform. Every
-capability on a device is a Plugin, and an agent helps at every step: on the
-device it writes scripts that drive the hardware, and on your computer it
-writes Plugins, Boards, and firmware. The same System runs on ESP32 and STM32
-microcontrollers and on Linux and macOS.
+Barracuda は、プラグインベースの組み込みランタイムであり、エージェント型のプラットフォームです。デバイス上のあらゆる機能はプラグインで、あらゆる段階で Agent が手助けします。デバイス上ではハードウェアを動かすスクリプトを書き、あなたのコンピューター上ではプラグイン、ボード、ファームウェアを書きます。同じ System が、ESP32 と STM32 のマイコンでも、Linux と macOS でも動きます。
 
 <CardGroup cols={2}>
-  <Card title="Use your device" icon="message-circle" href="/use/device-portal">
-    Talk to the on-board Agent and let it drive the hardware.
-    **Get started with the Device Portal.**
+  <Card title="デバイスを使う" icon="message-circle" href="/ja/use/device-portal">
+    オンボード Agent に話しかけ、ハードウェアを動かしてもらいます。
+    **デバイスポータルから始めましょう。**
   </Card>
-  <Card title="Configure" icon="list-checks" href="/boards/profiles">
-    Choose the Plugins in the firmware, then build and flash.
-    **Get started with `cargo board select`.**
+  <Card title="構成" icon="list-checks" href="/ja/boards/profiles">
+    ファームウェアに入れるプラグインを選び、ビルドして書き込みます。
+    **`cargo board select` から始めましょう。**
   </Card>
-  <Card title="Apps" icon="layout-grid" href="/architecture/device-ui">
-    Build apps with their own UI for the device's screen.
-    **Get started with the device UI.**
+  <Card title="アプリ" icon="layout-grid" href="/ja/architecture/device-ui">
+    デバイスの画面向けに、独自の UI を持つアプリを作ります。
+    **デバイス UI から始めましょう。**
   </Card>
-  <Card title="Plugins" icon="puzzle" href="/develop/write-a-plugin">
-    Add a capability with your coding agent.
-    **Get started with `create-plugin`.**
+  <Card title="プラグイン" icon="puzzle" href="/ja/develop/write-a-plugin">
+    コーディング Agent を使って機能を追加します。
+    **`create-plugin` から始めましょう。**
   </Card>
 </CardGroup>
 
-## Get started
+## はじめに
 
 <CardGroup cols={2}>
-  <Card title="Installation" icon="download" href="/get-started/installation">
-    Install the toolchain for your Board and clone the repository.
+  <Card title="インストール" icon="download" href="/ja/get-started/installation">
+    ボードに合ったツールチェーンをインストールし、リポジトリをクローンします。
   </Card>
-  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
-    Run Barracuda on your computer and talk to it in minutes.
+  <Card title="クイックスタート" icon="rocket" href="/ja/get-started/quickstart">
+    数分でコンピューター上の Barracuda を動かし、話しかけてみます。
   </Card>
 </CardGroup>
 
-## The ladder
+## 体験のはしご
 
-Each level is useful on its own, and each one gives you more freedom than the
-one below it. The docs follow the same levels.
+各段階はそれ自体で役に立ち、上の段階に進むほど自由度が増します。ドキュメントも同じ段階に沿って構成されています。
 
-| Level | What you do | Who helps | Start here |
+| 段階 | やること | 手助けするもの | 出発点 |
 | --- | --- | --- | --- |
-| 01 · Use your device | Ask the board to do things | The on-board Agent writes and runs scripts | [Device Portal](/use/device-portal) |
-| 02 · Configure | Choose the Plugins in the firmware, build, flash | A profile, a Board file, or your coding agent | [Board profiles](/boards/profiles) |
-| 03 · Apps | Build apps for the device's screen | The in-browser agent | [Device UI](/architecture/device-ui) |
-| 04 · Plugins | Add a capability to the runtime | Your coding agent with `create-plugin` | [Write a Plugin](/develop/write-a-plugin) |
-| 05 · Boards and Platforms | Bring up a new board or chip family | Your coding agent | [Boards](/boards/overview) |
-| 06 · Custom firmware | Fit a firmware to a chip and a budget | Your coding agent | [Custom firmware](/develop/custom-firmware) |
+| 01 · デバイスを使う | ボードに作業を頼む | オンボード Agent がスクリプトを書いて実行します | [デバイスポータル](/ja/use/device-portal) |
+| 02 · 構成 | ファームウェアに入れるプラグインを選び、ビルドして書き込む | プロファイル、ボードのファイル、またはコーディング Agent | [ボードプロファイル](/ja/boards/profiles) |
+| 03 · アプリ | デバイスの画面向けのアプリを作る | ブラウザ内の Agent | [デバイス UI](/ja/architecture/device-ui) |
+| 04 · プラグイン | ランタイムに機能を追加する | `create-plugin` を使うコーディング Agent | [プラグインを書く](/ja/develop/write-a-plugin) |
+| 05 · ボードとプラットフォーム | 新しいボードやチップファミリーを立ち上げる | コーディング Agent | [ボード](/boards/overview) |
+| 06 · カスタムファームウェア | ファームウェアをチップと予算に合わせる | コーディング Agent | [カスタムファームウェア](/ja/develop/custom-firmware) |
 
-Read [The ladder](/product/experience-ladder) for what each level is for.
+各段階の目的については [体験のはしご](/ja/product/experience-ladder) を参照してください。
 
-## What is Barracuda?
+## Barracuda とは
 
-Barracuda puts AI in three places, each chosen for the work it does best.
+Barracuda は AI を 3 つの場所に置き、それぞれが最も得意な仕事を担います。
 
-| | Where it runs | What it does |
+| | 動く場所 | 役割 |
 | --- | --- | --- |
-| On-board Agent | On the device, as the [Agent](/plugins/agent) Plugin | Writes Lua scripts and runs them against the hardware, now |
-| In-browser agent | In the browser | Generates apps and their UI |
-| Coding agents | Your computer: Claude Code, Cursor, Codex | Creates Plugins, Boards, Platforms, and custom firmware |
+| オンボード Agent | デバイス上で [Agent](/plugins/agent) プラグインとして | Lua スクリプトを書き、その場でハードウェアに対して実行します |
+| ブラウザ内の Agent | ブラウザ内 | アプリとその UI を生成します |
+| コーディング Agent | あなたのコンピューター上: Claude Code、Cursor、Codex | プラグイン、ボード、プラットフォーム、カスタムファームウェアを作成します |
 
-Underneath are four layers. Read these and you can read the repository.
+その下には 4 つのレイヤーがあります。これを押さえればリポジトリを読み解けます。
 
-| Layer | Owns | Directory |
+| レイヤー | 受け持つもの | ディレクトリ |
 | --- | --- | --- |
-| Board | The chip, toolchain target, flash layout, peripherals, and Plugin profile | `boards/` |
-| Platform | Executor entry, network stack, filesystem, flash, and HAL adapters | `platforms/` |
-| System | Registers every Plugin in dependency order, then starts them | `core/system/` |
-| Plugins | Capabilities, Workflow Actions and Events, Agent Tools, portal pages, tasks | `plugins/` |
+| ボード | チップ、ツールチェーンのターゲット、フラッシュのレイアウト、ペリフェラル、プラグインのプロファイル | `boards/` |
+| プラットフォーム | エグゼキューターのエントリー、ネットワークスタック、ファイルシステム、フラッシュ、HAL アダプター | `platforms/` |
+| System | すべてのプラグインを依存関係の順に登録し、起動します | `core/system/` |
+| プラグイン | ケイパビリティ、Workflow の Action と Event、Agent Tool、ポータルのページ、タスク | `plugins/` |
 
 <Tip>
-  No board? Select `local-linux` or `local-macos`. The same System runs on your
-  computer, with virtual peripherals. See the [Quickstart](/get-started/quickstart).
+  ボードがなくても大丈夫です。`local-linux` または `local-macos` を選べば、同じ System が仮想ペリフェラルとともにコンピューター上で動きます。[クイックスタート](/ja/get-started/quickstart) を参照してください。
 </Tip>

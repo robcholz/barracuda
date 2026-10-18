@@ -1,79 +1,87 @@
 ---
-title: "Plugins as the primitive"
-description: "What a Plugin is, how Plugins compose, and how a device is customized by choosing them."
+title: "Les Plugins comme brique de base"
+description: "Ce qu’est un Plugin, comment les Plugins se combinent et comment on personnalise un appareil en les choisissant."
 ---
 
-Everything a Barracuda device can do comes from a Plugin. The runtime itself is
-small: a portable System that registers Plugins in dependency order and starts
-them together. Customizing a device, building on it, and extending it all come
-down to choosing, configuring, trimming, or writing Plugins.
+Tout ce qu’un appareil Barracuda sait faire vient d’un Plugin. Le runtime
+lui-même est petit : un System portable qui enregistre les Plugins dans l’ordre
+des dépendances et les démarre ensemble. Personnaliser un appareil, construire
+dessus et l’étendre revient toujours à choisir, configurer, alléger ou écrire
+des Plugins.
 
-## What a Plugin is
+## Ce qu’est un Plugin
 
-A Plugin is a self-contained unit with a stable identity and a declared
-contract.
+Un Plugin est une unité autonome dotée d’une identité stable et d’un contrat
+déclaré.
 
-- **Identity and dependencies.** A `plugin.toml` gives the Plugin its ID, the
-  Plugins it depends on, and its build tasks.
-- **Typed capabilities.** A Plugin can provide domain APIs to other Plugins and
-  require theirs. This is how Plugins collaborate directly.
-- **Workflow Actions and Events.** A Plugin can expose operations and facts to
-  Workflow automations with stable, schema-checked contracts.
-- **Agent Tools.** A Plugin can give the on-board agent new abilities through
-  model-facing tools designed for agents.
-- **VM packages.** A Plugin can expose hardware or services to scripts, so the
-  on-board agent's in-time code can use them.
-- **A portal page.** A Plugin can contribute its own page, icon, and status to
-  the Device Portal, so every capability arrives with its own settings.
-- **Resources and storage.** A Plugin owns its files, its settings, and its
-  long-running tasks, and releases them when it stops.
-- **Documentation.** Every Plugin documents its capabilities, tools, actions,
-  events, errors, and lifecycle in its own `docs/plugin.md`, written for people
-  and for agents.
+- **Identité et dépendances.** Un `plugin.toml` donne au Plugin son ID, les
+  Plugins dont il dépend et ses tâches de compilation.
+- **Capacités typées.** Un Plugin peut fournir des API de domaine à d’autres
+  Plugins et exiger les leurs. C’est ainsi que les Plugins collaborent
+  directement.
+- **Actions et événements Workflow.** Un Plugin peut exposer des opérations et
+  des faits aux automatisations Workflow, avec des contrats stables et vérifiés
+  par schéma.
+- **Outils de l’Agent.** Un Plugin peut donner de nouvelles capacités à l’Agent
+  embarqué via des outils conçus pour les agents et destinés au modèle.
+- **Paquets VM.** Un Plugin peut exposer du matériel ou des services aux
+  scripts, afin que le code en temps réel de l’Agent embarqué puisse les
+  utiliser.
+- **Une page de portail.** Un Plugin peut ajouter sa propre page, son icône et
+  son état au portail de l’appareil : chaque capacité arrive avec ses propres
+  réglages.
+- **Ressources et stockage.** Un Plugin possède ses fichiers, ses réglages et
+  ses tâches de longue durée, et les libère quand il s’arrête.
+- **Documentation.** Chaque Plugin documente ses capacités, outils, actions,
+  événements, erreurs et cycle de vie dans son propre `docs/plugin.md`, écrit
+  pour les humains et pour les agents.
 
-## Why a primitive
+## Pourquoi une brique de base
 
-- **One way to add anything.** A sensor driver, a message channel, a web search
-  provider, and the agent itself are all Plugins. There is no second extension
-  mechanism to learn.
-- **Composable.** Plugins depend on each other's capabilities, not on each
-  other's internals, so they can be combined freely.
-- **Removable.** A Plugin that is not enabled is not bundled. Removing a Plugin
-  frees its memory, flash, and tasks.
-- **Portable.** Plugins depend on portable services, never on a particular
-  chip, so the same Plugin runs on every Platform.
-- **Agent-friendly.** The contract is explicit enough for an agent to read,
-  use, and write. The on-board agent calls Plugin tools; coding agents create
-  Plugins with the `create-plugin` skill.
+- **Une seule façon d’ajouter quoi que ce soit.** Un pilote de capteur, un canal
+  de messagerie, un fournisseur de recherche web et l’agent lui-même sont tous
+  des Plugins. Il n’y a pas de second mécanisme d’extension à apprendre.
+- **Composables.** Les Plugins dépendent des capacités des autres, pas de leurs
+  détails internes : on peut donc les combiner librement.
+- **Amovibles.** Un Plugin non activé n’est pas embarqué. Retirer un Plugin
+  libère sa mémoire, sa flash et ses tâches.
+- **Portables.** Les Plugins dépendent de services portables, jamais d’une puce
+  particulière : le même Plugin tourne sur toutes les plateformes.
+- **Adaptés aux agents.** Le contrat est assez explicite pour qu’un agent le
+  lise, l’utilise et l’écrive. L’Agent embarqué appelle les outils des Plugins ;
+  les agents de code créent des Plugins avec la skill `create-plugin`.
 
-## The Plugin catalog
+## Le catalogue de Plugins
 
-| Family | Examples |
+| Famille | Exemples |
 | --- | --- |
-| Device | Wi-Fi provisioning and setup hotspot, web server, Device Portal, HTTP client, time, scheduler |
-| Agent | The on-board agent, web search, files, HTTP for agents, schedules, Workflow access, VM access |
-| Channels | WeChat, Telegram, QQ, iMessage, Inkbox, web chat, terminal |
-| Automation | Workflow, scheduler |
-| Scripting | The VM and its packages |
-| Peripherals | GPIO, analog, I2C, I2S, SPI, UART, PWM, display, camera, audio, IMU, LED strip, power monitor, filesystem, message queue, system info |
-| Apps | App Manager and the app runtime |
+| Appareil | Provisionnement Wi-Fi et point d’accès de configuration, serveur web, portail de l’appareil, client HTTP, heure, planificateur |
+| Agent | L’Agent embarqué, recherche web, fichiers, HTTP pour les agents, planifications, accès à Workflow, accès à la VM |
+| Canaux | WeChat, Telegram, QQ, iMessage, Inkbox, chat web, terminal |
+| Automatisation | Workflow, planificateur |
+| Scripts | La VM et ses paquets |
+| Périphériques | GPIO, analogique, I2C, I2S, SPI, UART, PWM, écran, caméra, audio, IMU, bande de LED, mesure de consommation, système de fichiers, file de messages, informations système |
+| Applications | App Manager et le runtime d’applications |
 
-## Customizing with Plugins
+## Personnaliser avec les Plugins
 
-| Who | How they customize |
+| Qui | Comment ils personnalisent |
 | --- | --- |
-| Users and makers | Choose the Plugin set on their machine and build; configure each Plugin in the Device Portal |
-| App developers | Use Plugins from their apps through the Live Editor |
-| Plugin developers | Create new Plugins with `create-plugin` |
-| Builders | Choose the exact Plugin set for a product and trim each Plugin to the target's budget with `fully-customize` |
+| Utilisateurs et makers | Choisissent l’ensemble de Plugins sur leur machine et compilent ; configurent chaque Plugin dans le portail de l’appareil |
+| Développeurs d’applications | Utilisent les Plugins depuis leurs applications via le Live Editor |
+| Développeurs de Plugins | Créent de nouveaux Plugins avec `create-plugin` |
+| Concepteurs de produits | Choisissent l’ensemble exact de Plugins d’un produit et allègent chaque Plugin selon le budget de la cible avec `fully-customize` |
 
-## Fitting the resources
+## S’adapter aux ressources
 
-Barracuda runs on microcontrollers with a few hundred kilobytes of RAM, on
-boards with external memory, and on desktop hosts. The Plugin set is the main
-lever for fitting a target:
+Barracuda tourne sur des microcontrôleurs dotés de quelques centaines de
+kilo-octets de RAM, sur des cartes avec mémoire externe et sur des hôtes de
+bureau. L’ensemble de Plugins est le principal levier pour s’adapter à une
+cible :
 
-- small targets carry the essentials: networking, the portal, the agent, the VM,
-  one channel;
-- larger targets add peripherals, more channels, apps, and concurrent scripts;
-- product firmware carries exactly what the product needs and nothing else.
+- les petites cibles embarquent l’essentiel : le réseau, le portail, l’agent, la
+  VM, un canal ;
+- les cibles plus grandes ajoutent des périphériques, d’autres canaux, des
+  applications et des scripts concurrents ;
+- un firmware de produit embarque exactement ce dont le produit a besoin, et
+  rien d’autre.

@@ -1,27 +1,25 @@
 ---
-title: "STM32 Platform"
+title: "STM32 平台"
 sidebarTitle: "STM32"
-description: "Build, flash, and run Barracuda on STM32 Boards with Rust 1.98.1 and probe-rs."
+description: "用 Rust 1.98.1 和 probe-rs 在 STM32 开发板上构建、烧录和运行 Barracuda。"
 ---
 
-STM32 chips run Barracuda on the bare-metal `stm32` Platform. It builds with
-standard Rust and flashes through a debug probe with `probe-rs`; the flash
-layout is the linker's `memory.x` in each Board's bundle.
+STM32 芯片通过裸机 `stm32` 平台运行 Barracuda。它使用标准 Rust 构建，并通过调试探针用 `probe-rs` 烧录；Flash 布局由每块开发板 bundle 中链接器的 `memory.x` 定义。
 
-| Chip (Platform) | Rust target | Toolchain | Flash tool |
+| 芯片（平台） | Rust 目标 | 工具链 | 烧录工具 |
 | --- | --- | --- | --- |
 | STM32U5A5ZJ (`stm32`) | `thumbv8m.main-none-eabihf` | Rust 1.98.1 | `probe-rs` |
 
-## Install the toolchain
+## 安装工具链
 
 ```bash terminal
 rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
 cargo install probe-rs-tools
 ```
 
-## Build, flash, and run
+## 构建、烧录和运行
 
-Connect the Board's debug probe over USB, then:
+通过 USB 连接开发板的调试探针，然后运行：
 
 ```bash terminal
 cargo board select nucleo-u5a5zj-q
@@ -29,20 +27,17 @@ cargo run
 cargo image deploy
 ```
 
-- `cargo run` builds the firmware and runs it with `probe-rs run`.
-- `cargo image deploy` builds the Plugin resource image and writes it with
-  `probe-rs download`.
+- `cargo run` 构建固件，并用 `probe-rs run` 运行它。
+- `cargo image deploy` 构建插件资源镜像，并用 `probe-rs download` 写入。
 
-## Hardware the Platform drives
+## 平台驱动的硬件
 
-The `stm32` Platform provides digital inputs and outputs, GPIO, I2C devices,
-and SPI buses. Runtime I/O lets Lua scripts claim these controllers on a
-Board's exposed pins:
+`stm32` 平台提供数字输入和输出、GPIO、I2C 设备和 SPI 总线。运行时 I/O 让 Lua 脚本可以在开发板的可用引脚上占用这些控制器：
 
 | I2C | SPI | UART | ADC |
 | --- | --- | --- | --- |
 | `I2C1` | `SPI1` | `USART1` | `ADC1` |
 
-## Boards
+## 开发板
 
 - [NUCLEO-U5A5ZJ-Q](/boards/supported/nucleo-u5a5zj-q)

@@ -1,42 +1,38 @@
 ---
-title: "ESP32 Platforms"
+title: "ESP32 プラットフォーム"
 sidebarTitle: "ESP32"
-description: "Build, flash, and run Barracuda on ESP32, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Boards."
+description: "ESP32、ESP32-S3、ESP32-C3、ESP32-C6、ESP32-P4 のボード向けに Barracuda をビルドし、書き込み、実行します。"
 ---
 
-Espressif chips run Barracuda on five bare-metal Platforms, one per chip. They
-share a flash tool, `espflash`, and a flash layout, an ESP-IDF partition table in
-each Board's `partitions.csv`. They differ in Rust target and toolchain: `esp` is
-Espressif's Rust toolchain, and RISC-V GCC is Espressif's `riscv32-esp-elf` GCC.
+Espressif のチップでは、チップごとに 1 つ、合計 5 つのベアメタルのプラットフォーム上で Barracuda が動きます。書き込みツール `espflash` と、フラッシュのレイアウト（各ボードの `partitions.csv` にある ESP-IDF のパーティションテーブル）は共通です。異なるのは Rust ターゲットとツールチェーンです。`esp` は Espressif の Rust ツールチェーン、RISC-V GCC は Espressif の `riscv32-esp-elf` GCC を指します。
 
-| Chip (Platform) | Rust target | Toolchain | Boards |
+| チップ（プラットフォーム） | Rust ターゲット | ツールチェーン | ボード数 |
 | --- | --- | --- | --- |
 | ESP32 (`esp32`) | `xtensa-esp32-none-elf` | `esp` 1.98.1.0 | 24 |
 | ESP32-S3 (`esp32s3`) | `xtensa-esp32s3-none-elf` | `esp` 1.98.1.0 | 36 |
-| ESP32-C3 (`esp32c3`) | `riscv32imc-unknown-none-elf` | Rust 1.98.1, RISC-V GCC | 5 |
-| ESP32-C6 (`esp32c6`) | `riscv32imac-unknown-none-elf` | Rust 1.98.1, RISC-V GCC | 5 |
-| ESP32-P4 (`esp32p4`) | `riscv32imafc-unknown-none-elf` | `esp` 1.98.1.0, RISC-V GCC | 7 |
+| ESP32-C3 (`esp32c3`) | `riscv32imc-unknown-none-elf` | Rust 1.98.1、RISC-V GCC | 5 |
+| ESP32-C6 (`esp32c6`) | `riscv32imac-unknown-none-elf` | Rust 1.98.1、RISC-V GCC | 5 |
+| ESP32-P4 (`esp32p4`) | `riscv32imafc-unknown-none-elf` | `esp` 1.98.1.0、RISC-V GCC | 7 |
 
-## Install the toolchain
+## ツールチェーンをインストールする
 
-Install `espup` once, then the toolchain for your chip. `cargo board select`
-prints the same command when the toolchain is missing.
+`espup` を一度インストールし、続いてチップに合ったツールチェーンをインストールします。ツールチェーンがない場合は、`cargo board select` が同じコマンドを表示します。
 
 <Tabs>
-  <Tab title="ESP32, ESP32-S3">
+  <Tab title="ESP32、ESP32-S3">
     ```bash terminal
     cargo install espup
     espup install --toolchain-version 1.98.1.0
     ```
   </Tab>
-  <Tab title="ESP32-C3, ESP32-C6">
+  <Tab title="ESP32-C3、ESP32-C6">
     ```bash terminal
     rustup toolchain install 1.98.1
     cargo install espup
     espup install --stable-version 1.98.1 --targets esp32c3 --esp-riscv-gcc
     ```
 
-    For ESP32-C6, use `--targets esp32c6`.
+    ESP32-C6 の場合は `--targets esp32c6` を使います。
   </Tab>
   <Tab title="ESP32-P4">
     ```bash terminal
@@ -44,24 +40,21 @@ prints the same command when the toolchain is missing.
     espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
     ```
 
-    `espup` installs the `esp` toolchain beside an Xtensa target, so the
-    command names `esp32s3` too.
+    `espup` は `esp` ツールチェーンを Xtensa ターゲットと一緒にインストールするため、コマンドで `esp32s3` も指定します。
   </Tab>
 </Tabs>
 
-`espup` writes `~/export-esp.sh`. Board selection imports it, so you do not
-source it yourself. Install `espflash` to flash:
+`espup` は `~/export-esp.sh` を書き出します。ボードの選択時にこれが取り込まれるので、自分で source する必要はありません。書き込みには `espflash` をインストールします。
 
 ```bash terminal
 cargo install espflash
 ```
 
 <Note>
-  The ESP32-S3 Platform stays on `esp` 1.98.1.0: version 1.99.0.0 reorders
-  esp-hal's startup code so that release builds no longer link.
+  ESP32-S3 プラットフォームは `esp` 1.98.1.0 のままにしています。バージョン 1.99.0.0 では esp-hal の起動コードの順序が変わり、リリースビルドがリンクできなくなるためです。
 </Note>
 
-## Build, flash, and run
+## ビルド、書き込み、実行
 
 ```bash terminal
 cargo board select m5stack-cores3
@@ -69,34 +62,23 @@ cargo run
 cargo image deploy
 ```
 
-- `cargo run` builds the firmware with `--release`, flashes it with
-  `espflash flash --monitor`, and keeps the serial log in the terminal.
-- `cargo image deploy` builds the Plugin resource image and writes it to the
-  `resources` partition with `espflash write-bin`.
+- `cargo run` は `--release` でファームウェアをビルドし、`espflash flash --monitor` で書き込み、シリアルログをターミナルに表示し続けます。
+- `cargo image deploy` はプラグインのリソースイメージをビルドし、`espflash write-bin` で `resources` パーティションに書き込みます。
 
-## Hardware the Platforms drive
+## プラットフォームが制御するハードウェア
 
-Every ESP32 Platform provides digital inputs and outputs, GPIO, SPI devices,
-SPI buses, SPI outputs, and I2C devices. Runtime I/O lets Lua scripts claim
-these controllers on a Board's exposed pins:
+すべての ESP32 プラットフォームは、デジタル入出力、GPIO、SPI デバイス、SPI バス、SPI 出力、I2C デバイスを提供します。ランタイム I/O を使うと、Lua スクリプトがボードの公開ピン上でこれらのコントローラーを確保できます。
 
-| Platform | I2C | SPI | UART | ADC |
+| プラットフォーム | I2C | SPI | UART | ADC |
 | --- | --- | --- | --- | --- |
-| `esp32` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
-| `esp32s3` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
-| `esp32p4` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
+| `esp32` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
+| `esp32s3` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
+| `esp32p4` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
-ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, I2S audio
-streams, and capacitive touch.
+ESP32-S3 ではさらに、Quad SPI デバイス、SD/MMC カード、カメラキャプチャ、I2S オーディオストリーム、静電容量式タッチが使えます。
 
-## Boards
+## ボード
 
-See every Board for each chip under **Boards** in the sidebar, or start from
-[M5Stack CoreS3](/boards/supported/m5stack-cores3) (ESP32-S3),
-[ESP32-DevKitC V4](/boards/supported/esp32-devkitc-v4) (ESP32),
-[ESP32-C3-DevKitM-1](/boards/supported/esp32c3-devkitm-1) (ESP32-C3),
-[ESP32-C6-DevKitC-1](/boards/supported/esp32c6-devkitc-1) (ESP32-C6), and
-[ESP32-P4-Function-EV-Board](/boards/supported/esp32p4-function-ev-board)
-(ESP32-P4).
+各チップのすべてのボードは、サイドバーの **ボード** で確認できます。まずは [M5Stack CoreS3](/boards/supported/m5stack-cores3)（ESP32-S3）、[ESP32-DevKitC V4](/boards/supported/esp32-devkitc-v4)（ESP32）、[ESP32-C3-DevKitM-1](/boards/supported/esp32c3-devkitm-1)（ESP32-C3）、[ESP32-C6-DevKitC-1](/boards/supported/esp32c6-devkitc-1)（ESP32-C6）、[ESP32-P4-Function-EV-Board](/boards/supported/esp32p4-function-ev-board)（ESP32-P4）から始めてみてください。

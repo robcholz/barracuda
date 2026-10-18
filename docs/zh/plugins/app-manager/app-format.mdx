@@ -1,38 +1,24 @@
 ---
-title: "App Format"
-sidebarTitle: "App format"
-description: "Package an app: its container locations, manifest, Lua program, and views."
+title: "应用格式"
+sidebarTitle: "应用格式"
+description: "打包一个应用：容器位置、清单、Lua 程序和视图。"
 ---
 
-This is the format of an app container, version 1. The `app-manager` Plugin loads any
-container in this format from each of its locations, so a container written
-by the image build, the portal, or an Agent is the same thing; where it lives
-decides what kind of app it is (see
-[Device UI](/architecture/device-ui)).
-`crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
-rules below. What an app may use, and how a device decides it fits, is the
-app API, in [App API](/plugins/app-manager/app-api).
+本文描述应用容器的格式，版本 1。`app-manager` 插件会从它的每个位置加载符合此格式的任何容器，所以由镜像构建、门户或 Agent 写入的容器本质上是同一种东西；容器所在的位置决定了它属于哪种应用（参见[设备 UI](/zh/architecture/device-ui)）。`crates/appkit/resources/app-manifest.json` 是下文清单规则的机器可读版本。应用可以使用什么，以及设备如何判断应用是否适用，属于应用 API 的范畴，见[应用 API](/zh/plugins/app-manager/app-api)。
 
-## Locations
+## 位置
 
-| Location    | Directory                     | Written by                            | Holds |
+| 位置    | 目录                     | 写入者                            | 存放 |
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
-| `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
-| `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `builtin`   | 附带该应用的插件的 `/resources/app/` | 镜像构建（只读） | 系统应用 |
+| `installed` | `/media/apps/<id>/`           | 安装时由 `app-manager` 插件写入（私有） | 可安装应用 |
+| `workspace` | `/workspace/media/apps/<id>/` 或 `<id>.bapp` | 门户、Agent、其他插件（共享 Workspace） | 提供安装的应用 |
 
-A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
-own scope holds the other two; it only reads the Workspace. Builtin and
-installed apps are launchable; a Workspace container is an offer. Installing it copies
-the manifest and the files it names into `/media/apps/<id>/`, replacing an
-installed app at another version. A system app's ID belongs to it: no
-container elsewhere may use it, and `app.list` reports one that does as
-invalid.
+内置应用插件把自己的文件系统交给 `app-manager` 插件，后者自己的作用域存放另外两个位置；它对 Workspace 只读。内置应用和已安装应用可以启动；Workspace 中的容器只是一份待安装的提供。安装时，会把清单及其列出的文件复制到 `/media/apps/<id>/`，替换已安装的其他版本。系统应用的 ID 归它所有：其他位置的容器都不能使用这个 ID，`app.list` 会把使用它的容器报告为无效。
 
-## Container
+## 容器
 
-A container is a directory named after the app ID, holding a manifest and the
-files it names, side by side:
+容器是一个以应用 ID 命名的目录，里面并列存放清单及清单列出的文件：
 
 ```text
 <id>/
@@ -43,14 +29,11 @@ files it names, side by side:
   font-1.bin …      its baked font atlases       ┘
 ```
 
-Other files are ignored. Directories whose names start with `.` are skipped.
+其他文件会被忽略。名称以 `.` 开头的目录会被跳过。
 
-## Packages
+## 包
 
-In the Workspace an app may also be offered as one file,
-`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
-signed. An ID offered both as a directory and as a package is invalid.
-`resources/pack-app.ts` writes packages:
+在 Workspace 中，应用也可以以单个文件 `/workspace/media/apps/<id>.bapp` 的形式提供，其中包含同样的文件，并且可以签名。同一个 ID 既以目录又以包的形式提供，视为无效。`resources/pack-app.ts` 用来生成包：
 
 ```sh
 bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
@@ -58,34 +41,25 @@ bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built conta
 bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
 ```
 
-All numbers are little-endian:
+所有数字都是小端序：
 
-| Offset | Size | What |
+| 偏移 | 大小 | 内容 |
 | --- | --- | --- |
 | 0 | 4 | `BAPP` |
-| 4 | 1 | format version, 1 |
-| 5 | 1 | file count, 1 to 64 |
-| 6 | 1 | flags: bit 0, a signature block follows |
+| 4 | 1 | 格式版本，1 |
+| 5 | 1 | 文件数量，1 到 64 |
+| 6 | 1 | 标志：bit 0 表示后面跟有签名块 |
 | 7 | 1 | 0 |
-| 8 | 4 | the content's length: this header, the directory, and the files |
-| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
-| … | | the files, each where its entry says |
-| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
+| 8 | 4 | 内容长度：本文件头、目录和文件 |
+| 12 | 每个文件 40 | 目录：文件名（用 NUL 填充到 32 字节），然后是它的偏移和长度（各 4 字节） |
+| … | | 各个文件，位于各自目录项所指的位置 |
+| 内容长度 | 133 | 签名时：`BSIG`、SEC1 非压缩格式的 P-256 公钥（65 字节），以及对内容做 SHA-256 后的 ECDSA 签名，格式为 `r ‖ s`（64 字节） |
 
-Listing reads only the header and the directory. When an install is asked
-for, the device hashes the content with SHA-256 and verifies the signature:
-a package whose signature fails is invalid, and the install screen shows a
-signed package's signer by the first bytes of its key's SHA-256, or says it
-is unsigned. The install takes exactly what the person was shown: the
-digest is pinned, and an offer that changed since answers `Changed`. A
-directory offer is pinned the same way, by the SHA-256 of its files.
+列出应用时只读取文件头和目录。请求安装时，设备会对内容计算 SHA-256 并验证签名：签名验证失败的包视为无效；安装界面会用签名者公钥 SHA-256 的前几个字节标识签名包的签名者，或者注明未签名。安装的内容和用户看到的完全一致：摘要被固定，此后发生变化的提供会返回 `Changed`。目录形式的提供也以同样方式固定，依据是其文件的 SHA-256。
 
-An app installed from a signed package keeps its signer's key beside its
-container, and from then on takes only packages that key signed: another
-key's package, an unsigned one, or a directory offers no update and says
-why. An app installed unsigned takes any update.
+从签名包安装的应用会在容器旁保存签名者的公钥，此后只接受由该公钥签名的包：其他公钥签名的包、未签名的包或目录形式的提供都不会作为更新，并会说明原因。以未签名形式安装的应用接受任何更新。
 
-## Manifest
+## 清单
 
 ```json
 {
@@ -106,63 +80,41 @@ why. An app installed unsigned takes any update.
 }
 ```
 
-| Field          | Required | Rule                                                        |
+| 字段          | 必填 | 规则                                                        |
 | -------------- | -------- | ----------------------------------------------------------- |
-| `format`       | yes      | `1`                                                         |
-| `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; equal to the directory name      |
-| `name`         | yes      | display name, 1–64 characters                               |
-| `version`      | yes      | the author's version string, 1–32 characters                |
-| `icon`         | no       | a system icon's name, such as `lamp`, shown on the launcher; without one it shows the name's first character |
-| `entry`        | no       | the Lua program to run; defaults to `main.lua`              |
-| `view`         | no       | omit for a headless app                                     |
-| `view.program` | with view | the BVIR view program                                      |
-| `view.styles`  | with view | the compiled stylesheet                                    |
-| `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
-| `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
-| `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
-| `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
-| `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
-| `permissions`  | no       | up to 16 other Lua packages: Board-specific ones and those that promise nothing |
-| `boards`       | with a Board-specific package | the Boards the app is for, by their stable name |
+| `format`       | 是      | `1`                                                         |
+| `id`           | 是      | 1–32 个 `a-z`、`0-9`、`-` 字符；必须与目录名相同      |
+| `name`         | 是      | 显示名称，1–64 个字符                               |
+| `version`      | 是      | 作者自定的版本字符串，1–32 个字符                |
+| `icon`         | 否       | 系统图标的名称，例如 `lamp`，显示在启动器上；没有图标时显示名称的第一个字符 |
+| `entry`        | 否       | 要运行的 Lua 程序；默认为 `main.lua`              |
+| `view`         | 否       | 无头应用省略此项                                     |
+| `view.program` | 有视图时 | BVIR 视图程序                                      |
+| `view.styles`  | 有视图时 | 编译后的样式表                                    |
+| `view.fonts`   | 否       | 最多 16 个烘焙好的字体图集；默认为无               |
+| `view.size`    | 否       | `[width, height]`，视图能适配的最小显示屏尺寸；由构建根据 `pocket.json` 写入。视图按显示屏的实际尺寸布局 |
+| `view.shape`   | 否       | `round`：视图限制在内切圆内，适配任何显示屏；`rect`：视图需要矩形显示屏 |
+| `api`          | 否       | 应用所针对的 `app` Lua 包版本；默认为 `1` |
+| `requires`     | 否       | 最多 16 个应用离不开的稳定 Lua 包，每项写作 `name` 或 `name@version`，后者表示所需的最低版本 |
+| `uses`         | 否       | 最多 16 个设备具备时才使用的稳定 Lua 包，写法同 `requires` |
+| `permissions`  | 否       | 最多 16 个其他 Lua 包：开发板专用的 Lua 包，以及不做任何承诺的 Lua 包 |
+| `boards`       | 使用开发板专用 Lua 包时 | 应用适用的开发板，使用它们的稳定名称 |
 
-Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
-`0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
-are rejected so a typo is reported, not ignored. The manifest is at most
-4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
+清单中列出的每个文件都必须是容器中的普通文件名：由 1–64 个 `A-Z`、`a-z`、`0-9`、`_`、`.`、`-` 字符组成，不能是 `.` 或 `..`，并且必须存在。未知字段会被拒绝，这样拼写错误会被报告出来，而不是被悄悄忽略。清单最大 4 KiB，入口程序最大 64 KiB，视图文件合计最大 512 KiB。
 
-Each package is named once across `requires`, `uses`, and `permissions`:
-stable packages in the first two, everything else in the third; ambient
-packages, which every app has, in none. A Board-specific package without
-`boards` is not valid. Whether a package is stable, ambient, or
-Board-specific is what it declares on the device reading the manifest
-(`LuaPackage::interface`), so a package that device lacks is checked by the
-device where the app is installed.
+每个 Lua 包在 `requires`、`uses` 和 `permissions` 中只能出现一次：稳定的 Lua 包放在前两者中，其余的放在第三项中；每个应用都有的环境 Lua 包则不需要列出。开发板专用的 Lua 包如果没有配合 `boards`，就视为无效。一个 Lua 包是稳定的、环境的还是开发板专用的，取决于它在读取清单的设备上的声明（`LuaPackage::interface`），所以该设备上没有的 Lua 包，会由安装应用的设备来检查。
 
-An installable app's runs can `require` the ambient packages and the packages
-its manifest names; a package it did not name is not there, and `require`
-fails. Before the person installs the app, the install screen lists what it
-asks for in the words each package's Plugin declares, or says why this
-device cannot run it ([App API](/plugins/app-manager/app-api#install-check)). A system app
-may `require` every registered package, so its manifest needs none. A
-builtin app's own package, such as `settings`, is only for builtin apps: an
-installable app that asks for one is not valid.
+可安装应用的运行可以 `require` 环境 Lua 包和清单中列出的 Lua 包；未列出的 Lua 包不可用，`require` 会失败。在用户安装应用之前，安装界面会用每个 Lua 包所属插件声明的措辞列出应用请求的内容，或者说明本设备为什么无法运行它（[应用 API](/zh/plugins/app-manager/app-api)）。系统应用可以 `require` 任何已注册的 Lua 包，所以它的清单不需要列出任何 Lua 包。内置应用自己的 Lua 包（例如 `settings`）仅供内置应用使用：请求这类 Lua 包的可安装应用无效。
 
-A container that breaks a rule is not launchable. `app.list` reports it under
-`invalid` with the location, directory name, and the problem, for example
-`app.json: JSON schema validation failed at $.view.program: Pattern`.
+违反任何规则的容器都不能启动。`app.list` 会把它列在 `invalid` 下，并给出位置、目录名和问题，例如 `app.json: JSON schema validation failed at $.view.program: Pattern`。
 
-## Program
+## 程序
 
-The entry program runs on the VM like any Lua run, with the `app` package
-bound to this app. The binding shares the program's first line, so line
-numbers in errors match the file. Apps have no standard input; a read gets
-end of file.
+入口程序像任何 Lua 运行一样在 VM 上运行，并且 `app` Lua 包已绑定到这个应用。绑定代码与程序共用第一行，所以错误中的行号与文件一致。应用没有标准输入；读取会得到文件结束。
 
-### The event loop
+### 事件循环
 
-Every app is one loop over `app.events()`. View calls, lifecycle events, and
-timer ticks arrive in that one stream, in order:
+每个应用都是一个遍历 `app.events()` 的循环。视图调用、生命周期事件和定时器 tick 都按顺序从这一个流中到达：
 
 ```lua
 local app = require("app")
@@ -176,71 +128,56 @@ for event, a, b in app.events() do
 end
 ```
 
-| Event            | When                                                                 |
+| 事件            | 时机                                                                 |
 | ---------------- | -------------------------------------------------------------------- |
-| `app:active`     | The app is in the foreground and takes input. First event of a view app. |
-| `app:inactive`   | Still visible but not taking input: an overlay covers it or a transition runs. No view call follows until `app:active`. |
-| `app:background` | It left the foreground. Save now: a suspended app may be terminated without another event. |
-| `app:foreground` | It came back from the background; `app:active` follows.              |
-| `app:terminate`  | It is asked to exit. Return within the grace period or be cancelled. |
-| `app:tick`       | The interval set with `app.events{ every = ms }` passed (at least 100 ms). Not delivered in the background or while suspended. |
-| `app:back`       | The person swiped back while the app reported a page deeper than its first with `app.navigation`. Show the previous page and report its depth. |
+| `app:active`     | 应用位于前台并接收输入。这是带视图应用收到的第一个事件。 |
+| `app:inactive`   | 仍然可见，但不接收输入：被浮层遮挡，或正在进行转场。在 `app:active` 之前不会再有视图调用。 |
+| `app:background` | 应用离开了前台。此时立即保存：挂起的应用可能在没有任何后续事件的情况下被终止。 |
+| `app:foreground` | 应用从后台返回；随后会收到 `app:active`。              |
+| `app:terminate`  | 应用被要求退出。请在宽限期内返回，否则会被取消。 |
+| `app:tick`       | 经过了用 `app.events{ every = ms }` 设置的间隔（至少 100 ms）。在后台或挂起时不会投递。 |
+| `app:back`       | 应用通过 `app.navigation` 报告的页面深于第一页时，用户执行了返回滑动。显示上一页并报告它的深度。 |
 
-After `app:background` the program must be back in `app.events()` within the
-grace period (1 s); it is then suspended: it uses no CPU, and its view tree is
-released and rebuilt from its values when it returns. A program still busy
-when the grace period ends is cancelled, as is one that ignores
-`app:terminate`. The loop ends after `app.exit()`; the program then returns.
+收到 `app:background` 后，程序必须在宽限期（1 s）内回到 `app.events()`；随后它会被挂起：不占用 CPU，它的视图树会被释放，返回前台时再根据它的值重建。宽限期结束时仍在忙碌的程序会被取消，忽略 `app:terminate` 的程序也是如此。调用 `app.exit()` 后循环结束，程序随即返回。
 
-Headless apps never enter the foreground. They run as services and only see
-`app:tick` and `app:terminate`.
+无头应用永远不会进入前台。它们作为服务运行，只会收到 `app:tick` 和 `app:terminate`。
 
 ### API
 
-| Call | Result |
+| 调用 | 结果 |
 | ---- | ------ |
-| `app.id`, `app.name`, `app.version` | From the manifest. |
-| `app.device()` | The `app` package's version, the Board, display, touch, and the stable packages with their versions ([App API](/plugins/app-manager/app-api#runs)). |
-| `app.view()` | The view, or `nil` for a headless app. |
-| `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
-| `app.exit()` | Ends the event loop. |
-| `app.navigation(depth)` | Reports how many pages deep the app is; 0, the default, is its first page. A back swipe delivers `app:back` while it is above 0, and leaves the app at 0. |
-| `view:set(name, value)` | Writes a value the view's `app.d.ts` declares; checked against its type. |
-| `view:is_open()`, `view:close()` | The view's state; closing ends view calls. |
-| `app.kv.get(key)` | The stored value, or `nil`. |
-| `app.kv.set(key, value)` | Stores booleans, numbers, strings, and tables that are arrays or have string keys; `nil` deletes. |
-| `app.kv.delete(key)`, `app.kv.keys()` | Delete a key; list keys, sorted. |
-| `app.fs.read(path)`, `app.fs.write(path, data)`, `app.fs.append(path, data)` | Whole-file access; writes replace atomically. |
-| `app.fs.list([dir])` | Sorted names; directories end in `/`. |
-| `app.fs.exists(path)`, `app.fs.remove(path)`, `app.fs.mkdir(path)` | Plain file management. |
+| `app.id`、`app.name`、`app.version` | 来自清单。 |
+| `app.device()` | `app` Lua 包的版本、开发板、显示屏、触摸，以及各稳定 Lua 包及其版本（[应用 API](/zh/plugins/app-manager/app-api)）。 |
+| `app.view()` | 视图；无头应用返回 `nil`。 |
+| `app.events([{ every = ms }])` | 事件迭代器；`every` 会启动一个定时器。 |
+| `app.exit()` | 结束事件循环。 |
+| `app.navigation(depth)` | 报告应用当前所处的页面深度；0 是默认值，表示第一页。深度大于 0 时，返回滑动会投递 `app:back`；深度为 0 时，应用保持不变。 |
+| `view:set(name, value)` | 写入视图的 `app.d.ts` 声明的值；会根据其类型进行检查。 |
+| `view:is_open()`、`view:close()` | 视图的状态；关闭后视图调用结束。 |
+| `app.kv.get(key)` | 已存储的值，或 `nil`。 |
+| `app.kv.set(key, value)` | 存储布尔值、数字、字符串，以及数组或以字符串为键的表；`nil` 表示删除。 |
+| `app.kv.delete(key)`、`app.kv.keys()` | 删除一个键；列出所有键（已排序）。 |
+| `app.fs.read(path)`、`app.fs.write(path, data)`、`app.fs.append(path, data)` | 整文件读写；写入以原子方式替换。 |
+| `app.fs.list([dir])` | 已排序的名称；目录以 `/` 结尾。 |
+| `app.fs.exists(path)`、`app.fs.remove(path)`、`app.fs.mkdir(path)` | 普通的文件管理。 |
 
-Failures return `nil` and a message instead of raising, so `assert(...)` turns
-them into errors. Keys are 1–64 bytes and the store holds at most 16 KiB of
-JSON. Files are at most 64 KiB; paths are relative to the app's own file
-tree, at most 8 names deep, with no `.` or `..`.
+失败时返回 `nil` 和一条消息，而不是抛出错误，所以可以用 `assert(...)` 把它们变成错误。键的长度为 1–64 字节，存储最多容纳 16 KiB 的 JSON。文件最大 64 KiB；路径相对于应用自己的文件树，最多 8 层，不能包含 `.` 或 `..`。
 
-Storage belongs to the app ID, not the container: it lives in the App
-Manager's private `/media/data/<id>/` (`kv.json` and `files/`), survives
-updates and restarts, and is never visible to other apps.
+存储属于应用 ID，而不是容器：它位于 App Manager 私有的 `/media/data/<id>/`（`kv.json` 和 `files/`）中，更新和重启后依然保留，其他应用永远看不到。
 
-## Views
+## 视图
 
-`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
-outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
-into View IR, `ui-link` links it into BVIR, and the font baker produces the
-atlases. A source manifest's `view` holds only the `shape`. An Agent that
-cannot run that toolchain writes a headless app, or copies the view files of
-an existing build next to its own entry program.
+`view.program`、`view.styles`、`view.fonts` 和 `view.size` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中的 `view` 只包含 `shape`。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
 
-## Example: a headless app an Agent can offer
+## 示例：Agent 可以提供的无头应用
 
-`/workspace/media/apps/hello/app.json`:
+`/workspace/media/apps/hello/app.json`：
 
 ```json
 { "format": 1, "id": "hello", "name": "Hello", "version": "1" }
 ```
 
-`/workspace/media/apps/hello/main.lua`:
+`/workspace/media/apps/hello/main.lua`：
 
 ```lua
 local app = require("app")
@@ -249,11 +186,4 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Offer it with `app.install` and `{"id":"hello"}`: the device shows the
-install screen, and once the person installs it, open it with `app.open` and
-`{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
-example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
-`air` (an air-quality app, no packages), `lamp` (a light-strip app, requires
-`light`), `camera` (a camera app, requires `camera`), and `counter` (a counter,
-no packages).
+用 `app.install` 和 `{"id":"hello"}` 提供它：设备会显示安装界面；用户安装后，用 `app.open` 和 `{"id":"hello"}` 打开它；之后 `app.status` 会显示 `last_exit.output` 为 `["hello from hello, run 1"]`。`crates/appkit/tests/fixtures/` 中存放着已构建好的带视图示例应用，每个都可以直接复制到 `/workspace/media/apps/<id>/`：`air`（空气质量应用，不需要 Lua 包）、`lamp`（灯带应用，依赖 `light`）、`camera`（摄像头应用，依赖 `camera`）和 `counter`（计数器，不需要 Lua 包）。

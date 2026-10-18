@@ -1,38 +1,40 @@
 ---
-title: "App Format"
-sidebarTitle: "App format"
-description: "Package an app: its container locations, manifest, Lua program, and views."
+title: "Format d’application"
+sidebarTitle: "Format d’application"
+description: "Empaquetez une application : les emplacements de son conteneur, son manifeste, son programme Lua et ses vues."
 ---
 
-This is the format of an app container, version 1. The `app-manager` Plugin loads any
-container in this format from each of its locations, so a container written
-by the image build, the portal, or an Agent is the same thing; where it lives
-decides what kind of app it is (see
-[Device UI](/architecture/device-ui)).
-`crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
-rules below. What an app may use, and how a device decides it fits, is the
-app API, in [App API](/plugins/app-manager/app-api).
+Voici le format d’un conteneur d’application, version 1. Le Plugin
+`app-manager` charge tout conteneur à ce format depuis chacun de ses
+emplacements : un conteneur écrit par la compilation de l’image, par le portail
+ou par un Agent est donc la même chose ; c’est son emplacement qui détermine le
+type d’application (voir [Interface de l’appareil](/fr/architecture/device-ui)).
+`crates/appkit/resources/app-manifest.json` est la forme lisible par machine des
+règles de manifeste ci-dessous. Ce qu’une application peut utiliser, et la façon
+dont un appareil décide qu’elle lui convient, relèvent de l’API d’application,
+décrite dans [API d’application](/fr/plugins/app-manager/app-api).
 
-## Locations
+## Emplacements
 
-| Location    | Directory                     | Written by                            | Holds |
+| Emplacement | Répertoire                    | Écrit par                             | Contient |
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
-| `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
-| `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `builtin`   | `/resources/app/` du Plugin qui la fournit | la compilation de l’image (lecture seule) | les applications système |
+| `installed` | `/media/apps/<id>/`           | le Plugin `app-manager` à l’installation (privé) | les applications installables |
+| `workspace` | `/workspace/media/apps/<id>/` ou `<id>.bapp` | le portail, les Agents, d’autres Plugins (Workspace partagé) | les applications proposées à l’installation |
 
-A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
-own scope holds the other two; it only reads the Workspace. Builtin and
-installed apps are launchable; a Workspace container is an offer. Installing it copies
-the manifest and the files it names into `/media/apps/<id>/`, replacing an
-installed app at another version. A system app's ID belongs to it: no
-container elsewhere may use it, and `app.list` reports one that does as
-invalid.
+Un Plugin d’application intégrée transmet son système de fichiers au Plugin
+`app-manager`, dont la portée propre contient les deux autres ; il ne fait que
+lire le Workspace. Les applications intégrées et installées sont lançables ; un
+conteneur du Workspace est une offre. L’installer copie le manifeste et les
+fichiers qu’il nomme dans `/media/apps/<id>/`, en remplaçant une application
+installée d’une autre version. L’ID d’une application système lui appartient :
+aucun conteneur ailleurs ne peut l’utiliser, et `app.list` signale comme invalide
+un conteneur qui le fait.
 
-## Container
+## Conteneur
 
-A container is a directory named after the app ID, holding a manifest and the
-files it names, side by side:
+Un conteneur est un répertoire portant l’ID de l’application, qui contient côte
+à côte un manifeste et les fichiers qu’il nomme :
 
 ```text
 <id>/
@@ -43,14 +45,15 @@ files it names, side by side:
   font-1.bin …      its baked font atlases       ┘
 ```
 
-Other files are ignored. Directories whose names start with `.` are skipped.
+Les autres fichiers sont ignorés. Les répertoires dont le nom commence par `.`
+sont sautés.
 
-## Packages
+## Paquets
 
-In the Workspace an app may also be offered as one file,
-`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
-signed. An ID offered both as a directory and as a package is invalid.
-`resources/pack-app.ts` writes packages:
+Dans le Workspace, une application peut aussi être proposée sous la forme d’un
+seul fichier, `/workspace/media/apps/<id>.bapp`, qui contient les mêmes fichiers
+et peut être signé. Un ID proposé à la fois comme répertoire et comme paquet est
+invalide. `resources/pack-app.ts` écrit les paquets :
 
 ```sh
 bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
@@ -58,34 +61,36 @@ bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built conta
 bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
 ```
 
-All numbers are little-endian:
+Tous les nombres sont en little-endian :
 
-| Offset | Size | What |
+| Décalage | Taille | Contenu |
 | --- | --- | --- |
 | 0 | 4 | `BAPP` |
-| 4 | 1 | format version, 1 |
-| 5 | 1 | file count, 1 to 64 |
-| 6 | 1 | flags: bit 0, a signature block follows |
+| 4 | 1 | version du format, 1 |
+| 5 | 1 | nombre de fichiers, de 1 à 64 |
+| 6 | 1 | drapeaux : bit 0, un bloc de signature suit |
 | 7 | 1 | 0 |
-| 8 | 4 | the content's length: this header, the directory, and the files |
-| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
-| … | | the files, each where its entry says |
-| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
+| 8 | 4 | la longueur du contenu : cet en-tête, le répertoire et les fichiers |
+| 12 | 40 par fichier | le répertoire : le nom du fichier, complété par des NUL jusqu’à 32 octets, puis son décalage et sa longueur (4 octets chacun) |
+| … | | les fichiers, chacun à l’endroit qu’indique son entrée |
+| longueur du contenu | 133 | si signé : `BSIG`, la clé publique P-256 SEC1 non compressée (65 octets) et la signature ECDSA du contenu avec SHA-256 sous la forme `r ‖ s` (64 octets) |
 
-Listing reads only the header and the directory. When an install is asked
-for, the device hashes the content with SHA-256 and verifies the signature:
-a package whose signature fails is invalid, and the install screen shows a
-signed package's signer by the first bytes of its key's SHA-256, or says it
-is unsigned. The install takes exactly what the person was shown: the
-digest is pinned, and an offer that changed since answers `Changed`. A
-directory offer is pinned the same way, by the SHA-256 of its files.
+Le listage ne lit que l’en-tête et le répertoire. Quand une installation est
+demandée, l’appareil hache le contenu avec SHA-256 et vérifie la signature : un
+paquet dont la signature échoue est invalide, et l’écran d’installation affiche
+le signataire d’un paquet signé par les premiers octets du SHA-256 de sa clé, ou
+indique qu’il n’est pas signé. L’installation prend exactement ce qui a été
+montré à la personne : l’empreinte est figée, et une offre modifiée entre-temps
+répond `Changed`. Une offre sous forme de répertoire est figée de la même façon,
+par le SHA-256 de ses fichiers.
 
-An app installed from a signed package keeps its signer's key beside its
-container, and from then on takes only packages that key signed: another
-key's package, an unsigned one, or a directory offers no update and says
-why. An app installed unsigned takes any update.
+Une application installée depuis un paquet signé conserve la clé de son
+signataire à côté de son conteneur et n’accepte ensuite que les paquets signés
+par cette clé : un paquet d’une autre clé, un paquet non signé ou un répertoire
+ne proposent aucune mise à jour et indiquent pourquoi. Une application installée
+sans signature accepte n’importe quelle mise à jour.
 
-## Manifest
+## Manifeste
 
 ```json
 {
@@ -106,63 +111,68 @@ why. An app installed unsigned takes any update.
 }
 ```
 
-| Field          | Required | Rule                                                        |
+| Champ          | Obligatoire | Règle                                                    |
 | -------------- | -------- | ----------------------------------------------------------- |
-| `format`       | yes      | `1`                                                         |
-| `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; equal to the directory name      |
-| `name`         | yes      | display name, 1–64 characters                               |
-| `version`      | yes      | the author's version string, 1–32 characters                |
-| `icon`         | no       | a system icon's name, such as `lamp`, shown on the launcher; without one it shows the name's first character |
-| `entry`        | no       | the Lua program to run; defaults to `main.lua`              |
-| `view`         | no       | omit for a headless app                                     |
-| `view.program` | with view | the BVIR view program                                      |
-| `view.styles`  | with view | the compiled stylesheet                                    |
-| `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
-| `view.shape`   | no       | `round`, a view that keeps to the inscribed circle and fits any display, or `rect`, one that needs a rectangular display |
-| `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
-| `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
-| `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
-| `permissions`  | no       | up to 16 other Lua packages: Board-specific ones and those that promise nothing |
-| `boards`       | with a Board-specific package | the Boards the app is for, by their stable name |
+| `format`       | oui      | `1`                                                         |
+| `id`           | oui      | 1 à 32 caractères parmi `a-z`, `0-9`, `-` ; égal au nom du répertoire |
+| `name`         | oui      | nom affiché, 1 à 64 caractères                              |
+| `version`      | oui      | la chaîne de version de l’auteur, 1 à 32 caractères         |
+| `icon`         | non      | le nom d’une icône système, comme `lamp`, affichée dans le lanceur ; sans icône, le lanceur affiche le premier caractère du nom |
+| `entry`        | non      | le programme Lua à exécuter ; par défaut `main.lua`         |
+| `view`         | non      | à omettre pour une application sans interface               |
+| `view.program` | avec une vue | le programme de vue BVIR                                |
+| `view.styles`  | avec une vue | la feuille de style compilée                            |
+| `view.fonts`   | non      | jusqu’à 16 atlas de polices pré-calculés ; aucun par défaut |
+| `view.size`    | non      | `[width, height]`, le plus petit écran où tient la vue ; la compilation l’écrit depuis `pocket.json`. La vue est mise en page à la taille de l’écran |
+| `view.shape`   | non      | `round`, une vue qui reste dans le cercle inscrit et convient à tout écran, ou `rect`, une vue qui exige un écran rectangulaire |
+| `api`          | non      | la version du paquet `app` pour laquelle l’application est écrite ; par défaut `1` |
+| `requires`     | non      | jusqu’à 16 paquets stables sans lesquels l’application ne peut pas s’exécuter, chacun sous la forme `name` ou `name@version` avec la version minimale nécessaire |
+| `uses`         | non      | jusqu’à 16 paquets stables qu’elle utilise quand l’appareil les possède, écrits comme dans `requires` |
+| `permissions`  | non      | jusqu’à 16 autres paquets Lua : ceux propres à une carte et ceux qui ne garantissent rien |
+| `boards`       | avec un paquet propre à une carte | les cartes auxquelles l’application est destinée, par leur nom stable |
 
-Every named file is a plain file name in the container: 1–64 of `A-Z`, `a-z`,
-`0-9`, `_`, `.`, `-`, never `.` or `..`, and it must exist. Unknown fields
-are rejected so a typo is reported, not ignored. The manifest is at most
-4 KiB, the entry program 64 KiB, and the view files together 512 KiB.
+Chaque fichier nommé est un simple nom de fichier dans le conteneur : 1 à 64
+caractères parmi `A-Z`, `a-z`, `0-9`, `_`, `.`, `-`, jamais `.` ni `..`, et il
+doit exister. Les champs inconnus sont rejetés : une faute de frappe est ainsi
+signalée et non ignorée. Le manifeste fait au plus 4 Kio, le programme d’entrée
+64 Kio, et les fichiers de vue ensemble 512 Kio.
 
-Each package is named once across `requires`, `uses`, and `permissions`:
-stable packages in the first two, everything else in the third; ambient
-packages, which every app has, in none. A Board-specific package without
-`boards` is not valid. Whether a package is stable, ambient, or
-Board-specific is what it declares on the device reading the manifest
-(`LuaPackage::interface`), so a package that device lacks is checked by the
-device where the app is installed.
+Chaque paquet est nommé une seule fois dans l’ensemble de `requires`, `uses` et
+`permissions` : les paquets stables dans les deux premiers, tout le reste dans le
+troisième ; les paquets ambiants, dont dispose toute application, dans aucun. Un
+paquet propre à une carte sans `boards` n’est pas valide. Qu’un paquet soit
+stable, ambiant ou propre à une carte dépend de ce qu’il déclare sur l’appareil
+qui lit le manifeste (`LuaPackage::interface`) : un paquet absent de cet appareil
+est donc vérifié par l’appareil où l’application est installée.
 
-An installable app's runs can `require` the ambient packages and the packages
-its manifest names; a package it did not name is not there, and `require`
-fails. Before the person installs the app, the install screen lists what it
-asks for in the words each package's Plugin declares, or says why this
-device cannot run it ([App API](/plugins/app-manager/app-api#install-check)). A system app
-may `require` every registered package, so its manifest needs none. A
-builtin app's own package, such as `settings`, is only for builtin apps: an
-installable app that asks for one is not valid.
+Les exécutions d’une application installable peuvent faire `require` sur les
+paquets ambiants et les paquets que nomme son manifeste ; un paquet qu’elle n’a
+pas nommé n’est pas disponible, et `require` échoue. Avant que la personne
+installe l’application, l’écran d’installation liste ce qu’elle demande dans les
+termes que déclare le Plugin de chaque paquet, ou explique pourquoi cet appareil
+ne peut pas l’exécuter ([API d’application](/fr/plugins/app-manager/app-api)).
+Une application système peut faire `require` sur tout paquet enregistré : son
+manifeste n’en nomme donc aucun. Le paquet propre à une application intégrée,
+comme `settings`, est réservé aux applications intégrées : une application
+installable qui en demande un n’est pas valide.
 
-A container that breaks a rule is not launchable. `app.list` reports it under
-`invalid` with the location, directory name, and the problem, for example
-`app.json: JSON schema validation failed at $.view.program: Pattern`.
+Un conteneur qui enfreint une règle n’est pas lançable. `app.list` le signale
+sous `invalid` avec l’emplacement, le nom du répertoire et le problème, par
+exemple `app.json: JSON schema validation failed at $.view.program: Pattern`.
 
-## Program
+## Programme
 
-The entry program runs on the VM like any Lua run, with the `app` package
-bound to this app. The binding shares the program's first line, so line
-numbers in errors match the file. Apps have no standard input; a read gets
-end of file.
+Le programme d’entrée s’exécute sur la VM comme toute exécution Lua, avec le
+paquet `app` lié à cette application. La liaison partage la première ligne du
+programme : les numéros de ligne des erreurs correspondent donc au fichier. Les
+applications n’ont pas d’entrée standard ; une lecture obtient une fin de
+fichier.
 
-### The event loop
+### La boucle d’événements
 
-Every app is one loop over `app.events()`. View calls, lifecycle events, and
-timer ticks arrive in that one stream, in order:
+Chaque application est une boucle unique sur `app.events()`. Les appels de vue,
+les événements de cycle de vie et les tics de minuterie arrivent dans ce flux
+unique, dans l’ordre :
 
 ```lua
 local app = require("app")
@@ -176,71 +186,75 @@ for event, a, b in app.events() do
 end
 ```
 
-| Event            | When                                                                 |
+| Événement        | Quand                                                                |
 | ---------------- | -------------------------------------------------------------------- |
-| `app:active`     | The app is in the foreground and takes input. First event of a view app. |
-| `app:inactive`   | Still visible but not taking input: an overlay covers it or a transition runs. No view call follows until `app:active`. |
-| `app:background` | It left the foreground. Save now: a suspended app may be terminated without another event. |
-| `app:foreground` | It came back from the background; `app:active` follows.              |
-| `app:terminate`  | It is asked to exit. Return within the grace period or be cancelled. |
-| `app:tick`       | The interval set with `app.events{ every = ms }` passed (at least 100 ms). Not delivered in the background or while suspended. |
-| `app:back`       | The person swiped back while the app reported a page deeper than its first with `app.navigation`. Show the previous page and report its depth. |
+| `app:active`     | L’application est au premier plan et reçoit les saisies. Premier événement d’une application avec vue. |
+| `app:inactive`   | Toujours visible mais ne reçoit pas les saisies : une surcouche la recouvre ou une transition est en cours. Aucun appel de vue ne suit avant `app:active`. |
+| `app:background` | Elle a quitté le premier plan. Sauvegardez maintenant : une application suspendue peut être arrêtée sans autre événement. |
+| `app:foreground` | Elle revient de l’arrière-plan ; `app:active` suit.                  |
+| `app:terminate`  | On lui demande de s’arrêter. Rendez la main dans le délai de grâce, sinon elle est annulée. |
+| `app:tick`       | L’intervalle défini avec `app.events{ every = ms }` est écoulé (au moins 100 ms). Non délivré en arrière-plan ni pendant la suspension. |
+| `app:back`       | La personne a balayé pour revenir alors que l’application avait signalé, avec `app.navigation`, une page plus profonde que la première. Affichez la page précédente et signalez sa profondeur. |
 
-After `app:background` the program must be back in `app.events()` within the
-grace period (1 s); it is then suspended: it uses no CPU, and its view tree is
-released and rebuilt from its values when it returns. A program still busy
-when the grace period ends is cancelled, as is one that ignores
-`app:terminate`. The loop ends after `app.exit()`; the program then returns.
+Après `app:background`, le programme doit être revenu dans `app.events()` dans
+le délai de grâce (1 s) ; il est alors suspendu : il n’utilise pas de CPU, et
+son arbre de vue est libéré puis reconstruit à partir de ses valeurs à son
+retour. Un programme encore occupé à la fin du délai de grâce est annulé, tout
+comme un programme qui ignore `app:terminate`. La boucle se termine après
+`app.exit()` ; le programme rend alors la main.
 
-Headless apps never enter the foreground. They run as services and only see
-`app:tick` and `app:terminate`.
+Les applications sans interface ne passent jamais au premier plan. Elles
+s’exécutent comme des services et ne voient que `app:tick` et `app:terminate`.
 
 ### API
 
-| Call | Result |
+| Appel | Résultat |
 | ---- | ------ |
-| `app.id`, `app.name`, `app.version` | From the manifest. |
-| `app.device()` | The `app` package's version, the Board, display, touch, and the stable packages with their versions ([App API](/plugins/app-manager/app-api#runs)). |
-| `app.view()` | The view, or `nil` for a headless app. |
-| `app.events([{ every = ms }])` | The event iterator; `every` starts a timer. |
-| `app.exit()` | Ends the event loop. |
-| `app.navigation(depth)` | Reports how many pages deep the app is; 0, the default, is its first page. A back swipe delivers `app:back` while it is above 0, and leaves the app at 0. |
-| `view:set(name, value)` | Writes a value the view's `app.d.ts` declares; checked against its type. |
-| `view:is_open()`, `view:close()` | The view's state; closing ends view calls. |
-| `app.kv.get(key)` | The stored value, or `nil`. |
-| `app.kv.set(key, value)` | Stores booleans, numbers, strings, and tables that are arrays or have string keys; `nil` deletes. |
-| `app.kv.delete(key)`, `app.kv.keys()` | Delete a key; list keys, sorted. |
-| `app.fs.read(path)`, `app.fs.write(path, data)`, `app.fs.append(path, data)` | Whole-file access; writes replace atomically. |
-| `app.fs.list([dir])` | Sorted names; directories end in `/`. |
-| `app.fs.exists(path)`, `app.fs.remove(path)`, `app.fs.mkdir(path)` | Plain file management. |
+| `app.id`, `app.name`, `app.version` | Issus du manifeste. |
+| `app.device()` | La version du paquet `app`, la carte, l’écran, le tactile et les paquets stables avec leurs versions ([API d’application](/fr/plugins/app-manager/app-api)). |
+| `app.view()` | La vue, ou `nil` pour une application sans interface. |
+| `app.events([{ every = ms }])` | L’itérateur d’événements ; `every` démarre une minuterie. |
+| `app.exit()` | Termine la boucle d’événements. |
+| `app.navigation(depth)` | Indique à quelle profondeur de pages se trouve l’application ; 0, la valeur par défaut, est sa première page. Un balayage retour délivre `app:back` tant que la profondeur est supérieure à 0, et laisse l’application à 0. |
+| `view:set(name, value)` | Écrit une valeur déclarée par le `app.d.ts` de la vue ; vérifiée par rapport à son type. |
+| `view:is_open()`, `view:close()` | L’état de la vue ; la fermer met fin aux appels de vue. |
+| `app.kv.get(key)` | La valeur stockée, ou `nil`. |
+| `app.kv.set(key, value)` | Stocke des booléens, des nombres, des chaînes et des tables qui sont des tableaux ou ont des clés de type chaîne ; `nil` supprime. |
+| `app.kv.delete(key)`, `app.kv.keys()` | Supprime une clé ; liste les clés, triées. |
+| `app.fs.read(path)`, `app.fs.write(path, data)`, `app.fs.append(path, data)` | Accès au fichier entier ; les écritures remplacent de façon atomique. |
+| `app.fs.list([dir])` | Noms triés ; les répertoires se terminent par `/`. |
+| `app.fs.exists(path)`, `app.fs.remove(path)`, `app.fs.mkdir(path)` | Gestion simple des fichiers. |
 
-Failures return `nil` and a message instead of raising, so `assert(...)` turns
-them into errors. Keys are 1–64 bytes and the store holds at most 16 KiB of
-JSON. Files are at most 64 KiB; paths are relative to the app's own file
-tree, at most 8 names deep, with no `.` or `..`.
+Les échecs renvoient `nil` et un message au lieu de lever une erreur :
+`assert(...)` les transforme donc en erreurs. Les clés font 1 à 64 octets et le
+stockage contient au plus 16 Kio de JSON. Les fichiers font au plus 64 Kio ; les
+chemins sont relatifs à l’arborescence de fichiers propre à l’application, avec
+au plus 8 niveaux, sans `.` ni `..`.
 
-Storage belongs to the app ID, not the container: it lives in the App
-Manager's private `/media/data/<id>/` (`kv.json` and `files/`), survives
-updates and restarts, and is never visible to other apps.
+Le stockage appartient à l’ID de l’application, pas au conteneur : il se trouve
+dans le répertoire privé `/media/data/<id>/` de l’App Manager (`kv.json` et
+`files/`), survit aux mises à jour et aux redémarrages, et n’est jamais visible
+des autres applications.
 
-## Views
+## Vues
 
-`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
-outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
-into View IR, `ui-link` links it into BVIR, and the font baker produces the
-atlases. A source manifest's `view` holds only the `shape`. An Agent that
-cannot run that toolchain writes a headless app, or copies the view files of
-an existing build next to its own entry program.
+`view.program`, `view.styles`, `view.fonts` et `view.size` sont des produits de
+compilation : le compilateur MicroTS transforme `app.tsx` et son contrat
+`app.d.ts` en View IR, `ui-link` le lie en BVIR, et le générateur de polices
+produit les atlas. Le `view` d’un manifeste source ne contient que `shape`. Un
+Agent qui ne peut pas exécuter cette chaîne d’outils écrit une application sans
+interface, ou copie les fichiers de vue d’une compilation existante à côté de
+son propre programme d’entrée.
 
-## Example: a headless app an Agent can offer
+## Exemple : une application sans interface qu’un Agent peut proposer
 
-`/workspace/media/apps/hello/app.json`:
+`/workspace/media/apps/hello/app.json` :
 
 ```json
 { "format": 1, "id": "hello", "name": "Hello", "version": "1" }
 ```
 
-`/workspace/media/apps/hello/main.lua`:
+`/workspace/media/apps/hello/main.lua` :
 
 ```lua
 local app = require("app")
@@ -249,11 +263,12 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Offer it with `app.install` and `{"id":"hello"}`: the device shows the
-install screen, and once the person installs it, open it with `app.open` and
-`{"id":"hello"}`; `app.status` then shows `last_exit.output` as
-`["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
-example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
-`air` (an air-quality app, no packages), `lamp` (a light-strip app, requires
-`light`), `camera` (a camera app, requires `camera`), and `counter` (a counter,
-no packages).
+Proposez-la avec `app.install` et `{"id":"hello"}` : l’appareil affiche l’écran
+d’installation et, une fois que la personne l’a installée, ouvrez-la avec
+`app.open` et `{"id":"hello"}` ; `app.status` affiche alors `last_exit.output`
+sous la forme `["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/`
+contient des exemples d’applications compilées avec vues, chacune prête à être
+copiée dans `/workspace/media/apps/<id>/` : `air` (une application de qualité de
+l’air, sans paquet), `lamp` (une application de bande lumineuse, exige `light`),
+`camera` (une application de caméra, exige `camera`) et `counter` (un compteur,
+sans paquet).

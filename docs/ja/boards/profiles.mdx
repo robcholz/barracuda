@@ -1,33 +1,27 @@
 ---
-title: "Board profiles"
-description: "Choose which Plugins a firmware contains with layered profiles, or add a new one."
+title: "ボードプロファイル"
+description: "レイヤー化したプロファイルでファームウェアに含めるプラグインを選ぶか、新しいプロファイルを追加します。"
 tag: "NEW"
 ---
 
-A profile names the Plugins a firmware contains. Every Board builds one
-profile: the one its `board.yml` names, or `headless` when it names none.
-A Plugin that no profile and no Board enables is not in the firmware at all:
-no code, no settings, no text.
+プロファイルは、ファームウェアに含めるプラグインを指定します。各ボードは 1 つのプロファイルでビルドされます。`board.yml` で指定したプロファイル、指定がなければ `headless` です。どのプロファイルからもボードからも有効にされていないプラグインは、ファームウェアにまったく含まれません。コードも設定もテキストも入りません。
 
-The rules (how the enabled set is computed, what fails, the local override)
-are in [`plugin-api.md`](/architecture/plugin-api#enablement-per-board).
-This page says which profiles exist and how to pick or add one.
+ルール（有効なプラグインの組み合わせの計算方法、失敗する条件、ローカルでの上書き）は [`plugin-api.md`](/architecture/plugin-api#enablement-per-board) にあります。このページでは、どのプロファイルがあるか、どう選び、どう追加するかを説明します。
 
-## The profiles
+## プロファイル一覧
 
-The profiles are layers. Each one adds Plugins to the ones it extends, and
-the dependencies of every listed Plugin come along on their own.
+プロファイルはレイヤー構造になっています。各プロファイルは拡張元のプロファイルにプラグインを追加し、列挙したプラグインの依存関係は自動的に含まれます。
 
-| Profile | Extends | Adds | Network | Lua |
+| プロファイル | 拡張元 | 追加するもの | ネットワーク | Lua |
 | --- | --- | --- | --- | --- |
-| `minimal` | — | workflows, time, the scheduler, power, sound | no | no |
-| `lua` | `minimal` | the VM and the Lua packages that need no network, among them those for the Board's hardware | no | yes |
-| `network` | `minimal` | Wi-Fi, the web server, the captive portal, HTTP, the portal's file manager | yes | no |
-| `ai` | `network` | the Agent, its tools, and the message gateways | yes | no |
-| `headless` | `lua`, `ai` | the Lua packages that need the network or the Agent | yes | yes |
-| `ui` | — | the app manager with the system UI, the system fonts, the Files and Workflows apps | no | yes |
-| `screen-offline` | `lua`, `ui` | nothing more | no | yes |
-| `screen` | `headless`, `ui` | Wi-Fi in the system UI, installing apps from the portal, the Sessions and Settings apps | yes | yes |
+| `minimal` | — | Workflow、時刻、スケジューラー、電源、サウンド | なし | なし |
+| `lua` | `minimal` | VM と、ネットワークを必要としない Lua パッケージ（ボードのハードウェア向けのものを含む） | なし | あり |
+| `network` | `minimal` | Wi-Fi、Web サーバー、キャプティブポータル、HTTP、ポータルのファイルマネージャー | あり | なし |
+| `ai` | `network` | Agent、そのツール、メッセージゲートウェイ | あり | なし |
+| `headless` | `lua`、`ai` | ネットワークまたは Agent を必要とする Lua パッケージ | あり | あり |
+| `ui` | — | システム UI を持つアプリマネージャー、システムフォント、Files アプリと Workflows アプリ | なし | あり |
+| `screen-offline` | `lua`、`ui` | 追加なし | なし | あり |
+| `screen` | `headless`、`ui` | システム UI での Wi-Fi、ポータルからのアプリのインストール、Sessions アプリと Settings アプリ | あり | あり |
 
 ```text
                  minimal
@@ -43,15 +37,13 @@ the dependencies of every listed Plugin come along on their own.
        screen-offline = lua + ui
 ```
 
-`ui` is a layer, not a product: it has no Lua packages for the hardware and
-no way online. A Board with a screen names `screen` or `screen-offline`.
+`ui` はレイヤーであって製品向けのプロファイルではありません。ハードウェア向けの Lua パッケージもオンラインに出る手段も持ちません。画面のあるボードは `screen` または `screen-offline` を指定します。
 
-`screen-offline` has no Settings or Sessions app: Settings depends on Wi-Fi
-and Sessions on the Agent. Volume and brightness are in the control center.
+`screen-offline` には Settings アプリも Sessions アプリもありません。Settings は Wi-Fi に、Sessions は Agent に依存するためです。音量と明るさはコントロールセンターで調整できます。
 
-## Picking one
+## プロファイルを選ぶ
 
-A Board names its profile in `board.yml`:
+ボードは `board.yml` でプロファイルを指定します。
 
 ```yaml
 profile: screen-offline
@@ -60,17 +52,13 @@ plugins:
     enabled: false
 ```
 
-- A product with a screen names `screen`, or `screen-offline` when it never
-  goes online.
-- A product without one names nothing and builds `headless`, or a narrower
-  layer: `minimal`, `lua`, `network`, or `ai`.
-- One Plugin more or less goes in `plugins.<id>.enabled` on the Board, not in
-  a new profile.
+- 画面のある製品は `screen` を指定します。オンラインに出ることがなければ `screen-offline` を指定します。
+- 画面のない製品は何も指定せずに `headless` でビルドするか、より狭いレイヤー（`minimal`、`lua`、`network`、`ai`）を指定します。
+- プラグインを 1 つだけ増減する場合は、新しいプロファイルを作らず、ボードの `plugins.<id>.enabled` で指定します。
 
-## Adding one
+## プロファイルを追加する
 
-A new profile is a file here. Name it for what the product does, extend the
-layers it builds on, and list only what it adds:
+新しいプロファイルは、このディレクトリに置くファイル 1 つです。製品の用途に合わせて名前を付け、土台とするレイヤーを拡張し、追加するものだけを列挙します。
 
 ```yaml
 # boards/profiles/gateway.yml
@@ -81,9 +69,6 @@ enable:
   - imessage-telegram
 ```
 
-`extends` takes one profile or a list; a profile reached twice counts once,
-and a profile that extends itself fails. `enable` only adds: a narrower
-product extends a narrower layer instead of removing Plugins.
+`extends` には 1 つのプロファイルかリストを指定します。2 回たどり着いたプロファイルは 1 回として数え、自分自身を拡張するプロファイルはエラーになります。`enable` は追加しかできません。より小さな製品を作るときは、プラグインを取り除くのではなく、より狭いレイヤーを拡張します。
 
-Run `cargo plugin sync` after changing a profile or a Board, and
-`cargo plugin sync --check` before committing.
+プロファイルやボードを変更したら `cargo plugin sync` を実行し、コミット前に `cargo plugin sync --check` を実行してください。

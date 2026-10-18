@@ -1,104 +1,110 @@
 ---
-title: "App API"
-sidebarTitle: "App API"
-description: "Learn what an installable app can count on from every device: packages, install checks, and versions."
+title: "API d’application"
+sidebarTitle: "API d’application"
+description: "Découvrez ce qu’une application installable peut attendre de chaque appareil : paquets, vérifications d’installation et versions."
 ---
 
-The app API is what an installable app can count on from one device to the
-next: the Lua packages it may use, what it may ask the device, and the rules
-that keep both stable. It has two parts. The `app` package, this Plugin's,
-has a version, the **API level**; this system implements level 1, and an app
-names the level it is written for in its manifest's `api` (see
-[App format](/plugins/app-manager/app-format)). Every other package is whatever the
-device registers, each saying what it promises.
+L’API d’application est ce sur quoi une application installable peut compter
+d’un appareil à l’autre : les paquets Lua qu’elle peut utiliser, ce qu’elle peut
+demander à l’appareil, et les règles qui maintiennent ces deux éléments stables.
+Elle comporte deux parties. Le paquet `app`, celui de ce Plugin, a une version,
+le **niveau d’API** ; ce système implémente le niveau 1, et une application
+indique le niveau pour lequel elle est écrite dans le champ `api` de son
+manifeste (voir [Format d’application](/fr/plugins/app-manager/app-format)). Tous
+les autres paquets sont ceux que l’appareil enregistre, chacun indiquant ce
+qu’il garantit.
 
-System apps are not bound by the app API: they ship in the image and may
-`require` every package.
+Les applications système ne sont pas soumises à l’API d’application : elles sont
+livrées dans l’image et peuvent faire `require` sur n’importe quel paquet.
 
-## Packages
+## Paquets
 
-A Plugin that registers a Lua package declares what it promises with
-`LuaPackage::interface`, and the install screen's line for it. This Plugin
-reads those declarations from the `LuaPackageRegistry`; it names no other
-Plugin's package, so what a device offers apps is exactly what its enabled
-Plugins register. Each package's own Plugin documents its functions and the
-version each arrived in.
+Un Plugin qui enregistre un paquet Lua déclare ce qu’il garantit avec
+`LuaPackage::interface`, ainsi que la ligne qui le décrit sur l’écran
+d’installation. Ce Plugin lit ces déclarations dans le `LuaPackageRegistry` ; il
+ne nomme le paquet d’aucun autre Plugin : ce qu’un appareil offre aux
+applications est donc exactement ce qu’enregistrent ses Plugins activés. Le
+Plugin propre à chaque paquet documente ses fonctions et la version dans
+laquelle chacune est apparue.
 
-| Interface | How an app gets it | Same on every device |
+| Interface | Comment une application l’obtient | Identique sur tous les appareils |
 | --- | --- | --- |
-| Ambient | always, without asking | yes |
-| Stable, with a version | `requires` or `uses` in the manifest, as `name` or `name@version` | yes, where the device has it |
-| Board-specific | `permissions`, with `boards` | no: it talks to one Board's hardware |
-| None | `permissions` | no promise |
+| Ambiante | toujours, sans le demander | oui |
+| Stable, avec une version | `requires` ou `uses` dans le manifeste, sous la forme `name` ou `name@version` | oui, là où l’appareil la possède |
+| Propre à une carte | `permissions`, avec `boards` | non : elle dialogue avec le matériel d’une carte précise |
+| Aucune | `permissions` | aucune garantie |
 
-A package that needs a Board device declares nothing while the Board lacks
-the device, so on such a Board an app that requires it is not installed.
+Un paquet qui a besoin d’un composant de la carte ne déclare rien tant que la
+carte ne possède pas ce composant : sur une telle carte, une application qui
+l’exige n’est donc pas installée.
 
-This Plugin's own packages:
+Les paquets propres à ce Plugin :
 
-| Package | Interface | Lua API |
+| Paquet | Interface | API Lua |
 | --- | --- | --- |
-| `app` | ambient, version 1 | the app itself: events, view, storage, `app.device()` ([App format](/plugins/app-manager/app-format#api)) |
-| `notify` | stable, version 2 | `notify.post`, `notify.ask` (below) |
+| `app` | ambiante, version 1 | l’application elle-même : événements, vue, stockage, `app.device()` ([Format d’application](/fr/plugins/app-manager/app-format)) |
+| `notify` | stable, version 2 | `notify.post`, `notify.ask` (ci-dessous) |
 
 ### `notify`
 
-- `notify.post(title [, body]) -> id` adds a notice to the notification
-  center.
-- `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
-  a card listed before every notice and waits for the answer: `true` when
-  they allow it, `false` when they deny or dismiss it. From version 2,
-  `allow` and `deny` name the card's two buttons (default labels meaning Allow and Deny
-  unless given, at most 6 characters each), as in
-  `notify.ask("Lights on?", nil, "Now", "Later")`.
+- `notify.post(title [, body]) -> id` ajoute un avis au centre de
+  notifications.
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` interroge la personne
+  sur une carte listée avant tous les avis et attend sa réponse : `true` si elle
+  accepte, `false` si elle refuse ou ferme la carte. À partir de la version 2,
+  `allow` et `deny` nomment les deux boutons de la carte (par défaut, des
+  libellés signifiant Autoriser et Refuser ; 6 caractères au plus chacun), comme
+  dans `notify.ask("Lights on?", nil, "Now", "Later")`.
 
-Failures return `nil` and a message.
+Les échecs renvoient `nil` et un message.
 
-## Install check
+## Vérification d’installation
 
-The system checks an offered app against the device before installing it,
-in this order, and stops at the first reason. `app.list` reports the reason
-as the app's `incompatible`; the install screen shows it and disables the
-install button; `app.install` answers `{"error": "incompatible", "reason": …}`.
+Le système vérifie une application proposée par rapport à l’appareil avant de
+l’installer, dans cet ordre, et s’arrête à la première raison trouvée.
+`app.list` signale la raison comme `incompatible` pour l’application ; l’écran
+d’installation l’affiche et désactive le bouton d’installation ; `app.install`
+répond `{"error": "incompatible", "reason": …}`.
 
-| Check | What the reason says |
+| Vérification | Ce que dit la raison |
 | --- | --- |
-| `api` is above the device's level | update the system: the app needs API 2, this device has 1 |
-| `boards` does not list this Board | only for espressif-esp-vocat-v1-2 (the listed Boards) |
-| the app has a view and the device no display | this device has no screen |
-| the display is smaller than `view.size` | the screen is too small: the app needs 480×480 |
-| `view.shape` is `rect` and the display is round | the app needs a square screen |
-| a package in `requires` is not a stable package here | this device has no notify |
-| its version here is below the one `requires` names | update the system: the app needs notify version 2, this device has version 1 |
-| a package in `permissions` is missing | this device does not support serial |
+| `api` dépasse le niveau de l’appareil | mettez à jour le système : l’application exige l’API 2, cet appareil a la 1 |
+| `boards` ne liste pas cette carte | uniquement pour espressif-esp-vocat-v1-2 (les cartes listées) |
+| l’application a une vue et l’appareil n’a pas d’écran | cet appareil n’a pas d’écran |
+| l’écran est plus petit que `view.size` | l’écran est trop petit : l’application exige 480×480 |
+| `view.shape` vaut `rect` et l’écran est rond | l’application exige un écran carré |
+| un paquet de `requires` n’est pas un paquet stable ici | cet appareil n’a pas notify |
+| sa version ici est inférieure à celle que nomme `requires` | mettez à jour le système : l’application exige notify version 2, cet appareil a la version 1 |
+| un paquet de `permissions` est absent | cet appareil ne prend pas en charge serial |
 
-An installed app that no longer fits, after a Board or system change, does
-not open; `app.open` answers `incompatible`.
+Une application installée qui ne convient plus, après un changement de carte ou
+de système, ne s’ouvre pas ; `app.open` répond `incompatible`.
 
-### Views and the display
+### Vues et écran
 
-A view is laid out at the display's size, not scaled: its root fills the
-display, and the layout is flexbox, so a view that fills its parent
-(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
-right-[40px]`), and centers with `justify-center` fits displays of other
-sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits, and a round view, one that keeps to the inscribed circle,
-fits a rectangular display too; a `rect` view does not fit a round one,
-whose corners it would lose. Text keeps its size: font slots are baked at
-fixed pixel sizes. A view that needs the display's size reads it from
-`app.device().display`.
+Une vue est mise en page à la taille de l’écran, sans mise à l’échelle : sa
+racine remplit l’écran, et la mise en page est en flexbox ; une vue qui remplit
+son parent (`w-full`, `h-full`), espace ses colonnes avec des marges des deux
+côtés (`left-[40px] right-[40px]`) et centre avec `justify-center` convient donc
+aux écrans d’autres tailles. Les tailles fixes restent telles qu’écrites.
+`view.size` est le plus petit écran où la vue tient encore, et une vue ronde,
+qui reste dans le cercle inscrit, convient aussi à un écran rectangulaire ; une
+vue `rect` ne convient pas à un écran rond, dont elle perdrait les coins. Le
+texte garde sa taille : les emplacements de police sont pré-calculés à des
+tailles fixes en pixels. Une vue qui a besoin de la taille de l’écran la lit
+dans `app.device().display`.
 
-## Runs
+## Exécutions
 
-A run of an installable app may `require` the ambient packages and every
-package its manifest names in `requires`, `uses`, and `permissions`. A
-package the app did not name is not there, and `require` fails. A package in
-`uses` may be missing or older than the app would like: check
-`app.device().capabilities` before requiring it, or call
-`pcall(require, name)`.
+Une exécution d’une application installable peut faire `require` sur les
+paquets ambiants et sur chaque paquet que son manifeste nomme dans `requires`,
+`uses` et `permissions`. Un paquet que l’application n’a pas nommé n’est pas
+disponible, et `require` échoue. Un paquet de `uses` peut être absent ou plus
+ancien que souhaité : vérifiez `app.device().capabilities` avant de l’exiger, ou
+appelez `pcall(require, name)`.
 
-`app.device()` describes the device; `capabilities` maps each stable package
-to its version:
+`app.device()` décrit l’appareil ; `capabilities` associe chaque paquet stable à
+sa version :
 
 ```lua
 {
@@ -110,15 +116,15 @@ to its version:
 }
 ```
 
-## Versioning
+## Versions
 
-- A stable package's interface never changes once it is declared: no
-  function is removed, renamed, or given other arguments or results.
-- Adding functions raises the package's version; its Plugin documents what
-  each version added.
-- An incompatible change is a new package with a new name; the old one
-  stays.
-- The `app` package follows the same rules with the API level as its
-  version.
-- A Board-specific package, or one that promises nothing, may change with any
-  system update; that is why apps that use them name their Boards.
+- L’interface d’un paquet stable ne change jamais une fois déclarée : aucune
+  fonction n’est supprimée, renommée, ni dotée d’autres arguments ou résultats.
+- Ajouter des fonctions augmente la version du paquet ; son Plugin documente ce
+  que chaque version a ajouté.
+- Un changement incompatible donne un nouveau paquet avec un nouveau nom ;
+  l’ancien reste.
+- Le paquet `app` suit les mêmes règles, avec le niveau d’API comme version.
+- Un paquet propre à une carte, ou qui ne garantit rien, peut changer à chaque
+  mise à jour du système ; c’est pourquoi les applications qui l’utilisent
+  nomment leurs cartes.

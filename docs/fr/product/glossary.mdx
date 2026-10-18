@@ -1,66 +1,75 @@
 ---
-title: "Glossary"
-description: "Definitions of the terms used across Barracuda, from Agent and App to Board and Plugin."
+title: "Glossaire"
+description: "Définitions des termes utilisés dans Barracuda, d’Agent et App à Board et Plugin."
 ---
 
-**Agent (on-board agent).** The Agent Plugin running on the device. It talks to
-users through channels, keeps sessions and memory, uses tools, and does in-time
-coding with the VM.
+**Agent (on-board agent, Agent embarqué).** Le Plugin Agent qui s’exécute sur
+l’appareil. Il dialogue avec les utilisateurs via les canaux, conserve les
+sessions et la mémoire, utilise des outils et fait du codage en temps réel avec
+la VM.
 
-**Agent Tool.** A model-facing operation a Plugin gives the on-board agent.
+**Agent Tool (outil de l’Agent).** Une opération destinée au modèle qu’un Plugin
+fournit à l’Agent embarqué.
 
-**App.** A device application with its own UI, built in the Live Editor and
-managed on the device by the App Manager Plugin.
+**App (application).** Une application d’appareil dotée de sa propre interface,
+créée dans le Live Editor et gérée sur l’appareil par le Plugin App Manager.
 
-**App Manager.** The Plugin that installs, starts, stops, and updates apps on a
-device.
+**App Manager (gestionnaire d’applications).** Le Plugin qui installe, démarre,
+arrête et met à jour les applications d’un appareil.
 
-**Board.** A concrete piece of hardware described by YAML: chip, toolchain
-target, flash layout, and peripherals. Selected independently of the Platform.
+**Board (carte).** Un matériel concret décrit en YAML : puce, cible de la chaîne
+d’outils, plan de la flash et périphériques. Sélectionnée indépendamment de la
+plateforme.
 
-**Builder.** Someone shipping a product firmware shaped to a specific target and
-job, typically with the `fully-customize` skill.
-
-**Channel.** A way to reach the on-board agent: WeChat, Telegram, QQ, iMessage,
-Inkbox, web chat, or the terminal. Each channel is a Plugin.
-
-**Coding agent.** An AI coding tool on the developer's machine — Claude Code,
-Cursor, or Codex — used with Barracuda's skills.
-
-**Device Portal.** The web interface served by the device for configuration,
-status, Plugin pages, and web chat.
-
-**Experience ladder.** The six levels of using Barracuda: out of the box,
-configure, build apps, create Plugins, add Boards and Platforms, fully customize.
-
-**In-browser agent.** The agent in the Live Editor that generates apps and their
-UI.
-
-**In-time coding.** The on-board agent writing a VM script and running it
-against the hardware immediately, as part of a conversation.
-
-**Live Editor.** The browser-based visual, agentic editor for building and
-flashing device apps.
-
-**Platform.** The implementation of the Platform contract for a chip family or a
-host OS: executor entry, network stack, filesystem, flash, and HAL adapters.
-
-**Plugin.** The primitive unit of capability: a declared contract of typed
-capabilities, Workflow Actions and Events, Agent Tools, VM packages, portal
-pages, resources, and tasks.
-
-**Skill.** Agent-readable instructions in the repository that teach coding agents
-how to do a Barracuda task: `create-plugin`, `create-board`, `create-platform`,
+**Builder (concepteur de produit).** Une personne qui livre un firmware de
+produit taillé pour une cible et une tâche précises, généralement avec la skill
 `fully-customize`.
 
-**System.** The portable, `no_std` layer that registers the Plugin set in
-dependency order and starts it. The same System runs on every Platform.
+**Channel (canal).** Un moyen de joindre l’Agent embarqué : WeChat, Telegram,
+QQ, iMessage, Inkbox, chat web ou terminal. Chaque canal est un Plugin.
 
-**VM.** The on-device Lua runtime that runs scripts written by the on-board agent
-or by Workflow, with packages that expose the hardware.
+**Coding agent (agent de code).** Un outil de programmation à base d’IA sur la
+machine du développeur — Claude Code, Cursor ou Codex —, utilisé avec les skills
+de Barracuda.
 
-**Web Installer.** The browser page that installs Barracuda onto a board over USB
-and connects it to Wi-Fi.
+**Device Portal (portail de l’appareil).** L’interface web servie par l’appareil
+pour la configuration, l’état, les pages des Plugins et le chat web.
 
-**Workflow.** Durable automation: Events trigger Actions, so the device keeps
-working on its own.
+**Experience ladder (échelle d’expérience).** Les six niveaux d’utilisation de
+Barracuda : prêt à l’emploi, configurer, créer des applications, créer des
+Plugins, ajouter des cartes et des plateformes, tout personnaliser.
+
+**In-browser agent (Agent du navigateur).** L’agent du Live Editor qui génère
+les applications et leur interface.
+
+**In-time coding (codage en temps réel).** L’Agent embarqué qui écrit un script
+VM et l’exécute immédiatement sur le matériel, au cours d’une conversation.
+
+**Live Editor (éditeur en direct).** L’éditeur visuel et agentique dans le
+navigateur, qui sert à créer et flasher des applications d’appareil.
+
+**Platform (plateforme).** L’implémentation du contrat de plateforme pour une
+famille de puces ou un système d’exploitation hôte : point d’entrée de
+l’exécuteur, pile réseau, système de fichiers, flash et adaptateurs HAL.
+
+**Plugin (Plugin).** L’unité de base de capacité : un contrat déclaré de
+capacités typées, d’actions et d’événements Workflow, d’outils de l’Agent, de
+paquets VM, de pages de portail, de ressources et de tâches.
+
+**Skill (skill).** Des instructions lisibles par les agents, dans le dépôt, qui
+apprennent aux agents de code à réaliser une tâche Barracuda : `create-plugin`,
+`create-board`, `create-platform`, `fully-customize`.
+
+**System (System).** La couche portable et `no_std` qui enregistre l’ensemble de
+Plugins dans l’ordre des dépendances et le démarre. Le même System tourne sur
+toutes les plateformes.
+
+**VM (machine virtuelle).** Le runtime Lua de l’appareil qui exécute les scripts
+écrits par l’Agent embarqué ou par Workflow, avec des paquets qui exposent le
+matériel.
+
+**Web Installer (installateur web).** La page du navigateur qui installe
+Barracuda sur une carte par USB et la connecte au Wi-Fi.
+
+**Workflow (Workflow).** L’automatisation durable : des événements déclenchent
+des actions, si bien que l’appareil continue de travailler de lui-même.

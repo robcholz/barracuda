@@ -1,40 +1,37 @@
 ---
-title: "Channels"
-description: "Reach the on-board Agent from web chat, the terminal, WeChat, QQ, Telegram, iMessage, and Inkbox."
+title: "チャネル"
+description: "Web チャット、ターミナル、WeChat、QQ、Telegram、iMessage、Inkbox からオンボード Agent に話しかけます。"
 ---
 
-Every channel reaches the same Agent, with the same sessions. Each channel is a
-Plugin, so a firmware carries only the channels it needs.
+どのチャネルからも同じ Agent に、同じセッションでつながります。チャネルはそれぞれがプラグインなので、ファームウェアには必要なチャネルだけを入れられます。
 
-| Channel | Plugin | How to connect |
+| チャネル | プラグイン | 接続方法 |
 | --- | --- | --- |
-| Web chat | [`imessage-web`](/plugins/imessage-web) | Open **Web chat** in the [Device Portal](/use/device-portal) |
-| Terminal | `cargo cli` | Run `cargo cli` and choose Local or Remote |
-| WeChat | [`imessage-wechat`](/plugins/imessage-wechat) | Scan the QR code on its portal page |
-| QQ | [`imessage-qq`](/plugins/imessage-qq) | Scan the QR code on its portal page |
-| Telegram | [`imessage-telegram`](/plugins/imessage-telegram) | Enter your bot token on its portal page |
-| iMessage | [`imessage-bluebubble`](/plugins/imessage-bluebubble) | Connect your BlueBubbles server on its portal page |
-| Inkbox | [`imessage-inkbox`](/plugins/imessage-inkbox) | Enter an Inkbox API key, or sign up, on its portal page |
+| Web チャット | [`imessage-web`](/plugins/imessage-web) | [デバイスポータル](/ja/use/device-portal) で **Web chat** を開きます |
+| ターミナル | `cargo cli` | `cargo cli` を実行し、Local または Remote を選びます |
+| WeChat | [`imessage-wechat`](/plugins/imessage-wechat) | ポータルページの QR コードをスキャンします |
+| QQ | [`imessage-qq`](/plugins/imessage-qq) | ポータルページの QR コードをスキャンします |
+| Telegram | [`imessage-telegram`](/plugins/imessage-telegram) | ポータルページでボットトークンを入力します |
+| iMessage | [`imessage-bluebubble`](/plugins/imessage-bluebubble) | ポータルページで BlueBubbles サーバーを接続します |
+| Inkbox | [`imessage-inkbox`](/plugins/imessage-inkbox) | ポータルページで Inkbox の API キーを入力するか、サインアップします |
 
-Before any channel can answer, register a model on the **Models** page.
+どのチャネルも、応答する前に **Models** ページでモデルを登録しておく必要があります。
 
-## Owners
+## オーナー
 
-A messaging channel answers only its owners. To become one, send the channel
-the six-digit pairing code shown on its portal page. A code is valid for ten
-minutes; **New code** replaces it.
+メッセージングのチャネルは、オーナーにだけ応答します。オーナーになるには、そのチャネルのポータルページに表示される 6 桁のペアリングコードをチャネルに送信します。コードの有効期限は 10 分で、**New code** を押すと新しいコードに置き換わります。
 
-## Sessions
+## セッション
 
-Every channel manages sessions with the same text commands:
+どのチャネルでも、同じテキストコマンドでセッションを管理します。
 
-| Command | What it does |
+| コマンド | 動作 |
 | --- | --- |
-| `/sessions` | List saved sessions, newest first |
-| `/new` | Start a new session |
-| `/new temp` | Start a temporary session that is not saved |
-| `/switch N` | Switch to session `N` |
-| `/rename N title` | Rename session `N` |
-| `/delete N` | Ask to delete session `N`; `/delete N confirm` deletes it |
+| `/sessions` | 保存済みセッションを新しい順に一覧表示します |
+| `/new` | 新しいセッションを開始します |
+| `/new temp` | 保存しない一時セッションを開始します |
+| `/switch N` | セッション `N` に切り替えます |
+| `/rename N title` | セッション `N` の名前を変更します |
+| `/delete N` | セッション `N` の削除を確認します。`/delete N confirm` で削除します |
 
-Web chat shows the same sessions as a list.
+Web チャットでは、同じセッションが一覧で表示されます。

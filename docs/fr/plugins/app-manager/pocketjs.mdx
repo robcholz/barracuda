@@ -1,26 +1,27 @@
 ---
-title: "Vendored PocketJS crates"
-sidebarTitle: "Vendored PocketJS"
-description: "Where the vendored PocketJS crates come from and how they differ from upstream."
+title: "Crates PocketJS embarquées"
+sidebarTitle: "PocketJS embarqué"
+description: "D’où viennent les crates PocketJS embarquées dans le dépôt et en quoi elles diffèrent de l’amont."
 ---
 
-`pocketjs-core/` and `microts/` are copied from
-[PocketJS](https://github.com/pocket-nexus/pocketjs) at commit
-`e9e417308f094ead706754164acf91436e4d05a8`:
+`pocketjs-core/` et `microts/` sont copiés depuis
+[PocketJS](https://github.com/pocket-nexus/pocketjs) au commit
+`e9e417308f094ead706754164acf91436e4d05a8` :
 
-| Directory | Upstream path |
+| Répertoire | Chemin en amont |
 | --- | --- |
 | `pocketjs-core/src` | `engine/core/src` |
 | `microts/src` | `engine/crates/microts/src` |
 
-Both are MIT licensed (`LICENSE` in each directory). The library sources are
-unmodified except that three test modules are dropped because they read
-fixtures from the PocketJS repository: the out-of-line `core/src/tests.rs` and
-`core/src/physics/tests.rs` with their `mod tests;` declarations, and the
-inline `mod tests` at the end of `core/src/package.rs`. The sources are also
-reformatted with this workspace's `rustfmt`. The manifests are rewritten to
-stand alone in this workspace and silence Clippy's style lints.
+Les deux sont sous licence MIT (`LICENSE` dans chaque répertoire). Les sources
+de la bibliothèque ne sont pas modifiées, sauf que trois modules de test sont
+supprimés parce qu’ils lisent des fixtures du dépôt PocketJS : les fichiers
+séparés `core/src/tests.rs` et `core/src/physics/tests.rs` avec leurs
+déclarations `mod tests;`, et le `mod tests` en ligne à la fin de
+`core/src/package.rs`. Les sources sont aussi reformatées avec le `rustfmt` de
+cet espace de travail. Les manifestes sont réécrits pour être autonomes dans cet
+espace de travail et faire taire les lints de style de Clippy.
 
-Update by copying the same paths from a newer commit and re-applying the three
-deletions. Keep Barracuda-specific code out of these directories; it belongs in
-`barracuda-ui-runtime`.
+Pour mettre à jour, copiez les mêmes chemins depuis un commit plus récent et
+appliquez de nouveau les trois suppressions. Gardez le code propre à Barracuda
+hors de ces répertoires ; il a sa place dans `barracuda-ui-runtime`.

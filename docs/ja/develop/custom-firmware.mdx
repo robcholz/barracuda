@@ -1,36 +1,26 @@
 ---
-title: "Custom firmware"
-description: "Fit a firmware to a chip, a resource budget, and a job by choosing, trimming, and adding Plugins."
+title: "カスタムファームウェア"
+description: "プラグインを選び、削り、追加して、チップ、リソース予算、用途に合ったファームウェアを作ります。"
 ---
 
-A custom firmware contains only what a product needs. You shape it from three
-pieces you already have: a Board, a profile, and the Plugin set.
+カスタムファームウェアには、製品に必要なものだけが入ります。手元にある 3 つの要素、つまりボード、プロファイル、プラグインの組み合わせから形づくります。
 
 <Note>
-  A `fully-customize` skill that does all of this from one request is planned.
-  Until it ships, give your coding agent the steps below.
+  これらすべてを 1 回の依頼で行う `fully-customize` skill を計画しています。提供されるまでは、以下の手順をコーディング Agent に渡してください。
 </Note>
 
 <Steps>
-  <Step title="Pick or add the Board">
-    Start from a Board under `boards/configs/` on the same chip, or add one.
-    See [Boards](/boards/overview) and, for a new chip family,
-    [Platform architecture](/architecture/platform-architecture).
+  <Step title="ボードを選ぶか追加する">
+    同じチップを使う `boards/configs/` 配下のボードから始めるか、新しく追加します。[ボード](/boards/overview) を参照してください。新しいチップファミリーの場合は [プラットフォームアーキテクチャ](/architecture/platform-architecture) も参照してください。
   </Step>
-  <Step title="Pick the narrowest profile">
-    Choose the smallest [profile](/boards/profiles) that covers the job:
-    `minimal`, `lua`, `network`, `ai`, `headless`, `screen-offline`, or
-    `screen`. Add a profile under `boards/profiles/` when a product needs its
-    own layer.
+  <Step title="最小限のプロファイルを選ぶ">
+    用途を満たす最も小さい [プロファイル](/ja/boards/profiles) を選びます。`minimal`、`lua`、`network`、`ai`、`headless`、`screen-offline`、`screen` のいずれかです。製品に独自のレイヤーが必要な場合は、`boards/profiles/` にプロファイルを追加します。
   </Step>
-  <Step title="Trim and add single Plugins">
-    Turn single Plugins on or off with `plugins.<id>.enabled` in the Board's
-    `board.yml`. A Plugin that is not enabled is not in the firmware at all.
-    Write the missing ones with [create-plugin](/develop/write-a-plugin).
+  <Step title="個々のプラグインを削る・追加する">
+    ボードの `board.yml` にある `plugins.<id>.enabled` で、個々のプラグインを有効または無効にします。有効にしていないプラグインはファームウェアにまったく含まれません。足りないものは [create-plugin](/ja/develop/write-a-plugin) で作成します。
   </Step>
-  <Step title="Check the budget">
-    Build with `cargo build` and measure. The [bench](/tools/bench) page shows
-    how to measure binary size, heap, and stack.
+  <Step title="予算を確認する">
+    `cargo build` でビルドして計測します。バイナリサイズ、ヒープ、スタックの計測方法は [bench](/tools/bench) ページにあります。
   </Step>
 </Steps>
 

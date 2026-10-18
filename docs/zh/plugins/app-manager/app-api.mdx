@@ -1,104 +1,66 @@
 ---
-title: "App API"
-sidebarTitle: "App API"
-description: "Learn what an installable app can count on from every device: packages, install checks, and versions."
+title: "应用 API"
+sidebarTitle: "应用 API"
+description: "了解可安装应用在每台设备上都能依赖什么：Lua 包、安装检查和版本。"
 ---
 
-The app API is what an installable app can count on from one device to the
-next: the Lua packages it may use, what it may ask the device, and the rules
-that keep both stable. It has two parts. The `app` package, this Plugin's,
-has a version, the **API level**; this system implements level 1, and an app
-names the level it is written for in its manifest's `api` (see
-[App format](/plugins/app-manager/app-format)). Every other package is whatever the
-device registers, each saying what it promises.
+应用 API 是可安装应用在不同设备之间都能依赖的东西：它可以使用的 Lua 包、它可以向设备询问什么，以及让两者保持稳定的规则。它分为两部分。本插件的 `app` Lua 包有一个版本，称为 **API 级别**；当前 System 实现的是级别 1，应用在清单的 `api` 中写明它所针对的级别（参见[应用格式](/zh/plugins/app-manager/app-format)）。其他所有 Lua 包则取决于设备注册了什么，每个 Lua 包都会声明自己的承诺。
 
-System apps are not bound by the app API: they ship in the image and may
-`require` every package.
+系统应用不受应用 API 约束：它们随镜像一起提供，可以 `require` 任何 Lua 包。
 
-## Packages
+## Lua 包
 
-A Plugin that registers a Lua package declares what it promises with
-`LuaPackage::interface`, and the install screen's line for it. This Plugin
-reads those declarations from the `LuaPackageRegistry`; it names no other
-Plugin's package, so what a device offers apps is exactly what its enabled
-Plugins register. Each package's own Plugin documents its functions and the
-version each arrived in.
+注册 Lua 包的插件通过 `LuaPackage::interface` 声明它的承诺，以及该 Lua 包在安装界面上显示的那一行说明。本插件从 `LuaPackageRegistry` 读取这些声明；它不会指名任何其他插件的 Lua 包，所以设备向应用提供的，正好是它已启用的插件所注册的内容。每个 Lua 包所属的插件会记录它的函数，以及每个函数是在哪个版本中加入的。
 
-| Interface | How an app gets it | Same on every device |
+| 接口类型 | 应用如何获得 | 是否在每台设备上都一致 |
 | --- | --- | --- |
-| Ambient | always, without asking | yes |
-| Stable, with a version | `requires` or `uses` in the manifest, as `name` or `name@version` | yes, where the device has it |
-| Board-specific | `permissions`, with `boards` | no: it talks to one Board's hardware |
-| None | `permissions` | no promise |
+| 环境（Ambient） | 始终可用，无需请求 | 是 |
+| 稳定，带版本 | 在清单的 `requires` 或 `uses` 中写作 `name` 或 `name@version` | 是，只要设备具备 |
+| 开发板专用 | `permissions`，配合 `boards` | 否：它直接操作某块开发板的硬件 |
+| 无 | `permissions` | 不做任何承诺 |
 
-A package that needs a Board device declares nothing while the Board lacks
-the device, so on such a Board an app that requires it is not installed.
+需要开发板上某个设备的 Lua 包，在开发板缺少该设备时不做任何声明，所以在这样的开发板上，依赖它的应用不会被安装。
 
-This Plugin's own packages:
+本插件自己的 Lua 包：
 
-| Package | Interface | Lua API |
+| Lua 包 | 接口类型 | Lua API |
 | --- | --- | --- |
-| `app` | ambient, version 1 | the app itself: events, view, storage, `app.device()` ([App format](/plugins/app-manager/app-format#api)) |
-| `notify` | stable, version 2 | `notify.post`, `notify.ask` (below) |
+| `app` | 环境，版本 1 | 应用本身：事件、视图、存储、`app.device()`（[应用格式](/zh/plugins/app-manager/app-format)） |
+| `notify` | 稳定，版本 2 | `notify.post`、`notify.ask`（见下文） |
 
 ### `notify`
 
-- `notify.post(title [, body]) -> id` adds a notice to the notification
-  center.
-- `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
-  a card listed before every notice and waits for the answer: `true` when
-  they allow it, `false` when they deny or dismiss it. From version 2,
-  `allow` and `deny` name the card's two buttons (default labels meaning Allow and Deny
-  unless given, at most 6 characters each), as in
-  `notify.ask("Lights on?", nil, "Now", "Later")`.
+- `notify.post(title [, body]) -> id` 向通知中心添加一条通知。
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` 用一张排在所有通知之前的卡片询问用户，并等待回答：用户允许时返回 `true`，拒绝或关闭时返回 `false`。从版本 2 开始，`allow` 和 `deny` 用来指定卡片上两个按钮的文字（未指定时默认显示“允许”和“拒绝”的含义，每个最多 6 个字符），例如 `notify.ask("Lights on?", nil, "Now", "Later")`。
 
-Failures return `nil` and a message.
+失败时返回 `nil` 和一条消息。
 
-## Install check
+## 安装检查
 
-The system checks an offered app against the device before installing it,
-in this order, and stops at the first reason. `app.list` reports the reason
-as the app's `incompatible`; the install screen shows it and disables the
-install button; `app.install` answers `{"error": "incompatible", "reason": …}`.
+System 在安装所提供的应用之前，会按以下顺序根据设备检查它，并在遇到第一个原因时停止。`app.list` 把这个原因报告为应用的 `incompatible`；安装界面会显示它并禁用安装按钮；`app.install` 返回 `{"error": "incompatible", "reason": …}`。
 
-| Check | What the reason says |
+| 检查项 | 原因说明 |
 | --- | --- |
-| `api` is above the device's level | update the system: the app needs API 2, this device has 1 |
-| `boards` does not list this Board | only for espressif-esp-vocat-v1-2 (the listed Boards) |
-| the app has a view and the device no display | this device has no screen |
-| the display is smaller than `view.size` | the screen is too small: the app needs 480×480 |
-| `view.shape` is `rect` and the display is round | the app needs a square screen |
-| a package in `requires` is not a stable package here | this device has no notify |
-| its version here is below the one `requires` names | update the system: the app needs notify version 2, this device has version 1 |
-| a package in `permissions` is missing | this device does not support serial |
+| `api` 高于设备的级别 | 请更新系统：应用需要 API 2，本设备为 1 |
+| `boards` 未列出本开发板 | 仅适用于 espressif-esp-vocat-v1-2（列出的开发板） |
+| 应用带视图，而设备没有显示屏 | 本设备没有屏幕 |
+| 显示屏小于 `view.size` | 屏幕太小：应用需要 480×480 |
+| `view.shape` 为 `rect`，而显示屏是圆形 | 应用需要方形屏幕 |
+| `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | 本设备没有 notify |
+| 它在本设备上的版本低于 `requires` 中写明的版本 | 请更新系统：应用需要 notify 版本 2，本设备为版本 1 |
+| `permissions` 中的某个 Lua 包缺失 | 本设备不支持 serial |
 
-An installed app that no longer fits, after a Board or system change, does
-not open; `app.open` answers `incompatible`.
+开发板或系统发生变化后不再适配的已安装应用无法打开；`app.open` 会返回 `incompatible`。
 
-### Views and the display
+### 视图与显示屏
 
-A view is laid out at the display's size, not scaled: its root fills the
-display, and the layout is flexbox, so a view that fills its parent
-(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
-right-[40px]`), and centers with `justify-center` fits displays of other
-sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits, and a round view, one that keeps to the inscribed circle,
-fits a rectangular display too; a `rect` view does not fit a round one,
-whose corners it would lose. Text keeps its size: font slots are baked at
-fixed pixel sizes. A view that needs the display's size reads it from
-`app.device().display`.
+视图按显示屏的实际尺寸布局，而不是缩放：它的根节点填满显示屏，布局采用 flexbox，所以填满父元素（`w-full`、`h-full`）、用两侧内边距隔开列（`left-[40px] right-[40px]`）、并用 `justify-center` 居中的视图，可以适配其他尺寸的显示屏。固定尺寸会保持原样。`view.size` 是视图仍能适配的最小显示屏；圆形视图（限制在内切圆内的视图）也能适配矩形显示屏；`rect` 视图则不能适配圆形显示屏，因为它会丢失四个角。文字保持原有大小：字体字号是按固定像素尺寸烘焙的。需要知道显示屏尺寸的视图可以从 `app.device().display` 读取。
 
-## Runs
+## 运行
 
-A run of an installable app may `require` the ambient packages and every
-package its manifest names in `requires`, `uses`, and `permissions`. A
-package the app did not name is not there, and `require` fails. A package in
-`uses` may be missing or older than the app would like: check
-`app.device().capabilities` before requiring it, or call
-`pcall(require, name)`.
+可安装应用的运行可以 `require` 环境 Lua 包，以及清单在 `requires`、`uses` 和 `permissions` 中列出的每个 Lua 包。应用未列出的 Lua 包不可用，`require` 会失败。`uses` 中的 Lua 包可能缺失，或者版本比应用期望的旧：在 `require` 之前先检查 `app.device().capabilities`，或者调用 `pcall(require, name)`。
 
-`app.device()` describes the device; `capabilities` maps each stable package
-to its version:
+`app.device()` 描述设备；`capabilities` 把每个稳定 Lua 包映射到它的版本：
 
 ```lua
 {
@@ -110,15 +72,10 @@ to its version:
 }
 ```
 
-## Versioning
+## 版本管理
 
-- A stable package's interface never changes once it is declared: no
-  function is removed, renamed, or given other arguments or results.
-- Adding functions raises the package's version; its Plugin documents what
-  each version added.
-- An incompatible change is a new package with a new name; the old one
-  stays.
-- The `app` package follows the same rules with the API level as its
-  version.
-- A Board-specific package, or one that promises nothing, may change with any
-  system update; that is why apps that use them name their Boards.
+- 稳定 Lua 包的接口一经声明就永不改变：不会删除或重命名任何函数，也不会改变其参数或返回值。
+- 添加函数会提升 Lua 包的版本；其插件会记录每个版本新增了什么。
+- 不兼容的变更会成为一个新名称的新 Lua 包；旧的 Lua 包保持不变。
+- `app` Lua 包遵循同样的规则，以 API 级别作为它的版本。
+- 开发板专用的 Lua 包，或者不做任何承诺的 Lua 包，可能随任何系统更新而变化；这正是使用它们的应用需要列出适用开发板的原因。

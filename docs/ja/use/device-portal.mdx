@@ -1,41 +1,36 @@
 ---
-title: "Device Portal"
-description: "Set up Wi-Fi, models, channels, files, and apps from any browser on the device's network."
+title: "デバイスポータル"
+description: "デバイスと同じネットワーク上のブラウザから、Wi-Fi、モデル、チャネル、ファイル、アプリを設定します。"
 ---
 
-The Device Portal is the device's own web app, served by the device at
-`/portal/`. Every enabled Plugin that has settings adds its page to it, so the
-portal always matches the firmware.
+デバイスポータルは、デバイス自身が `/portal/` で配信する Web アプリです。設定を持つ有効なプラグインがそれぞれページを追加するので、ポータルの内容は常にファームウェアと一致します。
 
-## Open the portal
+## ポータルを開く
 
-| Where the device is | Address |
+| デバイスの状態 | アドレス |
 | --- | --- |
-| A Board that has no Wi-Fi yet | Join the open `Barracuda Setup` network, then open `http://192.168.4.1/portal/` |
-| A Board on your network | `http://DEVICE_ADDRESS:8787/portal/` |
+| まだ Wi-Fi に接続していないボード | オープンネットワーク `Barracuda Setup` に参加し、`http://192.168.4.1/portal/` を開きます |
+| ネットワークに接続済みのボード | `http://DEVICE_ADDRESS:8787/portal/` |
 | `local-linux` | `http://10.42.0.2:8787/portal/` |
 
-The portal follows your browser's language, Chinese or English.
+ポータルはブラウザの言語設定に合わせて、中国語または英語で表示されます。
 
-## Pages
+## ページ
 
-| Page | From Plugin | What you set |
+| ページ | 提供元プラグイン | 設定する内容 |
 | --- | --- | --- |
-| Wi-Fi | [`wifi`](/plugins/wifi) | Scan and join a network; the setup hotspot |
-| Models | [`agent`](/plugins/agent) | The model service, model, and API key for each Agent purpose |
-| Web search | [`agent-websearch`](/plugins/agent-websearch) | The search service the Agent uses |
-| Web chat | [`imessage-web`](/plugins/imessage-web) | Talk to the Agent in the browser |
-| WeChat, QQ, Telegram, BlueBubbles, Inkbox | [Channels](/use/channels) | Bind the account, owners, and pairing codes |
-| Files | [`files`](/plugins/files) | Browse the Workspace and Plugin files |
-| Apps | [`app-portal`](/plugins/app-portal) | Review and install apps |
+| Wi-Fi | [`wifi`](/plugins/wifi) | ネットワークのスキャンと接続、セットアップ用ホットスポット |
+| Models | [`agent`](/plugins/agent) | Agent の用途ごとのモデルサービス、モデル、API キー |
+| Web search | [`agent-websearch`](/plugins/agent-websearch) | Agent が使う検索サービス |
+| Web chat | [`imessage-web`](/plugins/imessage-web) | ブラウザで Agent と会話します |
+| WeChat、QQ、Telegram、BlueBubbles、Inkbox | [チャネル](/ja/use/channels) | アカウントの紐付け、オーナー、ペアリングコード |
+| Files | [`files`](/plugins/files) | Workspace とプラグインのファイルを閲覧します |
+| Apps | [`app-portal`](/plugins/app-portal) | アプリを確認してインストールします |
 
-A page appears only when its Plugin is in the firmware. See
-[Board profiles](/boards/profiles).
+各ページは、そのプラグインがファームウェアに含まれている場合にだけ表示されます。[ボードプロファイル](/ja/boards/profiles) を参照してください。
 
 <Warning>
-  The portal's HTTP APIs have no authentication or transport encryption, and
-  the setup hotspot is open. Configure the device only on a network you trust.
+  ポータルの HTTP API には認証も通信の暗号化もなく、セットアップ用ホットスポットはオープンです。デバイスの設定は信頼できるネットワーク上でのみ行ってください。
 </Warning>
 
-From a terminal, `cargo cli configure` fills in the same model, web search, and
-channel settings without a browser. See [Build and run](/get-started/build-and-run).
+ターミナルからは、`cargo cli configure` でブラウザを使わずに同じモデル、Web 検索、チャネルの設定を入力できます。[ビルドと実行](/ja/get-started/build-and-run) を参照してください。

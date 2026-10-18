@@ -1,15 +1,15 @@
 ---
 title: "Scripts"
-description: "Ask for something physical and the on-board Agent writes a Lua script and runs it on the hardware."
+description: "Demandez quelque chose de physique : l’Agent embarqué écrit un script Lua et l’exécute sur le matériel."
 ---
 
-When a request touches the physical world, the on-board Agent writes a short Lua
-script and runs it in the device's VM with its `vm_run` tool. The script reads
-and drives the real peripherals the moment it runs, and its output comes back
-into the conversation.
+Quand une demande touche le monde physique, l’Agent embarqué écrit un court
+script Lua et l’exécute dans la VM de l’appareil avec son outil `vm_run`. Le
+script lit et pilote les vrais périphériques dès son exécution, et sa sortie
+revient dans la conversation.
 
 ```txt
-> Set pin vio-0 high
+> Mets la broche vio-0 à l’état haut
 ```
 
 ```lua
@@ -18,34 +18,36 @@ local pin = gpio.open_output("vio-0", true, "push-pull")
 print("vio-0 is high")
 ```
 
-## What scripts can use
+## Ce que les scripts peuvent utiliser
 
-Each Lua package comes from its own Plugin, so a script can use exactly what the
-firmware carries.
+Chaque paquet Lua provient de son propre Plugin : un script peut donc utiliser
+exactement ce que le firmware embarque.
 
-| Package | Plugin | For |
+| Paquet | Plugin | Usage |
 | --- | --- | --- |
-| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | Digital inputs and outputs on the Board's exposed pins |
-| `i2c`, `spi`, `uart` | [`vm-i2c`](/plugins/vm-i2c), [`vm-spi`](/plugins/vm-spi), [`vm-uart`](/plugins/vm-uart) | Buses |
-| `pwm`, `analog`, `i2s` | [`vm-pwm`](/plugins/vm-pwm), [`vm-analog`](/plugins/vm-analog), [`vm-i2s`](/plugins/vm-i2s) | PWM outputs, analog inputs, and I2S audio streams |
-| `display`, `camera`, `audio` | [`vm-display`](/plugins/vm-display), [`vm-camera`](/plugins/vm-camera), [`vm-audio`](/plugins/vm-audio) | Screens, cameras, and sound |
-| `motion`, `light`, `power_monitor` | [`vm-imu`](/plugins/vm-imu), [`vm-led-strip`](/plugins/vm-led-strip), [`vm-power-monitor`](/plugins/vm-power-monitor) | Motion sensing, LED strips, and power |
-| `http`, `filesystem`, `message_queue` | [`vm-http`](/plugins/vm-http), [`vm-filesystem`](/plugins/vm-filesystem), [`vm-message-queue`](/plugins/vm-message-queue) | Requests, files, and queues |
-| `agent` | [`vm-agent`](/plugins/vm-agent) | Ask the Agent a question from inside a script |
-| `time` | [`vm-time`](/plugins/vm-time) | UTC time through `os.time` and `os.date` |
+| `gpio` | [`vm-gpio`](/plugins/vm-gpio) | Entrées et sorties numériques sur les broches exposées de la carte |
+| `i2c`, `spi`, `uart` | [`vm-i2c`](/plugins/vm-i2c), [`vm-spi`](/plugins/vm-spi), [`vm-uart`](/plugins/vm-uart) | Bus |
+| `pwm`, `analog`, `i2s` | [`vm-pwm`](/plugins/vm-pwm), [`vm-analog`](/plugins/vm-analog), [`vm-i2s`](/plugins/vm-i2s) | Sorties PWM, entrées analogiques et flux audio I2S |
+| `display`, `camera`, `audio` | [`vm-display`](/plugins/vm-display), [`vm-camera`](/plugins/vm-camera), [`vm-audio`](/plugins/vm-audio) | Écrans, caméras et son |
+| `motion`, `light`, `power_monitor` | [`vm-imu`](/plugins/vm-imu), [`vm-led-strip`](/plugins/vm-led-strip), [`vm-power-monitor`](/plugins/vm-power-monitor) | Détection de mouvement, bandes de LED et alimentation |
+| `http`, `filesystem`, `message_queue` | [`vm-http`](/plugins/vm-http), [`vm-filesystem`](/plugins/vm-filesystem), [`vm-message-queue`](/plugins/vm-message-queue) | Requêtes, fichiers et files de messages |
+| `agent` | [`vm-agent`](/plugins/vm-agent) | Poser une question à l’Agent depuis un script |
+| `time` | [`vm-time`](/plugins/vm-time) | Heure UTC via `os.time` et `os.date` |
 
-Each package's page lists its Lua API. The [VM](/plugins/vm) page covers the runtime itself.
+La page de chaque paquet détaille son API Lua. La page [VM](/plugins/vm) décrit
+le runtime lui-même.
 
-## Long-running scripts
+## Scripts de longue durée
 
-`vm_run` runs in the Agent's background pool, so the conversation continues
-while a script runs.
+`vm_run` s’exécute dans le pool d’arrière-plan de l’Agent : la conversation
+continue pendant qu’un script tourne.
 
-- A script that calls `io.read()` pauses and asks you for input; your reply is
-  fed back to it.
-- The Agent lists, answers, and cancels running scripts with its
-  `background_list`, `background_input`, and `background_cancel` tools. Ask it
-  to stop a script and it cancels the run.
+- Un script qui appelle `io.read()` se met en pause et vous demande une
+  saisie ; votre réponse lui est transmise.
+- L’Agent liste, alimente et annule les scripts en cours avec ses outils
+  `background_list`, `background_input` et `background_cancel`. Demandez-lui
+  d’arrêter un script et il annule l’exécution.
 
-For behavior that must outlive the conversation, such as "every morning at
-seven", the Agent uses [Automations](/use/automations).
+Pour un comportement qui doit survivre à la conversation, comme « tous les
+matins à sept heures », l’Agent utilise les
+[automatisations](/fr/use/automations).

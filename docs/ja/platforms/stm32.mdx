@@ -1,27 +1,25 @@
 ---
-title: "STM32 Platform"
+title: "STM32 プラットフォーム"
 sidebarTitle: "STM32"
-description: "Build, flash, and run Barracuda on STM32 Boards with Rust 1.98.1 and probe-rs."
+description: "Rust 1.98.1 と probe-rs で、STM32 ボード向けに Barracuda をビルドし、書き込み、実行します。"
 ---
 
-STM32 chips run Barracuda on the bare-metal `stm32` Platform. It builds with
-standard Rust and flashes through a debug probe with `probe-rs`; the flash
-layout is the linker's `memory.x` in each Board's bundle.
+STM32 チップでは、ベアメタルの `stm32` プラットフォーム上で Barracuda が動きます。標準の Rust でビルドし、`probe-rs` を使ってデバッグプローブ経由で書き込みます。フラッシュのレイアウトは、各ボードのバンドルにあるリンカーの `memory.x` で決まります。
 
-| Chip (Platform) | Rust target | Toolchain | Flash tool |
+| チップ（プラットフォーム） | Rust ターゲット | ツールチェーン | 書き込みツール |
 | --- | --- | --- | --- |
 | STM32U5A5ZJ (`stm32`) | `thumbv8m.main-none-eabihf` | Rust 1.98.1 | `probe-rs` |
 
-## Install the toolchain
+## ツールチェーンをインストールする
 
 ```bash terminal
 rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
 cargo install probe-rs-tools
 ```
 
-## Build, flash, and run
+## ビルド、書き込み、実行
 
-Connect the Board's debug probe over USB, then:
+ボードのデバッグプローブを USB で接続してから、次を実行します。
 
 ```bash terminal
 cargo board select nucleo-u5a5zj-q
@@ -29,20 +27,17 @@ cargo run
 cargo image deploy
 ```
 
-- `cargo run` builds the firmware and runs it with `probe-rs run`.
-- `cargo image deploy` builds the Plugin resource image and writes it with
-  `probe-rs download`.
+- `cargo run` はファームウェアをビルドし、`probe-rs run` で実行します。
+- `cargo image deploy` はプラグインのリソースイメージをビルドし、`probe-rs download` で書き込みます。
 
-## Hardware the Platform drives
+## プラットフォームが制御するハードウェア
 
-The `stm32` Platform provides digital inputs and outputs, GPIO, I2C devices,
-and SPI buses. Runtime I/O lets Lua scripts claim these controllers on a
-Board's exposed pins:
+`stm32` プラットフォームは、デジタル入出力、GPIO、I2C デバイス、SPI バスを提供します。ランタイム I/O を使うと、Lua スクリプトがボードの公開ピン上でこれらのコントローラーを確保できます。
 
 | I2C | SPI | UART | ADC |
 | --- | --- | --- | --- |
 | `I2C1` | `SPI1` | `USART1` | `ADC1` |
 
-## Boards
+## ボード
 
 - [NUCLEO-U5A5ZJ-Q](/boards/supported/nucleo-u5a5zj-q)

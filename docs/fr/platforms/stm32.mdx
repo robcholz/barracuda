@@ -1,27 +1,28 @@
 ---
-title: "STM32 Platform"
+title: "Plateforme STM32"
 sidebarTitle: "STM32"
-description: "Build, flash, and run Barracuda on STM32 Boards with Rust 1.98.1 and probe-rs."
+description: "Compilez, flashez et exécutez Barracuda sur les cartes STM32 avec Rust 1.98.1 et probe-rs."
 ---
 
-STM32 chips run Barracuda on the bare-metal `stm32` Platform. It builds with
-standard Rust and flashes through a debug probe with `probe-rs`; the flash
-layout is the linker's `memory.x` in each Board's bundle.
+Les puces STM32 exécutent Barracuda sur la plateforme bare-metal `stm32`. Elle
+se compile avec Rust standard et se flashe via une sonde de débogage avec
+`probe-rs` ; le plan de la flash est le `memory.x` de l’éditeur de liens dans le
+paquet de chaque carte.
 
-| Chip (Platform) | Rust target | Toolchain | Flash tool |
+| Puce (plateforme) | Cible Rust | Chaîne d’outils | Outil de flashage |
 | --- | --- | --- | --- |
 | STM32U5A5ZJ (`stm32`) | `thumbv8m.main-none-eabihf` | Rust 1.98.1 | `probe-rs` |
 
-## Install the toolchain
+## Installer la chaîne d’outils
 
 ```bash terminal
 rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
 cargo install probe-rs-tools
 ```
 
-## Build, flash, and run
+## Compiler, flasher et exécuter
 
-Connect the Board's debug probe over USB, then:
+Branchez la sonde de débogage de la carte en USB, puis :
 
 ```bash terminal
 cargo board select nucleo-u5a5zj-q
@@ -29,20 +30,20 @@ cargo run
 cargo image deploy
 ```
 
-- `cargo run` builds the firmware and runs it with `probe-rs run`.
-- `cargo image deploy` builds the Plugin resource image and writes it with
+- `cargo run` compile le firmware et l’exécute avec `probe-rs run`.
+- `cargo image deploy` compile l’image de ressources des Plugins et l’écrit avec
   `probe-rs download`.
 
-## Hardware the Platform drives
+## Matériel piloté par la plateforme
 
-The `stm32` Platform provides digital inputs and outputs, GPIO, I2C devices,
-and SPI buses. Runtime I/O lets Lua scripts claim these controllers on a
-Board's exposed pins:
+La plateforme `stm32` fournit des entrées et sorties numériques, le GPIO, des
+périphériques I2C et des bus SPI. Les E/S à l’exécution permettent aux scripts
+Lua de réserver ces contrôleurs sur les broches exposées d’une carte :
 
 | I2C | SPI | UART | ADC |
 | --- | --- | --- | --- |
 | `I2C1` | `SPI1` | `USART1` | `ADC1` |
 
-## Boards
+## Cartes
 
 - [NUCLEO-U5A5ZJ-Q](/boards/supported/nucleo-u5a5zj-q)
