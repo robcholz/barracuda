@@ -1,0 +1,64 @@
+---
+title: "项目性能分析与确定性工作负载"
+sidebarTitle: "Bench"
+description: "用项目范围的工作负载分析堆分配、LLM 回放、二进制大小和栈使用情况。"
+---
+
+在仓库根目录运行命令。
+
+## Agent 堆分析
+
+在初始化 `AgentRuntime` 时分析内存分配：
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- agent-init
+```
+
+该命令会打印分配总量、峰值存活字节数和保留字节数。它的 DHAT 报告写入：
+
+```text
+target/profiles/agent-init.dhat.json
+```
+
+传入第二个参数可以选择另一个输出路径：
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- \
+  agent-init target/profiles/custom.dhat.json
+```
+
+在 DHAT 下，让长的 `overall-capabilities` 录制带中的每个录制响应都经过生产环境中兼容 OpenAI 的流式解析器进行回放：
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- tape-replay
+```
+
+这个场景有意使用七字节的网络读取，以暴露数据块/解析器边界处的分配抖动。报告写入 `target/profiles/tape-replay.dhat.json`。在 DHAT 的查看器中打开它，按 **Total blocks** 对分配点排序，可以找到频繁分配/释放的位置；按 **Total bytes** 和 **At t-gmax** 排序，可以找到高流量和峰值存活的位置。最近一次核实的分析见[录制带回放堆分析](/zh/tools/tape-replay-profile)。
+
+[`barracuda-profile`](https://github.com/robcholz/barracuda/tree/master/shared/profile) 是共享的性能分析库；它没有独立的命令，也不归 Agent 组件所有。
+
+## LLM API 字节录制与回放
+
+[`llm-tape`](/zh/tools/llm-tape) 是一个独立的 Python 反向代理，用于录制未经解释的 LLM HTTP 响应数据块，并按原始时序回放它们。它面向确定性的 Agent 轨迹基准测试；它不解析 SSE 或模型输出。
+
+## 二进制大小
+
+构建主机性能分析可执行文件，并打印其加载镜像的构成：
+
+```bash
+cargo build --profile profiling -p barracuda-agent-profile
+size target/profiling/barracuda-agent-profile
+```
+
+在输出中，`dec` 是 `text + data + bss`。用 `size -A` 查看各个 ELF 段。该命令不会计算与旧构建之间的差值。
+
+## 栈使用
+
+使用 `bench/clippy.toml` 中配置的 4 KiB 阈值，运行 Clippy 的静态栈帧估算：
+
+```bash
+CLIPPY_CONF_DIR=bench cargo clippy -p barracuda-agent-profile --all-targets -- \
+  -W clippy::large-stack-frames -W clippy::large-stack-arrays
+```
+
+Clippy 会报告估计超过阈值的函数。这些估算值对回归检查很有用，但可能与优化后的运行时栈使用情况不同。

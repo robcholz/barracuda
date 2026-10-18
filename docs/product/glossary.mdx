@@ -1,0 +1,66 @@
+---
+title: "Glossary"
+description: "Definitions of the terms used across Barracuda, from Agent and App to Board and Plugin."
+---
+
+**Agent (on-board agent).** The Agent Plugin running on the device. It talks to
+users through channels, keeps sessions and memory, uses tools, and does in-time
+coding with the VM.
+
+**Agent Tool.** A model-facing operation a Plugin gives the on-board agent.
+
+**App.** A device application with its own UI, built in the Live Editor and
+managed on the device by the App Manager Plugin.
+
+**App Manager.** The Plugin that installs, starts, stops, and updates apps on a
+device.
+
+**Board.** A concrete piece of hardware described by YAML: chip, toolchain
+target, flash layout, and peripherals. Selected independently of the Platform.
+
+**Builder.** Someone shipping a product firmware shaped to a specific target and
+job, typically with the `fully-customize` skill.
+
+**Channel.** A way to reach the on-board agent: WeChat, Telegram, QQ, iMessage,
+Inkbox, web chat, or the terminal. Each channel is a Plugin.
+
+**Coding agent.** An AI coding tool on the developer's machine — Claude Code,
+Cursor, or Codex — used with Barracuda's skills.
+
+**Device Portal.** The web interface served by the device for configuration,
+status, Plugin pages, and web chat.
+
+**Experience ladder.** The six levels of using Barracuda: out of the box,
+configure, build apps, create Plugins, add Boards and Platforms, fully customize.
+
+**In-browser agent.** The agent in the Live Editor that generates apps and their
+UI.
+
+**In-time coding.** The on-board agent writing a VM script and running it
+against the hardware immediately, as part of a conversation.
+
+**Live Editor.** The browser-based visual, agentic editor for building and
+flashing device apps.
+
+**Platform.** The implementation of the Platform contract for a chip family or a
+host OS: executor entry, network stack, filesystem, flash, and HAL adapters.
+
+**Plugin.** The primitive unit of capability: a declared contract of typed
+capabilities, Workflow Actions and Events, Agent Tools, VM packages, portal
+pages, resources, and tasks.
+
+**Skill.** Agent-readable instructions in the repository that teach coding agents
+how to do a Barracuda task: `create-plugin`, `create-board`, `create-platform`,
+`fully-customize`.
+
+**System.** The portable, `no_std` layer that registers the Plugin set in
+dependency order and starts it. The same System runs on every Platform.
+
+**VM.** The on-device Lua runtime that runs scripts written by the on-board agent
+or by Workflow, with packages that expose the hardware.
+
+**Web Installer.** The browser page that installs Barracuda onto a board over USB
+and connects it to Wi-Fi.
+
+**Workflow.** Durable automation: Events trigger Actions, so the device keeps
+working on its own.

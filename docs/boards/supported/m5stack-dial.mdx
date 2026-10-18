@@ -1,0 +1,31 @@
+---
+title: "M5Stack Dial"
+sidebarTitle: "Dial"
+description: "Build, flash, and run Barracuda on the M5Stack Dial, an ESP32-S3 Board."
+---
+
+The M5Stack Dial is an ESP32-S3 Board from M5Stack.
+
+- Board ID: `m5stack-dial`
+- Vendor: M5Stack
+- Chip: ESP32-S3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32s3-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/m5stack-dial/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-dial
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |

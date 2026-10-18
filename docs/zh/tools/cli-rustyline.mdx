@@ -1,0 +1,11 @@
+---
+title: "为 Barracuda 打过补丁的 rustyline"
+sidebarTitle: "rustyline 补丁"
+description: "查看 Barracuda 对已发布的 rustyline crate 所做的修改，以及原因。"
+---
+
+这是 crates.io 上发布的 [rustyline](https://github.com/kkawakam/rustyline) 18.0.1，通过工作区清单中的 `[patch.crates-io]` 使用。`[[example]]` 条目已被删除，因为示例没有被纳入仓库；`[lints.rust]` 允许 `unconditional_panic`：路径依赖在进行 lint 检查时没有注册表 crate 所享有的上限，而 `src/keymap.rs` 在一个 rustc 看不到的长度检查之后对按键序列进行索引。其余部分就是已发布的 crate 加上下面的修改。这项修改可以提交给上游。
+
+| 修改 | 文件 | 原因 |
+| --- | --- | --- |
+| `PosixRawReader::select` 在等待终端之前先返回已缓冲的按键 | `src/tty/unix.rs` | 使用外部打印器时，即使之前的输入已经被缓冲，`select` 也会等待终端变为可读。不带括号粘贴标记的粘贴内容，或者输入法的一次提交（例如一个两字的中文词），会在一次读取中到达，因此第一个字符之后的所有内容都会一直隐藏，直到下一次按键。Barracuda CLI 始终使用外部打印器，在提示符上方流式输出回复。 |

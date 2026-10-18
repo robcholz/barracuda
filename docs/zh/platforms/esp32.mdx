@@ -1,0 +1,84 @@
+---
+title: "ESP32 平台"
+sidebarTitle: "ESP32"
+description: "在 ESP32、ESP32-S3、ESP32-C3、ESP32-C6 和 ESP32-P4 开发板上构建、烧录和运行 Barracuda。"
+---
+
+Espressif 芯片通过五个裸机平台运行 Barracuda，每款芯片一个。它们共用同一个烧录工具 `espflash` 和同一种 Flash 布局，即每块开发板 `partitions.csv` 中的 ESP-IDF 分区表。它们的区别在于 Rust 目标和工具链：`esp` 是 Espressif 的 Rust 工具链，RISC-V GCC 是 Espressif 的 `riscv32-esp-elf` GCC。
+
+| 芯片（平台） | Rust 目标 | 工具链 | 开发板数量 |
+| --- | --- | --- | --- |
+| ESP32 (`esp32`) | `xtensa-esp32-none-elf` | `esp` 1.98.1.0 | 24 |
+| ESP32-S3 (`esp32s3`) | `xtensa-esp32s3-none-elf` | `esp` 1.98.1.0 | 36 |
+| ESP32-C3 (`esp32c3`) | `riscv32imc-unknown-none-elf` | Rust 1.98.1、RISC-V GCC | 5 |
+| ESP32-C6 (`esp32c6`) | `riscv32imac-unknown-none-elf` | Rust 1.98.1、RISC-V GCC | 5 |
+| ESP32-P4 (`esp32p4`) | `riscv32imafc-unknown-none-elf` | `esp` 1.98.1.0、RISC-V GCC | 7 |
+
+## 安装工具链
+
+先安装一次 `espup`，再安装芯片对应的工具链。缺少工具链时，`cargo board select` 也会打印同样的命令。
+
+<Tabs>
+  <Tab title="ESP32、ESP32-S3">
+    ```bash terminal
+    cargo install espup
+    espup install --toolchain-version 1.98.1.0
+    ```
+  </Tab>
+  <Tab title="ESP32-C3、ESP32-C6">
+    ```bash terminal
+    rustup toolchain install 1.98.1
+    cargo install espup
+    espup install --stable-version 1.98.1 --targets esp32c3 --esp-riscv-gcc
+    ```
+
+    对于 ESP32-C6，请使用 `--targets esp32c6`。
+  </Tab>
+  <Tab title="ESP32-P4">
+    ```bash terminal
+    cargo install espup
+    espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
+    ```
+
+    `espup` 会把 `esp` 工具链与一个 Xtensa 目标一起安装，所以命令中也写了 `esp32s3`。
+  </Tab>
+</Tabs>
+
+`espup` 会生成 `~/export-esp.sh`。选择开发板时会自动导入它，所以你不需要自己 source。烧录需要安装 `espflash`：
+
+```bash terminal
+cargo install espflash
+```
+
+<Note>
+  ESP32-S3 平台保持使用 `esp` 1.98.1.0：1.99.0.0 版本调整了 esp-hal 启动代码的顺序，导致 release 构建无法链接。
+</Note>
+
+## 构建、烧录和运行
+
+```bash terminal
+cargo board select m5stack-cores3
+cargo run
+cargo image deploy
+```
+
+- `cargo run` 用 `--release` 构建固件，用 `espflash flash --monitor` 烧录，并在终端中持续显示串口日志。
+- `cargo image deploy` 构建插件资源镜像，并用 `espflash write-bin` 写入 `resources` 分区。
+
+## 平台驱动的硬件
+
+每个 ESP32 平台都提供数字输入和输出、GPIO、SPI 设备、SPI 总线、SPI 输出和 I2C 设备。运行时 I/O 让 Lua 脚本可以在开发板的可用引脚上占用这些控制器：
+
+| 平台 | I2C | SPI | UART | ADC |
+| --- | --- | --- | --- | --- |
+| `esp32` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
+| `esp32s3` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
+| `esp32p4` | `I2C0`、`I2C1` | `SPI2`、`SPI3` | `UART1` | `ADC1` |
+| `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
+| `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
+
+ESP32-S3 还支持四线 SPI 设备、SD/MMC 卡、摄像头采集、I2S 音频流和电容触摸。
+
+## 开发板
+
+在侧边栏的 **Boards** 下可以查看每款芯片的全部开发板，也可以从以下开发板入手：[M5Stack CoreS3](/zh/boards/supported/m5stack-cores3)（ESP32-S3）、[ESP32-DevKitC V4](/zh/boards/supported/esp32-devkitc-v4)（ESP32）、[ESP32-C3-DevKitM-1](/zh/boards/supported/esp32c3-devkitm-1)（ESP32-C3）、[ESP32-C6-DevKitC-1](/zh/boards/supported/esp32c6-devkitc-1)（ESP32-C6）和 [ESP32-P4-Function-EV-Board](/zh/boards/supported/esp32p4-function-ev-board)（ESP32-P4）。

@@ -1,0 +1,45 @@
+---
+title: "ESP32-S3-DevKitC-1"
+description: "在 ESP32-S3 开发板 ESP32-S3-DevKitC-1 上构建、烧录和运行 Barracuda。"
+---
+
+ESP32-S3-DevKitC-1 是 Espressif 推出的 ESP32-S3 开发板。
+
+- 开发板 ID：`esp32s3-devkitc-1`
+- 厂商：Espressif
+- 芯片：ESP32-S3
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`xtensa-esp32s3-none-elf`
+- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Flash 布局：`boards/configs/esp32s3-devkitc-1/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select esp32s3-devkitc-1
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/esp32s3-devkitc-1/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `expansion-1` | `GPIO1` |
+| `expansion-2` | `GPIO2` |
+| `expansion-3` | `GPIO3` |
+| `expansion-4` | `GPIO4` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("expansion-1", "up")
+print(pin:read())
+```

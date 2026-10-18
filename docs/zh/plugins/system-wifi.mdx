@@ -1,0 +1,28 @@
+---
+title: "System Wi-Fi 插件"
+sidebarTitle: "System Wi-Fi"
+description: "在设备的系统界面中显示 Wi-Fi 状态和控制项。"
+---
+
+在系统界面中显示 Wi-Fi：状态栏上的连接、主屏幕的离线卡片、控制中心的 Wi-Fi 磁贴，以及门户磁贴打开的设置热点。
+
+- 插件 ID：`system-wifi`
+- 依赖：`app-manager`、`wifi`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `SystemNetwork`，来自 `wifi` 的 `WifiControl`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：无
+
+注册时，本插件基于 `WifiControl` 给 `SystemNetwork` 提供一个 `NetworkSource`：
+
+- 站点（station）的连接状态成为 `NetworkState`（带网络名称的 `Connected`、`Connecting` 或 `Offline`）；网络由主机管理的主机开发板始终处于已连接状态；
+- 接入点正在启动或已启动时，设置热点处于打开状态；
+- 门户磁贴用 `SETUP_AP_PASSWORD` 打开接入点 `SETUP_AP_SSID`，显示如何通过 `SETUP_AP_ADDRESS` 访问门户，并能再次关闭它。
+
+需要联网的设备开发板会同时启用本插件和 `app-manager`；不带网络功能构建的开发板则不启用它，系统界面也不显示网络。

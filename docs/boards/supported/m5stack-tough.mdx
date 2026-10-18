@@ -1,0 +1,32 @@
+---
+title: "M5Stack Tough"
+sidebarTitle: "Tough"
+description: "Build, flash, and run Barracuda on the M5Stack Tough, an ESP32 Board."
+---
+
+The M5Stack Tough is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-tough`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-tough/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-tough
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/m5stack-tough/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

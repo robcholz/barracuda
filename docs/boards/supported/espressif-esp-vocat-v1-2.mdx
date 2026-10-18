@@ -1,0 +1,57 @@
+---
+title: "ESP-VoCat v1.2"
+description: "Build, flash, and run Barracuda on the ESP-VoCat v1.2, an ESP32-S3 Board."
+---
+
+The ESP-VoCat v1.2 is an ESP32-S3 Board from Espressif.
+
+- Board ID: `espressif-esp-vocat-v1-2`
+- Vendor: Espressif
+- Chip: ESP32-S3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32s3-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/espressif-esp-vocat-v1-2/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select espressif-esp-vocat-v1-2
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+| `front-buttons` | Capacitive touch buttons | — |
+| `green-status-led` | Indicator LED | — |
+| `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Battery gauge (BQ27220) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT) | — |
+| `touch` | Touch controller (CST816T) | — |
+| `video-display` | Round display (ST77916, quad SPI) | [`display`](/plugins/vm-display) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `magnetic-uart-rx` | `GPIO4` |
+| `magnetic-uart-tx` | `GPIO5` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("magnetic-uart-rx", "up")
+print(pin:read())
+```
+
+## Plugin settings
+
+- [`imessage-gateway`](/plugins/imessage-gateway) `receive-slots` is `3`:
+  3 connections are reserved for channel receive loops.

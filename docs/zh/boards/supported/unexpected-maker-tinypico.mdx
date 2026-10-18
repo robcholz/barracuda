@@ -1,0 +1,30 @@
+---
+title: "TinyPICO"
+description: "在 ESP32 开发板 TinyPICO 上构建、烧录和运行 Barracuda。"
+---
+
+TinyPICO 是 Unexpected Maker 推出的 ESP32 开发板。
+
+- 开发板 ID：`unexpected-maker-tinypico`
+- 厂商：Unexpected Maker
+- 芯片：ESP32
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`xtensa-esp32-none-elf`
+- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Flash 布局：`boards/configs/unexpected-maker-tinypico/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select unexpected-maker-tinypico
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | LED 灯带（APA102） | [`light`](/zh/plugins/vm-led-strip) |

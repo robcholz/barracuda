@@ -1,0 +1,18 @@
+---
+title: "Lua 使用的 musl 源码"
+sidebarTitle: "Lua 的 musl"
+description: "Lua 用哪些 musl C 库源码构建，以及它们与上游有何不同。"
+---
+
+Lua 调用的 C 库函数，复制自 [musl](https://musl.libc.org/) 1.2.5，这样 Lua 在任何目标上都不链接 C 库。`COPYRIGHT` 是 musl 的许可证（MIT）。`build.rs` 把这些文件编译成 `liblua_musl.a`，并首先包含 `barracuda_musl.h`；`../libc/` 把 Lua 使用的每个名称映射到它的 `barracuda_lua_` 副本。
+
+| 文件 | musl 源码 | 改动 |
+| --- | --- | --- |
+| `floor.c`、`fmod.c`、`frexp.c`、`ldexp.c`、`pow.c`、`pow_data.[ch]`、`exp_data.[ch]`、`scalbn.c`、`copysign.c`、`__math_{invalid,oflow,uflow,xflow}.c` | `src/math` | 从两个数据头文件中移除了 `#include <features.h>` |
+| `libm.h` | `src/internal/libm.h` | 精简到这些文件用到的内容：没有 `long double` 布局或辅助函数，也没有未复制的函数的声明 |
+| `memchr.c`、`strchr.c`、`strchrnul.c`、`strcmp.c`、`strcpy.c`、`stpcpy.c`、`strcspn.c`、`strlen.c`、`strncmp.c`、`strnlen.c`、`strpbrk.c`、`strspn.c`、`strstr.c` | `src/string` | 无 |
+| `ctype.c` | `src/ctype` | 一个包含 "C" 区域设置函数的文件，没有 `locale_t` 变体和别名 |
+| `floatscan.[ch]`、`strtod.c` | `src/internal`、`src/stdlib` | `long double` 即 `double`，与 musl 在两者相同的目标上一致；移除了对 `errno` 的写入；只保留 `strtod` |
+| `vfprintf.c` | `src/stdio` | 变为基于缓冲区的 `snprintf`；`long double` 即 `double`；没有 `%m`、`%C`、`%S`、`%L` 或 `errno` |
+| `stdio_impl.h`、`shgetc.h` | `src/internal` | 重写：只保留 `snprintf` 和 `strtod` 用到的 `FILE` 部分，用于缓冲区或字符串 |
+| `barracuda_musl.h` | — | Barracuda 自己的文件：为 musl 的内部全局名称加前缀，并去掉它的可见性和别名标记 |

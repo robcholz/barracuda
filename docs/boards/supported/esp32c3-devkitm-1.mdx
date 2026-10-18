@@ -1,0 +1,31 @@
+---
+title: "ESP32-C3-DevKitM-1"
+description: "Build, flash, and run Barracuda on the ESP32-C3-DevKitM-1, an ESP32-C3 Board."
+---
+
+The ESP32-C3-DevKitM-1 is an ESP32-C3 Board from Espressif.
+
+- Board ID: `esp32c3-devkitm-1`
+- Vendor: Espressif
+- Chip: ESP32-C3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `riscv32imc-unknown-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/esp32c3-devkitm-1/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select esp32c3-devkitm-1
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/esp32c3-devkitm-1/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

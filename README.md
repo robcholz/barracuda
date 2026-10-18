@@ -1,7 +1,8 @@
 # Barracuda
 
-Barracuda is a plugin-based embedded runtime: every capability on a device is a
-Plugin, composed into one firmware for a selected Board and Platform.
+Barracuda is the agentic platform for embedded devices: everything is a Plugin,
+and an agent helps at every step. Every capability on a device is a Plugin,
+composed into one firmware for a selected Board and Platform.
 
 ## Documentation
 

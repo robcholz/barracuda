@@ -1,0 +1,37 @@
+---
+title: "M5Stack Unit PoE-P4"
+sidebarTitle: "Unit PoE-P4"
+description: "Build, flash, and run Barracuda on the M5Stack Unit PoE-P4, an ESP32-P4 Board."
+---
+
+The M5Stack Unit PoE-P4 is an ESP32-P4 Board from M5Stack.
+
+- Board ID: `m5stack-unit-poep4`
+- Vendor: M5Stack
+- Chip: ESP32-P4
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `riscv32imafc-unknown-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-unit-poep4/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-unit-poep4
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/m5stack-unit-poep4/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).
+
+## Plugin settings
+
+- [`imessage-gateway`](/plugins/imessage-gateway) `receive-slots` is `0`: no
+  connections are reserved for channel receive loops on this Board.

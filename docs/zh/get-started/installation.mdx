@@ -1,0 +1,72 @@
+---
+title: "安装"
+description: "安装开发板所需的工具链，然后克隆 Barracuda。"
+---
+
+Barracuda 使用 Cargo 构建。插件会被编译进固件，所以你需要在自己的电脑上，用目标平台对应的 Rust 工具链进行构建。
+
+## 克隆仓库
+
+```bash terminal
+git clone https://github.com/robcholz/barracuda
+cd barracuda
+```
+
+## 安装工具链
+
+先安装 [rustup](https://rustup.rs)。仓库在 `rust-toolchain.toml` 中固定了 Rust 1.98.1，主机开发板只需要这些。
+
+<Tabs>
+  <Tab title="Linux 和 macOS">
+    无需安装其他东西。选择 `local-linux` 或 `local-macos`，即可在你的电脑上运行 Barracuda，由虚拟外设代替硬件。
+
+    ```bash terminal
+    rustup show
+    ```
+  </Tab>
+  <Tab title="ESP32">
+    ESP32 和 ESP32-S3 开发板使用 Espressif Rust 工具链构建，并用 `espflash` 烧录：
+
+    ```bash terminal
+    cargo install espup espflash
+    espup install --toolchain-version 1.98.1.0
+    ```
+
+    ESP32-C3、ESP32-C6 和 ESP32-P4 需要不同的命令，参见 [ESP32 平台](/zh/platforms/esp32)。
+  </Tab>
+  <Tab title="STM32">
+    STM32 开发板使用 Rust 1.98.1 和 Arm 目标构建，并通过调试探针用 `probe-rs` 烧录：
+
+    ```bash terminal
+    rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
+    cargo install probe-rs-tools
+    ```
+  </Tab>
+</Tabs>
+
+你不必事先知道某个开发板需要哪种工具链。当你选择的开发板缺少工具链时，`cargo board select` 会打印出安装它的确切命令。
+
+## 选择开发板
+
+```bash terminal
+cargo board select
+```
+
+列表支持搜索：输入名称的一部分（例如 `cores3`），然后按 Enter。你的选择保存在工作区中，之后每次 `cargo build` 和 `cargo run` 都会使用它。如果不想出现提示，直接写出开发板名称：
+
+```bash terminal
+cargo board select local-linux
+```
+
+开发板名称就是 `boards/configs/` 下的目录名。
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="快速开始" icon="rocket" href="/zh/get-started/quickstart">
+    在你的电脑上运行 Barracuda 并与它对话。
+  </Card>
+  <Card title="构建与运行" icon="terminal" href="/zh/get-started/build-and-run">
+    烧录开发板，打开终端消息通道，并设置日志级别。
+  </Card>
+</CardGroup>

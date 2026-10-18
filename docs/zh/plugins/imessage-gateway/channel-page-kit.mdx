@@ -1,0 +1,78 @@
+---
+title: "消息通道页面套件"
+sidebarTitle: "消息通道页面套件"
+description: "用共享的消息通道页面套件构建聊天消息通道的门户页面。"
+---
+
+用于外部消息通道（Telegram、QQ、微信、BlueBubbles、Inkbox）门户页面的构建期 TypeScript。消息通道的 `resources/web/entry.ts` 把它和门户 UI 套件一起导入，`tools/web/build.ts` 把两者打包进该消息通道自己的 `filesystem/resources/entry.js`。它读取并驱动 Gateway 在每个消息通道的配置路径下提供的 JSON（`ChannelEndpoint`，见
+[IMessage Gateway 插件](/zh/plugins/imessage-gateway)）。Gateway 本身不提供门户入口，也不依赖 captive portal；只有同时依赖两者的消息通道插件才会打包这个套件。
+
+```ts
+import {
+  definePage,
+  settingsForm,
+} from "../../../captive-portal/resources/web/ui";
+import {
+  channelInbound,
+  configuredRow,
+  readChannel,
+  type ChannelStatus,
+} from "../../../imessage-gateway/resources/web/channel";
+```
+
+套件只通过公共 index 导入门户 UI 套件。在消息通道的 `[tasks.build] inputs` 中，把
+`../imessage-gateway/resources/web/channel` 列在
+`../captive-portal/resources/web/ui` 旁边。
+
+## 消息通道状态（`channel.ts`）
+
+- `readChannel<T>(context, endpoint)`：对消息通道的配置路径发送 `GET <endpoint>/status`，它回答 `{"configured": bool, …}`，从不返回设置或密钥。解析出回复（`T` 加上页面特有的字段，例如 Inkbox 的 `signup`），设备没有给出这种格式的回复时为 `null`。它从不弹出提示。
+- `configuredRow(name, lang)` 返回 `{ element, show(visible) }`：一个“通道”行，其中是以单独的对勾开头、名为 `name` 的结果卡片，在 `show(true)` 之前隐藏。把它放在表单的第一行；当 `readChannel` 说明 `configured` 时，以及保存成功后，显示它：
+
+  ```ts
+  const current = configuredRow("Telegram", lang);
+  form.element.prepend(current.element);
+  void readChannel(context, "/api/gateway/telegram").then((state) => {
+    if (state?.configured) current.show(true);
+  });
+  // settingsForm options: onSuccess: () => { current.show(true); void context.refreshStatus(); }
+  ```
+
+## 消息通道模式和授权账号（`inbound.ts`）
+
+每个消息通道在其配置路径下提供同样的 JSON：`GET <endpoint>/status` 回答
+`ChannelStatus`（`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`），
+`POST <endpoint>/mode` 接收 `{mode}`，`GET`/`POST <endpoint>/owners` 回答 `OwnersReply`
+（`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`），并接收
+`{"remove": id}` 或 `{"rotate": true}`。
+
+- `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
+  返回 `{ rows, alert, attach(form), apply(status), refresh() }`：下面两行，已连接到设备。`onStatus(status)` 会随这两行显示的每个状态运行（当微信的接收状态是“需要重新扫码”错误时，它会提供“重新绑定”）。
+  - `attach(form)` 把它们放在表单的“高级”折叠区（或其页脚）之前。
+  - `alert` 是没有名额时的警示提醒：把它放在页面中标题框之下、表单之前
+    （`page(header(…), inbound.alert, form.element)`）。
+  - `apply(status)` 显示页面自己的 `readChannel` 读到的状态；`refresh()` 再读一次（在保存成功后调用）。两行都只在 `configured` 时显示。
+  - 模式变更会重新读取消息通道，然后调用 `context.refreshStatus()`。在 `send_receive` 下，每隔 `pollMs` 读取一次消息通道，直到页面消失，这样徽标保持实时；此时接收状态的变化也会刷新外壳的状态，`owners.count` 的变化会重新读取列表。读取失败时保留当前显示的内容。
+
+  ```ts
+  const inbound = channelInbound(context, {
+    endpoint: "/api/gateway/telegram",
+    channel: "Telegram",
+    how: { zh: "…", en: "In Telegram, send the bot" }, // zh: the Chinese text, elided
+    command: (code) => `/start ${code}`,
+  });
+  inbound.attach(form);
+  void readChannel<ChannelStatus>(context, ENDPOINT).then(inbound.apply);
+  // settingsForm options: onSuccess: () => void inbound.refresh()
+  ```
+
+- `modeRow({ endpoint, channel, modes?, onChange? }, context)` 返回 `{ element, update(status) }`：
+  “模式”行，`modes` 中每个模式一张单选卡片（默认为 `CHANNEL_MODES`：“停用” /
+  “仅发送” / “收发”；微信传入 `["disabled", "send_receive"]`）。卡片下方是状态徽标：`receiving` 为“收发中”（信号图标），`starting` 和
+  `idle` 为“连接中”，`no_slot` 为“等待名额”，`error` 为“连接中断”并以等宽字体显示设备的 `message`，后面跟着正在使用的名额（术语“名额”，说明由什么决定名额数量，以及等宽字体的计数 `1/2`）；`no_slot` 还会显示返回的 `alert`
+  （“收发名额已满”，`warning` 中的 `triangle-alert`）；其他模式显示“仅发送”和“已停用”。选择后立即发送 `{mode}`；204 或 409 `no_slot`（模式已保存）会运行
+  `onChange`，其他任何回答都会弹出提示，并恢复原来的选择。
+- `accountsRow({ endpoint, how, command? }, context)` 返回 `{ element, load(), hide(), count() }`：
+  “授权账号”行。一张卡片在 `how` 之下显示绑定码（`.bc-code-display`，给出 `command` 时为 `command(code)`）、它的倒计时（“有效期还剩 m:ss”，在本地计时；结束时重新读取列表）和“换一个绑定码”（`{"rotate": true}`）；`pairing: null` 时不显示这个框。然后是每个账号，`label` 显示在等宽字体的 `id` 之上（没有 label 时只显示等宽字体的 `id`），带有“移除”
+  （`{"remove": id}`，不需要确认），或者显示“还没有授权账号”。被拒绝时弹出提示；成功后重新读取列表。
+- 类型：`ChannelMode`、`ReceiveState`、`ChannelStatus`、`Owner`、`OwnersReply`，以及上面的选项和句柄。

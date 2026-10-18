@@ -1,0 +1,48 @@
+---
+title: "Display 插件"
+sidebarTitle: "Display"
+description: "用 `display` Lua 包在 Lua 中绘制和控制开发板的显示屏。"
+---
+
+Display 插件拥有所有未被其他插件占用的开发板显示屏，并把绘制和面板控制作为 `display` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`display`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `display.rest`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`display`
+- Web：无
+- 任务：无
+- 存储：无
+
+它的 `display.rest` 槽位在构建时接收开发板上所有未被其他已启用插件的槽位占用的显示屏，使用开发板中的设备名称。当另一个插件占用了主显示屏时，Lua 驱动其余的显示屏；否则 Lua 也会获得主显示屏。面板总线和控制引脚留在所选的实现内部。像素格式是 RGB565，即显示 API 的格式，LCD 面板直接使用它，电子纸实现则把它转换为自己的像素表示。
+
+Lua API：
+
+- `display.available([name]) -> boolean`：指定名称的显示屏（未给出名称时为任意显示屏）是否仍然可以打开
+- `display.list() -> { name, ... }`：本插件的显示屏在开发板中的名称
+- `display.open([name]) -> handle`：打开指定名称的显示屏，或第一个仍可用的显示屏
+- `display.rgb565(red, green, blue) -> integer`：把 8 位通道打包成一个 RGB565 值
+- `handle:descriptor() -> width, height, pixel_format, technology`
+- `handle:draw_rgb565(x, y, width, height, pixels)`，其中 `pixels` 包含 `width * height` 个小端 16 位 RGB565 值，最多 256 KiB，例如 `string.pack('<I2', display.rgb565(255, 0, 0))` 表示一个红色像素
+- `handle:flush(mode)`，其中 mode 为 `automatic`、`full`、`partial` 或 `fast`
+- `handle:set_power(state)`，其中 state 为 `on`、`sleep` 或 `off`
+- `handle:set_brightness(value)`，取值范围为 `0..255`
+- `handle:set_orientation(value)`，其中 value 为 `deg0`、`deg90`、`deg180` 或 `deg270`
+- `handle:wait_ready()`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+```lua
+local display = require('display')
+for _, name in ipairs(display.list()) do
+  print(name, display.available(name))
+end
+local status <close> = display.open('status')
+```
+
+没有给本插件留下任何显示屏的开发板报告不可用，并返回空列表。区域尺寸和数据长度会在调用实现之前检查。每个显示屏都只能移动（move-only），所以每次开机只能打开一次。

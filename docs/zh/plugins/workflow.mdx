@@ -1,0 +1,61 @@
+---
+title: "Workflow 插件"
+sidebarTitle: "Workflow"
+description: "用持久的 Workflow 实现设备自动化：由 Event 触发，由插件的 Action 组成。"
+---
+
+拥有持久的 Workflow 定义、Event 匹配和协作式执行，并发布供其他插件添加 Workflow Action 的注册表。
+
+- 插件 ID：`workflow`
+- 依赖：无
+- 设置：无
+- 上下文资源：无
+- 提供的能力：`WorkflowActionRegistry`、`WorkflowService`
+- 所需能力：无
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：一个 Workflow 运行时任务（`workflow_task`，池大小 1），它先恢复目录，再轮询各个执行
+- 存储：用户创建的定义保存在 `/data/workflows.json` 中，已关闭的 Workflow 的 ID 保存在 `/data/workflows-off.json` 中
+
+本插件声明一个私有文件系统。它自己不注册任何 Workflow Action 或 Event。单个执行按文档顺序等待它的 Action；不同的执行由 Workflow 任务并发轮询。
+
+依赖它的插件用 `WorkflowActionRegistry::add_action(handler)` 注册直接的类型化 Action。每个处理器声明 Rust 的 `Request` 和 `Response` 类型以及一份静态的 schema 契约。该契约内嵌请求和响应的 JSON Schema，并在构建时编译出两者的校验器；Workflow 运行时负责类型化处理器周围的校验和 Serde 转换。已注册的描述符暴露这些 schema，供将来的 Agent Workflow 构建器使用，而不会把 Action 本身变成 Agent 工具。
+
+正式的 Action 使用 `workflow_action_schema!("address")`，它从所属插件加载 `schemas/action/<address>/request.json` 和 `response.json`。`WorkflowService::load` 和 `WorkflowService::unload` 管理持久目录中用户创建的定义。`WorkflowService::load_transient` 为本次开机注册插件拥有的定义，而不修改该目录。这个能力还能列出已加载的定义并发出 Event。
+
+```rust
+#[derive(serde::Deserialize)]
+struct Request {
+    message: String,
+}
+
+#[derive(serde::Serialize)]
+struct Response {
+    delivered: bool,
+}
+
+struct SendMessage;
+
+impl WorkflowActionHandler for SendMessage {
+    type Request = Request;
+    type Response = Response;
+
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("message.send");
+
+    fn invoke(&self, request: Request) -> WorkflowActionFuture<'_, Response> {
+        Box::pin(async move {
+            send(request.message).await?;
+            Ok(Response { delivered: true })
+        })
+    }
+}
+
+let registration = actions.add_action(SendMessage)?;
+context.retain(registration);
+```
+
+本插件只把用户创建的定义保存在其作用域文件系统的 `/data/workflows.json` 中。它的 Embassy 任务会先恢复这个目录，然后才开始推进已发出的执行。持久加载和临时加载调用都会确保先完成用户定义的恢复，并与目录的修改串行执行，所以持久保存的用户定义优先于 ID 相同的临时定义。移除一个定义会阻止之后的 Event 启动它，但不会取消已经开始的执行快照。
+
+`WorkflowService::set_enabled(id, false)` 关闭一个已加载的 Workflow：它仍然保持加载状态并出现在列表中，但不会有 Event 启动它（`has_listener` 也会忽略它），已经在运行的执行会完成。本插件把已关闭的 Workflow 的 ID 保存在 `/data/workflows-off.json` 中，并随目录一起恢复，所以下次开机时再次加载的临时 Workflow 仍然是关闭的。移除一个用户创建的 Workflow 会忘记它曾被关闭。`WorkflowService::is_enabled(id)` 读取这个开关。

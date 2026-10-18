@@ -1,0 +1,43 @@
+---
+title: "Power Monitor 插件"
+sidebarTitle: "Power Monitor"
+description: "用 `power_monitor` Lua 包在 Lua 中读取开发板的电源监测器。"
+---
+
+基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包。
+
+- 插件 ID：`power-monitor`
+- 依赖：`vm`、`power`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`，来自 `power` 的 `Power`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`power_monitor`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件基于 `Power` 安装 `power_monitor` Lua 包。监测器、它的驱动以及提供给其他插件的电池电量，都属于 `power` 插件。
+
+Lua API：
+
+- `power_monitor.available() -> boolean`
+- `power_monitor.open() -> handle`
+- `handle:measure() -> bus_microvolts, shunt_nanovolts, current_microamps, power_microwatts`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`measure` 读取一次一致的采样。总线电压为正；分流电压、电流和功率是有符号的，以监测器从 IN+ 到 IN- 的方向为正。测量失败时返回 `nil, error`。
+
+```lua
+local power_monitor = require('power_monitor')
+local monitor <close> = assert(power_monitor.open())
+local bus_uv, shunt_nv, current_ua, power_uw = assert(monitor:measure())
+print(string.format('%.3f V %.1f mA %.1f mW', bus_uv / 1e6, current_ua / 1e3, power_uw / 1e3))
+```
+
+没有电源监测器的开发板仍然会安装这个 Lua 包；`available` 返回 false，`open` 返回 `nil, error`。每次开机只能打开一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止对它的后续操作。
+
+句柄通过共享的 `Power` 读取，所以在句柄打开期间，其他插件也能读取监测器。本插件不做后台采样，也不拥有长时间运行的任务。

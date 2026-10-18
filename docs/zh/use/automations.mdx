@@ -1,0 +1,16 @@
+---
+title: "自动化"
+description: "用 Workflow 自动化和定时任务，让设备在聊天结束后继续工作。"
+---
+
+脚本在你与 Agent 对话时运行。自动化则在对话结束后继续运行：“每天早上七点”“收到消息时”“某个定时任务到期时”。用日常语言向 Agent 提出需求即可。
+
+| 组成部分 | 插件 | 做什么 |
+| --- | --- | --- |
+| Workflow | [`workflow`](/zh/plugins/workflow) | 持久保存自动化，匹配 Event，执行 Action |
+| 定时任务 | [`scheduler`](/zh/plugins/scheduler) | 维护持久的定时任务，到期时发出 Event |
+| Agent 工具 | [`agent-workflow`](/zh/plugins/agent-workflow)、[`agent-scheduler`](/zh/plugins/agent-scheduler) | 让 Agent 列出、加载、卸载和切换自动化，以及安排或取消事件 |
+
+Agent 的 Workflow 工具有 `workflow_actions`、`workflow_list`、`workflow_load`、`workflow_unload` 和 `workflow_switch`；它的定时工具有 `scheduler_schedule` 和 `scheduler_cancel`。
+
+每个插件都会在[插件](/zh/plugins/overview)下自己的页面中说明它新增的 Workflow Action 和 Event。

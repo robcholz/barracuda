@@ -1,0 +1,13 @@
+---
+title: "HTTP Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "HTTP 插件提供的 Workflow Action：`http.request`、它的限制和错误。"
+---
+
+`http.request` 接受 `method`、绝对 `url`、可选的有序 `headers`，以及可选的 UTF-8 `body`。它返回上游的数字 `status` 和完整的 UTF-8 响应 `body`。
+
+URL 上限为 2 KiB，请求体上限为 32 KiB，最多 32 个请求头且总计不超过 16 KiB。整个请求有 30 秒的截止时间，响应体上限为 64 KiB。
+
+客户端自己写入 `Host`、`Content-Length` 或 `Transfer-Encoding`，以及连接相关的请求头。调用方提供的请求头如果使用了这些名称之一、名称不是合法的 HTTP token，或者值中含有制表符以外的控制字符，都会以 `invalid_header` 被拒绝，这样一个请求就不会被重复分帧或重复路由。
+
+稳定的错误有 `invalid_url`、`tls_not_configured`、`invalid_header`、`request_too_large`、`busy`、`timeout`、`transport`、`invalid_response_text` 和 `response_too_large`。

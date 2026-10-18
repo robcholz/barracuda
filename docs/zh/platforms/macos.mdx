@@ -1,0 +1,28 @@
+---
+title: "macOS 平台"
+sidebarTitle: "macOS"
+description: "通过无需特权的用户态网络网关在 macOS 上运行 Barracuda，无需 `sudo`。"
+---
+
+macOS 平台运行与设备平台相同的 `embassy_net::Stack`，并把它的三层驱动连接到 Barracuda 无需特权的用户态网关。它不会创建 UTUN 接口、修改 PF 规则或开启主机转发，也不需要 `sudo`。
+
+- 客户机协议栈：`10.0.2.15/24`
+- 虚拟网关：`10.0.2.2`
+- 虚拟 DNS：`10.0.2.3`
+- 数据包传输：`ws://127.0.0.1:8787/v1/connect`
+
+选择 macOS 开发板，然后按正常流程操作：
+
+```sh
+cargo board select local-macos
+cargo build
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+```
+
+`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址（可以是除网关所用的 8787 之外的任意空闲端口）。`local-macos` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器。参见 [`platforms/virtual-io`](/zh/platforms/virtual-io)。
+
+`cargo run` 会构建平台启动器，部署所选的 System 镜像，启动回环网络网关，然后启动 System 应用。启动器同时管理这两个进程，所以 Ctrl-C 或 SIGTERM 会停止整个运行。不需要第二个终端，也不需要手动运行网关命令。
+
+网关通过普通的主机 socket 转发设备发起的 TCP 和 UDP，转换发往 `10.0.2.3` 的 DNS 请求，并为配置的客户机 TCP 端口分配一个回环 URL。会话建立时，macOS 平台会在日志中输出这个 URL，并把它发布到 `.barracuda/address`。CLI 从这个文件发现当前地址，所以无需把临时的回环端口复制到本地配置中。它的 Local/Remote 选择器会在连接前显示发现的 Local 地址。`cargo cli configure` 使用同样的选择器，并打开当前 System 的插件配置门户。
+
+平台、System、Core 和插件的日志以 `info` 级别写入标准错误。如需为某次构建选择其他级别，可以这样做：`BARRACUDA_LOG_LEVEL=debug cargo run`。

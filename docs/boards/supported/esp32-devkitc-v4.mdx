@@ -1,0 +1,31 @@
+---
+title: "ESP32-DevKitC V4"
+description: "Build, flash, and run Barracuda on the ESP32-DevKitC V4, an ESP32 Board."
+---
+
+The ESP32-DevKitC V4 is an ESP32 Board from Espressif.
+
+- Board ID: `esp32-devkitc-v4`
+- Vendor: Espressif
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/esp32-devkitc-v4/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select esp32-devkitc-v4
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/esp32-devkitc-v4/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

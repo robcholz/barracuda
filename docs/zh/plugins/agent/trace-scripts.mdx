@@ -1,0 +1,100 @@
+---
+title: "barracuda-trace 工具"
+sidebarTitle: "跟踪工具"
+description: "从设备捕获实时的 `TRACE` 日志，并把它们导出为 Chrome 跟踪。"
+---
+
+从设备监视器捕获实时的 `TRACE` 日志，并把它导出为可以在 `chrome://tracing` / Perfetto 中打开的 Chrome 跟踪。这些工具解析的语法见
+[跟踪格式](/zh/plugins/agent/trace-format)。
+
+## CLI：`barracuda-trace-capture`（实时捕获）
+
+把监视器作为子进程运行，实时解析它的 `TRACE` 行，并在它退出时（或按下 Ctrl-C 时）写出
+`trace.json`。
+
+```bash
+# from the repository root
+uv run --package barracuda-trace \
+  barracuda-trace-capture --cmd "cargo espflash monitor" -o trace.json --tee
+```
+
+| 选项 | 默认值 | 含义 |
+|--------|---------|---------|
+| `--cmd` | — | 要运行的监视器命令，例如 `"cargo espflash monitor"` 或 `"idf.py monitor"`。 |
+| `-o` / `--output` | `trace.json` | 输出的 Chrome Trace Event JSON 路径。 |
+| `--encoding` | `utf-8` | 用于解码监视器字节的编码。 |
+| `--tee` | 关 | 同时把捕获的每一行实时回显到 stderr（边捕获边看日志）。 |
+
+为什么用子进程而不是原始管道：Ctrl-C 能被干净地处理——监视器被终止，而到目前为止收集到的记录仍然会被导出。
+Chrome 导出是一个批处理步骤（重建 span 树需要完整的捕获内容），所以 JSON 在最后一次性写出。偶尔损坏的串口行会被跳过（并计数），而不会中止捕获。
+
+Chrome 的线程行是合成的通道，以跟踪协议中的逻辑
+`task` 标签为键。对于异步运行时的工作，它们表示 Agent/future 的身份，而不是碰巧轮询它的执行器所在的操作系统线程或 FreeRTOS 线程。
+
+Chrome 的进程行同样是合成的分组作用域：
+
+- 带有 `run.session` 的记录使用该会话作为进程名，并且需要继承来的 `run.system` 作用域；
+- 只带有 `run.system` 的系统范围记录使用 `agent-system` 作用域；
+- 两个键都没有的记录使用 `unattributed`（例如初始化之前的工作，或者在进入运行时作用域之外发出的边界记录；它不是一个“未知会话”）；
+- 会话的进程键既包含它的 system 作用域，也包含它的会话 id。
+
+不提供旧版跟踪的兼容。带有 `run.session` 但没有
+`run.system` 的记录违反了当前的前缀闭合上下文模型，会中止导出；请用当前的 Rust 运行时重新生成捕获。这不适用于两个键都没有的记录：那是一条有效的当前记录，仍然为
+`unattributed`。
+
+Chrome 要求 `pid`/`tid` 为整数。导出器只把小整数作为格式层面的 id 分配；查看器可能会在标签后面附加一个（例如
+`session-5 (2)` 中的 `2`）。这个数字不是会话 id 的一部分，也不表示某个 Rust 线程。
+
+计数器轨道需要主动启用。只有名为
+`counter.<series>=<number>` 的事件字段才会产生 Chrome `ph=C` 记录；导出的序列名会去掉 `counter.` 前缀。例如，
+`counter.free_heap=120000` 对 `free_heap` 序列进行采样。普通的数值字段，例如 `argument_bytes=120`、`replace_count=2` 或 `count=3`，仍然是即时事件的参数，永远不会创建计数器轨道。显式标记的计数器如果值不是数字，会中止导出。
+
+## CLI：`barracuda-trace-chrome`（离线 `.log` → `trace.json`）
+
+把已经捕获的 `TRACE` 日志文件（或 stdin）转换为可以在 `chrome://tracing` / Perfetto 中打开的 Chrome Trace Event
+JSON。当你已经有一个 `.log`、不需要实时监视器时使用它。
+
+```bash
+# from the repository root
+uv run --package barracuda-trace barracuda-trace-chrome device.log -o trace.json
+cat device.log | uv run --package barracuda-trace \
+  barracuda-trace-chrome --strip-ansi -o trace.json
+```
+
+| 选项 | 默认值 | 含义 |
+|--------|---------|---------|
+| `file` | stdin | 要读取的日志文件；省略时读取 stdin。 |
+| `-o` / `--output` | `trace.json` | 输出的 Chrome Trace Event JSON 路径。 |
+| `--strip-ansi` | 关 | 解析之前去掉每行中的 ANSI 颜色转义序列。 |
+
+## 库
+
+其中三个包是可导入的库；`trace_capture` 是上面那个起粘合作用的工具。前三个共用 `barracuda-agent-trace/pyproject.toml`；`serial_log` 是一个独立的、没有依赖的项目，有它自己的 `pyproject.toml`。
+
+| 包 | 作用 |
+|---------|------|
+| `barracuda_trace` | 纯解析器：`parse_line` / `parse` 把行转换为 `TraceRecord`；`build_forest` 重建 span 树、计时和继承上下文；`render_tree` 把它打印出来。没有额外依赖。 |
+| `chrome_export` | 读取 `barracuda_trace` 森林并写出 Chrome Trace Event JSON（`write_chrome_trace`）。span → 持续时间切片，同一通道的父 span → 切片嵌套，跨通道的父 span → 原生的 `span_parent` 流，事件 → 即时事件，显式的 `counter.<series>` 字段 → 计数器轨道。以 `barracuda-trace-chrome` CLI 的形式提供。依赖 `chrometrace`。 |
+| `serial_log` | 独立且没有依赖：`LogStream` 运行一个子进程，把 stdout 的每一个完整行推送给 `on_log` 回调（去掉 ANSI，编码可配置）。参见 [serial-log](/zh/plugins/agent/serial-log)。 |
+| `trace_capture` | 只做粘合：在 `barracuda-trace-capture` 背后把 `serial_log` → `barracuda_trace` → `chrome_export` 串起来。 |
+
+`barracuda_trace` 仍然可以导入，也仍然可以通过 `python -m barracuda_trace` 运行（美观地打印重建的 span 树），但有意没有注册为控制台脚本。
+
+`chrome_export` 是唯一规范的 Chrome Trace 转换路径。上面两个 CLI 都调用这个 Python 包；没有第二个 Rust 导出器，因此不会出现映射与它不一致的情况。
+
+每个导出的 span 切片都在 `args.span` 中携带它的结构 id。span 内部的即时事件携带同样的外层 id，而孤立事件则省略它。这样在 Perfetto 中可以精确地把事件与子 span 关联起来，而不改变切片的计时，也不需要添加特定于子系统的导出逻辑。
+
+导出器识别
+[跟踪格式](/zh/plugins/agent/trace-format)中描述的通用 `flow_link` 事件。它从外层 span 向一个由逻辑任务和可选的 span 名称选定的 span 发出一条 Chrome 流。`flow.arg.*` 字段会被复制到源切片和流的两个端点上，供 Perfetto 搜索和 SQL 查询使用。此外，每条跨越进程/任务通道的结构性父子 span 边都会变成一条名为
+`span_parent` 的原生 Chrome 流；同一通道的父 span 则通过嵌套的完整切片呈现。
+两种流共用一个流 id 序列。由于旧版 Chrome 流的起点无法指定端点切片的 id，每条流连接的是在源通道和目标通道上生成的即时代理事件；它们的参数标明两个真实的 span id。即使有其他切片在时间上包住了代理的时间戳，这些显式 id 仍然是权威的。如果捕获在某个 span 退出之前停止，导出器会在可观察到的跟踪/祖先边界处关闭它的完整切片，并用
+`incomplete=true` 标记它，避免出现不配对的持续时间事件。
+
+## 开发 / 测试
+
+```bash
+# from the repository root
+uv run --package barracuda-trace \
+  pytest -c plugins/agent/crates/trace/pyproject.toml plugins/agent/crates/trace/scripts/tests
+uv run --package barracuda-trace ruff format plugins/agent/crates/barracuda-agent-trace
+```

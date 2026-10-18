@@ -1,0 +1,109 @@
+---
+title: "IMessage QQ HTTP API"
+sidebarTitle: "HTTP API"
+description: "QQ 消息通道的 HTTP 路由：状态、模式、所有者、扫码绑定登录和设置。"
+---
+
+## `GET /api/gateway/qq/status`
+
+返回 `200` 和共享的消息通道状态（见
+[Gateway 的消息通道 HTTP 接口](/zh/plugins/imessage-gateway)）：
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":1}},
+ "owners":{"count":1}}
+```
+
+`configured` 表示是否存储了配置。`receive` 只在
+`send_receive` 下出现；它的 `state` 是 `idle`、`starting`、`receiving`、`no_slot`
+（带 `capacity`）或 `error`（带 `message`，例如在关闭代码 4914 之后为
+“The QQ bot is delisted and may only use the sandbox”，前面是它的中文部分）。它从不返回设置、App Secret
+或 token，也不会向 QQ 发起请求。其他方法回答 `405`。
+
+## `POST /api/gateway/qq/mode`
+
+`{"mode":"disabled"|"send"|"send_receive"}`。应用成功时返回 204；当 `send_receive` 发现所有接收名额都在使用中时返回 409
+`{"error":"no_slot","capacity":n}`（模式已保存，有名额空出后开始接收）；400
+`invalid_request` 或 `unsupported_mode`；422 `registration_failed`；500
+`storage`。
+
+## `GET` 和 `POST /api/gateway/qq/owners`
+
+`GET` 回答
+`{"owners":[{"id":"<openid>","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`。
+所有者 id 是 QQ openid：私聊中为 `user_openid`，群聊中为
+`member_openid`。`POST` 接收 `{"remove":"<id>"}` 或
+`{"rotate":true}`，并回答 204。消息通道配置之前，两者都回答
+`409` `{"error":"not_configured"}`：此时还没有所有者名单。
+
+## `/api/gateway/qq/login`
+
+扫码绑定：机器人的所有者用手机 QQ 扫描二维码，并在那里选择或创建机器人之后，QQ 会交出该机器人的 App ID 和 App Secret，所以两者都不需要手动输入。最多运行一个 session；这个精确路由优先于
+`/api/gateway/qq` 前缀路由。
+
+### `POST`：启动 session
+
+body 为空或为 `{}`（其他任何内容都返回 400 `invalid_request`）。任何正在运行的 session 都会结束。设备从平台熵源中抽取一个随机的 32 字节密钥，并用它创建一个绑定任务：`POST https://q.qq.com/lite/create_bind_task`
+`{"key":"<base64 key>"}`（带上 `Accept: application/json`，没有它时门户会返回一个脚本质询），它回答
+`{"retcode":0,"data":{"task_id":"…"}}`。然后：
+
+- `200` `{"url":"https://q.qq.com/qqbot/openclaw/connect.html?task_id=…&source=barracuda&_wv=2"}`：
+  要编码进二维码的页面。QQ 没有说明任务的有效期。
+- `502` `{"error":"upstream_unavailable","message","code"}`：门户无法访问或拒绝了该任务；如果门户发送了自己的 `msg` 和
+  `retcode`，`message` 和 `code` 就是它们。
+- `500` `{"error":"entropy_unavailable"}`：平台没有熵源。
+
+### `GET`：查看 session
+
+立即返回 `200` `{"status":"wait","configured":false}`，不向 QQ 发起请求。
+`status` 是 `idle`、`wait`、`confirmed`、`expired` 或 `failed`（带
+`message`）。QQ 不报告扫码：任务一直处于 `wait`，直到绑定完成或过期。`configured` 表示是否存储了配置，存储了配置时，`app_id` 指明其机器人。App Secret 永远不会被返回。
+
+### `DELETE`：取消 session
+
+结束正在运行的 session 并回答 `204`；`status` 变为 `idle`。
+
+### Session 生命周期
+
+运行时每隔 2 秒轮询一次 `POST https://q.qq.com/lite/poll_bind_result`
+`{"task_id":"…"}`。`data.status` 为 0 或 1 表示等待中，3 表示已过期
+（未知任务也是如此），2 表示已完成，并带有 `bot_appid`、
+`bot_encrypt_secret` 和 `user_openid`。轮询失败时会再次请求；门户错误会以 `failed` 结束 session。session 还会在 10 分钟后过期。
+
+`bot_encrypt_secret` 是以下内容的 base64：一个 12 字节的 nonce、用任务密钥对 App Secret 进行 AES-256-GCM 加密得到的密文，以及它的 16 字节标签。设备解开它，然后把 `{app_id, app_secret}` 当作手动填写的配置处理：获取一个 access token（见下文），存储配置（保留已存储的
+`api_base` 和 `token_url`），并注册消息通道；被拒绝时以 `failed` 结束 session，不存储任何内容。存储之后，`user_openid`（扫码者私聊机器人时的发送者 id）会成为所有者。
+
+## `POST /api/gateway/qq`
+
+配置或替换 QQ 消息通道提供方。请求体是一个 JSON 对象：
+
+| 字段 | 必需 | 默认值 |
+| --- | --- | --- |
+| `app_id` | 是 | |
+| `app_secret` | 是 | |
+| `api_base` | 否 | `https://api.sgroup.qq.com` |
+| `token_url` | 否 | `https://bots.qq.com/app/getAppAccessToken` |
+
+未知字段会被拒绝，包括旧的 `access_token`。
+
+在存储任何内容之前，设备先用 App Secret 换取一个 access token：`POST {token_url}`，带上 `{"appId":"<app_id>","clientSecret":"<app_secret>"}`。
+QQ 回答 `{"access_token":"...","expires_in":"7200"}`（`expires_in` 可能是字符串，也可能是数字）。没有 `access_token` 的回复都算作拒绝，例如 HTTP 200
+`{"code":10004,"message":"…"}`，其消息说明机器人不存在。只有在获得 token 之后，才会存储配置并把消息通道注册到 Gateway。
+token 本身从不存储。
+
+响应：
+
+- `204 No Content`：凭据已验证，提供方已存储；除非模式为 `disabled`，否则它会注册到 Gateway，接收也会随之重新开始。配置不同的 App ID 或 API 源会忘记已存储的 gateway session。
+- `400 Bad Request` `{"error":"invalid_request"}`：JSON body 无效、缺少必需字段，或者存在未知字段。不会向 QQ 发起任何请求。
+- `405 Method Not Allowed` `{"error":"method_not_allowed"}`：该端点只接受 `POST`。
+- `422 Unprocessable Content`
+  `{"error":"verification_failed","message":"<QQ message>","code":"<QQ code>"}`：
+  QQ 拒绝签发 token。`message` 和 `code` 是 QQ 自己的，原样传递，并且各自只在 QQ 发送了它时才出现。不会存储任何内容，当前消息通道保持不变。
+- `422 Unprocessable Content` `{"error":"registration_failed"}`：Gateway 拒绝了消息通道注册。之前存储的配置会被恢复。
+- `502 Bad Gateway` `{"error":"upstream_unavailable","message":"<text>"}`：token 端点无法访问（传输、DNS 或 TLS 失败）、回答的不是 JSON、回答了 5xx 状态，或者签发的 token 没有有效的 `expires_in`。不会存储任何内容。
+- `500 Internal Server Error` `{"error":"storage"}`：无法读取、写入或回滚配置。
+
+App Secret 和 access token 只在请求体中接受，从不包含在响应或日志中。
+
+QQ 目标使用类型化的 Gateway 会话 ID：私聊为 `c2c:<openid>`，群消息为 `group:<group_openid>`，频道消息为 `channel:<channel_id>`。

@@ -1,0 +1,27 @@
+---
+title: "调试"
+sidebarTitle: "调试"
+description: "把 Agent 跟踪导出为 Chrome 跟踪格式，并可视化组装好的上下文。"
+---
+
+## 导出跟踪
+
+```bash
+uv run --package barracuda-trace \
+  barracuda-trace-chrome <path-to-log> -o <where-you-want-to-emit-chrome-trace>
+```
+
+可视化
+
+[Perfetto UI](https://ui.perfetto.dev/)
+
+该命令使用 `barracuda-agent-trace` 的规范 Python 导出器。它合成的 Chrome
+进程/线程映射（包括 `run.system`、会话分组以及
+`unattributed` 兜底）记录在
+[跟踪工具](/zh/plugins/agent/trace-scripts)中。
+
+## 上下文可视化
+
+```bash
+uv run --script plugins/agent/crates/context/scripts/context_viewer.py
+```

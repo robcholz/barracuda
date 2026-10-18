@@ -1,8 +1,11 @@
 ---
 title: "Build and run"
+description: "Select a Board once, then build, flash, and run it with ordinary Cargo commands."
 ---
 
-Board selection is a persistent workspace action, separate from compilation:
+Select a Board once; every later `cargo build` and `cargo run` uses it. On a
+device Board, `cargo run` builds the firmware, flashes it, and keeps the logs in
+this terminal.
 
 ```bash
 cargo board select
@@ -41,10 +44,11 @@ workspace address published by the macOS launcher, or the Linux endpoint
 `http://10.42.0.2:8787`. Remote prompts for a device IPv4 or IPv6 address and
 connects to its WebServer on port 8787.
 
-`cargo cli configure` uses the same Local/Remote selector, then opens the
-Barracuda Plugin portal. The portal lists the configuration pages contributed
-by the enabled Plugins, so new Plugin configuration surfaces do not require a
-new CLI release. Pass an explicit address to skip selection:
+`cargo cli configure` uses the same Local/Remote selector, then walks you
+through a configuration form in the terminal: models, web search, and the
+WeChat, QQ, BlueBubbles, Telegram, and Inkbox channels. Every Plugin's full
+settings page is in the [Device Portal](/use/device-portal). Pass an explicit
+address to skip selection:
 
 ```bash
 cargo cli configure http://DEVICE_ADDRESS:8787

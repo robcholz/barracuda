@@ -1,0 +1,140 @@
+---
+title: "虚拟 I/O"
+description: "在 Linux 和 macOS 平台上使用仅限主机的虚拟 GPIO、I2C 和 SPI 硬件。"
+---
+
+由 Linux 和 macOS 平台共用的、仅限主机的虚拟 GPIO、I2C 和 SPI 硬件。它永远不会进入固件。
+
+- **平台 HAL。**`barracuda_platform_virtual_io::hal` 被重新导出为两个主机平台的 `hal` 模块。它提供虚拟外设单例（`VirtualPeripherals`：引脚 `GPIO0`..`GPIO23`，I2C 控制器 `I2C0`、`I2C1` 和 `I2C2`，SPI 控制器 `SPI0` 和 `SPI1`）、开发板暴露 I/O 背后的 `RuntimePlatform` 适配器，以及供外设实现使用的 `i2c-device`、`spi-device`、`digital-output` 和 `digital-input` 构造器。主机开发板在 `GPIO0`..`GPIO7` 上暴露 `vio-0`..`vio-7`，并把 `I2C0` 和 `I2C1` 留给运行时 I/O。
+- **开发板声明的外设**。主机开发板和其他开发板一样在 `board.yml` 中声明外设。主机平台在它们的 HAL 清单中设置了 `peripheral-models`，因此生成的开发板组合会在初始化任何外设之前，对每个外设调用 `hal::declare_peripheral`；HAL 在声明的总线和地址上挂接该实现对应的芯片模型（见下文），System 则针对它运行真实的芯片驱动和外设实现。
+- **虚拟外设管理器**。一个进程范围的 `VirtualHardware` 保存引脚状态、挂接了设备模型的 I2C 总线、故障规则和带时间戳的事件日志。它监听 `BARRACUDA_VIRTUAL_IO_ADDR` 中的回环地址。该变量是必需的：缺少它、或者它的值不是回环地址或无法解析时，主机 System 会在启动时退出。
+- **设备模型。**`I2cDevice` 实现拥有寄存器行为，并可以报告违反数据手册顺序和时序的情况。它们独立于管理器和 System，因此芯片驱动测试可以在一个独立的 `VirtualHardware` 上、配合手动 `Clock` 和 `VirtualDelay` 运行驱动。
+
+## 开发板声明的外设
+
+`declared` 把外设实现映射到它的芯片模型，并把模型放在该实现 `i2c` 绑定的控制器上、位于其 `address` 参数指定的地址，或者放在其 `spi` 绑定的控制器上：
+
+| 实现 | 模型 | 初始状态 |
+| --- | --- | --- |
+| `rx8130ce-rtc` | `rx8130ce` | 依靠备用电源保持的时间：VLF = 0，时钟从主机的 UTC 时间开始运行（首次上电时在 2000–2099 之外） |
+| `ina226-power-monitor` | `ina226` | 上电状态，通过声明的 `shunt-micro-ohms` 测量 5.000 V 总线和 200 mA |
+| `bq27220-power-monitor` | `bq27220` | 上电状态 |
+| `cst816t-touch` | `cst816t` | 面板上没有手指 |
+| `mipi-dbi-display` | SPI 上的 `mipi-dbi-panel` | 声明的 `width` × `height`，处于睡眠且关闭状态；D/C 从 `dc` 引脚读取，地址按 `offset-x`/`offset-y` 偏移 |
+| `st77916-qspi-display` | 四线 SPI 上的 `st77916` | 360 × 360 圆形面板，处于睡眠且关闭状态；每次写入的头部携带操作码和 DCS 命令 |
+
+没有模型的外设会被记录到日志，并直接使用它的绑定。主机开发板在 `I2C2`（`GPIO8`/`GPIO9`，400 kHz）上声明了 `real-time-clock`（位于 `32h` 的 RX8130CE）、`power-monitor`（位于 `40h` 的 INA226，5 mΩ 分流电阻）和 `touch`（位于 `15h` 的 CST816T，中断在 `GPIO16`），并声明了 `display`，即 ESP-VoCat 的 360×360 圆形 ST77916，位于四线 SPI `SPI0` 上（`GPIO10` SCK，`GPIO11`/`GPIO17`/`GPIO18`/`GPIO19` 数据，`GPIO12` CS，`GPIO13` D/C，`GPIO14` 复位，`GPIO15` 背光，`GPIO20` 电源），因此主机会像圆形开发板那样显示设备 UI。它们的模型是普通的挂接设备：管理器读写它们的寄存器，在它们的地址上注入故障，并记录它们的事务和违反数据手册的情况，System 也会把这些违规记录为警告。`buses` 给出每个 I2C 设备对应的外设，`displays` 给出每个面板对应的外设，`reset` 会保留它们全部。
+
+## 显示查看器
+
+控制端口也响应 HTTP。在浏览器中打开 `http://<BARRACUDA_VIRTUAL_IO_ADDR>/`，例如 `http://127.0.0.1:7878/`，即可看到每个显示面板被其驱动绘制后的样子；面板变化时页面会重绘，关闭、睡眠或尚未初始化的面板显示为暗色，圆形面板显示为圆形。在面板上点击或拖动，会通过开发板的 CST816T 触摸它：页面把手指位置写入触摸模型的后门，System 像读取真实触摸一样读取它，因此点击就是点按，拖动就是滑动，按住按钮不动就是在系统 UI 上长按。
+
+| 请求 | 响应 |
+| --- | --- |
+| `GET /` | 查看器页面 |
+| `GET /display/<bus>` | 面板的像素：行优先的小端 RGB565，带 `X-Width`、`X-Height`、`X-Visible` 和 `X-Revision` 响应头 |
+| `POST /control` | 请求体为一个控制请求，响应方式与 TCP 协议中的一行相同 |
+
+每个 HTTP 请求都必须指定一个回环 `Host`（`127.0.0.1`、`[::1]` 或 `localhost`），并且 `POST /control` 必须带有 `Content-Type: application/json`，且来源只能是该页面自己，这样开发者访问的网站就无法驱动虚拟硬件。
+
+## 引脚模型
+
+| 模式 | 解析出的电平 |
+| --- | --- |
+| 输出，推挽 | 输出锁存器的值 |
+| 输出，开漏 | 锁存器为低或线路被外部拉低时为低；否则为高 |
+| 输入 | 外部驱动的电平；未被驱动时：有上拉则为高，否则为低 |
+| 禁用 | 外部驱动的电平；未被驱动时：低 |
+
+I2C 占用会把 SCL 和 SDA 标记为保持高电平的开漏输出。引脚模式或解析出的电平的每次变化都会连同其时间和来源一起记录（HAL 调用为 `system`，控制请求为 `manager`）。
+
+## I2C 模型
+
+发往不存在的设备的事务会以地址 NACK 失败。否则，设备按总线顺序接收各个阶段：相邻的写入是一个阶段（它们之间没有重复 START），每个读取阶段由设备填充。`registers` 模型有 256 字节和一个 8 位指针：写入阶段用第一个字节设置指针并存储其余字节，读取阶段从指针处返回字节，两者都会自动递增并回绕。
+
+故障规则按总线或按地址、在设备被寻址之前生效，第一条匹配的规则胜出，`once` 规则在触发后被移除：
+
+| 故障 | `embedded-hal` 错误种类 |
+| --- | --- |
+| `nack` | `NoAcknowledge(Address)` |
+| `arbitration-loss` | `ArbitrationLoss` |
+| `timeout` | `Other`（调试文本为 `Timeout`） |
+| `bus-error` | `Bus` |
+
+## 控制协议
+
+在配置的回环地址上使用 TCP。每个请求是一行上的一个 JSON 对象；每个响应也是一行上的一个 JSON 对象，按请求顺序返回。成功的响应带有 `"ok": true` 以及下表中的字段；失败的响应带有 `"ok": false` 和一条 `"error"` 消息。引脚用开发板名称（`vio-0`）或芯片名称（`GPIO0`）指定；总线用控制器名称（`I2C0`）指定；字节串是不带分隔符的十六进制。
+
+| `op` | 请求字段 | 响应字段 |
+| --- | --- | --- |
+| `pins` | | `pins`：每个引脚 |
+| `pin` | `pin` | `pin` |
+| `set_input` | `pin`，`level`：`true`、`false`，或用 `null` 释放 | `pin` |
+| `buses` | | `buses`：控制器、打开时它们的引脚和时钟，以及设备（开发板声明的设备带有 `peripheral`） |
+| `add_device` | `bus`、`address`、`model`（默认 `registers`）、`data`（可选，从偏移 0 开始的初始字节） | |
+| `remove_device` | `bus`、`address` | |
+| `read_registers` | `bus`、`address`、`offset`（默认 0）、`length` | `data` |
+| `write_registers` | `bus`、`address`、`offset`（默认 0）、`data` | |
+| `inject_fault` | `bus`、`address`（可选）、`fault`、`once`（默认 `true`） | `id` |
+| `clear_faults` | `bus`（可选：省略时为所有总线） | `cleared` |
+| `faults` | | `faults` |
+| `events` | `since`（默认 0）：起始序号 | `events` |
+| `violations` | | `violations` |
+| `reset` | | |
+| `displays` | | `displays`：每个显示面板的 `bus`、`peripheral`、`model`、`width`、`height`、`visible` 和 `revision`（随画面变化） |
+| `display` | `bus` | `width`、`height`、`visible`、`revision`，以及 `data`：行优先的小端 RGB565 像素 |
+
+引脚以 `{name, chip, function, mode, pull, drive, output,
+driven, level}` 的形式报告。通过管理器访问寄存器没有总线副作用，也不会被记录。`reset` 会移除设备、故障、外部驱动、事件和违规记录；引脚模式、输出锁存器、控制器占用，以及开发板声明的外设背后的设备，都属于正在运行的 System，会被保留。
+
+事件带有 `seq`、`at_us`（自管理器启动以来的微秒数）和 `kind`：
+
+```json
+{"seq":3,"at_us":1520,"kind":"gpio","pin":"vio-0","mode":"output","level":true,"source":"system"}
+{"seq":4,"at_us":1710,"kind":"i2c","bus":"I2C0","address":80,"operations":[{"write":"10"},{"read":"aabb"}],"result":"ok","injected":false}
+```
+
+设备模型的说明以 `{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}` 的形式跟在其事务之后。`result` 是 `ok`、`nack`、`arbitration-loss`、`timeout` 或 `bus-error`。日志保留最近的 4096 个事件。`spi` 事件保留每个方向的前 32 字节以及传输的 `length`，因为显示屏每次传输会流式发送数 KB 数据。违规记录带有暴露该违规的事务的 `seq`、`at_us`、`bus`、`address`、`model`、`rule` 和 `message`。
+
+```console
+$ printf '%s\n' '{"op":"add_device","bus":"I2C0","address":80}' \
+    '{"op":"set_input","pin":"vio-2","level":true}' | nc -q1 127.0.0.1 7878
+{"ok":true}
+{"ok":true,"pin":{"name":"vio-2","chip":"GPIO2",...,"level":true}}
+```
+
+## 芯片模型
+
+`models` 包含通过 I2C 访问的真实芯片的数据手册模型。每项寄存器行为、顺序规则和时序数值都在模型源码中引用其数据手册（文档、版本、章节或表格），每条规则违规都会给出该引用。通过管理器用 `add_device` 及其 `model` 名称挂接一个模型。
+
+| `model` | 芯片 | 数据手册 | 检查项 |
+| --- | --- | --- | --- |
+| `registers` | 通用 256 字节寄存器设备 | — | 无 |
+| `ina226` | TI INA226 电源监测器 | TI SBOS547C (2011, rev. Aug 2026) | 寄存器集合、双字节访问、只读寄存器、转换时序、公式 3 和 4 |
+| `rx8130ce` | Epson RX8130CE RTC | Epson ETM50E-10 | 上电后 30 ms 的访问等待、初始设置前的 t_str、只能访问用户寄存器、TEST 位、有效日期、VLF 之后初始化所有寄存器 |
+| `pi4ioe5v6408` | Diodes PI4IOE5V6408 I/O 扩展芯片 | Diodes DS40583 Rev 3-5 | 寄存器映射、由方向/输出/高阻决定的引脚驱动（记录为 `P<n> high/low/released` 事件）、不支持突发读取 |
+| `bq27220` | TI BQ27220 电量计 | TI SLUSCB7A, SLUUBD4A | 数据包之间 66 µs 的 t(BUF)、每秒两条命令、250 ms 的 tPUCD、只读命令返回 NACK |
+| `cst816t` | Hynitron CST816T 触摸控制器 | CST816T datasheet V1.1 | 从 01h 开始的报告（手势、手指数量、带事件标志的 12 位 X/Y），A7h 处的芯片 ID B4h；后门字节 0..=4 依次为是否触摸、X、Y，并且在主机读取之前已抬起的点按仍会报告一次 |
+| `es8311`、`es7210`、`es8389` | Everest 音频转换器 | Everest ES8311 rev 10.0, ES7210 rev 21.0, ES8389 rev 5.0 | 文档记载的寄存器映射和默认值、单字节写入格式、每次读取之前先写地址 |
+
+设备模型也可以把设备端的变化（例如扩展芯片的引脚电平变化）作为 `device` 事件记入日志。
+
+## 虚拟 SPI
+
+`VirtualHardware::with_spi` 为驱动测试添加 SPI 控制器；`spi_bus(name, frequency_hz)` 以固定时钟打开其中一个，作为 `embedded-hal` 的 `SpiBus`（阻塞和异步）。主机平台添加了 `SPI0` 和 `SPI1`，HAL 的 `spi_device` 把一个控制器及其片选引脚包装成 `embedded-hal-bus` 的 `ExclusiveDevice`，供外设实现使用。每个总线操作是一次全双工传输，记录为一个 `spi` 事件；没有设备时 MISO 读到 FFh。`inject_fault` 接受 SPI 控制器名称（按总线，不带地址），并使下一次传输失败。`SpiDevice` 模型在接收每次传输时会一并收到其开始时间、总线时钟和每个引脚的电平，因此显示屏可以读取它的 D/C 线；显示屏模型还会报告它的画面。每个控制器驱动一个设备，由开发板的声明或驱动测试挂接。
+
+| SPI 模型 | 芯片 | 数据手册 | 检查项 |
+| --- | --- | --- | --- |
+| `Ws2812bModel` | MOSI 上的 Worldsemi WS2812B LED 链 | Worldsemi WS2812B（无日期） | 根据 MOSI 位流和总线时钟检查 T0H/T0L/T1H/T1L ±150 ns、超过 50 µs 的 RES 锁存、24 位 GRB 帧 |
+| `MipiDbiPanelModel` | 带 D/C 引脚的 MIPI DBI C 型面板（ST7789、ILI9342C、ST7735S、GC9107、GC9A01） | MIPI DCS v1.02.00 | D/C 为低时为命令，D/C 为高时为参数或像素；睡眠、显示开/关、反色、列和页窗口、跨传输的 `RAMWR`/`RAMWRC` 流式写入、`MADCTL` 颜色顺序和行/列交换（镜像位只用于补偿安装方向）、只支持 16 位像素格式 |
+
+## 驱动测试
+
+```rust,ignore
+let hardware = VirtualHardware::new(&[], &["I2C0"], Clock::manual());
+hardware.attach("I2C0", 0x40, Box::new(MyChipModel::new()))?;
+let bus = hardware.i2c_bus("I2C0")?;
+let delay = VirtualDelay::new(hardware.clock().clone());
+my_driver::init(bus, delay)?;
+assert!(hardware.violations().is_empty());
+```

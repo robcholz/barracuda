@@ -1,0 +1,30 @@
+---
+title: "ESP32-S3-Korvo-2"
+description: "Build, flash, and run Barracuda on the ESP32-S3-Korvo-2, an ESP32-S3 Board."
+---
+
+The ESP32-S3-Korvo-2 is an ESP32-S3 Board from Espressif.
+
+- Board ID: `esp32s3-korvo-2`
+- Vendor: Espressif
+- Chip: ESP32-S3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32s3-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/esp32s3-korvo-2/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select esp32s3-korvo-2
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `camera` | Camera (OV3660) | [`camera`](/plugins/vm-camera) |

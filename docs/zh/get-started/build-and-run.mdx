@@ -1,0 +1,57 @@
+---
+title: "构建与运行"
+description: "只需选择一次开发板，之后用普通的 Cargo 命令构建、烧录和运行。"
+---
+
+只需选择一次开发板，之后每次 `cargo build` 和 `cargo run` 都会使用它。对于设备开发板，`cargo run` 会构建固件、烧录，并在当前终端中持续显示日志。
+
+```bash
+cargo board select
+cargo run
+```
+
+主机开发板（`local-linux`、`local-macos`）还需要提供虚拟外设管理器的回环地址：`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run`（参见 [Virtual IO](/zh/platforms/virtual-io)）。
+
+第一条命令会打开一个彩色的开发板列表。用方向键移动，输入文字进行模糊搜索，按 Enter 选择。它会校验开发板 bundle，并把选择记录在被忽略的本地状态中。它会解析出与之匹配的自描述平台，更新静态的“所选平台”和“所选开发板 HAL”依赖块，并在本地写入目标和 runner 配置。解析出的平台会提供它的 rustup 工具链、可选的 `build-std` 策略和安装程序生成的环境变量，以及在该工具链不可用时显示的安装提示。选择操作会把该工具链设为工作区覆盖并导入其环境变量，因此普通的 `cargo build` 和 `cargo run` 会通过原生 Cargo 直接作用于独立的 System 应用；不存在感知开发板的构建包装器，也没有 shell 设置步骤。设备开发板使用 `--release` 构建固件。System、平台、Core 和插件的日志都留在这个终端中。
+
+外部终端消息通道需要单独运行。这条命令始终为开发主机编译，即使所选开发板使用嵌入式目标也是如此：
+
+```bash
+cargo cli
+cargo cli configure
+```
+
+`cargo cli` 会打开一个 Local/Remote 选择器。Local 会显示并使用 macOS 启动器发布的当前工作区地址，或 Linux 端点 `http://10.42.0.2:8787`。Remote 会提示你输入设备的 IPv4 或 IPv6 地址，并连接到它在 8787 端口上的 WebServer。
+
+`cargo cli configure` 使用同样的 Local/Remote 选择器，然后在终端中引导你填写一份配置表单：模型、网页搜索，以及微信、QQ、BlueBubbles、Telegram 和 Inkbox 消息通道。每个插件的完整设置页面都在[设备门户](/zh/use/device-portal)中。传入一个明确的地址即可跳过选择：
+
+```bash
+cargo cli configure http://DEVICE_ADDRESS:8787
+```
+
+构建时平台日志级别默认为 `info`。为某一次构建设置 `BARRACUDA_LOG_LEVEL`，可选 `off`、`error`、`warn`、`info`、`debug` 或 `trace`：
+
+```bash
+BARRACUDA_LOG_LEVEL=debug cargo run
+```
+
+所选级别会经过校验并编译进平台二进制文件；运行时不会从环境变量读取。
+
+自动化流程可以用 `cargo board select <board-name>` 跳过提示。
+
+添加平台或开发板 HAL 时，维护者需要更新一次受跟踪的注册表，并提交生成的代码块：
+
+```bash
+cargo platform sync
+cargo board sync
+```
+
+CI 可以使用对应的 `--check` 形式来校验它们，而不写入任何文件。拉取最新的提交后，永远不需要额外的同步步骤。
+
+可用的开发板名称就是 `boards/configs/` 下的目录名。设备开发板的 `toolchain.target` 会成为本地 Cargo 的构建目标；主机开发板省略这一项。
+
+内存分析器是一个可执行的工作负载，而不是吞吐量基准测试：
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- agent-init
+```

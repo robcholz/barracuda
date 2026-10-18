@@ -1,0 +1,42 @@
+---
+title: "脚本"
+description: "提出一个涉及物理世界的请求，板上 Agent 就会编写 Lua 脚本并在硬件上运行。"
+---
+
+当请求涉及物理世界时，板上 Agent 会编写一段简短的 Lua 脚本，并用它的 `vm_run` 工具在设备的 VM 中运行。脚本一运行就会读取并驱动真实的外设，输出会回到对话中。
+
+```txt
+> 把引脚 vio-0 设为高电平
+```
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_output("vio-0", true, "push-pull")
+print("vio-0 is high")
+```
+
+## 脚本可以使用什么
+
+每个 Lua 包都来自它自己的插件，所以脚本能用的正好是固件所带的内容。
+
+| Lua 包 | 插件 | 用途 |
+| --- | --- | --- |
+| `gpio` | [`vm-gpio`](/zh/plugins/vm-gpio) | 开发板可用引脚上的数字输入和输出 |
+| `i2c`、`spi`、`uart` | [`vm-i2c`](/zh/plugins/vm-i2c)、[`vm-spi`](/zh/plugins/vm-spi)、[`vm-uart`](/zh/plugins/vm-uart) | 总线 |
+| `pwm`、`analog`、`i2s` | [`vm-pwm`](/zh/plugins/vm-pwm)、[`vm-analog`](/zh/plugins/vm-analog)、[`vm-i2s`](/zh/plugins/vm-i2s) | PWM 输出、模拟输入和 I2S 音频流 |
+| `display`、`camera`、`audio` | [`vm-display`](/zh/plugins/vm-display)、[`vm-camera`](/zh/plugins/vm-camera)、[`vm-audio`](/zh/plugins/vm-audio) | 屏幕、摄像头和声音 |
+| `motion`、`light`、`power_monitor` | [`vm-imu`](/zh/plugins/vm-imu)、[`vm-led-strip`](/zh/plugins/vm-led-strip)、[`vm-power-monitor`](/zh/plugins/vm-power-monitor) | 运动感应、LED 灯带和电源 |
+| `http`、`filesystem`、`message_queue` | [`vm-http`](/zh/plugins/vm-http)、[`vm-filesystem`](/zh/plugins/vm-filesystem)、[`vm-message-queue`](/zh/plugins/vm-message-queue) | 网络请求、文件和队列 |
+| `agent` | [`vm-agent`](/zh/plugins/vm-agent) | 在脚本中向 Agent 提问 |
+| `time` | [`vm-time`](/zh/plugins/vm-time) | 通过 `os.time` 和 `os.date` 获取 UTC 时间 |
+
+每个 Lua 包的页面都列出了它的 Lua API。[VM](/zh/plugins/vm) 页面介绍运行时本身。
+
+## 长时间运行的脚本
+
+`vm_run` 在 Agent 的后台池中运行，所以脚本运行时对话可以继续。
+
+- 调用 `io.read()` 的脚本会暂停并向你索要输入；你的回复会被传回给它。
+- Agent 用 `background_list`、`background_input` 和 `background_cancel` 工具列出、回应和取消正在运行的脚本。让它停止某个脚本，它就会取消这次运行。
+
+对于必须在对话结束后继续存在的行为（例如“每天早上七点”），Agent 会使用[自动化](/zh/use/automations)。

@@ -1,0 +1,32 @@
+---
+title: "System Fonts 插件"
+sidebarTitle: "System Fonts"
+description: "提供系统字体图集，显示屏上的视图默认用它们绘制。"
+---
+
+提供系统字体：对于视图没有自带字体的字体槽，显示屏上的每个视图都用这些字体图集来绘制。
+
+- 插件 ID：`system-fonts`
+- 依赖：`app-manager`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `SystemFonts`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：`/resources/fonts` 中的字体
+
+注册时，本插件通过 `SystemFonts::load_from` 给 `app-manager` 提供一个 `FontAtlases` 来源；显示屏启动时，这个来源从本插件自己的 `/resources/fonts` 读取图集，并把它们的字节交给 UI 套件，所以 `app-manager` 永远不会看到本插件的文件。这些字体大约 2.4 MB，所以它们与 `app-manager` 分开提供：有显示屏的开发板启用本插件，没有显示屏的开发板则不启用，也不携带任何字体。没有本插件时，视图只能用它们自带的图集绘制，其他字体槽中的文字会显示为占位方框。
+
+## 字体
+
+`resources/fonts/build.ts` 用 Noto Sans SC 烘焙这些字体：包括 ASCII 和本插件自己的字符列表 `resources/fonts/charset.txt` 中的字符，字号是系统视图和系统应用所用的字号；还包括 `app-manager` 为构建视图而发布的图标集（`resources/icons/`，构建只读取其中这些文件）的字形，字号是图标绘制时所用的字号。16 px 常规字体槽是正文槽：它还包含 GB 2312 的 3,755 个常用字，所以没有任何来源指定字体的文字，例如 Agent 的回答、通知或对话的标题，都用它绘制。包含图集之外字符的文字会显示为占位方框。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin system-fonts
+```
+
+`CJK_FONT_DIR` 中存放 `NotoSansSC-Regular.otf` 和 `NotoSansSC-Bold.otf`（github.com/notofonts/noto-cjk，`Sans/SubsetOTF/SC`）。向 `charset.txt` 添加字符后要重新构建；在那之前，如果某个视图的文字需要列表中没有的字符，它会自带自己的图集。

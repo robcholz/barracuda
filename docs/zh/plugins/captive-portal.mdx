@@ -1,0 +1,189 @@
+---
+title: "Captive Portal 插件"
+sidebarTitle: "概览"
+description: "把每个插件的网页和资源汇集到设备的门户外壳中。"
+---
+
+把可插拔的网页入口和资源提供者汇集到门户外壳中。
+
+- 插件 ID：`captive-portal`
+- 依赖：`webserver`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：`CaptivePortal`（其注册 API 中包含 `WebEntry`、`EntryStatus` 和
+  `EntryStatusSource` trait）
+- 所需能力：来自 `webserver` 的 `WebServer`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：没有自己的门户入口；`GET /portal/*` 子树
+  （`GET /portal/`、`GET /portal/entries.json`、`GET /portal/status`、
+  `GET /portal/assets/<id>/<path>`、`GET /portal/<path>`）
+- 任务：无
+- 存储：没有 KV 键；读取它自带的 `/resources/index.html`、
+  `/resources/app.js`、`/resources/app.css` 以及其他 `/resources/<path>`
+  文件
+
+本插件负责网页入口的汇集和门户骨架的资源入口。它向 WebServer 注册一个 GET 子树 `/portal/*`。它不拥有额外的任务、套接字或 DNS 服务。操作系统的强制门户网络检测路径和设置热点的强制门户 DNS 由 `wifi` 插件负责。
+
+## 使用方契约
+
+提供 UI 的插件把 `captive-portal` 声明为依赖，获取
+`CaptivePortal`，并调用 `register(WebEntry { id, group, order, title, summary,
+icon, figure, module }, assets)`：
+
+- `group`（`WebGroup::Device`、`Agent` 或 `Channel`）把入口放在导航中的“设备”/“智能体”/“消息通道”下；`order` 决定它在分组内的顺序（升序，相同时按 ID 排序）。
+- `title` 和 `summary` 是 `WebText { zh, en }`：导航标签，以及概览磁贴和列表行中位于标签下方的一行说明。
+- `icon` 是可选的相对资源路径：`.svg` 是单色标记，由外壳用 `currentColor` 绘制；其他格式按图片显示。
+- `figure` 是可选的实时插图模块的相对路径（见下文）。
+- `module` 是相对的入口模块。
+插件在它的注册上下文中保留返回的 `WebEntryRegistration`。
+
+能够报告自身状况的入口改用
+`register_with_status(entry, assets, status)` 注册。`status` 是一个
+`EntryStatusSource`，通常是闭包 `move || EntryStatus { .. }`；它归注册所有，并随注册一起被丢弃。来源是同步且廉价的：它读取插件已经持有的状态（一个标志、一份缓存的快照），从不查询设备或网络，也不得回调门户。
+`EntryStatus` 是 `{ state, label, detail }`：`state` 为 `EntryState::Ready`、
+`Attention` 或 `Off`；`label` 是可选的 `WebText`；`detail` 是可选的、不翻译的 `String`，例如网络名称。`EntryStatus::configured(bool)`
+给出共用的 `ready`“已配置”或 `off`“未配置”记录。
+从自己的路由（例如强制门户网络检测路径）把客户端引导到门户的插件，用 `CaptivePortal::landing()`（门户的落地页）响应这些请求；它从不直接写出门户的路径。
+
+`AssetsProvider` 就是现有的 WebServer `HttpProvider` trait，以门户资源的角色重新导出；不存在第二套读取器或传输契约。
+提供者接收一个经过验证的相对路径，例如 `chunks/main.js`，并返回一个 `HttpResponse`，通常是 `HttpResponse::stream(...)`。
+
+对于文件，把 `ResourceFiles::from(context.filesystem()?.clone())` 作为提供者传入。提供内容的插件声明 `PluginFilesystem::Private`；适配器只暴露它的 `/resources` 子树。它与门户骨架的提供者共用同一实现，所以使用方不需要自定义的 HTTP 文件处理程序。
+文件不存在时返回 404，资源卷未挂载时返回 503，其他存储故障返回 500，且不透露文件系统细节。
+
+这两项贡献是显式的：导航元数据及其提供者。
+依赖 WebServer 并不意味着插件有网页入口。
+门户不会检查依赖元数据，也不会从中推导领域 UI。
+使用方不注册单独的网页路由，门户的依赖也不会随着新增 UI 贡献者而增长。
+
+ID 遵循 `^[a-z0-9]+(?:-[a-z0-9]+)*$`，最长 64 字节。
+模块、图标、插图和资源路径都是相对路径，最长 256 字节，只能使用 ASCII 字母、数字、`/`、`-`、`_` 和 `.`。空段、`.` 段和父目录段、反斜杠、百分号转义和查询字符都会被拒绝。生成的资源文件名应遵守这些约束；URL 查询会在分派前由 WebServer 移除。
+
+## HTTP 接口
+
+- `/portal/entries.json` 按注册顺序返回一个由
+  `{id, group, order, title: {zh, en}, summary: {zh, en}, icon, figure, module}`
+  组成的数组。`group` 为 `"device"`、`"agent"` 或 `"channel"`。
+  资源 URL 的形式为 `/portal/assets/<id>/<relative-path>`；缺省的
+  `icon` 或 `figure` 为 `null`。标签经过 JSON 转义。外壳按（group, order, id）排序；如果任何记录格式错误，或者指向其自身 `/portal/assets/<id>/` 之外的 URL，就拒绝整份清单。
+- `/portal/status` 返回
+  `{"entries":{"<id>":{"state":"ready","label":{"zh":"…","en":"Connected"},"detail":"HomeNet"},...}}`。
+  只列出注册了状态来源的入口，按注册顺序排列；`state` 为 `"ready"`、`"attention"` 或 `"off"`，缺省时省略 `label` 和
+  `detail`。每个请求都会重新调用每个来源；设备上不做任何缓存，响应也不带缓存校验器。
+- `/portal/assets/<id>/<path>` 只分派给已注册的对应提供者。
+- `/portal/` 提供门户自己的 `/resources/index.html`。
+- 其他 `/portal/<path>` URL 提供门户自己的 `/resources/<path>`；
+  `entries.json`、`status` 和 `assets/` 子树保留给汇集功能。
+
+`/portal/*` 是一个 GET 子树：对于其他任何方法（包括对
+`/portal/status`），WebServer 都以 `405 Method Not Allowed` 和 `Allow: GET` 响应。
+
+清单在注册发生变化时重建，而不是在 HTTP 请求时重建。状态响应体在每个请求中、借用注册表期间构建到一个缓冲区中；它不会跨 await 持有锁。
+它以共享的不可变字节快照形式保存。注册和移除可能分配内存；缓存的清单查找和叶子分派则不会。WebServer 的内联叶子提供者句柄为每个叶子 future 预留 128 个机器字，为服务器处理程序中的汇集留出空间。超出容量会导致编译失败。
+常规的来源和套接字复制缓冲区仍然适用：这不是零拷贝。
+基于文件系统的响应仍会产生当前 VFS 自身的内存分配。
+
+丢弃一个注册会把它的入口从后续的清单响应中移除，并移除后续对其资源的访问。已经在进行中的响应可以使用它们保留的来源或清单快照完成。重新加载可以复用同一个 ID。浏览器必须重新获取清单才能看到运行时的变化；这里没有选定任何推送通知或浏览器刷新策略。
+
+## 文件和前端范围
+
+本插件请求它自己的 `ScopedVfs`，只读取 `/resources`。它从不挂载后端，也不打开其他插件的命名空间。每个提供内容的插件拥有自己的资源提供者和文件范围。
+
+未来的骨架输出属于
+`plugins/captive-portal/filesystem/resources/`；贡献者的输出属于
+`plugins/<id>/filesystem/resources/`。通用的镜像打包步骤仍负责只包含已启用插件的贡献。不添加专门针对网页的打包器、跨插件的 Bun 打包或 `include_bytes!` 资源嵌入。
+
+外壳在 `resources/web/src/` 中用 TypeScript、语义化 HTML 和 CSS 实现，不使用浏览器运行时框架或外部字体/CDN。它的样式表是设计系统的 `tokens.css` 和 `components/bundle.css`
+（`src/ds/`，除格式外未作修改），加上外壳自己的布局规则
+（`src/app.css`）。Bun 把 `index.html`、`app.js` 和 `app.css` 输出到
+`filesystem/resources/`。构建工具和测试依赖在仓库根目录管理，位于打包的资源树之外。挂载的卷中没有骨架时返回 404；资源卷不存在时返回 503。System 目前挂载持久化的 `/data` 卷；提供和挂载
+`/resources` 仍是 System/镜像集成方面的要求，而不是本插件执行的工作。
+
+外壳是一个应用外壳，带有可折叠的侧栏（Ctrl/⌘ B；选择以 `barracuda.sidebar` 保存在 `localStorage` 中）、带面包屑的顶栏，顶栏中有语言菜单（简体中文 / English，`barracuda.lang`；没有保存选择时，门户以浏览器首选语言中的第一个 zh 或 en 启动，如果浏览器只偏好其他语言则用英文，如果没有指定任何语言则用中文）和主题控件（“浅色”/“深色”/“跟随系统”，`barracuda.theme`，以 `data-theme` 应用在 `<html>` 上），以及哈希路由：`#overview`（默认）或 `#<entry id>`；后退和前进都能正常工作。
+宽度小于 720px 时，侧栏被手机布局取代：概览变成分组列表，页面带有返回链接。
+
+概览根据清单生成：页头框架（标题、导语、插件页面数量、连接、`board` 插图），每个有入口的分组一个“开始使用”步骤（链接到该分组的第一个入口），以及模块网格。每个设备和 Agent 入口，以及每个带
+`figure` 的消息通道入口，都是一个磁贴（插图、标题、摘要；整个磁贴是插图的悬停区域）。没有插图的消息通道入口是“消息通道”卡片中的列表行，卡片旁边是 `riffle` 插图。
+
+入口状态来自 `/portal/status`，与清单一起读取，时机包括每次导航、窗口获得焦点或变为可见时，以及页面调用
+`refreshStatus()` 时；它从不阻塞渲染。状态变化会重绘侧栏和顶栏，并就地重绘概览，所以插图会继续运行。第一个带有状态和标签的设备入口会成为顶栏徽标
+“\<title> \<label>”（“Wi-Fi 已连接”；`ready` 时为信号徽标，否则为普通徽标；仅桌面端）。入口的 `detail` 以等宽字体显示在它的侧栏标签之后、概览磁贴上和手机列表行中。页头的前两行键值对属于设备：“状态”及其标签徽标（`ready` 时为信号徽标），然后是它的标题及以等宽字体显示的 `detail`（Wi-Fi · HomeNet），没有时显示“—”（由主机管理的网络）。当某个分组中任一入口为 `ready` 时，该步骤即完成：对于设备分组，它显示一个对勾和“已连接 HomeNet”（没有 `detail` 时只显示标签“已连接”），否则显示就绪入口的标题和标签（优先选择带标签的入口），以此替代它的链接。“消息通道”卡片中和手机列表中的消息通道行显示标签（“已配置”）。读取失败或格式错误时，所有状态位置都留空；外壳不会显示它没有读到的状态。
+
+状态页面涵盖：没有入口（空）、入口未知或已被移除（不可用；如果外壳之前见过它，会写出它的名称）、模块正在导入（加载中），以及模块导入或挂载失败（失败，可重试）。页面只在被选中时才导入模块。它会在请求时、变为可见时以及可见期间每 30 秒刷新一次清单。
+刷新失败时保留最近一次已知的入口和已挂载的模块，并在顶栏显示“连接未就绪”。构建时排除和运行时移除路由是两回事：运行时卸载不会删除镜像文件。
+
+### 实时插图
+
+外壳只打包一次 Hairline 内核，把它发布为全局 `HL`，并定义 `<hl-figure name="…">`（`scan="true"` 表示环境扫描效果，悬停区域用 `data-hl-zone`，单个元素的位置用 `data-hl-at`）。内置名称有
+`board`、`riffle` 和 `plug`。其他任何名称都是入口 ID：外壳导入该入口清单中的 `figure` 模块一次（按 URL 缓存），并挂载它导出的 `figure`（`{ name, range, mount }`）。插图会按其名称对应的设计框裁剪，通过 `--figure-*` token 跟随主题，在减少动态效果时保持静止，在屏幕外休眠，并在其元素离开页面时销毁。贡献者的插图模块使用全局 `HL`，从不打包内核。
+
+## Bun 构建和模块契约
+
+在仓库根目录运行 `cargo plugin run build`，会为每个已启用的贡献者构建资源。`cargo plugin run build --plugin captive-portal` 只构建这个外壳。同一个构建任务会通过本插件的 Cargo 构建钩子自动运行；普通的 `cargo build`、`cargo run` 和 `cargo check` 不需要单独的资源构建命令。这会生成资源文件，而不是 System 镜像或已挂载的设备卷。Bun 必须是 CI 固定的版本（工作流中的 `BUN_VERSION`）；更早的版本无法读取 `bun.lock`。
+
+插件在 `plugin.toml` 中声明它的命令。`inputs` 和 `outputs` 相对于插件根目录，而 `cwd` 选择可执行文件的运行位置。
+只有 `build` 是自动运行的。前端依赖、格式化、lint、类型检查和测试运行器在整个仓库中共享。Bun 必须已经安装。
+
+在仓库根目录：
+
+```sh
+bun install --frozen-lockfile
+bun run format:check
+bun run lint
+bun run check
+cargo plugin run build
+bun run test
+bun run dev
+```
+
+`dev` 在回环地址上提供已构建的文件，并打印它的 URL（设置 `PORT` 可选择端口）。它的清单列出九个内置注册；已构建时，它们的资源从各插件自己的 `filesystem/resources/` 提供，否则返回 404；不提供任何设备 API，所以页面显示的是设备不响应时的样子。`PORTAL_MANIFEST=empty` 提供一份空清单。设备集成仍使用真实的 Rust 清单。修改源码后，请重新构建并刷新预览。
+
+每个贡献者用 `tools/web/build.ts` 独立地把自己的入口构建为浏览器 ESM，输出到自己的
+`filesystem/resources/`：`resources/web/entry.ts`
+变成 `entry.js`；可选的 `resources/web/figure.js`（或 `.ts`）变成
+`figure.js`（构建会拒绝打包了内核的插图模块）；可选的
+`resources/web/icon.svg` 或 `icon.png` 会被复制。源文件已不存在的可选输出会被删除。插件在它的 `WebEntry` 中注册这些路径，并在它的 `[tasks.build] outputs` 中列出它们。不要把插件模块静态导入骨架。模块导出：
+
+```ts
+import type { PortalContext } from "../../../captive-portal/resources/web/ui";
+
+export function mount(root: HTMLElement, context: PortalContext) {
+  const label = document.createElement("p");
+  label.textContent = context.lang === "zh" ? "…" : "Module content"; // "…": the Chinese text
+  root.append(label);
+  // Pass context.signal to fetch/listeners; clean up timers and other owned resources.
+  return () => root.replaceChildren();
+}
+```
+
+上下文是 `{ signal, lang, toast, navigate, has, status, refreshStatus, badge? }`：
+
+- `signal` 在导航、切换语言、卸载或离开页面时被中止；
+- `lang`（`"zh"` 或 `"en"`）是模块渲染自身文字所用的语言；
+  切换语言会重新挂载模块；
+- `toast({ kind: "success" | "error" | "info", title, body?, code?, action? })`
+  向外壳的提示堆栈添加一条提示（右下角；错误提示一直保留到被关闭，其他提示 4 秒后关闭）；
+- `navigate(id)` 跳转到另一个入口，或者 `"overview"`；
+- `has(id)` 表示清单当前是否列出了该 ID 的入口（已停用插件的入口不存在）；只有在它返回 `true` 时，页面才提供通往另一个插件入口的途径；
+- `status(id?)` 返回页面自身入口（或 `id` 对应入口）最新的 `/portal/status` 记录
+  （`{ state, label?, detail? }`），或者 `null`；
+- `refreshStatus()` 重新读取状态，并重绘显示状态的地方；页面在保存成功后调用它。它在完成时 resolve，从不 reject；在读取期间的调用会在当前读取完成后再读取一次；
+- `badge?({ label, tone: "live" | "lost" } | null)` 在顶栏中用页面的实时状态代替设备徽标（Web 聊天：“已连接”/“已断开”），或者清除它；页面关闭时外壳会清除它。
+
+设备的 Web 服务器最多保持四个连接，并拒绝超出的连接，所以外壳通过一个队列发送所有请求（同时进行两个），用退避重试被拒绝的 `GET`，并用 `?r=<n>` 重试加载失败的模块（服务器会忽略这个查询）。页面直接调用普通的 `fetch`；它就是经过队列的那个。
+
+信号被中止后，`toast`、`navigate`、`refreshStatus` 和 `badge` 不再做任何事。`mount` 可以返回一个解析为清理函数的 promise，也可以不返回清理函数。外壳会先中止信号并运行清理，再移除模块的根节点。每次挂载都有自己的 DOM 根节点；过期的导入无法挂载到新的界面中。模块必须处理取消，并避免修改外壳的全局 DOM。模块是受信任的同源插件代码，而不是沙箱化的第三方内容。页面使用 `resources/web/ui/` 中共享的 UI 工具包构建（文档见[门户 UI 工具包](/zh/plugins/captive-portal/ui-kit)）：
+它在构建时被打包进每个贡献者，运行时从不共享。
+任何模块专用的 CSS 都在贡献者内部加载（并在清理时移除自己的样式）；外壳不会发现额外的 CSS 文件。相对导入从贡献者的资源 URL 解析。跨固件版本时，优先使用带内容哈希的模块文件名；JavaScript 模块缓存由浏览器负责。
+
+## 验证
+
+贡献者是任何注册了入口的插件。每个贡献者拥有自己的
+`resources/web/entry.ts`、可选的插图和图标、测试、构建声明和资源输出。普通入口使用 `tools/web/build.ts`；这个外壳保留它自定义的构建脚本。页面自己的样式位于它的模块中，并在卸载时移除。没有任何依赖扫描会创建导航入口。
+
+修改贡献者或构建时使用的 `resources/web/ui/` 工具包后，在仓库根目录用 `cargo plugin run build` 重新构建受影响的贡献者。
+每个贡献者用 `tools/web/bundle-test.ts` 把已提交的输出（入口、插图和图标）与一次全新的内存 Bun 构建进行比对。门户前端测试验证清单解析、路由、模块会话的生命周期和上下文、概览分组、状态页面、提示、实时插图的加载和销毁，以及工具包的字段、校验、提交和密钥清理。这些是 DOM/协议测试，而不是设备上的验证或可视化的浏览器验证。
+
+测试覆盖入口校验、重复 ID、命名空间隔离、资源路径穿越的拒绝、缓存分派的分配次数、实际 HTTP 清单的 JSON 转义、精确的 `/portal/status` JSON（每个请求重新生成，来源随注册一起丢弃，其他方法返回 405）、骨架文件的流式传输，以及 Plugin Manager 卸载/重新加载时同时移除/恢复清单和资源访问。

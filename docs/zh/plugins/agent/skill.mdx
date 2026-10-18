@@ -1,0 +1,85 @@
+---
+title: "barracuda-agent-skill"
+sidebarTitle: "Skill"
+description: "从文件系统把标准 Agent Skill 加载进目录清单，并按需读取。"
+---
+
+用于标准 [Agent Skills](https://agentskills.io/specification) 的 `no_std` 文件系统运行时。
+
+一个 skill 是一个目录，包含 `SKILL.md`，以及可选的 `scripts/`、
+`references/` 和 `assets/` 资源。`FsSkillRegistry` 把一个或多个根目录扫描成一个全局唯一的目录清单。它只保留发现所需的元数据，按需读取说明和引用的资源。
+
+## 标准格式
+
+```yaml
+---
+name: light-switch
+description: Turn a board light on or off. Use when the user asks to control lighting.
+license: Apache-2.0
+compatibility: Requires an barracuda board with a configured light
+metadata:
+  author: example-org
+  version: "1.0"
+allowed-tools: lua_run_script
+---
+
+# Light switch
+
+Run `scripts/switch.lua`.
+```
+
+选中的插件在
+`filesystem/workspace/resources/skills/<name>/` 内置不可变的包，Agent 在
+`/workspace/resources/skills/<name>/` 看到它们。用户安装的包位于共享的持久目录树
+`/workspace/media/skills/<name>/` 中，任何能写文件的插件都可以在那里安装它们。这两个位置只在生命周期上不同；两者都贡献到同一个唯一的目录清单中。
+
+`name` 和 `description` 是必需的。`license`、`compatibility`、`metadata`
+以及实验性的 `allowed-tools` 字段是可选的。Frontmatter 使用 YAML，
+`metadata` 的值是字符串，名称使用小写字母、数字和连字符，并且名称必须与父目录一致。
+
+这个 crate 有意不接受 barracuda 以前的 JSON frontmatter，也不接受它的 `cap_groups`、`manage_mode`、类别、外设和标签 schema。
+
+## API
+
+- `FsSkillRegistry` 从文件系统根目录发现 skill。
+- `CatalogSnapshot` 是一个不可变的、带版本的发现快照。
+- `Skill` 包含标准的 frontmatter 字段。
+- `SkillSet::catalog_context()` 渲染名称和描述，用于在提示中发现 skill。
+- `SkillSet::list_skills()` 以 JSON 返回同样的发现字段。
+- `SkillSet::read_skill()` 返回 frontmatter 下面的 Markdown 说明，同时把它在文件系统中的目录留在资源解析内部。
+- `SkillSet::read_resource()` 从唯一注册的 skill 目录中的一个相对路径普通文件返回一页 4 字节到 16 KiB 的 UTF-8 内容。
+- `SkillSet::reload()` 重新扫描根目录，失败时不会替换有效的快照。
+
+```rust
+use std::sync::Arc;
+
+use barracuda_agent_skill::{FsSkillRegistry, SkillName};
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
+
+fn build() -> Result<(), barracuda_agent_skill::SkillError> {
+    block_on(async {
+    let filesystem = memory_vfs().await.unwrap();
+    let registry = Arc::new(FsSkillRegistry::new(filesystem)
+        .add_root("data/skills").await?
+        .add_root("system/skills").await?);
+    let mut skills = registry.skill_set();
+
+    println!("{}", skills.list_skills());
+    let document = skills.read_skill(&SkillName::new("light-switch")).await?;
+    println!("{}", document.content());
+    let guide = skills.read_resource(
+        &SkillName::new("light-switch"),
+        "references/guide.md",
+        0,
+        4096,
+    ).await?;
+    println!("{}", guide.content());
+    Ok(())
+    })
+}
+```
+
+根目录的顺序不影响选择。skill 名称必须在所有配置的根目录之间全局唯一；重复名称的每一份副本都会被排除，而不是从中选一个。格式错误的包会被单独排除，
+`CatalogSnapshot::rejected` 列出每个被排除的包及其原因。无法列出某个根目录的重新加载会保留之前的有效快照。
+这个 crate 不负责安装、注册、启用、禁用或持久化激活状态。资源路径始终相对于所选的 skill 目录，并且不能逃出该目录。

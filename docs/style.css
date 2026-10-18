@@ -1,0 +1,564 @@
+/* Barracuda Docs: the Barracuda design system on Mintlify's Sequoia theme.
+   Values come from the design system's tokens; selectors are the ids, classes,
+   and data attributes Sequoia renders. */
+
+/* Tokens. Sequoia tints its gray ramp toward the primary color; the design
+   system uses one neutral zinc ramp in both themes. */
+:root:root {
+  /* Sequoia paints active, hover, and focus states with the primary color;
+     the design keeps them ink. Lime stays on the elements styled below. */
+  --primary: 9 9 11;
+  --primary-light: 250 250 250;
+  --primary-dark: 9 9 11;
+  --gray-50: 245 245 247;
+  --gray-100: 240 240 242;
+  --gray-200: 225 225 229;
+  --gray-300: 210 210 214;
+  --gray-400: 161 161 170;
+  --gray-500: 108 108 117;
+  --gray-600: 82 82 91;
+  --gray-700: 63 63 70;
+  --gray-800: 39 39 42;
+  --gray-900: 24 24 27;
+  --gray-950: 9 9 11;
+
+  --bc-background: #FAFAFB;
+  --bc-sidebar: #F5F5F7;
+  --bc-foreground: #09090B;
+  --bc-muted: #F0F0F2;
+  --bc-muted-foreground: #6C6C75;
+  --bc-nav-foreground: #3F3F46;
+  --bc-border: #E1E1E5;
+  --bc-border-active: #A1A1AA;
+  --bc-ghost-hover: #00000015;
+  --bc-hover: #09090B0A;
+  --bc-signal: #CCFF00;
+  --bc-signal-foreground: #09090B;
+  --bc-signal-text: #5A7301;
+  --bc-tip-surface: #F2FCE1;
+  --bc-tip-border: #D3F18F;
+  --bc-warn-surface: #FFF6E1;
+  --bc-warn-border: #FFDD84;
+  --bc-danger-surface: #FFEEF0;
+  --bc-danger-border: #FFD8D7;
+  --bc-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --bc-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html.dark:root:root {
+  --bc-background: #09090B;
+  --bc-sidebar: #09090B;
+  --bc-foreground: #FAFAFA;
+  --bc-muted: #18181B;
+  --bc-muted-foreground: #A1A1AA;
+  --bc-nav-foreground: #D4D4D8;
+  --bc-border: #27272A;
+  --bc-border-active: #52525B;
+  --bc-ghost-hover: #FFFFFF17;
+  --bc-hover: #FAFAFA0F;
+  --bc-signal-text: #93B903;
+  --bc-tip-surface: #182100;
+  --bc-tip-border: #313F00;
+  --bc-warn-surface: #291800;
+  --bc-warn-border: #573200;
+  --bc-danger-surface: #330A11;
+  --bc-danger-border: #6F101B;
+}
+
+
+/* The page background, also behind overscroll and below fixed layers. */
+html, body {
+  background: var(--bc-background) !important;
+}
+
+/* Type: the system font stack with a CJK fallback chain. */
+html, body, #navbar, #sidebar-content, #mobile-nav, #content-area, #table-of-contents,
+#page-title, .prose, .card, .callout, .nav-tabs, button, input {
+  font-family: var(--bc-font-sans) !important;
+}
+code, pre, kbd, .font-mono {
+  font-family: var(--bc-font-mono) !important;
+}
+
+/* Navbar: a hairline under the bar; the tabs row sits on the sidebar color. */
+#navbar {
+  border-bottom: 1px solid var(--bc-border);
+}
+#navbar .nav-tabs {
+  gap: 24px;
+}
+#navbar div:has(> div > .nav-tabs) {
+  background: var(--bc-sidebar);
+  border-top: 1px solid var(--bc-border);
+}
+.nav-tabs-item {
+  color: var(--bc-muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+.nav-tabs-item:hover,
+.nav-tabs-item[data-active="true"] {
+  color: var(--bc-foreground);
+}
+.nav-tabs-item[data-active="true"] > div {
+  height: 2px;
+  background: var(--bc-foreground) !important;
+}
+#navbar > div > .lg\:hidden.bg-gray-50 {
+  background: var(--bc-background) !important;
+  border-bottom: 1px solid var(--bc-border);
+}
+/* Top bar as in the design: logo on the left, search centered, then language,
+   GitHub, the primary button, and the theme toggle on the right, inside the
+   same 24px gutter as the logo. The left and right groups dissolve into one
+   row so the language select can move to the right. */
+#navbar div:has(> div > #search-bar-entry) {
+  position: relative;
+  column-gap: 16px;
+}
+#navbar div:has(> div > #search-bar-entry) > div:first-child,
+#navbar div:has(> div > #search-bar-entry) > div:last-child {
+  display: contents;
+}
+#navbar div:has(> #search-bar-entry) {
+  flex: 1 1 auto;
+}
+#navbar div:has(> #localization-select-trigger) {
+  order: 1;
+}
+#navbar div:has(> div > #search-bar-entry) > div:last-child > * {
+  order: 2;
+}
+#localization-select-trigger {
+  color: var(--bc-muted-foreground) !important;
+  font-weight: 500;
+}
+/* The design's languages icon (Lucide), drawn in the button's text color. */
+#localization-select-trigger::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+#localization-select-trigger:hover,
+#localization-select-trigger[data-state="open"] {
+  color: var(--bc-foreground) !important;
+}
+#navbar div:has(> #theme-preference-menu-trigger) {
+  margin-right: -6px !important;
+}
+@media (min-width: 1280px) {
+  #navbar div:has(> #search-bar-entry) {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0;
+  }
+  #navbar div:has(> #localization-select-trigger) {
+    margin-left: auto;
+  }
+}
+#search-bar-entry {
+  background: var(--bc-sidebar);
+  border: 1px solid var(--bc-border);
+  border-radius: 6px;
+  color: var(--bc-muted-foreground);
+}
+/* The navbar's primary button: lime with ink text in both themes. */
+#navbar a[href$="/get-started/quickstart"] {
+  background: var(--bc-signal) !important;
+  color: var(--bc-signal-foreground) !important;
+  border-radius: 6px !important;
+}
+#navbar a[href$="/get-started/quickstart"] * {
+  color: var(--bc-signal-foreground) !important;
+}
+#navbar a[href$="/get-started/quickstart"]:hover {
+  background: #BAE634 !important;
+}
+.nav-logo {
+  height: 28px !important;
+}
+
+/* Sidebar: muted group labels; the current page is a neutral fill, not
+   colored text. */
+#navigation-items .sidebar-group-header {
+  color: var(--bc-muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+#navigation-items li > a,
+#navigation-items li > button {
+  color: var(--bc-nav-foreground) !important;
+  border-radius: 6px;
+}
+#navigation-items li > a:hover,
+#navigation-items li > button:hover {
+  background: var(--bc-hover);
+  color: var(--bc-foreground) !important;
+}
+#navigation-items li[data-active="true"] > a,
+#navigation-items li[data-active="true"] > a * {
+  color: var(--bc-foreground) !important;
+  font-weight: 500;
+}
+#navigation-items li[data-active="true"] > a {
+  background: var(--bc-muted) !important;
+}
+
+/* Table of contents: a left rail; the current heading is ink with an ink
+   rule. */
+#table-of-contents .toc-item > a {
+  color: var(--bc-muted-foreground);
+  border-left: 1px solid var(--bc-border);
+  padding-left: 12px;
+  font-size: 13px;
+}
+#table-of-contents .toc-item[data-depth="1"] > a {
+  padding-left: 24px;
+}
+#table-of-contents .toc-item > a:hover {
+  color: var(--bc-foreground);
+}
+#table-of-contents .toc-item[data-active-deepest="true"] > a {
+  color: var(--bc-foreground) !important;
+  border-left-color: var(--bc-foreground);
+  font-weight: 500;
+}
+
+/* Page header: mono eyebrow after a lime square, a 600-weight title, a muted
+   lead. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--bc-muted-foreground) !important;
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  background: var(--bc-signal);
+}
+#page-title {
+  color: var(--bc-foreground);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+#header .prose p {
+  color: var(--bc-muted-foreground);
+}
+
+/* Prose: ink links with a lime underline; inline code on a muted chip. */
+.mdx-content a.link {
+  color: var(--bc-foreground);
+  font-weight: 500;
+  border-bottom: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--bc-signal);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.mdx-content a.link:hover {
+  text-decoration-color: var(--bc-foreground);
+}
+.mdx-content :not(pre) > code {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  padding: 1px 6px;
+  border: 1px solid var(--bc-border);
+  border-radius: 4px;
+  background: var(--bc-muted);
+  color: var(--bc-foreground);
+  font-size: 0.875em;
+}
+.mdx-content :not(pre) > code::before,
+.mdx-content :not(pre) > code::after {
+  content: none;
+}
+
+/* Cards: hairline, 8px radius, no shadow; the icon sits in a tile. */
+.card {
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  background: var(--bc-background) !important;
+}
+/* Sequoia's card hover border is a layered !important rule on the primary
+   color, so cards get their own primary: the neutral active border. */
+.card {
+  --primary: 161 161 170;
+  --primary-light: 82 82 91;
+}
+.card:hover {
+  background: var(--bc-hover) !important;
+}
+.card [data-component-part="card-icon"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--bc-border);
+  border-radius: 4px;
+  background: var(--bc-sidebar);
+  color: var(--bc-foreground);
+}
+.card [data-component-part="card-icon"] svg {
+  background-color: var(--bc-foreground) !important;
+}
+.card [data-component-part="card-title"] {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Code blocks: one hairline frame, the header on the sidebar color, the code
+   on the page color. */
+.code-block,
+.code-group {
+  padding: 0 !important;
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  background: var(--bc-background) !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+.code-block [data-component-part="code-block-header"],
+.code-group [data-component-part="code-group-tab-bar"] {
+  border-radius: 7px 7px 0 0 !important;
+  background: var(--bc-sidebar) !important;
+  border-bottom: 1px solid var(--bc-border);
+  color: var(--bc-muted-foreground);
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+}
+html .code-block [data-component-part="code-block-root"],
+html.dark .code-block [data-component-part="code-block-root"],
+.code-block [data-component-part="scroll-area-viewport"] {
+  border-radius: 0 0 7px 7px !important;
+  background: var(--bc-background) !important;
+}
+
+.code-block:not([data-has-header]) [data-component-part="code-block-root"],
+.code-block:not([data-has-header]) [data-component-part="scroll-area-viewport"] {
+  border-radius: 7px !important;
+}
+.code-block [data-fade-overlay] {
+  display: none !important;
+}
+
+/* Tabs: ink label and underline for the open tab, muted for the rest. */
+.tabs [data-component-part="tabs-list"] {
+  border-color: var(--bc-border) !important;
+}
+.tabs [data-component-part="tab-button"] {
+  color: var(--bc-muted-foreground) !important;
+  font-weight: 500;
+}
+.tabs [data-component-part="tab-button"].border-current {
+  color: var(--bc-foreground) !important;
+  border-bottom: 2px solid var(--bc-foreground) !important;
+}
+
+/* Callouts: neutral by default, lime for tips, amber for warnings, red for
+   danger. */
+.callout {
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  background: var(--bc-sidebar) !important;
+  color: var(--bc-foreground);
+}
+.callout[data-callout-type="tip"],
+.callout[data-callout-type="check"] {
+  border-color: var(--bc-tip-border) !important;
+  background: var(--bc-tip-surface) !important;
+}
+.callout[data-callout-type="warning"] {
+  border-color: var(--bc-warn-border) !important;
+  background: var(--bc-warn-surface) !important;
+}
+.callout[data-callout-type="danger"] {
+  border-color: var(--bc-danger-border) !important;
+  background: var(--bc-danger-surface) !important;
+}
+.callout * {
+  color: inherit;
+}
+
+/* Steps: monospace digits in a 4px square on a hairline rail. */
+[data-component-part="step-indicator"] {
+  border: 1px solid var(--bc-border-active);
+  border-radius: 4px !important;
+  background: var(--bc-background) !important;
+  color: var(--bc-foreground) !important;
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+}
+[data-component-part="step-line"] {
+  background: var(--bc-border) !important;
+}
+[data-component-part="step-title"] {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Headings: 600 weight, tightened. */
+.mdx-content h2 {
+  color: var(--bc-foreground);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.mdx-content h3 {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Tables: a hairline frame and a muted header row. */
+.mdx-content table {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.mdx-content table th,
+.mdx-content table td {
+  min-width: 0 !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+.mdx-content table th {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  line-height: 20px;
+  vertical-align: middle;
+}
+.mdx-content table td {
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+/* Round the corner cells too: Safari does not clip cell backgrounds to a
+   rounded table. */
+.mdx-content table tr:first-child > :first-child {
+  border-top-left-radius: 7px;
+}
+.mdx-content table tr:first-child > :last-child {
+  border-top-right-radius: 7px;
+}
+.mdx-content table tbody tr:last-child > :first-child {
+  border-bottom-left-radius: 7px;
+}
+.mdx-content table tbody tr:last-child > :last-child {
+  border-bottom-right-radius: 7px;
+}
+.mdx-content table tr:last-child td {
+  border-bottom: 0 !important;
+}
+.mdx-content table th {
+  background: var(--bc-sidebar);
+  color: var(--bc-muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+}
+.mdx-content table td,
+.mdx-content table th {
+  border-bottom: 1px solid var(--bc-border) !important;
+}
+.mdx-content table tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+/* Page end: hairline pager cards and footer. */
+#pagination a {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  background: transparent !important;
+}
+#pagination a:hover {
+  border-color: var(--bc-border-active);
+}
+#footer {
+  border-color: var(--bc-border);
+}
+
+/* Banner: lime with ink text, as in the design. Sequoia forces the banner's
+   text white with a layered !important color, so the ink is painted with
+   -webkit-text-fill-color instead. */
+#banner {
+  background: var(--bc-signal) !important;
+}
+#banner * {
+  -webkit-text-fill-color: var(--bc-signal-foreground);
+  text-decoration-color: var(--bc-signal-foreground) !important;
+}
+#banner a {
+  text-underline-offset: 3px;
+}
+#banner button svg,
+#banner button svg * {
+  stroke: var(--bc-signal-foreground);
+}
+
+/* NEW tags: lime with ink, monospace. */
+.nav-tag-pill-text {
+  background: var(--bc-signal) !important;
+  color: var(--bc-signal-foreground) !important;
+  font-family: var(--bc-font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  border-radius: 4px !important;
+}
+
+/* Banner close button: a light ink wash on the lime, not Sequoia's gray. */
+#banner button {
+  border-radius: 6px;
+}
+#banner button:hover {
+  background-color: #09090B1A !important;
+}
+#banner button:focus-visible {
+  outline: 2px solid var(--bc-signal-foreground);
+  outline-offset: 1px;
+}
+
+/* The navbar's primary button keeps full opacity on hover. */
+#navbar a[href$="/get-started/quickstart"]:hover {
+  opacity: 1 !important;
+}
+
+/* Tooltips (copy, copied): ink on light, light on dark. Sequoia draws them
+   on the primary color, which is ink here. */
+[class*="text-tooltip-foreground"] {
+  background: var(--bc-foreground) !important;
+  color: var(--bc-background) !important;
+  -webkit-text-fill-color: var(--bc-background);
+  border-color: transparent !important;
+}
+
+/* Keyboard focus: an ink ring on cards, links, and controls. */
+.card:focus-visible,
+.card:has(:focus-visible) {
+  outline: 2px solid var(--bc-foreground) !important;
+  outline-offset: 2px;
+}
+#navbar a:focus-visible,
+#navbar button:focus-visible,
+#navigation-items a:focus-visible,
+#navigation-items button:focus-visible,
+#table-of-contents-layout a:focus-visible,
+#table-of-contents-layout button:focus-visible,
+#pagination a:focus-visible,
+.mdx-content a:focus-visible {
+  outline: 2px solid var(--bc-foreground) !important;
+  outline-offset: 2px;
+  border-radius: 4px;
+}

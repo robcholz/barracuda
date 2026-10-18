@@ -1,0 +1,32 @@
+---
+title: "M5Stack TimerCamera"
+sidebarTitle: "TimerCamera"
+description: "Build, flash, and run Barracuda on the M5Stack TimerCamera, an ESP32 Board."
+---
+
+The M5Stack TimerCamera is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-timercam`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-timercam/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-timercam
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/m5stack-timercam/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

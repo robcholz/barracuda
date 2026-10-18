@@ -1,0 +1,94 @@
+---
+title: "体验阶梯"
+sidebarTitle: "阶梯"
+description: "Barracuda 的六个层级：从开箱即用到完全定制固件，以及每一级在文档中的起点。"
+---
+
+Barracuda 的体验就像一架阶梯。每往上一级，对使用者的要求多一点，给他们的自由却多得多。每一级都能单独发挥作用；没有人需要爬到超出项目需要的高度。在每一级，繁重的工作都由 Agent 完成。
+
+| 层级 | 名称 | 适合谁 | 做什么 | 在哪里 | Agent | 从这里开始 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 开箱即用 | 所有人 | 从浏览器安装，然后让开发板替你做事 | 浏览器、手机、设备 | 板上 Agent 编写并运行 VM 脚本 | [设备门户](/zh/use/device-portal) |
+| 2 | 配置 | 创客、教育者 | 选择要放进固件的插件，构建并烧录 | 开发者的电脑 | —（是配置，不是生成） | [开发板 profile（配置档）](/zh/boards/profiles) |
+| 3 | 构建应用 | 应用开发者 | 描述一个应用，生成它的逻辑和 UI，然后烧录 | Live Editor（浏览器） | 浏览器里的 Agent | [设备 UI](/zh/architecture/device-ui) |
+| 4 | 创建插件 | 插件开发者 | 为运行时添加新能力 | 开发者的电脑 | 编程 Agent + `create-plugin` skill | [编写插件](/zh/develop/write-a-plugin) |
+| 5 | 添加开发板和平台 | 贡献者、开发板厂商 | 把 Barracuda 带到新的开发板或新的芯片系列 | 开发者的电脑 | 编程 Agent + `create-board`、`create-platform` skill | [开发板](/zh/boards/overview) |
+| 6 | 完全定制 | 构建者 | 选择或创建平台和开发板，精简或创建插件，让固件适配资源预算 | 开发者的电脑 | 编程 Agent + `fully-customize` skill | [定制固件](/zh/develop/custom-firmware) |
+
+## 第 1 级：开箱即用
+
+**相关文档：**[设备门户](/zh/use/device-portal) · [消息通道](/zh/use/channels) · [脚本](/zh/use/scripts) · [自动化](/zh/use/automations)
+
+**目标**：几分钟内得到一台能工作、能对话、能动手的设备，无需任何工具链。
+
+1. 打开 Web Installer，选择开发板和版本，插上 USB，开始安装。每块开发板都有一个默认固件，带有一组默认插件。
+2. 在同一页面连接 Wi-Fi；安装程序随后会跳转到设备门户。
+3. 注册一个模型并绑定一个消息通道（微信、Telegram、QQ、iMessage、网页聊天或终端）。
+4. 让开发板做一件实际操作硬件的事：“让 LED 每秒闪两次”“在屏幕上显示温度”“光线变暗时告诉我”。
+
+板上 Agent 的回应方式是编写一段简短的 VM 脚本，并立即在真实硬件上运行。脚本、它的输出和结果都会显示在对话中。需要长期运行的行为由 Workflow 自动化和定时任务维持，所以聊天结束后设备仍会继续工作。
+
+**背后的支撑**：Web Installer、设备门户、板上 Agent、VM 及其外设包、消息通道、Workflow。
+
+## 第 2 级：配置
+
+**相关文档：**[开发板 profile](/zh/boards/profiles) · [构建与运行](/zh/get-started/build-and-run) · [CLI](/zh/reference/cli)
+
+**目标**：通过选择插件让设备适合项目，无需编写代码。
+
+插件会被编译进固件，所以插件集合要在开发者的电脑上选定。选择开发板，挑出项目需要的插件（摄像头、显示屏、LED 灯带、传感器、网页搜索、某个消息通道），去掉其余的，然后构建并烧录。有三种选择方式：
+
+- 一条交互式命令，列出可供挑选的插件；
+- 一个列出已启用插件的配置文件，适合纳入版本控制的项目；
+- 开发者的编程 Agent，它会根据你描述的需求挑选插件并构建固件。
+
+没有选入的插件不占用任何内存、Flash 或任务。在设备上，每个插件都会在设备门户中带来自己的页面，所以每项能力都自带设置。
+
+**背后的支撑**：插件声明、主机构建、每个插件的门户页面。
+
+## 第 3 级：构建应用
+
+**相关文档：**[设备 UI](/zh/architecture/device-ui) · [应用格式](/zh/plugins/app-manager/app-format) · [应用 API](/zh/plugins/app-manager/app-api) · [PocketJS](/zh/plugins/app-manager/pocketjs)
+
+**目标**：一个带有自己 UI 的真正设备应用，无需搭建固件项目。
+
+开发者在 Live Editor 中描述应用。浏览器里的 Agent 生成应用逻辑和界面，开发者通过可视化方式预览和迭代，然后在同一页面通过 USB 把它烧录到开发板。应用在设备上由 App Manager 插件管理，它与运行时的其他部分一起安装、启动、停止和更新应用。
+
+**背后的支撑**：Live Editor、浏览器里的 Agent、App Manager 插件、应用运行时、浏览器烧录。
+
+## 第 4 级：创建插件
+
+**相关文档：**[编写插件](/zh/develop/write-a-plugin) · [Plugin API](/zh/architecture/plugin-api) · [全部插件](/zh/plugins/overview)
+
+**目标**：为 Barracuda 添加一项任何设备都能使用的新能力。
+
+开发者克隆仓库，然后让自己的编程 Agent（Claude Code、Cursor 或 Codex）创建一个插件。`create-plugin` skill 会把 Barracuda 的架构告诉 Agent：什么时候应该暴露类型化能力、Workflow Action 或 Event，或者 Agent Tool；生命周期和任务归属如何运作；插件如何为自己编写文档；以及要写哪些聚焦的测试。最终得到的插件和所有第一方插件一个样。
+
+**背后的支撑**：插件契约、`plugin.toml`、对 Agent 友好的 API 约定、`create-plugin` skill、每个插件的文档。
+
+## 第 5 级：添加开发板和平台
+
+**相关文档：**[开发板](/zh/boards/overview) · [外设](/zh/boards/peripherals) · [平台架构](/zh/architecture/platform-architecture)
+
+**目标**：把 Barracuda 带到新硬件上。
+
+- **新开发板**如果使用已支持的芯片，就只是一份描述：芯片、工具链目标、Flash 布局和外设。`create-board` skill 会生成这份描述及其布局，开发板随后就会出现在 Web Installer 中。
+- **新平台**意味着新的芯片系列：在平台契约之下实现执行器入口、网络栈、文件系统、Flash 和 HAL 适配器。`create-platform` skill 会引导 Agent 完成这份契约，同时保持 System 和所有插件不变。
+
+**背后的支撑**：开发板 YAML 和平台契约、相互独立的开发板与平台选择、`create-board` 和 `create-platform` skill。
+
+## 第 6 级：完全定制
+
+**相关文档：**[定制固件](/zh/develop/custom-firmware)
+
+**目标**：一个完全贴合某款芯片、某个资源预算和某项任务的产品固件。
+
+构建者说明目标和需求。借助 `fully-customize` skill，编程 Agent 会选择或创建平台和开发板，确定插件集合，精简对预算来说过重的插件，创建缺失的插件，并验证结果能装进设备的内存和 Flash。最终得到的固件只包含产品需要的东西。
+
+**背后的支撑**：下面的每一级（插件、开发板、平台，以及创建它们的 skill），由一个 Agent 围绕一个目标组合起来。
+
+## 在层级之间移动
+
+- 每一级都会把一样具体的东西交给下一级：板上 Agent 写的脚本可以变成应用；需要新能力的应用会变成插件；需要新硬件的插件会变成开发板。
+- 高层级的任何东西都不会破坏低层级。完全定制的固件仍然可以从浏览器安装，仍然有设备门户，它的板上 Agent 仍然会编写脚本。
+- 文档按层级组织，每位读者都可以从自己所在的位置开始。

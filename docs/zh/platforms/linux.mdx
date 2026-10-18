@@ -1,0 +1,29 @@
+---
+title: "Linux 平台"
+sidebarTitle: "Linux"
+description: "在 Linux 上运行 Barracuda，使用真实的 TUN 接口和虚拟外设。"
+---
+
+Linux 平台运行与设备平台相同的 `embassy_net::Stack`，并把它模拟的三层驱动连接到一个真实的、持久的 Linux TUN。
+
+每次开机后执行一次，配置 TUN、转发和 NAT：
+
+```sh
+sudo sh platforms/linux/provision.sh barracuda0
+```
+
+之后应用无需 root 权限即可打开 `barracuda0`。
+
+```sh
+cargo board select local-linux
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+```
+
+`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址。`local-linux` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器；管理器负责驱动输入电平、挂接 I2C 设备和注入故障。参见 [`platforms/virtual-io`](/zh/platforms/virtual-io)。
+
+这个终端负责运行 System 并显示它的日志。在另一个终端中启动 `cargo cli`，即可连接外部终端消息通道。
+
+- 操作系统一侧的对端：`10.42.0.1/30`
+- Embassy Net 协议栈：`10.42.0.2/30`，设备的服务在此监听
+
+平台、System、Core 和插件的日志以 `info` 级别写入标准错误。如需为某次构建选择其他级别，可以这样做：`BARRACUDA_LOG_LEVEL=debug cargo run`。

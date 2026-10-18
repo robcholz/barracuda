@@ -1,0 +1,17 @@
+---
+title: "mbedTLS 使用的 C 库"
+sidebarTitle: "C 运行时"
+description: "了解 Barracuda 在裸机目标上为 mbedTLS 编译了哪些 C 库函数，以及它们的来源。"
+---
+
+mbedTLS 会调用少数几个 C 库函数。Barracuda 在裸机目标上不链接任何 C 库，因此 `build.rs` 只在这些目标上把以下文件编译进 `libtls_c_runtime.a`。`weak.h` 最先被包含，它使每个函数都成为弱符号：目标已经链接的定义（芯片 ROM、分配器的 `calloc`/`free`、无线库的 `printf`）优先，这些文件只填补缺失的部分。主机目标使用其系统 C 库，不编译这里的任何内容。
+
+| 文件 | 来源 | 修改 |
+| --- | --- | --- |
+| `musl/memchr.c`、`musl/strchr.c`、`musl/strchrnul.c`、`musl/strcmp.c`、`musl/strstr.c` | [musl](https://musl.libc.org/) 1.2.5 `src/string` | 无 |
+| `musl/vfprintf.c` | musl 1.2.5 `src/stdio`，采用 `plugins/vm/crates/lua/c/musl` 中已经精简过的版本 | 变为基于缓冲区的 `vsnprintf` 和 `snprintf`；没有浮点转换（mbedTLS 不格式化任何浮点数，因此 `%e`、`%f`、`%g` 和 `%a` 会被拒绝）；一个私有的 `strnlen` |
+| `musl/stdio_impl.h` | musl `src/internal` | 重写：只保留 `vsnprintf` 用到的 `FILE` 部分 |
+| `musl/COPYRIGHT` | musl | musl 的许可证（MIT） |
+| `include/*.h` | — | Barracuda 自己的：只声明这些文件和 mbedTLS 用到的内容 |
+| `runtime.c` | — | Barracuda 自己的：基于 Rust（`src/c_runtime.rs`）实现的 `calloc`、`free`、`printf` 和 `puts` |
+| `weak.h` | — | Barracuda 自己的：弱定义；去掉 musl 的可见性和别名标记 |

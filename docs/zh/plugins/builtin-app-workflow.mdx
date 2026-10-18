@@ -1,0 +1,43 @@
+---
+title: "Builtin App Workflow 插件"
+sidebarTitle: "Builtin App Workflow"
+description: "用内置的工作流应用查看已加载的 Workflow，并逐个开启或关闭。"
+---
+
+提供工作流应用，这是一个系统应用，列出已加载的 Workflow、各自由什么触发，并为每个 Workflow 提供一个开关。
+
+- 插件 ID：`builtin-app-workflow`
+- 依赖：`app-manager`、`workflow`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `AppManager`，来自 `workflow` 的
+  `WorkflowService`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`workflows`，仅供本应用使用
+- Web：无
+- 任务：无；由 `app-manager` 的任务响应该 Lua 包
+- 存储：应用在 `/resources/app` 中的容器
+
+本应用是内置应用，参见 `app-manager` 插件的
+[App Manager](/zh/plugins/app-manager)。每个开关都调用 `WorkflowService::set_enabled`，所以关闭的 Workflow 在重启后仍保持关闭。
+
+## Lua API
+
+~~~lua
+local workflows = require("workflows")
+
+workflows.list()                  -- { { id, event, trigger, enabled }, ... }; trigger is a display label
+workflows.set_enabled(id, enabled) -- enabled, or nil and a message
+~~~
+
+`event` 是 Workflow 的 Event 规则，`trigger` 用文字描述它。没有任何 Event 触发的 Workflow，其 `enabled` 为 false。
+
+## 构建
+
+`resources/app/` 存放应用的源码；`app` 任务用 `app-manager` 的 `resources/build-app.ts` 把它们构建到 `filesystem/resources/app/`。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-workflow
+```

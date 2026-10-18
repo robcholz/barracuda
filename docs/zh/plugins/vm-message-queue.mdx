@@ -1,0 +1,31 @@
+---
+title: "Message Queue 插件"
+sidebarTitle: "Message Queue"
+description: "用 `message_queue` Lua 包在相互独立的 Lua 执行之间传递消息。"
+---
+
+安装只能 require 的 `message_queue` Lua 包：一组有界的共享 FIFO 队列，相互独立的 Lua 执行用它们交换消息。
+
+- 插件 ID：`message-queue`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`message_queue`
+- Web：无
+- 任务：无
+- 存储：无
+
+这个 VM Lua 包插件为每次 Lua 执行注册只能 require 的 `message_queue` 包。它的 Lua 包拥有一个共享的队列映射，所以相互独立的 Lua 执行可以通过同一个键交换二进制安全的消息，而无需任何 VM 专用的消息队列行为。
+
+Lua API：
+
+- `message_queue.push(key, message)` 异步等待队列有空余容量。
+- `message_queue.receive(key) -> message` 异步等待下一条 FIFO 消息。
+
+这个 Lua 包支持多个生产者和消费者。每个键都有一个独立的 FIFO，深度为 8。映射最多接受 16 个键，键最长 64 个 UTF-8 字节，消息最长 4096 字节。这些固定的限制约束了排队占用的内存，并防止容量增长；队列满时会施加异步背压，直到某个消费者腾出一个位置。
+
+丢弃本插件保留的 VM 注册会撤销现有 Lua 状态中的回调。之后的新调用会返回 Lua 运行时错误，同时撤销会主动取消并唤醒所有正在某个队列上等待的 push 或 receive。

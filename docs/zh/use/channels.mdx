@@ -1,0 +1,37 @@
+---
+title: "消息通道"
+description: "通过网页聊天、终端、微信、QQ、Telegram、iMessage 和 Inkbox 访问板上 Agent。"
+---
+
+每个消息通道访问的都是同一个 Agent，共享同样的会话。每个消息通道都是一个插件，所以固件只需带上它需要的消息通道。
+
+| 消息通道 | 插件 | 如何连接 |
+| --- | --- | --- |
+| 网页聊天 | [`imessage-web`](/zh/plugins/imessage-web) | 在[设备门户](/zh/use/device-portal)中打开 **Web 聊天** |
+| 终端 | `cargo cli` | 运行 `cargo cli`，选择 Local 或 Remote |
+| 微信 | [`imessage-wechat`](/zh/plugins/imessage-wechat) | 扫描其门户页面上的二维码 |
+| QQ | [`imessage-qq`](/zh/plugins/imessage-qq) | 扫描其门户页面上的二维码 |
+| Telegram | [`imessage-telegram`](/zh/plugins/imessage-telegram) | 在其门户页面上输入你的 bot token |
+| iMessage | [`imessage-bluebubble`](/zh/plugins/imessage-bluebubble) | 在其门户页面上连接你的 BlueBubbles 服务器 |
+| Inkbox | [`imessage-inkbox`](/zh/plugins/imessage-inkbox) | 在其门户页面上输入 Inkbox API key，或注册一个账号 |
+
+任何消息通道能回复之前，都需要先在 **模型配置**页面注册一个模型。
+
+## 所有者
+
+消息通道只回复它的所有者。要成为所有者，把门户页面上显示的六位配对码发送给该消息通道。配对码十分钟内有效；点击 **New code** 会生成新的配对码替换它。
+
+## 会话
+
+每个消息通道都用同样的文本命令管理会话：
+
+| 命令 | 做什么 |
+| --- | --- |
+| `/sessions` | 列出已保存的会话，最新的在前 |
+| `/new` | 开始一个新会话 |
+| `/new temp` | 开始一个不保存的临时会话 |
+| `/switch N` | 切换到会话 `N` |
+| `/rename N title` | 重命名会话 `N` |
+| `/delete N` | 请求删除会话 `N`；`/delete N confirm` 才会真正删除 |
+
+网页聊天会以列表形式显示同样的会话。

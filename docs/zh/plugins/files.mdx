@@ -1,0 +1,54 @@
+---
+title: "Files 插件"
+sidebarTitle: "Files"
+description: "浏览、上传和管理工作区文件，并以只读方式查看每个插件的私有文件。"
+---
+
+浏览工作区文件，并以只读方式显示每个插件的私有文件。
+
+- 插件 ID：`files`
+- 依赖：`webserver`、`captive-portal`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `webserver` 的 `WebServer`，来自 `captive-portal` 的
+  `CaptivePortal`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：门户入口 `files`；`GET /api/files/list/<path>`、
+  `GET /api/files/raw/<path>`、`PUT /api/files/upload/<path>`、
+  `POST /api/files/mkdir`、`POST /api/files/rename`、`POST /api/files/delete`
+- 任务：无
+- 存储：没有 KV 键，自己的 `/data` 下也没有任何内容；读取并修改
+  `/workspace/...`，读取 `/plugins/{data,cache,media,resources}/<id>`，并提供它自带的 `/resources/entry.js`、`/resources/figure.js`、
+  `/resources/icon.svg`
+
+Files 插件是门户的文件浏览器。它在“设备”分组中、Wi-Fi 之后注册“文件”入口，配上文件柜插图，并注册页面所用的 `/api/files` 路由。它声明 `PluginFilesystem::Inspect`：它的视图包含工作区，以及在 `/plugins` 下以只读方式挂载的每个插件的私有目录树（`/plugins/{data,cache,media,resources}/<id>`）。它不保存自己的状态：没有 KV 记录，自己的 `/data` 下也没有任何内容。
+
+## 路由
+
+路径是视图中的真实路径，只能位于 `/workspace` 或 `/plugins` 之下。在 URL 中，它们在路由前缀之后经过百分号编码；在 JSON 请求体中则是普通字符串。每个路径段都会被解码并检查：空名称、`.`、`..`、反斜杠、控制字符或无效的 UTF-8 都会以 400 拒绝，其他任何根路径也一样，所以插件自己的命名空间和 System 目录树都无法访问。
+
+| 路由 | 响应 |
+| --- | --- |
+| `GET /api/files/list/<path>` | `{"entries":[{"name","type":"dir"\|"file","size"}],"truncated"}`，目录在前，最多 256 项 |
+| `GET /api/files/raw/<path>` | 文件的字节，以流式传输 |
+| `PUT /api/files/upload/<path>` | `201` 和新条目；请求体以流式写入文件 |
+| `POST /api/files/mkdir` `{"path"}` | `201`；父目录必须存在 |
+| `POST /api/files/rename` `{"from","to"}` | `204`；两者必须在同一目录中 |
+| `POST /api/files/delete` `{"path"}` | `204`；一个文件或一个空目录 |
+
+上传、新建目录或重命名时，如果目标名称已存在，会返回 409；浏览器从不覆盖文件。上传通过 `WebServer::serve_upload` 以流式写入目标旁边的 `.<name>.part`，在声明的长度全部到达后才重命名到位；提前结束的请求体返回 400，并删除不完整的文件。
+
+哪些目录树可以修改由视图决定，而不是由路由决定：在 `/plugins` 或 `/workspace/resources` 下的修改会在文件层以 `ReadOnly` 失败，并返回 403 `{"error":"read_only"}`。其他拒绝返回 `{"error":<code>}`：路径不存在时为 404；名称已存在、目录非空或类型不对时为 409；请求进行中存储卡被拔出时为 503。
+
+`raw` 在门户的同源下提供文件，所以它只标注浏览器不会执行的类型：图片和音频按其类型，文本为 `text/plain`，其他一切（包括 HTML 和 SVG）都为 `application/octet-stream`。
+
+## 门户
+
+页面按插件对插件目录树分组，`/plugins/<tree>/<id>` 显示为“插件”/`<id>`/`<tree>`，并且不提供任何修改控件。不显示修改时间：VFS 元数据中没有这一项。只有在 `/workspace/removable` 下挂载了存储卡时，才会显示存储卡。目录树和窗格的样式规则随页面一起提供，在页面打开时加入：外壳的样式表受 Flash 预算限制，不包含这些规则。
+
+## 保留的注册
+
+插件在整个生命周期内保留它的门户入口和六个路由注册；卸载插件会移除页面和所有路由。

@@ -1,0 +1,55 @@
+---
+title: "Linux 主机"
+description: "在 Linux 电脑上使用虚拟外设运行 Barracuda，无需开发板。"
+---
+
+`local-linux` 开发板在 Linux 电脑上运行同一个 System，用虚拟外设代替硬件。这是试用 Barracuda 最快的方式。
+
+- 开发板 ID：`local-linux`
+- 平台：[Linux](/zh/platforms/linux)
+- Profile：[`screen`](/zh/boards/profiles)
+- Flash 布局：`boards/configs/local-linux/file-layout.yml`
+
+## 构建和运行
+
+```bash terminal
+cargo board select local-linux
+sudo sh platforms/linux/provision.sh barracuda0   # once per boot
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+```
+
+完整步骤参见[快速开始](/zh/get-started/quickstart)。
+
+## 外设
+
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 圆形显示屏（ST77916，四线 SPI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（CST816T） | — |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `power-monitor` | 电源监测器（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `vio-0` | `GPIO0` |
+| `vio-1` | `GPIO1` |
+| `vio-2` | `GPIO2` |
+| `vio-3` | `GPIO3` |
+| `vio-4` | `GPIO4` |
+| `vio-5` | `GPIO5` |
+| `vio-6` | `GPIO6` |
+| `vio-7` | `GPIO7` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("vio-0", "up")
+print(pin:read())
+```
+
+## 插件设置
+
+- [`imessage-gateway`](/zh/plugins/imessage-gateway) 的 `receive-slots` 为 `4`：为消息通道接收循环预留 4 个连接。

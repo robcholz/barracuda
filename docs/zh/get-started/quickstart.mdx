@@ -1,0 +1,77 @@
+---
+title: "快速开始"
+description: "在你的电脑上运行 Barracuda，连接一个模型，然后让 Agent 驱动一个引脚。"
+---
+
+在 Linux 或 macOS 上运行与设备相同的 System，用虚拟外设代替硬件。然后连接一个模型，与板上 Agent 对话。
+
+<Info>
+  前提条件：已安装 Rust 并克隆了仓库，参见[安装](/zh/get-started/installation)。你还需要一个兼容 OpenAI 或 Anthropic 的模型服务的 API key。
+</Info>
+
+<Steps>
+  <Step title="选择主机开发板">
+    ```bash terminal
+    cargo board select local-linux   # or local-macos
+    ```
+
+    主机开发板构建的是 `screen` profile（配置档）：包括 Agent、Lua 脚本、网页聊天、门户，以及一块虚拟圆形屏幕。
+  </Step>
+  <Step title="准备网络（仅 Linux）">
+    Linux 平台使用真实的 TUN 接口。每次开机后执行一次配置：
+
+    ```bash terminal
+    sudo sh platforms/linux/provision.sh barracuda0
+    ```
+
+    macOS 无需任何设置，也不需要 `sudo`。
+  </Step>
+  <Step title="运行 Barracuda">
+    ```bash terminal
+    BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+    ```
+
+    这个终端负责运行 System 并显示它的日志。`BARRACUDA_VIRTUAL_IO_ADDR` 是虚拟外设监听的地址；打开 [http://127.0.0.1:7878/](http://127.0.0.1:7878/) 即可查看屏幕。
+  </Step>
+  <Step title="连接模型">
+    在第二个终端中启动配置工具，选择 **Local**，然后选择模型配置（`agent`）：
+
+    ```bash terminal
+    cargo cli configure
+    ```
+
+    按提示填写：API 格式（`openai_compatible` 或 `anthropic_compatible`）、用途 `root_agent`、base URL、模型和你的 API key。key 保存在设备上。你也可以在[设备门户](/zh/use/device-portal)的 **模型配置**页面完成同样的操作。
+  </Step>
+  <Step title="与 Agent 对话">
+    打开终端消息通道并选择 **Local**：
+
+    ```bash terminal
+    cargo cli
+    ```
+
+    让它做一件实际操作硬件的事：
+
+    ```txt
+    > 把引脚 vio-0 设为高电平
+    ```
+
+    Agent 会编写一段简短的 Lua 脚本，用它的 `vm_run` 工具运行，然后回复结果。主机开发板提供虚拟引脚 `vio-0` 到 `vio-7`。
+  </Step>
+</Steps>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="脚本" icon="code" href="/zh/use/scripts">
+    Agent 如何编写 Lua 并在硬件上运行。
+  </Card>
+  <Card title="消息通道" icon="message-circle" href="/zh/use/channels">
+    通过网页聊天、微信、Telegram 等渠道访问同一个 Agent。
+  </Card>
+  <Card title="选择插件" icon="list-checks" href="/zh/boards/profiles">
+    用 profile 挑选要放进固件的内容。
+  </Card>
+  <Card title="烧录开发板" icon="cpu" href="/zh/get-started/build-and-run">
+    选择一块真实的开发板，在硬件上执行同样的步骤。
+  </Card>
+</CardGroup>

@@ -1,0 +1,75 @@
+---
+title: "欢迎使用 Barracuda"
+sidebarTitle: "欢迎"
+description: "面向嵌入式设备的 Agent 平台：一切皆插件，每一步都有 Agent 协助。"
+---
+
+Barracuda 是一个基于插件的嵌入式运行时，也是一个 Agent 平台。设备上的每项能力都是一个插件，每一步都有 Agent 协助：在设备上，它编写脚本来驱动硬件；在你的电脑上，它编写插件、开发板和固件。同一个 System 既能运行在 ESP32 和 STM32 微控制器上，也能运行在 Linux 和 macOS 上。
+
+<CardGroup cols={2}>
+  <Card title="使用设备" icon="message-circle" href="/zh/use/device-portal">
+    与板上 Agent 对话，让它驱动硬件。
+    **从设备门户开始。**
+  </Card>
+  <Card title="配置" icon="list-checks" href="/zh/boards/profiles">
+    选择固件中包含的插件，然后构建并烧录。
+    **从 `cargo board select` 开始。**
+  </Card>
+  <Card title="应用" icon="layout-grid" href="/zh/architecture/device-ui">
+    为设备屏幕构建带有自己 UI 的应用。
+    **从设备 UI 开始。**
+  </Card>
+  <Card title="插件" icon="puzzle" href="/zh/develop/write-a-plugin">
+    借助你的编程 Agent 添加一项能力。
+    **从 `create-plugin` 开始。**
+  </Card>
+</CardGroup>
+
+## 开始
+
+<CardGroup cols={2}>
+  <Card title="安装" icon="download" href="/zh/get-started/installation">
+    安装开发板所需的工具链，并克隆仓库。
+  </Card>
+  <Card title="快速开始" icon="rocket" href="/zh/get-started/quickstart">
+    几分钟内在你的电脑上运行 Barracuda 并与它对话。
+  </Card>
+</CardGroup>
+
+## 阶梯
+
+每一级都能单独发挥作用，而且每一级都比下一级给你更大的自由。文档也按同样的层级组织。
+
+| 层级 | 你做什么 | 谁来协助 | 从这里开始 |
+| --- | --- | --- | --- |
+| 01 · 使用设备 | 让开发板替你做事 | 板上 Agent 编写并运行脚本 | [设备门户](/zh/use/device-portal) |
+| 02 · 配置 | 选择固件中的插件，构建、烧录 | profile（配置档）、开发板文件或你的编程 Agent | [开发板 profile](/zh/boards/profiles) |
+| 03 · 应用 | 为设备屏幕构建应用 | 浏览器里的 Agent | [设备 UI](/zh/architecture/device-ui) |
+| 04 · 插件 | 为运行时添加一项能力 | 你的编程 Agent，配合 `create-plugin` | [编写插件](/zh/develop/write-a-plugin) |
+| 05 · 开发板与平台 | 适配新的开发板或芯片系列 | 你的编程 Agent | [开发板](/zh/boards/overview) |
+| 06 · 定制固件 | 让固件适配特定芯片和资源预算 | 你的编程 Agent | [定制固件](/zh/develop/custom-firmware) |
+
+阅读[阶梯](/zh/product/experience-ladder)，了解每一级的用途。
+
+## Barracuda 是什么？
+
+Barracuda 把 AI 放在三个位置，每个位置都对应它最擅长的工作。
+
+| | 运行位置 | 做什么 |
+| --- | --- | --- |
+| 板上 Agent | 在设备上，以 [Agent](/zh/plugins/agent) 插件的形式运行 | 编写 Lua 脚本，并立即在硬件上运行 |
+| 浏览器里的 Agent | 在浏览器中 | 生成应用及其 UI |
+| 编程 Agent | 你的电脑：Claude Code、Cursor、Codex | 创建插件、开发板、平台和定制固件 |
+
+底层分为四层。读懂这四层，你就能读懂整个仓库。
+
+| 层 | 负责 | 目录 |
+| --- | --- | --- |
+| 开发板 | 芯片、工具链目标、Flash 布局、外设和插件 profile | `boards/` |
+| 平台 | 执行器入口、网络栈、文件系统、Flash 和 HAL 适配器 | `platforms/` |
+| System | 按依赖顺序注册每个插件，然后启动它们 | `core/system/` |
+| 插件 | 能力、Workflow Action 与 Event、Agent Tool、门户页面、任务 | `plugins/` |
+
+<Tip>
+  没有开发板？选择 `local-linux` 或 `local-macos`。同一个 System 会在你的电脑上运行，并使用虚拟外设。参见[快速开始](/zh/get-started/quickstart)。
+</Tip>

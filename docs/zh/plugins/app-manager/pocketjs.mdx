@@ -1,0 +1,16 @@
+---
+title: "内置的 PocketJS crate"
+sidebarTitle: "内置的 PocketJS"
+description: "内置的 PocketJS crate 从哪里来，以及它们与上游有何不同。"
+---
+
+`pocketjs-core/` 和 `microts/` 复制自 [PocketJS](https://github.com/pocket-nexus/pocketjs) 的提交 `e9e417308f094ead706754164acf91436e4d05a8`：
+
+| 目录 | 上游路径 |
+| --- | --- |
+| `pocketjs-core/src` | `engine/core/src` |
+| `microts/src` | `engine/crates/microts/src` |
+
+两者都采用 MIT 许可证（每个目录下都有 `LICENSE`）。库源码未做修改，只是删除了三个测试模块，因为它们会从 PocketJS 仓库读取测试夹具：独立文件 `core/src/tests.rs` 和 `core/src/physics/tests.rs` 及其 `mod tests;` 声明，以及 `core/src/package.rs` 末尾的内联 `mod tests`。源码还用本工作区的 `rustfmt` 重新格式化过。清单文件经过改写，可以在本工作区中独立使用，并关闭了 Clippy 的风格类 lint。
+
+更新时，从较新的提交复制同样的路径，再重新执行这三处删除。不要把 Barracuda 专用的代码放进这些目录；它们应该放在 `barracuda-ui-runtime` 中。

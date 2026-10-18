@@ -1,0 +1,263 @@
+---
+title: "门户 UI 工具包"
+sidebarTitle: "门户 UI 工具包"
+description: "用共享 UI 工具包的构建时辅助函数构建门户页面。"
+---
+
+供门户页面使用的构建时辅助函数。贡献者从它的
+`resources/web/entry.ts` 导入工具包；`tools/web/build.ts` 把用到的部分打包进该插件自己的 `filesystem/resources/entry.js`。外壳在运行时从不加载工具包，贡献者之间在运行时也从不共享代码。
+
+```ts
+import {
+  definePage,
+  header,
+  settingsForm,
+} from "../../../captive-portal/resources/web/ui";
+```
+
+工具包绘制设计系统的标记（来自外壳唯一样式表的 `.bc-*` 类）；页面不添加自己的样式表，除非它需要设计系统没有的东西，并且要在清理时移除。
+
+## 模块契约
+
+页面导出 `mount(root, context)`；外壳为每次挂载提供独立的 `root`
+和一个 `PortalContext`：
+
+| 成员              | 含义                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `signal`          | 在导航、切换语言和卸载时被中止：把它传给 `fetch` 和监听器                                  |
+| `lang`            | `"zh"` 或 `"en"`；用它渲染每段文字（切换语言会重新挂载页面）                               |
+| `toast(toast)`    | 外壳的提示堆栈，位于右下角：`{ kind, title, body?, code?, action? }`                       |
+| `navigate(id)`    | 跳转到另一个入口 ID，或者 `"overview"`                                                     |
+| `has(id)`         | 清单当前是否列出了该 ID 的入口；只有在列出时才提供通往另一个插件页面的途径                 |
+| `status(id?)`     | 入口最新的 `GET /portal/status` 记录（默认为本页面自己的入口），或者 `null`                |
+| `refreshStatus()` | 重新读取状态，并重绘侧栏和概览；在保存成功后调用                                           |
+| `badge?(badge)`   | 在顶栏显示页面的实时状态（`{ label, tone: "live" \| "lost" }`），或用 `null` 清除；用于 Web 聊天的连接状态 |
+
+`mount` 可以返回一个清理函数（或一个解析为清理函数的 promise）。信号中止后，`toast`、`navigate`、`refreshStatus` 和 `badge` 不再做任何事。
+
+只有在插件启用时，它的入口才会被列出，而且页面不依赖任何其他插件的页面。在提供跳转到另一个入口的途径（提示中的操作、按钮）之前，先询问 `context.has(id)`，返回 `false` 时就不要提供；
+`navigate` 到不存在的入口会显示外壳的“\<name> 插件已停用”状态。类型：`PortalModule`、
+`PortalContext`、`PageBadge`、`Toast`、`Lang`、`PortalText`、`EntryStatus`、`EntryState`（都由工具包导出）。
+
+设备同时只服务四个连接，并拒绝其余连接，所以外壳把窗口的 `fetch` 路由到一个队列中（同时进行两个请求），并重试被拒绝的 `GET`。页面直接使用普通的 `fetch`；`assetIcon` 也通过同一个队列获取它的文件。
+
+`EntryStatus` 是 `{ state, label?, detail? }`：`state` 为 `"ready"`、`"attention"`
+或 `"off"`，`label` 是一个 `{ zh, en }` 短语（“已配置”），`detail` 是外壳以等宽字体显示的机器值（网络名称）。每个会保存的页面都在设备接受后调用一次
+`void context.refreshStatus()`，这样侧栏、顶栏徽标和“开始使用”步骤无需重新加载就会随之更新。
+
+## 导出
+
+文字和 DOM（`dom.ts`）
+
+- `Text` 是 `string | { zh, en }`；`pick(text, lang)` 返回对应的字符串。
+- `h(tag, props, ...children)` 构建一个元素：支持 `class`、`on<event>` 监听器和布尔属性；字符串子节点是文本，从不作为标记解析。
+- `icon(ICON_*, size?, className?)`：一个 Lucide 图标（`ICON_EYE`、`ICON_REFRESH`、`ICON_PLUS`、
+  `ICON_WIFI`、`ICON_COPY`、`ICON_EXTERNAL_LINK`、`ICON_MAIL`、`ICON_KEY_ROUND`……来自
+  `icons.ts`），默认 16px，手机列表行中为 18px；`className` 用来添加类，例如文字颜色（`bc-muted`、`bc-warning`）。
+- `mark(MARK_*, size?)`：来自 `marks.ts` 的设计标记——`MARK_BARE`、`MARK_TILE`
+  （聊天头像），或者页面保存在自己源码中的品牌标记。
+- `assetIcon(url, size?)`：一个图标文件；`.svg` 以 `currentColor` 遮罩绘制，其他格式按图片显示。页面自己的图标用 `new URL("./icon.svg", import.meta.url).href`。
+- `twoDigits(n)`：计数和步骤编号（`04`）。
+
+布局（`layout.ts`）
+
+- `definePage(render)`：一个 `mount`，把 `render(context)` 渲染一次到根节点中，并在清理时清空。
+- `page(...children)`：页面栏（`.bc-page`）。
+- `header({ title, lead, icon?, extra?, figure?, figureLabel?, figureWidth?, scan? }, lang)`：
+  页头框架。`figure` 是一个 `<hl-figure>` 名称：`riffle`（内置）或页面自己的入口 ID，外壳会加载该入口清单中的 `figure` 模块。`scan`
+  启动路由器的扫描效果（之后也可以用 `setAttribute("scan", "true")` 设置）。
+- `kv(rows, lang, { live?, mono? })`：一个 `.bc-kv` 表格（键宽 96px）；`live` 让它成为一个礼貌型状态区域。
+- `term(label, tip, lang, { start? })`：带点状下划线的旁注（“明文”、“名额”）。
+- `entryStatus(context)`：当前打开入口的“状态”徽标，来自 `/portal/status`（“已配置”/“未配置”），形式为
+  `{ slot, refresh }`，用于只写表单页头的 `kv`；保存后调用 `refresh`。
+- `badge(label, lang, { signal? })`、`button(label, lang, { variant, size, icon, type, onClick })`、
+  `frame(...children)`、`row(title, hint, lang, ...children)`（标签在左的一行；提示中的 `backticks` 标记机器值，以等宽字体显示：“在 `@BotFather` 发送 `/newbot` 获得 Token”）。
+- `monoParts(text)`：同样的反引号拆分，用于任何混合了文字和机器值的行。
+
+设置表单（`settings.ts`）
+
+- `settingsForm(options, context)` 返回 `{ element, values(), setError(name, message, code?), submit(), footer }`。
+  - `options.rows`：`{ title, hint?, link?, fields, blocks? }[]`，每项是标签在左的一行；
+    `link: { label, href }` 是提示下方的外部链接（“打开 @BotFather”，在新标签页打开）；
+    `blocks` 是行主体中位于字段之后的节点（一个 `resultCard`、一个 `qrLink`）。
+  - `options.advanced`：`{ hint?, fields, open?, columns?, onToggle? }`，即“高级”折叠区
+    （提示默认为“已填入默认值”）；其中某个字段无效时，它会自动展开。
+    `onToggle(open)` 在它展开或收起时运行（微信只在它展开时显示页脚）。
+  - `options.endpoint`：POST 目标。它从不显示：页脚只包含
+    “清空”（恢复默认值）和提交按钮。
+  - `options.submit`：按钮标签，一个说明结果的动词。
+  - `options.body(values)`：决定 JSON 请求体的形状（默认：值对象；
+    当接口接受批量时把它包起来，例如 `(v) => [v]`）。
+  - `options.success`：覆盖成功提示（`title`、`body`、`action`）。
+  - `options.onSuccess(values)`：在 2xx 之后运行。
+  - `options.onError(error)`：在非 2xx 时、显示提示之前，以设备的 `DeviceError`
+    （`{ status, error, message?, code? }`，见下文）运行；返回
+    `{ title?, body? }` 可以替换提示的内容，通常是 `{ body: error.message }`；并调用 `setError` 把上游的拒绝显示在对应字段上。
+  - `setError(name, message, code?)`：标记一个字段；消息说明该怎么做，并以句号结尾，`code` 以等宽字体跟在后面（“检查 App ID 和 App Secret。· `10004`”）。`footer` 是页脚元素，供只在某些状态下显示页脚的页面使用（用 `style.display = "none"` 隐藏它）。
+- 字段，都带有 `name`、`label`，以及可选的 `hint` 和 `optional`：
+  - `{ kind: "text" | "url", value?, placeholder?, mono? }`——会去除首尾空白；`url` 必须是 http(s)；
+  - `{ kind: "secret", placeholder? }`——带“显示”/“隐藏”的密码输入框，从不预填，
+    在设备接受后以及页面离开时清空；
+  - `{ kind: "number", value?, unit?, min? = 0, max? = 4294967295 }`——整数，单位显示在附加框中；
+  - `{ kind: "switch", value? }`——一个开关行，以布尔值发送；
+  - `{ kind: "radio", options: { value, label, hint?, icon? }[], value?, columns? = 2 }`——
+    单选卡片；`icon` 是用于 40px 图块的 `ICON_*` 或 `MARK_*` 字符串。
+  - 文本、URL 和密钥字段接受 `action: Node`，即输入框所在行中位于其后（以及“显示”/“隐藏”之后）的一个按钮，例如“验证”或“测试连接”。
+- 校验在提交时运行：无效字段会显示红色边框，并在下方显示一条消息
+  （“请填写 Bot Token。”），焦点移到第一个无效字段，并且不发送任何内容。输入会清除该字段的消息。空的可选字段会被省略。
+- `submitJson(context, { endpoint, body, method?, timeoutMs?, success?, retry?, onError? })`
+  以 JSON 发送 POST（`redirect: "error"`、`cache: "no-store"`、15 秒超时，随页面一起中止），并以提示显示结果：2xx 为“设备已接受配置”；404 为“接口不可用”；
+  其他 4xx 为“配置被拒绝”；5xx 为“提交失败”（状态码以等宽字体显示）；没有回复时为
+  “未收到设备确认”，提供了 `retry` 时还带“重试”（没有免责说明行）。
+  它 resolve 为 `"accepted" | "rejected" | "failed" | "aborted"`；页面离开后不再显示任何提示。`settingsForm` 使用它，并且同一时间只允许一个请求。
+- `fieldControl(field, lang)`：单独的一个字段，供自行布局控件的页面使用。
+- `fitColumns(count, min, gap)`（`grid.ts`）：一个 `grid-template-columns` 值，包含
+  `count` 个等宽列；当某列会窄于 `min` px 时，减少列数，最后变为一列；不使用媒体查询，所以可以内联使用。单选卡片（180px）和多列“高级”折叠区（160px）使用它，所以在手机上会堆叠排列。
+- `KIT_STRINGS[lang]`：工具包自己的文案，供想使用相同措辞的自定义页面使用。
+
+设备调用（`device.ts`），用于超出单次 POST 的流程（二维码登录、注册验证码）
+
+- `callDevice<T>(context, endpoint, { method? = "GET", body?, timeoutMs? = 15 s })`
+  在给出 `body` 时发送 JSON（`redirect: "error"`、`cache: "no-store"`，随页面一起中止），并 resolve 为 `{ kind: "ok", status, data }`（解析后的 JSON，204 时为 `null`）、
+  `{ kind: "error", error: DeviceError }`、`{ kind: "offline" }`（没有回复）或
+  `{ kind: "aborted" }`（不报告任何内容）。它从不显示提示。
+- `DeviceError` 是 `{ status, error, message?, code?, retry? }`，由 `deviceError(response)` 从设备的
+  `{"error", "message"?, "code"?, "retry"?}` 响应体中读取；`message`
+  和 `code` 是上游服务自己的措辞。数字类型的 `code` 会变成字符串。
+  `retry: true` 表示设备保留了已有的内容，同样的请求可以继续它。
+- `toastDeviceError(context, result, retry?)` 用工具包的措辞以提示显示 `error` 或 `offline` 结果：“配置被拒绝”（4xx）、“接口不可用”（404）、“提交失败”（5xx），状态码（以及上游代码）以等宽字体显示，`message` 作为正文；没有任何返回时为“未收到设备确认”，并带“重试”。带 `retry: true` 的错误在给出
+  `retry` 时也会带“重试”。
+
+块（`blocks.ts`）：设计中的表单块，用于行的 `blocks` 或任何地方
+
+- `resultCard({ title, badge?, live?, sub?, initial?, rows?, action? }, lang)`：一次检查发现的结果
+  （`role="status"`），一个只含一个 `.bc-card__body` 的 `.bc-card`：一个带 `initial` 的 40px 图块；没有 `initial` 时，在标题所在行显示一个 `success` 颜色的单独 `check`（从不加框：图块只容纳首字母），然后是标题、等宽字体的 `sub`、徽标（与首字母并列时为中性徽标：“已验证”；只有带
+  `live` 时才是信号徽标，用于实时连接，例如 BlueBubbles 的“已连接”；对于“微信已绑定”这样的普通状态则省略徽标，因为对勾和标题已经说明了），一个由 `rows` 组成的 `.bc-kv`（值以等宽字体显示，除非该行的第三项为 `false`），以及一个 `action` 节点。
+- `stepList(steps, { current, done }, lang)`：`.bc-steps`，带编号的 `radius-sm` 标记，编号以等宽字体显示（`01`）；前 `done` 个步骤（`.bc-step--done`）显示一个 `success` 颜色的对勾，`current`
+  （`aria-current="step"`，`-1` 表示没有）以 `muted` 填充。
+- `note(text, lang, { mono?, action?: { label, onClick } })`：一行较小的弱化文字，带一个等宽字体的值（同样弱化），并在一个圆点后跟一个 `button.bc-link`（“验证码已发到 `you@example.com` · 重新发送”）。
+- `qrPlate(data, px, lang, { dim? })`：放在 `.bc-qr` 底板上的二维码，底板在深色主题下也保持浅色（`data-theme="light"`）；`data: null` 是二维码加载期间的空底板；`dim`（`.bc-qr--dim`）让二维码在一个 `.bc-qr__overlay` 标签下变淡（“已扫码”、
+  “二维码已过期”）。把它放在 `.bc-card__body` 中，不要单独使用。
+- `qrLink(url, label, lang, { px? = 120 })`：一个在手机上打开的链接，形式为一个 `.bc-card`：包含它的二维码、等宽字体的 URL，以及一个在新标签页中打开它的描边按钮。
+- `copyText(text)`：复制到剪贴板；在没有 `navigator.clipboard` 的地方（普通 HTTP）退回到选区复制；resolve 为是否成功。
+
+二维码（`qr.ts`）
+
+- `encodeQr(text, mask?)`：字节模式（UTF-8），纠错级别 M，版本 1–40，选择能容纳内容的最小版本（超过 2331 字节时抛出 `RangeError`）；返回 `{ version, mask, size, modules }`，
+  其中 `modules[y * size + x]` 为 1 表示深色。掩码按标准的惩罚规则选择。
+- `qrPath(code, quiet? = 2)`：把深色模块表示为一条 SVG 路径（每段连续模块一个矩形）。
+- `qrSvg(text, px, quiet? = 2)`：它的 `<svg>`；直接放进 `.bc-qr` 底板
+  （`qrPlate`），底板在浅色背景上以 `foreground` 填充它，从不放在深色背景上。
+
+## 示例：设置页面
+
+```ts
+import {
+  definePage,
+  header,
+  page,
+  settingsForm,
+} from "../../../captive-portal/resources/web/ui";
+
+export const mount = definePage((context) => {
+  const { lang } = context;
+  // Each phrase is { zh, en }; the Chinese text is elided as "…" here.
+  const form = settingsForm(
+    {
+      endpoint: "/api/example",
+      submit: { zh: "…", en: "Save" },
+      rows: [
+        {
+          title: { zh: "…", en: "Service" },
+          hint: {
+            zh: "…",
+            en: "Create an `API Key` in the service's console",
+          },
+          fields: [{ kind: "secret", name: "api_key", label: "API Key" }],
+        },
+      ],
+      advanced: {
+        fields: [
+          {
+            kind: "url",
+            name: "api_base",
+            label: "API Base URL",
+            value: "https://api.example.com",
+          },
+          {
+            kind: "number",
+            name: "timeout_secs",
+            label: { zh: "…", en: "Timeout" },
+            value: 30,
+            unit: "s",
+          },
+        ],
+      },
+      // another plugin's page: offered only while the manifest lists it
+      success: context.has("other")
+        ? {
+            action: {
+              label: { zh: "…", en: "Take a look" },
+              run: () => context.navigate("other"),
+            },
+          }
+        : undefined,
+    },
+    context,
+  );
+  return page(
+    header(
+      {
+        title: "Example",
+        lead: {
+          zh: "…",
+          en: "Connect an external service.",
+        },
+        icon: new URL("./icon.svg", import.meta.url).href,
+        figure: "riffle",
+        figureWidth: 280,
+      },
+      lang,
+    ),
+    form.element,
+  );
+});
+```
+
+提交会把 `{"api_key": "…", "api_base": "https://api.example.com",
+"timeout_secs": 30}` 发送到 `/api/example`；204 时显示“设备已接受配置”，当清单列出 `other` 时还带有 “Take a look” 操作，并清空密钥。
+
+## 贡献者可以提供的资源
+
+`tools/web/build.ts`（插件的 `[tasks.build]`）从 `resources/web/` 构建：
+
+| 源文件                     | `filesystem/resources/` 中的输出  | 清单字段       |
+| -------------------------- | --------------------------------- | -------------- |
+| `entry.ts`（必需）         | `entry.js`                        | `module`       |
+| `figure.js` 或 `figure.ts` | `figure.js`                       | `figure`       |
+| `icon.svg` 或 `icon.png`   | 原样复制                          | `icon`         |
+
+在插件 `plugin.toml` 的 `[tasks.build] outputs` 中列出每个输出，并在它的 `inputs` 中列出
+`../captive-portal/resources/web/ui` 以及源文件。源文件被删除的输出会在下次构建时删除。
+
+- `icon.svg` 是单色标记（填充或描边使用任意一种颜色；外壳以 `currentColor` 绘制它，在侧栏和列表行中为 16px，在手机上为 18px）。
+  `icon.png` 是彩色图片（Inkbox）。
+- `figure.js` 是一个实时 Hairline 插图。它使用外壳的全局 `HL`（内核），不得导入或打包内核；构建会拒绝这样做的插图。
+  它导出设计源码传给 `hairline(...)` 的那个对象：
+
+  ```js
+  const { Cam, fit, proj, mk, register, pointer, disposer } = HL;
+  function mount({ stage, svg, read }, value) {
+    /* … */ return { destroy, set, scan };
+  }
+  export const figure = {
+    name: "router",
+    means: "…",
+    rules: [1, 3, 7, 8],
+    range: [0.5, 1.5, 3],
+    mount,
+  };
+  ```
+
+  外壳在 `<hl-figure name="<entry id>">` 第一次需要它时（概览磁贴或页头）导入它一次，按 `name`
+  （`router`、`socket`、`loupe`、`laptop`；或 `figure.view`）对应的设计框裁剪它，为它提供磁贴的悬停区域，并在元素离开页面时销毁它。减少动态效果由内核处理。

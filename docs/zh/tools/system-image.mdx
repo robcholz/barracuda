@@ -1,0 +1,23 @@
+---
+title: "System 镜像工具"
+description: "构建包含插件资源的 FATFS 或 LittleFS 镜像，并把它烧录到所选的开发板上。"
+---
+
+这个仅限主机的 crate 构建一个包含已启用插件资源的 FATFS 或 LittleFS 镜像，并把它烧录到所选开发板在运行时只读的 `resources` 区域中。
+
+```sh
+cargo board select
+cargo image build
+cargo image flash
+cargo image deploy
+```
+
+所有操作都读取 `.barracuda/selected-board`；没有任何操作接受开发板或平台参数。`build` 读取开发板的原生物理布局，并写入 `target/barracuda-system.img`。`flash` 要求完整的镜像已经存在，并且只把它写入所选开发板的原生 `resources` 区域。`deploy` 构建一个全新的镜像，然后烧录它。开发板原生的 `resources` 分区条目决定使用 `fatfs` 还是 `littlefs`：文件区域布局使用该区域的 `filesystem` 字段，ESP 布局使用它的分区子类型，链接器布局使用它的内联 `filesystem` 注解。`resources` 区域在运行时必须是只读的。
+
+共享的平台解析器发现 `platforms/*/platform.yml`，检查所选开发板的芯片和声明的工具链目标，并读取该平台的 `system-image` 驱动。因此，运行时构建和 System 镜像工具共用同一个平台目录，而无需集中式的芯片或平台注册表。
+
+布局驱动支持文件区域 YAML、ESP-IDF 分区 CSV、链接器 `MEMORY`，或者返回标准区域响应的平台本地命令。烧录驱动要么更新一个配置好的、以文件为后端的 Flash，要么执行一个不经过 shell 的命令模板，模板中带有开发板芯片、偏移、大小、布局和镜像的占位符。
+
+添加另一块使用现有平台的开发板，不需要新的 CLI 配置。新的平台在它自己的 `platform.yml` 中声明它的选择和镜像行为；自定义行为可以作为同一平台目录中的命令一起提供。
+
+`plugins/<directory>/filesystem/resources/` 下的文件按 `plugin.toml` 中的稳定 ID 收集，并成为所选文件系统镜像中的 `/plugins/<id>/`。System 把镜像挂载到 `/resources`，Plugin Manager 把全局的 `/resources/plugins/<id>/` 映射为该插件逻辑上的 `/resources/`。`plugins/<directory>/filesystem/workspace/resources/` 下的文件合并到镜像的 `/workspace/` 树中，Plugin Manager 把它暴露为共享的逻辑挂载点 `/workspace/resources/`。共享路径发生冲突时构建会失败，而不是让插件的发现顺序变得可观察。被禁用的插件不会被打包，可变的 `/data`、`/cache` 和 `/media` 树永远不能被预先构建。

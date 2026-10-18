@@ -1,0 +1,31 @@
+---
+title: "M5Stack CoreInk"
+sidebarTitle: "CoreInk"
+description: "Build, flash, and run Barracuda on the M5Stack CoreInk, an ESP32 Board."
+---
+
+The M5Stack CoreInk is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-coreink`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/m5stack-coreink/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-coreink
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | E-paper display (GDEH0154D67) | [`display`](/plugins/vm-display) |

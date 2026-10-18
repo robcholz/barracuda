@@ -1,0 +1,143 @@
+---
+title: "IMessage Inkbox HTTP API"
+sidebarTitle: "HTTP API"
+description: "Inkbox 消息通道的 HTTP 路由：状态、模式、所有者、设置和自助注册。"
+---
+
+除 `/api/gateway/inkbox/status` 只接受 `GET` 外，每个路由都接受 `POST`；`/api/gateway/inkbox/owners` 两者都接受。其他任何方法都返回
+`405 Method Not Allowed` 和 `{"error":"method_not_allowed"}`。
+
+## `GET /api/gateway/inkbox/status`
+
+返回 `200` 和共享的消息通道状态（见
+[Gateway 的消息通道 HTTP 接口](/zh/plugins/imessage-gateway)），当存储的配置来自自助注册时，还会加上
+`"signup": {"human_email": "<address entered>", "email_address": "<agent mailbox>", "claim_status": "<status>"}`：
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":1}},
+ "owners":{"count":1},
+ "signup":{"human_email":"person@example.com","email_address":"barracuda-a1b2@inkboxmail.com","claim_status":"agent_claimed"}}
+```
+
+`configured` 表示是否存储了配置。`receive` 只在
+`send_receive` 下出现；它的 `state` 是 `idle`、`starting`、`receiving`、`no_slot`
+（带 `capacity`）或 `error`（带 `message`）。`human_email` 是用户输入的地址（去掉首尾空白），Inkbox 把验证码发到这个地址。`claim_status` 是 Inkbox 最后一次报告的状态，来自注册或之后的验证。API key 和身份永远不会被返回。
+
+## `POST /api/gateway/inkbox/mode`
+
+`{"mode":"disabled"|"send"|"send_receive"}`。应用成功时返回 204；当 `send_receive` 发现所有接收名额都在使用中时返回 409
+`{"error":"no_slot","capacity":n}`（模式已保存，有名额空出后开始接收）；400
+`invalid_request` 或 `unsupported_mode`；422 `registration_failed`；500
+`storage`。
+
+## `GET` 和 `POST /api/gateway/inkbox/owners`
+
+`GET` 回答
+`{"owners":[{"id":"+15555550123","label":null}],"pairing":{"code":"012345","expires_in":600},"ignored":0}`；
+所有者 id 是 Inkbox 的 `remote_number`。`POST` 接收 `{"remove":"<id>"}` 或
+`{"rotate":true}`，并回答 204。消息通道配置之前，两者都回答
+`409` `{"error":"not_configured"}`：此时还没有所有者名单。
+
+## `POST /api/gateway/inkbox`
+
+配置或替换 Inkbox 消息通道提供方。请求体是一个 JSON 对象，包含 `api_key`、`identity_id` 和 `api_base`。有提供方默认值的字段可以省略。
+
+响应：
+
+- `204 No Content`：提供方已配置；除非模式为 `disabled`，否则它会注册到 Gateway，接收也会随之重新开始。不同的 API key、身份或源会从该身份最新的消息开始。
+- `400 Bad Request`：JSON body 无效或缺少必需字段。
+- `405 Method Not Allowed`：该端点只接受 `POST`。
+- `422 Unprocessable Content` `{"error":"registration_failed"}`：Gateway 拒绝了消息通道注册。之前存储的配置会被恢复，不会留下已注册的 Inkbox 消息通道。
+- `500 Internal Server Error` `{"error":"storage"}`：存储失败。
+
+之后，存储的配置中没有 `signup` 记录。
+
+凭据只在请求体中接受，从不包含在响应或日志中。
+
+## Agent 自助注册
+
+下面的路由让设备根据某人的邮箱地址创建自己的 Inkbox agent。所有上游调用都由设备发起，因为 Inkbox 不会为门户的源发送 CORS 头。Inkbox API key 从不离开设备：它直接写入存储的配置，从不被返回或记录到日志。
+
+上游调用使用生产环境的源 `https://inkbox.ai`，并遵循
+Inkbox SDK（PyPI 上的 `inkbox`，以及
+[https://github.com/inkbox-ai/inkbox](https://github.com/inkbox-ai/inkbox) 中的 `sdk/python/inkbox/client.py` 和
+`sdk/python/inkbox/identities/resources/identities.py`）：
+
+| 步骤 | 上游请求 |
+| --- | --- |
+| 注册 | `POST /api/v1/agent-signup`，不带身份验证 |
+| 身份 | `GET /api/v1/identities/{agent_handle}`，带 `X-API-Key` |
+| 验证 | `POST /api/v1/agent-signup/verify`，带 `X-API-Key` |
+| 重新发送 | `POST /api/v1/agent-signup/resend-verification`，带 `X-API-Key` |
+
+同一时间只运行一个注册、验证或重新发送流程，所以插件为它们最多持有一个上游连接。在另一个流程运行时到达的请求会立即返回 `409` `conflict`，而不是等待。
+
+### 错误 body
+
+这些路由的每个错误响应都是 JSON：
+
+```json
+{"error":"<kind>","message":"<text>","code":"<upstream code>","retry":true}
+```
+
+`message` 和 `code` 只在已知时出现。`retry` 只在 Inkbox 已接受注册之后的注册失败中出现，且为
+`true`：重复同一个请求会继续这次注册（见下文）。当 Inkbox 返回了自己的消息或代码时，它们会原样传递。Inkbox 以
+`{"detail":"<message>"}`、`{"detail":{"code","message"}}` 或校验列表
+`{"detail":[{"msg",…}]}` 的形式报告它们，列表中第一个 `msg` 会成为 `message`。
+
+| 状态码 | `error` | 含义 |
+| --- | --- | --- |
+| 400 | `invalid_request` | body 无效，或者 Inkbox 拒绝了注册请求（任何上游 4xx，包括它的 422 校验错误）。 |
+| 405 | `method_not_allowed` | 该路由不接受此方法。 |
+| 409 | `conflict` | 验证或重新发送时没有存储配置，或者另一个流程正在运行。 |
+| 422 | `verification_failed` | Inkbox 拒绝了验证码或存储的 API key（验证或重新发送时的任何上游 4xx）。 |
+| 422 | `registration_failed` | 注册之后 Gateway 拒绝了消息通道。 |
+| 500 | `storage` | 无法读取或写入插件存储。 |
+| 502 | `upstream_unavailable` | 传输、DNS 或 TLS 失败；5xx 或非 JSON 回复；不完整的成功回复；或者注册之后身份查询失败。 |
+
+### `POST /api/gateway/inkbox/signup`
+
+请求体：`{"email":"person@example.com"}`。首尾空白会被去掉；地址为空时返回 `400`，不会调用 Inkbox。
+
+设备调用 Inkbox 注册，把 `human_email` 设为该地址，
+`display_name` 为 `Barracuda`，`harness` 为 `barracuda`，`note_to_human` 为
+“Barracuda, your device, set up an Inkbox mailbox to send and receive mail for
+you. Enter the code from this email on the device portal.”。之后 Inkbox 会给这个人发送一封带 6 位验证码的邮件。
+
+返回的 `agent_handle` 通过上面的身份查询解析为身份 UUID（响应中的 `id`），设备把
+`{"api_key","identity_id","api_base":"https://inkbox.ai","signup":{"human_email","email_address","claim_status"}}`
+存储在与 `POST /api/gateway/inkbox` 相同的键下，然后（重新）注册消息通道。未认领的 agent 在其限额内已经可以发送消息，所以注册消息通道之前不需要验证。
+
+响应：
+
+- `200 OK`：`{"email_address":"<agent mailbox>","claim_status":"<status>"}`，
+  例如 `agent_unclaimed`。
+- `400`、`405`、`409`、`422 registration_failed`、`500`、`502`，含义同上。
+
+Inkbox 只显示一次 API key。如果在上游注册成功之后，身份查询（`502`）、存储
+（`500`）或注册（`422 registration_failed`）失败，则不会存储任何内容，错误带有 `"retry": true`，设备把注册结果保留在 RAM 中，直到它被存储或插件卸载。之后针对同一邮箱（去掉首尾空白后）的注册会从这里继续：不会再次调用 Inkbox 注册，所以不会发送第二封邮件，已经解析的身份也不会再次查询。针对另一个邮箱的注册会丢弃保留的结果，重新注册。
+
+### `POST /api/gateway/inkbox/verify`
+
+请求体：`{"code":"123456"}`。去掉首尾空白后，验证码必须正好是 6 个 ASCII 数字；否则返回 `400`，不会调用 Inkbox。设备使用存储的 API key 和存储的 `api_base` 提交它。
+
+响应：
+
+- `200 OK`：`{"claim_status":"<status>"}`，例如 `agent_claimed`。如果存储的配置来自使用此 key 的注册，它的 `claim_status` 会被更新；存储失败会记录日志，但不会改变响应。
+- `409 conflict`：没有存储配置。
+- `422 verification_failed`：Inkbox 拒绝了验证码，并附带它的消息（例如 `Invalid verification code`）。
+- `400`、`405`、`500`、`502`，含义同上。
+
+### `POST /api/gateway/inkbox/resend`
+
+不需要请求体；任何 body 都会被忽略。设备使用存储的 API key 请求 Inkbox 再次发送验证邮件。Inkbox 有 5 分钟的冷却时间。
+
+响应：
+
+- `204 No Content`：Inkbox 接受了重新发送。
+- `409 conflict`：没有存储配置。
+- `422 verification_failed`：Inkbox 拒绝了请求，例如在冷却期间，并附带它的消息。
+- `405`、`500`、`502`，含义同上。
+
+验证和重新发送使用当前存储的任何配置，包括通过 `POST /api/gateway/inkbox` 保存的配置；由 Inkbox 决定该 key 是否属于一个等待验证的 agent。

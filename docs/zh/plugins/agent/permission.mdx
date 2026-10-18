@@ -1,0 +1,91 @@
+---
+title: "barracuda-agent-permission"
+sidebarTitle: "权限"
+description: "决定一次 Agent Tool 调用是否可以运行，并在询问时记住用户的回答。"
+---
+
+barracuda Agent 框架的工具权限策略层。
+
+这是一个小而纯粹的 crate，只回答一个问题：**这次工具调用可以运行吗**？它把一次调用建模为一个 [`Action`]（一个动词 + 可选的目标 [`Resource`] +
+[`RiskClass`]），通过一个 [`PermissionPolicy`] 把它评估为一个
+[`PermissionDecision`]（`Allow` / `Ask` / `Deny`），并且——对于 `Ask` 路径——在一个 [`GrantStore`] 中记住用户的回答，这样重试的调用无需再问一次就能得到结果（也不会陷入循环）。
+
+## 各部分如何配合
+
+```text
+Action  ──evaluate──>  PermissionPolicy  ──>  PermissionDecision
+(verb +                (AllowAll,              (Allow | Ask | Deny)
+ resource +             AskAtOrAbove,                 │
+ risk)                  PolicyChain, …)               │ Ask
+                                                      ▼
+                                               human decides
+                                                      │
+                                                      ▼
+                                           GrantStore (signature → Grant)
+                                           → retried call resolves directly
+```
+
+权限层从不看到工具本身——只看到它产生的 `Action`。工具在它的 `classify` 方法中为每次调用构建一个 `Action`
+（位于 `barracuda-capability::tool`）；这个 crate 对它进行分类。
+
+## 公开 API
+
+从 crate 根重新导出：
+
+| 类型 | 作用 |
+|------|------|
+| `Action` | 一次调用*做什么*：`verb`（稳定的操作标签）、可选的 `resource` 和 `risk`。`signature()` 是授权所对应的稳定的 `verb[:resource]` 键。 |
+| `Resource` | 操作涉及的目标（`Path` / `Host` / `Agent`），属于授权签名的一部分，所以一次批准只针对*那个*资源。 |
+| `RiskClass` | `Safe < Low < Moderate < High`，有序排列，策略可以据此设定阈值。 |
+| `PermissionDecision` | 裁决：`Allow`、`Ask { reason }` 或 `Deny { reason }`。 |
+| `PermissionPolicy` | 策略 trait——纯分类，没有副作用。对象安全，所以一条链可以持有 `Box<dyn PermissionPolicy>`。 |
+| `PermissionRequest` | 一个待评估的操作。不携带 Agent 身份（没有内置策略以它为依据）；如果某个策略需要执行者身份，就以借用的基本类型把它加回来，让这个 crate 保持在 `barracuda-agent` 之下。 |
+| `AllowAll` | 宽松的基础策略：允许一切。 |
+| `AskAtOrAbove` | 在达到或超过某个风险阈值时请求批准；其余的允许。 |
+| `PolicyChain` | 组合多个策略，**最严格者胜出**：任何 `Deny` 都会短路，否则任何 `Ask`，否则 `Allow`。空链允许一切。 |
+| `GrantStore` / `Grant` | 以 `Action::signature` 为键记录 `Granted` / `Denied(reason)` 决定，这样已批准/已拒绝的操作无需再次询问就能得到结果。 |
+
+### 设计说明
+
+- **这个 crate 位于 `barracuda-agent` 之下**。`PermissionRequest` 以借用的基本类型（`u64` + `&str`）携带执行操作的 Agent，而不是 `barracuda-agent` 的
+  `AgentId` / `AgentKind`，所以依赖关系保持单向。
+- **签名限定批准范围**。`Action::signature()` 是 `verb` 或
+  `verb:resource`；以它记录的授权只适用于*那个*资源上的那个动词，而不是该动词的所有用法。换一个资源就会再次询问。
+- **最严格者胜出的组合是安全的**。向 `PolicyChain` 添加一条规则只会收紧访问，永远不会放宽——所以策略的组合不会带来意外。
+- **`Ask` 不会循环**。记录下来的授权/拒绝会在策略之前被查询，所以已批准（或已拒绝）的调用在重试时直接得到结果，而不会无休止地询问。
+
+## 用法
+
+```rust
+use barracuda_agent_permission::{
+    Action, AskAtOrAbove, GrantStore, PermissionDecision, PermissionPolicy,
+    PermissionRequest, PolicyChain, Resource, RiskClass,
+};
+
+let policy = PolicyChain::new().with(AskAtOrAbove::new(RiskClass::Moderate));
+let action = Action::new("write_file", RiskClass::Moderate)
+    .with_resource(Resource::Path("/data/x".into()));
+let request = PermissionRequest::new(&action);
+
+// First time: the policy asks for approval.
+assert!(matches!(policy.evaluate(&request), PermissionDecision::Ask { .. }));
+
+// After a human approves, the grant short-circuits the next identical call.
+let mut grants = GrantStore::new();
+grants.grant(action.signature());
+assert!(grants.lookup(&action.signature()).is_some());
+```
+
+## 示例
+
+可以在主机上运行：
+
+```bash
+cargo run --example policy_chain   --target x86_64-unknown-linux-gnu
+cargo run --example approval_flow  --target x86_64-unknown-linux-gnu
+cargo run --example custom_policy  --target x86_64-unknown-linux-gnu
+```
+
+## 所处的位置
+
+`barracuda-agent-permission` 是一个纯 Rust 的核心 crate，没有平台依赖。在 Agent 运行时中，`base_agent` 包装一个 `PermissionPolicy` 加一个 `GrantStore`，并实现 `barracuda-capability` 的 `ToolGate`，`ToolRunner` 在执行每个已分类的工具调用之前都会查询它。

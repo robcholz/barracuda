@@ -1,0 +1,36 @@
+---
+title: "SPI 插件"
+sidebarTitle: "SPI"
+description: "用 `spi` Lua 包在 Lua 中与开发板可用引脚上的 SPI 设备通信。"
+---
+
+基于开发板的可用 I/O 引脚安装只能 require 的 `spi` Lua 包。
+
+- 插件 ID：`spi`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`hal.exposed_io`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`spi`
+- Web：无
+- 任务：无
+- 存储：无
+
+构造期间，本插件共享开发板唯一的运行时 I/O 所有者。注册期间，它在 VM 注册表中安装只能 require 的 `spi` Lua 包。
+
+Lua API：
+
+- `spi.open_bus(sck, mosi, miso, frequency_hz, mode) -> handle`
+- `handle:read(length) -> binary string`
+- `handle:write(binary_string)`
+- `handle:transfer(write_binary_string, read_length) -> binary string`
+- `handle:transfer_in_place(binary_string) -> binary string`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+打开操作需要 SCK 和至少一个数据引脚，拒绝重复的信号角色，接受 SPI 模式 0 到 3。提供者会选择一个兼容的空闲控制器，把它连同所选引脚一起原子地占用，并返回一个 `embedded_hal_async::spi::SpiBus`。这个 Lua 包没有定义并行的 SPI 操作 trait。控制器标识是平台细节。这个 API 拥有一条原始总线，不执行任何片选操作；单次读取最多 65,536 字节。配置和 HAL 失败使用 Lua 惯用的 `nil, error` 结果。
+
+显式关闭、词法 `<close>`、userdata 回收以及 Lua 状态销毁都会释放总线，并使之后的操作失效。原始引脚和控制器令牌在重启之前一直处于已被取走的状态，因为生成的所有者不会重新创建厂商 HAL 的单例。插件被撤销也会使现有句柄失效。

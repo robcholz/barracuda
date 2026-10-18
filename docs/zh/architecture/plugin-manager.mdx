@@ -1,0 +1,51 @@
+---
+title: "Barracuda Plugin Manager"
+sidebarTitle: "Plugin Manager"
+description: "了解 Plugin Manager 如何按依赖顺序注册和启动插件，并拥有它们的存储。"
+---
+
+`barracuda-plugin-manager` 是插件身份、能力、自有任务和持久存储的系统边界。运行时组合留在 `barracuda-system` 中；这个核心 crate 不构造也不拥有应用 System。
+
+`barracuda-system` 在启动期间添加完整的插件集合。Plugin Manager 扫描声明的依赖 DAG，按依赖顺序注册每个插件，然后按同样的顺序启动已注册的集合。它不把 `load_plugin` 或 `unload_plugin` 作为运行时 API 暴露。管理器的生命周期操作是内部的装配机制，包括某个阶段失败时的回滚。
+
+```text
+add(c, a, b, ...)        where c depends on b, and b on a
+         |
+         v
+register(a) -> register(b) -> register(c) -> ...
+                                   |
+                                   v
+start(a)    -> start(b)    -> start(c)    -> ...
+```
+
+两个阶段都是同步的。`register` 在不让出执行的情况下原子地构造完整的类型化能力图。`start` 只是一个可选的注册后钩子：`PluginStartContext` 不能发布能力，任务派生本身也是同步的。长期运行的服务以由所有者管理的 Embassy 任务的形式运行，遵循仓库的[执行所有权](/zh/architecture/execution-ownership)边界。System 把 Embassy spawner 直接安装到 Plugin Manager 上；只有 `PluginStartContext::task_spawner` 暴露它，所以注册无法在完整的图存在之前启动服务。
+
+异步存储访问和其他 I/O 在拥有该工作的 Embassy 任务中运行。生命周期方法可以把存储句柄克隆给这些所有者，但它们自己不阻塞也不 await I/O。`PluginManager::open` 仍然是异步的，因为挂载共享数据库会执行真实的存储 I/O。
+
+管理器校验 `PluginDeclaration::ID`，从这个稳定的身份派生出一个限定命名空间的存储实现，并通过 `PluginRegisterContext` 把它作为 `PluginStorage` 契约传递。插件可以把它的存储能力克隆给自己拥有的服务和任务。键是 UTF-8 字符串，值是插件拥有的固定布局 zerocopy 类型；Plugin Manager 不添加任何自己的序列化格式。
+
+插件之间还可以交换仅限运行时的类型化能力。提供者在注册期间调用 `PluginRegisterContext::provide(Rc<T>)`；使用者在 `PluginDeclaration::DEPENDS_ON` 中声明提供者，并调用 `PluginRegisterContext::require::<T>(provider)`。管理器把值以 `Rc<dyn Any>` 的形式存放在 `(provider PluginId, TypeId)` 之下。它不了解具体的能力类型，这些条目也永远不会持久化到 `ekv`。
+
+System 把静态选定的平台句柄和派生的共享服务装配成一个 `barracuda_plugin_api::PluginContext`。每个具体插件的构造函数都接收这个构造上下文的共享引用，并只取走或克隆它拥有的固定句柄。`PluginRegisterContext` 单独携带插件拥有的存储、声明的插件能力和保留的资源。Embassy spawner 仍然是一个显式的启动生命周期设施，而不是构造资源或类型化查找。
+
+能力遵循其提供者的生命周期。只要声明的依赖方仍处于已注册状态，提供者就不能卸载；阶段回滚会移除该次尝试发布的所有内容。`PluginRegisterContext::retain` 让注册守卫或其他资源一直存活，直到所属插件成功卸载。
+
+每个插件声明自己的身份，并构造自己的能力和自有任务。`barracuda-system` 知道应用由哪些插件组成，但不拥有它们的内部服务。
+
+```text
+System
+├── PluginContext { target_identity, ip_stack, entropy, wifi, hal }
+└── PluginManager
+    ├── Typed capability registry
+    │   └── (provider, TypeId) -> Rc<dyn Any>
+    ├── Plugin-owned task cancellation
+    └── ekv Database
+        ├── PluginStorage("scheduler")
+        └── PluginStorage("another-plugin")
+```
+
+卸载会取消插件的自有任务，移除它的能力，并丢弃它保留的资源。它不会删除插件的命名空间；再次注册同一个 `PluginId` 会恢复对同一份数据的访问。
+
+System 把所选平台从其开发板原生布局中投射出的可写数据库 NOR 能力传给 `PluginManager::open`。Plugin Manager 构造并拥有唯一一个具体的 `barracuda-kv::Database`；不存在可互换的存储后端接口。完全擦除的存储会在首次启动时格式化，而未擦除的存储会被挂载，不做破坏性的回退。
+
+`PluginStorage` 只暴露限定范围的 KV 语义。它不包含任何 Flash、分区、文件系统或平台类型。公开的键是 `&str`，值是由 zerocopy 支持的固定布局 `barracuda-kv::Value` 类型。它的读写事务契约保留了 ekv 的生命周期：写入按键的顺序暂存，显式的 `commit` 让它们原子生效，丢弃未提交的事务会回滚它们。`get`、`put` 和 `delete` 仍然是单操作的便捷方法。

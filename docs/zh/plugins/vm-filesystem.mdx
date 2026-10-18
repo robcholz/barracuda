@@ -1,0 +1,54 @@
+---
+title: "VM Filesystem 插件"
+sidebarTitle: "VM Filesystem"
+description: "在 Lua 中用标准的 `io` 和 `os` API 读写文件。"
+---
+
+VM Filesystem 插件通过 Lua 标准的 `io` 和 `os` 文件 API，把它的插件作用域 VFS 暴露给 Lua 代码。
+
+- 插件 ID：`vm-filesystem`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：`VmFileTransfer`
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`filesystem`，它扩展内置的 `io` 和 `os` 表
+- Web：无
+- 任务：无
+- 存储：本插件的私有文件系统（`PluginFilesystem::Private`）；Lua 脚本可以访问其挂载点上的任何路径，`os.tmpname` 和 `io.tmpfile` 在 `/cache` 下创建文件
+
+本插件把 Plugin Manager 提供给它的私有 `ScopedVfs` 适配到 Lua 的标准文件 API。它在插件注册期间注册这个适配器，并在整个生命周期内保留该注册。
+
+## 所有权与沙箱边界
+
+`vm-filesystem` 不拥有任何全局或主机文件系统。Plugin Manager 给每个插件实例一个私有的 `ScopedVfs`；本插件把这个作用域保存在它的 Lua 包中，并把 Lua 路径原样传给它。路径只能访问该作用域中可见的挂载点：插件私有的 `/data`、`/media`、`/cache` 和只读的 `/resources`，以及共享的 `/workspace/media`、`/workspace/cache` 和只读的 `/workspace/resources`。常规的 VFS 路径规范化、挂载点权限和跨挂载点重命名规则依然有效。
+
+vm-filesystem 有意不设当前工作目录策略。在普通的插件作用域中，调用方使用显式路径，例如 `/data/file.txt` 或 `/workspace/media/file.txt`；未挂载的相对路径会在 VFS 中失败，而不是被悄悄重定向。
+
+VM 运行时不会因此依赖 VFS。禁用或撤销本插件会移除文件访问权限，而不会改变只做计算的 Lua 沙箱。
+
+## Lua API
+
+本插件扩充内置的 `io` 表，而不是替换它的虚拟标准流。它提供：
+
+- `io.open(filename [, mode])`，支持 `r`、`w`、`a`、`r+`、`w+` 和 `a+` 模式；按照 Lua 的要求，可选的 `b` 标记也被接受；
+- `io.tmpfile()`；
+- `file:close()`、`file:flush()`、`file:lines(...)`、`file:read(...)`、`file:seek([whence [, offset]])`、`file:setvbuf(mode [, size])` 和 `file:write(...)`；
+- `io.input([file|string])`、`io.output([file|string])`、`io.read(...)`、`io.write(...)`、`io.flush()`、`io.close([file])`、`io.lines([filename, ...])` 和 `io.type(value)`；
+- 标准的读取格式 `l`/`*l`、`L`/`*L`、`a`/`*a`、`n`/`*n` 以及非负的字节数，包括在一次调用中使用多个格式；
+- 标准 `os` 表中只提供 `os.remove`、`os.rename` 和 `os.tmpname`。
+
+文件句柄的元表及其背后的 Rust userdata 仍由这个 Lua 包控制。`VmFileTransfer` 让声明了依赖的插件把一个已经打开的可读文件作为自有的异步读取器来使用；它从不打开路径，也不会扩大文件的权限。已经安装到运行中 Lua 状态里的回调会再次检查 Lua 包是否已被撤销。
+
+转移一个文件会关闭它的 Lua 句柄，并把剩余的逻辑字节（包括 Lua 读取时已经缓冲的字节）移入读取器。该读取器保持同一个打开文件租约，直到它被释放。使用方用 `VmFileReader::close` 结束一个转移来的读取器；这也会在最后一个字节流出后删除底层的 `io.tmpfile` 路径。
+
+## 有意的限制与差异
+
+- 同时最多打开 16 个文件句柄。
+- 一次文件读取或单次写入最多传输 32 KiB。
+- 文件路径最长 1,024 字节。
+- 写入会立即刷新。`setvbuf` 会校验标准模式，除此之外只是一个用于兼容的空操作。
+- `os.tmpname` 会在 `/cache` 下原子地创建一个空文件，而不只是预测一个路径。`io.tmpfile` 在 Lua 显式 `close` 时，或在转移出去的读取器完成 `VmFileReader::close` 时删除该文件；没有经过这两种关闭就被丢弃的临时文件会留在可丢弃的 `/cache` 中，直到常规的缓存清理。
+- 本插件不提供 `io.popen`，也不提供进程、环境变量、区域设置、挂钟时间、动态加载器和主机文件描述符 API。`vm-time` 可以独立地用 UTC 日历 API 扩展同一个由 VM 拥有的 `os` 表。

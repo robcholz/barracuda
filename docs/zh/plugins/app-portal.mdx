@@ -1,0 +1,38 @@
+---
+title: "App Portal 插件"
+sidebarTitle: "App Portal"
+description: "在门户的应用页面审核并安装应用，也可以用连在设置热点上的手机操作。"
+---
+
+为门户添加应用页面：显示等待用户确认的安装，包括它请求什么、由谁签名，以及工作区提供的应用。只有连在设备设置热点上的客户端才能安装或拒绝，所以没有显示屏的开发板可以用设备旁边的手机来安装应用。
+
+- 插件 ID：`app-portal`
+- 依赖：`app-manager`、`webserver`、`captive-portal`、`wifi`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `AppManager`，来自 `webserver` 的
+  `WebServer`，来自 `captive-portal` 的 `CaptivePortal`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：`apps` 门户入口，以及下面的路由
+- 任务：无
+- 存储：`/resources` 中的页面
+
+有安装在等待时（`AppManager::install_request`），入口的状态为“待确认”并附上应用名称，否则为“无待安装”。
+
+## HTTP API
+
+| 路由 | 作用 |
+| --- | --- |
+| `GET /api/apps` | `{"waiting": {id, name, version, digest, signer, asks} \| null, "offers": [{id, name, version, incompatible?}]}`；`asks` 是安装界面上的各行说明（`AppManager::asks`） |
+| `POST /api/apps/request` `{"id"}` | 请求安装某个提供的应用（`AppManager::request_install`），之后它进入等待；返回 `204`，或者返回 `409 incompatible` 并以 `message` 给出原因 |
+| `POST /api/apps/install` `{"id", "digest"}` | 当 `id` 和 `digest` 与正在等待的应用一致时安装它，这样安装的正是页面显示的内容（否则返回 `409 changed`）；返回已安装的 `{id, name, version}` |
+| `POST /api/apps/decline` `{"id"}` | 拒绝正在等待的应用；返回 `204` |
+
+除非请求来自设置热点，安装和拒绝都会返回 `403 setup_hotspot_only`；`WifiStatus::is_setup_access_point` 根据连接在设备一端的地址（`HttpRequest::local_address`）判断这一点。这样，决定权就留给热点运行期间处于设备 Wi-Fi 范围内的人，而热点运行的时间是 Wi-Fi 尚未设置时，或者用户打开门户之后：家庭网络或互联网上的任何人都无法安装。这依据的是距离，而不是身份：设置热点是开放的，所以热点运行期间范围内的任何人都能访问该页面。请求安装可以在任何网络上进行，与 `app.install` Action 相同。失败时返回 `{"error", "message"}`，其中的消息使用面向用户的措辞。
+
+## 构建
+
+`resources/web/entry.ts` 由 `build` 任务（`bun ../../tools/web/build.ts`）构建到 `filesystem/resources/entry.js`。

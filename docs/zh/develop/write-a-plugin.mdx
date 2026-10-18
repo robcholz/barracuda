@@ -1,0 +1,55 @@
+---
+title: "编写插件"
+description: "借助你的编程 Agent 和 create-plugin skill，为 Barracuda 添加一项能力。"
+---
+
+Barracuda 中的每项能力都是一个插件，所以添加插件就是扩展运行时的方式。在你的电脑上、在仓库中，用你已经在用的编程 Agent 来完成：Claude Code、Cursor 或 Codex。
+
+## 交给你的编程 Agent
+
+仓库在 `.agents/skills/create-plugin/SKILL.md` 提供了一个 `create-plugin` skill。它会一步步应用 [Plugin API](/zh/architecture/plugin-api) 契约，所以最终结果和每个内置插件一个样。
+
+```txt
+> 阅读 .agents/skills/create-plugin/SKILL.md，然后创建一个插件，
+  读取 SHT40 温湿度传感器，并把它暴露给 Lua。
+```
+
+## 这个 skill 做了什么
+
+<Steps>
+  <Step title="确定范围">
+    说明插件负责的功能，以及它要使用其能力的插件。这些插件（且只有这些）会成为它的 `depends-on`。
+  </Step>
+  <Step title="布置目录">
+    创建 `plugins/<id>/plugin.toml` 和 `crates/plugin`，在某个 profile（配置档）或开发板上启用该插件，然后运行 `cargo plugin sync`。
+  </Step>
+  <Step title="构造、注册和启动">
+    只有一个构造函数：`new(&mut PluginContext)`。在 `register` 中注册契约；在 `start` 中启动它拥有的任务。
+  </Step>
+  <Step title="添加调用方需要的契约">
+    供其他插件使用的类型化能力、Workflow Action 和 Event、通过 `vm-<name>` 插件提供的 Lua 包，或者通过 `agent-<name>` 插件提供的 Agent Tool。
+  </Step>
+  <Step title="测试与文档">
+    为插件编写聚焦的测试，并按规定格式在 `docs/plugins/<id>.mdx` 编写它的页面。
+  </Step>
+</Steps>
+
+## 检查结果
+
+```bash terminal
+cargo plugin info <id>     # manifest and dependencies
+cargo plugin sync --check  # conventions, and the generated registry is current
+```
+
+`cargo plugin sync` 会先根据约定检查每个插件：目录布局、schema、页面格式和 crate 依赖。在本地运行该插件自己的聚焦测试；完整的测试矩阵交给 CI。
+
+## 延伸阅读
+
+<CardGroup cols={2}>
+  <Card title="Plugin API" icon="book-open" href="/zh/architecture/plugin-api">
+    契约：范围、目录布局、设置、生命周期和文档。
+  </Card>
+  <Card title="Plugin Manager" icon="workflow" href="/zh/architecture/plugin-manager">
+    插件如何按依赖顺序注册和启动。
+  </Card>
+</CardGroup>

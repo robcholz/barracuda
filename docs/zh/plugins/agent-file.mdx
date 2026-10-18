@@ -1,0 +1,37 @@
+---
+title: "Agent File 插件"
+sidebarTitle: "Agent File"
+description: "为 Agent 提供有边界的工具，用来读取、列出、写入、编辑、移动和删除文件。"
+---
+
+把插件文件系统作为有边界的原生文件工具暴露给 Agent。
+
+- 插件 ID：`agent-file`
+- 依赖：`agent`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `agent` 的 `AgentToolRegistry`
+- Workflow：无
+- Agent 工具：`file_read`、`file_list`、`file_write`、`file_edit`、`file_move`、
+  `file_delete`
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：没有 KV 键；这些工具在插件的 `ScopedVfs`（`/resources`、`/data`、`/cache`、`/media`、
+  `/workspace/resources`、`/workspace/cache`、`/workspace/media`）中读写调用方提供的路径
+
+本插件需要一个私有文件系统（`PluginFilesystem::Private`），它为插件提供插件私有的挂载点和共享的 Workspace 挂载点。
+
+本插件声明文件系统访问，并从 `PluginRegisterContext` 获得它普通的 `ScopedVfs`。注册期间，它把同一个作用域交给直接注册到 `AgentToolRegistry` 中的可等待工具 `file_read`、`file_list`、`file_write`、`file_edit`、`file_move`
+和 `file_delete`。System 负责挂载点的构造、策略以及底层文件系统的选择。
+
+该作用域暴露插件私有的 `/resources`、`/data`、`/cache` 和
+`/media` 挂载点，以及共享的 `/workspace/resources`、`/workspace/cache` 和
+`/workspace/media` 挂载点。因此文件工具可以通过共享的 Workspace 与其他启用了文件系统的插件交换文件，而插件的私有路径保持隔离。
+
+读取和目录列表都有上限并且分页。对 JPEG、PNG、GIF、WebP 或 PDF 文件（根据开头的字节识别）执行 `file_read` 时，会回答
+`{"path","mime_type","size"}`，并把文件作为工具结果的附件返回，Agent 可以直接把它展示给模型。只有 `/workspace` 下的路径才会被附加，因为 Agent 会在它自己的视图中打开同一路径，而私有路径在那里指向的是另一个文件；其他路径会回答
+`not_shared`。写入和编辑的上限为 32 KiB，并使用 `ScopedVfs::write_atomic`。除非调用方明确选择，创建操作不会替换已有路径。精确文本编辑在写入之前会拒绝缺失或有歧义的匹配。移动不会替换目标，删除仅限于一个文件或一个空目录。
+
+路径字符串直接传给插件的 `ScopedVfs`；本插件不重复实现路径语法、包含关系、根目录、只读挂载、可选挂载或跨挂载点策略。稳定的文件系统错误在工具输出中以 `ok = false` 返回；格式错误的参数仍属于框架层面的工具失败。

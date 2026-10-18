@@ -1,0 +1,40 @@
+---
+title: "VM HTTP 插件"
+sidebarTitle: "VM HTTP"
+description: "用 `http` Lua 包在 Lua 中发起有界的出站 HTTP 请求。"
+---
+
+VM HTTP 插件把 HTTP 插件的有界出站请求作为只能 require 的 `http` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`vm-http`
+- 依赖：`http`、`vm`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `http` 的 `Http`，来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`http`
+- Web：无
+- 任务：一个可取消的桥接任务，由一个容量为两项的请求队列供给；`Http` 能力的两个工作区限制了同时运行的请求数
+- 存储：无
+
+本插件把 HTTP 插件有界的高层操作作为只能 require 的 Lua `http` 包暴露出来。Lua 永远拿不到平台的 IP 栈、DNS 解析器、TCP 套接字、TLS 配置或主机网络原语。
+
+## Lua API
+
+~~~lua
+local http = require("http")
+local response, error = http.request({
+    method = "GET",
+    url = "https://example.com/data",
+    headers = {
+        { name = "accept", value = "application/json" },
+    },
+    body = "",
+})
+~~~
+
+支持的方法有 `GET`、`POST`、`PUT`、`PATCH`、`DELETE` 和 `HEAD`。成功时返回 `{ status=<integer>, body=<UTF-8 string> }`。有界的 HTTP 失败返回 `nil, <stable error code>`。无效的 Lua 请求结构，以及已被撤销或不可用的适配器，会引发 Lua 错误。
+
+底层的 HTTP 能力强制执行以下限制：URL 最长 2 KiB，最多 32 个请求头且总计不超过 16 KiB，请求体最大 32 KiB，UTF-8 响应体最大 64 KiB，两个可复用的并发工作区，以及整个请求 30 秒的截止时间。这个 Lua 包不暴露原始套接字或通用网络库。

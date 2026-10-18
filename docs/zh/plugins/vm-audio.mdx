@@ -1,0 +1,43 @@
+---
+title: "Audio 插件"
+sidebarTitle: "Audio"
+description: "用 `audio` Lua 包在 Lua 中播放和录制音频。"
+---
+
+Audio 插件把开发板音频编解码器（由 `sound` 插件拥有）上的播放和录音作为 `audio` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`audio`
+- 依赖：`vm`、`sound`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`，来自 `sound` 的 `Sound`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`audio`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件基于 `Sound` 安装 `audio` Lua 包：句柄用 `Sound::lend` 借用编解码器，并在关闭时归还。编解码器、它的驱动以及设备的输出音量都属于 `sound` 插件。
+
+Lua API：
+
+- `audio.available() -> boolean`
+- `audio.open() -> handle`
+- `audio.beep([hz [, ms]]) -> true` 播放一个方波音，未指定时为 880 Hz、150 ms，范围是 20 到 20000 Hz，最长 2000 ms
+- `handle:descriptor() -> sample_rate_hz, channels, bits_per_sample`
+- `handle:set_volume(percent)`
+- `handle:play(pcm_le_bytes)`
+- `handle:play_wav(wav_bytes)`
+- `handle:record(frames) -> pcm_le_bytes`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`set_volume` 接受 0 到 100 的整数百分比：这是应用自己的音量，它会缩放 `sound` 插件所保存的设备音量（它的 `Volume`）：编解码器可移植的 0 到 255 输出等于设备的百分比乘以应用的百分比，静音时为 0。当应用改变音量时，以及在播放每一段数据之前，句柄都会把音量应用到编解码器上，所以音量的改变会作用到正在播放的声音上。`descriptor` 报告所需的流格式。`play` 和 `record` 使用符合该格式的交错有符号 16 位小端 PCM。`play_wav` 接受未压缩的 16 位整数 PCM RIFF/WAVE 文件，根据编解码器校验它的采样率和声道数，跳过未知的块，并播放它的 `data` 块。压缩的 WAV 格式不会被解码。一次 PCM 操作最多传输 256 KiB，一个 WAV 文件最多可以带 64 KiB 的容器开销。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2；版本 2 加入了 `audio.beep`。
+
+从版本 2 开始提供的 `beep` 在没有句柄占用编解码器时以设备音量播放，在有句柄占用时返回 `nil, error`。
+
+没有内置编解码器的开发板报告不可用。同一时间只能打开一个句柄：显式关闭、词法 `<close>` 和垃圾回收都会阻止对它的后续操作，并归还编解码器，所以 `open` 可以再次使用；插件被撤销会阻止所有后续操作。

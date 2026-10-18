@@ -1,0 +1,136 @@
+---
+title: "IMessage Web 插件"
+sidebarTitle: "概览"
+description: "通过内置的 Web 会话，在浏览器中与板上 Agent 聊天。"
+---
+
+IMessage Web 插件把内置的 Web 会话添加为一个 iMessage
+Gateway 消息通道，并通过 WebSocket 桥接到浏览器。
+
+- 插件 ID：`imessage-web`
+- 依赖：`imessage-gateway`、`webserver`、`captive-portal`
+- 设置：无
+- 上下文资源：`entropy`（媒体 id 中每次启动的前缀）
+- 提供的能力：`IMessageWebRoute`
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
+  `IMessageGateway`、来自 `webserver` 的 `WebServer`
+- Workflow：无（收到的消息和控制指令以 Gateway 的
+  `gateway.message.received` 和 `gateway.control.received` 形式到达 Workflow）
+- Agent 工具：无
+- Lua 包：无
+- Web：门户入口 `imessage-web`，不带状态；WebSocket 路由
+  `/ws/message`；`PUT /api/web/upload/<mime>/<filename>`；
+  `GET /api/web/media/<id>`
+- 任务：无
+- 存储：设备上没有自己的存储；文件是 Gateway 的附件，位于 `/workspace/cache/gateway/web/` 之下。页面在浏览器的 `localStorage`
+  （`barracuda.chat.<session>`）中为每个已保存 session 的会话保留一份副本
+
+插件需要 `IMessageGateway` 能力，并在其整个生命周期内注册 `web`
+消息通道。它需要 `WebServer` 能力，挂载 WebSocket 桥和两个文件路由，并为内置 Web 会话的使用方发布
+`IMessageWebRoute`。它的门户入口不注册状态来源：Web 聊天是内置的，而不是外部消息通道，所以 `GET /portal/status` 中没有 `imessage-web`。
+
+## 文件
+
+文件从不经过 WebSocket 或消息通道的事件历史。页面先上传文件，然后在消息帧中指明它；消息通道发送的文件是一个事件，其中指明页面要获取的 URL。字节保存在 Gateway 的附件存储 `/workspace/cache/gateway/web/` 中，它随时可能消失，在把它放在内存中的开发板上重启后为空：重启之前的 id 不指向任何东西，因为每个 id 都带有一个前缀，该前缀在每次启动生成第一个 id 时从 `entropy` 中抽取（`1a2b3c4d-7`）。
+
+### 上传：`PUT /api/web/upload/<mime>/<filename>`
+
+上传端点（`WebServer::serve_upload`）能看到方法、路径和声明的 `Content-Length`，但看不到请求头，所以 MIME 类型和文件名是路径的两段，各自经过百分号编码
+（`/api/web/upload/image%2Fjpeg/beach%20day.jpg`）。MIME 类型是由 MIME token 字符组成、不带参数的
+`type/subtype`，最多 127
+字节，转为小写；文件名是 UTF-8，1 到 255 字节，不能是 `.` 或 `..`，不含 `/`、`\` 或控制字符。类型由 MIME 类型决定：`image/jpeg`、`image/png`、`image/gif` 和 `image/webp` 为 `image`，`audio/*` 为 `audio`，`video/*` 为 `video`，其他所有内容为 `file`（包括 SVG 和 HEIC）。
+
+body 通过一个单块管道（每次读取 2 KiB）流式写入
+`IMessageGateway::store_inbound("web", …)`；内存中不会收集任何内容。之后，上传以一个新 id 保留，直到某个消息帧把它发送出去。
+
+| 状态码 | Body | 何时 |
+| --- | --- | --- |
+| `201` | `{"id","kind","mime_type","filename","size"}` | 已存储 |
+| `400` | `{"error":"invalid_path"}` | 缺少某一段或某一段无效 |
+| `400` | `{"error":"incomplete_body"}` | body 在达到其长度之前结束 |
+| `405` | `{"error":"method_not_allowed"}` | 不是 `PUT` |
+| `411` | `{"error":"length_required"}` | 没有 `Content-Length`，或为 `0`（端点无法区分两者，而空文件没有可发送的内容） |
+| `413` | `{"error":"too_large","limit":<bytes>}` | 声明的长度或已存储的字节数超过 Gateway 的 `attachment-max-bytes` |
+| `507` | `{"error":"no_space"}` | 附件缓存已满（`StoreError::NoSpace`） |
+| `500` | `{"error":"io"}` | 其他任何文件系统故障 |
+
+最多 16 个上传（`MAX_UPLOADS`）等待发送；第十七个会挤掉最旧的那个，此后它的 id 不再指向任何东西。被挤掉或从未发送的上传会留在缓存中，直到缓存被清空。
+
+### 带文件的消息帧
+
+消息帧在文本旁边指明上传：
+`{"text":"look","attachments":["1a2b3c4d-0","1a2b3c4d-1"]}`，最多四个
+（`MAX_ATTACHMENTS`）；此时 `text` 可以是 `""`。桥会为每个消息帧编号 `web-in-<n>`，无论是否被接受，并通过
+`IMessageGateway::publish` 把被接受的消息帧作为 `GatewayInboundMessage` 发布，其中按帧中的顺序携带这些上传的
+`Attachment`。每个 id 由发送它的帧消耗。当帧指明了超过四个文件、消息通道没有持有的 id（从未上传、已发送、已被挤掉或来自重启之前）、同一个 id 两次，或者既没有文本也没有文件时，整个帧会被拒绝，不发布任何内容，也不消耗其中任何 id。只有发送它的客户端会收到通知，通知是一个不属于会话历史的 SSE 帧：
+
+```text
+event: message.rejected
+data: {"error":"unknown_attachment","message_id":"web-in-3"}
+```
+
+`error` 是 `unknown_attachment`、`too_many_attachments` 或 `empty`。只有文本的 `WebClientFrame { text }` 类型仍然是命令行客户端发送的形式。
+
+### 媒体消息与 `GET /api/web/media/<id>`
+
+`MessageChannel::send_media` 为每条媒体消息恰好发出一个事件，按类型为
+`message.image`、`message.audio`、`message.video` 或 `message.file`，键按以下顺序排列：
+
+```text
+event: message.image
+data: {"caption":null,"filename":"photo.jpg","message_id":"web-7","mime_type":"image/jpeg","reply_to":"web-in-2","size":48213,"url":"/api/web/media/1a2b3c4d-4"}
+```
+
+`BinaryBody::Source` 按原样保留，不复制；`Bytes` 和 `Stream`
+body 先用 `store_inbound("web",
+…)` 写入 Gateway 的存储，再用 `open_source` 重新打开。缺少的 MIME 类型由文件名的扩展名得出，否则为 `application/octet-stream`。暂存失败时不发送事件，并返回失败（`TooLarge` 作为无效请求）。64 个事件的历史和每个订阅者都只持有这个小事件，从不持有字节。
+
+`GET /api/web/media/<id>` 用 `HttpResponse::stream` 流式发送文件，其长度来自来源。文件在门户的源下提供，所以只有浏览器无需运行任何东西就能显示的类型才保留其类型：`image/jpeg`、
+`image/png`、`image/gif`、`image/webp`，音频类型 `audio/mpeg`、
+`audio/mp4`、`audio/aac`、`audio/ogg`（也用于 `audio/opus` 和
+`application/ogg`）、`audio/wav`、`audio/webm`、`audio/flac`，以及视频类型 `video/mp4`、`video/webm`、`video/quicktime`、`video/ogg`。其他所有内容，包括 HTML 和 SVG，都是 `application/octet-stream`。消息通道已不再保留的 id，或已离开缓存的文件，回答
+`404 {"error":"not_found"}`。最多保留 32 个已发送的文件（`MAX_KEPT`）；第三十三个会挤掉最旧的那个。该路由不支持 `Range`，所以浏览器从头播放视频，无法跳到尚未加载的位置。
+
+## 门户页面
+
+需要来自 `captive-portal` 的 `CaptivePortal` 和一个私有插件文件系统作用域。注册时保留一个 `WebEntryRegistration`，对应的 `WebEntry` 的 ID 为
+`imessage-web`，分组为 `WebGroup::Channel`，顺序为 10，标题为 `Web chat`，带有双语摘要，图标为 `icon.svg`，插图为 `figure.js`，模块为 `entry.js`，并带有一个
+`ResourceFiles` 提供方。卸载时移除导航入口、资源提供方和文件路由。
+
+Cargo 在编译此插件之前会自动运行声明的 `build` 任务。如果只想构建它的资源，在仓库根目录运行 `cargo plugin run build --plugin imessage-web`。该声明使用共享的 `tools/web/build.ts`
+脚本。前端依赖以及 format/lint/check/test 命令在仓库根目录统一管理；测试放在此插件的 `resources/web/tests/` 中。
+独立的浏览器模块写入此插件的 `filesystem/resources/entry.js`。通用镜像构建器只在选中此插件时才包含该目录。门户外壳中不会打包任何业务页面。共享的 UI 源码是构建期辅助工具，而不是对其他贡献者文件的运行时依赖。
+
+页面（`resources/web/entry.ts`，基于门户 UI 套件构建）连接到
+WebSocket `/ws/message`，发送 `WebClientFrame` JSON（`{ "text" }`，发送已上传的文件时带上
+`"attachments"`；回复只存在于页面中，所以对 Agent 消息的回复会把被引用的消息以 `<quote>…</quote>` XML 的形式放在用户的话之前，经过转义并截断到 512
+UTF-8 字节，位于 `text` 中），或者针对正在运行的轮次发送控制帧：
+`{ "control": "interrupt" }`（停止）或 `{ "control": "cancel" }`（撤回），或者发送会话命令：`sessions`、`new`（`temporary`）、`switch`（`session`）、
+`rename`（`session`、`title`）或 `delete`（`session`、`confirm`）。控制帧不带消息 id；桥把它传给
+`IMessageGateway::publish_control`，Agent 插件的
+`imessage-control-to-agent` Workflow 对该会话的 session 调用 `session.interrupt` 或
+`session.cancel`，或者调用 `imessage_bridge.session`，后者向该会话上打开的每个页面回答一个 `conversation.sessions` 事件（一个
+`SendSessionsRequest` 的紧凑 JSON）。页面渲染桥返回的 SSE 格式帧：消息开始、增量、编辑、删除、回应和结束（结束时出错会把消息标记为未完成）、`message.event` 中 Agent 的语义事件（推理、工具结果、输出和效果输出、轮次和 session 错误；步骤和 token 用量不显示在页面上）、权限请求（“允许”和“拒绝”会发送文本回答；任何消息都会回答待处理的请求）、正在输入、`stream.lagged`、媒体消息和被拒绝的帧。它只接收实时事件，最多保留 100 个日志项，每个文本部分最多 65,536 个 UTF-16 码元，并在卸载时关闭 socket。
+
+设备不会发送 session 过去的消息，所以页面在浏览器的 `localStorage` 中为每个已保存 session 的会话保留一份自己的副本，键为 `barracuda.chat.<session>`：这个浏览器发送的消息（文本、引用，以及每个文件的名称、类型和大小）和桥的 `message.*` 事件，按顺序排列，同一个流中连续的文本增量会合并。消息 id 与它到达时所在的连接一起保存，因为页面的 `web-in-<n>` 在每次连接时重新开始，设备的 id 在每次启动时重新开始。当页面显示一个屏幕上还没有内容的已保存 session 时（打开页面或切换到该 session），它会重新绘制副本，而不向设备请求任何东西；被重新加载打断的轮次停留在它到达的位置，而已发送的文件（其页面副本已经不在）显示为一张写着“已不可用”的卡片。副本在变化后一秒以及页面离开时保存；一个 session 的副本超过 100,000 个 UTF-16 码元时会丢掉最旧的轮次，只保留最后保存的 20 个 session，存储已满时先放弃最旧的其他副本，存储被阻止时页面就没有副本。临时会话从不复制，被撤回的消息及其轮次会从副本中移除，设备不再列出的 session 会失去它的副本。
+
+文件遵循设计系统的 Attachment、Media 和 Viewer 卡片。输入框的回形针（“添加附件”，它的第一个操作）打开文件选择器；粘贴图片或在页面任意位置拖放也会添加文件，文件拖到页面上方时，输入框变为虚线并显示
+“松开以添加附件”。它最多容纳四个文件，达到四个或离线时回形针不可用。JPEG、PNG 和 WebP 图片在上传前会重新绘制，长边最多 1568 px，并以 0.85 的质量编码（JPEG 编码为 JPEG，其他编码为 WebP，这同时会去掉它们的元数据）。每个文件立即用
+`XMLHttpRequest` 上传，进度显示为加载图标下方的一条 2px 线；上传失败的文件会变暗，上面有一个重试按钮，并有一句话说明情况，超过设备限制的文件会以 MB 写出限制。有文件而没有文本时也可以发送，有文件正在上传或上传失败时不能发送。排队的消息保留其文件（回形针之后的条会显示文件数），编辑后的消息会把文件原样放回，撤回的消息会重新上传它们，因为设备已经随消息收下了这些文件。被拒绝的帧会把它的消息标记为“附件已失效，这条消息没有发出”。
+在日志中，用户轮次的文件位于其气泡之上（没有文本时没有气泡），用页面自己的副本显示；Agent 的媒体按其阅读顺序排列。单张图片是一个打开 Viewer 的按钮，在用户轮次中最宽 320 px，在 Agent 轮次中最宽 440 px；一个轮次中同一行的多张图片共用一个由正方形单元格组成的两列网格，超过四张时第四张变暗并显示“+N”。
+音频是一张带播放和暂停、`0:12 / 0:48` 和一条 2px 进度线的卡片；视频在播放按钮下显示第一帧，之后显示原生控件；其他任何文件是一张带类型、大小和下载链接的卡片。URL 加载失败的图片（被挤掉，或因重启被清空）会变成一张写着“已不可用”的卡片。
+Viewer 以深色背景覆盖页面，显示图片的名称、类型和大小、它在多张图片中的位置、下载和关闭；方向键和滑动用于翻页，Escape、关闭按钮或点击图片旁边会关闭它，并把焦点还给打开它的那张图片。
+
+页面遵循设计系统的 Chat 卡片。连接后，它请求该会话的 session，并在左侧的栏中显示它们（在手机上是从顶部打开的面板）：“新会话”和临时会话开关，按日期分组的 session（“今天”、“昨天”、“过去 7 天”、“更早”），当前 session 高亮显示，仍在回复的 session 显示加载动画，每个 session 都有一个菜单，可以就地重命名或删除（红色，会先询问），底部显示数量。每次更改都是一条命令；设备的回答会重新绘制侧栏，切换或新建 session（无论来自这个页面还是另一个页面）会让视图重新开始：页面先绘制该 session 在浏览器中的副本（如果有），然后是接下来的内容，离开的 session 仍在发送的输出会被丢弃。每一轮结束后会再次请求列表。新的会话把输入框放在页面中部的 `laptop` 插图下方，下面是建议，并说明它是什么：“新会话”、它所延续的 session 的标题，或“临时会话”；临时会话会在顶部保留一个固定的“临时会话”徽标。输入框只有一行：文本框随文本增高，最高 200px，旁边是发送按钮。消息上限为 1,024 UTF-8 字节；超过上限时不能发送，并有一句话说明，没有计数器。设备一次运行一轮，所以在一轮运行期间（或在设备开始上一轮之前）写的消息会在页面的队列中等待，可以在那里编辑或移除，并在该轮结束时发出；权限回答会立即发出。一轮运行期间，作者标记会旋转（`resources/web/mark.ts`：WebGL，普通 HTTP 也允许使用；没有 WebGL 时显示静态标记和输入中的圆点，减少动态效果时标记保持静止），“思考中”闪烁，直到文本开始流入。回复在闪烁的光标后平滑地流入，由页面自己的包
+（`resources/web/markdown/`，见其 README）渲染为 Markdown：它是不带 React 的 Vercel Streamdown 渲染逻辑，并移植了 remend 的修复功能（Apache-2.0；见其
+`NOTICE`）。它能绘制标题、列表和任务列表、引用、分隔线、GFM 表格、围栏代码、行内代码、强调、删除线和链接。它构建 DOM 节点，从不解析标记，所以回复中的 HTML 保持为文本，链接只在新标签页中打开
+`http(s):` 和 `mailto:` 目标。它在流式输出时不会闪烁：
+- 段落中未闭合的部分会被修复，正在输入的链接会按链接绘制；
+- 尚不知道属于哪种块的最后一行会等待；
+- 每次绘制都就地修补 DOM，所以选区、悬停的按钮和代码块的滚动位置都能保留。
+
+代码块显示其语言和它自己的“复制”按钮，围栏尚未闭合时该按钮不可用，光标隐藏在代码块之后。代码由一个无依赖的扫描器着色，支持 Rust、C/C++、JavaScript/TypeScript、JSON、Python、
+shell、Go、Java/Kotlin/Swift/C#、TOML/YAML/INI、SQL、Lua 和 diff。“复制”和“回复”使用回复的 Markdown 源码。推理过程会自动折叠为“思考了 N 秒”；正在运行的工具显示加载动画；每个完成的回复末尾都有“复制”和“回复”图标按钮。一轮运行期间，“停止”（`circle-stop`）取代发送成为主按钮（读者开始输入后变为描边样式，旁边是“加入队列”）；该轮的 `turn_ended` 结果为
+`interrupted` 或 `cancelled` 时，以“已停止”结束。轮次尚未结束的消息带有“撤回”（`undo-2`）：它发送 `cancel`，移除该消息及其之后的所有内容，丢弃被取消轮次的剩余事件（如果该轮开始得晚，会再次取消），并把文本放回输入框，位于已输入的内容之前；队列会一直等到这段文本首先被发送。设备会在 session 的历史中保留被撤回的消息。页面自己的样式规则（`resources/web/style.ts`）在挂载时添加，在卸载时移除。
+发送没有服务器回执；只有当某条 Agent 消息回复了它，或它所回答的轮次继续进行时，一次发送才算确认，断开连接的提示会统计其余的发送；重新连接从不重发，不过从未发出的排队消息会在 socket 恢复后发出。概览磁贴显示
+`laptop` 插图（`resources/web/figure.js`）；侧栏图标是 `resources/web/icon.svg`（Lucide `message-square`）。

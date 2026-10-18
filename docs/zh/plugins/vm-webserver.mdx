@@ -1,0 +1,45 @@
+---
+title: "VM WebServer 插件"
+sidebarTitle: "VM WebServer"
+description: "用 `webserver` Lua 包在 Lua 中处理 `/vm` 下的 HTTP 请求并提供文件。"
+---
+
+通过只能 require 的 `webserver` 包，让 Lua 执行处理 `/vm` 下的入站 HTTP 请求，并把 VM 文件以流的形式作为响应返回。
+
+- 插件 ID：`vm-webserver`
+- 依赖：`vm`、`vm-filesystem`、`webserver`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`，来自 `vm-filesystem` 的 `VmFileTransfer`，来自 `webserver` 的 `WebServer`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`webserver`
+- Web：没有门户入口；`/vm` 前缀下的所有方法（`/vm/<mount>/...`）都会分派给占用该挂载点的 Lua 处理函数
+- 任务：无
+- 存储：无
+
+本插件安装只能 require 的 Lua `webserver` 包。在 `webserver.serve` 运行期间，一个 Lua 执行会在 `/vm` 下占用一个有界的挂载点。现有的 WebServer 连接工作者把请求交给那次执行；适配器不拥有监听器、套接字、网络栈或常驻任务。
+
+~~~lua
+local webserver = require("webserver")
+
+webserver.serve({
+    mount = "site",
+    handler = function(request)
+        if request.path == "/" then
+            local file = assert(io.open("/data/index.html", "rb"))
+            return webserver.file(file, "text/html")
+        end
+        return { status = 404, content_type = "text/plain", body = "not found" }
+    end,
+})
+~~~
+
+这个示例在 `/vm/site` 下提供服务。请求包含 `method`、相对于该挂载点的路径，以及二进制安全的 `body`。缓冲响应包含 `status`、`content_type` 和 `body`。
+
+支持的响应内容类型有 `text/plain`、`text/html`、`text/css`、`application/json`、`application/javascript`、`application/octet-stream`、`application/wasm`、`image/svg+xml`、`image/png`、`image/jpeg`、`image/gif`、`image/x-icon` 和 `font/woff2`；纯文本和 HTML 的 UTF-8 变体也被接受。
+
+`webserver.file(file, content_type [, status])` 取走一个由 `io.open` 返回的、已存在的可读 VM 文件。它不接受路径，也不会重新打开路径。因此该文件保留 VM 文件系统已有的命名空间、权限、路径校验和打开文件数量限制。当返回的响应被接受时，传输会关闭 Lua 句柄，并把它剩余的字节移入 `HttpResponse::stream`；打开文件的租约会一直保持到响应流被释放。VM 执行保留具体的文件读取器，并通过一个有界的单块代理把它提供给 WebServer，所以流式传输不要求每个 VFS 后端的文件都能在执行器任务之间转移。
+
+最多可以有四个活动的挂载点。一个挂载点接受一个活动的处理函数调用和一个排队的请求。额外的请求会收到 503。未知的挂载点会收到 404。处理函数失败和无效的响应文档会收到 500。处理函数如果在 30 秒内没有产生响应，会收到 504，并释放它的 WebServer 连接工作者。活动的文件流会一直占用该挂载点唯一的处理函数槽位，直到流完成或被释放。挂载点名称只能包含小写 ASCII 字母、数字和内部的连字符，最长 64 字节。移除一次 VM 执行会移除它的挂载点；插件被撤销会唤醒等待中的处理函数，并阻止新的注册。

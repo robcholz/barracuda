@@ -1,0 +1,28 @@
+---
+title: "Embassy 集成"
+sidebarTitle: "Embassy 集成"
+description: "在 Embassy 上运行 Agent 运行时：生成它的服务，提供它的文件系统，并构建模型 API。"
+---
+
+生产环境的 crate 使用 `no_std + alloc`，不依赖芯片 PAC 或某个具体的执行器。构造 `AgentRuntime` 时还会返回一个
+`RuntimeService` future。由应用生成这个 future，提供插件的 System 作用域 `Vfs`，并用 Embassy 的 TCP 和
+DNS 资源构造模型 API。
+
+```rust,ignore
+let factory = ModelApiFactory::new(|| build_barracuda_model_api_from_static_resources());
+let (agent, service) = AgentRuntime::new(filesystem, persistence, factory)?;
+spawner.spawn(run_agent_service(service))?;
+let session = agent.new_session(SessionPersistence::Persistent).await?;
+```
+
+该服务是一个本地（`!Send`）future。使用 Embassy 当前执行器的
+`Spawner`，它支持非 `Send` 的任务；不要为这个任务使用 `SendSpawner`。这是只依赖分配的 yield-stream 实现所做的取舍：不需要额外的生成器 crate 或同步机制，但不能跨执行器迁移。
+
+截止时间、重试退避和编排超时直接使用 `embassy-time`。固件应用通过它的 HAL 提供唯一的全局 Embassy 时间驱动；它不实现某个框架专用的定时器 trait。主机平台和主机测试启用 Embassy 的原生驱动和一个通用定时器队列，所以它们运行的计时代码与固件相同。
+
+每个 `ModelApi` 拥有一个由共享 HTTP 客户端工厂创建的客户端，包括它的持久连接和可复用的 HTTP 缓冲区。
+`ModelApiFactory` 只是应用的构造策略：一次调用创建一个独立的客户端，所以由应用决定存在多少个 Agent 客户端。同一个 `ModelApi` 上的连续请求复用它的 TCP/TLS 连接；请求从不重新构造它的客户端。共享 crate 负责 reqwless 客户端的构造；Model API 负责 LLM 专用的请求、响应、连接和流行为。
+
+System 用所选平台的 `entropy` 和 `shared/tls` 编译进来的 Mozilla 信任根（每个平台上都是同一套根证书）初始化 TLS，并把它传给共享的 HTTP 客户端工厂。没有任何平台或插件加载系统证书或选择 TLS 特性。
+
+主机测试和 `barracuda-cli` 仍然是普通的 `std` 使用方。以前的 C ABI 和预构建的静态库已不再是这个工作区的一部分。

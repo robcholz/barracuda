@@ -1,0 +1,166 @@
+---
+title: "跟踪格式规范"
+sidebarTitle: "跟踪格式"
+description: "扁平树形 `TRACE` 行格式的规范，以及解析器如何重建 span 树。"
+---
+
+`barracuda-agent-trace` 的 `FlatTreeSubscriber` 把 tracing 的 span 树展平成单独的行，离线解析器可以把它们重建回一棵树。本文档是**权威定义**；`trace.rs` 的实现及其单元测试必须严格遵循它。
+
+## 行结构
+
+```
+TRACE <timestamp> <type> <tracing-context> <incremental-context>* <custom-context>
+```
+
+- `TRACE` 之前的任何内容都是传输层前缀（ESP_LOG 的 `I (…) tag:` / 主机日志器的前缀），**不属于这个格式**；解析从 `TRACE` 标记开始。
+- `<timestamp>`：由框架填写的**单调时间戳（毫秒，从启动开始计；在主机上规范化为等效的单调时钟）**，是 `TRACE` 之后的第一个 token。一个 span 的持续时间是它的 `exit` 与 `enter` 之间的 `<timestamp>` 差值，**不依赖于传输前缀**。
+- 三层之间以及每个 `<...>` 内的 token 之间，都用**单个空格**分隔（没有对齐填充）；一行中从不包含换行符（`\n` 在输出之前会被转换为空格）。
+- `<...>` 内的每个 token 都是 `key=value`，**key 和 value 都不能包含空格**（空格是分隔符）。写入方用 `debug_assert!` 断言这一点；任何包含空格的内容都必须放进自定义上下文。
+- **所有可解析的结构信息都位于 `<...>` 块内**；它们之后的所有内容都是自定义上下文——自由文本，**不做解析**（空格 / 逗号 / 竖线 / 尖括号都允许）。
+- 一行以恰好一个 tracing-context 块开头，后面（仅在 `enter` 上）跟着**零个或多个**增量上下文块 `<context=group …>`。解析器读取开头的 `<...>` 块；该行剩下的部分就是自定义上下文。
+
+## ① `<type>`
+
+`enter`（进入一个 span）/ `exit`（离开一个 span）/ `event`（span 内的一条即时记录）。
+
+## ② tracing-context（由框架填写，一个 `<...>` 块）
+
+框架根据元数据、活动的 span 栈和逻辑任务继承推导出的坐标。内容按类型固定：
+
+| type | `<...>` 内容 |
+|------|------|
+| `enter` | `span=<id> parent=<id\|none> task=<label> span-name=<name> target=<module>` |
+| `exit`  | `span=<id> task=<label>` |
+| `event` | `span=<id\|none> task=<label> event-name=<name> target=<module>` |
+
+- `span`/`parent`：框架分配的、**单调递增、永不回收**的唯一 id（不是原始的 tracing id），在整个跟踪流中全局唯一，因此配对和建树都没有歧义。
+- `span`：这条记录所属 span 的 id；对于没有外层 span 的 `event`，它为 `none`（使用方如何呈现孤立事件由可视化工具决定，不在本规范范围内）。
+- `parent`：父 span 的 id；最外层的 span 没有父 span，记录为 `none`。
+- `task`：逻辑异步任务标签，用作离线/Chrome 的通道。span 通过保留字段 `trace.task=<label>` 开启一个逻辑任务；这个字段由 `barracuda-agent-trace` 消费，不会作为自定义上下文输出。后代 span 和事件继承该标签，即使 future 在另一个执行器线程上恢复或被丢弃，span 的 `exit` 也会复用它保存的标签。显式标签中的空白会被规范化为 `_`，使它仍是一个结构 token。
+- 如果没有外层 span 开启过 `trace.task`，`task` 会退回到主机线程名或 ESP FreeRTOS 任务名。这个兜底只用于标识同步/控制工作；它不是异步任务的身份。
+- `enter`/`exit` **每个 span 一对**，对应 span 的创建/销毁（而不是每次 poll）；它们通过相同的 `span` 配对（持续时间 = `<timestamp>` 差值），span 名称通过 `span` 从 `enter` 行查找。
+
+每个 span 生命周期可能与其他 future 重叠的、独立调度的 future，都必须开启它自己稳定的 `trace.task`。对重叠的异步工作复用物理执行器线程的标签，会违反本格式按任务回放的契约。
+
+## ③ incremental-context（调用方配置的分组，仅 `enter`）
+
+继承的上下文被组织成一个或多个**具名分组**，每个分组是一个封闭的、有序的键集合。分组**并没有**写死在 `barracuda-agent-trace` 中；调用方在订阅者初始化时注册它们：
+
+```rust
+TracingConfig::default()
+    .with_context_group_keys(
+        "run",
+        ["system", "session", "turn", "agent", "iteration"],
+    )
+```
+
+`barracuda_agent_runtime` 注册上面的 `run` 分组（固定顺序
+`system → session → turn → agent → iteration`）；其他子系统可以注册它们自己的分组。`system` 是用于启动/全局记录的语义上的 Agent 系统根；它是一个作用域标签，而不是分配出来或持久化的运行时 id。
+
+在某个 span 上至少开启了一个键的每个分组，会在该 span 的 `enter` 行上按注册顺序渲染为各自的块：
+
+```
+<context=<group> <key>=<value> …>
+```
+
+**调用点（字段如何成为增量上下文）**：名为 `group.key`（带点号）的 span 字段会被路由到该分组的上下文；其他任何字段都是自定义上下文。
+
+```rust
+info_span!(
+    "agent",
+    trace.task = %agent_id,
+    run.agent = %agent_id,
+    depth = 1,
+);
+//  trace.task: reserved logical-task control field
+//  run.agent:  group=run, key=agent
+//  depth:      custom context
+```
+
+- 字段的 `group` 前缀必须是已注册的分组，**并且**它的 `key` 必须在该分组的封闭集合中；已注册的前缀配上未知的键属于拼写错误，会触发 `debug_assert!`。前缀**不是**已注册分组的带点号字段（例如 `http.method`）是普通的自定义上下文。
+- 在一个逻辑任务内，一个键出现在开启或改变它的那个 span 的 `enter` 行上；普通的后代行和事件**不会**重复它。
+- 开启新 `trace.task` 的 span 是例外：它的 `enter` 行会重复**完整的有效上下文**（继承的上下文加上它自己的字段）。因此新任务会建立一个独立的、按任务划分的栈，而不是依赖执行器线程的栈。该任务上的后代又回到增量形式。
+- 使用方按 `task` 独立地重建上下文：`enter` 入栈，`exit` 出栈，任意一行的完整上下文是按分组合并后的任务栈（子覆盖父）。事件在 span 的上下文重建完成后，使用它们显式的 `span` id。
+- **前缀闭合（按分组）**：由于 span 层级是固定的嵌套，一个分组重建出的键集合总是其声明顺序的一个前缀——例如对于 `run`，有 `session` ⟹ 有 `system`；有 `agent` ⟹ 有 `system`+`session`+`turn`；有 `iteration` ⟹ 前面四个键都有。永远不会出现“有 `agent` 却缺少 `turn`”这样的空缺。
+- 规范的 Chrome 导出器拒绝没有 `run.system` 的 `run.session`；它不支持旧的上下文形式。空的 `run` 前缀是有效的：两个作用域之外的记录会被导出为 `unattributed`。
+- 在某个 span 上没有开启任何键的分组**不输出块**（没有空的 `<context=…>`）。`event` 行完全不携带增量块。
+
+## ④ custom-context（调用点，自由格式）
+
+每个 span/事件自己的内容——**由开发者定义，没有格式要求，不能包含 `|`**——原样追加在 `<...>` 块之后；框架不解析它。
+
+- 只有 `enter`（span 创建参数）和 `event`（记录内容）可以携带自定义上下文。
+- `exit` 行只有 tracing 上下文（`span=<id> task=<label>`）；它**既不携带增量上下文，也不携带自定义上下文**。
+- 规范的 Chrome 导出器把普通的数值型 `key=value` 字段当作事件参数。字段只有使用显式的
+  `counter.<series>=<number>` 形式才会成为 Chrome 计数器；导出的序列名省略
+  `counter.` 前缀。显式标记但值不是数字时，属于导出错误。
+- 在导出的 Chrome 参数中，`span` 是一个保留的结构字段。span 切片携带它自己的 id；即时事件携带其外层 span 的 id，孤立事件不携带结构性的 `span` 参数。这个结构值优先于同名的自定义 `span=...` token。
+  因此，事件与子 span 的关系可以用
+  `event.args.span == child.args.parent` 精确关联。
+
+### span 父子关系在 Chrome 中的投射
+
+规范的 Chrome 导出器会消费结构性的 `parent` 关系；它不只是被复制进显示参数中：
+
+- 位于同一个导出进程/任务通道上的父 span 和子 span，会成为嵌套的完整（`ph=X`）切片。它们的时间戳决定可见的嵌套关系。
+- 位于不同通道上的父 span 和子 span，用一条名为 `span_parent` 的标准 Chrome 流（`ph=s` / `ph=f`）连接。由于旧版 Chrome 流的起点和终点无法携带源/目标切片 id，导出器在父通道和子通道上发出线程作用域的即时代理事件，并连接这些代理。代理/端点的参数标明 `source_span`、`target_span`、
+  `parent_span` 和 `child_span`。
+- 捕获可能在观察到某个 span 的 `exit` 之前就结束了。导出器在最后观察到的跟踪时间戳处结束该切片（受任何已关闭祖先的限制），并添加 `incomplete=true`。它不会发出不配对的持续时间开始事件。
+
+这种投射是通用的：它只依赖 span 身份、父 span 身份、通道身份和计时。它不包含任何关于 Agent、工具或多 Agent 操作的运行时专用知识。
+
+### 跨任务的流链接
+
+名为 `flow_link` 的普通事件声明了一个查看器层面的关系：从它的外层源 span 指向另一个逻辑任务上的某个 span：
+
+```text
+TRACE 13 event <span=7 task=request-1 event-name=flow_link target=producer> flow.name=dispatch flow.target_task=worker-2 flow.target_span=worker flow.arg.request=request-1
+```
+
+- `flow.name` 是必需的，会成为 Chrome/Perfetto 的流名称。
+- `flow.target_task` 是必需的，用于选择目标逻辑任务。
+- `flow.target_span` 是可选的；提供时，它按 span 名称限定目标。
+- 每个 `flow.arg.<key>=<value>` 都会去掉 `flow.arg.` 前缀后，复制到源 span 和导出的两个流端点上。
+- 源和目标必须共享相同的有效 `run.system` 和
+  `run.session` 作用域。目标是开始时间落在源 span 生命周期内、最早的匹配 span。
+- Chrome 导出器在目标开始处周围放置不同的线程作用域即时代理事件，然后用标准流连接它们。它们的可见名称包含源/目标 span 名称和流名称。两者都携带
+  `flow_anchor=true`、`flow_anchor_role`、`source_span` 和 `target_span`；这些 span id 是权威的。当同一通道上另一个切片在时间上包住该时间戳时，Chrome JSON 没有任何字段可以强制把端点的 `slice.parent_id` 设为某个结构 span。
+- 显式的 `flow_link` 流和自动投射的 `span_parent` 流共用导出器范围内的同一个流 id 序列，所以它们的原生 Chrome 流 id 永远不会冲突。
+
+这些字段是一份通用的跟踪/导出契约。底层解析器和
+Chrome 导出器并不知道是哪个运行时子系统发出了该链接。
+
+## span 层级
+
+`agent.runtime`（开启 `system`）> `session`（开启 `session`）> `turn`
+（开启 `turn`）> `agent`（开启 `agent`）> `iteration_loop`（开启
+`iteration`）。启动时的恢复使用 `agent.runtime` > `session.restore` >
+`agent.create`；`agent.manager` 这类系统范围的启动工作直接位于
+`agent.runtime` 之下，不带会话键。
+
+- span = 一个有开始和结束的工作单元（`enter`/`exit` 配对）；event = 一个即时的事实。
+
+## 示例（相互重叠的异步 Agent）
+
+```
+TRACE 2090 enter <span=1 parent=none task=agent-runtime span-name=agent.runtime target=barracuda_agent_runtime::worker> <context=run system=agent-system>
+TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=barracuda_agent_session::manager> <context=run system=agent-system session=session-1>
+TRACE 2105 enter <span=3 parent=2 task=session-1 span-name=turn target=barracuda_agent_session::actor> <context=run turn=turn-7> cause=user
+TRACE 2110 enter <span=4 parent=3 task=agent-1 span-name=agent target=barracuda_agent_session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-1>
+TRACE 2112 enter <span=5 parent=4 task=agent-1 span-name=iteration_loop target=barracuda_agent::engine::iteration_loop> <context=run iteration=iteration-0>
+TRACE 2120 enter <span=6 parent=3 task=agent-2 span-name=agent target=barracuda_agent_session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-2>
+TRACE 2121 event <span=6 task=agent-2 event-name=polled target=barracuda_agent_session::actor> ready=true
+TRACE 2130 exit <span=6 task=agent-2>
+TRACE 2150 event <span=5 task=agent-1 event-name=completion target=barracuda_agent::engine::iteration_loop> status=done
+TRACE 2152 exit <span=5 task=agent-1>
+TRACE 2154 exit <span=4 task=agent-1>
+TRACE 2156 exit <span=3 task=session-1>
+TRACE 2158 exit <span=2 task=session-1>
+TRACE 2160 exit <span=1 task=agent-runtime>
+```
+
+- Agent 运行时拥有 system 通道，会话 actor 拥有
+  `session-1` 通道。`agent-1` 和 `agent-2` 在挂钟时间上重叠，但拥有独立的任务栈，因此也拥有独立的 Chrome 通道。每个新的会话/Agent 任务根都会重复它的完整上下文；后代只添加增量。`completion` 事件重建为
+  `agent-system + session-1 + turn-7 + agent-1 + iteration-0`，而
+  `polled` 事件重建为
+  `agent-system + session-1 + turn-7 + agent-2`。

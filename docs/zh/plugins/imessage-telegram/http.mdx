@@ -1,0 +1,66 @@
+---
+title: "IMessage Telegram HTTP API"
+sidebarTitle: "HTTP API"
+description: "Telegram 消息通道的 HTTP 路由：状态、设置、模式和所有者。"
+---
+
+共享的数据格式由 Gateway 的 `IMessageGateway::serve_channel` 提供；见 Gateway 的[插件页面](/zh/plugins/imessage-gateway)。
+
+## `GET /api/gateway/telegram/status`
+
+返回 `200` 和消息通道状态。它从不返回设置或 token；其他方法回答 `405`。
+
+```json
+{"configured":true,"mode":"send_receive",
+ "receive":{"state":"receiving","slots":{"in_use":1,"capacity":2}},
+ "owners":{"count":1}}
+```
+
+- `mode` 是 `disabled`、`send` 或 `send_receive`。未配置的消息通道报告它将以哪种模式开始（`send_receive`）。
+- `receive` 只在 `send_receive` 下出现。`state` 是 `idle`、`starting`、
+  `receiving`、`no_slot` 或 `error`；`message`（Telegram 的描述，或连接失败信息）只随 `error` 出现，`capacity` 只随
+  `no_slot` 出现。`slots` 是设备在所有消息通道中正在使用的接收名额，以及它总共有多少名额。
+- `owners.count` 是授权账号的数量。
+
+## `POST /api/gateway/telegram`
+
+配置或替换 Telegram 消息通道提供方。请求体是一个 JSON 对象，包含 `token`、`api_base` 和 `draft_min_delta_bytes`。有提供方默认值的字段可以省略。新配置会重新开始接收；不同的 bot token 还会清除接收游标。
+
+响应：
+
+- `204 No Content`：提供方已配置；除非模式为 `disabled`，否则已注册到 Gateway。
+- `400 Bad Request`，`{"error":"invalid_request"}`：JSON body 无效或缺少必需字段。
+- `405 Method Not Allowed`：该端点只接受 `POST`。
+- `422 Unprocessable Content`，`{"error":"registration_failed"}`：Gateway 拒绝了消息通道注册。之前存储的配置会被恢复，不会留下已注册的 Telegram 消息通道。
+- `500 Internal Server Error`，`{"error":"storage"}`：存储失败。
+
+凭据只在请求体中接受，从不包含在响应或日志中。
+
+## `POST /api/gateway/telegram/mode`
+
+请求体 `{"mode":"disabled"|"send"|"send_receive"}`。
+
+- `204`：模式已存储并应用：除非为 `disabled`，否则 `telegram` Gateway 消息通道会被注册，接收循环只在
+  `send_receive` 下运行。
+- `409`，`{"error":"no_slot","capacity":n}`：`send_receive` 已存储，但所有接收名额都在使用中；接收报告 `no_slot`，有名额空出后开始接收。
+- `400` `invalid_request` 或 `unsupported_mode`；`422` `registration_failed`
+  （保持之前的模式）；`500` `storage`；其他方法为 `405`。
+
+## `GET /api/gateway/telegram/owners`
+
+返回授权账号和绑定码，没有有效绑定码时会生成一个：
+
+```json
+{"owners":[{"id":"42","label":"@ann"}],
+ "pairing":{"code":"012345","expires_in":600},"ignored":3}
+```
+
+`id` 是 Telegram 用户 id，`label` 是 `@username` 或名字。当已授权八个账号或平台没有熵源时，`pairing`
+为 `null`。`ignored` 统计自启动以来因发送者未获授权而被丢弃的消息数。Telegram 用户向 bot 发送绑定码或 `/start <code>` 即可完成绑定；设备回答一次，然后绑定码轮换。消息通道配置之前，`GET` 和 `POST` 都回答 `409` `{"error":"not_configured"}`：此时还没有所有者名单。
+
+## `POST /api/gateway/telegram/owners`
+
+`{"remove":"<id>"}` 移除一个账号（未知 id 也没关系），
+`{"rotate":true}` 生成一个新的绑定码；两者都回答 `204`。其他任何 body 为 `400`
+`invalid_request`，另有 `500` `storage`、`503`
+`entropy_unavailable`。

@@ -1,0 +1,43 @@
+---
+title: "STM32 平台"
+sidebarTitle: "STM32"
+description: "用 Rust 1.98.1 和 probe-rs 在 STM32 开发板上构建、烧录和运行 Barracuda。"
+---
+
+STM32 芯片通过裸机 `stm32` 平台运行 Barracuda。它使用标准 Rust 构建，并通过调试探针用 `probe-rs` 烧录；Flash 布局由每块开发板 bundle 中链接器的 `memory.x` 定义。
+
+| 芯片（平台） | Rust 目标 | 工具链 | 烧录工具 |
+| --- | --- | --- | --- |
+| STM32U5A5ZJ (`stm32`) | `thumbv8m.main-none-eabihf` | Rust 1.98.1 | `probe-rs` |
+
+## 安装工具链
+
+```bash terminal
+rustup toolchain install 1.98.1 --target thumbv8m.main-none-eabihf
+cargo install probe-rs-tools
+```
+
+## 构建、烧录和运行
+
+通过 USB 连接开发板的调试探针，然后运行：
+
+```bash terminal
+cargo board select nucleo-u5a5zj-q
+cargo run
+cargo image deploy
+```
+
+- `cargo run` 构建固件，并用 `probe-rs run` 运行它。
+- `cargo image deploy` 构建插件资源镜像，并用 `probe-rs download` 写入。
+
+## 平台驱动的硬件
+
+`stm32` 平台提供数字输入和输出、GPIO、I2C 设备和 SPI 总线。运行时 I/O 让 Lua 脚本可以在开发板的可用引脚上占用这些控制器：
+
+| I2C | SPI | UART | ADC |
+| --- | --- | --- | --- |
+| `I2C1` | `SPI1` | `USART1` | `ADC1` |
+
+## 开发板
+
+- [NUCLEO-U5A5ZJ-Q](/zh/boards/supported/nucleo-u5a5zj-q)

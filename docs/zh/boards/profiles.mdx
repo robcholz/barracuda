@@ -1,0 +1,74 @@
+---
+title: "开发板 profile"
+description: "用分层的 profile 选择固件包含哪些插件，或添加一个新的 profile。"
+tag: "NEW"
+---
+
+profile（配置档）列出固件包含的插件。每块开发板都会构建一个 profile：`board.yml` 中指定的那个；如果没有指定，就是 `headless`。没有被任何 profile 或开发板启用的插件根本不会进入固件：没有代码，没有设置，也没有文本。
+
+具体规则（启用集合如何计算、哪些情况会失败、本地覆盖）见 [`plugin-api.md`](/zh/architecture/plugin-api)。本页说明有哪些 profile，以及如何选择或添加 profile。
+
+## 现有的 profile
+
+profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插件，列出的每个插件的依赖都会自动带上。
+
+| Profile | 扩展自 | 新增 | 网络 | Lua |
+| --- | --- | --- | --- | --- |
+| `minimal` | — | Workflow、时间、调度器、电源、声音 | 否 | 否 |
+| `lua` | `minimal` | VM 以及不需要网络的 Lua 包，其中包括开发板硬件对应的 Lua 包 | 否 | 是 |
+| `network` | `minimal` | Wi-Fi、Web 服务器、强制门户、HTTP、门户的文件管理器 | 是 | 否 |
+| `ai` | `network` | Agent、它的工具和消息网关 | 是 | 否 |
+| `headless` | `lua`、`ai` | 需要网络或 Agent 的 Lua 包 | 是 | 是 |
+| `ui` | — | 带 System UI 的应用管理器、系统字体、Files 和 Workflows 应用 | 否 | 是 |
+| `screen-offline` | `lua`、`ui` | 无其他新增 | 否 | 是 |
+| `screen` | `headless`、`ui` | System UI 中的 Wi-Fi、从门户安装应用、Sessions 和 Settings 应用 | 是 | 是 |
+
+```text
+                 minimal
+                /       \
+             lua         network
+              |  \          |
+              |   \         ai
+              |    \       /
+              |    headless          (the default)
+              |        \
+              |       screen = headless + ui + …
+              |
+       screen-offline = lua + ui
+```
+
+`ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen` 或 `screen-offline`。
+
+`screen-offline` 没有 Settings 和 Sessions 应用：Settings 依赖 Wi-Fi，Sessions 依赖 Agent。音量和亮度在控制中心里调节。
+
+## 选择 profile
+
+开发板在 `board.yml` 中指定自己的 profile：
+
+```yaml
+profile: screen-offline
+plugins:
+  camera:
+    enabled: false
+```
+
+- 带屏幕的产品指定 `screen`；如果从不联网，就指定 `screen-offline`。
+- 不带屏幕的产品不指定，构建 `headless`，或者选择更窄的层：`minimal`、`lua`、`network` 或 `ai`。
+- 只多一个或少一个插件时，在开发板的 `plugins.<id>.enabled` 中设置，而不是新建 profile。
+
+## 添加 profile
+
+新的 profile 就是这个目录下的一个文件。按产品的用途为它命名，扩展它所基于的层，只列出它新增的内容：
+
+```yaml
+# boards/profiles/gateway.yml
+extends: network
+enable:
+  - agent
+  - imessage-gateway
+  - imessage-telegram
+```
+
+`extends` 接受一个 profile 或一个列表；被引用两次的 profile 只计一次，扩展自身的 profile 会报错。`enable` 只能添加：更精简的产品应扩展更窄的层，而不是移除插件。
+
+修改 profile 或开发板后运行 `cargo plugin sync`，提交前运行 `cargo plugin sync --check`。

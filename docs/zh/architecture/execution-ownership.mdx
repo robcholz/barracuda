@@ -1,0 +1,69 @@
+---
+title: "异步执行所有权"
+sidebarTitle: "执行所有权"
+description: "了解谁拥有长期运行的 Embassy 任务，以及它们的生命周期、容量、失败和取消。"
+---
+
+本文定义长期运行的 future 在平台、HAL、System 和插件之间的所有权。与这些边界相矛盾的现有代码属于迁移工作，而不是先例。
+
+## 核心边界
+
+定义任务行为的子系统，同时拥有它的生命周期、容量、失败策略和取消。长期运行的工作以 Embassy 任务或任务池的形式运行，由该所有者启动。
+
+```text
+Embassy executor
++-- Platform-owned tasks
+|   `-- network runner
++-- HAL-owned tasks
+|   `-- peripheral Driver runners
++-- System-owned tasks
+`-- Plugin-owned tasks
+    +-- Workflow matching and execution
+    +-- WebServer accept and connection workers
+    +-- Scheduler due-occurrence loop
+    `-- other Plugin services
+```
+
+类型化能力决定另一个插件如何调用某项服务。Workflow Action 或 Event 决定 Workflow 如何与该服务集成。这两种契约都不会把执行所有权从实现该行为的子系统转移走。
+
+## 所有权表
+
+| 工作 | 所有者 | 执行方式 |
+| --- | --- | --- |
+| 平台网络 runner | 平台 | Embassy 任务 |
+| 外设驱动 runner | HAL 组合 | Embassy 任务 |
+| WebServer 接受循环 | WebServer 插件 | Embassy 任务 |
+| WebServer 连接 worker | WebServer 插件 | 固定的 Embassy 任务池 |
+| 网络时间同步 | Time 插件 | 可取消的 Embassy 任务 |
+| Scheduler 到期事件循环 | Scheduler 插件 | 可取消的 Embassy 任务 |
+| Workflow 匹配与执行 | Workflow 插件 | 可取消的 Embassy 任务 |
+| 类型化能力背后的持续工作 | 能力提供者 | 由所有者管理的 Embassy 任务 |
+
+平台和 HAL 只启动它们所构造资源的 runner。System 启动 System 拥有的工作，并安装插件启动时使用的 Embassy spawner。每个插件在完整的插件能力和注册图存在之后，启动自己的任务。
+
+## 插件启动与取消
+
+`Plugin::register` 同步地构造能力并安装保留的注册。`Plugin::start` 通过 `PluginStartContext::task_spawner` 同步地派生长期运行的工作。
+
+每个常驻的插件任务都会收到一个由管理器拥有的 `PluginTaskToken`。任务让它的所有者循环与 `PluginTaskToken::cancelled` 竞争，并在每个 await 点都保持取消安全。启动回滚、插件卸载和 Plugin Manager 拆除会向所有令牌发出信号，并等待任务端的令牌被丢弃，然后才释放能力和保留的资源。这使得在 Embassy 固定任务池上立即卸载再重新加载是安全的。
+
+长期运行的固定工作使用 `#[embassy_executor::task]`，必要时使用静态分配的任务池。任务和 worker 容量属于所属子系统的配置。派生失败就是该所有者的启动失败，并会通过 System 启动向上传播。
+
+## 不变量
+
+- 定义持续行为的层拥有它的任务和失败策略。
+- 平台和 HAL 的 runner 始终跟随它们所驱动的资源。
+- 外部协议的监听器和连接 worker 属于对应的协议插件。
+- 任务使用句柄或类型化能力；业务行为不会仅仅为了获得一个 `Spawner` 而移入平台。
+- 插件注册在插件任务接受外部工作之前完成。
+- 常驻的插件任务在卸载、启动回滚和 Plugin Manager 拆除时协作式地停止。
+
+## 评审清单
+
+添加长期运行的 future 之前，确认：
+
+1. 哪个子系统定义了这项工作的行为、容量和失败策略？
+2. 应该由哪个平台、HAL、System 或插件的生命周期来启动和停止它？
+3. 它能否使用静态分配的 Embassy 任务或任务池？
+4. 启动过程能否保证在任务开始接受工作之前，依赖和保留的注册都已存在？
+5. 取消是否会释放立即重新加载所需的每个租用的 worker、队列、socket 和注册？

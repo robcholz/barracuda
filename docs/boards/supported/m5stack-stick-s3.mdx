@@ -1,0 +1,31 @@
+---
+title: "M5Stack StickS3"
+sidebarTitle: "StickS3"
+description: "Build, flash, and run Barracuda on the M5Stack StickS3, an ESP32-S3 Board."
+---
+
+The M5Stack StickS3 is an ESP32-S3 Board from M5Stack.
+
+- Board ID: `m5stack-stick-s3`
+- Vendor: M5Stack
+- Chip: ESP32-S3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32s3-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/m5stack-stick-s3/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-stick-s3
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |

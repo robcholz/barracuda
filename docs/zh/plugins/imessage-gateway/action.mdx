@@ -1,0 +1,57 @@
+---
+title: "IMessage Gateway Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "Gateway 提供的 Workflow Action：发送文本、Agent 事件流和媒体。"
+---
+
+插件注册了三个类型化 Action，其静态 schema 位于
+`schemas/action/<address>/` 下：
+
+- `gateway.send` 发送一条完整的文本消息，并返回 `message_id`。
+- `gateway.send_stream` 接收一个有序的语义 Agent 事件。
+- `gateway.send_media` 按路径发送一个文件（`file`），或者为一个二进制流接收 `start`、
+  `chunk` 和 `finish` 命令。
+
+业务失败是普通的 `{"error":"<code>"}` Action 响应。最多四个活动流的限制和每个流的队列背压属于运行时限制。
+
+## `gateway.send_media`
+
+Schema：`schemas/action/gateway.send_media/request.json` 和
+`response.json`。
+
+### `file`
+
+```json
+{"action":"file","channel":"telegram","conversation_id":"chat-42","kind":"image","path":"/workspace/cache/agent/chart.png","caption":"Today"}
+```
+
+在 Gateway 的文件系统视图中打开 `path`，把它作为一条 `kind`（`file`、`image`、`audio` 或 `video`）类型的消息发送，并像
+`gateway.send` 一样等待送达。Gateway 能打开的任何路径都可以，例如
+`/workspace/cache/...` 或 `/workspace/media/...`。`filename` 默认为路径的最后一段，`mime_type` 默认为扩展名对应的类型（`png`、
+`jpg`、`mp4`、`ogg`、`pdf`……）；对于未知扩展名，由提供方自行决定。`thread_id`、`caption` 和 `reply_to` 是可选的。
+
+响应：`{"message_id":"<provider id>"}`。之后不会有 `gateway.send_media.finished`
+Event。
+
+错误：
+
+- `invalid_request`：`channel`、`conversation_id` 或 `path` 为空；
+- `unknown_channel`：`channel` 下没有注册任何消息通道；
+- `not_found`：`path` 指向的文件不存在；
+- `too_large`：文件超过 `attachment-max-bytes` 设置；
+- `unsupported`：消息通道无法发送 `kind` 类型的媒体；
+- `authentication`、`rate_limited`、`delivery`：提供方失败。
+
+### `start`、`chunk`、`finish`
+
+```json
+{"action":"start","stream_id":"s1","sequence":0,"channel":"telegram","conversation_id":"chat-42","kind":"file","filename":"a.bin"}
+{"action":"chunk","stream_id":"s1","sequence":1,"content_base64":"AAEC"}
+{"action":"finish","stream_id":"s1","sequence":2}
+```
+
+每条命令都回答 `{"accepted_sequence":n}`；送达结果以
+`gateway.send_media.finished` 的形式返回，通过 `stream_id` 匹配。`start` 使用序号 0，之后的每条命令使用下一个序号。
+
+错误：`invalid_request`、`unknown_channel`（来自 `start`）、
+`duplicate_stream`、`unknown_stream`、`out_of_order`，以及在四个媒体 worker 全部被占用或该流的队列已满时返回的 `busy`。

@@ -1,0 +1,29 @@
+---
+title: "M5Stack Paper Color"
+sidebarTitle: "Paper Color"
+description: "在 ESP32-S3 开发板 M5Stack Paper Color 上构建、烧录和运行 Barracuda。"
+---
+
+M5Stack Paper Color 是 M5Stack 推出的 ESP32-S3 开发板。
+
+- 开发板 ID：`m5stack-paper-color`
+- 厂商：M5Stack
+- 芯片：ESP32-S3
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`xtensa-esp32s3-none-elf`
+- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Flash 布局：`boards/configs/m5stack-paper-color/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select m5stack-paper-color
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-paper-color/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。

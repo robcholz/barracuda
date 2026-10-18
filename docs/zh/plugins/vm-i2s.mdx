@@ -1,0 +1,33 @@
+---
+title: "I2S 插件"
+sidebarTitle: "I2S"
+description: "用 `i2s` Lua 包在 Lua 中通过开发板的可用引脚传输 I2S PCM 音频流。"
+---
+
+I2S 插件把开发板可用引脚上的 I2S PCM 流传输作为 `i2s` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`i2s`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`hal.exposed_io`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`i2s`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件共享开发板统一的可用 I/O 所有者，并安装 `i2s` Lua 包。它复用同一个 `audio::PcmStream` 契约，这个契约由平台的 I2S 适配器实现，由音频编解码器的实现使用。
+
+Lua API：
+
+- `i2s.open(bclk, ws, dout, din, mclk, sample_rate_hz, channels, bits_per_sample) -> handle`
+- `handle:format() -> sample_rate_hz, channels, bits_per_sample, master_clock_hz`
+- `handle:write(pcm_le_bytes)`
+- `handle:read(frames) -> pcm_le_bytes`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`dout`、`din` 和 `mclk` 可以为 `nil`；至少需要一个数据方向。PCM 字节是交错的有符号 16 位小端采样。因此，当前可移植的流契约接受 `bits_per_sample = 16`。打开操作会从所有其他可用协议所用的同一个所有者那里原子地取走每一个信号引脚。

@@ -1,0 +1,252 @@
+---
+title: "上下文模型规范"
+sidebarTitle: "上下文模型"
+description: "了解 Agent 上下文如何组织，以及它在线上如何排序以最大化前缀缓存。"
+---
+
+`barracuda-agent-context` 在每次迭代中组装交给 LLM 的上下文。这是**权威定义**；实现和测试严格遵循它。
+它是对旧的三桶布局的全面重构，不做向后兼容。目标：在通用 Agent 上提高前缀缓存命中率、token 效率和 LLM 质量。
+
+## 架构与布局
+
+这是两个独立的关注点；把它们混为一谈会污染缓存：
+
+- **架构**——上下文如何组织、归谁所有、从哪里来（A 部分）。它不是字节顺序。
+- **布局**——发送给 LLM 的字节顺序，为最大化缓存前缀而排序（B 部分）。按**可变性**排序，而不是按作用域。
+
+每个块都有一个**作用域**（架构）和一个**可变性类别**（布局）。
+布局*只*看可变性；作用域是同一层级内的次要排序依据。
+例如：`AgentInstruction` 属于 Agent 作用域但不可变，所以它位于线上顶部，*高于*属于全局作用域但可变的 `Soul` 和 `GlobalMemory`。
+移动它的是可变性，而不是作用域。
+
+## 实现：两个线上字段
+
+上面的模型保持不变；这里只说明它如何映射到 API 客户端发送的请求上。一个请求恰好有两个线上字段，`Context` 是同时生成这两者的唯一组装器（`Context::request(history)` 返回一个由 `system` 加尾部两段组成的
+`RequestContext`）。运行时提供者可以通过 `ContextSink` 接受的 `ContextItem` 向组装器输入：`Block`
+条目进入 `system`，`Message` 条目进入有序的历史，`Reminder`
+条目进入临时的 reminder 尾部。
+
+- **`system`（前缀）**——通过 `Context::with` 声明的可缓存文本 `Block`（Band 1–2，持久前缀），在一个复用的缓冲区中渲染成一个字符串，只在某个块真正改变时才重新渲染（由
+  `Context::version` 控制）。
+- **`messages`（尾部）**——Band 3 的结构化尾部，分为**保持分开的两段**，所以追加时永远不会克隆历史：
+  - 持久化的对话 `history`（`ConversationSummary` +
+    `RecentMessages/…`），归记忆所有。当前的用户输入是这条历史通道中当前的用户消息/打开的轮次，而不是一个重复的块；以及
+  - 临时的 **reminder**——每次请求的提示（例如 `ToolReminder`、软隐藏阶段说明，或者以末尾的 `<system-reminder>` 形式实现的、静态但放在最后的 `OutputContract`），它们**从不持久化**。
+
+确定性规则（每个条目只有一个归处）：按作用域划分的稳定文本 -> 一个 `Block`
+（前缀）；真实的、持久化的对话/工具事件 -> 记忆 `history`（尾部）；
+每次请求的临时提示 -> `reminders`（尾部）。通过工具检索到的知识
+（`memory_recall`、文档查找、Web/API 调用）是历史中的一个工具结果事件，而不是单独的 `PulledKnowledge` 块。没有第四种选择。
+
+---
+
+# A 部分——架构
+
+## 块分组
+
+按职责的概念分组——不是线上顺序，也不是作用域嵌套。
+
+```
+Context
+├── Core        Soul · AgentInstruction · ToolPolicy · ToolReminder · SkillList
+├── Mode        ModePolicy · ActiveMode
+├── Knowledge   GlobalMemory/SessionMemory/AgentMemory (push)
+│               retrieved knowledge is tool-call output in History (pull)
+├── History     ConversationSummary · RecentMessages/Events/ToolResults/Errors/Approvals
+└── Output      OutputContract
+```
+
+## 模式模型（主要的扩展维度）
+
+`ModeContext` 让一个模型无需重构就能支撑不同的 Agent 行为。它的系统级策略不可变，而当前模式是一个很小的、每次请求的信号。
+
+- **ModePolicy**——每种受支持模式的静态规则。Agent 切换模式时，它保持字节完全一致。
+- **ActiveMode**——一个易变的 reminder，内容只有 `normal` 或 `plan`。
+  它选择 `ModePolicy` 的哪个分支适用于当前请求。
+
+在线上，模式按可变性拆分（策略 → Band 1，当前模式 → Band 3），但它在架构上是同一个概念。未来的模式会扩展静态策略和
+`AgentMode` 状态，而不会把可变内容移进缓存的前缀。
+
+## 构建时指令
+
+共享的通用指令是一个**清单生成阶段的概念**，而不是运行时的
+`BlockKind`。运行时收到的是一个已经完全组装好的 Agent 指令字符串。
+
+`barracuda-agent-runtime` 目前读取：
+
+- `resources/agents/common/instructions.md`——每种 Agent 共享的前言。
+- `resources/agents/<kind>/instructions.md`——特定类型的指令。
+
+构建脚本把它们拼接进 `AgentManifest.instructions`；运行时再把最终文本作为 `BlockKind::AgentInstruction` 注入。除非共享前言获得了独立的运行时生命周期，否则不要添加运行时的通用指令块。
+
+## 当前输入的位置
+
+当前的用户输入不是一个 `BlockKind`。它位于对话记录中：
+
+1. `AgentEngine::submit` / `AppendMessage` 把文本作为打开的用户轮次追加进去。
+2. `RecentMessagesContextProvider` 读取摘要游标之后已提交的轮次，以及正在进行的打开轮次。
+3. 该提供者把这些消息作为 `RecentContext` 贡献到历史尾部。
+
+这样用户消息就保留在模型正常的对话通道中，避免在 system 前缀中重复。只有无法把当前输入表示为消息的系统，才应该使用自定义的易变块。
+
+## 记忆：三个维度
+
+记忆显得混乱，是因为每个产物在三个相互独立的维度上各有一个取值；只说产物的名字会掩盖其中两个。
+
+| 维度 | 问题 | 取值 |
+|---|---|---|
+| **作用域** | 它属于谁 / 共享范围多广？ | Global / Session / Agent / Conversation |
+| **注入方式** | 它如何到达模型？ | Push（前缀）/ Pull（工具 → 尾部） |
+| **可变性** | 它多久变化一次？ | Immutable / Durable-mutable / Volatile |
+
+产物是这些取值的组合：
+
+| 产物 | 作用域 | 注入方式 | 可变性 |
+|---|---|---|---|
+| 构建时组装的通用前言 + `agents/<role>/instruction.md` | Agent | Push | Immutable |
+| ToolPolicy 文本 | Agent | Push | Immutable |
+| ToolReminder 阶段说明 | Agent | Push reminder | Volatile |
+| `soul.md` / `identity.md` / `user.md` | Global | Push | Durable-mutable |
+| `MEMORY.md`（每个层级一个） | Global/Session/Agent | Push | Durable-mutable |
+| `ConversationSummary` | Conversation | Push | Durable-mutable |
+| 长期记忆召回、`RetrievedDocs` 查找 | 任意 | 通过工具 Pull | 工具结果为 Volatile |
+
+## 作用域嵌套（所有权，而非布局）
+
+```
+Global ⊃ Session ⊃ Agent ⊃ Conversation ⊃ Turn
+```
+
+一个 **Session 包含多个 Agent<strong>；</strong>Agent** 只存在于它的 Session 之内；一个
+**Conversation** 是一个 Agent 的对话。作用域决定*复用方向*（谁可以共享一段缓存），并且是同一可变性层级内的次要排序依据——它从不凌驾于可变性之上。
+
+## Push 与 Pull
+
+- **Push**——持久的、按作用域整体携带的内容 → **前缀**。
+- **Pull**——每次迭代由模型可见的工具获取的、针对特定查询的知识 → **尾部**中的工具结果消息。
+
+没有规范的 `PulledKnowledge` `BlockKind`。如果模型通过工具请求长期记忆、`RetrievedDocs`、仓库/API 结果或外部查找，这些内容会作为普通的工具结果落下，之后由最近历史和摘要携带。只有不经过模型工具调用、由系统发起的预取才需要单独的易变注入点；对于这种特殊路径，优先使用 `Custom` 易变块或一条 reminder。
+
+**语料作用域 ≠ 结果易变性**。检索到的*结果*总是易变的，即使它的语料是全局的：按作用域 push 持久的*整体*；把针对查询的*片段* pull 进尾部。
+
+## 块目录
+
+分组、作用域、来源和扩展点。（可变性 / band 见 B 部分。）
+
+- **Soul**——*Core，Global*。人设、行为原则和风格。`soul.md`。
+- **AssistantIdentity**——*Core，Global*。助手/设备的角色、能力和边界。`identity.md`。
+- **UserProfile**——*Core，Global*。唯一用户的稳定偏好和交互约定。`user.md`。
+- **AgentInstruction**——*Core，Agent*。角色和边界。
+  运行时文本是构建时把 `resources/agents/common/instructions.md` 和
+  `resources/agents/<kind>/instructions.md` 合在一起的结果。*扩展*：frontend /
+  worker / reviewer / planner / memory_writer。
+- **ToolPolicy**——*Core，Agent*。**不是**工具 schema（schema → API 的 `tools`）。
+  而是文本：能力类别、何时使用工具、什么需要审批、绝不编造结果、何时 pull。动态的阶段控制不在这里。
+  *扩展*：文件系统 / 网络 / 硬件 / 审批 / 沙箱 / 风险策略。
+- **ToolReminder**——*Core，Agent*。临时的工具阶段说明（例如当前的软隐藏允许集合），渲染为一个 reminder 尾部条目。它不会被持久化，也不会移动缓存的 system 前缀。
+- **SkillList**——*Core，Agent*。可用 skill 的目录，渲染为提示指引。完整的 skill 文档由 skill 激活工具返回。
+- **ModePolicy**——*Mode，Agent*。解释每种受支持的当前模式的不可变规则。
+- **ActiveMode**——*Mode，Agent*。只包含当前
+  `normal` 或 `plan` 模式的易变 reminder。
+- **ReasoningEffort**——*Mode，Agent*。每个会话的编排指引，说明根 Agent 应以多直接或多审慎的方式处理当前轮次。
+- **GlobalMemory / SessionMemory / AgentMemory**——*Knowledge*。每个作用域的 `MEMORY.md`，整体 push。*扩展*：`team_memory` / `device_docs` / `hardware_specs`。
+- **SessionContext**——*Knowledge，Session*。会话范围共享的背景框架（如果有的话）。
+- **通过工具检索的知识**——*Knowledge，pull*。长期记忆、
+  `RetrievedDocs`、仓库/API 查找。没有对应的块类型；结果作为尾部中的工具结果消息落下。
+- **ConversationSummary**——*History，Conversation*。压缩后的对话。*扩展：*
+  简短 / 详细 / 按主题。
+- **RecentContext / LiveState**——*History/Mode，Turn*。最近的原始消息/事件/结果；`LiveState` = 模式中易变的那一半。
+- **OutputContract**——*Output，Agent/模式*。对话：自然语言回答/风格。
+  工作：结构化 JSON（`actions`/`blockers`/`needs_approval`/`memory.updates`/
+  `next_step`）。*扩展*：按 Agent/模式的契约。
+
+---
+
+# B 部分——布局（线上顺序）
+
+## 排序规则
+
+1. **可变性（主要）**：Immutable → Durable-mutable → Volatile。可变的内容永远不会排在不可变的内容之上。
+2. **作用域（次要）**：在同一层级内，从宽到窄。在持久层级中，这也对应变化频率（越宽越少变），并有助于跨实体复用。
+3. **确定性**：输入不变时，一个块渲染出完全相同的字节（没有 map 迭代顺序，没有附带的时间戳）。缓存以字节为键。
+
+## Band
+
+```
+BAND 1 — STATIC INSTRUCTIONS   (immutable; the long shared prefix, never busted at runtime)
+  AgentInstruction · ToolPolicy · ModePolicy
+
+BAND 2 — DURABLE STATE         (slowly mutable; broad→narrow scope; an edit busts only Bands 2–3)
+  Soul · AssistantIdentity · UserProfile · GlobalMemory · SessionContext · SessionMemory · AgentMemory
+  SkillList · ReasoningEffort · ConversationSummary
+
+BAND 3 — VOLATILE TAIL         (rebuilt each iteration; append-only between compactions)
+  ToolReminder                 (dynamic tool phase note, reminder tail)
+  ActiveMode                   (`normal` or `plan`, reminder tail)
+  RecentContext + LiveState (RecentMessages/Events/ToolResults/Errors/Approvals;
+      WorkingState/ApprovalState/Blockers; tool-retrieved knowledge is a ToolResult)
+  OutputContract               (static, but last by exception — see below)
+```
+
+Band 3 在两次压缩之间只追加，所以每次迭代只在末尾增加 token，整个前缀保持缓存。通过工具检索的知识自然落在用户轮次旁边，因为它是最近历史中的一个工具结果。
+
+## 例外
+
+- **`OutputContract`**——静态但放在最后：它不会被缓存（易变的尾部在它之前），但靠近末尾能提高指令遵循度，而且它很小。
+- **`ModeContext`**——按可变性拆分：策略 → Band 1，当前模式 → Band 3。
+- **时间 / 运行元数据**——易变；只放在 Band 3。
+
+## 缓存断点
+
+服务商的断点（Anthropic：最多 4 个）放在 **Band 1** 之后，以及 **Band 2** 内
+Global 和 Session 子组之后，这样一处变化可以复用它之上的所有区域。
+低于服务商最小值的区域（OpenAI 约为 1024 个 token）单独不会被缓存。
+
+## 块属性对照表
+
+| 块 | 作用域 | 可变性 | Band |
+|---|---|---|---|
+| AgentInstruction | Agent | Immutable | 1 |
+| ToolPolicy | Agent | Immutable | 1 |
+| ModePolicy | Agent | Immutable | 1 |
+| ActiveMode | Agent | Volatile reminder | 3 |
+| ToolReminder | Agent | Volatile reminder | 3 |
+| Soul / AssistantIdentity / UserProfile | Global | Durable-mutable | 2 |
+| GlobalMemory | Global | Durable-mutable | 2 |
+| SessionContext / SessionMemory | Session | Durable-mutable | 2 |
+| AgentMemory | Agent | Durable-mutable | 2 |
+| SkillList | Agent | Durable-mutable | 2 |
+| ReasoningEffort | Agent | Durable-mutable | 2 |
+| ConversationSummary | Conversation | Durable-mutable | 2 |
+| RecentContext / LiveState / ToolResults | Turn | Volatile | 3 |
+| OutputContract | Agent/mode | Static（放在最后，属于例外） | 3 |
+
+## 扩展不变式
+
+**不要添加 band，也不要重新排列 band**。在某个 band 内扩展（新的记忆作用域、子策略、知识语料或 `ModeContext` 变体）。先按三个维度给新来源分类，再优先按可变性、其次按作用域放置它。永远不要把可变内容放在 Band 1 之上。
+
+## 待定决策
+
+这些是产品层面的决定；每项都列出了布局所假定的默认值。
+
+1. **记忆写入节奏**——默认：在边界处通过工具写入（写入落在尾部；注入的副本在下一轮刷新 → 轮次内保持稳定）。每次迭代都更新的实时草稿区属于 Volatile，移到 Band 3。
+2. **`RetrievedDocs` 注入**——默认通过工具调用 *pull*，因此它是历史中的一个工具结果。对于不经过工具调用、由系统发起的预取，使用
+   `Custom` 易变块或 reminder。不要添加 `PulledKnowledge` 类型。
+3. **`SessionContext`**——确认除了
+   `SessionMemory` 之外还存在什么会话范围的背景框架，否则删除它。
+
+## 旧版 C 映射与 Rust 集成待办
+
+`master` 没有这套 `BlockKind` 分类。它有三种上下文提供者类型（`SYSTEM_PROMPT`、`MESSAGES`、`TOOLS`），以及用户、助手、助手工具和工具结果消息的持久化记录。Rust 迁移应在把旧提供者映射为显式块的同时，保留这些行为边界：
+
+| 上下文 | `master` 上的旧行为 | Rust 现状 / 方向 |
+|---|---|---|
+| Soul / AssistantIdentity / UserProfile | `barracuda_agent_memory_profile_provider` 把可编辑的 profile 文件（`user.md`、`soul.md`、`identity.md`）推入 system prompt。 | 已实现为由 `ProfileStore` 和 `ProfileContextProvider` 支撑的一等全局块。 |
+| SessionContext | 除了来源消息通道/聊天等请求元数据之外，没有明确的旧版对应物。 | 产品决策。只有当会话获得稳定的共享背景框架时才实现；否则删除这个块类型。 |
+| SessionMemory | 没有会话作用域的持久 `MEMORY.md` 对应物。旧版的 Session History 是对话记录存储，而不是会话记忆。 | 按设计缺失。只有当我们需要不同于对话记录/摘要的、会话范围的持久笔记时才实现。 |
+| ModePolicy / ActiveMode | 根 Agent/子 Agent 的角色和模式提示由 Agent 管理器合并进 Agent 的 system prompt。 | 已实现为一个不可变的 `ModePolicy` system 块加一个易变的 `ActiveMode` reminder，因此切换模式不会使缓存的前缀失效。 |
+| OutputContract | 没有独立的旧版提供者。输出预期隐含在提示/工具中。 | 缺失。当靠近末尾很重要时，优先使用一个小的 reminder/尾部注入；只有稳定的按 Agent 或按模式的契约才使用块。 |
+
+## 与 LLM 请求的关系
+
+所有块都是文本 / 结构化文本上下文。**工具 schema 不属于这个模型**——它们放在 API 的 `tools` 字段中。`ToolPolicy` 管理稳定的工具使用行为以及*何时 pull*；`ToolReminder` 管理易变的阶段可用性；schema 管理*形状*。

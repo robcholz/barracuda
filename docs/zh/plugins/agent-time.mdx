@@ -1,0 +1,24 @@
+---
+title: "Agent Time 插件"
+sidebarTitle: "Agent Time"
+description: "让 Agent 用 `time_now` 工具读取当前的 UTC 时间。"
+---
+
+把 `time` 插件的 `UtcClock` 能力作为原生工具暴露给 Agent。
+
+- 插件 ID：`agent-time`
+- 依赖：`agent`、`time`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `agent` 的 `AgentToolRegistry`、来自 `time` 的
+  `UtcClock`
+- Workflow：无
+- Agent 工具：`time_now`
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：无
+
+插件注册期间，它把可等待的 `time_now` 工具添加到共享的
+`AgentToolRegistry`。它不拥有任何时钟状态或后台任务。
