@@ -1,0 +1,48 @@
+---
+title: "NUCLEO-U5A5ZJ-Q"
+description: "在 STM32U5A5ZJ 开发板 NUCLEO-U5A5ZJ-Q 上构建、烧录和运行 Barracuda。"
+---
+
+NUCLEO-U5A5ZJ-Q 是 STMicroelectronics 推出的 STM32U5A5ZJ 开发板。
+
+- 开发板 ID：`nucleo-u5a5zj-q`
+- 厂商：STMicroelectronics
+- 芯片：STM32U5A5ZJ
+- 平台：[STM32](/zh/platforms/stm32)
+- Rust 目标：`thumbv8m.main-none-eabihf`
+- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Flash 布局：`boards/configs/nucleo-u5a5zj-q/memory.x`
+
+## 构建和运行
+
+```bash terminal
+cargo board select nucleo-u5a5zj-q
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [STM32](/zh/platforms/stm32)。
+
+## 外设
+
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `status-led` | 指示 LED | — |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `user-button` | `PC13` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("user-button", "up")
+print(pin:read())
+```
+
+## 插件设置
+
+- [`imessage-gateway`](/zh/plugins/imessage-gateway) 的 `receive-slots` 为 `0`：这块开发板不为消息通道接收循环预留连接。

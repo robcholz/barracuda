@@ -1,0 +1,56 @@
+---
+title: "ESP-VoCat v1.2"
+description: "在 ESP32-S3 开发板 ESP-VoCat v1.2 上构建、烧录和运行 Barracuda。"
+---
+
+ESP-VoCat v1.2 是 Espressif 推出的 ESP32-S3 开发板。
+
+- 开发板 ID：`espressif-esp-vocat-v1-2`
+- 厂商：Espressif
+- 芯片：ESP32-S3
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`xtensa-esp32s3-none-elf`
+- Profile：[`screen`](/zh/boards/profiles)
+- Flash 布局：`boards/configs/espressif-esp-vocat-v1-2/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select espressif-esp-vocat-v1-2
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
+| `front-buttons` | 电容触摸按键 | — |
+| `green-status-led` | 指示 LED | — |
+| `inertial-measurement` | IMU（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电量计（BQ27220） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `micro-sd` | microSD 卡槽（FAT） | — |
+| `touch` | 触摸控制器（CST816T） | — |
+| `video-display` | 圆形显示屏（ST77916，四线 SPI） | [`display`](/zh/plugins/vm-display) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `magnetic-uart-rx` | `GPIO4` |
+| `magnetic-uart-tx` | `GPIO5` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("magnetic-uart-rx", "up")
+print(pin:read())
+```
+
+## 插件设置
+
+- [`imessage-gateway`](/zh/plugins/imessage-gateway) 的 `receive-slots` 为 `3`：为消息通道接收循环预留 3 个连接。

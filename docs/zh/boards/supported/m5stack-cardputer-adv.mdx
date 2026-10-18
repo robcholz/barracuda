@@ -1,0 +1,31 @@
+---
+title: "M5Stack Cardputer-Adv"
+sidebarTitle: "Cardputer-Adv"
+description: "在 ESP32-S3 开发板 M5Stack Cardputer-Adv 上构建、烧录和运行 Barracuda。"
+---
+
+M5Stack Cardputer-Adv 是 M5Stack 推出的 ESP32-S3 开发板。
+
+- 开发板 ID：`m5stack-cardputer-adv`
+- 厂商：M5Stack
+- 芯片：ESP32-S3
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`xtensa-esp32s3-none-elf`
+- Profile：[`screen`](/zh/boards/profiles)
+- Flash 布局：`boards/configs/m5stack-cardputer-adv/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select m5stack-cardputer-adv
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |

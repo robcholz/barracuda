@@ -1,0 +1,32 @@
+---
+title: "ESP32-P4-Function-EV-Board"
+description: "在 ESP32-P4 开发板 ESP32-P4-Function-EV-Board 上构建、烧录和运行 Barracuda。"
+---
+
+ESP32-P4-Function-EV-Board 是 Espressif 推出的 ESP32-P4 开发板。
+
+- 开发板 ID：`esp32p4-function-ev-board`
+- 厂商：Espressif
+- 芯片：ESP32-P4
+- 平台：[ESP32](/zh/platforms/esp32)
+- Rust 目标：`riscv32imafc-unknown-none-elf`
+- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Flash 布局：`boards/configs/esp32p4-function-ev-board/partitions.csv`
+
+## 构建和运行
+
+```bash terminal
+cargo board select esp32p4-function-ev-board
+cargo run
+cargo image deploy
+```
+
+请先安装工具链，参见 [ESP32](/zh/platforms/esp32)。
+
+## 外设
+
+这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/esp32p4-function-ev-board/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+
+## 插件设置
+
+- [`imessage-gateway`](/zh/plugins/imessage-gateway) 的 `receive-slots` 为 `0`：这块开发板不为消息通道接收循环预留连接。
