@@ -116,6 +116,49 @@ code, pre, kbd, .font-mono {
   background: var(--bc-background) !important;
   border-bottom: 1px solid var(--bc-border);
 }
+/* Top bar as in the design: logo on the left, search centered, then language,
+   GitHub, the primary button, and the theme toggle on the right, inside the
+   same 24px gutter as the logo. The left and right groups dissolve into one
+   row so the language select can move to the right. */
+#navbar div:has(> div > #search-bar-entry) {
+  position: relative;
+  column-gap: 16px;
+}
+#navbar div:has(> div > #search-bar-entry) > div:first-child,
+#navbar div:has(> div > #search-bar-entry) > div:last-child {
+  display: contents;
+}
+#navbar div:has(> #search-bar-entry) {
+  flex: 1 1 auto;
+}
+#navbar div:has(> #localization-select-trigger) {
+  order: 1;
+}
+#navbar div:has(> div > #search-bar-entry) > div:last-child > * {
+  order: 2;
+}
+#localization-select-trigger {
+  color: var(--bc-muted-foreground) !important;
+  font-weight: 500;
+}
+#localization-select-trigger:hover,
+#localization-select-trigger[data-state="open"] {
+  color: var(--bc-foreground) !important;
+}
+#navbar div:has(> #theme-preference-menu-trigger) {
+  margin-right: -6px !important;
+}
+@media (min-width: 1280px) {
+  #navbar div:has(> #search-bar-entry) {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0;
+  }
+  #navbar div:has(> #localization-select-trigger) {
+    margin-left: auto;
+  }
+}
 #search-bar-entry {
   background: var(--bc-sidebar);
   border: 1px solid var(--bc-border);
