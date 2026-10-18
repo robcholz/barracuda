@@ -7,7 +7,7 @@ description: "用 memory crate 存储 Agent 的对话记录、profile 文档和�
 Agent 的记忆子系统。
 
 这里有三个相互独立的部分：**`TranscriptStore`**——一份纯粹的、只追加的对话轮次逐字记录；用于可编辑全局 profile 文档（`soul.md`、`identity.md`、`user.md`）的 **`ProfileStore`**；以及
-**长期记忆（**持久的事实）。这些存储对提示组装、摘要、token 预算或 Agent 工具一无所知。组装 LLM
+**长期记忆**（持久的事实）。这些存储对提示组装、摘要、token 预算或 Agent 工具一无所知。组装 LLM
 上下文窗口是 *Agent 层*的工作，它通过 `barracuda-agent` 中的上下文提供者建立在这些存储之上。
 
 这个 crate 只定义 `Compactor` **接缝**——把一段较旧的消息窗口折叠成更短摘要的契约。它不带任何 LLM 依赖；现成的基于 LLM 的压缩器（`LlmCompactor`）和驱动它的滚动摘要提供者都位于 `barracuda_agent` 中（拥有 LLM
