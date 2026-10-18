@@ -127,38 +127,38 @@ Global ⊃ Session ⊃ Agent ⊃ Conversation ⊃ Turn
 
 没有规范的 `PulledKnowledge` `BlockKind`。如果模型通过工具请求长期记忆、`RetrievedDocs`、仓库/API 结果或外部查找，这些内容会作为普通的工具结果落下，之后由最近历史和摘要携带。只有不经过模型工具调用、由系统发起的预取才需要单独的易变注入点；对于这种特殊路径，优先使用 `Custom` 易变块或一条 reminder。
 
-**语料作用域 ≠ 结果易变性。**检索到的*结果*总是易变的，即使它的语料是全局的：按作用域 push 持久的*整体*；把针对查询的*片段* pull 进尾部。
+**语料作用域 ≠ 结果易变性**。检索到的*结果*总是易变的，即使它的语料是全局的：按作用域 push 持久的*整体*；把针对查询的*片段* pull 进尾部。
 
 ## 块目录
 
 分组、作用域、来源和扩展点。（可变性 / band 见 B 部分。）
 
-- **Soul**——*Core，Global。*人设、行为原则和风格。`soul.md`。
-- **AssistantIdentity**——*Core，Global。*助手/设备的角色、能力和边界。`identity.md`。
-- **UserProfile**——*Core，Global。*唯一用户的稳定偏好和交互约定。`user.md`。
-- **AgentInstruction**——*Core，Agent。*角色和边界。
+- **Soul**——*Core，Global*。人设、行为原则和风格。`soul.md`。
+- **AssistantIdentity**——*Core，Global*。助手/设备的角色、能力和边界。`identity.md`。
+- **UserProfile**——*Core，Global*。唯一用户的稳定偏好和交互约定。`user.md`。
+- **AgentInstruction**——*Core，Agent*。角色和边界。
   运行时文本是构建时把 `resources/agents/common/instructions.md` 和
-  `resources/agents/<kind>/instructions.md` 合在一起的结果。*扩展：*frontend /
+  `resources/agents/<kind>/instructions.md` 合在一起的结果。*扩展*：frontend /
   worker / reviewer / planner / memory_writer。
-- **ToolPolicy**——*Core，Agent。***不是**工具 schema（schema → API 的 `tools`）。
+- **ToolPolicy**——*Core，Agent*。**不是**工具 schema（schema → API 的 `tools`）。
   而是文本：能力类别、何时使用工具、什么需要审批、绝不编造结果、何时 pull。动态的阶段控制不在这里。
-  *扩展：*文件系统 / 网络 / 硬件 / 审批 / 沙箱 / 风险策略。
-- **ToolReminder**——*Core，Agent。*临时的工具阶段说明（例如当前的软隐藏允许集合），渲染为一个 reminder 尾部条目。它不会被持久化，也不会移动缓存的 system 前缀。
-- **SkillList**——*Core，Agent。*可用 skill 的目录，渲染为提示指引。完整的 skill 文档由 skill 激活工具返回。
-- **ModePolicy**——*Mode，Agent。*解释每种受支持的当前模式的不可变规则。
-- **ActiveMode**——*Mode，Agent。*只包含当前
+  *扩展*：文件系统 / 网络 / 硬件 / 审批 / 沙箱 / 风险策略。
+- **ToolReminder**——*Core，Agent*。临时的工具阶段说明（例如当前的软隐藏允许集合），渲染为一个 reminder 尾部条目。它不会被持久化，也不会移动缓存的 system 前缀。
+- **SkillList**——*Core，Agent*。可用 skill 的目录，渲染为提示指引。完整的 skill 文档由 skill 激活工具返回。
+- **ModePolicy**——*Mode，Agent*。解释每种受支持的当前模式的不可变规则。
+- **ActiveMode**——*Mode，Agent*。只包含当前
   `normal` 或 `plan` 模式的易变 reminder。
-- **ReasoningEffort**——*Mode，Agent。*每个会话的编排指引，说明根 Agent 应以多直接或多审慎的方式处理当前轮次。
-- **GlobalMemory / SessionMemory / AgentMemory**——*Knowledge。*每个作用域的 `MEMORY.md`，整体 push。*扩展：*`team_memory` / `device_docs` / `hardware_specs`。
-- **SessionContext**——*Knowledge，Session。*会话范围共享的背景框架（如果有的话）。
-- **通过工具检索的知识**——*Knowledge，pull。*长期记忆、
+- **ReasoningEffort**——*Mode，Agent*。每个会话的编排指引，说明根 Agent 应以多直接或多审慎的方式处理当前轮次。
+- **GlobalMemory / SessionMemory / AgentMemory**——*Knowledge*。每个作用域的 `MEMORY.md`，整体 push。*扩展*：`team_memory` / `device_docs` / `hardware_specs`。
+- **SessionContext**——*Knowledge，Session*。会话范围共享的背景框架（如果有的话）。
+- **通过工具检索的知识**——*Knowledge，pull*。长期记忆、
   `RetrievedDocs`、仓库/API 查找。没有对应的块类型；结果作为尾部中的工具结果消息落下。
-- **ConversationSummary**——*History，Conversation。*压缩后的对话。*扩展：*
+- **ConversationSummary**——*History，Conversation*。压缩后的对话。*扩展：*
   简短 / 详细 / 按主题。
-- **RecentContext / LiveState**——*History/Mode，Turn。*最近的原始消息/事件/结果；`LiveState` = 模式中易变的那一半。
-- **OutputContract**——*Output，Agent/模式。*对话：自然语言回答/风格。
+- **RecentContext / LiveState**——*History/Mode，Turn*。最近的原始消息/事件/结果；`LiveState` = 模式中易变的那一半。
+- **OutputContract**——*Output，Agent/模式*。对话：自然语言回答/风格。
   工作：结构化 JSON（`actions`/`blockers`/`needs_approval`/`memory.updates`/
-  `next_step`）。*扩展：*按 Agent/模式的契约。
+  `next_step`）。*扩展*：按 Agent/模式的契约。
 
 ---
 
@@ -166,9 +166,9 @@ Global ⊃ Session ⊃ Agent ⊃ Conversation ⊃ Turn
 
 ## 排序规则
 
-1. **可变性（主要）：**Immutable → Durable-mutable → Volatile。可变的内容永远不会排在不可变的内容之上。
-2. **作用域（次要）：**在同一层级内，从宽到窄。在持久层级中，这也对应变化频率（越宽越少变），并有助于跨实体复用。
-3. **确定性：**输入不变时，一个块渲染出完全相同的字节（没有 map 迭代顺序，没有附带的时间戳）。缓存以字节为键。
+1. **可变性（主要）**：Immutable → Durable-mutable → Volatile。可变的内容永远不会排在不可变的内容之上。
+2. **作用域（次要）**：在同一层级内，从宽到窄。在持久层级中，这也对应变化频率（越宽越少变），并有助于跨实体复用。
+3. **确定性**：输入不变时，一个块渲染出完全相同的字节（没有 map 迭代顺序，没有附带的时间戳）。缓存以字节为键。
 
 ## Band
 
@@ -223,7 +223,7 @@ Global 和 Session 子组之后，这样一处变化可以复用它之上的所�
 
 ## 扩展不变式
 
-**不要添加 band，也不要重新排列 band。**在某个 band 内扩展（新的记忆作用域、子策略、知识语料或 `ModeContext` 变体）。先按三个维度给新来源分类，再优先按可变性、其次按作用域放置它。永远不要把可变内容放在 Band 1 之上。
+**不要添加 band，也不要重新排列 band**。在某个 band 内扩展（新的记忆作用域、子策略、知识语料或 `ModeContext` 变体）。先按三个维度给新来源分类，再优先按可变性、其次按作用域放置它。永远不要把可变内容放在 Band 1 之上。
 
 ## 待定决策
 

@@ -6,7 +6,7 @@ description: "决定一次 Agent Tool 调用是否可以运行，并在询问时
 
 barracuda Agent 框架的工具权限策略层。
 
-这是一个小而纯粹的 crate，只回答一个问题：**这次工具调用可以运行吗？**它把一次调用建模为一个 [`Action`]（一个动词 + 可选的目标 [`Resource`] +
+这是一个小而纯粹的 crate，只回答一个问题：**这次工具调用可以运行吗**？它把一次调用建模为一个 [`Action`]（一个动词 + 可选的目标 [`Resource`] +
 [`RiskClass`]），通过一个 [`PermissionPolicy`] 把它评估为一个
 [`PermissionDecision`]（`Allow` / `Ask` / `Deny`），并且——对于 `Ask` 路径——在一个 [`GrantStore`] 中记住用户的回答，这样重试的调用无需再问一次就能得到结果（也不会陷入循环）。
 
@@ -47,12 +47,12 @@ Action  ──evaluate──>  PermissionPolicy  ──>  PermissionDecision
 
 ### 设计说明
 
-- **这个 crate 位于 `barracuda-agent` 之下。**`PermissionRequest` 以借用的基本类型（`u64` + `&str`）携带执行操作的 Agent，而不是 `barracuda-agent` 的
+- **这个 crate 位于 `barracuda-agent` 之下**。`PermissionRequest` 以借用的基本类型（`u64` + `&str`）携带执行操作的 Agent，而不是 `barracuda-agent` 的
   `AgentId` / `AgentKind`，所以依赖关系保持单向。
-- **签名限定批准范围。**`Action::signature()` 是 `verb` 或
+- **签名限定批准范围**。`Action::signature()` 是 `verb` 或
   `verb:resource`；以它记录的授权只适用于*那个*资源上的那个动词，而不是该动词的所有用法。换一个资源就会再次询问。
-- **最严格者胜出的组合是安全的。**向 `PolicyChain` 添加一条规则只会收紧访问，永远不会放宽——所以策略的组合不会带来意外。
-- **`Ask` 不会循环。**记录下来的授权/拒绝会在策略之前被查询，所以已批准（或已拒绝）的调用在重试时直接得到结果，而不会无休止地询问。
+- **最严格者胜出的组合是安全的**。向 `PolicyChain` 添加一条规则只会收紧访问，永远不会放宽——所以策略的组合不会带来意外。
+- **`Ask` 不会循环**。记录下来的授权/拒绝会在策略之前被查询，所以已批准（或已拒绝）的调用在重试时直接得到结果，而不会无休止地询问。
 
 ## 用法
 

@@ -1,0 +1,102 @@
+---
+title: "IMessage WeChat 插件"
+sidebarTitle: "概览"
+description: "通过微信访问板上 Agent。"
+---
+
+IMessage WeChat 插件把微信 iLink 添加为 iMessage Gateway 的消息通道：它通过二维码登录绑定机器人，通过 iLink 及其 CDN 发送文本和文件，并通过长轮询接收消息及其文件。
+
+- 插件 ID：`imessage-wechat`
+- 依赖：`imessage-gateway`、`webserver`、`captive-portal`
+- 设置：无
+- 上下文资源：`entropy`（用于 `X-WECHAT-UIN`）
+- 提供的能力：无
+- 所需能力：来自 `imessage-gateway` 的 `IMessageGateway`，来自 `webserver` 的 `WebServer`，来自 `captive-portal` 的 `CaptivePortal`
+- Workflow：没有自己的 Workflow；来自允许账号的入站消息通过 `IMessageGateway::publish` 发布（即 Gateway 的 `gateway.message.received` Event）
+- Agent 工具：无
+- Lua 包：无
+- Web：带状态的门户入口 `imessage-wechat`；`POST /api/gateway/wechat`、`GET /api/gateway/wechat/status`、`POST /api/gateway/wechat/mode`、`GET /api/gateway/wechat/owners`、`POST /api/gateway/wechat/owners`、`POST /api/gateway/wechat/login`、`GET /api/gateway/wechat/login`、`DELETE /api/gateway/wechat/login`（参见 [HTTP API](/zh/plugins/imessage-wechat/http)）
+- 任务：`wechat_login_task` 和 `wechat_receive_task`（池大小各为 1），都在 `start` 中启动，并与 `PluginTaskToken` 竞争；当消息通道已绑定且处于 `send_receive` 时，接收任务持有 Gateway 的一个接收槽位（`IMessageGateway::receive_control`），否则不持有
+- 存储：插件作用域的 KV 键：
+  - `configuration`：完整的提供者配置；
+  - `mode`：`"disabled"` 或 `"send_receive"`（JSON 字符串）；
+  - `owners`：允许的账号（`{id,label}` 的 JSON 数组）；
+  - `get_updates_buf`：最后一个 iLink `getupdates` 游标（原始字节）；
+  - `context_tokens`：最多 16 个用户的最新 `context_token`（JSON 数组 `[{user,token}]`，最近使用的在前）；
+  - `bot_id`：最后一次确认的二维码登录的 `ilink_bot_id`。
+
+`IMessageWechatPlugin::new(context)` 只保留 `context.entropy`；HTTP、接收槽位、模式、所有者（及其配对码）、路由和状态都来自 `IMessageGateway`。
+
+存储为空时，本插件在没有提供者凭据的情况下启动。它需要 `IMessageGateway` 和 `WebServer` 能力，暴露 `/api/gateway/wechat` 用于运行时配置和状态，并在消息通道已绑定（已保存配置）且模式不是 `disabled` 时注册消息通道 `wechat`。iLink 无法引用消息，所以 `reply_to` 会被忽略，而不是导致失败。被接受的配置会在激活前持久保存，并在插件注册期间恢复。格式错误的已保存配置会导致注册失败。只有在绑定机器人之后才会加载允许的账号。参见 [HTTP API](/zh/plugins/imessage-wechat/http)。
+
+## 模式
+
+微信提供 `disabled` 和 `send_receive`（`ChannelMode::WITHOUT_SEND_ONLY`）：iLink 发送消息需要入站的 `context_token` 和最近的用户活动，所以没有仅发送模式。新绑定的消息通道，以及在引入模式之前保存的配置，都会接收消息；已保存的 `send` 会被读作 `send_receive`。`disabled` 会丢弃 Gateway 注册、接收会话和槽位。
+
+## 接收
+
+`wechat_receive_task` 拥有共享的接收运行时（`IMessageGateway::receive_runtime`）。当消息通道已绑定且处于 `send_receive` 时，它持有一个接收槽位租约；否则它处于休眠状态，不持有任何连接。当所有槽位都在使用中时，消息通道报告 `no_slot` 并等待有槽位空出，所以一旦另一个消息通道释放槽位，它就会立即启动。
+
+每个接收会话通过租约用 `GatewayHttp::poll`（而不是 `GatewayHttp::send`，它 30 s 的截止时间比一次长轮询更短）打开一个到所配置 `api_base` 的保活连接，并重复以下步骤：
+
+1. 等待 `IMessageGateway::ready()`；
+2. 用 `{"get_updates_buf":"<cursor>","base_info":{"channel_version":"barracuda-wechat"}}` 以及请求头 `Content-Type`、`AuthorizationType: ilink_bot_token`、`Authorization: Bearer <token>`、`X-WECHAT-UIN`（每次请求从平台熵源取一个新的随机 `u32`，把它的十进制字符串做 base64 编码；没有熵源时使用配置的值）、`iLink-App-Id`、`iLink-App-ClientVersion`，以及配置了时的 `SKRouteTag`，发送 `POST {api_base}/ilink/bot/getupdates`；
+3. 用 iLink 的 `longpolling_timeout_ms`（在某个应答指定之前为 35 s，限制在 5–120 s 之间）加 5 s 作为这次轮询的上限。超过上限的轮询算作一次空的成功：会话报告 `receiving` 并立即重新打开连接；
+4. 对于每条新消息：只保留不带 `group_id`、`item_list` 中有文本项（类型 1）或文件（图片 2、语音 3、文件 4、视频 5）的 `message_type` 1（用户）消息；机器人自己的消息（`message_type` 2）以及两者都没有的消息会被跳过并计数。消息 id 在传输中是 `u64`，以十进制字符串保存；
+5. 在获取任何文件之前，根据文本用所有者名册对发送者 `from_user_id`（无标签）进行分类：
+   - 所有者：获取消息的文件（参见“文件”），然后发布 `gateway.message.received`，带路由 `{channel:"wechat", conversation_id:<from_user_id>}`（没有 `thread_id`）、消息 id、文本，以及作为 `attachments` 的文件；
+   - 配对码：通过常规发送路径回复一次配对成功消息；
+   - 其他任何人：丢弃并计数；
+6. 保存所有者或新配对发送者的最新 `context_token`（陌生人永远不会占用位置），然后保存游标。
+
+超过 32 KiB 的应答体不会被完整缓冲：轮询保留它的前 32 KiB 和最后 4 KiB，从中取出 `get_updates_buf`（以及 `longpolling_timeout_ms`），立即保存该游标，并带一条警告把这批消息计为丢失，这样下一次轮询就会越过它。只有游标在这两部分中都找不到的应答才会让轮询失败。
+
+在一次正常的轮询之后被服务器关闭的连接会立即重新打开。其他失败按照脚手架的退避策略处理（从 1 s 开始翻倍，最长 30 s；HTTP 429 之后为 30 s）。`ret` 或 `errcode` 为 -14 表示机器人会话已过期：循环会停止，接收状态为 `error`，消息为 `SESSION_EXPIRED_MESSAGE`（中文部分之后是 "Scan again to relink"），直到新的二维码登录被确认，或者配置或模式发生变化。
+
+**文件。**每个 iLink 文件都存放在 CDN 上（`cdn_base`，默认为 `https://novac2c.cdn.weixin.qq.com/c2c`），用它自己的密钥以 AES-128-ECB 加密，并使用 PKCS#7 填充。一个条目通过 `media.full_url` 指明文件，否则通过 `media.encrypt_query_param`（从 `<cdn_base>/download?encrypted_query_param=<param>` 下载），并携带密钥：`image_item.aeskey` 为 32 位十六进制数字，否则 `media.aes_key` 为 16 个原始字节或其十六进制数字的 base64 编码。
+
+| 条目 | 类型 | MIME 类型 |
+| --- | --- | --- |
+| `image_item` (2) | `image` | 根据解密后的字节判断（JPEG、PNG、GIF、WebP），否则为默认值 |
+| `voice_item` (3) | `audio` | `encode_type` 为 5 时为 `audio/amr`，为 7 时为 `audio/mpeg`，否则为 `audio/silk`（按收到的原样保存，不转码） |
+| `file_item` (4) | `file` | 根据 `file_name` 的扩展名判断；`file_name` 是附件的 `filename` |
+| `video_item` (5) | `video` | `video/mp4` |
+
+`len` 超过 `IMessageGateway::attachment_max_bytes()` 的文件条目会直接被拒绝，不发出请求。否则，下载（在共享请求池上用 `GatewayHttp::download`，从不占用接收槽位，上限为限制值加一个块）会逐次读取、逐次解密：一个接收端解密每次读取的数据，并通过一个容量为两项的通道把明文交给 `IMessageGateway::store_inbound`，后者写入 `/workspace/cache/gateway/wechat/`；解密器会保留最后一个块，直到检查并去除填充。没有任何密钥的图片按收到的原样保存（`download_inbound`）。如果一个文件没有引用或密钥、超过限制，或者它的下载、解密或保存失败，消息并不会被丢弃：它的文本末尾会追加一行 `[<kind> too large, not
+received]` 或 `[<kind> not received]`。陌生人的消息和配对消息中的文件从不获取。CDN URL 属于凭据，从不记录到日志。文件逐个获取，期间下一次轮询会等待。
+
+媒体条目会让一批消息变大（每个 `encrypt_query_param` 有几百字节）；超过 32 KiB 的一批消息仍会像上文所述那样越过它的游标被跳过。
+
+**发送文件。**`send_media`（图片、视频、文件；音频作为文件条目发送，因为 iLink 自己的客户端也不发送语音）接受一个可以读取两次的文件：字节，或者诸如 `gateway.send_media` 的 `file` 命令这样的来源。流会得到 `InvalidRequest`。
+
+1. 第一遍计算明文的 MD5 和长度。
+2. 用机器人的请求头和 `{"filekey","media_type","to_user_id","rawsize","rawfilemd5","filesize","no_need_thumb":true,"aeskey","base_info"}` 发送 `POST {api_base}/ilink/bot/getuploadurl`：`filekey` 和 AES 密钥各为从平台熵源取得的 16 字节，以十六进制表示；`media_type` 为 1 图片、2 视频、3 文件；`filesize` 是密文长度（向上取整到下一个完整的 16 字节块）。
+3. 把文件在再次读取时加密，`POST` 到 `upload_full_url`，否则到 `<cdn_base>/upload?encrypted_query_param=<upload_param>&filekey=<filekey>`，类型为 `application/octet-stream`，带 `Content-Length`（从不分块，也不带机器人令牌）。CDN 在它的 `x-encrypted-param` 响应头中给出下载参数；非 200 的应答为 `Platform`，带状态码和 `x-error-message`。
+4. 说明文字先作为单独的一条文本消息发送；然后用一次 `sendmessage` 发送该条目：`image_item {media, mid_size}`、`video_item {media, video_size}` 或 `file_item {media, file_name, len}`，其中 `media` 为 `{encrypt_query_param, aes_key: base64 of the key's hex
+   digits, encrypt_type: 1}`，并像发送文本一样带上接收者的上下文令牌。
+
+与每次发送一样，上传必须在 Gateway 30 s 的 `SEND_TIMEOUT` 之内完成。iLink 错误（`ret`/`errcode`）为 `Platform`，401/403 为 `Authentication`，429 为 `RateLimited`，文件读取失败为 `Stream`。
+
+来源：腾讯自己的 iLink 客户端 `@tencent-weixin/openclaw-weixin` 2.4.10（npm，由腾讯发布）：`src/api/types.ts`（条目、`getuploadurl`）、`src/cdn/aes-ecb.ts`、`cdn-url.ts`、`cdn-upload.ts`、`upload.ts`、`pic-decrypt.ts`（加密、URL、`x-encrypted-param`、密钥编码）、`src/media/media-download.ts` 和 `src/messaging/send.ts`。
+
+**带上下文令牌发送。**提供者会在每次发送时附上接收者（`to_user_id`）最新保存的 `context_token`。目标 `thread_id` 仍然会覆盖它。令牌从不放进路由的 `thread_id`：它随每条消息变化，会把路由拆散。
+
+**去重和游标。**最近送达的 32 个消息 id 保存在 RAM 中，所以重新连接或重启后重新投递的一批消息只会发布一次。游标在一批消息处理完之后推进；当它在一批包含消息的批次中发生变化时写入，否则最多每 5 分钟写入一次。只会保存非空的 `get_updates_buf`。
+
+**每个接收中的消息通道的内存占用。**租约的静态 1 KiB TX 和 4 KiB RX 套接字缓冲区；连接期间基于它们的一个 mbedTLS 会话（堆上约 2 × 16.7 KiB 的记录缓冲区）；每次轮询一个 2 KiB 的响应头缓冲区和一个 512 字节的读取块；应答体（上限 32 KiB，只有在跳过更大的批次时才另加 4 KiB 的尾部）；最多 32 个记住的消息 id；以及最多 16 个上下文令牌（每个用户 id ≤ 128 字节，令牌 ≤ 1 KiB）。下载文件期间：一个带 Gateway 下载缓冲区的请求池连接、一个 AES 上下文，以及最多两次正在处理的解密读取；上传占用一个连接、一个 AES 上下文和一个文件块。
+
+**登录。**二维码登录有自己的任务。确认的登录会像手动 `POST` 一样保存配置；当它的 `ilink_bot_id` 与已保存的 `bot_id` 不同时，会清除旧机器人的游标和上下文令牌。然后接收会与模式同步并重新开始，这也会清除会话过期导致的停止。
+
+门户入口通过 `CaptivePortal::register_with_status` 注册。它的 `GET /portal/status` 记录在二维码登录会话处于 `wait` 或 `scanned` 时为 `attention`“等待扫码”，在接收因机器人会话过期而停止时为 `attention`“需要重新扫码”，否则为 Gateway 对该消息通道的 `channel_status`：未绑定时为 `off`“未配置”，停用时为 `off`“已停用”，接收中为 `ready`“收发中”，其他情况为 `attention`“连接中”、“名额已满”或“连接中断”。
+
+配置也可以在 `/api/gateway/wechat/login` 通过二维码登录获得。注册时保留两个 HTTP 路由：配置前缀（其 `/status`、`/mode` 和 `/owners` 由 Gateway 提供，`IMessageGateway::serve_channel`）和精确的登录路由。两条配置路径都通过同一条共享路径保存和注册，所以确认的登录会写入与手动 `POST /api/gateway/wechat` 相同的 `configuration` 键和格式：iLink 的 `bot_token` 作为 `token`，iLink 的 `baseurl`（或登录时所用的 `api_base`）作为 `api_base`，其他字段都取默认值。
+
+`wechat_login_task` 拥有唯一的登录会话。没有会话运行时，它在一个命令信号上休眠，不持有任何 iLink 连接和二维码数据。一个 `POST` 会唤醒它去获取二维码；然后它一次一个请求地长轮询 iLink，直到会话被确认、过期、达到 480 s、被 `DELETE` 取消或被新的 `POST` 替换。每个会话的状态只在会话运行期间装箱；会话之间，任务只保留最后的状态。任务让它的循环与 `PluginTaskToken` 竞争，所以卸载、启动回滚和 Plugin Manager 的销毁都会丢弃正在运行的 iLink 请求，并以 `502` 释放所有等待中的 `POST`。
+
+## 门户页面
+
+需要来自 `captive-portal` 的 `CaptivePortal` 和一个私有的插件文件系统作用域。注册时保留一个 `WebEntryRegistration`，对应的 `WebEntry` 的 ID 为 `imessage-wechat`，分组为 `WebGroup::Channel`，排序为 30，标题为 `WeChat`，带双语摘要、图标 `icon.svg`、没有插图、模块为 `entry.js`，以及一个 `ResourceFiles` 提供者。卸载会移除导航入口和资源提供者；不会注册额外的 HTTP 路由。
+
+Cargo 会在编译本插件之前自动运行声明的 `build` 任务。如果只想构建它的资源，在仓库根目录运行 `cargo plugin run build --plugin imessage-wechat`。该声明使用共享的 `tools/web/build.ts` 脚本。前端依赖以及 format/lint/check/test 命令在仓库根目录统一管理；测试放在本插件的 `resources/web/tests/` 中。独立的浏览器模块写入本插件的 `filesystem/resources/entry.js`。通用的镜像构建器只在选择了本插件时才包含该目录。不会有业务页面打包进门户外壳。共享的 UI 源码是构建时的辅助工具，而不是对其他贡献者文件的运行时依赖。
+
+页面（`resources/web/entry.ts`，基于强制门户的 UI 套件和 Gateway 的消息通道页面套件构建）在挂载时开始二维码登录（`POST /api/gateway/wechat/login`），把返回的 `url` 绘制为二维码，并根据 `expires_in` 显示倒计时，每 2 s 轮询一次 `GET`（wait、scanned、confirmed、expired 或 failed），离开时发送一个 `keepalive` 的 `DELETE`。如果 `GET` 报告 `configured` 且没有会话在运行，页面会显示已绑定状态和“重新绑定”，而不是开始登录。在手机上（宽度小于 720 px），它显示操作步骤和一个“复制链接”按钮，而不是二维码，也不会开始会话。在“高级”下手动输入的令牌会提交到 `POST /api/gateway/wechat`；页脚只在该折叠区展开时显示。登录确认或令牌被接受后，页面会调用 `context.refreshStatus()`，让门户的导航和概览随之更新。密钥使用密码输入框，从不保存在浏览器存储中，并在成功或卸载时清除。请求在卸载时取消，并且从不自动重试。HTTP API 没有身份验证或传输加密；只在可信的配网网络中使用。

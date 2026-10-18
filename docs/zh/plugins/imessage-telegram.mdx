@@ -55,10 +55,10 @@ IMessage Telegram 插件把 Telegram Bot 添加为一个 iMessage Gateway 消息
 
 在一次正常轮询之后断开的连接会立即重新打开；其他失败从 1 秒退避到 30 秒。
 
-- **游标。**offset（最后的 `update_id` + 1）在下一次轮询时确认所有已处理的 update。它保存在 RAM 中，最多每 10 秒写入一次 `offset`。新的 bot token 会清除它。
-- **重复。**会记住最近处理的 16 个 `update_id`；再次发送的 update（例如重连之后）会被丢弃。
-- **消息。**带有发送者和 `text` 的消息，或者带有下列媒体之一的消息（其 `caption` 作为文本，可能为空），会被处理。贴纸、服务消息和其他内容会被跳过，并记录一条调试日志。
-- **授权账号。**发送者是 `from.id`，标签为 `@username` 或名字。`Owners::classify` 在获取任何文件之前，根据文本或说明文字作出判断：
+- **游标**。offset（最后的 `update_id` + 1）在下一次轮询时确认所有已处理的 update。它保存在 RAM 中，最多每 10 秒写入一次 `offset`。新的 bot token 会清除它。
+- **重复**。会记住最近处理的 16 个 `update_id`；再次发送的 update（例如重连之后）会被丢弃。
+- **消息**。带有发送者和 `text` 的消息，或者带有下列媒体之一的消息（其 `caption` 作为文本，可能为空），会被处理。贴纸、服务消息和其他内容会被跳过，并记录一条调试日志。
+- **授权账号**。发送者是 `from.id`，标签为 `@username` 或名字。`Owners::classify` 在获取任何文件之前，根据文本或说明文字作出判断：
   - 所有者的消息作为 `GatewayInboundMessage` 发布，路由为
     `{channel: "telegram", conversation_id: <chat.id>}`，`message_id` 为
     `<message_id>`，这样回复（以及 `reply_to`）会落在同一个聊天中，其文件（见下文）作为唯一的附件；
@@ -70,7 +70,7 @@ IMessage Telegram 插件把 Telegram Bot 添加为一个 iMessage Gateway 消息
     `send_receive`（或新配置）时调用一次 `deleteWebhook`，然后继续轮询。再次出现 409，包括来自第二个轮询方的 "terminated by other getUpdates request"，会以 Telegram 的描述报告 `error` 并退避。
   - 429：至少等待 `parameters.retry_after`。
   - 401 或 404（token 错误或已被撤销）：报告 `error` 并停止，直到配置或模式发生变化。
-- **内存。**每个正在接收的消息通道：
+- **内存**。每个正在接收的消息通道：
   - 一个 1 KiB 的响应头缓冲区和一个 512 字节的读取块；
   - 解码一次轮询时最多 16 KiB 的响应 body；它直接解码到用到的少数几个字段中。超过上限的批次会改为一次一个 update 重新获取，单个 update 超过上限时会被确认并跳过，同时给出警告；
   - 租约的 TLS 会话，空闲时约 35 KiB，带有 16 KiB 输入和 4 KiB 输出的记录缓冲区；

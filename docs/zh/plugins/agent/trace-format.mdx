@@ -63,7 +63,7 @@ TracingConfig::default()
 <context=<group> <key>=<value> …>
 ```
 
-**调用点（字段如何成为增量上下文）：**名为 `group.key`（带点号）的 span 字段会被路由到该分组的上下文；其他任何字段都是自定义上下文。
+**调用点（字段如何成为增量上下文）**：名为 `group.key`（带点号）的 span 字段会被路由到该分组的上下文；其他任何字段都是自定义上下文。
 
 ```rust
 info_span!(

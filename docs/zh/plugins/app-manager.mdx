@@ -247,7 +247,7 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 | `view` | 从 `resources/view/app.tsx` 及其 `app.d.ts` 契约构建系统视图；它不带图集 |
 | `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/` |
 
-`resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。视图中的图标是 `""` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
+`resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。视图中的图标是 `"\uE008"` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
 
 ```sh
 POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin app-manager

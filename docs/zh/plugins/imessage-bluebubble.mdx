@@ -1,0 +1,153 @@
+---
+title: "IMessage BlueBubble 插件"
+sidebarTitle: "概览"
+description: "通过 BlueBubbles 服务器访问板上 Agent。"
+---
+
+IMessage BlueBubble 插件把 BlueBubbles 服务器添加为一个 iMessage
+Gateway 消息通道：它通过 BlueBubbles API 发送消息，并通过服务器推送到设备自身 Web 服务器的 webhook 接收消息。
+
+- 插件 ID：`imessage-bluebubble`
+- 依赖：`imessage-gateway`、`webserver`、`captive-portal`
+- 设置：无
+- 上下文资源：`ip_stack`（webhook URL 中写明的站点地址）、
+  `entropy`（webhook 密钥）
+- 提供的能力：无
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`，
+  来自 `imessage-gateway` 的 `IMessageGateway`，来自 `webserver` 的 `WebServer`
+- Workflow：无（收到的消息以 Gateway 的
+  `gateway.message.received` 形式到达 Workflow）
+- Agent Tool：无
+- Lua 包：无
+- Web：门户入口 `imessage-bluebubble`，带状态；`POST
+  /api/gateway/bluebubbles`、`GET /api/gateway/bluebubbles/status`、`POST
+  /api/gateway/bluebubbles/mode`、`GET /api/gateway/bluebubbles/owners`、
+  `POST /api/gateway/bluebubbles/owners`、`POST
+  /api/gateway/bluebubbles/hook/<secret>`（见 [HTTP API](/zh/plugins/imessage-bluebubble/http)）
+- 任务：`bluebubbles_receive_task`（池大小 1），一个接收运行时
+  （见下文）；它不占用接收名额
+- 存储：插件作用域的 KV：
+  - `configuration`：提供方配置；
+  - `mode`：消息通道模式；
+  - `owners`：授权账号；
+  - `webhook`：`{"server","secret","url"?}`，即 webhook 密钥、为其生成该密钥的服务器，以及最近一次注册的 URL；
+  - `cursor`：`{"after"?,"seen":[…]}`，即追赶游标。
+
+接收名额：无。webhook 由设备自己的 Web 服务器提供，所以消息通道使用 Gateway 的 `webhook_receive_control()`，从不报告
+`no_slot`。发送和 webhook 请求都通过 `IMessageGateway::http()` 进行。
+
+存储为空时，插件在没有提供方凭据的情况下启动。它提供 `/api/gateway/bluebubbles` 用于运行时配置，并在已配置且模式为 `send` 或
+`send_receive` 时注册消息通道 `bluebubbles`，所以它可以与 Inkbox 的 `inkbox` 消息通道同时处于活动状态。启用 Private API 时，`reply_to` 作为 `selectedMessageGuid` 发送；未启用时，AppleScript 发送无法引用消息，所以 `reply_to` 会被忽略，文本或附件会以不带线程的形式发送，而不是失败。被接受的配置会在激活前持久化，并在插件注册时恢复。存储的数据格式错误会导致注册失败。参见
+[HTTP API](/zh/plugins/imessage-bluebubble/http)。
+
+## 模式
+
+消息通道遵循 Gateway [插件页面](/zh/plugins/imessage-gateway)中共享的接入机制
+（“消息通道如何接入”一节）。
+
+- `disabled`：不在 Gateway 中注册；不接收消息。
+- `send`：已注册，只发送。在模式出现之前存储的配置会以 `send` 加载。
+- `send_receive`：已注册，并通过 webhook 接收。这是新消息通道的默认模式。
+
+离开 `send_receive` 会停止接收会话，然后从服务器删除 webhook，最多等待 10 秒。失败会被记录到日志，并保留记录，以便下次注册时删除过期的条目。门户状态来自 `IMessageGateway::channel_status`：“仅发送”、“收发中”、“连接中”、
+“连接中断”或“已停用”。
+
+## 接收
+
+接收通过局域网 webhook 进行。BlueBubbles 服务器把 `new-message` 事件推送到设备 Web 服务器（端口 8787）上的 `POST /api/gateway/bluebubbles/hook/<secret>`，所以它不使用出站连接，也不占用接收名额。
+
+**密钥。**Web 服务器不暴露请求头或查询参数，所以由路径携带密钥。密钥是来自平台熵源的 128 位数据，写成 32 个十六进制数字，并以恒定时间比较。它与为其生成该密钥的服务器 URL 一起存储在 `webhook` 中。新的服务器 URL 会生成新的密钥，并开始新的游标。
+没有熵源时，接收会以错误停止。
+
+**端点。**路由以前缀形式注册
+（`serve_http_prefix("/api/gateway/bluebubbles/hook")`），因为注册时还不知道密钥。处理程序只做检查和排队；它从不等待。
+- 密钥错误或不处于 `send_receive` 时返回 404，方法不是 `POST` 时返回 405。
+- 否则立即返回 204，并执行以下操作之一：
+  - 丢弃超过 8 KiB 的请求体，计为丢失，并请求一次追赶；
+  - 忽略其他事件类型、无法解析的请求体和 `isFromMe` 消息；
+  - 丢弃已经处理或已排队的 GUID；
+  - 把消息排入队列。
+- 收件箱最多容纳 8 条消息和 16 KiB 的字符串（文本、地址，以及附件的 GUID、类型和名称）。放不下的投递会计为丢失，并请求一次追赶。
+
+只解析 `type`、`data.guid`、`data.text`、`data.isFromMe`、`data.handle.address`、
+`data.chats[0].guid`、`data.dateCreated`、`data.itemType`、
+`data.associatedMessageType`，以及每个 `data.attachments[]` 的 `guid`、
+`mimeType`、`transferName` 和 `totalBytes`。其他内容都由 serde 跳过，不构建 JSON 树。
+
+**接收任务。**`bluebubbles_receive_task` 在 `start` 中启动一次。它让来自 `receive_runtime(.., ReceiveTiming::DEVICE)` 的运行时与插件的任务令牌竞争。每个会话执行以下步骤：
+
+1. 取得密钥，必要时生成密钥。它根据
+   `ip_stack.config_v4()` 构建 URL
+   `http://<station IPv4>:8787/api/gateway/bluebubbles/hook/<secret>`。没有地址时，会话以“device
+   LAN address unknown”失败，并以退避重试。
+2. 没有游标时，从最新的消息开始游标
+   （`message/query` `sort: DESC, limit: 1`），这样新的消息通道不会重放历史消息。
+3. 注册 webhook。它列出 `GET /api/v1/webhook`，删除本设备过期的条目（存储的 URL，或任何以本密钥路径结尾的 URL），并在当前 URL 不存在时创建 `{"url":…,"events":["new-message"]}`。其他设备的条目保持不动。然后它报告
+   `receiving`。
+4. 通过 `POST /api/v1/message/query`
+   `{"after":<cursor>,"sort":"ASC","with":["chat","attachment"],"limit":10,"offset":n}` 追赶。
+   - 每页容纳 10 条消息。当某页超过 16 KiB 时，限制减半。
+     单条超过 16 KiB 的消息会被跳过并计为丢失。
+   - 一次追赶最多处理 50 条消息。当 `metadata.total` 报告更多时，跳过最早的消息并计为丢失。
+   - 在每页之前，它等待 `IMessageGateway::ready()`。
+5. 循环处理三种事件：
+   - 已排队的消息：等待 `ready()`，然后逐条处理。
+   - 一次丢失的投递：执行追赶。
+   - 每 3 分钟：再次注册 webhook（如果服务器丢弃了它就重新创建），并执行追赶。服务器从不重试投递，而 Web 服务器会拒绝超过其 8 KiB 请求缓冲区的请求体，所以这一步可以同时弥补这两种情况。
+
+处理一条消息：
+- 记录 GUID 并推进游标。
+- 它的文本是去掉附件位置的 `U+FFFC` 标记并去除首尾空白后的 `data.text`；消息带有文件时，文本可以为空。
+- 跳过 `isFromMe`；把 tapback、群组事件、既没有文本也没有文件的消息，以及没有发送者或聊天的消息计为已跳过。
+- 然后在获取任何文件之前调用 `owners.classify(handle.address, None, text)`：
+  - `Owner`：下载它的文件（见下文），然后发布
+    `GatewayInboundMessage`，路由为
+    `{channel:"bluebubbles", conversation_id:<chats[0].guid>}`，
+    `message_id` 设为消息 GUID，并把存储的文件作为
+    `attachments`。聊天 GUID 就是发送路径的 `chatGuid`，所以回复会落在同一个聊天中。
+  - `Paired`：通过提供方向该聊天发送 `PAIRED_REPLY`。
+  - `Ignored`：丢弃消息；所有者名单会对它计数。
+
+**附件。**所有者消息的 `attachments[]` 会按顺序逐个获取，每个都通过
+`IMessageGateway::download_inbound` 在共享请求池中使用
+`GET /api/v1/attachment/<guid>/download?password=…`，下载到
+`/workspace/cache/gateway/bluebubbles/`。
+- 附件的 MIME 类型取 `mimeType`，否则取下载的
+  `Content-Type`；它的 `filename` 是 `transferName`。
+- 类型规则：`image/jpeg`、`png`、`gif` 和 `webp` 为 `image`，`audio/*` 为 `audio`，`video/*` 为 `video`，其他为 `file`。HEIC 和 HEIF 照片保持为类型 `file` 的 `image/heic` 文件，因为模型不把它们当作图片接收，而设备也不要求服务器做任何转换。
+- `transferName` 以 `.pluginPayloadAttachment` 结尾的条目是链接预览的隐藏负载，不是发送者的文件，因此不做处理。
+- `totalBytes` 超过 Gateway 的 `attachment_max_bytes()` 时，不发请求就拒绝。被拒绝、过大或下载失败不会丢弃消息：会在它的文本后追加一行
+  `[<kind> too large, not received]` 或 `[<kind> not received]`，消息仍会发布。
+
+服务器错误映射到运行时的策略：
+- 401/403 以“BlueBubbles rejected the password”停止，直到配置发生变化。
+- 429 在至少 30 秒后重试。
+- 其他错误以退避重试。
+
+**游标和去重。**`after` 是已处理消息中最新的 `dateCreated`。`seen`
+保存最新的 32 个 GUID，因为 `after` 是包含边界的。两者都保存在 RAM 中。接收任务在它们变化期间最多每 10 秒存储一次，所以重启最多会重放最后 10 秒的消息，而仍在 GUID 环中的消息会被它拦下。webhook 和追赶都会对照 GUID 环和收件箱去重。
+
+**内存。**
+- 收件箱最多容纳 8 条消息和 16 KiB 的字符串。
+- GUID 环容纳 32 个 GUID，约 1.3 KiB。
+- 追赶的一页最多容纳 16 KiB 的响应体，加上 Gateway HTTP 辅助程序的 16 KiB 响应头缓冲区和 8 KiB 读缓冲区，都位于大块内存中，且只在请求运行期间存在。webhook 列表最多 8 KiB。附件通过同样的 Gateway 缓冲区流式写入文件；不会在 RAM 中保存任何文件。
+- `http://` 服务器 URL 不需要 TLS。`https://` URL 每个请求从共享请求池中占用一个 TLS 会话，从不占用接收租约。
+
+## 门户页面
+
+需要来自 `captive-portal` 的 `CaptivePortal` 和私有的插件文件系统作用域。注册时保留一个 `WebEntryRegistration`，对应的 `WebEntry` 的 ID 为
+`imessage-bluebubble`，分组为 `WebGroup::Channel`，顺序为 50，标题为 `BlueBubbles`，带双语摘要、图标 `icon.svg`、没有插图、模块为 `entry.js`，以及一个 `ResourceFiles` 提供者，其状态为 Gateway 对该消息通道的 `channel_status`。卸载会移除导航入口、资源提供者和两个 HTTP 路由：
+配置前缀（它也提供 `/mode` 和 `/owners`，
+即 `IMessageGateway::serve_channel`），以及 `/hook` 前缀。
+
+Cargo 会在编译本插件之前自动运行声明的 `build` 任务。
+只构建它的资源时，在仓库根目录运行 `cargo plugin run build --plugin imessage-bluebubble`。该声明使用共享的 `tools/web/build.ts`
+脚本。前端依赖和 format/lint/check/test 命令在仓库根目录统一管理；测试位于本插件的 `resources/web/tests/`。
+独立的浏览器模块写入本插件的 `filesystem/resources/entry.js`。通用的镜像构建器只在选中本插件时包含该目录。门户外壳中不打包任何业务页面。共享的 UI 源码是构建时的辅助代码，而不是对其他贡献者文件的运行时依赖。
+
+页面（`resources/web/entry.ts`，基于强制门户的 UI 工具包和 Gateway 的消息通道页面工具包构建）把
+`{server_url, password, use_private_api, stream_edit_min_delta_bytes,
+stream_max_edits}` 发送到 `POST /api/gateway/bluebubbles`。它的“测试连接”按钮直接从浏览器调用服务器的 `GET /api/v1/server/info?password=…`：显示服务器版本、macOS 版本和 Private API 状态，并把 Private
+API 开关设为服务器的值；服务器的拒绝显示在 URL 字段上。当浏览器无法访问服务器时（没有路由或 CORS），页面会注明连接未测试；测试从不阻止保存。
+挂载时，它读取 `GET /api/gateway/bluebubbles/status`（共享的消息通道状态）；已配置的消息通道显示为一个“通道”行，并在用来替换它的表单上方显示已配置的卡片；共享的模式和授权账号控件
+（`channelInbound`）使用 `/mode` 和 `/owners`。保存成功后也会出现该行，然后页面调用 `context.refreshStatus()`，让门户的导航和概览随之更新。它从不读取设置或密钥。密钥使用密码输入框，从不持久化到浏览器存储中，并在成功或卸载时清空。请求在卸载时取消，从不自动重试。HTTP API 没有身份验证，也没有传输加密；只能在可信的配置网络中使用。

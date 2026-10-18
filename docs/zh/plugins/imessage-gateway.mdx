@@ -103,7 +103,7 @@ impl IMessageGateway {
   `SendMediaRequest::size` 设为它的长度；这样 `Multipart::file` 就能让请求的 `Content-Length` 保持已知。
 - 这些文件位于 `/workspace/cache`，随时可能消失；在把它放在内存中的开发板上，重启后它们就不在了。
 
-**下载前先判断所有者。**消息通道先调用
+**下载前先判断所有者**。消息通道先调用
 `owners.classify(sender, label, text)`，只有结果为 `Owner` 时才存储或下载消息中的文件。已配对或被忽略的发送者的文件永远不会被获取或写入，所以陌生人无法填满缓存。
 
 ### 流式下载
@@ -290,7 +290,7 @@ Gateway 的接收名额（`http_client::ReceiveSlots`，数量与
 `receive-slots` 设置相同）实现了 `ReceiveSlotSource`，所以消息通道从
 `IMessageGateway::receive_control` 获取它的控制器。
 
-**HTTP 接口。**消息通道实现：
+**HTTP 接口**。消息通道实现：
 
 ```rust
 pub trait ChannelControl: 'static {
@@ -345,7 +345,7 @@ impl IMessageGateway {
   - 消息通道路径之下的其他路径为 404 `{"error":"not_found"}`；
   - 其他方法为 405 `{"error":"method_not_allowed"}`。
 
-**门户状态。**`IMessageGateway::channel_status(&channel)` 给出一个
+**门户状态**。`IMessageGateway::channel_status(&channel)` 给出一个
 `ChannelStatus { level, zh, en }`；消息通道插件把 `level`
 （`ChannelLevel::Off`、`Ready`、`Attention`）映射为其门户卡片的 `EntryStatus`：
 
@@ -359,18 +359,18 @@ impl IMessageGateway {
 | `send_receive`，没有名额 | `attention` “名额已满” |
 | `send_receive`，出错 | `attention` “连接中断” |
 
-**消息通道页面套件。**`resources/web/channel/`（见
+**消息通道页面套件**。`resources/web/channel/`（见
 [消息通道页面套件](/zh/plugins/imessage-gateway/channel-page-kit)）是针对上述 JSON 的构建期 TypeScript：`readChannel`、
 `configuredRow` 和 `channelInbound`（“模式”和“授权账号”两行）。消息通道的门户入口把它和 captive portal 的 UI 套件打包在一起；
 Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试在 `resources/web/tests/` 中。
 
 ## 消息通道如何接入
 
-1. **依赖。**在 `depends-on` 中列出 `imessage-gateway`，并依赖
+1. **依赖**。在 `depends-on` 中列出 `imessage-gateway`，并依赖
    `barracuda-imessage-gateway-plugin`。
-2. **构造函数。**消息通道不从 `PluginContext` 获取任何东西；Gateway 持有用于配对码的熵源和接收名额。在 `register` 中调用
+2. **构造函数**。消息通道不从 `PluginContext` 获取任何东西；Gateway 持有用于配对码的熵源和接收名额。在 `register` 中调用
    `require::<IMessageGateway>("imessage-gateway")`。从 `gateway.receive_control()` 获取控制器；通过 webhook 接收的 BlueBubbles 则使用 `gateway.webhook_receive_control()`（`UnlimitedSlots`）。
-3. **状态。**在 `register` 中：
+3. **状态**。在 `register` 中：
    - 加载配置；
    - `gateway.load_mode(&storage, configured, ChannelMode::legacy())`
      （微信：`ChannelMode::SendReceive`）；
@@ -382,10 +382,10 @@ Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试
    - 把这些都放进一个实现了
      `ChannelControl` 的消息通道状态类型中。微信用
      `ChannelMode::WITHOUT_SEND_ONLY` 覆盖 `modes()`。
-4. **`apply_mode`。**调用 `gateway.store_mode`，然后添加或撤销 Gateway 注册，使注册恰好在消息通道已配置且
+4. **`apply_mode`**。调用 `gateway.store_mode`，然后添加或撤销 Gateway 注册，使注册恰好在消息通道已配置且
    `mode.registers()` 时存在，再更新 `mode()`。把失败映射为
    `ModeError::Storage` 或 `ModeError::Registration`。
-5. **接收方。**实现 `ReceiveChannel<Lease>`。每个 session 循环执行：
+5. **接收方**。实现 `ReceiveChannel<Lease>`。每个 session 循环执行：
    1. 等待 `IMessageGateway::ready()`；
    2. 通过租约获取一批消息。轮询型消息通道通过租约使用
       `GatewayHttp::poll`（来自 `gateway.http()`）
@@ -400,7 +400,7 @@ Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试
    5. 持久化游标。
 
    对重试可以解决的失败返回 `ReceiveError::new`，对重试无法解决的失败返回 `halt`（微信 `-14`：“需要重新扫码”），对 429 使用 `.retry_after(..)`。
-6. **运行时。**构建
+6. **运行时**。构建
    `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`，
    然后调用 `gateway.sync_receive(&*state)`；那里的 `NoSlot` 已经作为状态报告出来了。把运行时保留到 `start`。
 7. **端点。**
@@ -408,10 +408,10 @@ Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试
    - 配置 `POST` 成功后，它调用 `sync_receive` 和
      `control.restart()`。
    - 把配置端点、`/mode` 和 `/owners` 注册为一个前缀路由：`gateway.serve_channel(CONFIG_API_PATH, state, config)`。
-8. **门户。**`register_with_status(.., move || entry_status(gateway.channel_status(&*state)))`，
+8. **门户**。`register_with_status(.., move || entry_status(gateway.channel_status(&*state)))`，
    其中消息通道的 `entry_status` 把 `ChannelStatus` 映射为 `EntryStatus`。页面导入消息通道页面套件，并在其构建 `inputs` 中列出
    `../imessage-gateway/resources/web/channel`。
-9. **任务。**在 `start` 中，生成一个拥有该运行时的任务：
+9. **任务**。在 `start` 中，生成一个拥有该运行时的任务：
 
    ```rust
    #[embassy_executor::task]
@@ -419,4 +419,4 @@ Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试
        let _completed = select(cancellation.cancelled(), runtime).await;
    }
    ```
-10. **文档。**在消息通道的插件页面 `docs/plugins/<id>.mdx` 上，声明任务、端点、存储键（`mode`、`owners` 和游标）以及名额使用情况。
+10. **文档**。在消息通道的插件页面 `docs/plugins/<id>.mdx` 上，声明任务、端点、存储键（`mode`、`owners` 和游标）以及名额使用情况。

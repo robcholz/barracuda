@@ -1,0 +1,62 @@
+---
+title: "IMessage BlueBubble HTTP API"
+sidebarTitle: "HTTP API"
+description: "BlueBubbles 消息通道的 HTTP 路由：状态、设置、模式、所有者和 webhook。"
+---
+
+## `GET /api/gateway/bluebubbles/status`
+
+返回 `200` 和共享的消息通道状态（参见 Gateway 的
+[插件页面](/zh/plugins/imessage-bluebubble)）。它从不返回设置或密码；其他方法返回 `405`。
+
+```json
+{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1},"webhook":{"lost":0,"skipped":2}}
+```
+
+- `mode` 为 `disabled`、`send` 或 `send_receive`。
+- `receive` 只在 `send_receive` 时出现。`state` 为 `idle`、`starting`、
+  `receiving` 或 `error`（带 `message`）。webhook 不占用接收名额，所以从不出现 `no_slot`，也从不出现 `slots`。
+- `webhook` 只在 `send_receive` 时出现。两个计数器在启动时都从零开始：
+  - `lost`：设备无法接收的投递。包括超过 8 KiB 的请求体、收件箱已满时到达的投递，以及因追赶发现超过 50 条待处理消息而跳过的消息。
+  - `skipped`：既没有文本也没有文件的消息，例如 tapback 和群组事件。
+
+## `POST /api/gateway/bluebubbles`
+
+配置或替换 BlueBubble 消息通道提供方。请求体是一个 JSON 对象，包含 `server_url`、`password`、`use_private_api`、`stream_edit_min_delta_bytes` 和 `stream_max_edits`。有提供方默认值的字段可以省略。
+
+响应：
+
+- `204 No Content`：提供方已配置，并且除非模式为
+  `disabled`，否则已注册。接收会以新设置重新开始。如果在接收期间服务器 URL 发生了变化，设备会先尽力从旧服务器删除它的 webhook。
+- `400 Bad Request`：JSON 请求体无效，或缺少必需字段。
+- `405 Method Not Allowed`：该端点只接受 `POST`。
+- `422 Unprocessable Content`，`{"error":"registration_failed"}`：Gateway
+  拒绝了消息通道注册。之前存储的配置会被恢复，不会有 BlueBubbles 消息通道保持注册状态。
+- `500 Internal Server Error`，`{"error":"storage"}`：存储失败。
+
+凭据只在请求体中接受，从不出现在响应或日志中。
+
+## `POST /api/gateway/bluebubbles/mode`
+
+`{"mode":"disabled"|"send"|"send_receive"}`。返回 `204`。错误与共享的错误相同：`400` `invalid_request` 或 `unsupported_mode`，`422`
+`registration_failed`，`500` `storage`，其他方法为 `405`。从不出现 `409`
+`no_slot`。
+
+离开 `send_receive` 时，会在响应之前从 BlueBubbles 服务器删除设备的 webhook。这最多等待 10 秒，失败会被记录到日志。
+`disabled` 还会从 Gateway 注销该消息通道。
+
+## `GET` 和 `POST /api/gateway/bluebubbles/owners`
+
+共享的授权账号端点。所有者的 `id` 是发送者的 BlueBubbles handle 地址（电话号码或电子邮件）。所有者没有标签。
+在消息通道配置之前，两种方法都返回 `409`
+`{"error":"not_configured"}`：此时还没有所有者名单。
+
+## `POST /api/gateway/bluebubbles/hook/<secret>`
+
+BlueBubbles 服务器把 webhook 事件推送到这里。设备自己注册这个 URL；没有其他人调用它。
+
+- 路径携带一个 128 位密钥，写成 32 个小写十六进制数字，并以恒定时间比较。密钥错误或缺失，或者消息通道不处于
+  `send_receive` 时，返回 `404` `{"error":"not_found"}`。
+- 密钥正确时，`POST` 以外的任何方法都返回 `405`。
+- 每个密钥正确的 `POST` 都会立即得到不带响应体的 `204`，无论投递的内容是什么：`new-message` 以外的事件、从 Mac 自己账号发出的消息、已经处理或已排队的 GUID、超过 8 KiB 的请求体（计入 `lost`），或者收件箱已满（计入 `lost`；下一次追赶会弥补它）。
+- 新消息会被排入队列，由接收任务发布。

@@ -71,7 +71,7 @@ import {
 - `entryStatus(context)`：当前打开入口的“状态”徽标，来自 `/portal/status`（“已配置”/“未配置”），形式为
   `{ slot, refresh }`，用于只写表单页头的 `kv`；保存后调用 `refresh`。
 - `badge(label, lang, { signal? })`、`button(label, lang, { variant, size, icon, type, onClick })`、
-  `frame(...children)`、`row(title, hint, lang, ...children)`（标签在左的一行；提示中的 `反引号` 标记机器值，以等宽字体显示：“在 `@BotFather` 发送 `/newbot` 获得 Token”）。
+  `frame(...children)`、`row(title, hint, lang, ...children)`（标签在左的一行；提示中的 `backticks` 标记机器值，以等宽字体显示：“在 `@BotFather` 发送 `/newbot` 获得 Token”）。
 - `monoParts(text)`：同样的反引号拆分，用于任何混合了文字和机器值的行。
 
 设置表单（`settings.ts`）

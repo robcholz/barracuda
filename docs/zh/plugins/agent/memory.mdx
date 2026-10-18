@@ -36,7 +36,7 @@ Agent 的记忆子系统。
 4. 轮次提交是同步的；持久的 VFS I/O 通过
    `flush().await` 显式进行。
 
-**压缩不是存储关心的事。**在 `barracuda-agent` 中，一个
+**压缩不是存储关心的事**。在 `barracuda-agent` 中，一个
 `RollingSummaryContextProvider` 通过 `turns()` 读取较旧的轮次，通过注入的 `Compactor` 对它们做摘要，再由一个
 `RecentMessagesContextProvider` 渲染逐字的尾部。两者通过一个共享游标协调，该游标标记已摘要前缀和逐字尾部之间的边界。限制磁盘上的增长（保留策略）同样是一个独立的、未来的关注点——不归存储负责。
 
