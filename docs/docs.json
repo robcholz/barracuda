@@ -38,7 +38,8 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/robcholz/barracuda"
+        "href": "https://github.com/robcholz/barracuda",
+        "icon": "github"
       }
     ],
     "primary": {
@@ -55,12 +56,13 @@
       "chatgpt",
       "cursor",
       "mcp"
-    ]
+    ],
+    "display": "toc"
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Docs",
+        "tab": "Guides",
         "groups": [
           {
             "group": "Get started",
@@ -97,7 +99,12 @@
               "plugins/app-manager/app-api",
               "plugins/app-manager/pocketjs"
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "Develop",
+        "groups": [
           {
             "group": "04 · Plugins",
             "pages": [
@@ -395,12 +402,58 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "pages": [
+          "changelog"
+        ]
       }
-    ]
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/robcholz/barracuda",
+          "icon": "github"
+        },
+        {
+          "anchor": "Changelog",
+          "href": "/changelog",
+          "icon": "history"
+        }
+      ]
+    }
   },
   "footer": {
     "socials": {
       "github": "https://github.com/robcholz/barracuda"
-    }
+    },
+    "links": [
+      {
+        "header": "Barracuda",
+        "items": [
+          {
+            "label": "GitHub",
+            "href": "https://github.com/robcholz/barracuda"
+          },
+          {
+            "label": "Changelog",
+            "href": "/changelog"
+          },
+          {
+            "label": "Quickstart",
+            "href": "/get-started/quickstart"
+          }
+        ]
+      }
+    ]
+  },
+  "banner": {
+    "content": "**v0.1.0**: apps on the device screen, layered Board profiles, and a new docs site. [See the changelog →](/changelog)",
+    "dismissible": true
+  },
+  "feedback": {
+    "thumbsRating": true
   }
 }

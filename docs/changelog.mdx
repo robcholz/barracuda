@@ -1,0 +1,95 @@
+---
+title: "Changelog"
+description: "What changed in Barracuda, newest first, with the pull request behind each change."
+---
+
+Barracuda is at version 0.1.0 and has no tagged release yet; every change below
+is on `master`. Each entry links to its pull request.
+
+<Update label="October 17, 2026" description="v0.1.0" tags={["Apps", "Boards", "Docs"]}>
+  - **Layered Board profiles.** A Board names a profile, such as `headless` or
+    `screen`, and turns single Plugins on or off; a firmware without the network
+    can still have the system UI. See [Board profiles](/boards/profiles).
+    ([#95](https://github.com/robcholz/barracuda/pull/95))
+  - **Versioned app API and signed app packages.** Apps declare the API they use
+    in their package metadata, and the App Manager backs the device UI.
+    ([#94](https://github.com/robcholz/barracuda/pull/94))
+  - **New docs site.** All documentation moved into this site.
+    ([#96](https://github.com/robcholz/barracuda/pull/96))
+</Update>
+
+<Update label="October 16, 2026" description="v0.1.0" tags={["Apps"]}>
+  - **Device UI.** The App Manager and the builtin Files, Sessions, Settings,
+    and Workflows apps. See [Device UI](/architecture/device-ui).
+    ([#93](https://github.com/robcholz/barracuda/pull/93))
+</Update>
+
+<Update label="October 13, 2026" description="v0.1.0" tags={["Apps", "Channels"]}>
+  - **Apps on the Board display.** The `ui` and app Plugins run MicroTS apps on
+    the device's screen. ([#89](https://github.com/robcholz/barracuda/pull/89))
+  - **Web chat keeps each conversation.** Each session's conversation stays in
+    the browser. ([#91](https://github.com/robcholz/barracuda/pull/91))
+  - **The portal follows the browser's language**, and the Gateway keeps the
+    next turn's reply. ([#90](https://github.com/robcholz/barracuda/pull/90))
+</Update>
+
+<Update label="October 12, 2026" description="v0.1.0" tags={["Boards", "Plugins"]}>
+  - **Per-Board Plugin enablement and peripheral claims.**
+    ([#92](https://github.com/robcholz/barracuda/pull/92))
+  - **Fixed** decoding of escaped characters in streamed replies.
+    ([#83](https://github.com/robcholz/barracuda/pull/83))
+</Update>
+
+<Update label="October 11, 2026" description="v0.1.0" tags={["Plugins", "Channels"]}>
+  - **One Plugin API.** One way per topic, checked by `cargo plugin sync`. See
+    [Plugin API](/architecture/plugin-api).
+    ([#87](https://github.com/robcholz/barracuda/pull/87))
+  - **Images and files in messages** across channels, the Gateway, the Agent,
+    and web chat. ([#88](https://github.com/robcholz/barracuda/pull/88))
+</Update>
+
+<Update label="October 10, 2026" description="v0.1.0" tags={["Portal", "Channels", "Agent"]}>
+  - **Files in the portal.** Browse the Workspace and Plugin files.
+    ([#84](https://github.com/robcholz/barracuda/pull/84))
+  - **Web chat:** streaming Markdown with highlighted code
+    ([#86](https://github.com/robcholz/barracuda/pull/86)), a message queue, and
+    stop and rewind for the running turn
+    ([#85](https://github.com/robcholz/barracuda/pull/85)).
+  - **Background tools.** Each Agent runs long tools, such as scripts, in its own
+    background pool. ([#82](https://github.com/robcholz/barracuda/pull/82))
+  - **QQ binds by QR code**, like WeChat.
+    ([#81](https://github.com/robcholz/barracuda/pull/81))
+  - **`/status` endpoints** report each service's configuration without secrets.
+    ([#80](https://github.com/robcholz/barracuda/pull/80))
+</Update>
+
+<Update label="October 9, 2026" description="v0.1.0" tags={["Portal", "Channels"]}>
+  - **The portal on the design system**, channels that receive messages, virtual
+    hardware for host Boards, and recorded end-to-end tests.
+    ([#79](https://github.com/robcholz/barracuda/pull/79))
+</Update>
+
+<Update label="October 7, 2026" description="v0.1.0" tags={["Platforms"]}>
+  - Portable atomics, heap work on bulk memory, device entries, TLS in the
+    System, and replayed end-to-end tests.
+    ([#78](https://github.com/robcholz/barracuda/pull/78))
+</Update>
+
+<Update label="September 20, 2026" description="v0.1.0" tags={["Wi-Fi", "Platforms"]}>
+  - **Wi-Fi provisioning** through a captive portal on every Platform.
+    ([#77](https://github.com/robcholz/barracuda/pull/77))
+  - **Bulk memory** that follows each Platform's toolchain.
+    ([#76](https://github.com/robcholz/barracuda/pull/76))
+</Update>
+
+<Update label="September 2026" description="Earlier" tags={["Boards", "Lua"]}>
+  - **ESP-VoCat v1.2** Board ([#73](https://github.com/robcholz/barracuda/pull/73)),
+    removable filesystems mounted on demand
+    ([#72](https://github.com/robcholz/barracuda/pull/72)), and Embassy 0.10 on
+    every target ([#74](https://github.com/robcholz/barracuda/pull/74)).
+  - **Lua:** the Platform and Board identity
+    ([#67](https://github.com/robcholz/barracuda/pull/67)) and bounded HTTP
+    handlers ([#66](https://github.com/robcholz/barracuda/pull/66)).
+  - **macOS without `sudo`**, through a user-space network gateway
+    ([#64](https://github.com/robcholz/barracuda/pull/64)).
+</Update>
