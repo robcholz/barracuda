@@ -405,9 +405,7 @@
       },
       {
         "tab": "Changelog",
-        "pages": [
-          "changelog"
-        ]
+        "href": "https://github.com/robcholz/barracuda/releases"
       }
     ],
     "global": {
@@ -419,7 +417,7 @@
         },
         {
           "anchor": "Changelog",
-          "href": "/changelog",
+          "href": "https://github.com/robcholz/barracuda/releases",
           "icon": "history"
         }
       ]
@@ -439,7 +437,7 @@
           },
           {
             "label": "Changelog",
-            "href": "/changelog"
+            "href": "https://github.com/robcholz/barracuda/releases"
           },
           {
             "label": "Quickstart",
@@ -450,7 +448,7 @@
     ]
   },
   "banner": {
-    "content": "**v0.1.0**: apps on the device screen, layered Board profiles, and a new docs site. [See the changelog →](/changelog)",
+    "content": "See what's new in the latest Barracuda release. [Release notes →](https://github.com/robcholz/barracuda/releases)",
     "dismissible": true
   },
   "feedback": {
