@@ -31,6 +31,7 @@
   --bc-border: #E1E1E5;
   --bc-border-active: #A1A1AA;
   --bc-ghost-hover: #00000015;
+  --bc-hover: #09090B0A;
   --bc-signal: #CCFF00;
   --bc-signal-foreground: #09090B;
   --bc-signal-text: #5A7301;
@@ -55,6 +56,7 @@ html.dark:root:root {
   --bc-border: #27272A;
   --bc-border-active: #52525B;
   --bc-ghost-hover: #FFFFFF17;
+  --bc-hover: #FAFAFA0F;
   --bc-signal-text: #93B903;
   --bc-tip-surface: #182100;
   --bc-tip-border: #313F00;
@@ -70,7 +72,7 @@ html, body {
 }
 
 /* Type: the system font stack with a CJK fallback chain. */
-html, body, #navbar, #sidebar-content, #content-area, #table-of-contents,
+html, body, #navbar, #sidebar-content, #mobile-nav, #content-area, #table-of-contents,
 #page-title, .prose, .card, .callout, .nav-tabs, button, input {
   font-family: var(--bc-font-sans) !important;
 }
@@ -130,27 +132,27 @@ code, pre, kbd, .font-mono {
 
 /* Sidebar: muted group labels; the current page is a neutral fill, not
    colored text. */
-#sidebar-content .sidebar-group-header {
+#navigation-items .sidebar-group-header {
   color: var(--bc-muted-foreground);
   font-size: 12px;
   font-weight: 500;
 }
-#sidebar-content li > a,
-#sidebar-content li > button {
+#navigation-items li > a,
+#navigation-items li > button {
   color: var(--bc-nav-foreground) !important;
   border-radius: 6px;
 }
-#sidebar-content li > a:hover,
-#sidebar-content li > button:hover {
-  background: var(--bc-ghost-hover);
+#navigation-items li > a:hover,
+#navigation-items li > button:hover {
+  background: var(--bc-hover);
   color: var(--bc-foreground) !important;
 }
-#sidebar-content li[data-active="true"] > a,
-#sidebar-content li[data-active="true"] > a * {
+#navigation-items li[data-active="true"] > a,
+#navigation-items li[data-active="true"] > a * {
   color: var(--bc-foreground) !important;
   font-weight: 500;
 }
-#sidebar-content li[data-active="true"] > a {
+#navigation-items li[data-active="true"] > a {
   background: var(--bc-muted) !important;
 }
 
@@ -240,7 +242,7 @@ code, pre, kbd, .font-mono {
   --primary-light: 82 82 91;
 }
 .card:hover {
-  background: var(--bc-ghost-hover) !important;
+  background: var(--bc-hover) !important;
 }
 .card [data-component-part="card-icon"] {
   display: flex;
@@ -466,6 +468,9 @@ html.dark .code-block [data-component-part="code-block-root"],
   border-radius: 4px;
   background: var(--bc-background);
 }
+#mobile-nav .nav-anchor::before {
+  left: 0;
+}
 .nav-anchor > svg {
   position: relative;
   margin-right: 4px;
@@ -483,4 +488,49 @@ html.dark .code-block [data-component-part="code-block-root"],
   font-size: 10px !important;
   font-weight: 500 !important;
   border-radius: 4px !important;
+}
+
+/* Banner close button: a light ink wash on the lime, not Sequoia's gray. */
+#banner button {
+  border-radius: 6px;
+}
+#banner button:hover {
+  background-color: #09090B1A !important;
+}
+#banner button:focus-visible {
+  outline: 2px solid var(--bc-signal-foreground);
+  outline-offset: 1px;
+}
+
+/* The navbar's primary button keeps full opacity on hover. */
+#navbar a[href="/get-started/quickstart"]:hover {
+  opacity: 1 !important;
+}
+
+/* Tooltips (copy, copied): ink on light, light on dark. Sequoia draws them
+   on the primary color, which is ink here. */
+[class*="text-tooltip-foreground"] {
+  background: var(--bc-foreground) !important;
+  color: var(--bc-background) !important;
+  -webkit-text-fill-color: var(--bc-background);
+  border-color: transparent !important;
+}
+
+/* Keyboard focus: an ink ring on cards, links, and controls. */
+.card:focus-visible,
+.card:has(:focus-visible) {
+  outline: 2px solid var(--bc-foreground) !important;
+  outline-offset: 2px;
+}
+#navbar a:focus-visible,
+#navbar button:focus-visible,
+#navigation-items a:focus-visible,
+#navigation-items button:focus-visible,
+#table-of-contents-layout a:focus-visible,
+#table-of-contents-layout button:focus-visible,
+#pagination a:focus-visible,
+.mdx-content a:focus-visible {
+  outline: 2px solid var(--bc-foreground) !important;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
