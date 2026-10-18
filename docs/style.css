@@ -274,19 +274,24 @@ code, pre, kbd, .font-mono {
 }
 .code-block [data-component-part="code-block-header"],
 .code-group [data-component-part="code-group-tab-bar"] {
-  border-radius: 0 !important;
+  border-radius: 7px 7px 0 0 !important;
   background: var(--bc-sidebar) !important;
   border-bottom: 1px solid var(--bc-border);
   color: var(--bc-muted-foreground);
   font-family: var(--bc-font-mono) !important;
   font-size: 12px;
 }
-.code-block .code-block-background,
-.code-block .code-block-background > div {
-  border-radius: 0 !important;
+html .code-block [data-component-part="code-block-root"],
+html.dark .code-block [data-component-part="code-block-root"],
+.code-block [data-component-part="scroll-area-viewport"] {
+  border-radius: 0 0 7px 7px !important;
   background: var(--bc-background) !important;
 }
 
+.code-block:not([data-has-header]) [data-component-part="code-block-root"],
+.code-block:not([data-has-header]) [data-component-part="scroll-area-viewport"] {
+  border-radius: 7px !important;
+}
 .code-block [data-fade-overlay] {
   display: none !important;
 }
@@ -369,6 +374,30 @@ code, pre, kbd, .font-mono {
 .mdx-content table td {
   padding-left: 12px !important;
   padding-right: 12px !important;
+}
+.mdx-content table th {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  line-height: 20px;
+  vertical-align: middle;
+}
+.mdx-content table td {
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+/* Round the corner cells too: Safari does not clip cell backgrounds to a
+   rounded table. */
+.mdx-content table tr:first-child > :first-child {
+  border-top-left-radius: 7px;
+}
+.mdx-content table tr:first-child > :last-child {
+  border-top-right-radius: 7px;
+}
+.mdx-content table tbody tr:last-child > :first-child {
+  border-bottom-left-radius: 7px;
+}
+.mdx-content table tbody tr:last-child > :last-child {
+  border-bottom-right-radius: 7px;
 }
 .mdx-content table tr:last-child td {
   border-bottom: 0 !important;
