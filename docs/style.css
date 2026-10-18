@@ -66,13 +66,6 @@ html.dark:root:root {
   --bc-danger-border: #6F101B;
 }
 
-/* Japanese pages put Japanese fonts first, so kanji take Japanese forms
-   rather than the Simplified Chinese ones in the default stack. */
-html[lang="ja"]:root:root {
-  --bc-font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
-    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Meiryo",
-    "Segoe UI", sans-serif;
-}
 
 /* The page background, also behind overscroll and below fixed layers. */
 html, body {
