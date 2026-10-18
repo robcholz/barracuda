@@ -407,21 +407,7 @@
         "tab": "Changelog",
         "href": "https://github.com/robcholz/barracuda/releases"
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "GitHub",
-          "href": "https://github.com/robcholz/barracuda",
-          "icon": "github"
-        },
-        {
-          "anchor": "Changelog",
-          "href": "https://github.com/robcholz/barracuda/releases",
-          "icon": "history"
-        }
-      ]
-    }
+    ]
   },
   "footer": {
     "socials": {

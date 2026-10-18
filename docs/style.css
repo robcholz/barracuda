@@ -449,37 +449,6 @@ html.dark .code-block [data-component-part="code-block-root"],
   stroke: var(--bc-signal-foreground);
 }
 
-/* Sidebar anchors: the icon sits in a 24px hairline tile. */
-.nav-anchor {
-  position: relative;
-  color: var(--bc-nav-foreground) !important;
-  font-size: 14px;
-}
-.nav-anchor::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  width: 24px;
-  height: 24px;
-  transform: translateY(-50%);
-  box-sizing: border-box;
-  border: 1px solid var(--bc-border);
-  border-radius: 4px;
-  background: var(--bc-background);
-}
-#mobile-nav .nav-anchor::before {
-  left: 0;
-}
-.nav-anchor > svg {
-  position: relative;
-  margin-right: 4px;
-  background-color: var(--bc-foreground) !important;
-}
-.nav-anchor:hover {
-  color: var(--bc-foreground) !important;
-}
-
 /* NEW tags: lime with ink, monospace. */
 .nav-tag-pill-text {
   background: var(--bc-signal) !important;
