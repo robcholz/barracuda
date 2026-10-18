@@ -222,6 +222,29 @@ body:has(#chat-assistant-sheet[aria-hidden="false"]) #bc-ask-ai {
   }
 }
 
+/* On desktop the assistant panel floats as a card above the bottom-right
+   corner, as on bun.com, instead of a full-height column beside the page.
+   Mintlify still sets its width; the card leaves the page layout alone. */
+@media (min-width: 1024px) {
+  [data-assistant-sheet-container] {
+    position: fixed !important;
+    top: auto !important;
+    right: 16px;
+    bottom: 16px;
+    z-index: 40 !important;
+    height: min(640px, calc(100vh - var(--banner-height, 0px) - 120px)) !important;
+    margin: 0 !important;
+    border: 1px solid var(--bc-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 30px #00000029;
+    overflow: hidden;
+  }
+  [data-assistant-sheet-container][style*="width: 0px"] {
+    border: 0;
+    box-shadow: none;
+  }
+}
+
 /* The ask box in the assistant panel: a bordered field with a lime send
    button. */
 div:has(> div > textarea.chat-assistant-input) {
