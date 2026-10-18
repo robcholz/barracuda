@@ -1,0 +1,60 @@
+---
+title: "Rust API 接口约定"
+sidebarTitle: "Rust API 约定"
+description: "在 `getset` 与手写 getter 之间、在 `From`/`TryFrom` 与具名构造函数之间做出选择。"
+---
+
+本文记录仓库在 `getset` 与手写 getter、`From`/`TryFrom` 与具名构造函数之间做选择的规则。每个新建或修改的 Rust 类型都要应用这些规则。
+
+## Getter
+
+对于平凡的字段访问器，优先使用 `getset` derive：这类方法除了以相同的类型、含义和可见性返回一个字段之外，什么也不做。
+
+| 返回 | Derive | 属性 |
+| --- | --- | --- |
+| `&T` | `Getters` | `#[getset(get = "pub")]` |
+| 复制的 `Copy` 值 | `CopyGetters` | `#[getset(get_copy = "pub")]` |
+| `&mut T` | `MutGetters` | `#[getset(get_mut = "pub")]` |
+
+规则：
+
+- 用属性保留原有的方法名和可见性。
+- 把 API 文档写在字段上，这样生成的 getter 在 `missing_docs` 下仍有文档。
+- 只转换原样返回字段的方法。
+
+当手写 getter 属于以下任一情况时，保留它：
+
+- 类型与字段不同的视图（`Vec<T>` 到 `&[T]`、`Option<Value>` 到 `Option<&Value>`、通过 `as_str` 从 `String` 到 `&str`）；
+- 解析、校验、查找、计算或错误处理；
+- `const fn`；
+- trait 实现（`AsRef`、`Borrow`）。
+
+## From / TryFrom
+
+总是在目标类型上实现 `From`；永远不要直接实现 `Into`。通用实现 `impl<T, U> Into<U> for T where U: From<T>` 会免费提供 `.into()`。
+
+单值转换的决策流程：
+
+1. 它会失败吗？使用 `impl TryFrom`。
+2. 它是否在不消耗 `self` 的情况下返回借用视图？使用 `as_xxx()` 或 `impl AsRef`。
+3. 它是否消耗 `self` 并产生一个明确、无损的目标类型？使用 `impl From`。
+4. 其他情况（提取一个字段、有损/编解码映射、带默认值的分类器）使用具名的 `into_xxx()` / `from_xxx()`。
+
+以下情况不要实现 `From`：
+
+- 构造函数守护着一个校验边界；保持校验构造函数为私有或具名；
+- 转换会丢弃源的一部分；
+- 映射是有损的，或者有回退分支；
+- 源类型是 `pub(crate)`；公开的 `From` 会泄露它，所以保留一个 `pub(crate)` 的具名构造函数。
+
+对于 `TryFrom`，使用 crate 自然的错误类型。如果该类型对这个转换可能产生的单一失败来说过于宽泛，就引入更精确的错误类型，或者保留一个具名的可失败构造函数。
+
+一旦存在 `From` 或 `TryFrom` 实现，就在调用处使用它（`.into()`、`.try_into()`、`?`），而不是使用平行的辅助函数。
+
+## 原子类型和 `Arc`
+
+固件代码使用 `portable_atomic` 原子类型和 `portable_atomic_util::Arc` / `Weak`，永远不使用 `core::sync::atomic`、`alloc::sync::Arc` 或它们在 `std` 中的重新导出：有些目标没有原生原子操作，而可移植类型让每个平台都只有一种实现。根目录的 `clippy.toml` 禁止使用标准类型，CI 会拒绝 `clippy::disallowed_types`。
+
+仅限主机的 crate（Linux 和 macOS 平台、CLI、工作区工具、构建期和过程宏 crate、基准测试）带有自己的 `clippy.toml`，它会替换根目录的文件并允许标准类型。固件 crate 中仅限主机的模块（例如位于某个主机 feature 之后的模块）在本地允许该 lint，并写明理由。
+
+`portable_atomic_util::Arc` 在 stable Rust 上无法强制转换为 `Arc<dyn Trait>`；用 `Arc::from(Box::new(value) as Box<dyn Trait>)` 构建 trait 对象。

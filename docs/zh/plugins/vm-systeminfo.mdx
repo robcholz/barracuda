@@ -1,0 +1,37 @@
+---
+title: "VM System Info 插件"
+sidebarTitle: "VM System Info"
+description: "用 `systeminfo` Lua 包在 Lua 中读取设备的平台和开发板标识。"
+---
+
+把所选的平台和开发板标识作为只能 require 的 `systeminfo` 包暴露给 Lua。
+
+- 插件 ID：`vm-systeminfo`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`target_identity`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`systeminfo`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件在 System 构造期间复制所选 Target 的固定 `TargetIdentity`，并把它投射到每次 Lua 执行中。平台清单拥有平台标识，开发板配置拥有开发板标识，Target 组合则保留这两个独立选择的维度。
+
+## Lua API
+
+~~~lua
+local info = require("systeminfo")
+
+print(info.platform.name)
+print(info.platform.family)
+print(info.platform.architecture)
+print(info.platform.environment)
+print(info.board.name)
+print(info.board.chip)
+~~~
+
+这个模块只包含编译进所选镜像的静态值。每个 Lua 状态都会得到自己的表，所以脚本的修改只在那次执行中有效。这个 Lua 包不做任何硬件发现、运行时采样或后台工作。

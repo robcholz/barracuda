@@ -1,0 +1,93 @@
+---
+title: "暴露 I/O 设计"
+sidebarTitle: "暴露 I/O"
+description: "让应用在运行时为开发板引脚选择一种功能，例如 GPIO、PWM、I2C 或 SPI。"
+---
+
+## 范围
+
+暴露 I/O 让应用在运行时为开发板可见的物理资源选择一种功能。封装引脚是稳定的资源；数字 GPIO、模拟转换、PWM、I2C、SPI、UART 和 I2S 都是由只能移动（move-only）的引脚令牌和控制器令牌构造出来的功能。
+
+内置外设不在这个运行时模型之内。开发板组合在 System 启动之前构造它们的外设实现，只把剩余的、显式暴露的资源交给运行时 I/O 所有者。
+
+```text
+selected Board pins + Platform controller pools
+                 |
+                 v
+       one exposed-I/O owner
+       +-------------------+
+       | move-only tokens  |
+       | Platform providers|
+       +-------------------+
+          |       |       |
+          v       v       v
+       digital   I2C     SPI   ...  concrete HAL values
+                  |
+                  v
+       the consumers' handles
+```
+
+## 物理资源和功能占用
+
+生成的所有者把每个暴露的引脚令牌以其开发板可见的应用名称存放一次。兼容的 I2C 和 SPI 控制器令牌来自平台元数据；它们的身份对应用保持不可见。已被内置声明使用的控制器会在生成期间从运行时池中移除。
+
+提供者在一次请求中解析每个角色，并以原子方式占用整组资源。一个数字输出使用一个引脚。一条 I2C 总线使用一个控制器、SCL 和 SDA。一个 I2S 发送器可能使用一个控制器、BCLK、WS、DOUT 和 DMA。重复的角色、未知的名称、已用尽的控制器和已被占用的引脚，都会在任何令牌被移动之前失败。
+
+第一次成功的功能选择会在本次启动期间消耗这些原始令牌。丢弃句柄会禁用或丢弃构造出的 HAL 值，但它无法安全地重新创建原始的厂商单例令牌。因此，重新打开该引脚（包括作为另一种协议打开）都会失败，直到重启。这是有意设置的安全边界，而不是对热重新配置的模拟承诺。并发的电气扇出和隐式的引脚共享需要单独的平台资源。
+
+## 提供者边界
+
+协议构造以每个功能系列一个提供者 trait 的方式表达。当前的契约构造数字引脚、异步 I2C 总线和异步 SPI 总线。System 要求这些提供者位于同一个暴露 I/O 所有者上，因此每种协议看到的都是同一份物理令牌状态。
+
+平台实现校验引脚路由和配置，然后返回一个实现生态契约的具体值。数字句柄实现 `embedded-hal` 的数字 trait，I2C 句柄实现 `embedded-hal-async::i2c::I2c`，SPI 总线句柄实现 `embedded-hal-async::spi::SpiBus`。`ConfigurableDigitalPin` 涵盖 embedded-hal 没有标准化的运行时输入/输出模式切换。提供者契约涵盖构造，因为 embedded-hal 有意不定义引脚复用或外设分配；数据面操作仍然是上游 HAL 的操作。
+
+生成的 `RuntimeIo` 是唯一的具体所有者。带运行时控制器池的平台提供 I2C 和 SPI 构造；控制器池为空的平台返回明确的无控制器错误。因此，使用方永远不会仅仅因为引脚被暴露就看到控制器。
+
+新的功能系列添加一个专注的提供者。UART 可以返回 `embedded-io-async` 流，PWM 可以返回 `embedded-hal::pwm::SetDutyCycle`，没有上游契约的领域可以定义一个狭窄的领域接口。每个提供者都扩展同一个只能移动的所有者，而不是创建协议本地的资源映射。
+
+## 使用方的调用路径
+
+System 与暴露硬件的每个使用方共享同一个暴露 I/O 所有者。使用方打开一个完整的功能，并把返回的具体值保存在自己的句柄中，因此能力的生命周期和硬件的生命周期是同一个对象。
+
+```text
+open I2C(scl, sda, frequency)
+  -> consumer validates its arguments
+  -> provider resolves pins and selects a compatible free controller
+  -> atomically claim controller + SCL + SDA
+  -> Platform configures pin mux and controller
+  -> return I2C value implementing embedded-hal-async
+  -> consumer reads and writes through the value
+  -> consumer closes its handle
+  -> disable/drop the HAL value; raw tokens remain claimed until restart
+```
+
+使用方校验与协议无关的事实，例如正的频率、互不相同的信号引脚、传输限制、地址宽度和 SPI 模式。提供者校验开发板暴露情况、所有权、控制器可用性和平台硬件限制。事务失败由具体的 HAL 值报告。被拒绝的占用前检查不会改变任何请求的资源。如果厂商构造函数在消耗了参数之后才拒绝配置，这些只能移动的令牌仍然保持被占用；错误会告诉应用修正配置并重启。
+
+无论使用方以何种方式结束它的句柄，丢弃 HAL 值就是硬件的拆除，任何路径都不会制造替代的厂商令牌。
+
+## 应用压力
+
+公开的形态要对照几个本质上不同的使用方进行检验：
+
+| 应用 | 占用的资源 | 返回的操作契约 |
+| --- | --- | --- |
+| 按钮或继电器 | 一个引脚 | 数字输入/输出 |
+| ADC 探头 | 引脚加 ADC 路由 | 模拟采样 |
+| PWM 执行器 | 引脚加定时器/通道 | 占空比输出 |
+| I2C 传感器总线 | 控制器、SCL、SDA | 异步 I2C 事务 |
+| SPI 像素流 | 控制器、SCK、数据引脚 | 独占的异步 SPI 总线 |
+| SPI 寄存器设备 | 共享总线加 CS | 异步 SPI 设备事务 |
+| UART 控制台 | 控制器、TX/RX 以及可选的流控引脚 | 异步字节流 |
+| I2S 音频 | 控制器、时钟、数据引脚、DMA | PCM 流 |
+
+单引脚、多线、可选角色、共享总线和 DMA 支持的情况都使用同一个原子的、只能移动的占用原语。它们不同的配置和操作语义留在提供者和使用方中。这是对抽象两个方向的检验：添加一种协议不得创建独立的所有权体系，使用方也不得自己重建平台的引脚复用。
+
+## 不变量
+
+- 一个生成的暴露 I/O 所有者代表所选开发板的完整运行时硬件面。
+- 暴露硬件的每个使用方都共享这个所有者，而不是拿走一个独立的 GPIO、I2C 或 SPI 集合。
+- 在一次启动期间，一个物理令牌最多被一个功能消耗。
+- 多资源获取要么占用每个角色，要么一个都不占用。
+- 平台路由和构造在返回句柄之前完成。
+- 在上游 HAL trait 存在的情况下，功能句柄通过这些 trait 进行操作。
+- 关闭或丢弃句柄会拆除构造出的 HAL 值，而不重新创建原始令牌。

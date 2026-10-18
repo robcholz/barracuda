@@ -1,0 +1,35 @@
+---
+title: "I2C 插件"
+sidebarTitle: "I2C"
+description: "用 `i2c` Lua 包在 Lua 中与开发板可用引脚上的 I2C 设备通信。"
+---
+
+I2C 插件把开发板可用引脚上的 I2C 总线传输作为 `i2c` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`i2c`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`hal.exposed_io`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`i2c`
+- Web：无
+- 任务：无
+- 存储：无
+
+在统一的插件构造期间，本插件共享开发板唯一的运行时 I/O 所有者。注册期间，它在 VM 注册表中安装只能 require 的 `i2c` Lua 包。
+
+Lua API：
+
+- `i2c.open(scl, sda, frequency_hz) -> handle`
+- `handle:read(address, length) -> binary string`
+- `handle:write(address, binary_string)`
+- `handle:write_read(address, binary_string, read_length) -> binary string`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+打开操作会校验 SCL/SDA 引脚互不相同且频率为正，然后请提供者选择一个兼容的空闲控制器，并把它连同两个引脚一起原子地占用。控制器标识是平台细节，不是 Lua 或开发板中的引脚名称。返回的总线实现了 `embedded_hal_async::i2c::I2c`；本插件没有定义并行的总线操作 trait。地址是 7 位的，单次读取最多 65,536 字节。配置和 HAL 失败使用 Lua 惯用的 `nil, error` 结果。
+
+显式关闭、词法 `<close>`、userdata 回收以及 Lua 状态销毁都会释放总线，并使之后的操作失效。原始引脚和控制器令牌在重启之前一直处于已被取走的状态，因为生成的所有者不会重新创建厂商 HAL 的单例。插件被撤销也会使现有句柄失效。

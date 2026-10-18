@@ -1,0 +1,22 @@
+---
+title: "macOS 平台网络网关"
+sidebarTitle: "macOS 网络网关"
+description: "运行把 macOS 平台连接到主机网络的无特权虚拟路由器。"
+---
+
+`barracuda-platform-macos-network-gateway` 是 macOS 平台的无特权、纯 Rust 虚拟路由器。每个连接都拥有一个隔离的虚拟网络会话。
+
+```sh
+cargo run -p barracuda-platform-macos-network-gateway --target "$(rustc -vV | sed -n 's/^host: //p')"
+```
+
+默认端点是 `ws://127.0.0.1:8787/v1/connect`。一个会话把客户机的 TCP 和 UDP 流转换为主机套接字，把客户机可见的 `10.0.2.3:53` 解析器映射到 `1.1.1.1:53`，并打开一个临时的回环监听器，转发到一个配置好的客户机 TCP 端口（默认 8787）。分配到的 URL 通过同一个带版本的协议返回给 macOS 客户机。
+
+原生客户端不会发送浏览器的 `Origin` 请求头，使用默认命令即可工作。浏览器客户端需要在来源允许列表中添加一个确切的条目，例如：
+
+```sh
+cargo run -p barracuda-platform-macos-network-gateway --target "$(rustc -vV | sed -n 's/^host: //p')" -- \
+  --allowed-origin http://localhost:3000
+```
+
+使用 `--dns-server`、`--forward-address`、`--forward-port`、`--public-base-url` 以及可重复的 `--allowed-origin` 参数覆盖这些默认值。把 WebSocket 监听器或转发的设备端口绑定到回环地址之外，会把相应的接口暴露给那个网络，这应当是一个明确的部署决定。

@@ -1,0 +1,68 @@
+---
+title: "Agent IMessage Gateway 插件"
+sidebarTitle: "概览"
+description: "把 Gateway 对话连接到 Agent 会话，并提供 iMessage 工具和会话命令。"
+---
+
+提供 iMessage 的 Agent Tool、把 Gateway 对话桥接到 Agent 会话的 Workflow Action，以及会话命令。
+
+- 插件 ID：`agent-imessage-gateway`
+- 依赖：`agent`、`imessage-gateway`、`time`、`workflow`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 需要的能力：来自 `agent` 的 `AgentToolRegistry`、来自 `agent` 的
+  `AgentRuntime`、来自 `imessage-gateway` 的 `IMessageGateway`、来自 `time` 的 `UtcClock`、
+  来自 `workflow` 的 `WorkflowActionRegistry`、来自 `workflow` 的 `WorkflowService`
+- Workflow：Action `imessage_bridge.to_agent`、`imessage_bridge.to_gateway`、
+  `imessage_bridge.session`，参见 [Action](/zh/plugins/agent-imessage-gateway/action)
+- Agent Tool：`gateway_send`、`send_attachment`
+- Lua 包：无
+- Web：无
+- 任务：一个加载 Workflow 的任务（池大小 1），从 `start` 生成，内置 Workflow 加载完成后即结束
+- 存储：插件作用域的 KV 条目，以 Agent 会话 ID 为键，每条保存该会话已保存的 Gateway 路由；读取 `/resources/workflows.json`
+
+注册期间，本插件把可等待的 `gateway_send` 工具和后台的 `send_attachment` 工具作为隐藏的
+`gateway` 组添加到 `AgentToolRegistry`，并在 `WorkflowActionRegistry` 中注册这三个 Action，在插件的整个生命周期内保留它们的注册守卫。
+
+## 发送文件
+
+`send_attachment { path, caption?, kind? }` 把文件发送到调用它的会话所在的对话，会话从 `ToolContext::session` 读取：也就是桥接器把该会话绑定到的路由，并回复该会话当前轮次所回答的那条消息。路由已经离开的会话不会送达任何人，和它的输出一样；没有绑定路由的会话会在接受之前以
+`no_conversation` 被拒绝。该工具发送一个 `GatewaySendMediaRequest::File`，所以由
+Gateway 按路径打开文件，字节从不经过模型或 Workflow；除了 Gateway 能否打开之外，没有其他路径限制。
+`kind` 默认根据路径扩展名对应的 MIME 类型取值：`image`、
+`audio`、`video`，否则为 `file`。这个调用是一个后台工具：它会被立即接受，完成时返回 `{"message_id"}`，或 Gateway 稳定的业务错误
+`{"error"}`（`not_found`、`too_large`、`unknown_channel`、
+`unsupported`、`authentication`、`rate_limited`、`delivery`、
+`invalid_request`）。
+
+## 每个对话的会话
+
+一个路由（一个消息通道中的对话）拥有它开启的会话，并且最多有一个当前会话来接收它的消息。没有当前会话时，下一条消息会开启一个：`imessage_bridge.to_agent` 回答 `{ persistence }`
+（`/new temp` 之后为 `ephemeral`），`imessage-to-agent` Workflow 用它创建会话。路由处于某个会话时开始的轮次，即使路由之后离开了该会话，也会在那里完成；路由已经离开的会话之后的输出不会送达任何人。临时会话的映射从不保存，离开它就会删除该会话。
+
+`imessage_bridge.session` 执行 `gateway.control.received` 中的会话控制（除了 `interrupt` 和 `cancel`，这两个由
+`imessage-control-to-agent` Workflow 发送给 `session.interrupt` 和
+`session.cancel`）：列出、新建、切换、重命名（`AgentRuntime::rename_session`）和删除（除非带有 `confirm`，否则会先询问）。它按最近使用时间从新到旧列出路由已保存的会话（`AgentRuntime::describe_sessions`），忘掉 Agent 已经不再拥有的会话，并通过
+`IMessageGateway::send_sessions` 带上 `UtcClock` 时间回复对话。
+
+桥接器使用本插件作用域内的键值存储来保存 Gateway 路由到 Agent 会话的持久映射。待处理的入站回复、当前轮次的回复，以及为正在创建的会话所做的路由预留，仍然是仅存在于运行时的状态。Action 注册守卫在插件的整个生命周期内保留。Action 的请求和响应契约位于
+`schemas/action`。
+
+`imessage_bridge.to_agent` 接受三种请求之一：`{ route, message_id,
+text, attachments? }` 为一条入站消息解析会话（在其会话创建期间预留尚未映射的路由），`{ route, message_id, session }` 绑定它，`{ route }` 只查找路由，用于 `gateway.control.received`：
+`imessage-control-to-agent` Workflow 把一个控制映射为对找到的会话执行
+`session.interrupt` 或 `session.cancel`，对于没有打开会话的路由则什么都不做。
+
+## 内置 Workflow
+
+本插件在它作用域内的 `/resources/workflows.json` 中提供连接 Gateway 和 Agent 的 Workflow：`imessage-to-agent` 和
+`imessage-control-to-agent` 把 `gateway.message.received` 和
+`gateway.control.received` 路由到 Agent 会话，`agent-to-imessage` 用 `gateway.send_stream` 把每个
+`session.event` 发回它的路由。
+`imessage-to-agent` 把消息的 `attachments`（对 Gateway 所存文件的引用，从不包含文件字节）传给 `session.append` 或
+`session.respond`。Workflow 的链接在字段缺失时会失败，而 Gateway 对不带文件的消息会省略 `attachments`，所以 Workflow 根据
+`$event.input.attachments` 是否为 `null` 进行分支，只在该字段存在时才发送它。启动时，等每个插件都注册好它的 Action 之后，一个由插件拥有的任务通过 `WorkflowService` 临时加载每个定义，然后结束。这些定义保留在 `/resources` 中，从不复制到用户创建的
+`/data/workflows.json` 目录中；ID 相同的已持久化用户定义优先。资源缺失或无效，或者某个定义被拒绝时，会记录日志，并且不再加载剩余的定义。
+
+本插件不拥有任何消息通道或流式运行时。

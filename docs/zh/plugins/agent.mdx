@@ -1,0 +1,122 @@
+---
+title: "Agent 插件"
+sidebarTitle: "概览"
+description: "在设备上运行对话式 Agent，并通过 HTTP 和门户配置它们的模型 API。"
+---
+
+运行对话式 Agent，并通过 HTTP 和一个门户页面提供模型配置。
+
+- 插件 ID：`agent`
+- 依赖：`webserver`、`workflow`、`captive-portal`、`time`、`http`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：`AgentRuntime`、`AgentToolRegistry`
+- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `webserver` 的
+  `WebServer`、来自 `workflow` 的 `WorkflowActionRegistry`、来自 `workflow` 的
+  `WorkflowService`、来自 `http` 的 `ClientFactory`、来自 `time` 的 `UtcClock`
+- Workflow：Action `session.new`、`session.open`、`session.append`、
+  `session.respond`、`session.interrupt`、`session.cancel`、`session.close`、
+  `session.delete`、`session.list`、`session.rename`、
+  `session.set_permission_level`、`session.set_reasoning_effort`，参见
+  [Action](/zh/plugins/agent/action)；Event `session.event`，参见 [Event](/zh/plugins/agent/event)
+- Agent Tool：`background_list`、`background_wait`、`background_input`、
+  `background_cancel`、`conversation_end`、`skill_list`、`skill_read`、
+  `skill_resource_read`、`skill_reload`、`memory_store`、`memory_recall`、
+  `memory_list`、`memory_update`、`memory_forget`、`plan_enter`、`plan_exit`、
+  `plan_clarify`、`profile_read`、`profile_replace`、`profile_clear`、
+  `todo_update`、`tool_search`、`tool_load`、`subagent_spawn`、`subagent_run`、
+  `subagent_list`、`subagent_list_spawnable`、`subagent_watch`、
+  `subagent_interrupt`、`subagent_delete`；权限回复解析器在它自己的模型调用中使用
+  `permission_resolve_reply`
+- Lua 包：无
+- Web：门户入口 `agent`，带状态；`POST /api/model-api`、
+  `GET /api/model-api/status`（参见 [HTTP](/zh/plugins/agent/http)）
+- 任务：一个 Agent 任务（池大小 1），驱动 Agent 运行时，并把打开的会话的输出转发为
+  `session.event`
+- 存储：模型 API 记录保存在插件作用域的 KV 键 `default` 和
+  `purpose.{root_agent,sub_agent,memory,compaction}` 下；持久的运行时状态以 `.bin`
+  文件保存在 `/data` 下；用户安装的 skill 从 `/workspace/media/skills` 读取，共享的内置
+  skill 从 `/workspace/resources/skills` 读取；内置 `/resources/entry.js`、
+  `/resources/figure.js`、`/resources/icon.svg`
+
+本插件需要一个私有文件系统（`PluginFilesystem::Private`）。
+
+System 用通用的 `PluginContext` 构造 Agent 插件。注册期间，它创建并发布
+`AgentRuntime`，发布 `AgentToolRegistry`，并把 Agent 会话操作注册为直接的 Workflow
+Action。Workflow 插件保持独立于 Agent；Agent 是能力的使用方。
+
+直接依赖它的插件使用 `AgentRuntime` 进行类型化的会话协作。特定于传输或环境的请求整形留在这些适配插件中，而不放进 Agent 运行时。
+
+每个会话都带有面向人的元数据：标题和最近使用时间。`AgentRuntime::describe_sessions`
+为每个存活的会话返回一个 `SessionInfo`（id、持久性、标题、`updated_at`），
+`AgentRuntime::rename_session` 替换标题。没有标题的会话从第一条带可见文本的用户消息取标题：第一个非空行，去掉首尾空白，最多 64 个字符，被截断时末尾加 `…`。重命名按同样的方式规范化，规范化后没有可见内容时会被拒绝。每条追加的用户消息都会用 `UtcClock` 以 Unix 毫秒记录 `updated_at`，该时钟由注册过程通过
+`AgentRuntime::set_wall_clock` 安装；时钟尚未同步时，保留之前的值。持久会话把这两个字段和其余会话状态一起存储；临时会话把它们保存在内存中。
+
+`AgentRuntime::session_transcript(session, limit, max_chars)` 以人阅读的方式读取一个存活会话的对话：最后 `limit` 条用户和 Agent 消息，从旧到新，每条是一个 `TranscriptEntry`，包含它的
+`TranscriptRole`、截断到 `max_chars` 个字符的文本、Agent 消息调用过的工具名称，以及它是否属于仍在进行中的轮次。推理、工具结果和运行时自己的后台更新消息不包含在内。它读取根 Agent 已经保存的对话记录，临时会话的记录在内存中；还没有消息的会话，或者临时 Agent 已经不存在的会话，没有对话记录。
+
+本插件直接拥有并驱动 `RuntimeService`。与之并列的 Agent 到 Workflow 适配器只负责把打开的会话的输出转发为 `session.event`；它既不拥有也不运行 Agent 运行时或 Workflow 运行时。
+
+依赖它的插件可以在启动前通过 `AgentToolRegistry` 注册原生的 Agent `ToolGroup`。Agent 的启动钩子会先启动完整的工具注册表，再生成运行时任务。
+
+## 附件
+
+一条消息以文本加上 `Attachment` 引用的形式到达 Agent
+（`Message::with_attachments`，`session.append` 的 `attachments`）：类型、共享文件系统视图中的路径（通常是 `/workspace/cache/...` 或
+`/workspace/media/...`）、MIME 类型、可选的文件名和大小。对话记录用数组内容保存带附件的用户消息：一个
+`{"type":"text"}` 部分，以及每个文件一个内部的 `{"type":"media",...}` 部分。
+每次模型请求之前，Agent 通过它的 `ScopedVfs` 读取模型配置允许内联的最新附件（`input_modalities`、
+`max_images_in_context`、`image_max_bytes`；参见 [HTTP](/zh/plugins/agent/http)），根据字节内容识别图片，请求再把它们 base64 编码进请求体。
+其他所有附件，以及文件已经不存在的附件（Workspace 缓存在重启后不会保留），都变成一行按路径指明它的文本。工具结果以同样的方式携带附件（见下文），其中的图片与用户的图片一起计入
+`max_images_in_context`。历史压缩和记忆提取把附件读作 `[image: cat.jpg]` 这样的标签，上下文大小估算把一张图片计为 1600
+个 token。
+
+## 工具和后台工具
+
+工具要么是普通工具（`Tool::new` 加一个 `ToolHandler`），其调用在模型轮次内完成；要么是后台工具（`Tool::background` 加一个
+`BackgroundToolHandler`），其调用返回一个已接受的输出并继续运行。是否为后台工具属于工具定义的一部分，而不是每次调用时的选择。
+
+每次调用除了参数之外还会收到一个 `ToolContext`；它的 `session` 是该调用所属 Agent 会话的 `SessionId`，对根 Agent 和它的子 Agent 都一样。适配插件用它代表该会话行事，例如在它绑定的对话中作答。
+`ToolOutput` 由 `content`、`ok` 和 `attachments` 组成：`attachments` 是对结果要向模型展示的文件的引用（`ToolOutput::with_attachments`），从不包含文件字节。对话记录把它们保存为工具消息的 `media` 部分，每次请求像处理用户附件一样内联最新的附件；OpenAI 兼容的请求让工具消息保持为文本，并在工具结果之后用一条用户消息附上图片。后台调用的进度和结果会把它们的附件带进传递它们的那条更新消息中。
+
+每个 Agent 拥有一个 `BackgroundToolPool`。这个池比工具低一层：它就是通用的
+`barracuda_runtime_utils::background::BackgroundPool`，用池分配的 id 存储任务，并在旁边保存它从不检查的元数据，传递任务的进度和完成结果，让持有者按 id 等待或移除任务。工具层用 `BackgroundToolCall` 元数据（调用本身、工具的控制钩子和 `toolcall` span）实例化它，并负责所有工具层面的行为。
+
+运行器把一个已接受的后台调用移入池中，它的已接受输出变为带有池 `id` 的 `[background:accepted]`。Agent 驱动这个池，并自动以
+`[background:progress]`、`[background:completed]` 或 `[background:failed]`
+更新的形式传递调用的进度和最终结果；空闲的 Agent 会为它们开启新的轮次。始终可见的
+`background` 工具组按 `id` 操作这个池：
+
+- `background_list` 对每个正在运行的调用做快照，包括它的工具和状态；
+- `background_wait` 阻塞直到某个调用完成并返回其结果，该结果之后不会再被传递；或者超时，让调用继续运行；
+- `background_input` 向正在运行的调用发送输入或输入结束；
+- `background_cancel` 丢弃一个正在运行的调用；它的结果永远不会被传递。
+
+处理器附加 `BackgroundToolControl` 来提供状态、接受输入，以及停止不归其被丢弃的完成 future 所有的工作。丢弃一个调用总会丢弃它的完成 future，所以取消调用、取消 Agent 或丢弃 Agent，都会停止所有工作归该 future 所有的调用。这个池是仅存在于运行时的状态，Agent 重启后不会保留。
+
+运行时把 `/workspace/media/skills` 和 `/workspace/resources/skills` 扫描进同一个目录清单。skill 属于 Agent 应用而不是框架，所以这是建立在现有 Workspace 挂载点之上的 Agent 约定：任何能写文件的插件，例如 `agent-file`，只要把 skill 包写到
+`/workspace/media/skills` 下，就安装了这个 skill。skill 名称在两个根目录之间全局唯一；它们在文件系统中的位置没有选择优先级。格式错误的包，或者名称重复的每一份副本，都会被排除并给出警告，由 `skill_reload` 报告，所以共享目录中的一个坏包永远不会让 Agent 停下来。`skill_read` 只加载所选的 `SKILL.md` 说明。`skill_resource_read` 解析相对于该唯一 skill 目录的、有大小上限的 UTF-8 文件路径，不会把底层路径暴露给模型。
+
+本插件通过 `WebServer` 提供 `POST /api/model-api` 和 `GET /api/model-api/status`
+（参见 [HTTP](/zh/plugins/agent/http)）；两者读取同一份内存中的配置。Agent 插件卸载时，保留的路由注册会被自动释放。被接受的模型配置在生效之前会被原子地持久化。注册过程会在 Agent 开始工作之前恢复完整的模型、用途绑定和默认模型快照。存储缺失时得到空配置；存储的数据格式错误会使插件注册失败。
+
+门户入口通过 `CaptivePortal::register_with_status` 注册；它的
+`GET /portal/status` 记录是 `EntryStatus::configured`：当生效的配置为至少一种用途（显式指定或通过默认模型）解析出一个模型时为 `ready`
+“已配置”，否则为 `off` “未配置”。它读取一个标志，端点在恢复之后以及每次接受
+`POST` 之后更新该标志。
+
+## 门户页面
+
+需要来自 `captive-portal` 的 `CaptivePortal` 和一个私有的插件文件系统作用域。注册过程为一个 `WebEntry` 保留一个 `WebEntryRegistration`，该入口的 ID 为
+`agent`，分组 `WebGroup::Agent`，顺序 10，标题 `Models`（双语），一段双语摘要，图标 `icon.svg`，图形 `figure.js`，模块 `entry.js`，以及一个
+`ResourceFiles` 提供者。卸载时会移除导航入口和资源提供者；不注册额外的 HTTP 路由。
+
+Cargo 在编译本插件之前会自动运行声明的 `build` 任务。只想构建它的资源时，在仓库根目录运行 `cargo plugin run build --plugin agent`。该声明使用共享的 `tools/web/build.ts`
+脚本。前端依赖以及 format/lint/check/test 命令在仓库根目录统一管理；测试放在本插件的 `resources/web/tests/` 中。独立的浏览器模块被写入本插件的 `filesystem/resources/entry.js`。通用的镜像构建器只在选中本插件时才包含该目录。门户外壳中不打包任何业务页面。共享的 UI 源码是构建时的辅助工具，而不是对其他贡献者文件的运行时依赖。
+
+页面基于门户 UI 套件构建：带有实时 `socket` 图形的页头
+（`resources/web/figure.js`，使用外壳的全局 `HL`），用于接口协议（`backend`）和用途的单选卡片，“设为默认模型”开关（`default`），连接字段（`base_url`、`model`、`api_key`），“输入”下的“图片”和
+PDF 开关（`input_modalities.image`、`input_modalities.pdf`），以及一个默认展开的“高级”折叠区，包含 `timeout_ms`、`max_tokens`、`image_max_bytes` 和
+`max_images_in_context`。它以单元素批次的形式发送端点需要的每个字段，并根据门户语言显示中文或英文。`resources/web/icon.svg` 是 Lucide 的 `cpu` 图标。
+
+页面提交现有的 POST 配置契约，设备接受后调用 `context.refreshStatus()`，让门户的“开始使用”步骤和导航随之更新。它的页头显示“状态”徽标，并为每种用途显示它使用的模型（自己的或默认的），这些信息在挂载时以及每次保存被接受后从 `GET /api/model-api/status` 读取。它不声称设备接受即代表上游服务已经过验证。密钥使用密码输入框，从不保存在浏览器存储中，并在成功或卸载时清空。请求在卸载时取消，从不自动重试。现有的 HTTP API 在这里没有添加身份验证或传输加密；只在可信的配置网络中使用。

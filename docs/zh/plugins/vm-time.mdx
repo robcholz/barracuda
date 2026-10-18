@@ -1,0 +1,37 @@
+---
+title: "VM Time 插件"
+sidebarTitle: "VM Time"
+description: "在 Lua 中通过标准的 `os` 时间函数读取 UTC 时间。"
+---
+
+通过标准的 `os` 时间函数把 Time 插件的 UTC 时钟暴露给 Lua。
+
+- 插件 ID：`vm-time`
+- 依赖：`time`、`vm`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `time` 的 `UtcClock`，来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`time`，它扩展标准的 `os` 表
+- Web：无
+- 任务：一个可取消的 UTC 请求桥接任务（`vm_time_task`，池大小 1），由一个深度为 4 的请求队列供给
+- 存储：无
+
+本插件把 Time 插件经过网络同步、在本地推进的 UTC 时钟投射到 Lua 标准的 `os` 表中。它不拥有任何时钟、网络来源或时区配置。它的桥接任务保留了 `UtcClock` 在执行器本地的所有权，而注册的 Lua 包仍然是 `Send + Sync`。
+
+## Lua API
+
+VM 的本地时区固定为 UTC。本插件提供：
+
+- `os.time()`，返回当前的整数 Unix 时间戳（秒）；
+- `os.time(table)`，用于 UTC 日历表，包括对超出范围的月、日、时、分、秒字段进行规范化；
+- `os.date([format [, timestamp]])`，包括 `*t`、`!*t`、可移植的 C 转换说明符以及 `!` UTC 前缀；
+- `os.difftime(second, first)`。
+
+由于本地时间就是 UTC，带 `!` 和不带 `!` 的格式结果相同，`%z` 为 `+0000`，`%Z` 为 `UTC`，`isdst` 始终为 false。日期格式最长 256 个 UTF-8 字节。
+
+当 Time 插件尚未同步，或者它的保持（holdover）已过期时，`os.time()` 以及不带显式时间戳的 `os.date` 调用会失败。显式时间戳的转换仍然可用，因为它不需要读取时钟。
+
+`os.clock` 被有意省略：它表示进程的 CPU 时间而不是 UTC，而沙箱不暴露计时侧信道或主机进程时钟。进程、环境变量、区域设置和退出函数同样不提供。

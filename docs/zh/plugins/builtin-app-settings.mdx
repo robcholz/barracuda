@@ -1,0 +1,54 @@
+---
+title: "Builtin App Settings 插件"
+sidebarTitle: "Builtin App Settings"
+description: "用内置的设置应用管理 Wi-Fi、声音、显示、应用、存储和设备。"
+---
+
+提供设置应用，这是一个用于 Wi-Fi、声音与显示、已安装应用、存储和设备的系统应用。
+
+- 插件 ID：`builtin-app-settings`
+- 依赖：`app-manager`、`wifi`
+- 设置：无
+- 上下文资源：`target_identity`
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `AppManager` 和 `Preferences`，
+  来自 `wifi` 的 `WifiControl`
+- Workflow：无
+- Agent Tool：无
+- Lua 包：`settings`，仅供本应用使用
+- Web：无
+- 任务：无；由 `app-manager` 的任务响应该 Lua 包
+- 存储：应用在 `/resources/app` 中的容器；读取
+  `/workspace/media` 和 `/workspace/cache` 下的大小
+
+本应用是内置应用，参见 `app-manager` 插件的
+[App Manager](/zh/plugins/app-manager)。它为 `wifi` 打开：控制中心的 Wi-Fi 磁贴会打开它。它的页面有设置主页、Wi-Fi、声音与显示、应用、存储和关于本机；向右滑动返回上一页。
+
+## Lua API
+
+每个调用都返回它的值，或者返回 `nil` 和一条消息。
+
+~~~lua
+local settings = require("settings")
+
+settings.status()
+-- { wifi = { state = "connected" | "connecting" | "disconnected", ssid = ... },
+--   brightness = 70, volume = 60, muted = false, microphone = true,
+--   quiet = false, screen_off = 30,
+--   device = { version = "0.1.0", board = ..., chip = ..., platform = ... } }
+settings.set("brightness", 40)  -- also volume, muted, microphone, quiet, screen_off
+settings.scan()                 -- { { ssid, bars = 1..4, glyphs, secured }, ... }
+settings.apps()                 -- installed apps: { { id, name, version, glyphs, letter, state }, ... }
+settings.storage()              -- { used, label, total, free, total_label, free_label,
+                                 --   parts = { { name, icon, bytes, label }, ... } }
+~~~
+
+`set` 修改 `app-manager` 的 `Preferences`（控制中心也会显示这些偏好），并返回新的 `status()`。亮度和音量是百分比；`screen_off` 是 `SCREEN_TIMEOUTS` 中的一个值，单位为秒。`glyphs` 是图标在系统图标字体中的各个图层，即 `{ base, accent, dim }`。应用的 `state` 为 `running`、`background`、`suspended`、`terminating`，或者不存在。`storage` 把工作区的媒体和缓存与 `AppManager::used_bytes` 相加；`total` 和 `free` 是存放共享媒体、应用和数据的文件系统的大小和剩余空间（`ScopedVfs::usage`），在文件系统无法提供时不存在。存储页面按 `total` 填充进度条，并显示剩余空间。
+
+## 构建
+
+`resources/app/` 存放应用的源码；`app` 任务用 `app-manager` 的 `resources/build-app.ts` 把它们构建到 `filesystem/resources/app/`。本应用不带字体，使用系统字体绘制。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-settings
+```

@@ -1,0 +1,35 @@
+---
+title: "VM Agent 插件"
+sidebarTitle: "VM Agent"
+description: "用 `agent` Lua 包在 Lua 中向 Agent 提出隔离的一次性问题。"
+---
+
+VM Agent 插件把隔离的、不持久保存的 Agent 提问作为只能 require 的 `agent` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`vm-agent`
+- 依赖：`agent`、`vm`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `agent` 的 `AgentRuntime`，来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`agent`
+- Web：无
+- 任务：一个 Agent 提问适配服务任务，最多同时处理两个提问
+- 存储：无
+
+本插件为每次 VM 执行注册只能 require 的 `agent` Lua 包。它拥有面向 VM 的 API 形式，并把每个请求转换为一个全新的临时 Agent 会话。Agent 插件只提供它的类型化运行时；它不了解 Lua、流，也不了解这个适配器的响应契约。
+
+Lua API：
+
+- `agent.ask(text, stream) -> output | nil, error` 发起一次隔离的、不持久保存的提问。
+- `output:next() -> text | nil, error` 返回下一个值。
+- `output:next() -> nil` 在临时会话被删除后返回干净的 EOF。
+- `output:close()` 提前取消提问。也支持 Lua 5.4 的 to-be-closed 变量。
+
+两种模式返回同样的 `output` userdata。`stream=true` 时，每次 `next()` 返回一段助手文本增量。`stream=false` 时，适配器会缓冲助手文本，并在 EOF 之前只返回一个完整的值。启动和迭代失败遵循 Lua 惯用的 `nil, error` 返回形式。
+
+每个会话都使用 `SessionPersistence::Ephemeral` 和权限级别 `Deny`。适配器最多允许两个并发提问，每次提问最多接受 4096 字节的输入，最多允许 32768 字节的助手输出。有界的输出队列会对流式生产者施加背压。
+
+丢弃保留的 VM 注册会撤销现有 Lua 状态中的回调、拒绝新的提问、取消活动的提问，并让所属任务在退出前删除它们的临时会话。

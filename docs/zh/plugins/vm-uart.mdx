@@ -1,0 +1,34 @@
+---
+title: "UART 插件"
+sidebarTitle: "UART"
+description: "用 `uart` Lua 包在 Lua 中通过开发板的可用引脚使用 UART 串口。"
+---
+
+基于开发板的可用 I/O 引脚安装 `uart` Lua 包。
+
+- 插件 ID：`uart`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`hal.exposed_io`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`uart`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件共享开发板统一的可用 I/O 所有者，并安装 `uart` Lua 包。端口实现了 `embedded_io_async::Read + Write`；控制器分配和引脚路由留在平台提供者内部。
+
+Lua API：
+
+- `uart.available(tx, rx) -> boolean`
+- `uart.open(tx, rx, baud, data_bits, parity, stop_bits) -> handle`
+- `handle:read(max_length) -> bytes`
+- `handle:write(bytes)`
+- `handle:flush()`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`tx` 或 `rx` 可以为 `nil`，但不能两者都是。数据位为 `7`、`8` 或 `9`；校验为 `"none"`、`"even"` 或 `"odd"`；停止位为 `1` 或 `2`。打开操作会从其他可用协议所用的同一个所有者那里原子地取走每一个所选的物理引脚。

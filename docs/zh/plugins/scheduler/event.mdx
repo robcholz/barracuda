@@ -1,0 +1,39 @@
+---
+title: "Scheduler JSON Event"
+sidebarTitle: "Workflow Event"
+description: "Scheduler 发出的 Workflow Event：`scheduler.triggered` 及其输入。"
+---
+
+## `scheduler.triggered`
+
+- Event ID：`scheduler.triggered`
+- Topic：计划的 `id`
+- 发出时机：`UtcClock` 报告某次有效的触发已到期后发出一次
+- Schema：`schemas/event/scheduler.triggered.json`
+
+Event 的输入是一个 JSON 对象：
+
+```json
+{"id":"morning","run_number":1}
+```
+
+`id` 是计划的标识，`run_number` 是已被接受的触发次数，从 1 开始计数。Scheduler 把它作为 `serde_json::Value` 直接发给 `WorkflowService`。
+
+只有在 Workflow 接受该 Event 之后，这次触发才会被提交。随后受影响的计划键会被原子地更新或删除。一次性计划或已用完次数的有限计划会被移除。对于间隔计划，错过的间隔会合并：只发出一个逾期的 Event，然后下一个截止时间推进到严格晚于所观测到的 UTC 时间的第一个间隔。被跳过的时间段不消耗 `count`；只有被接受的 Event 才消耗。
+
+当 `UtcClock::now` 报告错误时，不会发出任何 Event。
+
+跨越断电的投递是至少一次。如果在 Workflow 接受某个 Event 之后、受影响的计划键提交之前断电，恢复后可能会再次发出这次触发。Workflow 和插件 KV 不共享同一个事务。
+
+Workflow 可以按 Event ID 匹配每一次触发，也可以按 Topic 选择某一个计划：
+
+```json
+{
+  "id": "morning-alarm",
+  "match": {
+    "event": "scheduler.triggered",
+    "topic": "morning"
+  },
+  "steps": [{"call": "alarm.ring"}]
+}
+```

@@ -1,0 +1,44 @@
+---
+title: "Builtin App Files 插件"
+sidebarTitle: "Builtin App Files"
+description: "用内置的文件应用浏览共享工作区中的文件。"
+---
+
+提供文件应用，这是一个显示共享工作区中文件的系统应用。
+
+- 插件 ID：`builtin-app-files`
+- 依赖：`app-manager`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `AppManager`
+- Workflow：无
+- Agent Tool：无
+- Lua 包：`files`，仅供本应用使用
+- Web：无
+- 任务：无；由 `app-manager` 的任务响应该 Lua 包
+- 存储：应用在 `/resources/app` 中的容器；读取
+  `/workspace/media`、`/workspace/resources`、`/workspace/removable` 和
+  `/workspace/cache`
+
+本应用是内置应用，参见 `app-manager` 插件的
+[App Manager](/zh/plugins/app-manager)。它的首页统计每个区域（`AREAS`）中的文件数，这些区域的名称分别表示媒体、资源、存储卡和缓存；打开某个区域会列出其中的文件。
+
+## Lua API
+
+~~~lua
+local files = require("files")
+
+files.areas()     -- { { name, count, present }, ... }, one per area
+files.list(name)  -- { name, present, count, label, files = { { path, label }, ... } }
+~~~
+
+区域不存在时 `present` 为 false，例如没有插卡时的存储卡区域。一次列表最多包含 `MAX_FILES`（64）个文件，按它们在区域中的路径排序。
+
+## 构建
+
+`resources/app/` 存放应用的源码；`app` 任务用 `app-manager` 的 `resources/build-app.ts` 把它们构建到 `filesystem/resources/app/`。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-files
+```

@@ -1,0 +1,30 @@
+---
+title: "前端与 Python 工具"
+sidebarTitle: "工作区工具"
+description: "配置共享的 Bun 前端工具和 uv Python 工作区。"
+---
+
+## 前端工具
+
+安装 Bun（CI 使用 1.4.0）。前端工具和依赖在仓库根目录共享；插件的源码和测试保留在 `plugins/<id>/resources/web/` 中。
+
+```sh
+bun install --frozen-lockfile
+bun run format          # format frontend source
+bun run format:check    # verify formatting without changes
+bun run lint
+bun run check           # TypeScript types
+bun run test            # all frontend tests
+```
+
+`cargo build` 和 `cargo run` 会自动构建插件资源。只做前端工作时，使用 `cargo plugin run build`，可以加上 `--plugin <id>`。每个插件只写入它自己的 `filesystem/resources/`。测试修改过的前端源码之前，先运行资源构建；测试还会检查已提交的打包产物是否与源码一致。`bun run dev` 用一份空的清单在本地预览门户外壳，不模拟设备。
+
+## Python 工具
+
+Python 工具是根 uv 工作区的成员，共用一个 `uv.lock` 和一个 `.venv`。在这个目录下安装每个工具及其开发依赖：
+
+```bash
+uv sync --all-packages --all-groups
+```
+
+用 `--package` 显式选择打包的工具，这样成员选择永远不依赖当前目录。下面的示例都从这个工作区根目录运行，因此它们的输入和输出路径也没有歧义。独立的 PEP 723 脚本继续使用 `uv run --script`。

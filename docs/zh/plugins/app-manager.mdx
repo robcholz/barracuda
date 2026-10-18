@@ -1,0 +1,254 @@
+---
+title: "App Manager 插件"
+sidebarTitle: "概览"
+description: "运行 Lua 应用；在带显示屏的开发板上，显示这些应用和设备的系统 UI。"
+tag: "NEW"
+---
+
+运行带可选 MicroTS 视图的 Lua 应用；在带显示屏的开发板上，还会显示这些应用和设备的系统 UI：主屏幕与 Agent 的状态、启动器、应用切换器、通知中心和控制中心，以及应用生命周期前后的各个界面。
+
+- 插件 ID：`app-manager`
+- 依赖：`vm`、`workflow`、`time`、`power`、`sound`
+- 设置：无
+- 上下文资源：外设槽位 `display.main`（`primary`，可选）
+  和 `touch.main`（`primary`，可选）
+- 提供的能力：`AppManager`、`Notifications`、`AgentStatus`、
+  `Preferences`、`SystemFonts`、`SystemNetwork`
+- 所需能力：来自 `vm` 的 `Vm` 和 `LuaPackageRegistry`，
+  来自 `workflow` 的 `WorkflowActionRegistry`，来自 `time` 的 `UtcClock`，
+  来自 `power` 的 `Power`，来自 `sound` 的 `Volume`
+- Workflow：Action `app.list`、`app.open`、`app.install`、`app.home`、
+  `app.interactive`、`app.terminate`、`app.status`、`app.tap`、`app.notify`、
+  `app.confirm` 和 `app.agent`，参见 [Action](/zh/plugins/app-manager/action)；Event 无
+- Agent Tool：无
+- Lua 包：`app`（环境）和 `notify`（稳定，版本 2），以及每个内置应用的 Lua 包
+- Web：无
+- 任务：一个任务，监管最多 `MAX_APP_RUNS`（3）个应用运行，响应内置应用的 Lua 包调用；有显示屏时，还负责绘制视图、读取触摸并运行系统 UI
+- 存储：已安装应用位于私有的 `/media/apps` 下，提供的应用位于共享的 `/workspace/media/apps` 下（只读）；每个应用的键值存储和文件位于私有的 `/media/data/<id>/` 下；系统视图位于
+  `/resources/view`；偏好设置位于 `/data/preferences.json`
+
+## 结构
+
+插件由两个工具包组装而成，它们都是插件自己的 crate：
+
+| Crate | 负责 | 了解 |
+| --- | --- | --- |
+| `crates/appkit` | 应用：容器、安装、生命周期、`app` Lua 包、存储、内置应用及其 Lua 包、`app.*` 应用 Action | 对显示屏一无所知：没有 UI 时，它运行无头应用，并对带视图的应用返回 `NoDisplay` |
+| `crates/uikit` | 视图：BVIR 运行时、图层、显示与触摸循环、手势、系统字体和图标 | 对应用一无所知 |
+| `crates/plugin` | 入口：连接两者，以及系统 UI | 两者都了解 |
+
+在没有显示屏的开发板上，UI 工具包不会运行：插件就是一个无头应用的管理器。设备 UI 的三层，即系统、系统应用和可安装应用，见[设备 UI](/zh/architecture/device-ui)；本插件就是其中的系统，并运行另外两层。
+
+## 应用
+
+应用是一个带可选编译后 MicroTS 视图的 Lua 程序，以应用容器的形式存储。[应用格式](/zh/plugins/app-manager/app-format)定义了容器、清单和 `app` Lua API；
+`crates/appkit/resources/app-manifest.json` 用于检查清单。
+
+容器所在的位置决定了它的 `AppKind`，定义见[设备 UI](/zh/architecture/device-ui)：
+
+- **系统应用**是其他插件提供的内置应用，各自位于自己文件系统的 `/resources/app`；插件通过 `AppManager::add_builtin` 把自己加入，见下文。它们的运行可以 `require` 每个已注册的 Lua 包，`uninstall` 会拒绝它们，任何已安装应用都不能占用它们的 ID。
+- **可安装应用**安装在私有的 `/media/apps` 下。它们的运行通过 `Vm::run_scoped` 获得 `LuaPackageScope::Only`，只包含环境 Lua 包和清单中列出的 Lua 包。
+- **提供的应用**是位于共享的 `/workspace/media/apps` 下的容器，由门户、Agent 或其他插件写入。它们不能启动；`open` 会返回 `NotInstalled`。`AppManager::install` 把一个提供的应用（目录或 `.bapp` 包）复制到 `/media/apps`，替换已安装的其他版本；它只接受待处理请求所固定的内容（否则返回 `Changed`），而对于从签名包安装的应用，只接受同一签名者的包。`AppManager::install_offer` 按安装时的样子描述一个提供的应用，包括它的 `digest`、`signer`，以及在无法安装时的原因。格式见[应用格式](/zh/plugins/app-manager/app-format)，
+  `AppManager::uninstall` 删除已安装的应用及其数据。只有系统 UI 会在询问用户之后调用它们；`AppManager::request_install`（即 `app.install` Action）请求系统 UI 显示一个提供的应用，而 `AppManager::install_request` 和 `AppManager::decline_install` 是该请求在系统 UI 一侧的接口。
+
+每个应用的数据按 ID 存放在私有的 `/media/data/<id>/` 下，所以更新后依然保留。
+
+## 内置应用
+
+内置应用插件依赖本插件，并在注册时把一个 `BuiltinApp` 交给 `AppManager::add_builtin`：包括它的 ID、它的文件系统、系统 UI 在什么情况下打开它（`opens`，例如为控制中心的 Wi-Fi 磁贴指定 `wifi`），以及可选的 `BuiltinPackage`，即一个 Lua 包名及响应它的 `BuiltinBackend`。它在整个生命周期内保留返回的注册。这个 Lua 包是应用通往设备的途径：可安装应用永远不能请求它，请求它的清单是无效的。
+
+一次调用，例如 `require("settings").status()`，最多把 `MAX_BUILTIN_ARGS`（4）个参数作为字符串传递，并排入一个作业；本插件的任务用后端响应它，后端返回一个 JSON 值，Lua 以表的形式接收，或者返回一条消息，Lua 以 `nil, message` 的形式接收。同时最多有 `MAX_BUILTIN_CALLS`（8）个调用在等待，而等待用户的调用（例如一个提问）不会阻塞其他调用。
+`AppManager::serve_builtins` 运行响应循环。
+
+## 应用 API
+
+[应用 API](/zh/plugins/app-manager/app-api) 是可安装应用与设备之间的契约。本插件把用来检查应用的 `Device` 交给 `AppManager::register`：开发板的稳定名称、来自 UI 工具包的显示屏尺寸和形状（`DisplayFeatures::ROUND` 标记圆形屏幕），以及它是否读取触摸。每次列出应用时都会从 `LuaPackageRegistry::packages` 读取各 Lua 包的接口类型，所以在本插件之后注册的 Lua 包插件也会被计入，并填写每个可安装应用的 `incompatible`；`request_install`、
+`install` 和 `open` 会以 `Incompatible` 拒绝带有该字段的应用。
+`AppManager::purpose` 是安装界面上某个 Lua 包的那一行说明，由该 Lua 包所属插件在 `LuaPackage::interface` 中声明；本插件不指名任何其他插件的 Lua 包，而是从注册表中了解所有 Lua 包。
+
+`notify` Lua 包属于本插件：`AppManager::add_package` 用内置应用 Lua 包所用的同一座桥注册它，它的后端把通知发到 `Notifications`。
+
+## 生命周期
+
+系统 UI 负责手势并调用 `AppManager`；本插件负责状态、预算，以及告诉程序什么。程序只做响应。`AppManager::changed` 在每次状态转换、退出、安装和安装请求之后唤醒系统 UI，所以由 Workflow 打开或关闭的应用也会让界面随之变化。
+
+```text
+               open                     home / open another app
+not running ──────────→ active ⇄ inactive ──────────────→ background
+                          ↑  set_interactive                │ parked within GRACE
+                          │                                 ↓
+                          └──────────── open ───────────  suspended
+terminate from any state → terminating → exits within GRACE, or is cancelled
+```
+
+| 系统 UI 操作                              | `AppManager` 调用           | 程序收到                             |
+| ----------------------------------------- | --------------------------- | ------------------------------------ |
+| 点击图标                                  | `open(id)`                  | 启动，然后 `app:active`；恢复时为 `app:foreground`、`app:active` |
+| 下拉面板，或任何系统界面覆盖应用          | `set_interactive(false)`    | `app:inactive`                       |
+| 关闭面板                                  | `set_interactive(true)`     | `app:active`                         |
+| 在应用内较深的页面上向右滑动              | `back()`                    | `app:back`                           |
+| 在应用首页上向右滑动退出应用              | `back()`，它会调用 `home()` | `app:inactive`、`app:background`     |
+| 在应用切换器中关闭它                      | `terminate(id)`             | `app:terminate`                      |
+| 在它的信息界面中卸载它                    | `uninstall(id)`             | `app:terminate`                      |
+| 触摸应用的视图                            | 无；代码中可用 `tap(x, y)`  | 视图的处理函数调用                   |
+
+- **输入。**只有处于活动状态的应用才会收到视图调用；非活动应用的视图仍留在显示屏上，但忽略触摸。在它停止接收输入之前排队的调用会被丢弃，所以 `app:inactive` 之后不会再有调用到达。
+- **挂起。**`app:background` 之后过了 `GRACE`（1 秒），在 `app.events()` 中等待的应用会被挂起：它的视图树被释放，值被保留，`open` 会根据这些值重建视图树。仍在运行的应用会被取消。挂起的程序不占用 CPU，但保留它的 VM 运行和 Lua 堆。
+- **终止。**`terminate` 发送 `app:terminate`；如果运行在 `GRACE` 之后仍未结束，就会被取消。超出 `MAX_SUSPENDED`（2）的挂起应用，以及启动新应用需要运行槽位时最久未使用的挂起应用，会在不再发送事件的情况下被终止，所以程序应在 `app:background` 时保存数据。
+- **无头应用**没有视图，从不进入前台，以服务的形式运行，直到返回或被终止。
+- **退出。**`AppManager::last_exit` 记录最近一次运行是如何结束的：VM 结果、它的诊断信息或被取消的原因、最后几行输出，以及应用当时是否在前台，以便系统 UI 能告诉用户显示屏上的应用已退出。`AppManager::running` 按最近使用在前的顺序列出正在运行的应用，供应用切换器使用。
+
+应用最多占用 VM 四个执行槽位中的 `MAX_APP_RUNS`（3）个，所以总有一个留给 Workflow 和 Agent 运行。
+
+## `app` Lua 包
+
+每个应用程序的第一行都是 `require("app").__bind("<ticket>");`。这个票据指明应用的端口，即程序与本插件共享的 `Send + Sync` 状态：生命周期队列、来自 UI 工具包的视图通道、计时器和存储。一张票据只能绑定一次；其他 Lua 运行无法认领某个应用。
+
+该 Lua 包把程序的视图作为基于 UI 工具包 `ViewChannel` 的 `view` userdata 交给程序。它把 Lua 值转换为视图的类型化值，并根据应用 `app.d.ts` 中的名称和类型进行检查，所以名称或类型错误会以 `nil, message` 失败，永远不会到达视图；整数值可以接受整数形式的浮点数，嵌套表最多 16 层。
+处理函数的参数以 Lua 标量的形式到达。
+
+```lua
+assert(view:set("count", 3))  -- write a value declared in app.d.ts
+view:is_open()
+view:close()
+```
+
+## 视图
+
+UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bvir`）、编译后的样式表（`styles.bin`）和烘焙好的字体图集（`font-<slot>.bin`）组成，由 MicroTS 编译器从 MicroTS 源码生成。crate `barracuda-ui-runtime` 读取 BVIR，把它挂载到一个内置的 PocketJS 核心树中，并在值变化时重新求值这棵树。
+
+`UiService::open` 把应用的视图挂载到应用层，
+`UiService::open_on` 把视图挂载到指定的 `Layer`；两者都返回一个 `UiSession`，由呈现该视图的一方持有。它的 `ViewChannel` 是 `Send + Sync` 的那一半，供驱动视图的代码在任意任务上使用：`ViewChannel::set` 写入一个 `ViewValue`，
+`ViewChannel::next` 等待下一次处理函数调用，其参数同样是 `ViewValue`。UI 工具包对 Lua 一无所知；值由应用工具包转换。
+
+写入会根据视图契约（`ViewChannel::value_type`）检查：未声明的名称以 `ViewError::UnknownValue` 失败，类型不符的值以 `ViewError::Mismatch` 失败，两者都不会到达视图树。每个槽位只保留最新写入的值，数组最多容纳 `MAX_ARRAY_ITEMS` 项。
+每个视图最多排队 `MAX_EVENTS` 个处理函数调用；视图停止接收输入时，`UiSession::clear_events` 会丢弃尚未接收的调用。
+
+持有者从不直接操作 UI 树。它只与 UI 循环共享一个临界区信箱；UI 循环在有写入时被唤醒，应用这些写入，并对每个发生变化的视图重新布局。
+
+视图是其值的函数。`UiSession::suspend` 释放视图树（视图内存的主要部分）并保留值；期间的写入在信箱中等待。`UiSession::resume` 根据资源和这些值重建视图树，并拒绝契约已不再匹配的资源。
+
+丢弃 `UiSession` 会卸载视图，并对通道结束该视图：它不再传递调用，写入会以 `ViewError::Closed` 失败。通过通道关闭视图后，可以从 `UiSession::is_closed` 看到。
+
+## 显示屏
+
+插件通过可选的 `display.main` 槽位获取开发板的主显示屏，并按显示屏尺寸布局每个视图，一个视图像素对应一个显示屏像素。
+
+视图位于两个图层之一。`Layer::App` 承载应用的视图，`Layer::System` 承载系统 UI 的视图；每个图层最多显示一个视图，系统层有视图时显示屏显示系统层的视图，否则显示应用层的视图（参见[设备 UI](/zh/architecture/device-ui)）。持有者用 `UiSession::show` 把视图放到自己的图层上，这会替换该图层之前的视图；用 `UiSession::hide` 把它撤下；挂起或丢弃会话也会隐藏视图。因此，系统 UI 可以覆盖和露出某个应用，而不需要该应用的持有者撤下自己的视图。两个图层都没有视图时，显示屏为空白。`UiService::showing` 报告显示屏上的内容，
+`UiService::set_brightness` 设置屏幕亮度。
+
+在带触摸的开发板上，`UiService::set_screen_timeout` 会在一段时间没有触摸后关闭屏幕；重新点亮屏幕的那次触摸不会到达任何视图，也不会形成手势。`UiService::wake` 用代码点亮屏幕。
+
+只绘制发生变化的部分。每次变化后，任务会询问 PocketJS 的损伤跟踪器，视图 DrawList 中哪些区域与上一帧不同，把这些区域按 16 行一条光栅化为 RGB565（显示 API 的像素格式），逐条绘制，并刷新变化的范围。不保留帧缓冲区。当一帧仍在变化时（例如动画期间），任务以每秒 60 帧推进；静止的视图不产生任何开销。
+
+可选的 `touch.main` 槽位获取开发板的触摸控制器。当显示屏上有视图时，以及在一次已开始的接触结束之前，任务每帧轮询它，把控制器的坐标范围缩放到显示屏，并对每次接触进行分类：
+
+| 接触 | 识别为 |
+| --- | --- |
+| 在距起点 12 px 以内抬起 | 点击：如果显示屏上的视图接收输入（`UiSession::show(true)`），就在起点按下该视图 |
+| 在 12 px 以内停留 0.5 秒 | `Gesture::LongPress`，在手指仍按住时报告；这次接触不会点击任何东西 |
+| 沿一个轴移动 40 px 或更多后抬起 | `Gesture::Swipe`，带有它的 `Direction`；如果起点位于它离开的那一侧的 12% 范围内，还带有该 `Edge` |
+
+手势不会到达任何视图：系统 UI 通过 `UiService::next_gesture` 等待手势，在没有人等待时保留最近的 `MAX_GESTURES`（8）个。要针对长按位置的内容采取行动，系统 UI 会用 `UiSession::resolve_press` 询问自己的会话，它返回在那里按下时会产生的处理函数调用，但不实际传递。
+
+来自点击的处理函数调用通过视图的通道到达，与 `UiSession::press_at` 的效果相同；后者用代码按下，没有显示屏也能工作。
+`UiSession::texts` 以同样的方式读取视图的文字，
+`UiSession::advance` 像显示屏那样推进视图的过渡动画。
+
+### 显示屏上的应用
+
+应用视图位于应用层。每次状态转换后，本插件会对前台应用的视图调用 `UiSession::show`，只有应用处于活动状态时触摸才会到达它；没有应用在前台时，隐藏应用视图。系统 UI 的视图位于上方的系统层，所以它覆盖应用时不需要本插件参与。显示屏上的点击直接通过 UI 工具包按下视图。`AppManager::tap` 和
+`AppManager::texts` 用代码完成同样的事情，供 Workflow（`app.tap`）和测试使用，没有显示屏也能工作。
+
+## 字体和图标
+
+系统字体是由另一个插件提供的字体图集，在设备开发板上是 `system-fonts`，因为它们大约有 2.4 MB，而没有显示屏的开发板不需要它们。该插件在注册时为 `SystemFonts` 能力提供一个 `FontAtlases` 来源，任务在第一个视图打开之前通过它加载图集，从不读取该插件的文件；`UiService::ready` 会等待它们加载完成。某个字体槽位没有自带图集的视图会用对应的系统字体绘制，所以系统 UI 和系统应用共用一套字体，自己不带任何字体。没有提供系统字体的插件时，视图只能使用自己的图集绘制。`system-fonts` 插件的
+[System Fonts 插件](/zh/plugins/system-fonts)页面说明了其中包含的内容。
+
+系统图标集是一个字体 `resources/icons/barracuda-icons.otf`，由 `resources/icons/build.py` 从 `resources/icons/svg` 构建。每个图标的每个颜色图层都是一个位于固定码位（`codepoints.json`）的字形，由视图叠加并着色；`icons::icon` 为 Rust 代码列出图标的图层。系统字体以 16 px 常规和 18 px 粗体包含这些图标，以 36 px 包含应用图标。
+
+没有指定字号或字重类的文字在 UI 核心中使用字体槽位 0，而 PocketJS 编译器把它理解为 16 px 默认值，并烘焙为槽位 2。当视图带有槽位 2 而没有槽位 0 时，运行时会用槽位 2 提供槽位 0。
+
+没有显示屏时创建的 `UiService`（例如在测试中）按 `DEFAULT_VIEWPORT` 布局视图，不绘制任何内容。
+
+## 系统 UI
+
+系统 UI 在系统层上打开一个视图。当有应用在前台且没有系统界面覆盖它时，该视图隐藏，显示应用的视图。每个系统界面都会覆盖前台应用并停止它的输入（`AppManager::set_interactive(false)`），直到界面关闭。它是设备上唯一替用户安装、卸载和切换应用的部分。
+
+### 界面和手势
+
+| 界面          | 显示内容                                                      | 进入方式                                    |
+| ------------- | ------------------------------------------------------------- | ------------------------------------------- |
+| 主屏幕        | 时钟和状态图标、处于当前状态的 Agent，以及一张卡片：离线提示，否则为待回答的问题，否则为刚完成的事项 | 启动时、没有应用在前台时，以及在启动器中向右滑动 |
+| 应用          | 蜂巢式启动器：先是内置应用，然后是已安装应用，然后是工作区中提供安装的应用（变暗显示）；正在运行的应用带一个圆点。每页容纳显示屏放得下的行数（360 px 圆形屏幕上为 2-3-2）；更多页面向上滑动即可到达，每页对应一个圆点 | 在主屏幕上向左滑动，或在应用首页内向右滑动 |
+| 菜单          | 变暗的启动器上方显示应用名称：应用信息，可安装应用还有卸载     | 在启动器中长按某个应用                      |
+| 运行中        | 应用切换器：每个正在运行的应用、它的状态和一个关闭按钮        | 在启动器中向左滑动                          |
+| 通知          | 通知中心：问题在前，带允许和拒绝；然后是通知，最新的在前；可逐条关闭或全部清除 | 在任意位置从顶部边缘向下滑动；向上滑动关闭 |
+| 控制          | Wi-Fi、麦克风、静音、勿扰、亮度和门户的磁贴；亮度滑块；门户地址 | 在任意位置从底部边缘向上滑动；向下滑动关闭 |
+| 启动中        | 应用启动期间显示它的图标和名称                                | 点击某个应用                                |
+| 已退出        | 显示屏上的应用意外结束；可重新打开或回到主屏幕                | 前台应用失败或被取消                        |
+| 安装          | 提供的应用，以及用其所依赖插件的措辞说明它请求的内容；安装或取消；对于本设备无法运行的应用，说明原因并禁用安装 | 点击某个提供的应用，或收到 `app.install` 请求 |
+| 信息          | 应用的版本和类型；可安装应用还列出它的权限                    | 菜单中的应用信息                            |
+
+主屏幕显示 Agent 的 `AgentStatus`：待机；聆听，带音量电平和听到的内容；思考，带问题；回答，带问题和答案，九秒后或点击后回到待机。已回答的问题会短暂显示为已完成，并在主屏幕卡片上保留 30 秒。
+
+手势就是 UI 工具包的单指手势：点击会按下显示屏上的视图，长按和滑动则通过
+`UiService::next_gesture` 交给本插件，从不交给应用。长按通过
+`UiSession::resolve_press` 解析，所以它选中的就是在那里点击会选中的内容。主屏幕、启动器和切换器左右滑动切换，面板从各自的边缘滑入，耗时 280 ms。
+
+| 手势                        | 位置               | 作用                                   |
+| --------------------------- | ------------------ | -------------------------------------- |
+| 点击                        | 任何可点击的元素   | 打开、切换、确认                       |
+| 长按（0.5 秒）              | 应用图标           | 应用菜单                               |
+| 长按                        | Wi-Fi 磁贴         | 为 `wifi` 打开的内置应用               |
+| 从顶部边缘向下滑动          | 任意位置           | 通知中心                               |
+| 从底部边缘向上滑动          | 任意位置           | 控制中心                               |
+| 向左 / 向右滑动             | 主屏幕、应用、运行中 | 在它们之间切换                       |
+| 向上 / 向下滑动             | 应用               | 启动器的下一页 / 上一页                |
+| 向右滑动                    | 应用内             | 返回（`AppManager::back`）：应用的上一页，在首页时回到启动器 |
+| 向右滑动                    | 菜单、安装、信息、已退出 | 取消                             |
+
+### 应用及其生命周期
+
+点击可启动的应用会调用 `AppManager::open`。点击提供的应用会显示安装界面；安装调用 `AppManager::install`，拒绝调用
+`AppManager::decline_install`。菜单中的卸载调用
+`AppManager::uninstall`，它会拒绝系统应用，所以系统应用的菜单不提供卸载。切换器中的关闭调用 `AppManager::terminate`。
+
+系统 UI 跟随 `AppManager::changed`，所以由 Workflow 打开或关闭的应用（`app.open`、`app.home`、`app.terminate`）会以同样的方式切换界面。在显示屏上失败的应用会显示已退出界面；在后台失败的应用或无头应用则改为收到一条通知。
+`app.install` 请求会在当前任何界面之上显示安装界面。
+
+### 通知和问题
+
+`Notifications` 最多保存 `MAX_NOTICES`（8）条通知，每条包含标题、正文和可选的系统图标，每段文字截断到 `MAX_NOTICE_CHARS`（64）个字符。任何插件都可以发布通知，Workflow 用 `app.notify` 发布。
+发布通知后，主屏幕会标记为未读，直到打开通知中心；勿扰模式会隐藏这个标记。
+
+`Notifications::ask` 改为发布一个问题；`Notifications::answer` 等待用户在卡片上允许或拒绝，卡片被关闭或丢弃时返回 `None`。Workflow 用 `app.confirm` 提问。
+
+### 偏好设置
+
+`Preferences` 保存亮度、音量、静音、麦克风、勿扰和屏幕超时（`SCREEN_TIMEOUTS`）。控制中心和内置应用（例如设置）修改的是同一组值。
+系统 UI 用 `UiService::set_brightness` 和 `UiService::set_screen_timeout` 把亮度和屏幕超时应用到显示屏，并在每次修改后保存这些值。它用
+`Volume::set` 把音量和静音应用到扬声器：每个应用的声音都按音量缩放，静音则使其无声。麦克风是用户对 Agent 语音的选择。
+在电源监测器为电量计的开发板上，控制中心会显示来自 `Power::battery` 的电池电量，其他开发板上则不显示。
+
+### 状态栏
+
+时钟是来自 `time` 插件 `UtcClock` 的 UTC 时间，每 15 秒重绘一次：开发板有实时时钟时，启动时从实时时钟读取，之后使用网络时间；在没有实时时钟的开发板上，网络时间到达之前时钟为空。勿扰和离线以图标显示在时钟旁边。网络是某个插件用
+`SystemNetwork::show` 显示的 `NetworkSource`：`system-wifi` 显示 Wi-Fi。它驱动主屏幕的离线卡片、控制中心的 Wi-Fi 磁贴和门户磁贴；门户磁贴会打开该来源的设置热点并显示它的
+`hotspot_hint`。不显示任何网络的设备（例如构建时未包含网络功能的设备）没有 Wi-Fi 和门户磁贴，也从不处于离线状态。
+
+## 构建
+
+插件的构建输入位于 `resources/`，其输出（已提交到仓库）位于 `filesystem/resources/` 和 `crates/appkit/tests/fixtures/`。每个任务都需要一份 PocketJS 检出（`POCKETJS_ROOT`）来提供 MicroTS 编译器和字体烘焙器，示例还需要 Noto Sans SC（`CJK_FONT_DIR`）：
+
+| 任务 | 构建 |
+| --- | --- |
+| `icons` | 从 `resources/icons/svg` 构建图标字体和码位表 |
+| `view` | 从 `resources/view/app.tsx` 及其 `app.d.ts` 契约构建系统视图；它不带图集 |
+| `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/` |
+
+`resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。视图中的图标是 `""` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin app-manager
+```

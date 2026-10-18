@@ -1,0 +1,28 @@
+---
+title: "Agent Workflow 插件"
+sidebarTitle: "Agent Workflow"
+description: "让 Agent 用原生工具发现、加载、卸载和切换 Workflow。"
+---
+
+把 Workflow 的发现和持久控制作为原生 Agent Tool 暴露出来。
+
+- 插件 ID：`agent-workflow`
+- 依赖：`agent`、`workflow`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 需要的能力：来自 `agent` 的 `AgentToolRegistry`、
+  来自 `workflow` 的 `WorkflowActionRegistry`、来自 `workflow` 的 `WorkflowService`
+- Workflow：无
+- Agent Tool：`workflow_actions`、`workflow_list`、`workflow_load`、
+  `workflow_unload`、`workflow_switch`
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：无
+
+注册期间，它把可等待的 `workflow_actions`、`workflow_list`、
+`workflow_load`、`workflow_unload` 和 `workflow_switch` 工具添加到
+`AgentToolRegistry`。`workflow_list` 列出已加载的 Workflow 和已关闭的 Workflow；`workflow_switch` 打开或关闭某个 Workflow，而不卸载它。
+
+`workflow_actions` 暴露当前注册的每个 Workflow Action 的地址和静态请求/响应 schema。Agent 在调用 `workflow_load` 之前，用这份目录构造有效的 Workflow DSL 文档。

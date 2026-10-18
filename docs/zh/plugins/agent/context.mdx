@@ -1,0 +1,69 @@
+---
+title: "barracuda-agent-context"
+sidebarTitle: "上下文"
+description: "用 `Context` 组装 LLM 请求中可缓存的 system 前缀和消息尾部。"
+---
+
+Agent 的上下文组装器：把声明的内容转换为 LLM 请求的两个线上字段——`system` 前缀字符串和
+`messages` 尾部——的**唯一类型**。
+
+这个 crate 负责**放置、变更检测和渲染**，从不负责**内容**。`Context` 把你声明的块按可变性分级的线上布局排序（参见[上下文模型](/zh/plugins/agent/context-model)），丢弃缺失的块，缓存渲染好的前缀，并把它与尾部配对。每个块*包含*什么——指令、人设、记忆、检索到的知识——由调用方提供。
+
+## 两条通道
+
+一个请求恰好有两个线上字段，`Context` 同时生成这两者。提供者可以直接用 `Block` 向它输入，也可以通过一个接受一等 `ContextItem`（`Block`、历史 `Message` 或 `Reminder`）的 `ContextSink` 输入：
+
+- **PREFIX（可缓存）-> `system`**：声明的 `Block` 按线上顺序渲染成一个字符串。保存在一个**复用的缓冲区**中，只在某个块真正改变时才重新渲染，所以稳定的前缀在每次迭代中都没有开销。
+- **TAIL -> `messages`**：持久化的对话 `history`（归记忆所有）加上临时的 `reminders`（每次请求的提示，从不持久化）。history 以引用方式传入；reminders 归 `Context` 所有，并由它做脏标记控制。
+
+`Context::request(history)` 把前缀与尾部的两段配对成一个全部为借用的
+`RequestContext`（`history` 和 `reminders` 保持分开，所以追加一条 reminder 永远不会克隆对话记录）——这是直接交给 API 客户端的唯一交接物。
+
+## 工作原理
+
+你用 `with(Block)` 以任意顺序**声明**块；`Context` 是线上顺序的唯一决定者，依次按 **band**、**scope**、band 内顺序排序。
+声明是增量且安全的：
+
+- 你没有声明的类型**保持它上一次的值**（从不悄悄丢弃）。
+- **空内容会移除一个类型**（它渲染为空）。
+- **重新声明完全相同的内容是一个免费的空操作**——对任何可能改变的内容，每个 tick 都调用 `with`；上下文永远不会过期，并且只在真正改变时才重新渲染（由 `version()` 跟踪）。
+
+由于块以 `BlockKind` 为键，“重复的规范块”**无法表示**——没有需要处理的构建错误，`request` 也永远不会失败。
+
+| 项 | 作用 |
+|---|---|
+| `Context` | 自有的、自带缓存的上下文：用 `with(Block)` / `with_reminder(kind, text)` 声明，或者为混合的 `ContextItem` 创建一个 `sink()`；用 `request(&history)` 读取。`version()` 只在前缀真正改变时递增（一个低成本的 LLM 前缀缓存键）。 |
+| `ContextItem<'a>` / `ContextSink<'a>` | 提供者统一的贡献路径：块的文本、历史消息和类型化的 reminder 通过同一个 sink 进入，而 `Context` 负责放置和缓存。 |
+| `Block<'a>` | 一段内容加上它的放置位置：`Block::new(kind, text)`。内容是一个 `Cow`，所以调用方可以自由传入 `&str`/`String`/`Cow`；`Context` 在真正改变时才复制它。 |
+| `BlockKind` | 规范的上下文类型（例如 `Soul`、`AssistantIdentity`、`UserProfile`、`GlobalMemory`、`AgentInstruction`、`ToolPolicy`、`ModePolicy`、`ActiveMode`、`ToolReminder`、`AgentMemory`、`SkillList`、`ReasoningEffort`、`RecentContext`、`OutputContract`），以及用于调用方自定义块的 `Custom { band, scope, order, label }`。 |
+| `Band` / `Scope` | 布局排序所依据的两个维度（持久性 band、所有权 scope）。 |
+| `RequestContext<'a>` | 组装好的 `(system, messages)` 交接物：一个 `system` 前缀加上尾部的两段（`history` + `reminders`），全部为借用。 |
+
+## 示例
+
+```rust
+use barracuda_agent_context::{Block, BlockKind, Context};
+use serde_json::json;
+
+let mut context = Context::new();
+context
+    .with(Block::new(BlockKind::AgentInstruction, "You are a helpful agent."))
+    .with(Block::new(BlockKind::OutputContract, "Answer in one concise paragraph."));
+
+let history = json!([{ "role": "user", "content": "What's the weather?" }]);
+let request = context.request(&history);
+assert_eq!(
+    request.system(),
+    "You are a helpful agent.\n\nAnswer in one concise paragraph.",
+);
+```
+
+更完整、可运行的演示——一个工作模式上下文、一个 `Custom` 块、一条 reminder，以及 `version()` 变更检测——位于 `examples/`：
+
+```bash
+cargo run -p barracuda-agent-context --example build_context --target x86_64-unknown-linux-gnu
+```
+
+## 所处的位置
+
+默认构建是纯 Rust，只依赖 `serde_json`（用来承载结构化的 `messages` 尾部）。它被打包进固件的 `barracuda_rt` 静态库，并且完全可以在主机上测试。内容提供者（指令加载器、记忆提供者、skill 集合、摘要器）位于其他 crate 中，通过 `with` 或 `sink` 输入它们的文本或条目；对话 `history` 由 Agent 传入。

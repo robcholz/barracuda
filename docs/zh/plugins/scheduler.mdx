@@ -1,0 +1,24 @@
+---
+title: "Scheduler 插件"
+sidebarTitle: "概览"
+description: "保存持久的计划，并在每个计划到期时触发一个 Workflow Event。"
+---
+
+Scheduler 插件拥有持久的计划，并在某个计划到期时发出一个 Workflow Event。
+
+- 插件 ID：`scheduler`
+- 依赖：`time`、`workflow`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：`Scheduler`
+- 所需能力：来自 `time` 的 `UtcClock`，来自 `workflow` 的 `WorkflowService`
+- Workflow：Event `scheduler.triggered`，参见 [Event](/zh/plugins/scheduler/event)
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：一个可取消的到期循环（`scheduler_task`，池大小 1）
+- 存储：以计划 ID 为键的插件作用域 KV 记录
+
+Scheduler 插件拥有计划的状态、持久化、计时以及 `scheduler.triggered` Workflow Event 的发出。它通过 `Scheduler` 能力发布类型化的 `schedule` 和 `cancel` 方法，不包含任何 Agent 工具的注册。`agent-scheduler` 是单独的 Agent 适配器。
+
+循环会先在内存中提交每次运行，再把它持久化。存储失败会被记录到日志，循环继续服务每个计划；这次运行可能在重启后再次触发，所以 `scheduler.triggered` 至少送达一次。

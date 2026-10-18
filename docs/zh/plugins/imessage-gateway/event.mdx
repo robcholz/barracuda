@@ -1,0 +1,35 @@
+---
+title: "IMessage Gateway Workflow Event"
+sidebarTitle: "Workflow Event"
+description: "Gateway 发出的 Workflow Event：收到的消息、附件和控制指令。"
+---
+
+提供方通过 `IMessageGateway` 发布 `GatewayInboundMessage`。Gateway 把完整的值作为 `gateway.message.received` 发出：
+
+```json
+{"route":{"channel":"telegram","conversation_id":"chat-42","thread_id":"topic-7"},"message_id":"message-100","text":"hello"}
+```
+
+提供方的消息没有选择话题时，省略 `thread_id`；它永远不会被序列化为 `null`。
+
+带文件的消息会携带 `attachments`，即 Gateway 已存储的文件的引用；字节仍留在文件中。如果用户只发送了文件，`text` 为空：
+
+```json
+{"route":{"channel":"telegram","conversation_id":"chat-42"},"message_id":"message-101","text":"","attachments":[{"kind":"image","path":"/workspace/cache/gateway/telegram/1a2b3c4d-0.jpg","mime_type":"image/jpeg","filename":"photo.jpg","size":48213}]}
+```
+
+| 字段 | 值 |
+| --- | --- |
+| `kind` | `file`、`image`、`audio` 或 `video` |
+| `path` | 该文件在每个插件文件系统视图中的路径，位于 `/workspace/cache/gateway/<channel>/` 之下 |
+| `mime_type` | 消息通道或下载报告的类型，否则为 `application/octet-stream` |
+| `filename` | 发送者为该文件起的名字；没有时省略 |
+| `size` | 字节数，最多为 `attachment-max-bytes` 设置的值 |
+
+消息没有附件时省略 `attachments`。这些文件位于
+`/workspace/cache`，所以可能会消失，例如在重启时；读取方发现路径不存在时，把该附件视为不可用。
+
+Schema：`schemas/event/gateway.message.received.json`。没有 Topic。消息通道每发布一条消息就发出一次；文本是会话命令的消息会改为变成 `gateway.control.received`，其附件会被丢弃。
+
+`gateway.send_stream.finished` 和 `gateway.send_media.finished` 在提供方完成或失败后发出。成功送达的流包含其关联键、已接受的最终序号、`outcome: "completed"` 和提供方的
+`message_id`；失败使用 `outcome: "failed"` 和一个稳定的 `error`。

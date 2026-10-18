@@ -1,0 +1,99 @@
+---
+title: "外设组合"
+description: "在构建时把语义外设 API、外设实现和芯片驱动组合到开发板中。"
+---
+
+## 概览
+
+Barracuda 把语义外设 API、外设实现和底层芯片驱动分开。开发板恰好有两个公开的硬件面：`peripherals` 和 `exposed-io`。所有只用于构造外设的东西，包括 GPIO 扩展芯片和总线开关，都是其实现私有的。
+
+组合发生在构建时。所选的开发板 HAL 包含具体类型和 `Option<T>` 字段；固件不在运行时查找目录，也不使用外设 trait 对象。
+
+## 所有权边界
+
+- `peripherals/api` 定义与芯片无关的语义契约，例如 `Display`、`Touch`、`PowerMonitor` 和 `RealTimeClock`，以及通用的 `PeripheralImplementation` 构造 trait。
+- `peripherals/impl/<peripheral>/<implementation-id>` 把一种具体的硬件配置适配到一个语义 API。它拥有自己的 `peripheral.yml`、初始化策略和私有的辅助芯片依赖。
+- `peripherals/config` 只发现外设实现，校验它们的清单和开发板接线，并生成静态的开发板组合。
+- `drivers/chips/<chip>` 包含底层的寄存器和协议驱动。芯片驱动既不知道开发板名称，也不知道语义外设 API，并且没有 `peripheral.yml`。
+- `boards/hal` 拥有 `BoardResources { peripherals, exposed_io }` 外壳，以及生成的组合所使用的资源适配器。
+
+依赖方向是单向的：
+
+~~~text
+Platform HAL resource -> chip driver -> peripheral implementation -> peripheral API
+                                  Board wiring -----------^
+~~~
+
+当上游生态的 crate 已经提供底层驱动时，外设实现可以不使用单独的芯片 crate。语义边界仍然不变：System 只接收外设 API。
+
+## 开发板模型
+
+`board.yml` 描述的是产品接线，而不是 Rust 模块：
+
+~~~yaml
+peripherals:
+  io:
+    i2c-device:
+      internal:
+        peripheral: I2C0
+        scl: GPIO32
+        sda: GPIO31
+        frequency-hz: 400000
+  devices:
+    battery-monitor:
+      implementation: ina226-power-monitor
+      bindings:
+        i2c: internal
+      parameters:
+        address: 65
+
+exposed-io:
+  pins:
+    port-a-sda: { pin: GPIO53 }
+~~~
+
+`peripherals.io` 声明构造期间使用的私有资源。`peripherals.devices` 选择语义实现。`exposed-io` 是开发板唯一可在运行时配置的 I/O 面。一个芯片原生令牌不能既是私有的外设接线，又是暴露 I/O。
+
+每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
+
+## 实现清单
+
+每个可选的实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`。父目录等于 `peripheral`，叶目录等于 `id`。版本 1 的清单声明：
+
+- 稳定的实现 ID 和语义外设 API；
+- 只供代码生成使用的 Cargo 和 Rust 构造模板；
+- 具名的硬件绑定角色和安全的输出初始化策略；
+- 类型化的参数、默认值、枚举取值范围和 Rust 值映射。
+
+`peripherals/config::PERIPHERAL_APIS` 是注册边界。未知的语义种类会被拒绝，并提示在它的第一个实现之前先添加它的 API trait。生成器理解绑定类别和所有权，但不包含针对具体实现 ID 的匹配。
+
+`cargo board sync` 校验每个清单并维护工作区依赖。`cargo board select <board>` 根据这些 schema 解析所选的开发板，检查平台 HAL 的支持情况，并只把所选实现的依赖写入 `boards/selected/Cargo.toml`。
+
+## 私有辅助芯片
+
+辅助芯片是实现细节，除非它独立地提供一个 System 使用的语义外设。因此，用于复位、使能、中断或电源控制信号的 I/O 扩展芯片不会自动成为开发板外设。
+
+在 M5Stack Tab5 上，位于 `0x43` 的 PI4IOE5V6408 就是这样被隐藏的：
+
+- 音频编解码器实现拥有扬声器功放的使能引脚；
+- 显示实现拥有面板复位引脚；
+- 触摸实现拥有触摸复位引脚；
+- 摄像头实现拥有传感器复位引脚。
+
+这四个实现都使用 `drivers/chips/pi4ioe5v6408`；没有一个向 System 暴露这个扩展芯片、它的引脚或一个通用的系统控制器外设。其他由 PI4 控制的信号同样必须由它们所使能的具体语义服务拥有。
+
+## 稳定的构造和运行时行为
+
+`PeripheralImplementation` 声明只能移动（move-only）的 `Bindings`、经过校验的 `Config`、返回的语义 `Peripheral`，以及它的初始化 `Error`。它的 future 不装箱，并且是单态化的。
+
+平台 HAL 模块把厂商令牌转换为 `embedded-hal`、`embedded-hal-async`，或者狭窄的数据面契约，例如 DSI、MIPI-CSI、摄像头采集和 PCM。外设实现依赖这些契约，而不依赖厂商 HAL。芯片驱动通常只依赖上游的协议 trait。
+
+对于 DSI 显示屏，平台绑定建立链路并发送原始 DBI 命令，芯片驱动拥有控制器命令序列，显示实现选择时序并施加所需的延时。这让控制器寄存器既不出现在语义 API 中，也不出现在平台 HAL 中。
+
+生成的代码直接构造每个所选实现，并把它的语义结果存放在 `GeneratedPeripherals` 中。System 和插件使用这些语义值，从不根据原始引脚重新构造实现。
+
+## 添加硬件
+
+添加一块复用现有实现的开发板，通常只需要 `board.yml` 接线和原生布局文件。在现有语义外设背后添加一颗新芯片时，按需添加一个芯片驱动、一个外设实现及其清单。添加一个真正全新的语义外设，则从它的 API trait 和可选的所有权槽位开始，然后再添加实现。
+
+这让开发板数量不会成倍增加 Rust 代码：可复用的芯片行为、语义适配、平台资源构造和产品接线各自位于一层。

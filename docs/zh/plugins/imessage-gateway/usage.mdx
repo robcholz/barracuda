@@ -1,0 +1,76 @@
+---
+title: "IMessage Gateway 用法"
+sidebarTitle: "用法"
+description: "注册消息通道提供方，并通过 Gateway 发送消息、Agent 事件和媒体。"
+---
+
+## 1. 注册提供方并发布收到的消息
+
+```rust
+let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
+let registration = gateway
+    .register(provider)
+    .map_err(PluginError::registration)?;
+context.retain(registration);
+
+gateway
+    .publish(GatewayInboundMessage {
+        route: GatewayRoute::new("telegram", "chat-42"),
+        message_id: "message-100".into(),
+        text: "hello".into(),
+        attachments: Vec::new(),
+    })
+    .await?;
+```
+
+发布会发出一个 `gateway.message.received` Workflow Event。带文件的消息携带
+`store_inbound` 或 `download_inbound` 返回的 `Attachment` 引用。
+
+## 2. 发送一条完整的消息
+
+```rust
+let receipt = gateway
+    .send(GatewaySendRequest {
+        channel: "telegram".into(),
+        conversation_id: "chat-42".into(),
+        thread_id: None,
+        reply_to: None,
+        text: "hello".into(),
+    })
+    .await?;
+```
+
+同样的操作以 `gateway.send` 的形式提供给 Workflow，以
+`gateway_send` 的形式提供给 Agent。
+
+## 3. 转发语义 Agent 事件
+
+为每个完整事件调用 `send_stream`。`turn_started` 打开一个提供方流；`turn_ended` 在送达后关闭它。
+
+```rust
+gateway.send_stream(GatewaySendStreamRequest {
+    route: GatewayRoute::new("telegram", "chat-42"),
+    reply_to: None,
+    session: "session-1".into(),
+    sequence: 0,
+    event_type: "turn_started".into(),
+    payload: serde_json::json!({}),
+})?;
+```
+
+按 `session` 匹配 `gateway.send_stream.finished`，以获取提供方回执或送达错误。操作返回 `busy` 时，先让出执行，再用同一个序号重试。
+
+## 4. 按路径发送文件
+
+`GatewaySendMediaRequest::File` 指定 Gateway 文件系统视图中的一个文件；`IMessageGateway::send_media(..).await` 用 `open_source` 打开它、发送它，并用带有提供方
+`message_id` 的 `GatewaySendMediaResponse::Sent` 作答。它就是 `gateway.send_media` Workflow
+Action 的 `file` 命令。
+
+## 5. 发送流式媒体
+
+使用 `GatewaySendMediaRequest::Start`、一条或多条包含规范 base64 的 `Chunk` 命令，以及 `Finish`；每条都回答
+`GatewaySendMediaResponse::Accepted`。按
+`stream_id` 匹配 `gateway.send_media.finished` 获取最终结果。同样的命令也以
+`gateway.send_media` Workflow Action 的形式提供。
+
+JSON 契约见 [Action](/zh/plugins/imessage-gateway/action)，Workflow Event 文档见 [Event](/zh/plugins/imessage-gateway/event)。

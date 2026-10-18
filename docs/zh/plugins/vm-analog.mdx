@@ -1,0 +1,37 @@
+---
+title: "Analog 插件"
+sidebarTitle: "Analog"
+description: "用 `analog` Lua 包在 Lua 中读写开发板可用引脚上的模拟值。"
+---
+
+Analog 插件把开发板可用引脚上的模拟输入和输出作为 `analog` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`analog`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：`hal.exposed_io`
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`analog`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件共享开发板统一的可用 I/O 所有者，并安装 `analog` Lua 包。`embedded-hal` 1.0 没有定义 ADC 或 DAC 契约，所以 Barracuda 使用精简的原始值输入/输出 trait，而把引脚复用、校准和转换器的构造留在平台 HAL 中。
+
+Lua API：
+
+- `analog.input_available(name) -> boolean`
+- `analog.output_available(name) -> boolean`
+- `analog.open_input(name) -> handle`
+- `analog.open_output(name) -> handle`
+- `input:max_value() -> integer`
+- `input:read() -> integer`
+- `output:max_value() -> integer`
+- `output:write(value)`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+打开操作会从 GPIO、I2C 和 SPI 所用的同一个所有者那里取走物理引脚。不支持的引脚功能会在令牌转移之前失败。关闭句柄会释放转换器值，但不会重新创建原始引脚令牌。

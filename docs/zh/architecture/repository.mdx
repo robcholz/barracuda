@@ -1,0 +1,44 @@
+---
+title: "仓库与 System 组合"
+sidebarTitle: "仓库结构"
+description: "了解仓库的组织方式，以及 System 如何由插件组合而成。"
+---
+
+Barracuda 是一个基于插件的嵌入式运行时：设备上的每项能力都是一个插件，这些插件针对所选的开发板和平台组合成一个固件。要构建和运行它，见[构建与运行](/zh/get-started/build-and-run)。
+
+## 目录结构
+
+- `plugins/` 包含每个由系统管理的插件，以及该插件 `crates/` 目录下它私有的运行时 crate 和支持 crate。
+- 每个插件都在 [插件](/zh/plugins/overview) 下它自己的页面中记录它的能力、Agent Tool、Workflow Action 和 Event、错误以及生命周期。
+- `shared/` 包含插件之间和应用之间共享的 crate。
+- `bench/` 包含整个项目范围的测量和性能分析工作负载，包括针对特定工作负载的测试框架和共享的录制夹具。
+- `tools/` 包含整个项目范围的开发工具，例如 LLM API 录制器和确定性回放代理。
+- `apps/barracuda-system/` 拥有由普通 `cargo run` 选中的可移植应用生命周期；所选平台只提供编译期 ABI 和执行器入口包装。
+- `apps/barracuda-cli/` 是一个外部终端消息通道，它连接到正在运行的 Gateway；它从不构造 System。
+
+## System 组合
+
+Barracuda 把可移植的系统行为与运行时实现和平台实现分开：
+
+- **开发板**位于 `boards/` 下。它们的 YAML 文件包含产品固定的 Flash 布局和存储映射；开发板配置 crate 在构建时校验这些内容，并生成一份静态的、与平台无关的描述。
+- **平台契约**位于 `platforms/api`。它定义编译期初始化边界，以及 System 使用的资源。
+- **具体平台**位于 `platforms/<name>` 下。主机平台和设备平台使用相同的 Embassy 执行器、任务、定时器和生命周期模型；只有它们底层的网络、文件系统、Flash 和 HAL 适配器不同。
+- **开发板和平台由构建配置分别独立选择**。开发板的 Rust 类型从不选择平台类型，也不依赖平台类型。
+- **System** 是 `no_std` 聚合层。它接收底层平台能力，构造固定的插件集合，按依赖顺序注册每个插件，然后启动整个集合。System 和插件从不选择主机或设备的执行器、文件系统、网络栈或监听器，也不构造插件的私有服务。
+- **插件**拥有它们的类型化能力、Workflow 集成、运行时任务以及其他插件范围的资源。内置插件自己建立默认值，而不是从 Host 接收组装好的服务包。更高层的 crate 依赖 trait 和可移植服务，而不依赖某个特定的具体平台。
+
+```text
+Embassy entry
+     |
+Board YAML + Platform YAML
+     |
+Selected Platform realizes generated Board settings
+     |
+System application
+     |
+   System
+     |
+Plugins [capabilities + Workflow + resources]
+```
+
+跨平台服务保持为单一的可移植实现。例如，`WebServer` 基于 picoserve 构建，由主机平台和设备平台共用。插件在其生命周期内注册端点；所选平台提供驱动同一个服务器的网络栈、监听器和套接字。不得把平台选择编码为不同的 `WebServer` 实现、分散的 `cfg` 分支，或在可移植系统代码中使用不同的应用执行器。

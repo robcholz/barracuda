@@ -1,0 +1,39 @@
+---
+title: "Agent Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "Agent 插件提供的 Workflow Action：会话请求、响应和错误。"
+---
+
+Agent 插件直接通过 `WorkflowActionRegistry` 注册它的会话操作。静态的请求和响应 schema 与它们的校验器一起编译，Action 适配器使用自有的 Serde 请求和响应类型。
+
+现有的 Workflow 行为保持不变：稳定的业务失败是成功的 Action 响应，形式为 `{"error":"code"}`。已经解析出会话的操作可以把它保留为 `{"session":"session-N","error":"code"}`。这样现有的定义就可以根据 `$previous.output.error` 进行分支。`WorkflowActionError` 保留给 Action 基础设施层面的失败，而不用于这些既定的业务结果。
+
+| 地址 | 请求 | 成功 | 稳定的业务错误 |
+| --- | --- | --- | --- |
+| `session.new` | `{"persistence":"persistent" \| "ephemeral"}` | `{"session":"session-N"}` | `worker_stopped`, `persistence` |
+| `session.list` | `{"offset"?:0,"limit"?:positive integer}` | `{"sessions":[{"session":"session-N","persistent":bool,"title":string \| null,"updated_at":integer \| null}],"next_offset":number \| null}` | `invalid_request` |
+| `session.open` | `{"session":"session-N"}` | `{"session":"session-N","run":"run-N"}` | `invalid_request`, `session_not_found`, `already_open`, `worker_stopped` |
+| `session.delete` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_found`, `already_deleting`, `worker_stopped`, `storage` |
+| `session.rename` | `{"session":"session-N","title":"..."}` | `{}` | `invalid_request`, `session_not_found`, `invalid_title`, `worker_stopped` |
+| `session.append` | `{"session":"session-N","text":"...","attachments"?:[Attachment]}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+| `session.respond` | `{"session":"session-N","request":"input-N","text":"...","attachments"?:[Attachment]}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `not_awaiting_input`, `input_request_mismatch`, `worker_stopped` |
+| `session.set_reasoning_effort` | `{"session":"session-N","effort":"low" \| "medium" \| "high" \| "ultra"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+| `session.set_permission_level` | `{"session":"session-N","level":"deny" \| "ask" \| "allow_all"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+| `session.interrupt` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+| `session.cancel` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+| `session.close` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
+
+省略 `session.list.limit` 会返回剩余的所有会话。提供 limit 则启用分页。会话按 id 排序。`title` 取自第一条带可见文本的用户消息，或者由 `session.rename` 设置；
+`updated_at` 是最后一条追加的用户消息的时间，以 Unix 毫秒表示；如果追加时墙上时钟从未同步过，则为 `null`。
+
+`Attachment` 按路径引用消息携带的一个文件：
+`{"kind":"file"|"image"|"audio"|"video","path":"/workspace/...","mime_type":"...","filename"?:"...","size":bytes}`。
+字节从不经过 Action。会话的对话记录保存这些引用；每次模型请求读取它可以内联的最新图片和 PDF 文件（参见 [HTTP API](/zh/plugins/agent/http)），并按路径指明其他所有附件，这样 Agent 仍然可以用文件工具打开它们。只有附件的消息即使 `text` 为空也算一个用户轮次。`session.respond` 根据它的 `text` 回答一个待处理的审批；它的附件不会被保留。
+
+`session.rename` 不需要 `session.open`。它保留标题的第一个非空行，去掉首尾空白，最多 64 个字符，被截断时末尾加 `…`；没有可见文本时返回 `invalid_title`。
+
+`session.open` 建立其他会话 Action 所使用的控制租约和 Event 订阅。`session.close` 确认该命令；与之对应的
+`closed` 或 `stream_error` Event 才是该租约权威的结束标志。
+
+schema 位于
+`schemas/action/<address>/{request,response}.json`。

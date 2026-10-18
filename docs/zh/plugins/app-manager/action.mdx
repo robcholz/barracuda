@@ -1,0 +1,96 @@
+---
+title: "App Manager Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "App Manager 提供的 Workflow Action：列出、打开、安装和控制应用。"
+---
+
+`app-manager` 插件注册了 `app.list`、`app.open`、`app.install`、`app.home`、
+`app.interactive`、`app.terminate`、`app.status` 和 `app.tap`。除了只发出请求的
+`app.install`，它们都是系统 UI 执行的同一套操作；参见[生命周期](/zh/plugins/app-manager)。
+它们的请求和响应契约位于 `schemas/action/<address>/`。
+拒绝时返回 `{"error":"<code>"}`，以便 Workflow 根据它分支；
+`incompatible` 还会附带设备显示的 `reason`。
+
+正在运行的应用以如下形式报告：
+
+```json
+{"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"installed",
+        "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
+        "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
+ "run_id":1,"state":"active"}
+```
+
+镜像中的应用 `kind` 为 `system`，用户安装的应用为 `installable`。`api`、`requires`、`uses`、`permissions`、`boards`、
+`view_size` 和 `view_shape` 来自应用的清单，详见
+[应用 API](/zh/plugins/app-manager/app-api)；`incompatible` 只出现在本设备无法运行的可安装应用上，说明原因。
+
+`state` 为 `active`、`inactive`、`background`、`suspended`、`running`（无头应用）或 `terminating`。
+
+`app.list` 接受 `{}`，返回每个可启动的应用、每个可以安装的工作区容器（新应用，或已安装应用的其他版本），以及每个违反[应用格式](/zh/plugins/app-manager/app-format)的容器及其原因，以便作者修复。`location` 为 `builtin`、`installed` 或
+`workspace`：
+
+```json
+{"apps":[{"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
+          "kind":"system","has_view":true,"permissions":[]}],
+ "installable":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
+                 "kind":"installable","has_view":true,"api":1,"requires":["light"],
+                 "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
+                 "view_shape":"round","incompatible":"This device has no light"}],
+ "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
+```
+
+`app.open` 接受 `{"id":"counter"}`。它恢复正在运行的应用或启动该应用，在程序启动后返回正在运行的应用；失败时返回
+`not_found`、`not_installed`（该应用只在工作区中提供）、
+`invalid_bundle`、`storage`、`view_rejected`、`no_display`（应用带视图而开发板没有显示屏）、`incompatible`（已安装的应用不再适配本设备）、`runtime_unavailable` 或 `busy`。
+
+`app.install` 接受 `{"id":"lamp"}`，请求系统 UI 提供该工作区容器以供安装。它立即返回
+`{"requested": <app>}`；用户在设备上安装或拒绝，`app.list` 会显示结果。较新的请求会替换仍未答复的请求。
+被请求的应用还带有 `digest`，即安装所锁定的文件的 SHA-256，以及 `signer`，即为
+`.bapp` 包签名的密钥的简称（[应用格式](/zh/plugins/app-manager/app-format)）。失败时返回
+`not_found`、`system_app`（该 ID 属于某个系统应用）、`invalid_bundle`
+（签名校验失败的包也算）、`storage`，或者 `incompatible` 并附上原因：本设备无法运行该应用，或者从已签名包安装的应用只接受其签名者的更新：
+
+```json
+{"error":"incompatible","reason":"This device has no light"}
+```
+
+`app.home` 接受 `{}`，返回 `{"app": <running app or null>}`：即转入后台的应用。
+
+`app.interactive` 在有浮层覆盖前台应用时接受 `{"interactive":false}`，浮层关闭时接受 `{"interactive":true}`。它返回前台应用，或以 `no_foreground_app` 失败。
+
+`app.terminate` 接受 `{"id":"counter"}`，返回 `{"app": <running app or
+null>}`，此时状态为 `terminating`。
+
+`app.status` 接受 `{}`，返回前台应用、所有正在运行的应用（最近使用的排在最前）、前台视图显示的文字，以及上一次应用运行是如何结束的：
+
+```json
+{"foreground":null,"running":[],
+ "last_exit":{"id":"counter","run_id":1,"outcome":"success","output":[],"foreground":false}}
+```
+
+`last_exit.foreground` 表示应用结束时是否处于前台。
+
+`app.tap` 在视图坐标处点击当前活动的前台视图，返回它调用的处理函数；如果那里没有可点击的元素，则返回 `null`：
+
+```json
+{"x":120,"y":200}
+```
+
+```json
+{"handler":"increment"}
+```
+
+失败时返回 `no_foreground_app` 或 `not_interactive`。
+
+## 系统 UI
+
+`app.notify` 接受 `{"title":"Doorbell","body":"Someone is at the door","icon":"alert"}`，
+其中 `body` 和 `icon` 可选；它把通知发到通知中心，并返回 `{"id":3}`。`icon` 指定一个系统图标；没有图标时，通知显示标题的第一个字符。超过 64 个字符的标题和正文会被截断，通知超过八条时会丢弃最早的一条。
+
+`app.confirm` 接受 `{"title":"Turn on the living room light strip?","body":"Lin Xia · Telegram"}`，
+其中 `body` 可选；它用一张排在所有通知之前、也显示在主屏幕上的卡片询问用户，并在用户回答后返回：
+`{"allowed":true,"answered":true}`。卡片被关闭或未经回答就被丢弃时，返回 `{"allowed":false,"answered":false}`。
+
+`app.agent` 接受 `{"state":"answering","question":"When is tomorrow's meeting?","answer":"9:30 product review"}`，
+其中 `question` 和 `answer` 可选；它在主屏幕上显示 Agent 的状态：`standby`、`listening`、`thinking` 或 `answering`。它返回
+`{}`。回答在九秒后或被点击时回到待机状态。

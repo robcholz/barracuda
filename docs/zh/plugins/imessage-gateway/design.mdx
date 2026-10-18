@@ -1,0 +1,55 @@
+---
+title: "IMessage Gateway 设计"
+sidebarTitle: "设计"
+description: "了解 Gateway 如何连接消息通道提供方、Agent Tool 和 Workflow Action。"
+---
+
+## 范围
+
+IMessage Gateway 统一了提供方注册、收到的消息、完整文本投递、语义 Agent 流和二进制媒体流。一个类型化的
+`IMessageGateway` 能力是提供方和适配器插件共享的边界。
+
+```text
+channel providers ── register/publish ──┐
+                                       v
+Agent tools ── typed request ──> IMessageGateway <── typed request ── Workflow Actions
+                                       |
+                                       v
+                              registered MessageChannel
+
+provider ingress/stream completion ──> WorkflowService ──> Workflow matching
+```
+
+## 能力与适配器
+
+`IMessageGateway` 负责提供方注册表，并把出站操作委托给一个共享运行时。`agent-imessage-gateway` 把原生工具调用翻译成这些类型化操作。Gateway 插件独立地把同样的操作注册为 `gateway.send`、`gateway.send_stream` 和 `gateway.send_media`
+Workflow Action，并带有静态的请求和响应 schema。
+
+提供方插件只需要 `IMessageGateway`。它们的注册守卫定义了消息通道的归属，丢弃守卫就会注销该消息通道。
+
+## 收到的消息
+
+提供方发布一条完整的规范化消息，其中包含路由、提供方消息 ID、文本和附件引用。Gateway 校验必需的路由标识，并通过 Workflow 匹配发出一个 `gateway.message.received` 值。
+
+附件字节永远不会进入 Workflow JSON、Event 或对话记录。消息通道先通过 Gateway 存储每个文件（`store_inbound`，对于 URL 则用
+`download_inbound`），存入 Gateway 的
+`/workspace/cache/gateway/<channel>/`，然后只发布返回的引用：类型、路径、MIME 类型、文件名和大小。
+
+## 出站流
+
+语义文本流以 Agent session 和序号作为标识和顺序契约。`turn_started` 预留一个 worker，中间事件进入每个流各自的有界队列，`turn_ended` 或 `stream_error` 关闭该流。
+
+媒体流使用显式的 `start`、`chunk` 和 `finish` 命令，并带有由调用方持有的流 ID 和序号。base64 数据块在进入面向提供方的流之前被解码。`file` 命令则指定一个文件，Gateway 把它作为已知长度、可重复打开的来源（`BinaryBody::Source`）打开，这样提供方可以读取它两次（先计算摘要，再上传），或者带着 `Content-Length` 发送它。
+
+运行时拥有四个文本 worker 和四个媒体 worker。这限定了活动的提供方工作量，并让彼此独立的流可以并发推进。队列背压返回稳定的 `busy` 业务错误。
+
+## 完成与错误
+
+提供方完成时，会发出带有原始关联键和最终序号的 `gateway.send_stream.finished` 或
+`gateway.send_media.finished`。业务失败在 Action 响应和最终 Event 中都使用稳定的、可序列化的错误码。Schema、解码或序列化失败留在适配器边界处理。
+
+## 提供方 HTTP
+
+提供方通过 Gateway 的 `send` 辅助函数发起 HTTP 调用，它为每个请求打开一个新连接并缓冲响应。一次交换的每一步都有 30 秒的截止时间，与 `http` 插件的请求截止时间一致：建立连接、请求 body 的每次写入，以及最后一次写入后的响应。body 生成下一批字节所花的时间不计入，所以在慢速链路上上传几 MB 的文件时，限制的是每次写入，而不是整体。错过截止时间会断开连接并返回 `Error::Timeout`，提供方把它报告为 `Transport` 消息通道错误。
+
+下载（`GatewayHttp::download`）把响应 body 流式写入一个 sink，而不是缓冲它，在达到字节上限时停止，并单独限定每次等待服务器的时间：从建立连接到收到响应头、每次请求写入，以及每次 body 读取。这样，慢速链路上的大文件只要仍在传输，就不会被中途切断。

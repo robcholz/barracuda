@@ -1,0 +1,38 @@
+---
+title: "Camera 插件"
+sidebarTitle: "Camera"
+description: "用 `camera` Lua 包在 Lua 中采集摄像头画面。"
+---
+
+Camera 插件拥有开发板的主摄像头，并把帧采集作为 `camera` Lua 包暴露给 Lua 代码。
+
+- 插件 ID：`camera`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `camera.device`（`primary`，可选）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`camera`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `Camera` 能力，并安装 `camera` Lua 包。OV2640/OV3660 的控制总线、并行采集和 DMA 仍由实现和平台 HAL 拥有。
+
+Lua API：
+
+- `camera.available() -> boolean`
+- `camera.open() -> handle`
+- `camera.snap([capacity]) -> bytes, pixel_format` 采集一帧，未指定时预留 128 KiB 空间
+- `handle:descriptor() -> width, height, pixel_format`
+- `handle:capture(capacity) -> bytes`
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2；版本 2 加入了 `camera.snap`。
+
+从版本 2 开始提供的 `snap` 在没有句柄占用摄像头时使用它，在有句柄占用时返回 `nil, error`。
+
+采集存储由调用方指定大小，在大块内存中上限为 512 KiB。没有摄像头的开发板报告不可用。同一时间只能打开一个句柄：显式关闭、词法 `<close>` 和垃圾回收都会阻止对它的后续操作，并归还摄像头，所以 `open` 可以再次使用；插件被撤销会阻止所有后续操作。

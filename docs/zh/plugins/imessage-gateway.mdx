@@ -1,0 +1,422 @@
+---
+title: "IMessage Gateway 插件"
+sidebarTitle: "概览"
+description: "通过一个共享的 Gateway，在聊天消息通道和 Workflow 之间路由消息。"
+---
+
+IMessage Gateway 插件在消息通道插件与 Workflow 之间路由消息，并负责所有消息通道插件共享的部分：模式、所有者、接收循环和名额、它们的 HTTP 路由和状态、HTTP 辅助工具，以及用户发送的文件。
+
+- 插件 ID：`imessage-gateway`
+- 依赖：`workflow`、`http`、`webserver`
+- 设置：`receive-slots`（`usize`，默认 `1`）、`attachment-max-bytes`
+  （`u32`，默认 `8388608`）
+- Context 资源：`ip_stack`、`entropy`
+- 提供的能力：`IMessageGateway`
+- 需要的能力：来自 `workflow` 的 `WorkflowService`、来自 `workflow` 的
+  `WorkflowActionRegistry`、来自 `http` 的 `ClientFactory`、来自 `webserver` 的
+  `WebServer`
+- Workflow：Action `gateway.send`、`gateway.send_stream`、
+  `gateway.send_media`，见 [Action](/zh/plugins/imessage-gateway/action)；Event `gateway.message.received`、
+  `gateway.control.received`、`gateway.send_stream.finished`、
+  `gateway.send_media.finished`，见 [Event](/zh/plugins/imessage-gateway/event)
+- Agent Tool：无
+- Lua 包：无
+- Web：自身没有；`IMessageGateway::serve_channel` 在 `WebServer` 上为消息通道插件挂载其前缀路由
+- 任务：四个文本流 worker（`gateway_event_worker`，池大小 4）和四个媒体 worker（`gateway_media_worker`，池大小 4）
+- 存储：一个私有文件系统（`PluginFilesystem::Private`）；收到的附件以文件形式存放在 `/workspace/cache/gateway/<channel>/` 中，先写成 `.<name>.part`，再重命名到位；自身没有 KV 键：
+  `load_mode`、`store_mode` 和 `load_owners` 读写调用方消息通道插件存储中的 `mode` 和
+  `owners` 键
+
+`receive-slots` 是为消息通道接收循环预留的连接数，每个连接都有自己静态分配的 socket 缓冲区。
+`attachment-max-bytes` 是 Gateway 存储或发送的单个附件的最大大小；没有总配额。
+
+插件在整个生命周期内保持其 Workflow Action 注册有效。
+消息通道所有者名单的配对码，以及附件名称中每次启动的前缀，都来自平台的熵源。
+
+`IMessageGateway` 是共享的类型化 API。提供方插件通过它注册消息通道并发布收到的消息；Workflow Action 和独立的
+`agent-imessage-gateway` 适配器调用同样的发送方法。
+
+`IMessageGateway::publish_control` 发布 `gateway.control.received`
+（`GatewayInboundControl`：`{ route, control, temporary?, session?, index?,
+title?, confirm? }`）。控制指令可以是 `interrupt` 或 `cancel`，作用于会话中正在运行的那一轮；也可以是会话命令：`sessions`（列出）、`new`
+（`temporary` 表示从不保存的聊天）、`switch`、`rename`（`title`）、
+`delete`（`confirm`），或者在命令格式错误时为 `help`。命令通过 `session` id（富消息通道）或 `index`（它在该会话按从新到旧排列的列表中从 1 开始的位置）来指定会话。控制指令不等待 `ready`，所以永远不会排在消息后面。某个路由拥有哪些会话由消费方决定；Gateway 只负责指明路由。
+
+## 每个消息通道都能用的会话命令
+
+`IMessageGateway::publish` 把会话文本命令转成控制指令而不是消息（`parse_command`），因此每个消息通道都用文本管理自己的会话：`/sessions`、`/new`、`/new temp`、`/switch N`、
+`/rename N title`、`/delete N` 和 `/delete N confirm`。其他文本，包括其他斜杠命令，仍然是消息；参数错误的已知命令会变成 `help`。
+
+回答通过 `IMessageGateway::send_sessions` 返回
+（`SendSessionsRequest`：该会话的当前 session、它是否为临时会话、按从新到旧排列的已保存 session 及其标题、最后使用时间和是否有轮次正在运行、命令做了什么，以及设备时钟）。
+`MessageChannel::send_sessions` 默认发送一条纯英文消息
+（`sessions_text`）；Web 消息通道覆盖了它，把列表推送到每个打开的页面。
+
+## 附件
+
+文件以引用的形式传递，绝不会以字节形式出现在 Workflow JSON、Event 或对话记录中。`GatewayInboundMessage::attachments` 保存这些引用，而
+`gateway.send_media` 的 `file` 命令按路径发送一个文件。
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum MediaKind { File, Image, Audio, Video }
+pub struct Attachment {                        // {"kind","path","mime_type","filename"?,"size"}
+    pub kind: MediaKind,
+    pub path: String,                          // /workspace/cache/gateway/<channel>/<name>.<ext>
+    pub mime_type: String,
+    pub filename: Option<String>,
+    pub size: u64,
+}
+pub struct AttachmentMeta { pub kind: MediaKind, pub mime_type: Option<String>,
+    pub filename: Option<String> }
+pub enum StoreError { TooLarge { limit: u64 }, NoSpace, Filesystem(FsError), Stream(StreamError) }
+pub fn mime_extension(mime_type: &str) -> &'static str;   // "image/jpeg" -> "jpg", else "bin"
+pub fn extension_mime(path: &str) -> Option<&'static str>; // "a.png" -> "image/png"
+impl IMessageGateway {
+    pub const fn attachment_max_bytes(&self) -> u64;
+    pub async fn store_inbound(&self, channel: &str, meta: AttachmentMeta, body: BinaryStream)
+        -> Result<Attachment, StoreError>;
+    pub async fn download_inbound<B: RequestBody>(&self, channel: &str,
+        request: DownloadRequest<'_, B>, meta: AttachmentMeta)
+        -> Result<Attachment, InboundDownloadError>;   // Http, Status(u16), Store
+    pub async fn open_source(&self, path: &str) -> Result<Rc<dyn MediaSource>, StoreError>;
+}
+```
+
+- `store_inbound` 把 `body` 写入
+  `/workspace/cache/gateway/<channel>/.<name>.part`，在流结束后把它重命名为
+  `<name>`。`<channel>` 保留 ASCII 字母、数字、
+  `-` 和 `_`，其他字符一律变成 `_`，最多 32 字节。`<name>`
+  由每次启动的随机前缀加一个计数器组成，例如 `1a2b3c4d-0.jpg`，绝不会与已有文件同名。扩展名通过
+  `mime_extension` 由 MIME 类型得出（`jpg`、`png`、`gif`、`webp`、`heic`、`mp4`、`mov`、`ogg`、
+  `opus`、`mp3`、`m4a`、`wav`、`pdf`、`txt`，否则为 `bin`）；缺少类型时为
+  `application/octet-stream`。
+- 超过 `attachment-max-bytes` 的 body 以 `StoreError::TooLarge` 失败，流失败时为
+  `StoreError::Stream`，缓存已满时为
+  `StoreError::NoSpace`，其他任何文件系统故障为
+  `StoreError::Filesystem`；每种失败都会删除不完整的文件。在写入中途被丢弃的 future 会把它的 `.part` 文件留在缓存中。
+- `download_inbound` 把一次 `GatewayHttp::download` 直接流式写入
+  `store_inbound` 的文件：MIME 类型取 `meta.mime_type`，否则取响应中去掉参数的 `Content-Type`。非 2xx 状态不存储任何内容（`InboundDownloadError::Status`）。超过
+  `attachment-max-bytes` 的 `Content-Length` 或 body 为 `StoreError::TooLarge`。每次等待服务器的时间由 `DOWNLOAD_IDLE_TIMEOUT`（30 秒）限定，而不是整个下载过程。
+- `open_source` 把 Gateway 视图中的任意文件（`/workspace/...`、它自己的 `/data`、`/cache`、`/media`）作为 `MediaSource` 打开：它的 `len()` 是元数据中的文件大小，每次 `open()` 都从头重新读取，读取的字节数正好是这个大小。超过 `attachment-max-bytes` 的文件为
+  `StoreError::TooLarge`。发送方把它作为 `BinaryBody::Source` 传入，并把
+  `SendMediaRequest::size` 设为它的长度；这样 `Multipart::file` 就能让请求的 `Content-Length` 保持已知。
+- 这些文件位于 `/workspace/cache`，随时可能消失；在把它放在内存中的开发板上，重启后它们就不在了。
+
+**下载前先判断所有者。**消息通道先调用
+`owners.classify(sender, label, text)`，只有结果为 `Owner` 时才存储或下载消息中的文件。已配对或被忽略的发送者的文件永远不会被获取或写入，所以陌生人无法填满缓存。
+
+### 流式下载
+
+```rust
+pub struct DownloadRequest<'a, B = ()> { pub method: Method, pub url: &'a str,
+    pub headers: &'a [(&'a str, &'a str)], pub body: B }
+impl<'a> DownloadRequest<'a> { pub const fn get(url: &'a str) -> Self; }
+impl<'a, B> DownloadRequest<'a, B> { pub fn with_headers(self, headers: &'a [(&'a str, &'a str)]) -> Self; }
+pub struct DownloadLimits { pub max_bytes: u64, pub idle_timeout: Duration }
+pub struct DownloadHead { pub status: u16, pub content_type: Option<String>,
+    pub content_length: Option<u64> }
+pub trait DownloadSink {
+    type Error;
+    async fn head(&mut self, head: &DownloadHead) -> Result<(), Self::Error>;
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+impl GatewayHttp {
+    pub async fn download<B: RequestBody, S: DownloadSink>(&self, request: DownloadRequest<'_, B>,
+        limits: DownloadLimits, sink: &mut S) -> Result<DownloadHead, DownloadError<S::Error>>;
+}
+```
+
+`download` 打开一个新连接，先把响应头交给 sink，然后依次交给它每次读到的 body。超过 `max_bytes` 的 `Content-Length` 会在读取任何 body 之前失败，更长的 body 则在超过 `max_bytes` 时失败，两者都是
+`Error::BodyTooLarge`。`idle_timeout` 限定从建立连接到收到响应头、每次请求写入以及每次 body 读取的时间；花在 sink 中的时间不计入。超时为 `Error::Timeout`。
+
+### 已知长度的上传
+
+```rust
+pub struct StreamBody;                         // RequestBody, Clone
+impl StreamBody {
+    pub fn new(stream: BinaryStream, len: usize) -> Self;
+    pub fn failure(&self) -> Option<String>;
+}
+impl GatewayHttp {
+    pub async fn send_reading_headers<B: RequestBody>(&self, method: Method, url: &str,
+        headers: &[(&str, &str)], body: B, names: &[&str])
+        -> Result<(Response, Vec<Option<String>>), Error>;
+}
+```
+
+`StreamBody` 以 `len` 作为 `Content-Length`，发送提供方以流的形式构建的 body（编码或加密后的文件），从不缓冲它。流失败，或产出的字节多于或少于 `len` 时，body 会提前结束，`failure()` 会说明原因，所以提供方在信任响应之前要先检查它。
+`send_reading_headers` 就是 `send`，只是它还会返回 `names` 中指定的响应头的值（不区分大小写），缺少的响应头为 `None`。和 `send` 一样，每一步（建立连接、每次写入、最后一次写入后的响应）都由 `SEND_TIMEOUT` 限定，而不是整个上传过程。
+
+## 入口背压
+
+`IMessageGateway::ready(&self)`（async）会等到 Workflow 能够接收下一个
+`gateway.message.received`。它就是针对该 Event 的 `WorkflowService::ready_for`：当由该 Event 启动、正在排队或运行的执行少于 `EVENT_BACKLOG_LIMIT`（4）个时它就完成；没有 Workflow 监听时立即完成。它是取消安全的。接收循环在获取每一批消息之前都会等待它，所以突发流量会在上游等待，而不是堆在 RAM 里。
+
+## 消息通道服务
+
+本插件 crate 中的 `owners` 和 `channel` 模块包含所有外部消息通道插件（Telegram、微信、QQ、BlueBubbles、Inkbox）共享的内容。消息通道插件通过 `IMessageGateway` 能力和该 crate 导出的类型使用它们。Gateway 不依赖 captive portal；消息通道插件自己把 `ChannelStatus` 映射到它的门户卡片。
+
+### 所有者
+
+每个消息通道有一份所有者名单：最多 `MAX_OWNERS`（8）个发送者可以向设备下指令；其他人的消息都会被丢弃并计数。
+
+```rust
+pub struct Owner;                              // {"id":"…","label":"…"|null}
+impl Owner {
+    pub fn new(id: &str, label: Option<&str>) -> Option<Self>; // id 1..=128 bytes
+    pub fn id(&self) -> &str;
+    pub fn label(&self) -> Option<&str>;      // trimmed, ≤ 64 bytes
+}
+pub enum Classification { Owner, Paired, Ignored }
+pub struct Owners<Storage>;                    // persisted under key "owners"
+impl IMessageGateway {
+    // codes come from the Platform entropy the Gateway holds
+    pub async fn load_owners<S: PluginStorage>(&self, storage: S) -> Result<Owners<S>, OwnersError>;
+}
+impl<Storage: PluginStorage> Owners<Storage> {
+    pub async fn classify(&self, sender: &str, label: Option<&str>, text: &str) -> Classification;
+    pub fn is_owner(&self, id: &str) -> bool;
+    pub fn count(&self) -> usize;
+    pub fn ignored(&self) -> u32;
+    pub fn owners(&self) -> Vec<Owner>;
+    pub fn pairing(&self) -> Option<PairingView>;   // mints when none is valid
+    pub fn rotate(&self) -> Result<(), EntropyUnavailable>;
+    pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
+    pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
+}
+pub const PAIRED_REPLY: &str; // a Chinese line, then "Paired. You can start chatting."
+```
+
+- 配对码是从熵源中均匀抽取的六位数字，在 `PAIRING_CODE_LIFETIME`（10 分钟）内有效，并以恒定时间进行比较。
+- 当消息去掉首尾空白后的文本就是配对码，或者是 `/start <code>`（也可以是
+  `/start@bot <code>`）时，这条消息完成配对。
+- 配对会把发送者添加为所有者并作废该配对码；下一次
+  `pairing()` 会生成新的配对码。`rotate()` 按请求生成新的配对码。
+- `MAX_PAIRING_ATTEMPTS`（5）次形似配对码的错误猜测也会作废该配对码。
+- `add` 不用配对码直接指定所有者，适用于自身设置流程就知道是谁完成设置的消息通道（QQ 的扫码绑定会报告扫码者的 openid）。对于已存在的所有者或已满的名单，它不会添加任何人。
+- 名单已满或平台没有熵源时，不提供配对码。
+- 名单以 JSON 数组形式存储；配对码和忽略计数器只保存在 RAM 中。
+- `OwnerBook` 是同样的逻辑，但不带存储，并显式传入时间。
+
+### 消息通道
+
+**模式。**
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum ChannelMode { Disabled, Send, #[default] SendReceive }
+impl ChannelMode {
+    pub const ALL: &[Self];                  // disabled, send, send_receive
+    pub const WITHOUT_SEND_ONLY: &[Self];    // WeChat: disabled, send_receive
+    pub const fn legacy() -> Self;           // Send: configs stored before modes
+    pub const fn registers(self) -> bool;    // not Disabled
+    pub const fn receives(self) -> bool;     // SendReceive
+}
+impl IMessageGateway {
+    pub async fn load_mode<S: PluginStorage>(&self, storage: &S, configured: bool,
+        legacy: ChannelMode) -> Result<ChannelMode, StorageError>;
+    pub async fn store_mode<S: PluginStorage>(&self, storage: &S, mode: ChannelMode)
+        -> Result<(), StorageError>;
+}
+```
+
+模式以 JSON 字符串的形式存储在它自己的键 `mode` 下。没有存储模式时，`load_mode` 对已配置的消息通道返回 `legacy`，对未配置的消息通道返回
+`send_receive`，并把结果存储下来。微信把
+`ChannelMode::SendReceive` 作为 `legacy` 传入。
+
+**接收循环脚手架。**
+
+```rust
+pub trait ReceiveSlotSource: 'static {
+    type Lease: 'static;                     // dropping it frees the slot
+    fn acquire(&self) -> Option<Self::Lease>;
+    fn capacity(&self) -> usize;
+    fn in_use(&self) -> usize;               // held right now, across every channel
+    fn wait_available(&self) -> SlotWait<'_> // default: never completes
+}
+pub struct UnlimitedSlots;                   // Lease = (); webhook receivers
+pub trait ReceiveChannel<Lease>: 'static {
+    fn receive<'a>(&'a self, lease: &'a mut Lease, session: ReceiveSession<'a>)
+        -> ReceiveFuture<'a>;                // Result<(), ReceiveError>
+}
+impl ReceiveSession<'_> { pub fn receiving(&self); }
+impl ReceiveError {
+    pub fn new(message: impl Into<String>) -> Self;   // retried after backoff
+    pub fn halt(message: impl Into<String>) -> Self;  // waits for restart()
+    pub fn retry_after(self, delay: Duration) -> Self; // ≥ delay, ≤ 10 min
+}
+pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(String) }
+pub struct ReceiveControl<Slots: ReceiveSlotSource>;
+impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
+    pub fn new(slots: Slots) -> Self;
+    pub fn set_enabled(&self, enabled: bool) -> Result<(), NoSlot>;
+    pub fn restart(&self);
+    pub fn is_enabled(&self) -> bool;
+    pub fn state(&self) -> ReceiveState;
+    pub fn capacity(&self) -> usize;
+    pub fn in_use(&self) -> usize;
+}
+pub struct ReceiveTiming { initial_backoff, max_backoff, slot_retry }
+// ReceiveTiming::DEVICE = 1 s, 30 s, 5 s
+impl IMessageGateway {
+    pub fn receive_control(&self) -> ReceiveControl<ReceiveSlots>;      // the Gateway's slots
+    pub fn webhook_receive_control(&self) -> ReceiveControl<UnlimitedSlots>;
+    pub fn receive_runtime<Slots, Channel>(&self, control: Rc<ReceiveControl<Slots>>,
+        channel: Rc<Channel>, timing: ReceiveTiming) -> ReceiveRuntime;
+}
+pub struct OnDemand<T>;                      // Box<T> loaded by the first session
+impl<T> OnDemand<T> {
+    pub const fn new() -> Self;
+    pub fn get(&self) -> Option<&T>;
+    pub async fn get_or_load<E, F>(&self, load: impl FnOnce() -> F) -> Result<&T, E>
+        where F: Future<Output = Result<T, E>>;
+}
+```
+
+- 接收被禁用时，运行时停在一个信号上，不占用名额。停住的运行时是一个很小的 future（大约 100 字节）；接收启用时运行的循环只在那段时间内被装箱。
+- 消息通道把只有接收中的消息通道才需要的内容（它的游标、最近的消息 id、一个 gateway session）放在一个 `OnDemand` 中，由第一个 session 从存储中加载；它的所有者名单放在另一个 `OnDemand` 中，在消息通道配置完成后加载一次。未配置的消息通道对每一项只持有一个指针，启动时一项都不读取。
+- `set_enabled(true)` 立即获取一个名额，这样调用方可以回答
+  `no_slot`。没有空闲名额时，控制器保持启用状态，报告 `no_slot`，运行时会在 `wait_available` 完成时（基于
+  `ReceiveSlots` 的适配器返回 `Box::pin(slots.wait_available())`）或每隔
+  `slot_retry` 重试，以先到者为准。
+- 启用期间，运行时在租约上运行消息通道的 session。调用过 `receiving()` 的 session 结束后，它会立即重新连接。
+- 出错后它等待 1 秒，之后加倍，上限为 30 秒；一旦某个 session 报告 `receiving()`，等待时间就会重置。
+- `halt` 错误会等待 `restart()` 或模式变更。
+- `set_enabled(false)` 丢弃 session 和租约。
+- 丢弃运行时（任务取消就是这样做的）会丢弃 session 和租约，报告 `idle`，并让控制器不再获取名额。
+
+Gateway 的接收名额（`http_client::ReceiveSlots`，数量与
+`receive-slots` 设置相同）实现了 `ReceiveSlotSource`，所以消息通道从
+`IMessageGateway::receive_control` 获取它的控制器。
+
+**HTTP 接口。**消息通道实现：
+
+```rust
+pub trait ChannelControl: 'static {
+    type Storage: PluginStorage;
+    type Slots: ReceiveSlotSource;
+    fn configured(&self) -> bool;
+    fn mode(&self) -> ChannelMode;
+    fn modes(&self) -> &'static [ChannelMode] { ChannelMode::ALL }
+    fn apply_mode(&self, mode: ChannelMode) -> ModeFuture<'_>; // Result<(), ModeError>
+    fn receive(&self) -> &ReceiveControl<Self::Slots>;
+    fn owners(&self) -> Option<&Owners<Self::Storage>>; // None until configured
+    fn status_details(&self) -> Map<String, Value> { Map::new() } // e.g. `webhook`
+}
+impl IMessageGateway {
+    pub fn sync_receive<C: ChannelControl + ?Sized>(&self, channel: &C) -> Result<(), NoSlot>;
+    pub fn serve_channel<C: ChannelControl, Config: HttpEndpoint>(&self, base: &'static str,
+        channel: Rc<C>, config: Config) -> Result<WebRouteRegistration, WebServerError>;
+    pub fn channel_status<C: ChannelControl + ?Sized>(&self, channel: &C) -> ChannelStatus;
+}
+```
+
+消息通道用 `serve_channel(base, channel, config)` 为它的配置路径注册一个前缀路由，Gateway 通过 `serve_http_prefix` 把它挂载到
+`WebServer` 上：
+`base` 交给插件自己的 `config` 端点，该端点只接收变更；
+`GET base/status` 返回消息通道状态（其他方法返回 405）；
+`base/mode` 接收模式变更，`base/owners` 处理所有者名单，`base` 之下的其他任何路径都返回 404 `{"error":"not_found"}`。`base` 之下的精确路由（微信的
+`/login`，Inkbox 的 `/signup`、`/verify`、`/resend`）和更长的前缀（BlueBubbles 的 `/hook`）仍然处理各自的请求。每个消息通道用一条路由而不是四条，可以让 webserver 的路由表保持在首次分配的空间之内。
+
+| 请求 | 响应 |
+| --- | --- |
+| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`，然后是消息通道的 `status_details` |
+| `POST /api/gateway/<channel>/mode` `{"mode":"send"}` | 204 |
+| 同上，但为 `send_receive` 且没有空闲名额 | 409 `{"error":"no_slot","capacity":2}` |
+| `GET /api/gateway/<channel>/owners` | 200 `{"owners":[{"id":"42","label":"Ann"}],"pairing":{"code":"012345","expires_in":600},"ignored":3}` |
+| `POST /api/gateway/<channel>/owners` `{"remove":"42"}` 或 `{"rotate":true}` | 204 |
+
+- `receive` 只在 `send_receive` 下出现。`state` 是 `idle`、
+  `starting`、`receiving`、`no_slot` 或 `error` 之一。`message` 只随
+  `error` 出现，`capacity` 只随 `no_slot` 出现。只要消息通道从有上限的名额池中取用，就会带上 `slots`
+  （`{"in_use":n,"capacity":n}`），这样门户就能显示“名额 1/2”；webhook 接收方
+  （`UnlimitedSlots`）没有这一项。
+- 409 时模式仍会保存；之后接收会报告 `no_slot`，直到有名额空出。
+- 当所有者名单已满或平台没有熵源时，`pairing` 为 `null`。没有有效配对码时，`GET` 会生成一个。
+- 移除未知的 id 也返回 204。
+- 错误：
+  - 请求体格式错误时为 400 `{"error":"invalid_request"}`；
+  - 消息通道不提供的模式为 400 `{"error":"unsupported_mode"}`；
+  - 422 `{"error":"registration_failed"}`；
+  - 500 `{"error":"storage"}`；
+  - 轮换无法生成配对码时为 503 `{"error":"entropy_unavailable"}`；
+  - 消息通道未配置时，`/owners` 返回 409 `{"error":"not_configured"}`（此时还没有所有者名单；`owners.count` 读数为 0）；
+  - 消息通道路径之下的其他路径为 404 `{"error":"not_found"}`；
+  - 其他方法为 405 `{"error":"method_not_allowed"}`。
+
+**门户状态。**`IMessageGateway::channel_status(&channel)` 给出一个
+`ChannelStatus { level, zh, en }`；消息通道插件把 `level`
+（`ChannelLevel::Off`、`Ready`、`Attention`）映射为其门户卡片的 `EntryStatus`：
+
+| 消息通道 | 状态 |
+| --- | --- |
+| 未配置 | `off` “未配置” |
+| `disabled` | `off` “已停用” |
+| `send` | `ready` “仅发送” |
+| `send_receive`，接收中 | `ready` “收发中” |
+| `send_receive`，空闲或启动中 | `attention` “连接中” |
+| `send_receive`，没有名额 | `attention` “名额已满” |
+| `send_receive`，出错 | `attention` “连接中断” |
+
+**消息通道页面套件。**`resources/web/channel/`（见
+[消息通道页面套件](/zh/plugins/imessage-gateway/channel-page-kit)）是针对上述 JSON 的构建期 TypeScript：`readChannel`、
+`configuredRow` 和 `channelInbound`（“模式”和“授权账号”两行）。消息通道的门户入口把它和 captive portal 的 UI 套件打包在一起；
+Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试在 `resources/web/tests/` 中。
+
+## 消息通道如何接入
+
+1. **依赖。**在 `depends-on` 中列出 `imessage-gateway`，并依赖
+   `barracuda-imessage-gateway-plugin`。
+2. **构造函数。**消息通道不从 `PluginContext` 获取任何东西；Gateway 持有用于配对码的熵源和接收名额。在 `register` 中调用
+   `require::<IMessageGateway>("imessage-gateway")`。从 `gateway.receive_control()` 获取控制器；通过 webhook 接收的 BlueBubbles 则使用 `gateway.webhook_receive_control()`（`UnlimitedSlots`）。
+3. **状态。**在 `register` 中：
+   - 加载配置；
+   - `gateway.load_mode(&storage, configured, ChannelMode::legacy())`
+     （微信：`ChannelMode::SendReceive`）；
+   - 把所有者名单保存在 `OnDemand<Owners<_>>` 中，只有在消息通道已配置时才用
+     `gateway.load_owners(storage.clone())` 加载，可以在这里加载，也可以在存储配置之前加载；
+   - 把游标和其他接收簿记放在由第一个 session 加载的 `OnDemand` 中，这样未配置的消息通道不持有也不读取其中任何内容；
+   - 只有在 `configured && mode.registers()` 时才注册 `MessageChannel`；
+   - 构建 `Rc<ReceiveControl<_>>`；
+   - 把这些都放进一个实现了
+     `ChannelControl` 的消息通道状态类型中。微信用
+     `ChannelMode::WITHOUT_SEND_ONLY` 覆盖 `modes()`。
+4. **`apply_mode`。**调用 `gateway.store_mode`，然后添加或撤销 Gateway 注册，使注册恰好在消息通道已配置且
+   `mode.registers()` 时存在，再更新 `mode()`。把失败映射为
+   `ModeError::Storage` 或 `ModeError::Registration`。
+5. **接收方。**实现 `ReceiveChannel<Lease>`。每个 session 循环执行：
+   1. 等待 `IMessageGateway::ready()`；
+   2. 通过租约获取一批消息。轮询型消息通道通过租约使用
+      `GatewayHttp::poll`（来自 `gateway.http()`）
+      （一条保持活动的连接；`GET` 或 `POST`，每个请求有截止时间，body 有上限，可带可选的尾部）：只有 Gateway 的插件 crate 和
+      `shared/http-client` 可以使用 reqwless（`workspace_boundary`）；
+   3. 调用 `session.receiving()`；
+   4. 对每条新消息（已去重），调用
+      `owners.classify(sender, label, text)`：
+      - `Owner`：`gateway.publish(...)`；
+      - `Paired`：通过消息通道正常的发送路径发送 `PAIRED_REPLY`；
+      - `Ignored`：什么也不做。
+   5. 持久化游标。
+
+   对重试可以解决的失败返回 `ReceiveError::new`，对重试无法解决的失败返回 `halt`（微信 `-14`：“需要重新扫码”），对 429 使用 `.retry_after(..)`。
+6. **运行时。**构建
+   `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`，
+   然后调用 `gateway.sync_receive(&*state)`；那里的 `NoSlot` 已经作为状态报告出来了。把运行时保留到 `start`。
+7. **端点。**
+   - 配置端点只接收 `POST`；`GET /status` 由 Gateway 回答。
+   - 配置 `POST` 成功后，它调用 `sync_receive` 和
+     `control.restart()`。
+   - 把配置端点、`/mode` 和 `/owners` 注册为一个前缀路由：`gateway.serve_channel(CONFIG_API_PATH, state, config)`。
+8. **门户。**`register_with_status(.., move || entry_status(gateway.channel_status(&*state)))`，
+   其中消息通道的 `entry_status` 把 `ChannelStatus` 映射为 `EntryStatus`。页面导入消息通道页面套件，并在其构建 `inputs` 中列出
+   `../imessage-gateway/resources/web/channel`。
+9. **任务。**在 `start` 中，生成一个拥有该运行时的任务：
+
+   ```rust
+   #[embassy_executor::task]
+   async fn telegram_receive_task(runtime: ReceiveRuntime, cancellation: PluginTaskToken) {
+       let _completed = select(cancellation.cancelled(), runtime).await;
+   }
+   ```
+10. **文档。**在消息通道的插件页面 `docs/plugins/<id>.mdx` 上，声明任务、端点、存储键（`mode`、`owners` 和游标）以及名额使用情况。

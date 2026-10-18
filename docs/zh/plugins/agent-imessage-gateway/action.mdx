@@ -1,0 +1,19 @@
+---
+title: "Agent iMessage Gateway Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "把 Gateway 消息桥接到 Agent 会话并把回复路由回去的 Workflow Action。"
+---
+
+两个 Action 都使用 `schemas/action` 下的静态请求和响应 schema。
+它们的类型化处理器在 Workflow schema 校验之后使用 Serde。
+
+`imessage_bridge.to_agent` 解析一个完整的 `gateway.message.received`
+文档（包括 `attachments`），而不改变回复状态；或者把一个打开的 Agent 会话绑定到该路由，并把入站的 `message_id` 加入队列。对于每条被接受的入站消息，Workflow 都会在 `session.append` 之前立即调用绑定形式。恢复出来的映射会明确报告 `open_required: true`，因为 Agent 会话的所有权不会被持久化。
+
+解析一个尚未映射的路由时，会为这条消息预留该路由，这条消息的 Workflow 收到 `{}` 并创建会话。同一路由上之后的消息要等预留结束后才会被解析：会话一旦绑定，它就得到该会话（`open_required: false`），所以新路由上接连到来的消息共用一个会话。绑定失败会立即结束预留，而 Workflow 一直没有绑定的预留会在 30 s 后失效；等待中的消息随后自己预留该路由并创建会话。
+
+`imessage_bridge.to_gateway` 处理一个完整的、有大小上限的 `session.event`
+文档。用户的 `turn_started` 会取出队列中最早的入站消息，并把它固定为当前的 `reply_to`，直到 `turn_ended`；之后的入站消息不会改变当前轮次。非用户轮次保留已映射的路由，`reply_to` 为 null。未映射的会话，或者不在当前轮次内的事件，返回一个空对象。语义事件本身保持不变，由 Workflow 传给
+`gateway.send_stream`。`closed` 事件会清除临时的回复状态，把存储的 Agent 会话标记为不再打开，返回一个空对象，并保留它的路由映射，供之后显式的 `session.open` 使用。
+
+如果这次显式打开返回非 null 的 `error`，内置 Workflow 会保留映射，不追加入站消息，并使用入站路由和消息 ID，把完整的 Agent 错误响应作为单独的 `stream_error` 负载发送出去。

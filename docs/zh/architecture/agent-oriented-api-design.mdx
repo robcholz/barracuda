@@ -1,0 +1,116 @@
+---
+title: "面向 Agent 的 API 设计"
+sidebarTitle: "面向 Agent 的 API 设计"
+description: "把面向模型的 ToolCall 设计为 ShortRun 或 LongRun，并让面向 Agent 的契约保持一致。"
+---
+
+本文定义面向模型的 ToolCall 的约定。内部 API 可以是任何形式，只要面向 Agent 的契约遵循这些规则。
+
+## ToolCall 的性质
+
+每个 ToolCall 都有一个固定的性质：**ShortRun** 或 **LongRun**。性质是 ToolCall 定义的一部分。它不会因参数、实际耗时或 Agent 的选择而改变。
+
+用这个问题来判断：
+
+> 第一个 ToolCall 结果返回时，所请求的工作是否已到达终止状态？
+
+- 如果是，这个 ToolCall 是 ShortRun。
+- 如果在该结果之后工作还在继续，这个 ToolCall 是 LongRun。
+
+持久存在的资源本身并不会让 ToolCall 成为 LongRun。例如，如果在调用返回之前日程已经完全创建，`schedule_create` 就可以是 ShortRun。
+
+## ShortRun ToolCall
+
+ShortRun ToolCall 是一次原子的请求/结果交换：
+
+```text
+call -> succeeded | failed | timed_out
+```
+
+第一个结果总是终止的。ShortRun ToolCall：
+
+- 返回所请求的结果或一个终止错误；
+- 不返回用于继续工作的句柄；
+- 没有 `status`、`wait` 或 `cancel` ToolCall；
+- 通过发起新的 ToolCall 来重试。
+
+用 ShortRun ToolCall 的领域动作为它命名，例如 `file_read`、`memory_recall`、`schedule_create` 或 `code_validate`。不存在生命周期时，不要添加生命周期动词。
+
+## LongRun ToolCall
+
+LongRun ToolCall 启动的工作会在第一个结果之后继续：
+
+```text
+start -> accepted(handle) -> running -> terminal completion
+```
+
+初始结果并不表示完成。它确认系统已经接管了这项工作，并返回一个稳定的句柄，供后续 ToolCall 引用。
+
+每个 LongRun 能力都有以下面向 Agent 的动作。
+
+### Start
+
+启动工作并返回其句柄。使用符合领域的动词，例如 `start`、`submit`、`open`、`spawn` 或 `subscribe`。
+
+只有在系统接管了这项工作之后才返回 `accepted`。如果工作无法启动，返回终止失败，而不是句柄。
+
+### Status
+
+立即返回当前状态，不等待。结果应包含句柄、当前状态，以及可用时的简短进度摘要。如果工作已终止，status 必须暴露其终止状态，并让其结果可以取回。
+
+`status` 是观察工具，而不是建议轮询。正常的完成会被自动送达。
+
+### Wait
+
+阻塞当前 ToolCall，直到工作到达终止状态或等待期限到期。
+
+等待期限只适用于那一次 wait 调用。到达期限时，绝不能取消或改变底层的工作。如果工作已经终止，`wait` 会立即返回已保存的结果。
+
+只有当 Agent 的下一步需要该结果、并且没有可以继续进行的有用的独立工作时，Agent 才应该等待。
+
+### Cancel
+
+请求终止未完成的工作。如果不支持取消，ToolCall 的描述必须明确说明。
+
+取消不同于关闭输入流、停止持续运行的服务或删除已保存的状态。使用与真实领域动作相符的动词。
+
+### 自动完成
+
+当终止完成没有通过 `wait` 被观察到时，自动把它送达 Agent。Agent 绝不应需要轮询 `status` 才能发现完成。
+
+如果 `wait` 返回了终止结果，不要再次把同一个完成送达 Agent。Agent 忙碌时，完成可以排队，等它能处理新一轮时再送达。
+
+## 可选的 LongRun 动作
+
+只有当能力的性质需要时才添加这些动作：
+
+- `list`：在可能同时存在多次运行时找回句柄；
+- `send` 或 `append`：为交互式工作提供更多输入；
+- `close`：正常结束输入流或会话；
+- `interrupt`：替换或重定向正在进行的工作；
+- `pause` 和 `resume`：控制支持挂起的工作；
+- `result` 或 `read`：取回较大或被保留的终止结果；
+- `delete`：在执行后删除资源或保留的状态。
+
+不要用 `watch` 获取即时快照。`status` 返回快照；`watch` 保留给真正等待状态变化或以流的方式输出变化的 ToolCall。
+
+## 示例
+
+| ToolCall | 性质 | 原因 |
+| --- | --- | --- |
+| `http_request` | ShortRun | 返回时响应已经是终止的。 |
+| `schedule_create` | ShortRun | 即使日程会持久存在，创建也已经完成。 |
+| `deployment_start` | LongRun | 接受之后部署仍在继续。 |
+| `download_submit` | LongRun | 传输在返回的句柄下继续。 |
+| `terminal_open` | LongRun | 会话保持活跃，并接受之后的输入。 |
+| `metrics_subscribe` | LongRun | 订阅持续产生观测数据。 |
+
+## 评审清单
+
+对每个新的 ToolCall：
+
+1. 声明它的性质是 ShortRun 还是 LongRun。
+2. 让第一个结果符合该性质：终止结果或已接受的句柄。
+3. 对于 LongRun，定义 `status`、`wait`、取消行为和自动完成。
+4. 只添加真正支持的、领域特定的生命周期动作。
+5. 清楚说明完成行为，让 Agent 不需要轮询。

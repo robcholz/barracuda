@@ -1,0 +1,35 @@
+---
+title: "VM Workflow Action"
+sidebarTitle: "Workflow Action"
+description: "VM 插件提供的 Workflow Action：运行 Lua 脚本、向它们发送输入以及取消它们。"
+---
+
+VM 插件向 Workflow Action 注册表注册 `vm.run`、`vm.input` 和 `vm.cancel`。它们静态的请求和响应契约位于 `schemas/action/<address>/`。
+
+`vm.run` 接受一个完整的 Lua 源代码字符串，并异步等待直到执行结束。它没有 Event Router 帧大小限制：
+
+```json
+{"source":"print('hello')"}
+```
+
+成功的执行会按顺序返回来自 `print(...)`、`io.write(...)` 以及虚拟 stdout/stderr 句柄的输出行。换行符分隔各个条目；末尾未以换行结束的片段会作为最后一个条目保留：
+
+```json
+{"run_id":1,"outcome":"success","output":["hello"]}
+```
+
+取消时返回 `outcome: "cancelled"`。执行失败时返回 `outcome: "error"`，并带有稳定的 `error` 代码和诊断信息。在执行槽被接受之前就被拒绝时，返回 `{"error":"<code>"}`。
+
+如果 Lua 在 `io.read()` 中等待，Workflow Action 会继续等待同一次执行；它不会返回中间响应，也不会发出 Workflow Event。并发的 Workflow 分支可以用 `vm.input` 提供输入。
+
+`vm.input` 提供一个完整的输入字符串，或者 EOF：
+
+```json
+{"run_id":1,"input":"answer"}
+```
+
+```json
+{"run_id":1,"eof":true}
+```
+
+`vm.cancel` 接受 `{"run_id":1}`。控制操作被拒绝时返回 `{"error":"<code>"}`，这样 Workflow 可以据此分支。

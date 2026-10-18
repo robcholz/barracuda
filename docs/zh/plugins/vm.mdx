@@ -1,0 +1,28 @@
+---
+title: "VM 插件"
+sidebarTitle: "概览"
+description: "在隔离的沙箱中运行 Lua 脚本，并用其他插件提供的 Lua 包扩展它们。"
+---
+
+VM 插件拥有隔离的 Lua 执行：它发布类型化的 `Vm` 能力、供 VM 包插件扩展的 `LuaPackageRegistry`，以及运行 Lua 脚本的 Workflow Action。
+
+- 插件 ID：`vm`
+- 依赖：`workflow`
+- 设置：无
+- 上下文资源：`entropy`（为 `math.random` 提供种子）
+- 提供的能力：`Vm`、`LuaPackageRegistry`
+- 所需能力：来自 `workflow` 的 `WorkflowActionRegistry`
+- Workflow：Action `vm.run`、`vm.input`、`vm.cancel`，参见 [Action](/zh/plugins/vm/action)
+- Agent 工具：无
+- Lua 包：没有在 `LuaPackageRegistry` 中注册任何 Lua 包；每个 Lua 状态都会获得 VM 内置的 `io`、`math` 和 `os` 包，参见 [Lua 环境](/zh/plugins/vm/environment)
+- Web：无
+- 任务：一个生命周期任务，以及一个包含四个 Lua 执行任务的池（每个执行槽一个，每个都有一个从平台大块内存分配的 1 MiB Lua 堆）
+- 存储：无
+
+`Vm` 是唯一的类型化执行 API，Workflow Action 和单独的 `agent-vm` 适配器都使用它。启动一次运行会返回一个可等待的 `VmRun` 句柄，它的标识符可以立即获得。`VmRun::next_update` 暴露类型化的非终止进度和终止完成状态，而直接等待 `VmRun` 只返回有序的输出消息和终止结果。丢弃一个未完成的 `VmRun` 会请求协作式取消，并唤醒正在等待输入的运行。
+
+`Vm::list` 返回一个有界的快照，包含活动运行的 ID 及其当前的 `running` 或 `input_required` 状态，不暴露 Lua 源代码。
+
+`vm.run` Workflow Action 会等待这个句柄，只有在 Lua 执行结束后才返回。VM 的输出和终止状态不会作为 Workflow Event 发出，输入进度也不会改变 Workflow Action 的契约。本插件拥有一个固定的池，包含四个 Embassy 执行槽；每个正在运行的执行都会从平台大块内存分配一个 1 MiB 的 Lua 堆。请求和响应使用普通的 Serde 值；没有 Event Router 通道，也没有由传输方式决定的源代码或输入限制。
+
+依赖它的 VM 包插件在插件注册期间，通过 `LuaPackageRegistry` 注册只能 require 的 Lua 包。

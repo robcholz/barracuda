@@ -1,0 +1,107 @@
+---
+title: "开发板"
+sidebarTitle: "概览"
+description: "了解开发板包如何把通用 YAML 转换成静态 Rust 数据，以及外设和驱动放在哪里。"
+---
+
+`boards/` 拥有具体的产品包，以及在构建时把它们的通用 YAML 转换成静态 Rust 数据的工具。语义外设实现位于 `peripherals/impl` 下；可复用的底层芯片驱动位于 `drivers/chips` 下。每个平台把它的厂商 HAL 适配为上游硬件 trait；开发板包不包含手写的 Rust HAL。
+
+```text
+boards/
+|-- api/          # no_std `Board`, `Hardware`, and `Storage` values
+|-- config/       # std-only YAML parsing, validation, and Rust generation
+|-- hal/          # named resource ownership exposed to hardware Plugins
+|-- profiles/     # the Plugin sets a Board builds; see Board profiles
+`-- configs/
+    `-- <board>/
+        |-- board.yml
+        `-- <Platform-native layout files>
+```
+
+`configs/` 下的一个目录描述一个具体产品。`board.yml` 包含最大公约数：身份、规范的芯片名称、显式的开发板硬件面，以及原生布局绑定。它不得包含 Rust 平台类型，也不得选择 `macos`、`linux`、`esp32` 或其他平台实现。它的 `profile` 指定固件包含的插件集合；没有指定时为 `headless`；[开发板 profile](/zh/boards/profiles) 列出了各个 profile。
+
+硬件面恰好有两个部分。`peripherals` 描述可选的外接设备，以及构造它们所用的私有 I/O。`exposed-io` 列出应用可以在运行时配置的物理资源。平台 HAL 随后会把一个暴露的引脚令牌作为数字、模拟、PWM、I2C、SPI、UART、I2S 或应用选择的其他受支持功能来使用。
+
+```yaml
+peripherals:
+  io:
+    i2c-device:
+      sensor-i2c:
+        peripheral: I2C0
+        scl: GPIO1
+        sda: GPIO2
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        peripheral: SPI2
+        sck: GPIO6
+        mosi: GPIO5
+        chip-select: GPIO7
+        frequency-hz: 80000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        backlight: GPIO9
+        dc: GPIO4
+        reset: GPIO8
+        spi: display-spi
+      parameters:
+        controller: gc9a01
+        width: 240
+        height: 240
+
+exposed-io:
+  pins:
+    expansion-1: { pin: GPIO3 }
+    expansion-2: { pin: GPIO4 }
+```
+
+每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
+
+开发板 HAL 不取代 `embedded-hal`。它为暴露的物理资源提供一个共享的运行时所有者。功能提供者以原子方式占用引脚，并在需要时占用一个内部选择的控制器，请所选平台配置它们的复用，然后把具体的 `embedded-hal` 或 `embedded-hal-async` 值返回给使用方。它的构造、GPIO 模式和模拟扩展涵盖了 embedded-hal 1.0 没有定义的操作。
+
+生成的设备所有者保留厂商 HAL 的只能移动（move-only）语义。一次功能占用会在本次启动期间消耗它的原始引脚令牌和控制器令牌；关闭使用方的句柄会停止访问并丢弃构造出的 HAL 值，但不会凭空造出替代的单例令牌。冲突的或重复的打开会返回运行时错误，重启会重建完整的暴露面。
+
+物理布局仍然放在该开发板包中，但使用启动生态的原生格式：
+
+- ESP32：`partitions.csv`（包括 OTA 槽位和 ESP 标志）。
+- STM32：`memory.x` 以及链接器/Embassy Boot 符号。
+- macOS 和 Linux：`file-layout.yml`，用于其以文件为后端的 NOR 镜像。
+
+这些原生文件是唯一的物理事实来源。平台构建代码对照它们校验 `board.yml` 的绑定，并把所选区域投射到 `embedded-storage`/Embassy 接口上。不要添加通用的 Barracuda 分区表，也不要添加生成厂商分区表的转换器。
+
+先选择一次具体的开发板，然后使用普通的构建命令：
+
+```bash
+cargo board select
+cargo run
+```
+
+主机开发板以 `BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run` 的方式运行；该变量指定虚拟外设管理器的回环地址，它位于虚拟 GPIO 和 I2C 背后（见 `platforms/virtual-io`）。
+
+`cargo run` 只拥有所选的 System 应用。在另一个终端中用 `cargo cli [ws://DEVICE_ADDRESS:8787]` 启动外部终端消息通道。CLI 被强制使用开发主机目标，因此在选中嵌入式开发板时它也能连接。
+
+应用二进制本身始终是 `barracuda-system`。它被跟踪的 `main.rs` 是 `no_std` 的，拥有 Target 的构造以及 System 生命周期。它把这个应用回调传给所选平台的编译期入口宏，因此主机进程启动和嵌入式固件启动仍然归平台所有，而无需引入另一个应用包或运行时分派。
+
+`cargo board select` 会打开一个带颜色、支持模糊搜索的列表，并默认选中当前所选的开发板。它在写入被忽略的、工作区本地的开发板、平台和 Cargo 选择文件之前，会校验完整的开发板包。脚本可以用 `cargo board select <board-name>` 传入明确的名称。该命令在 `.barracuda/selection` 下写入被忽略的本地依赖包，因此原生 Cargo 能看到完整的静态依赖图，而无需修改被跟踪的选择器清单或 `Cargo.lock`。它会验证并激活解析出的平台的 rustup 工具链，并写入其可选的 `build-std` 和安装器生成的环境配置，使之后所有的检查、构建和运行都使用普通的 Cargo 命令，无需配置 shell。工具链不可用时，选择过程会报告平台自己的安装提示，而不改变所选的开发板。没有选择时的构建会停止，并给出选择开发板所需的命令；它从不根据 Rust 目标猜测开发板。
+
+`boards/selected` 不会根据目标操作系统或架构推断开发板。选择命令根据自描述的平台目录解析开发板的芯片和工具链目标，然后分别独立生成两个已选择的维度。设备入口代码构造确切类型的平台和开发板绑定。
+
+添加开发板包或外设实现是维护者的操作。运行 `cargo board sync` 并提交它生成的确定性工作区依赖块。在 CI 中使用 `cargo board sync --check` 拒绝过期的注册表。拉取该提交的使用者只需运行 `cargo board select`，然后使用普通的 Cargo 命令。
+
+仓库目前为 ESP32、ESP32-S3、ESP32-C3、ESP32-C6 和 ESP32-P4 平台提供参考开发板包。目录中还包括 Espressif DevKitM 开发板（`esp32c3-devkitm-1`、`esp32c6-devkitm-1`、`esp32s3-devkitm-1`）、ESP32-S3-BOX-3 评估套件，以及 M5Stamp C3 Mate（`m5stack-stamp-c3-mate`）。每个 ESP 开发板包都把它的 ESP-IDF 分区 CSV 作为原生布局，并在 `board.yml` 中记录芯片对应的 Rust 目标。
+
+使用同一模组的开发板仍然是各自独立的开发板包：随着开发板 schema 的扩展，把它们确切的固定接线添加到各自的开发板包中，而不是把一块开发套件当作所有基于该芯片的产品的别名。
+
+`nucleo-u5a5zj-q` 在 ESP 系列之外演示了同样的纯 YAML 组合。它的配置通过共享的 `indicator-led` 实现构建 PC7 上高电平有效的绿色 LD1，并把 PC13 显式暴露为动态 GPIO 名称 `user-button`。STM32 平台 HAL 取代了它以前开发板专用的 HAL crate。名称 `user-button` 标识物理引脚 PC13；应用在运行时获取它的数字功能。
+
+## M5Stack 开发板覆盖范围
+
+Barracuda 为基于工作区当前已实现的每个 ESP 芯片系列的 M5Stack 控制器提供可选择的开发板包：ESP32、ESP32-C3、ESP32-C6、ESP32-S3 和 ESP32-P4。运行 `cargo board select` 并搜索 `m5stack-` 前缀，即可看到完整的当前目录。
+
+M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化板载的 ES8388/ES7210 音频通路、BMI270 惯性测量、INA226 电源监测、RX8130CE 实时时钟、microSD 存储，以及区分硬件版本的触摸和 DSI 显示屏。音频、显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的使能线或复位线；这个扩展芯片不是 System 可见的外设。该开发板还通过共享的运行时 I/O 所有者暴露 HY2.0-4P PORT.A、背面的 M5-Bus，以及可用的 SIT3088 RS-485 信号。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+
+板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
+
+所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，并通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板。这两个系列都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。

@@ -1,0 +1,46 @@
+---
+title: "Builtin App Sessions 插件"
+sidebarTitle: "Builtin App Sessions"
+description: "用内置的会话应用浏览 Agent 的对话。"
+---
+
+提供会话应用，这是一个列出 Agent 对话的系统应用。
+
+- 插件 ID：`builtin-app-sessions`
+- 依赖：`app-manager`、`agent`、`time`
+- 设置：无
+- 上下文资源：无
+- 提供的能力：无
+- 所需能力：来自 `app-manager` 的 `AppManager` 和 `AgentStatus`，
+  来自 `agent` 的 `AgentRuntime`，来自 `time` 的 `UtcClock`
+- Workflow：无
+- Agent Tool：无
+- Lua 包：`sessions`，仅供本应用使用
+- Web：无
+- 任务：无；由 `app-manager` 的任务响应该 Lua 包
+- 存储：应用在 `/resources/app` 中的容器
+
+本应用是内置应用，参见 `app-manager` 插件的
+[App Manager](/zh/plugins/app-manager)。它的首页列出对话，最近使用的排在最前；打开某个对话会显示来自 `AgentRuntime::session_transcript` 的最新消息：用户的消息在右侧，Agent 的消息在左侧（只调用了工具的 Agent 消息会列出这些工具的名称），Agent 仍在回答时显示一个加载动画。较早的消息会移出页面顶部。
+
+## Lua API
+
+~~~lua
+local sessions = require("sessions")
+
+sessions.list()          -- { { id, title, when }, ... }; when is "10:31" today, else a day or date label
+sessions.transcript(id)  -- { { mine, text, tools = { name, ... }, open }, ... }, oldest first
+sessions.agent()         -- { state = "standby" | "listening" | "thinking" | "answering", question, answer }
+~~~
+
+`transcript` 返回某个对话的最后 6 条消息，每条截断到 160 个字符；`mine` 标记用户的消息，`open` 标记 Agent 仍在回答的那一轮中的消息。未知的 `id` 返回 `nil` 和一条消息。
+
+时间是 UTC，与状态栏的时钟一致。没有标题的对话会显示一个表示“新对话”的占位标题。
+
+## 构建
+
+`resources/app/` 存放应用的源码；`app` 任务用 `app-manager` 的 `resources/build-app.ts` 把它们构建到 `filesystem/resources/app/`。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs cargo plugin run app --plugin builtin-app-sessions
+```

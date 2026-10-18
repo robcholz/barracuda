@@ -1,0 +1,26 @@
+---
+title: "HTTP 插件"
+sidebarTitle: "概览"
+description: "从插件和 Workflow 发起出站 HTTP 和 HTTPS 请求。"
+---
+
+HTTP 插件负责出站 HTTP：TLS 引擎、连接池、类型化的请求能力，以及
+`http.request` Workflow Action。
+
+- 插件 ID：`http`
+- 依赖：`workflow`
+- 设置：无
+- 上下文资源：`entropy`、`ip_stack`
+- 提供的能力：`Http`、`ClientFactory`（`http_client::ClientFactory`）
+- 所需能力：来自 `workflow` 的 `WorkflowActionRegistry`
+- Workflow：Action `http.request`，参见 [Action](/zh/plugins/http/action)
+- Agent Tool：无
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：无
+
+构造函数用平台的熵源启动 TLS，并在 IP 协议栈上构建
+`http_client::ClientFactory` 连接池。没有 TLS 时，`https://` 请求会直接失败，而不会退回明文。插件把这个工厂作为能力发布，供自行构建 HTTP 客户端的插件使用；再把它封装进类型化的 `Http` 能力，并把同一操作注册为 `http.request` Workflow Action。
+
+该能力预先分配两个可复用的 HTTP 工作区。每个工作区拥有自己的响应头缓冲区和读缓冲区，并保留响应体用到过的最大容量。同时发起第三个请求会返回 `busy`。响应体上限为 64 KiB。请求的上限是：URL 2 KiB，最多 32 个请求头且总计不超过 16 KiB，请求体 32 KiB。DNS、连接、TLS、HTTP 和读取响应体的整个操作有 30 秒的截止时间。

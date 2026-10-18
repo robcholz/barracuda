@@ -1,0 +1,28 @@
+---
+title: "Power 插件"
+sidebarTitle: "Power"
+description: "通过 `Power` 能力读取开发板的电源监测器和电池电量。"
+---
+
+拥有开发板的主电源监测器，并把它的读数和电池电量以 `Power` 的形式发布给其他插件。
+
+- 插件 ID：`power`
+- 依赖：无
+- 设置：无
+- 上下文资源：外设槽位 `power-monitor.device`（`primary`，可选）
+- 提供的能力：`Power`
+- 所需能力：无
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `PowerMonitor`，并把它放在一把锁后面。`Power` 的克隆开销很小，每个克隆读取的都是同一个监测器，所以系统界面的电池显示和一个 Lua 句柄可以同时读取它：
+
+- `Power::is_present()`：开发板是否有电源监测器。
+- `Power::measure()`：一次一致的采样（`PowerMeasurement`）；没有监测器或读取失败时返回 `PowerError`。
+- `Power::battery()`：电池电量（带有 `percent` 和 `charging` 的 `BatteryState`），来自作为电池电量计的监测器，例如 BQ27220；其他监测器或读取失败时返回 `None`。
+
+I2C 的所有权、芯片初始化、校准以及到整数 SI 子单位的换算，都留在所选的实现和生成的开发板 HAL 中。本插件不做后台采样，也不拥有长时间运行的任务。

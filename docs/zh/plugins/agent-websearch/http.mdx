@@ -1,0 +1,18 @@
+---
+title: "Agent Websearch Tavily 配置"
+sidebarTitle: "HTTP API"
+description: "网页搜索插件的 HTTP 路由：安装或替换 Tavily 配置。"
+---
+
+## `POST /api/tavily`
+
+安装或替换持久的 Tavily 配置。
+
+```json
+{
+  "api_key": "tvly-...",
+  "api_base": "https://api.tavily.com"
+}
+```
+
+`api_base` 是可选的，默认为 Tavily 生产环境 API 的源地址。端点成功时返回 `204`；JSON 格式错误时返回 `400`；其他方法返回 `405`；API 密钥为空、超过 256 字节或包含非可打印 ASCII 字符，或者 HTTP(S) 基础 URL 无效、超过 512 字节或包含非可打印 ASCII 字符时返回 `422`；持久化失败时返回 `500`。这些上限确保每个搜索请求即使带上最长的查询，也能放进插件固定大小的请求缓冲区。`api_base` 和 `api_key` 条目在生效配置改变之前，于同一个私有 KV 事务中提交。进行中的搜索会继续使用它的请求开始时捕获的配置快照。

@@ -1,0 +1,26 @@
+---
+title: "Time 插件"
+sidebarTitle: "Time"
+description: "通过 SNTP 和开发板的实时时钟保持准确的 UTC 时间。"
+---
+
+Time 插件通过 SNTP 同步 UTC 时间，维护开发板的实时时钟，并把时间作为类型化的只读时钟能力发布出去。
+
+- 插件 ID：`time`
+- 依赖：无
+- 设置：无
+- 上下文资源：`ip_stack`；开发板的主实时时钟（如果有，`[peripherals.real-time-clock]`，可选）
+- 提供的能力：`UtcClock`
+- 所需能力：无
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：一个可取消的 SNTP 同步循环（`time_sync_task`，池大小 1）
+- 存储：无
+
+Time 插件拥有网络同步，只发布类型化的只读 `UtcClock` 能力。它不了解 Agent 工具、Workflow Action 或 JSON 传输。`agent-time` 是单独的 Agent 适配器。
+
+## 实时时钟
+
+在带有实时时钟的开发板上，注册时会读取它：如果它在断电期间保持了计时，并且读数不早于 2024 年，`UtcClock` 就从它开始（`UtcClockUpdater::seed`），这样开机时就有时间，而不必等到第一次 SNTP 应答之后。网络时间总是会替换它，每个被接受的 SNTP 样本都会由 `time_sync_task` 写回实时时钟，所以下次开机时的时间接近网络时间。`UtcClock::source()` 说明当前时间来自哪里（`ClockSource::RealTimeClock` 或 `ClockSource::Network`）；保持（holdover）和过期规则对两者都适用。没有实时时钟时，在 SNTP 成功之前时钟读数为 `Unsynchronized`。

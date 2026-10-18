@@ -1,0 +1,150 @@
+---
+title: "平台架构"
+sidebarTitle: "系统架构"
+description: "了解平台、开发板、HAL、Target、System 和插件的含义，以及各自拥有什么。"
+---
+
+本文定义 Barracuda 的目标架构。对于平台、开发板、外设、芯片驱动、HAL、Target、System 和插件的含义与所有权，它是权威说明。与这些边界相矛盾的现有代码属于迁移工作，而不是先例。
+
+## 核心模型
+
+Barracuda 有两个独立选择的维度，以及一个由平台拥有的硬件边界：
+
+~~~text
+Platform  = platform services + vendor adaptation to ecosystem HAL contracts
+Board HAL = Board matrix + peripheral implementations + exposed I/O
+Target    = Platform + Board HAL
+~~~
+
+- **平台（Platform）**是一个执行平台：一个芯片系列，例如 ESP32-S3、ESP32-C6 或 STM32，或者一个托管环境，例如 Linux 或 macOS。它提供平台机制，例如 IP 协议栈、熵和分区，并把它的厂商 HAL 适配到上游硬件契约。它不描述开发板的具体外设、接线或产品硬件矩阵。
+- **开发板（Board）**是一个具体的硬件组合。它的矩阵描述该产品的芯片、总线、引脚、时钟、所连接的外设、固定接线和原生物理布局。
+- **外设 API（Peripheral API）**是一个语义化的、与芯片无关的接口，例如 Display、Touch、PowerMonitor 或 RealTimeClock。
+- **外设实现（Peripheral implementation）**把具体的芯片和接线适配到一个外设 API。它可以组合多个私有的芯片驱动。
+- **芯片驱动（Chip Driver）**是 `drivers/chips` 下的底层寄存器或协议实现。它对开发板和 System 都不可见，也不拥有外设清单。
+- **平台 HAL 模块（Platform HAL module）**是在每个平台旁边实现的厂商适配。它把所选平台的只能移动的令牌转换为实现 `embedded-hal`、`embedded-hal-async` 的具体值，或者在这些生态没有对应契约时，转换为一个窄范围的领域绑定。
+- **开发板 HAL（Board HAL）**是通过所选平台 HAL 模块，把外设实现应用到开发板矩阵上得到的静态组合结果。它暴露可选的语义化外设和显式暴露的 I/O，供 System 和硬件插件使用。
+- **Target** 是独立选择的平台与所选开发板 HAL 的组合。
+- **System** 是聚合入口。它构造由 System 拥有的服务，装配固定的插件图，并把平台和 HAL 的能力路由给它们的使用者。
+- **插件（Plugin）**是由 System 管理的自包含功能模块。
+
+平台不是开发板支持包、外设驱动集合，也不是 System 的依赖袋。它的 HAL 模块包含可复用的厂商适配，而不是产品接线。
+
+`TargetIdentity` 是不可变的构建期元数据，描述独立选择的平台和开发板。它与 `TargetResources` 并列组合，但永远不在其内部：它不授予任何硬件权限，也不改变 `BoardResources { peripherals, exposed_io }` 的确切形态。System 可以把这份元数据复制到 `vm-systeminfo` 这样的观察性适配器中。
+
+## 组合边界
+
+开发板和平台的选择是相互独立的构建输入。开发板永远不通过 Rust 关联类型、Cargo 依赖或 YAML 引用来选择它的平台。
+
+~~~text
+one hardware bootstrap --------+------------------------------+
+                               |                              |
+selected Platform -------------+-> Platform bindings -> Platform services
+             `--------------------> Platform HAL
+                                                              |
+selected Board config -> generated Board composition <--------+
+  +-- peripheral implementation + private I/O -> peripherals  |
+  `-- explicitly exposed I/O -> GPIO/I2C/SPI providers        |
+                               |                              |
+                               +----------> Board HAL ---------+
+                                                              |
+                                                              v
+                                                            Target
+                                                              |
+                                                              v
+                                                   barracuda_target::resources
+                                                              |
+                                                              v
+                                                            System
+                                                              |
+                                                              v
+                                                           Plugins
+~~~
+
+所选 Target 的组合根校验独立选择的平台和开发板能否构成一个 Target。所选平台暴露一个编译期入口宏，它只拥有目标 ABI、执行器引导，以及进程或固件的终止行为。System 应用拥有它的应用回调，接收所选 Target 的类型化 `TargetBindings`，构造 Target 资源并运行 System。宏展开直接调用这个回调：它不引入动态分发、装箱的 future 或运行时注册表。
+
+设备平台在产生这些绑定时，恰好获取一次芯片 HAL 的单例。然后公共的 Target 组合拆分绑定，调用平台和开发板的构造函数，并把它们的资源返回给 System，而不把一个维度压平到另一个维度中。组合遵循所选开发板的声明；它不会从开发板配置中省略的硬件推断出 I/O 接口。平台入口不解析 YAML，不实例化外设实现，不为单个开发板外设接线，也不依赖 System。
+
+~~~rust,ignore
+async fn application(spawner: Spawner, bindings: barracuda_target::Bindings) -> Result<(), Error> {
+    let resources = barracuda_target::resources_with_bindings(spawner, bindings).await?;
+    barracuda_system_app::run(spawner, resources).await?;
+    Ok(())
+}
+
+barracuda_target::application_entry!(application);
+~~~
+
+主机 Target 没有芯片外设单例。Linux 和 macOS 平台改为共享一个仅限主机的虚拟单例（`platforms/virtual-io`）：虚拟引脚以及 I2C 和 SPI 控制器，背后是一个虚拟外设管理器，测试和开发者通过回环控制接口驱动它，该接口还提供显示面板的浏览器视图。主机入口宏恰好取一次这个单例，正如设备入口取一次它的芯片单例，生成的开发板绑定再从中移出声明的虚拟令牌。应用仍然使用同一个 `resources_with_bindings` 边界，虚拟硬件永远不会进入固件。
+
+主机开发板像设备开发板一样在 `board.yml` 中声明外设。由于主机没有物理芯片，它的平台 HAL 清单设置了 `peripheral-models`：生成的开发板组合在初始化任何外设之前，先把每个声明的外设（名称、实现标识符、芯片原生绑定和标量参数）通告给 `hal::declare_peripheral`，然后虚拟平台在声明的总线和地址上挂接该实现的芯片模型。显示屏的面板模型位于它的 SPI 控制器上，并读取它的数据/命令引脚，所以主机开发板的显示屏在浏览器中的显示，与其真实驱动绘制的完全一样。开发板仍然是唯一的声明，生成器也不保留任何平台或实现的特例。设备平台不设置它，所以它们生成的组合保持不变。
+
+返回的形态保留了所有权：
+
+~~~rust,ignore
+TargetResources {
+    platform: PlatformResources { ip_stack, wifi, entropy, partitions },
+    board_hal: BoardResources { peripherals, exposed_io },
+}
+~~~
+
+开发板外设永远不会成为 `PlatformResources` 的字段。平台服务永远不会成为开发板资源包的字段。
+
+## 平台
+
+平台代表一个执行平台：ESP32-S3 或 ESP32-C6 这样的 ESP 芯片、一个 STM32 系列、Linux、macOS 或同等的环境。每款 ESP 芯片都是自己的平台 crate 和选择（`platforms/esp32`、`platforms/esp32c3`、`platforms/esp32s3`……）；共享同一厂商生态的芯片在 `platform.yml` 中声明相同的 `family`，并且可以共享厂商适配的源代码，但它们永远不会合并成一个系列平台。平台拥有与其执行环境的集成，并提供平台级服务。具体的开发板外设不会成为平台字段或平台关联类型。
+
+平台资源具有稳定、确切的形态。当前的公共契约暴露一个 Embassy IP 协议栈、一个 Wi-Fi 控制机制、一个熵源和一个分区集合：
+
+~~~rust,ignore
+pub struct PlatformResources<Partitions, Wifi, Entropy> {
+    pub ip_stack: embassy_net::Stack<'static>,
+    pub wifi: Wifi,
+    pub entropy: Entropy,
+    pub partitions: Partitions,
+}
+~~~
+
+`wifi` 是一个独立的通信机制，不属于 `ip_stack`。没有无线电的平台提供一个显式标明不受支持的实现，System 把这个机制交给唯一一个取走它并拥有其策略的插件。
+
+`entropy` 是平台的不可预测字节来源，适用于密码学用途：在主机平台上是操作系统的生成器，在设备上是由物理噪声驱动的真随机数生成器。没有熵源的平台提供 `UnavailableEntropy`，永远不提供更弱的生成器。System 把它的类型擦除到 `PluginContext::entropy` 中，每个需要随机性的插件都克隆它；无线电则擦除到 `PluginContext::wifi` 中。
+
+这是架构上的指导，而不是冻结的 Rust 签名。不变量是分区始终是一个集合。业务角色永远不会成为 filesystem_partition、resources_partition 或 database_partition 这样的字段。IP 能力同样始终是 `ip_stack`，而不是 web_network 或 database_network。TLS 不是平台资源；拥有 HTTP 的插件在平台边界之上构建它（见“TLS 和 HTTP 客户端”）。
+
+添加插件、外设、文件系统、数据库或应用子系统，都不会修改平台 API 或 PlatformResources 的形态。
+
+平台初始化可以启动它自己的服务所需的任务。它不启动属于外设实现的任务。实现的生命周期属于拥有它的 HAL 组合。
+
+## 开发板
+
+开发板描述一个具体的产品硬件矩阵：
+
+- 确切的芯片和封装；
+- 总线、引脚、DMA 通道、中断和时钟；
+- 所连接的外设型号及其固定接线；
+- 显式暴露的多功能引脚；
+- 外部存储器和存储设备；
+- 原生的启动和物理布局产物；
+- 产品特定的硬件功能是否存在。
+
+开发板 YAML 和与开发板相关的 crate 位于 boards/ 下。开发板矩阵是用来构造 HAL 的数据；它不实现也不选择平台。
+
+开发板配置标识具体的硬件以及构造它所需的原生名称。它不包含已挂载的文件系统、数据库对象、插件实例或应用服务。在硬件矩阵之外，开发板还指定 `boards/profiles/` 下的 profile，由它决定固件包含哪些插件；开发板的 `plugins.<id>` 部分启用或禁用单个插件、设置它们的设置，并在默认值不合适时为它们的外设槽位接线。这一部分是开发板唯一提到插件的地方；规则见 [Plugin API](/zh/architecture/plugin-api)。
+
+选择开发板是一个显式的持久步骤：
+
+~~~bash
+cargo board select
+cargo build
+~~~
+
+选择命令会显示一个带颜色、可模糊搜索的列表，校验所选的开发板包，并把它的名字记录在工作区本地被忽略的状态中。它也接受一个显式的开发板名称，供自动化使用。每个平台声明用来编译它的 rustup 工具链、Cargo 必须为其目标构建的标准库 crate、一个可选的由安装程序生成的环境文件，以及该工具链不可用时显示的提示。选择过程会校验这些声明，应用工作区的 rustup override，并写入普通的 `cargo check`、`cargo build` 和 `cargo run` 命令所需的 Cargo 配置。当嵌入式 `build-std` 策略生效时，主机端的 Cargo 工具使用完整的主机标准库和一个隔离的产物目录。选择器 crate 保持稳定的源清单。`cargo board` 在 Cargo 解析源工作区之前，先在 `.barracuda/selection` 下引导被忽略的本地依赖包，然后只激活所选开发板需要的具体平台和外设实现依赖，以及开发板启用的插件。每个本地包都声明完整的可选依赖目录，所以修改所选的默认 feature 不会重写 `Cargo.lock`。构建读取持久的工作区状态；它不需要 shell 设置，也不需要感知开发板的构建包装器。`boards/selected` 不得检查 `target_os` 或 `target_arch`，外层的 Target 组合也不得据此推断默认开发板或激活开发板 feature。缺少选择是一个构建错误，它会指回选择命令。这样就把目标策略排除在开发板解析和代码生成之外，同时保持开发板和平台作为相互独立的输入。
+
+## 开发板声明的硬件接口
+
+所选开发板配置是 Barracuda 所构造硬件接口的事实来源。这个接口恰好有两个字段：
+
+- `peripherals` 指定可选的已连接设备、它们的实现，以及用来构造它们的私有引脚、总线、几何参数、极性和其他固定输入；
+- 暴露的 I/O 指定应用可以在运行时配置的物理资源，首先是多功能封装引脚。
+
+生成的开发板组合恰好构造这些声明。它不会自动暴露未使用的引脚或外设实例。在 `exposed-io` 中省略的物理资源不会出现在 Barracuda 的 I/O 接口中，即使芯片本来可以使用它。
+
