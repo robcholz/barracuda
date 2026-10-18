@@ -152,16 +152,57 @@ code, pre, kbd, .font-mono {
 #navbar div:has(> #theme-preference-menu-trigger) {
   margin-right: -6px !important;
 }
-@media (min-width: 1280px) {
-  #navbar div:has(> #search-bar-entry) {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 0;
-  }
-  #navbar div:has(> #localization-select-trigger) {
-    margin-left: auto;
-  }
+/* The search group fills the space between the logo and the right-hand
+   items and centers in it. It is not pinned to the page center: the bar
+   narrows when the assistant panel opens, and a pinned group would cover the
+   language select. */
+#navbar div:has(> #search-bar-entry) {
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Ask Assistant, beside search: an outline button as in the design. */
+#assistant-entry {
+  height: 32px;
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 6px !important;
+  background: var(--bc-background) !important;
+}
+#assistant-entry:hover {
+  background: var(--bc-hover) !important;
+}
+#assistant-entry > span:first-child {
+  color: var(--bc-foreground) !important;
+}
+#assistant-entry > span:last-child {
+  border: 1px solid var(--bc-border);
+  background: var(--bc-background) !important;
+  color: var(--bc-muted-foreground) !important;
+  font-family: var(--bc-font-mono);
+}
+
+/* The ask box, at the foot of a page and in the assistant panel: a bordered
+   field with a lime send button. */
+div:has(> div > textarea.chat-assistant-input) {
+  border: 1px solid var(--bc-border-active) !important;
+  border-radius: 12px !important;
+  background: var(--bc-background) !important;
+  box-shadow: 0 1px 2px #0000000D;
+}
+div:has(> div > textarea.chat-assistant-input):focus-within {
+  border-color: var(--bc-foreground) !important;
+}
+.chat-assistant-send-button {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 8px !important;
+  background: var(--bc-signal) !important;
+}
+.chat-assistant-send-button svg {
+  color: var(--bc-signal-foreground) !important;
+}
+.chat-assistant-send-button:disabled {
+  opacity: 0.4;
 }
 #search-bar-entry {
   background: var(--bc-sidebar);
