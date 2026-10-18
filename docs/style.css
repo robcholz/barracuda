@@ -667,3 +667,15 @@ html.dark .code-block [data-component-part="code-block-root"],
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* Content column as on bun.com: 32px from the sidebar and 46rem of text,
+   instead of a 40.5rem column centered in the space between the sidebar
+   and the table of contents. */
+@media (min-width: 1024px) {
+  #content-area {
+    --content-width: 46rem;
+    max-width: min(calc(var(--content-width) + 3rem), calc(100% - 64px)) !important;
+    margin-left: 32px !important;
+    margin-right: auto !important;
+  }
+}
