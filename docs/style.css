@@ -5,6 +5,11 @@
 /* Tokens. Sequoia tints its gray ramp toward the primary color; the design
    system uses one neutral zinc ramp in both themes. */
 :root:root {
+  /* Sequoia paints active, hover, and focus states with the primary color;
+     the design keeps them ink. Lime stays on the elements styled below. */
+  --primary: 9 9 11;
+  --primary-light: 250 250 250;
+  --primary-dark: 9 9 11;
   --gray-50: 245 245 247;
   --gray-100: 240 240 242;
   --gray-200: 225 225 229;
@@ -59,6 +64,11 @@ html.dark:root:root {
   --bc-danger-border: #6F101B;
 }
 
+/* The page background, also behind overscroll and below fixed layers. */
+html, body {
+  background: var(--bc-background) !important;
+}
+
 /* Type: the system font stack with a CJK fallback chain. */
 html, body, #navbar, #sidebar-content, #content-area, #table-of-contents,
 #page-title, .prose, .card, .callout, .nav-tabs, button, input {
@@ -92,6 +102,10 @@ code, pre, kbd, .font-mono {
   height: 2px;
   background: var(--bc-foreground) !important;
 }
+#navbar > div > .lg\:hidden.bg-gray-50 {
+  background: var(--bc-background) !important;
+  border-bottom: 1px solid var(--bc-border);
+}
 #search-bar-entry {
   background: var(--bc-sidebar);
   border: 1px solid var(--bc-border);
@@ -121,12 +135,15 @@ code, pre, kbd, .font-mono {
   font-size: 12px;
   font-weight: 500;
 }
-#sidebar-content li > a {
-  color: var(--bc-nav-foreground);
+#sidebar-content li > a,
+#sidebar-content li > button {
+  color: var(--bc-nav-foreground) !important;
   border-radius: 6px;
 }
-#sidebar-content li > a:hover {
+#sidebar-content li > a:hover,
+#sidebar-content li > button:hover {
   background: var(--bc-ghost-hover);
+  color: var(--bc-foreground) !important;
 }
 #sidebar-content li[data-active="true"] > a,
 #sidebar-content li[data-active="true"] > a * {
@@ -214,11 +231,16 @@ code, pre, kbd, .font-mono {
   border: 1px solid var(--bc-border) !important;
   border-radius: 8px !important;
   box-shadow: none !important;
-  background: var(--bc-background);
+  background: var(--bc-background) !important;
+}
+/* Sequoia's card hover border is a layered !important rule on the primary
+   color, so cards get their own primary: the neutral active border. */
+.card {
+  --primary: 161 161 170;
+  --primary-light: 82 82 91;
 }
 .card:hover {
-  border-color: var(--bc-border-active) !important;
-  background: var(--bc-ghost-hover);
+  background: var(--bc-ghost-hover) !important;
 }
 .card [data-component-part="card-icon"] {
   display: flex;
@@ -239,24 +261,47 @@ code, pre, kbd, .font-mono {
   font-weight: 600;
 }
 
-/* Code blocks: hairline frame, 8px radius, the header on the sidebar color. */
+/* Code blocks: one hairline frame, the header on the sidebar color, the code
+   on the page color. */
 .code-block,
 .code-group {
+  padding: 0 !important;
   border: 1px solid var(--bc-border) !important;
   border-radius: 8px !important;
+  background: var(--bc-background) !important;
   box-shadow: none !important;
   overflow: hidden;
 }
-.code-block [data-component-part="code-block-root"] {
-  background: var(--bc-background) !important;
-}
 .code-block [data-component-part="code-block-header"],
 .code-group [data-component-part="code-group-tab-bar"] {
-  background: var(--bc-sidebar);
+  border-radius: 0 !important;
+  background: var(--bc-sidebar) !important;
   border-bottom: 1px solid var(--bc-border);
   color: var(--bc-muted-foreground);
   font-family: var(--bc-font-mono) !important;
   font-size: 12px;
+}
+.code-block .code-block-background,
+.code-block .code-block-background > div {
+  border-radius: 0 !important;
+  background: var(--bc-background) !important;
+}
+
+.code-block [data-fade-overlay] {
+  display: none !important;
+}
+
+/* Tabs: ink label and underline for the open tab, muted for the rest. */
+.tabs [data-component-part="tabs-list"] {
+  border-color: var(--bc-border) !important;
+}
+.tabs [data-component-part="tab-button"] {
+  color: var(--bc-muted-foreground) !important;
+  font-weight: 500;
+}
+.tabs [data-component-part="tab-button"].border-current {
+  color: var(--bc-foreground) !important;
+  border-bottom: 2px solid var(--bc-foreground) !important;
 }
 
 /* Callouts: neutral by default, lime for tips, amber for warnings, red for
@@ -326,7 +371,7 @@ code, pre, kbd, .font-mono {
   padding-right: 12px !important;
 }
 .mdx-content table tr:last-child td {
-  border-bottom: 0;
+  border-bottom: 0 !important;
 }
 .mdx-content table th {
   background: var(--bc-sidebar);
@@ -338,11 +383,15 @@ code, pre, kbd, .font-mono {
 .mdx-content table th {
   border-bottom: 1px solid var(--bc-border) !important;
 }
+.mdx-content table tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
 
 /* Page end: hairline pager cards and footer. */
 #pagination a {
   border: 1px solid var(--bc-border);
   border-radius: 8px;
+  background: transparent !important;
 }
 #pagination a:hover {
   border-color: var(--bc-border-active);
