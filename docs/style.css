@@ -1,43 +1,352 @@
-/* Barracuda design system on Mintlify's Sequoia theme. Only Mintlify's
-   documented selectors are used: #sidebar, #topbar-cta-button, #banner,
-   .card, .callout, .code-block, .accordion-group, .step, .toc-item, .eyebrow. */
+/* Barracuda Docs: the Barracuda design system on Mintlify's Sequoia theme.
+   Values come from the design system's tokens; selectors are the ids, classes,
+   and data attributes Sequoia renders. */
 
-/* System fonts, with a CJK fallback chain the `fonts` key cannot express. */
-body, .mdx-content {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
-    "Noto Sans SC", "Segoe UI", Roboto, sans-serif;
+/* Tokens. Sequoia tints its gray ramp toward the primary color; the design
+   system uses one neutral zinc ramp in both themes. */
+:root:root {
+  --gray-50: 245 245 247;
+  --gray-100: 240 240 242;
+  --gray-200: 225 225 229;
+  --gray-300: 210 210 214;
+  --gray-400: 161 161 170;
+  --gray-500: 108 108 117;
+  --gray-600: 82 82 91;
+  --gray-700: 63 63 70;
+  --gray-800: 39 39 42;
+  --gray-900: 24 24 27;
+  --gray-950: 9 9 11;
+
+  --bc-background: #FAFAFB;
+  --bc-sidebar: #F5F5F7;
+  --bc-foreground: #09090B;
+  --bc-muted: #F0F0F2;
+  --bc-muted-foreground: #6C6C75;
+  --bc-nav-foreground: #3F3F46;
+  --bc-border: #E1E1E5;
+  --bc-border-active: #A1A1AA;
+  --bc-ghost-hover: #00000015;
+  --bc-signal: #CCFF00;
+  --bc-signal-foreground: #09090B;
+  --bc-signal-text: #5A7301;
+  --bc-tip-surface: #F2FCE1;
+  --bc-tip-border: #D3F18F;
+  --bc-warn-surface: #FFF6E1;
+  --bc-warn-border: #FFDD84;
+  --bc-danger-surface: #FFEEF0;
+  --bc-danger-border: #FFD8D7;
+  --bc-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --bc-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
-code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 
-/* Lime buttons carry ink text. */
-#topbar-cta-button a { color: #09090B; }
-#banner { background: #CCFF00; color: #09090B; }
-
-/* Selection is a neutral fill, not colored text. */
-#sidebar a[data-active] {
-  background: #F0F0F2; color: #09090B; font-weight: 500; border-radius: 6px;
-}
-.dark #sidebar a[data-active] { background: #18181B; color: #FAFAFA; }
-
-/* Hairlines instead of shadows. */
-.card, .callout, .code-block, .accordion-group {
-  border: 1px solid #E1E1E5; border-radius: 8px; box-shadow: none;
-}
-.dark .card, .dark .callout, .dark .code-block, .dark .accordion-group {
-  border-color: #27272A;
-}
-
-/* Step numbers: monospace digits in a square. */
-.step [data-component-part="step-number"] {
-  border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+html.dark:root:root {
+  --bc-background: #09090B;
+  --bc-sidebar: #09090B;
+  --bc-foreground: #FAFAFA;
+  --bc-muted: #18181B;
+  --bc-muted-foreground: #A1A1AA;
+  --bc-nav-foreground: #D4D4D8;
+  --bc-border: #27272A;
+  --bc-border-active: #52525B;
+  --bc-ghost-hover: #FFFFFF17;
+  --bc-signal-text: #93B903;
+  --bc-tip-surface: #182100;
+  --bc-tip-border: #313F00;
+  --bc-warn-surface: #291800;
+  --bc-warn-border: #573200;
+  --bc-danger-surface: #330A11;
+  --bc-danger-border: #6F101B;
 }
 
-/* Table of contents: the active item is ink, not the accent. */
-.toc-item[data-active-deepest] { color: #09090B; font-weight: 500; }
-.dark .toc-item[data-active-deepest] { color: #FAFAFA; }
+/* Type: the system font stack with a CJK fallback chain. */
+html, body, #navbar, #sidebar-content, #content-area, #table-of-contents,
+#page-title, .prose, .card, .callout, .nav-tabs, button, input {
+  font-family: var(--bc-font-sans) !important;
+}
+code, pre, kbd, .font-mono {
+  font-family: var(--bc-font-mono) !important;
+}
 
-/* A lime square before each eyebrow. */
+/* Navbar: a hairline under the bar; the tabs row sits on the sidebar color. */
+#navbar {
+  border-bottom: 1px solid var(--bc-border);
+}
+#navbar .nav-tabs {
+  gap: 24px;
+}
+#navbar div:has(> div > .nav-tabs) {
+  background: var(--bc-sidebar);
+  border-top: 1px solid var(--bc-border);
+}
+.nav-tabs-item {
+  color: var(--bc-muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+.nav-tabs-item:hover,
+.nav-tabs-item[data-active="true"] {
+  color: var(--bc-foreground);
+}
+.nav-tabs-item[data-active="true"] > div {
+  height: 2px;
+  background: var(--bc-foreground) !important;
+}
+#search-bar-entry {
+  background: var(--bc-sidebar);
+  border: 1px solid var(--bc-border);
+  border-radius: 6px;
+  color: var(--bc-muted-foreground);
+}
+/* The navbar's primary button: lime with ink text in both themes. */
+#navbar a[href="/get-started/quickstart"] {
+  background: var(--bc-signal) !important;
+  color: var(--bc-signal-foreground) !important;
+  border-radius: 6px !important;
+}
+#navbar a[href="/get-started/quickstart"] * {
+  color: var(--bc-signal-foreground) !important;
+}
+#navbar a[href="/get-started/quickstart"]:hover {
+  background: #BAE634 !important;
+}
+.nav-logo {
+  height: 28px !important;
+}
+
+/* Sidebar: muted group labels; the current page is a neutral fill, not
+   colored text. */
+#sidebar-content .sidebar-group-header {
+  color: var(--bc-muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+#sidebar-content li > a {
+  color: var(--bc-nav-foreground);
+  border-radius: 6px;
+}
+#sidebar-content li > a:hover {
+  background: var(--bc-ghost-hover);
+}
+#sidebar-content li[data-active="true"] > a,
+#sidebar-content li[data-active="true"] > a * {
+  color: var(--bc-foreground) !important;
+  font-weight: 500;
+}
+#sidebar-content li[data-active="true"] > a {
+  background: var(--bc-muted) !important;
+}
+
+/* Table of contents: a left rail; the current heading is ink with an ink
+   rule. */
+#table-of-contents .toc-item > a {
+  color: var(--bc-muted-foreground);
+  border-left: 1px solid var(--bc-border);
+  padding-left: 12px;
+  font-size: 13px;
+}
+#table-of-contents .toc-item[data-depth="1"] > a {
+  padding-left: 24px;
+}
+#table-of-contents .toc-item > a:hover {
+  color: var(--bc-foreground);
+}
+#table-of-contents .toc-item[data-active-deepest="true"] > a {
+  color: var(--bc-foreground) !important;
+  border-left-color: var(--bc-foreground);
+  font-weight: 500;
+}
+
+/* Page header: mono eyebrow after a lime square, a 600-weight title, a muted
+   lead. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--bc-muted-foreground) !important;
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
 .eyebrow::before {
-  content: ""; display: inline-block; width: 6px; height: 6px;
-  margin-right: 8px; background: #CCFF00;
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  background: var(--bc-signal);
+}
+#page-title {
+  color: var(--bc-foreground);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+#header .prose p {
+  color: var(--bc-muted-foreground);
+}
+
+/* Prose: ink links with a lime underline; inline code on a muted chip. */
+.mdx-content a.link {
+  color: var(--bc-foreground);
+  font-weight: 500;
+  border-bottom: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--bc-signal);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.mdx-content a.link:hover {
+  text-decoration-color: var(--bc-foreground);
+}
+.mdx-content :not(pre) > code {
+  padding: 1px 6px;
+  border: 1px solid var(--bc-border);
+  border-radius: 4px;
+  background: var(--bc-muted);
+  color: var(--bc-foreground);
+  font-size: 0.875em;
+}
+.mdx-content :not(pre) > code::before,
+.mdx-content :not(pre) > code::after {
+  content: none;
+}
+
+/* Cards: hairline, 8px radius, no shadow; the icon sits in a tile. */
+.card {
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  background: var(--bc-background);
+}
+.card:hover {
+  border-color: var(--bc-border-active) !important;
+  background: var(--bc-ghost-hover);
+}
+.card [data-component-part="card-icon"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--bc-border);
+  border-radius: 4px;
+  background: var(--bc-sidebar);
+  color: var(--bc-foreground);
+}
+.card [data-component-part="card-icon"] svg {
+  background-color: var(--bc-foreground) !important;
+}
+.card [data-component-part="card-title"] {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Code blocks: hairline frame, 8px radius, the header on the sidebar color. */
+.code-block,
+.code-group {
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+.code-block [data-component-part="code-block-root"] {
+  background: var(--bc-background) !important;
+}
+.code-block [data-component-part="code-block-header"],
+.code-group [data-component-part="code-group-tab-bar"] {
+  background: var(--bc-sidebar);
+  border-bottom: 1px solid var(--bc-border);
+  color: var(--bc-muted-foreground);
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+}
+
+/* Callouts: neutral by default, lime for tips, amber for warnings, red for
+   danger. */
+.callout {
+  border: 1px solid var(--bc-border) !important;
+  border-radius: 8px !important;
+  background: var(--bc-sidebar) !important;
+  color: var(--bc-foreground);
+}
+.callout[data-callout-type="tip"],
+.callout[data-callout-type="check"] {
+  border-color: var(--bc-tip-border) !important;
+  background: var(--bc-tip-surface) !important;
+}
+.callout[data-callout-type="warning"] {
+  border-color: var(--bc-warn-border) !important;
+  background: var(--bc-warn-surface) !important;
+}
+.callout[data-callout-type="danger"] {
+  border-color: var(--bc-danger-border) !important;
+  background: var(--bc-danger-surface) !important;
+}
+.callout * {
+  color: inherit;
+}
+
+/* Steps: monospace digits in a 4px square on a hairline rail. */
+[data-component-part="step-indicator"] {
+  border: 1px solid var(--bc-border-active);
+  border-radius: 4px !important;
+  background: var(--bc-background) !important;
+  color: var(--bc-foreground) !important;
+  font-family: var(--bc-font-mono) !important;
+  font-size: 12px;
+}
+[data-component-part="step-line"] {
+  background: var(--bc-border) !important;
+}
+[data-component-part="step-title"] {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Headings: 600 weight, tightened. */
+.mdx-content h2 {
+  color: var(--bc-foreground);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.mdx-content h3 {
+  color: var(--bc-foreground);
+  font-weight: 600;
+}
+
+/* Tables: a hairline frame and a muted header row. */
+.mdx-content table {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+.mdx-content table th,
+.mdx-content table td {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+.mdx-content table tr:last-child td {
+  border-bottom: 0;
+}
+.mdx-content table th {
+  background: var(--bc-sidebar);
+  color: var(--bc-muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+}
+.mdx-content table td,
+.mdx-content table th {
+  border-bottom: 1px solid var(--bc-border) !important;
+}
+
+/* Page end: hairline pager cards and footer. */
+#pagination a {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+}
+#pagination a:hover {
+  border-color: var(--bc-border-active);
+}
+#footer {
+  border-color: var(--bc-border);
 }
