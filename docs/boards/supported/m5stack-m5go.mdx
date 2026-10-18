@@ -1,0 +1,31 @@
+---
+title: "M5Stack M5GO"
+sidebarTitle: "M5GO"
+description: "Build, flash, and run Barracuda on the M5Stack M5GO, an ESP32 Board."
+---
+
+The M5Stack M5GO is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-m5go`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/m5stack-m5go/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-m5go
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |

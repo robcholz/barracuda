@@ -1,0 +1,32 @@
+---
+title: "M5Stack Chan"
+sidebarTitle: "Chan"
+description: "Build, flash, and run Barracuda on the M5Stack Chan, an ESP32-S3 Board."
+---
+
+The M5Stack Chan is an ESP32-S3 Board from M5Stack.
+
+- Board ID: `m5stack-chan`
+- Vendor: M5Stack
+- Chip: ESP32-S3
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32s3-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-chan/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-chan
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/m5stack-chan/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

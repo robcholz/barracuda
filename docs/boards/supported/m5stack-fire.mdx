@@ -1,0 +1,31 @@
+---
+title: "M5Stack Fire"
+sidebarTitle: "Fire"
+description: "Build, flash, and run Barracuda on the M5Stack Fire, an ESP32 Board."
+---
+
+The M5Stack Fire is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-fire`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/m5stack-fire/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-fire
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |

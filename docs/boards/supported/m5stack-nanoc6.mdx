@@ -1,0 +1,32 @@
+---
+title: "M5Stack NanoC6"
+sidebarTitle: "NanoC6"
+description: "Build, flash, and run Barracuda on the M5Stack NanoC6, an ESP32-C6 Board."
+---
+
+The M5Stack NanoC6 is an ESP32-C6 Board from M5Stack.
+
+- Board ID: `m5stack-nanoc6`
+- Vendor: M5Stack
+- Chip: ESP32-C6
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `riscv32imac-unknown-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-nanoc6/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-nanoc6
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/m5stack-nanoc6/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).

@@ -1,0 +1,56 @@
+---
+title: "macOS host"
+description: "Run Barracuda on a Mac with virtual peripherals, no Board needed."
+---
+
+The `local-macos` Board runs the same System on a Mac, with virtual
+peripherals in place of hardware. It is the quickest way to try Barracuda.
+
+- Board ID: `local-macos`
+- Platform: [macOS](/platforms/macos)
+- Profile: [`screen`](/boards/profiles)
+- Flash layout: `boards/configs/local-macos/file-layout.yml`
+
+## Build and run
+
+```bash terminal
+cargo board select local-macos
+BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
+```
+
+See the [Quickstart](/get-started/quickstart) for the full walkthrough.
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Round display (ST77916, quad SPI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (CST816T) | — |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `vio-0` | `GPIO0` |
+| `vio-1` | `GPIO1` |
+| `vio-2` | `GPIO2` |
+| `vio-3` | `GPIO3` |
+| `vio-4` | `GPIO4` |
+| `vio-5` | `GPIO5` |
+| `vio-6` | `GPIO6` |
+| `vio-7` | `GPIO7` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("vio-0", "up")
+print(pin:read())
+```
+
+## Plugin settings
+
+- [`imessage-gateway`](/plugins/imessage-gateway) `receive-slots` is `4`:
+  4 connections are reserved for channel receive loops.

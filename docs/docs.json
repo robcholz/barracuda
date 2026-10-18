@@ -121,10 +121,127 @@
               "boards/exposed-io",
               "boards/drivers",
               "architecture/platform-architecture",
-              "platforms/linux",
-              "platforms/macos",
-              "platforms/macos-network-gateway",
-              "platforms/virtual-io"
+              {
+                "group": "Platforms",
+                "pages": [
+                  "platforms/esp32",
+                  "platforms/stm32",
+                  "platforms/linux",
+                  "platforms/macos",
+                  "platforms/macos-network-gateway",
+                  "platforms/virtual-io"
+                ]
+              },
+              {
+                "group": "Boards",
+                "pages": [
+                  {
+                    "group": "M5Stack",
+                    "pages": [
+                      "boards/supported/m5stack-airq",
+                      "boards/supported/m5stack-atom-display",
+                      "boards/supported/m5stack-atom-echo",
+                      "boards/supported/m5stack-atom-lite",
+                      "boards/supported/m5stack-atom-matrix",
+                      "boards/supported/m5stack-atom-psram",
+                      "boards/supported/m5stack-atom-s3",
+                      "boards/supported/m5stack-atom-s3-lite",
+                      "boards/supported/m5stack-atom-s3r",
+                      "boards/supported/m5stack-atom-s3r-cam",
+                      "boards/supported/m5stack-atom-s3r-ext",
+                      "boards/supported/m5stack-atom-s3u",
+                      "boards/supported/m5stack-atom-u",
+                      "boards/supported/m5stack-atom-voice-s3r",
+                      "boards/supported/m5stack-basic",
+                      "boards/supported/m5stack-capsule",
+                      "boards/supported/m5stack-cardputer",
+                      "boards/supported/m5stack-cardputer-adv",
+                      "boards/supported/m5stack-chain-captain",
+                      "boards/supported/m5stack-chan",
+                      "boards/supported/m5stack-core2",
+                      "boards/supported/m5stack-core2-for-aws",
+                      "boards/supported/m5stack-coreink",
+                      "boards/supported/m5stack-corep4x",
+                      "boards/supported/m5stack-cores3",
+                      "boards/supported/m5stack-cores3-se",
+                      "boards/supported/m5stack-dial",
+                      "boards/supported/m5stack-din-meter",
+                      "boards/supported/m5stack-fire",
+                      "boards/supported/m5stack-gray",
+                      "boards/supported/m5stack-m5go",
+                      "boards/supported/m5stack-m5go-lite",
+                      "boards/supported/m5stack-nanoc6",
+                      "boards/supported/m5stack-paper",
+                      "boards/supported/m5stack-paper-color",
+                      "boards/supported/m5stack-paper-diy",
+                      "boards/supported/m5stack-paper-mono",
+                      "boards/supported/m5stack-paper-s3",
+                      "boards/supported/m5stack-powerhub",
+                      "boards/supported/m5stack-stamp-c3",
+                      "boards/supported/m5stack-stamp-c3-mate",
+                      "boards/supported/m5stack-stamp-c3u",
+                      "boards/supported/m5stack-stamp-c6",
+                      "boards/supported/m5stack-stamp-p4",
+                      "boards/supported/m5stack-stamp-p4x",
+                      "boards/supported/m5stack-stamp-pico",
+                      "boards/supported/m5stack-stamp-plc",
+                      "boards/supported/m5stack-stamp-s3",
+                      "boards/supported/m5stack-stamp-s3-bat",
+                      "boards/supported/m5stack-stamp-s3-mini",
+                      "boards/supported/m5stack-station",
+                      "boards/supported/m5stack-stick-s3",
+                      "boards/supported/m5stack-stickc",
+                      "boards/supported/m5stack-stickc-plus",
+                      "boards/supported/m5stack-stickc-plus2",
+                      "boards/supported/m5stack-stopwatch",
+                      "boards/supported/m5stack-tab5",
+                      "boards/supported/m5stack-tab5x",
+                      "boards/supported/m5stack-timercam",
+                      "boards/supported/m5stack-tough",
+                      "boards/supported/m5stack-unit-c6l",
+                      "boards/supported/m5stack-unit-poep4",
+                      "boards/supported/m5stack-va-meter"
+                    ]
+                  },
+                  {
+                    "group": "Espressif",
+                    "pages": [
+                      "boards/supported/esp32-devkitc-v4",
+                      "boards/supported/esp32c3-devkitc-02",
+                      "boards/supported/esp32c3-devkitm-1",
+                      "boards/supported/esp32c6-devkitc-1",
+                      "boards/supported/esp32c6-devkitm-1",
+                      "boards/supported/esp32p4-function-ev-board",
+                      "boards/supported/esp32s3-box-2",
+                      "boards/supported/esp32s3-box-3",
+                      "boards/supported/esp32s3-devkitc-1",
+                      "boards/supported/esp32s3-devkitm-1",
+                      "boards/supported/esp32s3-eye",
+                      "boards/supported/esp32s3-korvo-2",
+                      "boards/supported/espressif-esp-vocat-v1-2"
+                    ]
+                  },
+                  {
+                    "group": "STMicroelectronics",
+                    "pages": [
+                      "boards/supported/nucleo-u5a5zj-q"
+                    ]
+                  },
+                  {
+                    "group": "Unexpected Maker",
+                    "pages": [
+                      "boards/supported/unexpected-maker-tinypico"
+                    ]
+                  },
+                  {
+                    "group": "Computers",
+                    "pages": [
+                      "boards/supported/local-linux",
+                      "boards/supported/local-macos"
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {

@@ -1,0 +1,31 @@
+---
+title: "M5Stack ATOM Matrix"
+sidebarTitle: "ATOM Matrix"
+description: "Build, flash, and run Barracuda on the M5Stack ATOM Matrix, an ESP32 Board."
+---
+
+The M5Stack ATOM Matrix is an ESP32 Board from M5Stack.
+
+- Board ID: `m5stack-atom-matrix`
+- Vendor: M5Stack
+- Chip: ESP32
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `xtensa-esp32-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/m5stack-atom-matrix/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select m5stack-atom-matrix
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `led-strip` | LED strip (WS2812) | [`light`](/plugins/vm-led-strip) |

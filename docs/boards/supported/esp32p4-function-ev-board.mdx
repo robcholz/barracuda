@@ -1,0 +1,36 @@
+---
+title: "ESP32-P4-Function-EV-Board"
+description: "Build, flash, and run Barracuda on the ESP32-P4-Function-EV-Board, an ESP32-P4 Board."
+---
+
+The ESP32-P4-Function-EV-Board is an ESP32-P4 Board from Espressif.
+
+- Board ID: `esp32p4-function-ev-board`
+- Vendor: Espressif
+- Chip: ESP32-P4
+- Platform: [ESP32](/platforms/esp32)
+- Rust target: `riscv32imafc-unknown-none-elf`
+- Profile: [`headless`](/boards/profiles) (the default)
+- Flash layout: `boards/configs/esp32p4-function-ev-board/partitions.csv`
+
+## Build and run
+
+```bash terminal
+cargo board select esp32p4-function-ev-board
+cargo run
+cargo image deploy
+```
+
+Install the toolchain first; see [ESP32](/platforms/esp32).
+
+## Peripherals
+
+This Board declares no peripherals yet. The network, the Agent, and the
+portal run on it; add its devices to
+`boards/configs/esp32p4-function-ev-board/board.yml` to drive them. See
+[Peripheral composition](/boards/peripherals).
+
+## Plugin settings
+
+- [`imessage-gateway`](/plugins/imessage-gateway) `receive-slots` is `0`: no
+  connections are reserved for channel receive loops on this Board.
