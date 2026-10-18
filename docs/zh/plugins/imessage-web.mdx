@@ -10,13 +10,13 @@ Gateway 消息通道，并通过 WebSocket 桥接到浏览器。
 - 插件 ID：`imessage-web`
 - 依赖：`imessage-gateway`、`webserver`、`captive-portal`
 - 设置：无
-- Context 资源：`entropy`（媒体 id 中每次启动的前缀）
+- 上下文资源：`entropy`（媒体 id 中每次启动的前缀）
 - 提供的能力：`IMessageWebRoute`
-- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
   `IMessageGateway`、来自 `webserver` 的 `WebServer`
 - Workflow：无（收到的消息和控制指令以 Gateway 的
   `gateway.message.received` 和 `gateway.control.received` 形式到达 Workflow）
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：无
 - Web：门户入口 `imessage-web`，不带状态；WebSocket 路由
   `/ws/message`；`PUT /api/web/upload/<mime>/<filename>`；

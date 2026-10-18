@@ -17,7 +17,7 @@ Gateway 消息通道：它通过 BlueBubbles API 发送消息，并通过服务�
   来自 `imessage-gateway` 的 `IMessageGateway`，来自 `webserver` 的 `WebServer`
 - Workflow：无（收到的消息以 Gateway 的
   `gateway.message.received` 形式到达 Workflow）
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：无
 - Web：门户入口 `imessage-bluebubble`，带状态；`POST
   /api/gateway/bluebubbles`、`GET /api/gateway/bluebubbles/status`、`POST
@@ -56,10 +56,10 @@ Gateway 消息通道：它通过 BlueBubbles API 发送消息，并通过服务�
 
 接收通过局域网 webhook 进行。BlueBubbles 服务器把 `new-message` 事件推送到设备 Web 服务器（端口 8787）上的 `POST /api/gateway/bluebubbles/hook/<secret>`，所以它不使用出站连接，也不占用接收名额。
 
-**密钥。**Web 服务器不暴露请求头或查询参数，所以由路径携带密钥。密钥是来自平台熵源的 128 位数据，写成 32 个十六进制数字，并以恒定时间比较。它与为其生成该密钥的服务器 URL 一起存储在 `webhook` 中。新的服务器 URL 会生成新的密钥，并开始新的游标。
+**密钥**。Web 服务器不暴露请求头或查询参数，所以由路径携带密钥。密钥是来自平台熵源的 128 位数据，写成 32 个十六进制数字，并以恒定时间比较。它与为其生成该密钥的服务器 URL 一起存储在 `webhook` 中。新的服务器 URL 会生成新的密钥，并开始新的游标。
 没有熵源时，接收会以错误停止。
 
-**端点。**路由以前缀形式注册
+**端点**。路由以前缀形式注册
 （`serve_http_prefix("/api/gateway/bluebubbles/hook")`），因为注册时还不知道密钥。处理程序只做检查和排队；它从不等待。
 - 密钥错误或不处于 `send_receive` 时返回 404，方法不是 `POST` 时返回 405。
 - 否则立即返回 204，并执行以下操作之一：
@@ -108,7 +108,7 @@ Gateway 消息通道：它通过 BlueBubbles API 发送消息，并通过服务�
   - `Paired`：通过提供方向该聊天发送 `PAIRED_REPLY`。
   - `Ignored`：丢弃消息；所有者名单会对它计数。
 
-**附件。**所有者消息的 `attachments[]` 会按顺序逐个获取，每个都通过
+**附件**。所有者消息的 `attachments[]` 会按顺序逐个获取，每个都通过
 `IMessageGateway::download_inbound` 在共享请求池中使用
 `GET /api/v1/attachment/<guid>/download?password=…`，下载到
 `/workspace/cache/gateway/bluebubbles/`。

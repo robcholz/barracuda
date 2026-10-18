@@ -6,8 +6,8 @@ description: "在 Linux 和 macOS 平台上使用仅限主机的虚拟 GPIO、I2
 由 Linux 和 macOS 平台共用的、仅限主机的虚拟 GPIO、I2C 和 SPI 硬件。它永远不会进入固件。
 
 - **平台 HAL。**`barracuda_platform_virtual_io::hal` 被重新导出为两个主机平台的 `hal` 模块。它提供虚拟外设单例（`VirtualPeripherals`：引脚 `GPIO0`..`GPIO23`，I2C 控制器 `I2C0`、`I2C1` 和 `I2C2`，SPI 控制器 `SPI0` 和 `SPI1`）、开发板暴露 I/O 背后的 `RuntimePlatform` 适配器，以及供外设实现使用的 `i2c-device`、`spi-device`、`digital-output` 和 `digital-input` 构造器。主机开发板在 `GPIO0`..`GPIO7` 上暴露 `vio-0`..`vio-7`，并把 `I2C0` 和 `I2C1` 留给运行时 I/O。
-- **开发板声明的外设。**主机开发板和其他开发板一样在 `board.yml` 中声明外设。主机平台在它们的 HAL 清单中设置了 `peripheral-models`，因此生成的开发板组合会在初始化任何外设之前，对每个外设调用 `hal::declare_peripheral`；HAL 在声明的总线和地址上挂接该实现对应的芯片模型（见下文），System 则针对它运行真实的芯片驱动和外设实现。
-- **虚拟外设管理器。**一个进程范围的 `VirtualHardware` 保存引脚状态、挂接了设备模型的 I2C 总线、故障规则和带时间戳的事件日志。它监听 `BARRACUDA_VIRTUAL_IO_ADDR` 中的回环地址。该变量是必需的：缺少它、或者它的值不是回环地址或无法解析时，主机 System 会在启动时退出。
+- **开发板声明的外设**。主机开发板和其他开发板一样在 `board.yml` 中声明外设。主机平台在它们的 HAL 清单中设置了 `peripheral-models`，因此生成的开发板组合会在初始化任何外设之前，对每个外设调用 `hal::declare_peripheral`；HAL 在声明的总线和地址上挂接该实现对应的芯片模型（见下文），System 则针对它运行真实的芯片驱动和外设实现。
+- **虚拟外设管理器**。一个进程范围的 `VirtualHardware` 保存引脚状态、挂接了设备模型的 I2C 总线、故障规则和带时间戳的事件日志。它监听 `BARRACUDA_VIRTUAL_IO_ADDR` 中的回环地址。该变量是必需的：缺少它、或者它的值不是回环地址或无法解析时，主机 System 会在启动时退出。
 - **设备模型。**`I2cDevice` 实现拥有寄存器行为，并可以报告违反数据手册顺序和时序的情况。它们独立于管理器和 System，因此芯片驱动测试可以在一个独立的 `VirtualHardware` 上、配合手动 `Clock` 和 `VirtualDelay` 运行驱动。
 
 ## 开发板声明的外设

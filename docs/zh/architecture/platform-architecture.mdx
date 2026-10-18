@@ -16,16 +16,16 @@ Board HAL = Board matrix + peripheral implementations + exposed I/O
 Target    = Platform + Board HAL
 ~~~
 
-- **平台（Platform）**是一个执行平台：一个芯片系列，例如 ESP32-S3、ESP32-C6 或 STM32，或者一个托管环境，例如 Linux 或 macOS。它提供平台机制，例如 IP 协议栈、熵和分区，并把它的厂商 HAL 适配到上游硬件契约。它不描述开发板的具体外设、接线或产品硬件矩阵。
-- **开发板（Board）**是一个具体的硬件组合。它的矩阵描述该产品的芯片、总线、引脚、时钟、所连接的外设、固定接线和原生物理布局。
-- **外设 API（Peripheral API）**是一个语义化的、与芯片无关的接口，例如 Display、Touch、PowerMonitor 或 RealTimeClock。
-- **外设实现（Peripheral implementation）**把具体的芯片和接线适配到一个外设 API。它可以组合多个私有的芯片驱动。
-- **芯片驱动（Chip Driver）**是 `drivers/chips` 下的底层寄存器或协议实现。它对开发板和 System 都不可见，也不拥有外设清单。
-- **平台 HAL 模块（Platform HAL module）**是在每个平台旁边实现的厂商适配。它把所选平台的只能移动的令牌转换为实现 `embedded-hal`、`embedded-hal-async` 的具体值，或者在这些生态没有对应契约时，转换为一个窄范围的领域绑定。
-- **开发板 HAL（Board HAL）**是通过所选平台 HAL 模块，把外设实现应用到开发板矩阵上得到的静态组合结果。它暴露可选的语义化外设和显式暴露的 I/O，供 System 和硬件插件使用。
+- <strong>平台（Platform）</strong>是一个执行平台：一个芯片系列，例如 ESP32-S3、ESP32-C6 或 STM32，或者一个托管环境，例如 Linux 或 macOS。它提供平台机制，例如 IP 协议栈、熵和分区，并把它的厂商 HAL 适配到上游硬件契约。它不描述开发板的具体外设、接线或产品硬件矩阵。
+- <strong>开发板（Board）</strong>是一个具体的硬件组合。它的矩阵描述该产品的芯片、总线、引脚、时钟、所连接的外设、固定接线和原生物理布局。
+- <strong>外设 API（Peripheral API）</strong>是一个语义化的、与芯片无关的接口，例如 Display、Touch、PowerMonitor 或 RealTimeClock。
+- <strong>外设实现（Peripheral implementation）</strong>把具体的芯片和接线适配到一个外设 API。它可以组合多个私有的芯片驱动。
+- <strong>芯片驱动（Chip Driver）</strong>是 `drivers/chips` 下的底层寄存器或协议实现。它对开发板和 System 都不可见，也不拥有外设清单。
+- <strong>平台 HAL 模块（Platform HAL module）</strong>是在每个平台旁边实现的厂商适配。它把所选平台的只能移动的令牌转换为实现 `embedded-hal`、`embedded-hal-async` 的具体值，或者在这些生态没有对应契约时，转换为一个窄范围的领域绑定。
+- <strong>开发板 HAL（Board HAL）</strong>是通过所选平台 HAL 模块，把外设实现应用到开发板矩阵上得到的静态组合结果。它暴露可选的语义化外设和显式暴露的 I/O，供 System 和硬件插件使用。
 - **Target** 是独立选择的平台与所选开发板 HAL 的组合。
 - **System** 是聚合入口。它构造由 System 拥有的服务，装配固定的插件图，并把平台和 HAL 的能力路由给它们的使用者。
-- **插件（Plugin）**是由 System 管理的自包含功能模块。
+- <strong>插件（Plugin）</strong>是由 System 管理的自包含功能模块。
 
 平台不是开发板支持包、外设驱动集合，也不是 System 的依赖袋。它的 HAL 模块包含可复用的厂商适配，而不是产品接线。
 

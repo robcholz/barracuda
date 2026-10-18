@@ -11,11 +11,11 @@ description: "为 Agent 提供基于 Tavily 的网页搜索，并通过门户页
 - 设置：无
 - 上下文资源：无
 - 提供的能力：无
-- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、
   来自 `agent` 的 `AgentToolRegistry`、来自 `webserver` 的 `WebServer`、
   来自 `http` 的 `ClientFactory`
 - Workflow：无
-- Agent Tool：`web_search`
+- Agent 工具：`web_search`
 - Lua 包：无
 - Web：门户入口 `agent-websearch`，带状态；`GET /api/tavily/status`、
   `POST /api/tavily`（参见 [HTTP](/zh/plugins/agent-websearch/http)）

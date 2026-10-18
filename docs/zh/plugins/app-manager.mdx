@@ -20,7 +20,7 @@ tag: "NEW"
 - Workflow：Action `app.list`、`app.open`、`app.install`、`app.home`、
   `app.interactive`、`app.terminate`、`app.status`、`app.tap`、`app.notify`、
   `app.confirm` 和 `app.agent`，参见 [Action](/zh/plugins/app-manager/action)；Event 无
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：`app`（环境）和 `notify`（稳定，版本 2），以及每个内置应用的 Lua 包
 - Web：无
 - 任务：一个任务，监管最多 `MAX_APP_RUNS`（3）个应用运行，响应内置应用的 Lua 包调用；有显示屏时，还负责绘制视图、读取触摸并运行系统 UI
@@ -92,7 +92,7 @@ terminate from any state → terminating → exits within GRACE, or is cancelled
 | 在它的信息界面中卸载它                    | `uninstall(id)`             | `app:terminate`                      |
 | 触摸应用的视图                            | 无；代码中可用 `tap(x, y)`  | 视图的处理函数调用                   |
 
-- **输入。**只有处于活动状态的应用才会收到视图调用；非活动应用的视图仍留在显示屏上，但忽略触摸。在它停止接收输入之前排队的调用会被丢弃，所以 `app:inactive` 之后不会再有调用到达。
+- **输入**。只有处于活动状态的应用才会收到视图调用；非活动应用的视图仍留在显示屏上，但忽略触摸。在它停止接收输入之前排队的调用会被丢弃，所以 `app:inactive` 之后不会再有调用到达。
 - **挂起。**`app:background` 之后过了 `GRACE`（1 秒），在 `app.events()` 中等待的应用会被挂起：它的视图树被释放，值被保留，`open` 会根据这些值重建视图树。仍在运行的应用会被取消。挂起的程序不占用 CPU，但保留它的 VM 运行和 Lua 堆。
 - **终止。**`terminate` 发送 `app:terminate`；如果运行在 `GRACE` 之后仍未结束，就会被取消。超出 `MAX_SUSPENDED`（2）的挂起应用，以及启动新应用需要运行槽位时最久未使用的挂起应用，会在不再发送事件的情况下被终止，所以程序应在 `app:background` 时保存数据。
 - **无头应用**没有视图，从不进入前台，以服务的形式运行，直到返回或被终止。

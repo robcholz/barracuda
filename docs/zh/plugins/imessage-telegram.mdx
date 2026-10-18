@@ -9,13 +9,13 @@ IMessage Telegram 插件把 Telegram Bot 添加为一个 iMessage Gateway 消息
 - 插件 ID：`imessage-telegram`
 - 依赖：`imessage-gateway`、`webserver`、`captive-portal`
 - 设置：无
-- Context 资源：无
+- 上下文资源：无
 - 提供的能力：无
-- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
   `IMessageGateway`
 - Workflow：无（收到的消息以 Gateway 的
   `gateway.message.received` 形式到达 Workflow）
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：无
 - Web：门户入口 `imessage-telegram`，带状态；`POST
   /api/gateway/telegram`、`GET /api/gateway/telegram/status`、`POST

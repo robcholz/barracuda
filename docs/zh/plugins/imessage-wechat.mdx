@@ -53,7 +53,7 @@ IMessage WeChat 插件把微信 iLink 添加为 iMessage Gateway 的消息通道
 
 在一次正常的轮询之后被服务器关闭的连接会立即重新打开。其他失败按照脚手架的退避策略处理（从 1 s 开始翻倍，最长 30 s；HTTP 429 之后为 30 s）。`ret` 或 `errcode` 为 -14 表示机器人会话已过期：循环会停止，接收状态为 `error`，消息为 `SESSION_EXPIRED_MESSAGE`（中文部分之后是 "Scan again to relink"），直到新的二维码登录被确认，或者配置或模式发生变化。
 
-**文件。**每个 iLink 文件都存放在 CDN 上（`cdn_base`，默认为 `https://novac2c.cdn.weixin.qq.com/c2c`），用它自己的密钥以 AES-128-ECB 加密，并使用 PKCS#7 填充。一个条目通过 `media.full_url` 指明文件，否则通过 `media.encrypt_query_param`（从 `<cdn_base>/download?encrypted_query_param=<param>` 下载），并携带密钥：`image_item.aeskey` 为 32 位十六进制数字，否则 `media.aes_key` 为 16 个原始字节或其十六进制数字的 base64 编码。
+**文件**。每个 iLink 文件都存放在 CDN 上（`cdn_base`，默认为 `https://novac2c.cdn.weixin.qq.com/c2c`），用它自己的密钥以 AES-128-ECB 加密，并使用 PKCS#7 填充。一个条目通过 `media.full_url` 指明文件，否则通过 `media.encrypt_query_param`（从 `<cdn_base>/download?encrypted_query_param=<param>` 下载），并携带密钥：`image_item.aeskey` 为 32 位十六进制数字，否则 `media.aes_key` 为 16 个原始字节或其十六进制数字的 base64 编码。
 
 | 条目 | 类型 | MIME 类型 |
 | --- | --- | --- |
@@ -79,13 +79,13 @@ received]` 或 `[<kind> not received]`。陌生人的消息和配对消息中的
 
 来源：腾讯自己的 iLink 客户端 `@tencent-weixin/openclaw-weixin` 2.4.10（npm，由腾讯发布）：`src/api/types.ts`（条目、`getuploadurl`）、`src/cdn/aes-ecb.ts`、`cdn-url.ts`、`cdn-upload.ts`、`upload.ts`、`pic-decrypt.ts`（加密、URL、`x-encrypted-param`、密钥编码）、`src/media/media-download.ts` 和 `src/messaging/send.ts`。
 
-**带上下文令牌发送。**提供者会在每次发送时附上接收者（`to_user_id`）最新保存的 `context_token`。目标 `thread_id` 仍然会覆盖它。令牌从不放进路由的 `thread_id`：它随每条消息变化，会把路由拆散。
+**带上下文令牌发送**。提供者会在每次发送时附上接收者（`to_user_id`）最新保存的 `context_token`。目标 `thread_id` 仍然会覆盖它。令牌从不放进路由的 `thread_id`：它随每条消息变化，会把路由拆散。
 
-**去重和游标。**最近送达的 32 个消息 id 保存在 RAM 中，所以重新连接或重启后重新投递的一批消息只会发布一次。游标在一批消息处理完之后推进；当它在一批包含消息的批次中发生变化时写入，否则最多每 5 分钟写入一次。只会保存非空的 `get_updates_buf`。
+**去重和游标**。最近送达的 32 个消息 id 保存在 RAM 中，所以重新连接或重启后重新投递的一批消息只会发布一次。游标在一批消息处理完之后推进；当它在一批包含消息的批次中发生变化时写入，否则最多每 5 分钟写入一次。只会保存非空的 `get_updates_buf`。
 
-**每个接收中的消息通道的内存占用。**租约的静态 1 KiB TX 和 4 KiB RX 套接字缓冲区；连接期间基于它们的一个 mbedTLS 会话（堆上约 2 × 16.7 KiB 的记录缓冲区）；每次轮询一个 2 KiB 的响应头缓冲区和一个 512 字节的读取块；应答体（上限 32 KiB，只有在跳过更大的批次时才另加 4 KiB 的尾部）；最多 32 个记住的消息 id；以及最多 16 个上下文令牌（每个用户 id ≤ 128 字节，令牌 ≤ 1 KiB）。下载文件期间：一个带 Gateway 下载缓冲区的请求池连接、一个 AES 上下文，以及最多两次正在处理的解密读取；上传占用一个连接、一个 AES 上下文和一个文件块。
+**每个接收中的消息通道的内存占用**。租约的静态 1 KiB TX 和 4 KiB RX 套接字缓冲区；连接期间基于它们的一个 mbedTLS 会话（堆上约 2 × 16.7 KiB 的记录缓冲区）；每次轮询一个 2 KiB 的响应头缓冲区和一个 512 字节的读取块；应答体（上限 32 KiB，只有在跳过更大的批次时才另加 4 KiB 的尾部）；最多 32 个记住的消息 id；以及最多 16 个上下文令牌（每个用户 id ≤ 128 字节，令牌 ≤ 1 KiB）。下载文件期间：一个带 Gateway 下载缓冲区的请求池连接、一个 AES 上下文，以及最多两次正在处理的解密读取；上传占用一个连接、一个 AES 上下文和一个文件块。
 
-**登录。**二维码登录有自己的任务。确认的登录会像手动 `POST` 一样保存配置；当它的 `ilink_bot_id` 与已保存的 `bot_id` 不同时，会清除旧机器人的游标和上下文令牌。然后接收会与模式同步并重新开始，这也会清除会话过期导致的停止。
+**登录**。二维码登录有自己的任务。确认的登录会像手动 `POST` 一样保存配置；当它的 `ilink_bot_id` 与已保存的 `bot_id` 不同时，会清除旧机器人的游标和上下文令牌。然后接收会与模式同步并重新开始，这也会清除会话过期导致的停止。
 
 门户入口通过 `CaptivePortal::register_with_status` 注册。它的 `GET /portal/status` 记录在二维码登录会话处于 `wait` 或 `scanned` 时为 `attention`“等待扫码”，在接收因机器人会话过期而停止时为 `attention`“需要重新扫码”，否则为 Gateway 对该消息通道的 `channel_status`：未绑定时为 `off`“未配置”，停用时为 `off`“已停用”，接收中为 `ready`“收发中”，其他情况为 `attention`“连接中”、“名额已满”或“连接中断”。
 

@@ -10,16 +10,16 @@ IMessage Gateway 插件在消息通道插件与 Workflow 之间路由消息，�
 - 依赖：`workflow`、`http`、`webserver`
 - 设置：`receive-slots`（`usize`，默认 `1`）、`attachment-max-bytes`
   （`u32`，默认 `8388608`）
-- Context 资源：`ip_stack`、`entropy`
+- 上下文资源：`ip_stack`、`entropy`
 - 提供的能力：`IMessageGateway`
-- 需要的能力：来自 `workflow` 的 `WorkflowService`、来自 `workflow` 的
+- 所需能力：来自 `workflow` 的 `WorkflowService`、来自 `workflow` 的
   `WorkflowActionRegistry`、来自 `http` 的 `ClientFactory`、来自 `webserver` 的
   `WebServer`
 - Workflow：Action `gateway.send`、`gateway.send_stream`、
   `gateway.send_media`，见 [Action](/zh/plugins/imessage-gateway/action)；Event `gateway.message.received`、
   `gateway.control.received`、`gateway.send_stream.finished`、
   `gateway.send_media.finished`，见 [Event](/zh/plugins/imessage-gateway/event)
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：无
 - Web：自身没有；`IMessageGateway::serve_channel` 在 `WebServer` 上为消息通道插件挂载其前缀路由
 - 任务：四个文本流 worker（`gateway_event_worker`，池大小 4）和四个媒体 worker（`gateway_media_worker`，池大小 4）

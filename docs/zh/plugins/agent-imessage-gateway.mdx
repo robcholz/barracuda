@@ -11,12 +11,12 @@ description: "把 Gateway 对话连接到 Agent 会话，并提供 iMessage 工�
 - 设置：无
 - 上下文资源：无
 - 提供的能力：无
-- 需要的能力：来自 `agent` 的 `AgentToolRegistry`、来自 `agent` 的
+- 所需能力：来自 `agent` 的 `AgentToolRegistry`、来自 `agent` 的
   `AgentRuntime`、来自 `imessage-gateway` 的 `IMessageGateway`、来自 `time` 的 `UtcClock`、
   来自 `workflow` 的 `WorkflowActionRegistry`、来自 `workflow` 的 `WorkflowService`
 - Workflow：Action `imessage_bridge.to_agent`、`imessage_bridge.to_gateway`、
   `imessage_bridge.session`，参见 [Action](/zh/plugins/agent-imessage-gateway/action)
-- Agent Tool：`gateway_send`、`send_attachment`
+- Agent 工具：`gateway_send`、`send_attachment`
 - Lua 包：无
 - Web：无
 - 任务：一个加载 Workflow 的任务（池大小 1），从 `start` 生成，内置 Workflow 加载完成后即结束

@@ -3,42 +3,42 @@ title: "术语表"
 description: "Barracuda 中常用术语的定义，从 Agent、App 到 Board 和 Plugin。"
 ---
 
-**Agent (on-board agent)（板上 Agent）。**运行在设备上的 Agent 插件。它通过消息通道与用户对话，维护会话和记忆，使用工具，并借助 VM 进行即时编程。
+**Agent (on-board agent)（板上 Agent）**。运行在设备上的 Agent 插件。它通过消息通道与用户对话，维护会话和记忆，使用工具，并借助 VM 进行即时编程。
 
-**Agent Tool（Agent 工具）。**插件提供给板上 Agent 的一项面向模型的操作。
+**Agent Tool（Agent 工具）**。插件提供给板上 Agent 的一项面向模型的操作。
 
-**App（应用）。**带有自己 UI 的设备应用，在 Live Editor 中构建，在设备上由 App Manager 插件管理。
+**App（应用）**。带有自己 UI 的设备应用，在 Live Editor 中构建，在设备上由 App Manager 插件管理。
 
-**App Manager（应用管理器）。**在设备上安装、启动、停止和更新应用的插件。
+**App Manager（应用管理器）**。在设备上安装、启动、停止和更新应用的插件。
 
-**Board（开发板）。**由 YAML 描述的一块具体硬件：芯片、工具链目标、Flash 布局和外设。它的选择与平台相互独立。
+**Board（开发板）**。由 YAML 描述的一块具体硬件：芯片、工具链目标、Flash 布局和外设。它的选择与平台相互独立。
 
-**Builder（构建者）。**交付针对特定目标和任务定制的产品固件的人，通常会使用 `fully-customize` skill。
+**Builder（构建者）**。交付针对特定目标和任务定制的产品固件的人，通常会使用 `fully-customize` skill。
 
-**Channel（消息通道）。**访问板上 Agent 的途径：微信、Telegram、QQ、iMessage、Inkbox、网页聊天或终端。每个消息通道都是一个插件。
+**Channel（消息通道）**。访问板上 Agent 的途径：微信、Telegram、QQ、iMessage、Inkbox、网页聊天或终端。每个消息通道都是一个插件。
 
-**Coding agent（编程 Agent）。**开发者电脑上的 AI 编程工具（Claude Code、Cursor 或 Codex），配合 Barracuda 的 skill 使用。
+**Coding agent（编程 Agent）**。开发者电脑上的 AI 编程工具（Claude Code、Cursor 或 Codex），配合 Barracuda 的 skill 使用。
 
-**Device Portal（设备门户）。**由设备提供的网页界面，用于配置、查看状态、访问插件页面和网页聊天。
+**Device Portal（设备门户）**。由设备提供的网页界面，用于配置、查看状态、访问插件页面和网页聊天。
 
-**Experience ladder（体验阶梯）。**使用 Barracuda 的六个层级：开箱即用、配置、构建应用、创建插件、添加开发板和平台、完全定制。
+**Experience ladder（体验阶梯）**。使用 Barracuda 的六个层级：开箱即用、配置、构建应用、创建插件、添加开发板和平台、完全定制。
 
-**In-browser agent（浏览器里的 Agent）。**Live Editor 中生成应用及其 UI 的 Agent。
+**In-browser agent（浏览器里的 Agent）**。Live Editor 中生成应用及其 UI 的 Agent。
 
-**In-time coding（即时编程）。**板上 Agent 在对话中编写 VM 脚本并立即在硬件上运行。
+**In-time coding（即时编程）**。板上 Agent 在对话中编写 VM 脚本并立即在硬件上运行。
 
-**Live Editor（实时编辑器）。**基于浏览器的可视化 Agent 编辑器，用于构建和烧录设备应用。
+**Live Editor（实时编辑器）**。基于浏览器的可视化 Agent 编辑器，用于构建和烧录设备应用。
 
-**Platform（平台）。**针对某个芯片系列或主机操作系统的平台契约实现：执行器入口、网络栈、文件系统、Flash 和 HAL 适配器。
+**Platform（平台）**。针对某个芯片系列或主机操作系统的平台契约实现：执行器入口、网络栈、文件系统、Flash 和 HAL 适配器。
 
-**Plugin（插件）。**能力的基本单元：一份声明式契约，包括类型化能力、Workflow Action 与 Event、Agent Tool、VM 包、门户页面、资源和任务。
+**Plugin（插件）**。能力的基本单元：一份声明式契约，包括类型化能力、Workflow Action 与 Event、Agent Tool、VM 包、门户页面、资源和任务。
 
-**Skill（skill）。**仓库中供 Agent 阅读的说明，教编程 Agent 如何完成 Barracuda 的某项任务：`create-plugin`、`create-board`、`create-platform`、`fully-customize`。
+**Skill（skill）**。仓库中供 Agent 阅读的说明，教编程 Agent 如何完成 Barracuda 的某项任务：`create-plugin`、`create-board`、`create-platform`、`fully-customize`。
 
-**System（System）。**可移植的 `no_std` 层，按依赖顺序注册插件集合并启动它。同一个 System 在每个平台上运行。
+**System（System）**。可移植的 `no_std` 层，按依赖顺序注册插件集合并启动它。同一个 System 在每个平台上运行。
 
-**VM（虚拟机）。**设备上的 Lua 运行时，运行由板上 Agent 或 Workflow 编写的脚本，并通过各种包暴露硬件。
+**VM（虚拟机）**。设备上的 Lua 运行时，运行由板上 Agent 或 Workflow 编写的脚本，并通过各种包暴露硬件。
 
-**Web Installer（网页安装器）。**通过 USB 把 Barracuda 安装到开发板上并让它连上 Wi-Fi 的浏览器页面。
+**Web Installer（网页安装器）**。通过 USB 把 Barracuda 安装到开发板上并让它连上 Wi-Fi 的浏览器页面。
 
-**Workflow（Workflow）。**持久的自动化：Event 触发 Action，让设备自行持续工作。
+**Workflow（Workflow）**。持久的自动化：Event 触发 Action，让设备自行持续工作。

@@ -11,7 +11,7 @@ description: "在设备上运行对话式 Agent，并通过 HTTP 和门户配置
 - 设置：无
 - 上下文资源：无
 - 提供的能力：`AgentRuntime`、`AgentToolRegistry`
-- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `webserver` 的
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `webserver` 的
   `WebServer`、来自 `workflow` 的 `WorkflowActionRegistry`、来自 `workflow` 的
   `WorkflowService`、来自 `http` 的 `ClientFactory`、来自 `time` 的 `UtcClock`
 - Workflow：Action `session.new`、`session.open`、`session.append`、
@@ -19,7 +19,7 @@ description: "在设备上运行对话式 Agent，并通过 HTTP 和门户配置
   `session.delete`、`session.list`、`session.rename`、
   `session.set_permission_level`、`session.set_reasoning_effort`，参见
   [Action](/zh/plugins/agent/action)；Event `session.event`，参见 [Event](/zh/plugins/agent/event)
-- Agent Tool：`background_list`、`background_wait`、`background_input`、
+- Agent 工具：`background_list`、`background_wait`、`background_input`、
   `background_cancel`、`conversation_end`、`skill_list`、`skill_read`、
   `skill_resource_read`、`skill_reload`、`memory_store`、`memory_recall`、
   `memory_list`、`memory_update`、`memory_forget`、`plan_enter`、`plan_exit`、

@@ -9,13 +9,13 @@ IMessage QQ 插件把 QQ 机器人添加为一个 iMessage Gateway 消息通道�
 - 插件 ID：`imessage-qq`
 - 依赖：`imessage-gateway`、`webserver`、`captive-portal`
 - 设置：无
-- Context 资源：`entropy`（WebSocket 密钥和掩码、扫码绑定密钥）
+- 上下文资源：`entropy`（WebSocket 密钥和掩码、扫码绑定密钥）
 - 提供的能力：无
-- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
+- 所需能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
   `IMessageGateway`、来自 `webserver` 的 `WebServer`
 - Workflow：无（收到的消息以 Gateway 的
   `gateway.message.received` 形式到达 Workflow）
-- Agent Tool：无
+- Agent 工具：无
 - Lua 包：无
 - Web：门户入口 `imessage-qq`，带状态；`POST /api/gateway/qq`、
   `GET /api/gateway/qq/status`、`POST /api/gateway/qq/mode`、`GET

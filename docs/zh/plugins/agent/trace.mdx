@@ -48,7 +48,7 @@ Chrome 计数器是显式的：只有 `counter.<series>=<number>` 事件字段�
 
 有两层限制输出的详细程度：
 
-- **编译时**（`Cargo.toml` 特性）：`log_max_*` 转发到
+- **编译时（**`Cargo.toml` 特性）：`log_max_*` 转发到
   `log/release_max_level_*`，`trace_max_*` 转发到 `tracing/release_max_level_*`，在 **release** 构建中把更高级别的宏完全去掉（不格式化，不经过 FFI）。同一时间只能启用一个 `log_max_*`。默认为 `log_max_info`。
 - **运行时**：`init_logger` 的 `max_level` 参数。嘈杂的主机依赖（TLS/网络 crate）无论如何都被限制在 `Warn`，所以
   `init_logger(Trace)` 保留第一方代码的详细输出，而不会被依赖的日志淹没。
