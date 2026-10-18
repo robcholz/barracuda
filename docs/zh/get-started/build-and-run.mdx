@@ -10,7 +10,7 @@ cargo board select
 cargo run
 ```
 
-主机开发板（`local-linux`、`local-macos`）还需要提供虚拟外设管理器的回环地址：`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run`（参见 [Virtual IO](/platforms/virtual-io)）。
+主机开发板（`local-linux`、`local-macos`）还需要提供虚拟外设管理器的回环地址：`BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run`（参见 [Virtual IO](/zh/platforms/virtual-io)）。
 
 第一条命令会打开一个彩色的开发板列表。用方向键移动，输入文字进行模糊搜索，按 Enter 选择。它会校验开发板 bundle，并把选择记录在被忽略的本地状态中。它会解析出与之匹配的自描述平台，更新静态的“所选平台”和“所选开发板 HAL”依赖块，并在本地写入目标和 runner 配置。解析出的平台会提供它的 rustup 工具链、可选的 `build-std` 策略和安装程序生成的环境变量，以及在该工具链不可用时显示的安装提示。选择操作会把该工具链设为工作区覆盖并导入其环境变量，因此普通的 `cargo build` 和 `cargo run` 会通过原生 Cargo 直接作用于独立的 System 应用；不存在感知开发板的构建包装器，也没有 shell 设置步骤。设备开发板使用 `--release` 构建固件。System、平台、Core 和插件的日志都留在这个终端中。
 

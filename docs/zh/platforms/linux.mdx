@@ -19,7 +19,7 @@ cargo board select local-linux
 BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
 ```
 
-`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址。`local-linux` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器；管理器负责驱动输入电平、挂接 I2C 设备和注入故障。参见 [`platforms/virtual-io`](/platforms/virtual-io)。
+`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址。`local-linux` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器；管理器负责驱动输入电平、挂接 I2C 设备和注入故障。参见 [`platforms/virtual-io`](/zh/platforms/virtual-io)。
 
 这个终端负责运行 System 并显示它的日志。在另一个终端中启动 `cargo cli`，即可连接外部终端消息通道。
 

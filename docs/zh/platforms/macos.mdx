@@ -19,7 +19,7 @@ cargo build
 BARRACUDA_VIRTUAL_IO_ADDR=127.0.0.1:7878 cargo run
 ```
 
-`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址（可以是除网关所用的 8787 之外的任意空闲端口）。`local-macos` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器。参见 [`platforms/virtual-io`](/platforms/virtual-io)。
+`BARRACUDA_VIRTUAL_IO_ADDR` 是必需的：它是虚拟外设管理器监听的回环地址（可以是除网关所用的 8787 之外的任意空闲端口）。`local-macos` 提供虚拟引脚 `vio-0` 到 `vio-7` 和两个虚拟 I2C 控制器。参见 [`platforms/virtual-io`](/zh/platforms/virtual-io)。
 
 `cargo run` 会构建平台启动器，部署所选的 System 镜像，启动回环网络网关，然后启动 System 应用。启动器同时管理这两个进程，所以 Ctrl-C 或 SIGTERM 会停止整个运行。不需要第二个终端，也不需要手动运行网关命令。
 
