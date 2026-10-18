@@ -53,28 +53,37 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Docs",
         "groups": [
           {
-            "group": "Start",
+            "group": "Get started",
             "pages": [
               "index",
+              "get-started/installation",
+              "get-started/quickstart",
               "product/experience-ladder",
               "product/three-agents",
-              "product/plugins",
-              "product/glossary"
+              "product/plugins"
+            ]
+          },
+          {
+            "group": "01 · Use your device",
+            "pages": [
+              "use/device-portal",
+              "use/channels",
+              "use/scripts",
+              "use/automations"
             ]
           },
           {
             "group": "02 · Configure",
             "pages": [
-              "get-started/build-and-run",
               "boards/profiles",
-              "platforms/virtual-io"
+              "get-started/build-and-run"
             ]
           },
           {
-            "group": "03 · Build apps",
+            "group": "03 · Apps",
             "pages": [
               "architecture/device-ui",
               "plugins/app-manager/app-format",
@@ -83,33 +92,9 @@
             ]
           },
           {
-            "group": "Product",
+            "group": "04 · Plugins",
             "pages": [
-              "product/overview",
-              "product/vision",
-              "product/surfaces",
-              "product/audiences",
-              "product/positioning"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Develop",
-        "groups": [
-          {
-            "group": "Start developing",
-            "pages": [
-              "architecture/repository",
-              "get-started/tooling",
-              "architecture/codestyle",
-              "architecture/agent-oriented-api-design",
-              "architecture/execution-ownership"
-            ]
-          },
-          {
-            "group": "04 · Create Plugins",
-            "pages": [
+              "develop/write-a-plugin",
               "architecture/plugin-api",
               "architecture/plugin-manager"
             ]
@@ -117,14 +102,63 @@
           {
             "group": "05 · Boards and Platforms",
             "pages": [
-              "architecture/platform-architecture",
               "boards/overview",
               "boards/peripherals",
               "boards/exposed-io",
               "boards/drivers",
+              "architecture/platform-architecture",
               "platforms/linux",
               "platforms/macos",
-              "platforms/macos-network-gateway"
+              "platforms/macos-network-gateway",
+              "platforms/virtual-io"
+            ]
+          },
+          {
+            "group": "06 · Custom firmware",
+            "pages": [
+              "develop/custom-firmware"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "architecture/repository",
+              "contributing/docs",
+              "get-started/tooling",
+              "architecture/codestyle",
+              "architecture/agent-oriented-api-design",
+              "architecture/execution-ownership",
+              {
+                "group": "Testing and bench",
+                "pages": [
+                  "tools/e2e",
+                  "tools/llm-tape",
+                  "tools/bench",
+                  "tools/bench-tapes",
+                  "tools/tape-replay-profile"
+                ]
+              },
+              {
+                "group": "Shared crates",
+                "pages": [
+                  "shared/http-client",
+                  "shared/runtime-utils",
+                  "shared/tls/c-runtime",
+                  "shared/tls/roots",
+                  "shared/tls/mbedtls-rs",
+                  "tools/cli-rustyline"
+                ]
+              },
+              {
+                "group": "Product",
+                "pages": [
+                  "product/overview",
+                  "product/vision",
+                  "product/surfaces",
+                  "product/audiences",
+                  "product/positioning"
+                ]
+              }
             ]
           }
         ]
@@ -346,35 +380,11 @@
         "tab": "Reference",
         "groups": [
           {
-            "group": "Shared crates",
+            "group": "Reference",
             "pages": [
-              "shared/http-client",
-              "shared/runtime-utils"
-            ]
-          },
-          {
-            "group": "TLS",
-            "pages": [
-              "shared/tls/c-runtime",
-              "shared/tls/roots",
-              "shared/tls/mbedtls-rs"
-            ]
-          },
-          {
-            "group": "Tools",
-            "pages": [
-              "tools/e2e",
-              "tools/llm-tape",
+              "reference/cli",
               "tools/system-image",
-              "tools/cli-rustyline"
-            ]
-          },
-          {
-            "group": "Bench",
-            "pages": [
-              "tools/bench",
-              "tools/bench-tapes",
-              "tools/tape-replay-profile"
+              "product/glossary"
             ]
           }
         ]

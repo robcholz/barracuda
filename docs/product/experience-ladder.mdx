@@ -1,6 +1,7 @@
 ---
 title: "The experience ladder"
 sidebarTitle: "The ladder"
+description: "The six levels of Barracuda, from out of the box to fully custom firmware, and where each one starts in the docs."
 ---
 
 Barracuda is experienced as a ladder. Each level asks a little more of the
@@ -8,16 +9,18 @@ person and gives them much more freedom. Every level is useful on its own; no
 one has to climb higher than their project needs. At every level an agent does
 the heavy lifting.
 
-| Level | Name | Who | What they do | Where | Agent |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts |
-| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) |
-| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent |
-| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill |
-| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills |
-| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill |
+| Level | Name | Who | What they do | Where | Agent | Start here |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Out of the box | Everyone | Install from the browser, then ask the board to do things | Browser, phone, device | On-board agent writes and runs VM scripts | [Device Portal](/use/device-portal) |
+| 2 | Configure | Makers, educators | Choose which Plugins go into the firmware, build, and flash | Developer's machine | — (configuration, not generation) | [Board profiles](/boards/profiles) |
+| 3 | Build apps | App developers | Describe an app, generate its logic and UI, flash it | Live Editor (browser) | In-browser agent | [Device UI](/architecture/device-ui) |
+| 4 | Create Plugins | Plugin developers | Add new capabilities to the runtime | Developer's machine | Coding agent + `create-plugin` skill | [Write a Plugin](/develop/write-a-plugin) |
+| 5 | Add Boards and Platforms | Contributors, board vendors | Bring Barracuda to a new board or a new chip family | Developer's machine | Coding agent + `create-board`, `create-platform` skills | [Boards](/boards/overview) |
+| 6 | Fully customize | Builders | Choose or create the Platform and Board, trim or create Plugins, fit the firmware to a resource budget | Developer's machine | Coding agent + `fully-customize` skill | [Custom firmware](/develop/custom-firmware) |
 
 ## Level 1 — Out of the box
+
+**In the docs:** [Device Portal](/use/device-portal) · [Channels](/use/channels) · [Scripts](/use/scripts) · [Automations](/use/automations)
 
 **Goal:** a working, talking, acting device in minutes, with no toolchain.
 
@@ -38,6 +41,8 @@ and schedules, so the device keeps working after the chat ends.
 Agent, the VM and its peripheral packages, channels, Workflow.
 
 ## Level 2 — Configure
+
+**In the docs:** [Board profiles](/boards/profiles) · [Build and run](/get-started/build-and-run) · [CLI](/reference/cli)
 
 **Goal:** make the device fit the project by choosing its Plugins, without
 writing code.
@@ -62,6 +67,8 @@ pages.
 
 ## Level 3 — Build apps
 
+**In the docs:** [Device UI](/architecture/device-ui) · [App format](/plugins/app-manager/app-format) · [App API](/plugins/app-manager/app-api) · [PocketJS](/plugins/app-manager/pocketjs)
+
 **Goal:** a real device application with its own UI, without setting up a
 firmware project.
 
@@ -75,6 +82,8 @@ updates them alongside the rest of the runtime.
 Plugin, the app runtime, browser flashing.
 
 ## Level 4 — Create Plugins
+
+**In the docs:** [Write a Plugin](/develop/write-a-plugin) · [Plugin API](/architecture/plugin-api) · [All Plugins](/plugins/overview)
 
 **Goal:** add a new capability to Barracuda that any device can use.
 
@@ -90,6 +99,8 @@ conventions, the `create-plugin` skill, per-Plugin docs.
 
 ## Level 5 — Add Boards and Platforms
 
+**In the docs:** [Boards](/boards/overview) · [Peripherals](/boards/peripherals) · [Platform architecture](/architecture/platform-architecture)
+
 **Goal:** bring Barracuda to new hardware.
 
 - **A new Board** on a supported chip is a description: chip, toolchain target,
@@ -104,6 +115,8 @@ conventions, the `create-plugin` skill, per-Plugin docs.
 and Platform selection, the `create-board` and `create-platform` skills.
 
 ## Level 6 — Fully customize
+
+**In the docs:** [Custom firmware](/develop/custom-firmware)
 
 **Goal:** a product firmware shaped exactly to a chip, a resource budget, and a
 job.

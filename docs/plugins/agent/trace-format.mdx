@@ -1,6 +1,7 @@
 ---
 title: "Trace Format Specification"
 sidebarTitle: "Trace format"
+description: "Specification of the flat-tree `TRACE` line format and how a parser rebuilds the span tree."
 ---
 
 `barracuda-agent-trace`'s `FlatTreeSubscriber` flattens the tracing span tree into single lines that an offline parser can reconstruct back into a tree. This document is the **authoritative definition**; the `trace.rs` implementation and its unit tests must follow it strictly.

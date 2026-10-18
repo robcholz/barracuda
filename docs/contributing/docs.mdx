@@ -1,0 +1,67 @@
+---
+title: "Writing docs"
+description: "Where a page goes, how it is titled and opened, and the words to use for each reader."
+---
+
+The docs follow the ladder: each reader starts at the level their project needs
+and climbs only as far as they want. Write every page so a reader at that level
+can act on it in the first screen.
+
+## Where a page goes
+
+| Tab | Group | Put here |
+| --- | --- | --- |
+| Docs | Get started | Welcome, Installation, Quickstart, and the three concepts: the ladder, the agents, Plugins |
+| Docs | 01 · Use your device | Using a running device: the portal, channels, scripts, automations |
+| Docs | 02 · Configure | Choosing the Plugins in a firmware, building, flashing |
+| Docs | 03 · Apps | Building apps for the device |
+| Docs | 04 · Plugins | Writing Plugins and the Plugin contract |
+| Docs | 05 · Boards and Platforms | Boards, peripherals, drivers, and Platforms |
+| Docs | 06 · Custom firmware | Fitting a firmware to a chip and a budget |
+| Docs | Contributing | Working on Barracuda itself: conventions, internals, tests, bench, shared crates, product docs |
+| Plugins | by family | One page per Plugin at `docs/plugins/<id>.mdx`, in the form the [Plugin API](/architecture/plugin-api#plugin-documentation) requires |
+| Reference | Reference | The CLI, file formats, and the glossary |
+
+Internals go under Contributing, never in a level a user reads first. Add every
+new page to `docs/docs.json`.
+
+## Every page
+
+- **Frontmatter.** `title` and a one-sentence `description` of at most about 110
+  characters. Start the description with a verb from the reader's side:
+  "Read and drive the Board's pins from Lua with the `gpio` package."
+- **Titles.** A feature page is a noun: "Channels", "Board profiles". A command
+  page is the command: "cargo board". A task page is an imperative: "Write a
+  Plugin".
+- **First screen.** One or two sentences on what the reader gets, then
+  something to run or copy and what it produces. Rules, edge cases, and
+  internals come after.
+- **Voice.** Address the reader as "you" and give steps as imperatives. Use
+  `Steps` for a sequence and `CardGroup` for the next places to go.
+- **Facts.** Every command, path, and name is checked against the code. Describe
+  what exists now; mark anything planned as planned.
+- **MDX.** Write `<`, `{`, and `}` in prose as `\<`, `\{`, and `\}`, or inside code
+  spans. A `Card` with an `href` holds no links.
+
+## Words for each reader
+
+| Reader | Section | Say | Avoid on their pages |
+| --- | --- | --- | --- |
+| Makers and education | Get started, 01, 02 | install, talk to your board, choose Plugins, Device Portal | `no_std`, executor, Platform contract |
+| App developers | 03 · Apps | app, screen, install, app API | Rust internals |
+| Plugin developers | 04 · Plugins | Plugin, capability, Workflow Action and Event, Agent Tool, Lua package | — |
+| Board vendors and contributors | 05 · Boards and Platforms | Board, Platform, peripheral, driver, profile | — |
+| Builders | 06 · Custom firmware | profile, budget, trim, fit | — |
+| People working on Barracuda | Contributing | the exact technical terms | — |
+
+Use the defined terms in the [glossary](/product/glossary) everywhere: Plugin,
+Board, Platform, System, Agent, channel. Say "on-board Agent", not "assistant";
+say "Lua script", not "code" alone.
+
+## Check before you push
+
+```bash terminal
+cd docs
+npx mint validate
+npx mint broken-links
+```

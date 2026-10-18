@@ -4,7 +4,10 @@ All documentation lives in the Mintlify site under [docs/](docs/), with its
 navigation in [docs/docs.json](docs/docs.json). Pages are MDX: write `<`, `{`,
 and `}` in prose as `\<`, `\{`, and `\}`, or inside code spans. Add every new
 page to `docs/docs.json`, and run `npx mint validate` and
-`npx mint broken-links` from `docs/` after changing pages.
+`npx mint broken-links` from `docs/` after changing pages. Follow
+[docs/contributing/docs.mdx](docs/contributing/docs.mdx) for where a page goes,
+its title and description, its first screen, and the words to use for each
+reader.
 
 See [docs/architecture/codestyle.mdx](docs/architecture/codestyle.mdx) for the Rust API.
 
