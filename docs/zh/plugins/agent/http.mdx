@@ -1,0 +1,67 @@
+---
+title: "Agent HTTP API"
+sidebarTitle: "HTTP API"
+description: "Agent 插件的 HTTP 路由：配置模型 API 并读取它们的状态。"
+---
+
+## `POST /api/model-api`
+
+直接在 Agent 运行时上配置一个或多个模型 API。Agent
+插件在插件注册期间，把这个端点注册到它所需的 `WebServer` 能力上。
+
+请求体：
+
+```json
+[
+  {
+    "timeout_ms": 30000,
+    "max_tokens": 4096,
+    "image_max_bytes": 524288,
+    "input_modalities": {"image": true, "pdf": false},
+    "max_images_in_context": 2,
+    "backend": "openai_compatible",
+    "purpose": "root_agent",
+    "default": true,
+    "api_key": "provider-secret",
+    "model": "model-name",
+    "base_url": "https://provider.example/v1"
+  }
+]
+```
+
+数组不能为空，每个字段都是必需的，未知字段会被拒绝。`backend` 为 `openai_compatible` 或 `anthropic_compatible`。
+`purpose` 为 `root_agent`、`sub_agent`、`memory` 或 `compaction`。
+
+附件字段决定一次请求把哪些文件交给模型直接读取。`input_modalities.image` 把 JPEG、PNG、GIF 和 WebP 图片作为图片块发送；`input_modalities.pdf` 把 PDF 作为文档块发送，仅适用于
+`anthropic_compatible`。上下文中只有最新的 `max_images_in_context` 个图片或
+PDF 附件会以这种方式发送，每个最多
+`image_max_bytes` 字节；其他所有附件以一行文本的形式到达模型，写明它的文件、类型、大小和路径。没有这些字段的已存储模型在加载时，`image` 为开启，`pdf` 为关闭，`max_images_in_context` 为 2。
+
+| 状态 | 含义 |
+| --- | --- |
+| `204 No Content` | 所有配置都已接受。 |
+| `400 Bad Request` | 请求体不是一个有效的非空配置数组。 |
+| `405 Method Not Allowed` | 使用 POST 以外的方法调用了该路由。 |
+| `422 Unprocessable Entity` | Agent 拒绝了某个模型 API 配置。 |
+
+错误响应是带有一个稳定 `error` 字符串的 JSON 对象。API 密钥从不包含在响应或日志中。
+
+## `GET /api/model-api/status`
+
+报告生效的模型配置，不含 API 密钥：
+
+```json
+{
+  "configured": true,
+  "default": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+  "purposes": {
+    "root_agent": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+    "sub_agent": null,
+    "memory": null,
+    "compaction": null
+  }
+}
+```
+
+`configured` 表示是否有任何用途解析出了模型。`default` 是没有自己模型的用途所使用的模型；这种情况下该用途为 `null`。
+其他方法回答 `405 Method Not Allowed`。

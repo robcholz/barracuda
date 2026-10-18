@@ -148,3 +148,490 @@ cargo build
 
 生成的开发板组合恰好构造这些声明。它不会自动暴露未使用的引脚或外设实例。在 `exposed-io` 中省略的物理资源不会出现在 Barracuda 的 I/O 接口中，即使芯片本来可以使用它。
 
+外设组合在构造运行时 I/O 之前消耗它的私有资源。同一个芯片原生令牌不能既是外设绑定又是暴露的资源。在暴露的 I/O 中，即使所选平台可以把数字、模拟、PWM、I2C、SPI、UART 或 I2S 功能路由到某个物理引脚，这个引脚也只声明一次。功能在应用打开句柄时选择；它不会在开发板 YAML 中被编码为该引脚的第二个逻辑副本。
+
+通用校验覆盖开发板 schema、引用的实现标识符、必需的接线字段，以及所选平台是否声明了所需的 HAL 绑定。只能移动的生成绑定防止同一个芯片令牌被消耗两次。平台提供者在构造功能句柄之前，校验运行时路由、电气模式、频率和控制器限制。
+
+## 外设和暴露的 I/O
+
+开发板配置区分可选的已连接产品硬件，以及 Barracuda 有意提供给应用的物理资源：
+
+~~~yaml
+peripherals:
+  io: {}
+  devices:
+    status-indicator:
+      implementation: indicator-led
+      bindings:
+        pin: gpio10
+      parameters:
+        active-level: low
+    front:
+      implementation: mipi-dbi-display
+      primary: true
+      bindings: { ... }
+    status-panel:
+      implementation: gdeh0154d67-display
+      bindings: { ... }
+
+exposed-io:
+  pins:
+    expansion-1: { pin: gpio2 }
+    expansion-2: { pin: gpio3 }
+    expansion-3: { pin: gpio4 }
+    expansion-4: { pin: gpio5 }
+~~~
+
+具体的 schema 存放硬件事实、实现标识符、稳定的应用可见名称和芯片原生标识符。Rust crate 路径、平台类型、插件身份和应用策略不属于开发板矩阵。实现标识符选择已注册的组合代码；YAML 不指定 Rust 类型或 crate 路径。
+
+设备名称由开发板自己决定。开发板可以连接多个显示屏；其他每种外设类型最多只有一个设备。某种类型有多个设备时，恰好有一个被标记为 `primary: true`，这是关于产品主设备的硬件事实，而不是插件的选择。只有一个设备的类型不需要标记。
+
+开发板资源不包含第三种硬件类别：
+
+~~~rust,ignore
+BoardResources {
+    peripherals: GeneratedPeripherals { /* one Option per declared device */ },
+    exposed_io: GeneratedExposedIo { /* move-only tokens, Platform providers */ },
+}
+~~~
+
+`BoardResources<Peripherals, ExposedIo>` 是公共的所有权封装。它的泛型字段为每块所选开发板保留具体的、静态组合的外设类型。每个生成的外设字段都是 `Option<T>`，因为没有哪种外设类型是必需的。每个外设 trait 都通过 `Instance` 获取设备，`Instance` 是该设备在开发板同类设备中按名称排序的位置；插件永远不自己构建 `Instance`，而是使用构建过程根据它们声明的槽位解析出的常量。多个显示屏作为一个生成的 `BoardDisplay` 枚举返回，它覆盖开发板的各个显示屏实现，由 `display_set!` 构建，因此分发保持静态。唯一的暴露 I/O 值拥有所有运行时物理资源。System 把它放在 `PluginContext` 中一个共享的 `Arc` 之后；使用暴露硬件的插件克隆这个所有者，而不是各自独立的协议集合。平台拥有的控制器池属于这个所有者，但不是应用可见的名称。
+
+控制器、通道、定时器、DMA 和缓冲区的清单属于平台清单，而不是 `exposed-io`。必须一起获取的资源族被声明为类型化的控制器组：
+
+~~~yaml
+hal:
+  runtime-uart-controllers: [UART1]
+  runtime-adc-controllers:
+    - controller: ADC1
+      channels:
+        - { channel: CHANNEL0, pin: GPIO1 }
+  runtime-pwm-controllers:
+    - controller: LEDC
+      timers: [TIMER0]
+      channels: [CHANNEL0]
+  runtime-i2s-controllers:
+    - controller: I2S0
+      dma-channels: [DMA_CH0]
+      dma-buffer-bytes: 4096
+~~~
+
+当某个外设绑定已经消耗了运行时组的控制器或 DMA 通道时，开发板生成器会移除整个运行时组。然后它构造固定大小的具体资源池；固件永远不扫描芯片，也不推断缺失的资源。物理引脚进入共享所有者之后，ADC 通道路由仍保留它的控制器和通道标识。PWM 句柄同时消耗一个定时器和一个输出通道。I2S 句柄连同它的引脚一起，消耗一个控制器、DMA 和有界的静态缓冲区。
+
+`ExposedIo` 标志着这个共享所有权边界。专门的提供者 trait 在它之上打开功能，并返回实现上游契约的具体、静态分发的值：
+
+| 硬件用途 | 上游契约 |
+| --- | --- |
+| 动态配置的数字 GPIO | Barracuda `ConfigurableDigitalPin`，其操作来自 `embedded_hal::digital` |
+| 异步 GPIO 边沿等待 | `embedded_hal_async::digital::Wait` |
+| 模拟输入或输出 | Barracuda `AnalogInput` 或 `AnalogOutput` |
+| PWM 输出 | `embedded_hal::pwm::SetDutyCycle` |
+| I2C 控制器句柄 | `embedded_hal_async::i2c::I2c` |
+| 独占的 SPI 控制器句柄 | `embedded_hal_async::spi::SpiBus` |
+| 共享 SPI 控制器上的一个设备 | `embedded_hal_async::spi::SpiDevice` |
+
+Barracuda 不替换上游 HAL trait 已经定义的操作。`ConfigurableDigitalPin` 补上了缺失的在禁用、输入和输出状态之间的运行时转换。`AnalogInput` 和 `AnalogOutput` 覆盖 ADC 和 DAC，因为 `embedded-hal` 1.0 没有对应的契约。稳定的开发板名称、静态存储、引脚复用、控制器构造和硬件拆除，来自生成的开发板组合和所选平台的 HAL 提供者。
+
+运行时所有者包含一个与协议无关的、由只能移动的平台令牌组成的目录。数字、模拟、PWM、I2C、SPI、UART、I2S 以及未来的功能族的提供者，都通过这同一个所有者认领资源。数字句柄消耗一个引脚。I2C 句柄原子地消耗一个控制器、SCL 和 SDA。I2S 句柄可以消耗一个控制器、时钟和数据引脚以及 DMA。角色重复、路由不可用或任何资源已被认领时，都会失败，且不会部分地改变所有权。
+
+应用指定的是暴露的引脚和功能参数，而不是芯片的控制器实例。例如，`i2c.open(scl, sda, frequency)` 请求提供者选择一个兼容的空闲控制器。这样就把控制器分配和外设预留留在平台组合中，并为控制器编号不同的开发板提供相同的应用 API。
+
+可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收和 PCM 流；它们与外设 API 放在一起，而不是构成第二个通用 HAL。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
+
+`embedded-hal` 没有对在输入和输出模式之间切换 GPIO 做标准化。因此，每个暴露给 VM 的数字句柄除了上游的操作 trait 之外，还实现小巧的开发板 HAL 配置契约。协议的复用功能由对应的提供者建立，而不是由数字 API 建立。每个平台的 `hal` 模块拥有厂商的引脚复用和控制器构造。
+
+外设总线使用现有的上游共享适配器。HAL 拥有的总线使用阻塞或异步的 `embassy-embedded-hal` 或 `embedded-hal-bus` 适配器，选择其所有权模型适合具体实现的那一个。实现代码在寻址一个由 CS 选择的设备时接收 `SpiDevice`，只有在真正拥有整条总线时才接收 `SpiBus`。`mipidsi` 这样的显示屏实现继续接收这些上游值，并保持在动态的暴露 I/O 所有权之外。
+
+GPIO、I2C 和 SPI 插件是共享运行时所有者之上的适配器。它们校验脚本层面的参数，并请求它们的提供者原子地打开一个完整的功能。返回的 HAL 值存放在 Lua userdata 中，操作直接调用它的上游 trait。显式的 `close`、词法作用域的 `<close>`、垃圾回收和 VM 拆除会禁用并丢弃所构造的功能。它们不会重新创建厂商的单例令牌：生成的设备所有者让原始引脚和控制器一直保持被认领，直到重启。插件被撤销时，操作会立即失效。因此，在一次启动期间，被 GPIO 认领的引脚无法再作为 I2C 或 SPI 打开，即使这些功能属于不同的 VM 包。
+
+开发板 HAL 没有脚本服务契约。VM 包不做引脚复用，不重新构造厂商外设，也不保留协议本地的所有权映射。运行时分发仅限于开发板名称查找和提供者选择；数据操作、开发板组合和外设实现仍然是静态分发的。详细的所有权和应用压力模型记录在[开发板 HAL](/zh/boards/exposed-io)中。
+
+## 外设实现、芯片驱动和 HAL
+
+外设实现把可复用的芯片行为适配到语义化的 API。开发板矩阵提供用来实例化它们的具体总线和接线值：
+
+~~~text
+Platform HAL + Board matrix + peripheral implementations -> Board peripherals
+~~~
+
+以显示屏为例：
+
+~~~text
+Board matrix
++-- display controller model
++-- SPI or parallel bus
++-- chip-select, data/command, reset, and backlight pins
++-- DMA and interrupt bindings
++-- geometry and orientation
+             |
+             v
+Display peripheral implementation
+             |
+             v
+Display peripheral
+             |
+             +----> System
+             +----> Display-consuming Plugin
+~~~
+
+使用者接收语义化的 Display 外设。它不会从原始引脚重新构造实现，也不导入具体的开发板 crate。
+
+添加一个 Display 会改变开发板矩阵、外设组合，以及使用 Display 的 System 或插件接线。它不会改变平台或 PlatformResources。
+
+实现的任务和面向中断的状态由实例化该实现的 HAL 组合拥有。System 和插件接收句柄或外设；它们不拥有实现的 runner。
+
+开发板 HAL 的初始化消耗生成的、自有的绑定，而不是按编号查找硬件或自己获取芯片单例。它的概念性契约是：
+
+~~~rust,ignore
+trait BoardHal {
+    type Bindings;
+    type Resources;
+    type Error;
+
+    async fn initialize(
+        spawner: Spawner,
+        bindings: Self::Bindings,
+    ) -> Result<Self::Resources, Self::Error>;
+}
+~~~
+
+运行时的 `Board` 描述符对于身份、诊断和原生布局选择仍然有用。它不是外设所有权的第二个来源。设备入口获取它的芯片单例，并构造一个 `TargetBindings<PlatformBindings, BoardHalBindings>` 值。所选 Target 的组合在调用两个初始化函数之前，消耗并拆分这个值。Rust 类型强制规定哪些绑定值可以到达哪个维度；芯片兼容性校验仍然留在具体的绑定构造函数中。两个维度都不提到也不选择对方。
+
+## 分区
+
+分区是一项平台服务，以一个通用集合的形式呈现。平台实现适合其系列的机制，而所选开发板为产品提供具体的原生布局产物。
+
+| 平台 | 原生来源 |
+| --- | --- |
+| ESP | ESP 分区 CSV 或二进制 |
+| STM32 | 链接器和 bootloader 布局符号 |
+| nRF/RP | 链接器和 Embassy Boot 符号 |
+| Linux/macOS | 基于文件的镜像布局 |
+
+原生格式仍然是权威的。Barracuda 不引入第二种跨平台的物理分区表格式，也不把一个厂商的分区表翻译成另一个厂商的分区表。
+
+平台初始化校验所选的原生布局，并通过 partitions 暴露其可用区域。每个条目都携带从该分区表条目复制过来的原生访问方式和介质上的格式元数据（`raw`、`fatfs` 或 `littlefs`）。集合支持任意条目；它的 Rust 类型不会为每个使用者增加一个字段。
+
+~~~text
+PlatformResources
++-- partitions
+    +-- partition A
+    +-- partition B
+    +-- partition C
+    +-- ...
+~~~
+
+System 从集合中取出区域之后，再赋予它们业务含义：
+
+~~~text
+partitions
++-- system region            -> mount mutable LittleFS
++-- resources region         -> mount selected read-only FATFS or LittleFS
++-- region selected by System -> open ekv
++-- remaining regions         -> OTA, boot state, or future consumers
+~~~
+
+平台知道声明式的介质上格式，因为它投射了原生分区表。它不构造 LittleFS、FATFS、ekv、Event Router、WebServer、Plugin Manager 或插件身份。这些构造由 System 拥有。
+
+插件通常从 System 获得限定范围的语义化存储。如果产品需要一个新的专用物理区域，它的原生开发板布局会增加这个区域，System 从 partitions 中使用它；平台 API 保持不变。
+
+## 文件系统和数据库
+
+System 根据所选 Target 提供的平台分区、内存和产生文件系统的外设，构造应用存储。文件系统和数据库对象是 System 拥有的软件服务，而不是平台资源。
+
+`shared/vfs` 是文件系统的机制层。它定义后端契约、相互独立的挂载命名空间、路径解析、可移植的文件操作，以及不含挂载管理的 `ScopedVfs` 视图。它对 Barracuda 的语义化根目录、插件布局、Workspace、分区或具体的文件系统选择一无所知。System 拥有这些应用策略，并把具体的后端组合成一个进程范围的 VFS。
+
+System 只根据平台提供的分区元数据来选择 resources 后端。它永远不读取镜像字节或引导扇区魔数来猜测分区包含的是 FATFS 还是 LittleFS。
+
+~~~text
+Target partitions, memory, and removable filesystem peripherals
+          |
+          v
+System application composition
+  +-- FATFS
+  +-- LittleFS
+  +-- MemFS
+  `-- ekv
+          |
+          +----> process-wide VFS ----> scoped Plugin views
+          `----> Plugin Manager KV storage
+~~~
+
+### 语义化根目录
+
+System 为每个全局 VFS 根目录指定一份生命周期契约和一个默认后端：
+
+| 语义化根目录 | 默认后端 | 访问方式和生命周期 |
+| --- | --- | --- |
+| `/resources` | 由原生分区元数据选择的 FATFS 或 LittleFS | 只读的镜像内容。升级可能替换整个文件系统。 |
+| `/data` | LittleFS | 保证正确性所需的持久读写状态。System 永远不驱逐它。 |
+| `/cache` | MemFS | 读写的可重新生成或临时内容。每次重启后为空，运行期间也可能被清空。MemFS 把文件页面放在大容量内存中，所以它的容量就是大容量内存的剩余空间；放不下的写入会以 `FsError::NoSpace` 失败，文件保持不变。 |
+| `/media` | 由 Target 选择的已安装文件系统；目前是 System LittleFS 的一个子树 | 稳定、持久、大容量的运行时内容。它的物理介质可以是焊接的存储、已安装的存储或 Flash 上的 FATFS，但在 System 运行期间它的命名空间不会消失。 |
+| `/removable` | 只读的 MemFS 命名空间锚点，加上动态的子挂载 | 可能出现和消失的文件系统的运行时命名空间。每个存在的介质以读写方式挂载在 `/removable/<slot-id>`；锚点本身不存储任何内容。 |
+
+无论原生开发板布局选择的是哪种文件系统，System 都以只读方式挂载 `/resources`。默认的 `/media` 挂载限定在挂载于 `/data` 的同一个持久 LittleFS 后端的 `/media` 子树；单独的 VFS 挂载保留了生命周期边界和跨挂载点重命名的行为，而无需发明另一个原生分区。未来的 Target 可以提供一个专用的已安装大容量介质后端，同时保留相同的逻辑契约。
+
+`Media` 描述的是稳定的大容量存储角色，而不是总线或文件系统格式。`RemovableStorage` 描述一个连接在开发板上的槽位，它的实现识别文件系统，并报告插入和移除事件。它不向 System 暴露 SDMMC 设备、块操作、FAT 驱动、插卡检测信号或 IO 扩展器。这些细节留在外设实现和芯片驱动内部。
+
+生成的开发板外设实例名称就是稳定的 `slot-id`；例如，名为 `micro-sd` 的外设出现在 `/removable/micro-sd`。System 拥有槽位的生命周期任务，并动态地挂载和分离文件系统。分离会立即把该路径从新的查找中移除；在物理移除之后仍然存在的句柄，会在其后端观察到介质断开时报告 `MediaRemoved`。
+
+VFS API 只暴露每个根目录的语义化契约。文件系统选择、格式化、挂载和恢复留在 System 组合中。ekv 数据库与 VFS 保持分离，为 Plugin Manager 的限定范围结构化存储提供支撑。
+
+### 插件和 Workspace 命名空间
+
+全局 VFS 把私有的插件目录树与一个共享的 Workspace 分开：
+
+~~~text
+/resources/plugins/<plugin-id>/...
+/data/plugins/<plugin-id>/...
+/cache/plugins/<plugin-id>/...
+/media/plugins/<plugin-id>/...
+
+/resources/workspace/...
+/cache/workspace/...
+/media/workspace/...
+
+/removable/<slot-id>/...
+~~~
+
+Plugin Manager 为每个启用了文件系统的插件派生一个 `ScopedVfs`：
+
+| 插件可见路径 | 全局来源 | 所有权 |
+| --- | --- | --- |
+| `/resources` | `/resources/plugins/<plugin-id>` | 插件私有 |
+| `/data` | `/data/plugins/<plugin-id>` | 插件私有 |
+| `/cache` | `/cache/plugins/<plugin-id>` | 插件私有 |
+| `/media` | `/media/plugins/<plugin-id>` | 插件私有 |
+| `/workspace/resources` | `/resources/workspace` | 共享，只读 |
+| `/workspace/cache` | `/cache/workspace` | 共享，可丢弃 |
+| `/workspace/media` | `/media/workspace` | 共享，持久 |
+| `/workspace/removable` | `/removable` | 共享，动态可用 |
+
+声明了 `PluginFilesystem::Inspect` 的插件会得到相同的视图，外加以只读方式访问的每个插件的私有目录树。它们是为向所有者展示设备文件的插件准备的，由 System 决定哪些插件随附它：
+
+| 插件可见路径 | 全局来源 | 所有权 |
+| --- | --- | --- |
+| `/plugins/data` | `/data/plugins` | 每个插件的，只读 |
+| `/plugins/cache` | `/cache/plugins` | 每个插件的，只读 |
+| `/plugins/media` | `/media/plugins` | 每个插件的，只读 |
+| `/plugins/resources` | `/resources/plugins` | 每个插件的，只读 |
+
+即使这些挂载的来源是可写的，视图也会以 `FsError::ReadOnly` 拒绝它们之下的每一次修改。插件的设置和凭据存放在 Plugin Manager 的 KV 存储中，而不在这些目录树中，并且不出现在任何视图中。
+
+每个启用了文件系统的插件都在相同的逻辑路径上看到相同的 Workspace 内容。私有路径按插件身份保持隔离。保证正确性所需的共享状态保留一个明确的所有者，并存放在该插件的 `/data` 目录树或限定范围的 KV 存储中，所以 Workspace 只暴露 `resources`、`cache`、`media` 以及当前插入的可移动文件系统。
+
+`/workspace/resources` 包含由 System 镜像提供的不可变公共输入。`/workspace/cache` 是 VM 输出以及在插件之间传递的其他文件的短期交换区；System 可以按运行、按会话、在内存紧张时或在重启时清空它。`/workspace/media` 包含必须比产生它们的运行存活更久的共享用户上传文件和生成文件；System 不会自动驱逐它。`/workspace/removable/<slot-id>` 暴露当前插入的文件系统的根目录。它不需要插件普通文件系统声明之外的任何能力，并在该介质被移除时消失。
+
+### 组合和操作不变量
+
+镜像构建器把 `filesystem/resources` 的贡献放在 `/resources/plugins/<plugin-id>` 之下，并把 `filesystem/workspace/resources` 的贡献合并到 `/resources/workspace` 之下。共享路径冲突会让镜像构建失败。
+
+System 在 Plugin Manager 派生任何 `ScopedVfs` 之前安装稳定的语义化根目录。所有 VFS 克隆和限定范围的视图共享一个动态的挂载表，所以之后挂载的可移动文件系统对已经在运行的插件可见。限定范围的视图支持文件操作和路径转换；挂载、卸载、后端检查、具体文件系统选择以及可移动介质的生命周期留在 System 边界。限定范围的视图可以查询容纳某个路径的文件系统有多大、还剩多少空间（`usage`），这不涉及任何后端名称；共享同一个文件系统的挂载报告相同的数字，无法得知的后端回答 `Unsupported`。
+
+每个逻辑挂载点都是视图中的一个目录：在其来源目录存在之前，它列出为空，并且不能被写入、删除或重命名，所以任何插件都无法用文件替换私有根目录或共享的 Workspace 目录。挂载点的父目录（例如 `/` 和 `/workspace`）会列出它们之下的挂载点。重命名永远不会把目录移入它自己的后代目录中。
+
+路径规范化把操作限制在暴露的逻辑挂载点之内。重命名限于一个已挂载的文件系统之内，所以从 `/workspace/cache` 移动到 `/workspace/media` 需要先复制再删除。原子发布先写一个临时文件，然后在目标挂载点之内重命名它。
+
+插件卸载会释放它的句柄和限定范围的视图，同时保留持久的 `/data`、`/media` 和 `/workspace/media` 内容。缓存内容始终可以丢弃，与插件的生命周期无关。
+
+## IP 和通信能力
+
+`network` 太宽泛，不适合作为有用的能力名称。当前的平台契约提供一个名为 `ip_stack` 的 `embassy_net::Stack`，它的确切含义是 IPv4/IPv6、TCP、UDP 以及在该协议栈上启用的协议。System 和插件共享这同一个能力。`web_network` 和 `database_network` 这样针对特定使用者的字段并不存在。
+
+Wi-Fi 控制、BLE、USB、蜂窝网络控制以及未来的通信机制都是独立的能力，拥有独立的 API 和生命周期。它们不会被隐藏在一个通用的 `Network` trait 之后，也不会被塞进 `ip_stack` 字段。
+
+平台拥有保持其 IP 服务存活所需的执行工作。System 和插件接收可用的 IP 协议栈句柄，而不是它的 runner 或平台特定的设置对象。
+
+## 日志和追踪
+
+平台、HAL、System、核心和插件中的普通诊断都使用 `log` 门面。库和子系统 crate 只发出记录；它们不选择输出设备，不初始化全局 logger，也不依赖仅限主机的日志实现。
+
+所选平台在 `Platform::prepare` 中、在初始化任何其他平台机制之前，安装进程或固件全局的 `log::Log` 后端。具体的输出端属于平台集成：
+
+- macOS 和 Linux 把格式化后的记录写到标准错误；
+- ESP32-C6 通过它的 USB Serial/JTAG 调试通道写出；
+- STM32 通过非阻塞的 RTT 写出。
+
+主机 logger 的安装和输出端选择位于每个具体的主机平台内部。它们不是共享机制，不得移入跨平台的日志 crate。
+
+`BARRACUDA_LOG_LEVEL` 在构建期选择 `off`、`error`、`warn`、`info`、`debug` 或 `trace`，默认为 `info`。每个具体平台的构建脚本校验这个值，并为它的后端生成一个 `log::LevelFilter` 常量。平台不得在运行时读取或解析这个设置；无效的值是构建错误。
+
+日志是进程全局的支持设施，而不是可供使用的业务能力。它不会成为 `PlatformResources` 字段、插件能力、Workflow 契约或开发板外设。平台特定的输出设置留在核心和插件之外。
+
+`tracing` 不是通用的日志 API。如果插件的嵌套 span 和继承的执行上下文值得付出这份开销，它可以在自己的 crate 内部使用 `tracing`，把追踪行渲染到同一个 `log` 输出端中；核心以及插件之下的各层永远不引入 `tracing` 依赖。
+
+日志必须标识生命周期边界和失败，但不能包含 API 密钥、凭据、消息正文或其他携带机密的载荷。
+
+## 大容量内存
+
+大容量内存是一个进程全局的分配域，用于大型的纯数据缓冲区。它是运行时支持设施，而不是可供使用的业务能力，所以它不会成为 `PlatformResources` 字段、`PluginContext` 字段、Workflow 契约或开发板外设。
+
+开发板矩阵把可直接寻址的外部存储器声明为硬件事实，包括它的技术、接口和安装容量。所选平台拥有该存储器的初始化，并安装共享大容量内存机制所使用的分配器。没有独立外部存储域的平台，在同一个 API 之后安装它们普通的全局分配器。
+
+调用方通过 `BulkVec<T>` 和 `BulkBox<T>` 进行分配。它们的元素边界要求 `bytemuck::Pod`；底层分配器是私有的，安全的调用方代码无法取回它。这样，在无法安全访问这些值的芯片上，原子类型、锁、future、指针和其他控制状态就不会进入外部存储器。大容量容器始终是显式的：平台不会把外部存储器加入任意 System 和插件状态所用的普通全局分配器。
+
+通过 `calloc` 风格的钩子分配内存的 C 库请求的是无类型内存，所以无法为它检查 `Pod` 边界。`bulk_memory::foreign` 从同一个域为这类库提供原始的、清零的字节缓冲区；它的所有者只把大型纯数据缓冲区送到那里，并把库的控制结构留在全局堆上。`shared/tls` 是唯一的使用者：mbedTLS 中 4 KiB 及以上的分配（记录缓冲区和证书副本）进入大容量内存，更小的分配进入全局堆。
+
+## TLS 和 HTTP 客户端
+
+TLS 是位于平台边界之上的共享软件服务。它唯一与平台相关的输入是随机性，而平台已经以 `entropy` 的形式提供了它；引擎、它的进程生命周期以及信任根在每个平台上都相同。
+
+`shared/tls` 拥有 TLS 引擎和信任根。`Tls::new(entropy)` 用平台的熵源初始化进程范围的 mbedTLS 引擎，并拒绝 `UnavailableEntropy`，而不是回退到更弱的生成器；之后才失败的熵源会让握手以熵错误失败。
+
+信任根是 Mozilla 的 CA 存储，固定在 `shared/tls/roots` 中，在每个平台上都相同。与 ESP-IDF 的证书包一样，`build.rs` 把每个根证书精简为它的主题名称和公钥，并把结果编译进去（121 个根证书约 54 KiB）。mbedTLS 得到一个空的 CA 链和一个校验回调：服务器证书链的顶端证书以不受信任的状态到达，只有当一个与其签发者名称相同的打包根证书验证了它的签名，或者它本身就是一个打包的根证书（名称和公钥都一致）时，回调才信任它。mbedTLS 校验链的其余部分。服务器也可能在一个打包的根证书之上再发送一个更旧的根证书（有的服务器会在 GlobalSign Root CA - R3 之上发送 GlobalSign Root CA）；这时回调会把不受信任的顶端证书记录在一个按会话的字中，只有当打包的根证书出现在已校验路径的更下方时才信任这条链，就像浏览器在遇到第一个它信任的根证书时就停下一样。根证书保留在 Flash 中，只有匹配的根证书的公钥会被解析，所以没有任何平台在 RAM 中保留解析后的根证书。每个连接的记录缓冲区（接收记录 16 KiB，因为服务器会发送满尺寸的记录；发送记录 4 KiB）来自大容量内存（见“大容量内存”），在有外部 RAM 的开发板上就是外部 RAM。这个发送尺寸不是预构建设备库的配置，所以设备构建会编译 mbedTLS，`barracuda-tls` 根据编译目标为芯片选择 C 编译器；没有任何平台依赖它。mbedTLS 不检查证书日期，所以生成证书包时会排除已过期的根证书。`mbedtls-rs` 以 vendored 方式放在 `shared/tls/mbedtls-rs` 中，并添加了校验回调和一个可失败的随机源。
+
+没有任何平台读取其操作系统的证书存储，`shared/tls` 在运行时也不读取任何环境变量或证书文件。只有主机测试构建可以在构建期通过 `BARRACUDA_TLS_TEST_ROOTS` 添加根证书（用于拦截 TLS 的测试网络）；设备固件会拒绝它。它还拥有 mbedTLS 在裸机目标上调用的少数几个 C 库函数，并在同一个 mbedTLS 构建上暴露 `aes_256_gcm_open`、带 PKCS#7 填充的增量 AES-128-ECB（`Aes128EcbEncryptor`、`Aes128EcbDecryptor`）以及 MD5（`Md5`），这样必须使用某个服务的加密或摘要算法的使用者就不需要携带第二份实现。
+
+HTTP 同样是一个库：
+
+~~~text
+PluginContext { ip_stack, entropy }
+                 |
+                 v
+http Plugin: barracuda_tls::Tls::new(entropy)
+             http_client::ClientFactory::new(ip_stack, tls)
+                 |
+                 v  ClientFactory capability
+        every Plugin that depends on http
+~~~
+
+`shared/http-client` 是工作区中唯一的 reqwless 集成：它用 TCP 连接器、DNS 解析器和一个可选的 TLS 引擎构建 reqwless 客户端，并为长期连接提供专用的接收槽位。它不持有任何进程范围的服务。`http` 插件用上下文的 `entropy` 构建 TLS 引擎，用它的 `ip_stack` 构建请求池，并把 `ClientFactory` 作为它的能力发布；每个 HTTP 使用者都依赖 `http`。当 TLS 无法启动时，工厂没有 TLS，`https://` 请求会失败，而不是回退到明文。禁用 `http` 会把 TLS 和请求池从构建中移除。
+
+每个 `ClientFactory::create()` 的结果独立拥有连接复用和请求串行化，而所有结果共享同一个池。因此，“一个共享的 HTTP 客户端”指的是一份实现和构造策略，而不是让互不相关的并发协议共用一个 TCP 连接。
+
+长期运行的接收循环永远不从这个池中取连接。运行它们的插件拥有由共享工厂构建的 `http_client::ReceiveSlots`，每个槽位是一个静态分配的 socket。槽位的数量是该插件的开发板设置，所以开发板只为它负担得起的连接付出代价，而不含该插件的构建不会链接任何接收缓冲区。
+
+Embassy 是 Barracuda 在嵌入式、macOS 和 Linux 平台上使用的公共任务、定时器和生命周期模型。操作系统平台可以在其实现背后使用原生设施，而 System 和插件保持相同的 Embassy 生命周期。
+
+任务所有权和取消定义在[执行所有权](/zh/architecture/execution-ownership)中。
+
+## System
+
+System 是聚合入口。它的职责包括：
+
+- 使用所选 Target 的资源；
+- 从分区构造已挂载的文件系统和数据库；
+- 构造 Plugin Manager；
+- 装配固定的插件集合；
+- 把平台服务和 HAL 能力提供给它们的使用者；
+- 确定插件的注册和启动顺序。
+
+System 不解释具体开发板的引脚，不实例化外设实现，不解析厂商的分区格式，也不通过插件 API 暴露所选的平台类型。
+
+HAL 产生的能力可以由 System 直接使用，也可以作为类型化能力安装给插件。这个选择遵循所有权和生命周期，而不是产生该能力的硬件类型。
+
+## 插件
+
+插件是由 System 管理的功能模块。它们使用语义化的能力，并保持独立于平台、开发板、外设实现和芯片驱动的类型。
+
+例如，Display 插件使用 Display。它不使用 SPI 引脚、开发板矩阵或具体的显示屏实现。使用存储的插件接收限定范围的存储，而不是原始分区。
+
+插件之下的每一层都与插件无关：禁用一个插件会把它的功能从构建中移除，核心、System、组合层、平台、开发板或 `shared/` 中都不会提到它。插件需要的按开发板变化的值是插件自己的设置，在开发板的 `plugins.<id>` 部分中设置，永远不是平台或开发板的字段。驱动外设的插件为它声明一个槽位，并接收开发板解析分配给它的设备；两个插件永远不会争抢同一个设备。插件契约（目录布局、`plugin.toml`、设置、主机任务、构造、生命周期、协作契约、文件和文档）见 [Plugin API](/zh/architecture/plugin-api)。长期运行的插件工作的执行所有权见[执行所有权](/zh/architecture/execution-ownership)。
+
+## 依赖和仓库方向
+
+~~~text
+platforms/
++-- api/
++-- selected/          # selects only Platform
++-- esp32/             # one Platform per ESP chip: services + vendor HAL adaptation
++-- esp32c3/
++-- esp32c6/
++-- esp32p4/
++-- esp32s3/
++-- stm32/             # Platform services + vendor HAL adaptation
++-- nrf/
++-- ch/
++-- linux/
++-- macos/
++-- virtual-io/        # host-only virtual GPIO/I2C shared by linux and macos
+
+peripherals/
++-- api/
++-- config/
++-- impl/<peripheral>/<implementation-id>/
+
+drivers/
++-- chips/<chip>/
+
+boards/
++-- api/
++-- hal/
++-- config/
++-- configs/<board>/
++-- selected/          # selects only Board + Board HAL
++-- <board-related composition crates>/
+
+composition/
++-- api/               # separate Platform and Board HAL resource fields
++-- selected/          # generated allocation and orchestration of both axes
+
+core/
++-- plugin/
+|   +-- crates/
+|       +-- api/
+|       +-- manager/
+|       +-- macros/
+|       +-- manifest/
++-- system/
+
+plugins/
++-- <plugin>/
+~~~
+
+依赖流向语义化的使用者：
+
+~~~text
+Platform adaptation + peripheral implementations + Board matrix -> Board HAL ----+
+                                                                         |
+Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
+~~~
+
+平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
+
+生成的组合调用所选平台的 `hal` 模块，并把得到的 `embedded-hal` 资源交给由其清单选择的外设实现。复用现有实现的新开发板只需要开发板 YAML。新的实现添加它的 crate 和 `peripheral.yml`；它可以复用现有的芯片驱动，并且不需要在中央渲染器中添加分支。
+
+## 静态组合要求
+
+- 平台和开发板在构建期独立选择。
+- 开发板 HAL 由一个平台 HAL、一个开发板矩阵及其外设实现静态组合而成。
+- 具体的平台和开发板 HAL 针对一个 Target 进行单态化。
+- 不需要运行时的平台查找，也不需要 dyn 平台注册表。
+- 外设实现的调用保持静态分发。
+- 设备入口获取一次硬件单例，构造所选 Target 的绑定，并调用所选 Target 的组合。主机 Target 以同样的方式取得其平台的虚拟外设单例。
+- 开发板 HAL 初始化消耗自有的绑定；它不在运行时重新获取外设或解析引脚编号。
+- 开发板 HAL 只构造开发板配置中显式声明的可选外设和暴露的 I/O。
+- 公共框架不在这些声明之间定义冲突、互斥或复用策略。
+- 数字 GPIO、PWM、I2C 和 SPI 操作使用 `embedded-hal` 生态的契约。Barracuda 只补充 `embedded-hal` 1.0 没有提供的 GPIO 模式配置和模拟转换契约。
+- 共享的 I2C/SPI 总线使用上游的总线设备适配器和一个静态分配的所有者。
+- 平台 runner 和外设实现 runner 分别跟随各自的所有者。
+- System 和插件的热路径不执行平台、开发板或实现查找。
+- 添加插件不会改变平台 API。
+- 添加外设不会改变平台 API。
+- 添加开发板只是组合现有的平台、芯片驱动和外设实现构件，而不复制任何一方的实现。
+
+## 评审清单
+
+修改与目标相关的代码之前，确认：
+
+1. 平台是否拥有 ESP/STM32/nRF/CH/Linux/macOS 层面的机制，并把它的厂商 HAL 适配到芯片驱动和外设实现所使用的上游契约？
+2. 具体的产品硬件是否由开发板而不是平台描述？
+3. 每个外设 API 是否位于 `peripherals/api` 下，每个语义化实现是否位于 `peripherals/impl/<peripheral>/<implementation-id>` 下，每个可复用的底层驱动是否位于 `drivers/chips/<chip>` 下？
+4. 开发板 HAL 组合是否使用所选平台 HAL 加上开发板矩阵和外设实现？
+5. 平台是否暴露一个 partitions 集合，而不是针对特定业务的分区字段？
+6. IP、Wi-Fi 控制、BLE、USB 和其他通信能力是否被确切命名，而不是隐藏在通用的 Network 抽象之后？
+7. LittleFS、FATFS 和 ekv 是否由 System 而不是平台构造？
+8. 能否在不改变平台 API 的情况下添加插件或外设？
+9. 插件是否使用语义化的外设，而不是开发板、实现、芯片驱动或原始分区类型？
+10. 平台和开发板是否独立选择，只在 Target 组合时检查兼容性？
+11. Display 是否从开发板矩阵加上 Display 实现流入 HAL，再流向 System 或插件？
+12. 应用是否从 Target 组合 crate 获得完整的所选 Target，而不自己进行接线？
+13. 拥有 HTTP 的插件是否用上下文的熵和共享的信任根构建 TLS，没有任何平台或 System 触碰 TLS，同时所有 HTTP 使用者都使用它的 `ClientFactory`？
+14. 设备入口是否恰好获取一次硬件单例，并在返回 Target 资源之前，把得到的绑定对传过所选 Target 的组合？
+15. 可选外设及其私有接线是否声明在开发板配置的 `peripherals` 字段下？
+16. 暴露的数字 GPIO、模拟、PWM、I2C 和 SPI 接口是否被显式声明，而不是从未使用的硬件推断出来？
+17. 公共层是否避免对引用同一物理资源的声明施加冲突或复用策略？
+18. 该能力能否直接暴露 `embedded-hal`、`embedded-hal-async` 或领域生态契约，而不是引入一个 Barracuda 操作 trait？
+19. 当 SPI 实现拥有一个由 CS 选择的设备时，它是否接收 `SpiDevice`，并由上游适配器处理共享和按设备的配置？
+20. 禁用任何插件是否会移除其功能的每一处痕迹，插件之下没有任何地方提到它？
+21. 每个插件是否通过声明的槽位取得它的外设，并由开发板的 profile 和 `plugins.<id>` 决定存在哪些插件、每个槽位得到哪个设备？

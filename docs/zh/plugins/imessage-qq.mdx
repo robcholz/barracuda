@@ -1,0 +1,174 @@
+---
+title: "IMessage QQ 插件"
+sidebarTitle: "概览"
+description: "通过 QQ 机器人从 QQ 访问板上 Agent。"
+---
+
+IMessage QQ 插件把 QQ 机器人添加为一个 iMessage Gateway 消息通道：它通过扫码或配置绑定机器人，通过 QQ OpenAPI 发送文本和文件，并通过 QQ gateway WebSocket 接收消息及其文件。
+
+- 插件 ID：`imessage-qq`
+- 依赖：`imessage-gateway`、`webserver`、`captive-portal`
+- 设置：无
+- Context 资源：`entropy`（WebSocket 密钥和掩码、扫码绑定密钥）
+- 提供的能力：无
+- 需要的能力：来自 `captive-portal` 的 `CaptivePortal`、来自 `imessage-gateway` 的
+  `IMessageGateway`、来自 `webserver` 的 `WebServer`
+- Workflow：无（收到的消息以 Gateway 的
+  `gateway.message.received` 形式到达 Workflow）
+- Agent Tool：无
+- Lua 包：无
+- Web：门户入口 `imessage-qq`，带状态；`POST /api/gateway/qq`、
+  `GET /api/gateway/qq/status`、`POST /api/gateway/qq/mode`、`GET
+  /api/gateway/qq/owners`、`POST /api/gateway/qq/owners`、`POST
+  /api/gateway/qq/login`、`GET /api/gateway/qq/login`、`DELETE
+  /api/gateway/qq/login`（见 [HTTP API](/zh/plugins/imessage-qq/http)）
+- 任务：`qq_receive_task`（池大小 1），一个接收循环（见下文），在消息通道已配置且处于 `send_receive` 时占用 Gateway 的一个接收名额；`qq_login_task`（池大小 1），扫码绑定 session（见“扫码绑定”）
+- 存储：插件作用域的 KV：
+  - `configuration`：提供方配置；
+  - `mode`：消息通道模式（`ChannelMode` JSON 字符串）；
+  - `owners`：授权账号（所有者名单）；
+  - `session`：要恢复的 gateway session，`{"session_id","seq"}`。
+
+Gateway 消息通道名为 `qq`。
+
+存储为空时，插件在没有提供方凭据的情况下启动。它需要 `IMessageGateway`
+和 `WebServer` 能力，并遵循
+[`imessage-gateway`](/zh/plugins/imessage-gateway) 的消息通道接入方式：
+`POST /api/gateway/qq` 配置消息通道，`GET /api/gateway/qq/status`
+回答共享的消息通道状态；`/api/gateway/qq/mode` 和 `/api/gateway/qq/owners` 是共享的模式和所有者端点。Gateway 通过一个前缀路由提供所有这些端点
+（`IMessageGateway::serve_channel`）；插件自己只在 `WebServer` 上注册精确的登录路由。HTTP 请求通过
+`IMessageGateway::http` 发出。授权账号只有在消息通道配置完成后才会加载，gateway session 则由第一个接收 session 加载。`qq` 消息通道恰好在已配置且模式为 `send` 或
+`send_receive` 时注册到 Gateway。在出现模式之前存储的配置按 `send` 加载；新配置以 `send_receive` 开始。扫码绑定 session 等待期间，门户入口的
+`GET /portal/status` 记录为“等待扫码”（`attention`），其他时候为 Gateway 对该消息通道的 `channel_status`（“未配置”、“已停用”、
+“仅发送”、“收发中”、“连接中”、“名额已满”或“连接中断”）。见 [HTTP API](/zh/plugins/imessage-qq/http)。
+
+存储的配置是 `{"app_id","app_secret","api_base","token_url"}`。
+QQ access token 最多有效两小时，所以插件存储 App Secret，从不存储 token。在持久化新配置之前，端点会在 `token_url` 用 App Secret 换取一个 access token；被拒绝时返回 422
+`verification_failed`，不存储任何内容。被接受的配置会在启用之前持久化，并在插件注册时恢复，不发起任何网络请求。
+
+提供方只在 RAM 中保存 access token 及其过期时刻。它在第一次发送前按需获取 token，并在其剩余有效期不足 60 秒时再次获取。QQ OpenAPI 返回 401 时，它刷新一次 token 并重试一次请求。并发的发送共享同一次刷新。
+OpenAPI 请求带有 `Authorization: QQBot <access_token>` 和
+`X-Union-Appid: <app_id>`。
+
+## 接收
+
+QQ 只通过其 WebSocket gateway 投递消息，所以插件拥有一个 Embassy 任务
+`qq_receive_task`，在 `start` 中生成，并与插件的任务令牌竞争。它运行 Gateway 的 `receive_runtime`：除非消息通道已配置且处于 `send_receive`，否则它停住而不占用名额；启用时，它通过
+`IMessageGateway::receive_control` 租用 Gateway 的一个接收名额（绝不是请求池中的连接），并在其上一次运行一个 gateway session。
+
+一个 session：
+
+1. 通过提供方的缓存路径获取 access token（App Secret 被拒绝时，停止接收，直到配置发生变化）；
+2. 向 `GET {api_base}/gateway` 请求一次 WebSocket URL 并缓存。QQ 每分钟只允许两次这样的调用，所以新的查询至少要在上一次之后等待 30 秒，在 QQ 拒绝一次之后等待 60 秒。升级被拒绝时会丢弃缓存的 URL；
+3. 通过租约的 `connect_stream` 和 `split` 打开 `wss://…`，并运行
+   `shared/ws-client` 握手（`Sec-WebSocket-Key` 来自平台熵源，检查 `Sec-WebSocket-Accept`，使用掩码帧）；
+4. 等待 Hello（`op` 10），如果存储了 session 就发送 Resume（`op` 6），否则发送 Identify（`op` 2），intents 为 `1<<25`
+   （`GROUP_AND_C2C_EVENT`），shard 为 `[0, 1]`；
+5. 每隔 `heartbeat_interval` 发送心跳（`op` 1，带上最后的 `s`）。计时器与可安全取消的 WebSocket 读取端竞争，所以挂起的读取永远不会延迟心跳。到下一次心跳时上一次心跳仍未被确认（`op` 11），就结束该 session，然后恢复它；
+6. 收到 `READY`（其 `session_id` 会立即存储）或
+   `RESUMED` 时报告 `receiving`；
+7. 连接期间，当共享的 access token 进入最后一分钟时也会刷新它，供回复和下一次登录使用。
+
+每次分发的 `s` 保存在 RAM 中，最多每 10 秒与 session id 一起存储一次。代码为 4009 的关闭、服务器的 `op` 7 或连接断开，都会在一个正常 session 之后立即恢复。`d:false` 的 `op` 9 以及其他所有关闭代码会忘记该 session，并在运行时的退避之后重新 identify；4004 还会更新 token。关闭代码 4914（已下架，仅沙箱）和 4915
+（已封禁）会以一条双语消息停止接收，直到配置发生变化。
+
+`C2C_MESSAGE_CREATE` 变成路由 `qq`/`c2c:<author.user_openid>`，
+`GROUP_AT_MESSAGE_CREATE` 变成路由 `qq`/`group:<group_openid>`，与发送路径使用的会话 id 相同。对照所有者名单检查的发送者，在私聊中是 `author.user_openid`，在群聊中是 `author.member_openid`（QQ 把两者都限定在机器人范围内，所以同一个人在每个场景中的 id 都不同）。文本会去掉首尾空白。带文本或 `attachments`（见下文）的消息会被处理，只有附件时文本为空；`message_type` 不为 0 的消息（引用、卡片、转发）和空消息会被跳过。最近的 16 个消息 id 保存在 RAM 中，所以 QQ 再次推送的消息（包括恢复之后）只会被处理一次。每条新消息在获取任何文件之前，先用 `Owners::classify` 对其文本进行分类：
+
+- 所有者的消息作为 `GatewayInboundMessage` 发布，以 QQ 消息 `id` 作为 `message_id`，其文件作为 `attachments`；
+- 新发送者发来的配对码会把对方添加为所有者，并以被动回复的形式对这条配对码消息回答 `PAIRED_REPLY`
+  （“Paired. You can start chatting.”）；
+- 其他人的消息都会被丢弃并计数。
+
+在读取下一个负载之前，session 会等待 `IMessageGateway::ready()`，期间仍然发送心跳。
+
+### 附件
+
+所有者 `attachments[]` 中的每一项（`content_type`、`url`、`filename`、
+`size`，语音还有 `voice_wav_url`）都会变成一个
+`GatewayInboundMessage::attachments` 条目：
+
+| `content_type` | 类型 | MIME 类型 |
+| --- | --- | --- |
+| `image/jpeg`、`image/png`、`image/gif`、`image/webp` | `image` | `content_type` |
+| `voice`、`audio/*`，或以 `.amr`、`.silk`、`.slk` 结尾的文件名 | `audio` | 有 `voice_wav_url`（QQ 的转换结果）时为 `audio/wav`；否则为 `content_type`，或按文件名为 `audio/amr` / `audio/silk` |
+| `video/*` | `video` | `content_type` |
+| 其他任何内容，包括其他图片 | `file` | 当 `content_type` 是 MIME 类型时为它 |
+
+未确定的类型取下载的 `Content-Type`。附件的文件名使用发送者的 `filename`（转换结果为 `.wav`）。QQ 发送的某些 URL 没有协议（`//host/…`），会补上 `https:`。
+
+1. `size` 超过 `IMessageGateway::attachment_max_bytes()` 时直接拒绝，不发请求（WAV 转换结果的大小未知，所以不做检查）。
+2. `IMessageGateway::download_inbound` 在共享请求池上把 URL 流式写入
+   `/workspace/cache/gateway/qq/`，绝不使用接收名额。
+
+文件在处理消息时依次下载；期间 session 持续发送心跳，并且只在消息发布之后才读取下一个负载。被拒绝、超过限制、没有 URL 或失败（非 2xx 状态、传输或存储失败）的文件不会导致消息被丢弃：会在消息文本后追加一行，`[<kind> too large, not received]`
+或 `[<kind> not received]`。陌生人的消息和配对消息中的文件永远不会被获取。这些 URL 可能带有访问密钥，从不记录到日志。
+
+### 发送文件
+
+`send_media` 把文件上传到私聊或群聊并发送它（见
+`qq::media` 模块）：
+
+1. `POST {api_base}/v2/users/<openid>/files` 或
+   `/v2/groups/<group_openid>/files`，带上
+   `{"file_type","srv_send_msg":false,"file_name","file_data":"<base64>"}`。
+   设备没有可供 QQ 的 `url` 形式使用的公网 URL，所以字节以 base64 形式放在
+   `file_data` 中。body 以流的形式发送（`StreamBody`），`Content-Length`
+   根据文件长度计算（JSON 外壳加上
+   `4 * ceil(len / 3)`）；文件从不被缓冲。QQ 回答 `file_info`。
+2. `POST …/messages`，带上 `{"msg_type":7,"media":{"file_info"}}`，说明文字作为 `content`，`msg_id`/`msg_seq` 与文本回复完全相同（见下文）。
+
+`file_type` 对图片（`image/jpeg`、`png`、`gif`、`webp`、`bmp` 或这类文件名）为 1，对 `video/mp4` 为 2，对 SILK 音频（`audio/silk`、`.silk`、
+`.slk`）为 3，其他所有内容为 4（文件）：QQ 只把 SILK 当作语音播放，只把 mp4 当作视频播放，所以其他音频和视频都以文件形式到达。`file_name` 是发送者给的名字，否则为 `<kind>.<extension>`。
+
+限制和错误：文件长度必须已知（来源或字节，或者带 `size` 的流）；没有长度的流为 `InvalidRequest`，不会发送任何内容。QQ 通过 `file_data` 最多接收 5 MiB（`MAX_UPLOAD_BYTES`）；更大的文件为 `InvalidRequest`（不使用 QQ 的 URL 上传和分块上传）。频道（`channel:`）没有文件端点：`Unsupported`。401 会更新 token，并在文件可以再次读取时再上传一次；401/403 为
+`Authentication`，429 为 `RateLimited`，其他拒绝为带有 QQ 的
+`code` 和 `message` 的 `Platform`，读取文件失败为 `Stream`。和每次发送一样，上传必须在 Gateway 的 30 秒 `SEND_TIMEOUT` 内完成。
+
+来源：QQ 机器人 API 关于富媒体的页面
+（[https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html)、
+[https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html)：
+`file_type` 1–4，带 `file_name` 的 5 MB 以内的 `file_data`，`file_info`，`ttl`），以及腾讯的 `@tencent-connect/qqbot-nodejs` SDK（`file_data` 为 base64，
+`msg_type` 7 带 `media.file_info`，收到的 `attachments` 带
+`voice_wav_url`）。
+
+### 被动回复
+
+QQ 接受对收到消息的回复，私聊中为 60 分钟内，群聊中为 5 分钟内，并且对同一条消息的每次回复都需要不同的 `msg_seq`。接收循环会把收到的每条消息告知提供方；`reply_to` 指向其中某条消息的发送，在时间窗口内会带上 `msg_id` 和下一个 `msg_seq`（1、2、
+…），窗口关闭后则作为普通消息发出。接收循环从未见过的 `reply_to`（重启之前收到的消息）仍然作为回复发送。频道消息只带 `msg_id`，不带 `msg_seq`。提供方保留最近的 16 条消息。
+
+### 内存
+
+每个正在接收的 QQ 消息通道：接收名额的静态 socket 缓冲区（发送 1 KiB，接收 4 KiB）、租约中的一个 TLS 会话（设备上空闲时约 35 KiB；见平台清单）、WebSocket 读取缓冲区（空闲时 2 KiB；更大的帧会让它增长到帧的大小，最多 64 KiB 加帧头，读完后缩回）、每个发送帧的一个短期缓冲区、2 KiB 的握手限制、约 1.5 KiB 的最近消息 id、提供方的回复簿（16 个条目）、缓存的 gateway URL 和 session id，以及装箱的 session future。
+下载消息中的文件时，Gateway 的下载缓冲区位于一个请求池连接上；上传占用一个池连接和一个文件块。
+
+## 配置
+
+以旧的 `access_token` 格式存储的配置不会阻止启动：注册时记录一条警告，并让消息通道保持未配置状态，直到保存新的配置。其他格式错误的存储数据会导致注册失败。
+
+## 扫码绑定
+
+`/api/gateway/qq/login`（一个精确路由）启动、报告和取消 QQ 扫码绑定流程（`qq::bind`）的一个 session，详见
+[HTTP API](/zh/plugins/imessage-qq/http)。`qq_login_task` 拥有该运行时：没有 session 运行时，它停在一个命令信号上，不持有任何连接；每个 session 都被装箱，所以停住的任务不会为请求预留空间。绑定完成后，用 `barracuda_tls::aes_256_gcm_open` 解开 App Secret，然后走与手动填写配置相同的验证和 `configure` 路径，并用
+`Owners::add` 把扫码者的 `user_openid` 添加到所有者名单。密钥和 App Secret 都不会被记录到日志或返回。
+
+## 门户页面
+
+需要来自 `captive-portal` 的 `CaptivePortal` 和一个私有插件文件系统作用域。注册时保留一个 `WebEntryRegistration`，对应的 `WebEntry` 的 ID 为
+`imessage-qq`，分组为 `WebGroup::Channel`，顺序为 40，标题为 `QQ`，带有双语摘要，图标为 `icon.svg`，没有插图，模块为 `entry.js`，并带有一个 `ResourceFiles`
+提供方。卸载时移除导航入口和资源提供方；页面使用上面的 HTTP 路由。
+
+Cargo 在编译此插件之前会自动运行声明的 `build` 任务。如果只想构建它的资源，在仓库根目录运行 `cargo plugin run build --plugin imessage-qq`。该声明使用共享的 `tools/web/build.ts`
+脚本。前端依赖以及 format/lint/check/test 命令在仓库根目录统一管理；测试放在此插件的 `resources/web/tests/` 中。
+独立的浏览器模块写入此插件的 `filesystem/resources/entry.js`。通用镜像构建器只在选中此插件时才包含该目录。门户外壳中不会打包任何业务页面。共享的 UI 源码是构建期辅助工具，而不是对其他贡献者文件的运行时依赖。
+
+页面（`resources/web/entry.ts`，基于 captive portal 的 UI 套件和 Gateway 的消息通道页面套件构建）和微信页面一样，通过二维码绑定。页面挂载时读取 `GET /api/gateway/qq/login`：
+已配置且没有等待中的 session 时，显示“绑定”行，其中有“QQ 已绑定”卡片（以等宽字体显示其 App ID）和“重新绑定”；否则页面发送请求启动一个 session，在浅色底板上显示二维码，旁边是三个步骤
+（“用 QQ 扫描二维码”、“在手机上选好机器人”、“绑定完成”），以及“换一张二维码”。QQ 不报告扫码状态，也不报告有效期，所以没有已扫码状态，也没有倒计时。页面每隔 2 秒轮询一次
+`GET`，直到 `confirmed`（显示已绑定卡片、一条成功提示，并调用
+`context.refreshStatus()`）、`expired`（二维码变暗，“换一张二维码”变为主按钮）或 `failed`（提示说明该怎么做）；离开页面时发送一个 keepalive
+`DELETE`。在手机上，页面显示步骤和“复制链接”，而不是二维码，因为扫码的正是这部手机。已绑定时，显示模式（“停用”、“仅发送”、
+“收发”）和授权账号两行。
+
+在默认收起的“高级”折叠区（“手动填写 App ID 和 App Secret”）中，页面用
+“验证并保存”把 `{app_id, app_secret, api_base, token_url}` 提交到 `POST /api/gateway/qq`；页脚只在折叠区展开时显示。设备在存储任何内容之前先获取一个 access token，所以 422 `verification_failed` 会把 QQ 自己的 `message` 和 `code` 显示在 App Secret 字段上；其他错误会以提示显示设备的 `message`。保存会结束二维码 session，并显示已绑定卡片。页面从不读回 App Secret。密钥使用密码输入框，从不保存在浏览器存储中，并在成功或卸载时清空。请求在卸载时取消，且从不自动重试。HTTP API 没有身份验证或传输加密；只在可信的配置网络中使用。

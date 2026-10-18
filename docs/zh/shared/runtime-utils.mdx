@@ -1,0 +1,60 @@
+---
+title: "barracuda-runtime-utils"
+sidebarTitle: "运行时工具"
+description: "使用共享的辅助工具实现取消、逻辑流、异步生成器和带前缀的 ID。"
+---
+
+在 barracuda 各个 Rust crate 之间共享的、小巧且依赖很少的辅助工具：
+
+1. **`Cancel` / `CancellationFlag`**——协作式取消信号。
+2. **`stream::StreamPart`**——逻辑流共用的 `Delta`/`End` 词汇。
+3. **`yield_stream`**——安全的单任务异步生成器适配器。
+4. **`define_prefixed_id!`**——强类型、带传输前缀的 ID newtype 宏。
+5. **`define_id_allocator!`**——为带前缀的 ID 类型提供的单调递增分配器。
+
+crate 名称是 `barracuda-runtime-utils`；库以 `barracuda_runtime_utils` 导入。
+
+## `stream::StreamPart<T>`——逻辑流的组成部分
+
+当一个更大的事件流多路复用了一个需要自己显式边界的逻辑增量流时，使用 `StreamPart`：
+
+```rust
+use barracuda_runtime_utils::stream::StreamPart;
+
+let fragment = StreamPart::Delta("hello");
+let end: StreamPart<&str> = StreamPart::End;
+```
+
+如果一个普通的 Rust `Stream` 唯一相关的边界就是它的 `None`，就不需要这个包装。
+
+## `yield_stream`——单任务异步生成器
+
+`yield_stream` 和 `try_yield_stream` 把一个异步生产者变成装箱的 `Stream`。生产者收到一个 `Yielder`，在每产出一项之后挂起，直到使用方取走它。实现使用了 `Rc<RefCell>`，因此有意设计为本地的（`!Send`），适用于一个协作式执行器任务。
+
+## `define_prefixed_id!`——带传输前缀的 ID newtype
+
+定义一个 `u32` newtype，它的传输形式带有固定的字符串前缀（`session-1`、`task-2`……）。这让每个领域 ID 都有自己的类型——在需要 `SessionId` 的地方不能传入 `TaskId`——同时保留紧凑、人类可读的序列化形式。
+
+```rust
+use barracuda_runtime_utils::define_prefixed_id;
+
+define_prefixed_id!(SessionId, "session-", "session");
+define_prefixed_id!(TaskId, "task-", "task");
+
+let id = SessionId::new(1);
+assert_eq!(id.to_wire(), "session-1");
+assert_eq!(SessionId::from_wire("session-1").unwrap(), id);
+```
+
+每个生成的类型都派生 `Clone, Copy, Debug, PartialEq, Eq, Hash`，并实现：
+
+- `new(u32)` / `From<u32>`——从原始数字构造。
+- `to_wire()` / `Display`——渲染为带前缀的字符串。
+- `from_wire(&str)` / `FromStr`——解析并校验前缀。
+- `Serialize` / `Deserialize`——**按传输字符串**进行序列化和反序列化，因此前缀是传输表示的一部分。
+
+当输入为空，或缺少预期的前缀和数字后缀时，解析返回 `IdParseError`（`Empty` 或 `Invalid { kind, value }`）。`parse_prefixed_id` 作为该宏所基于的共享解析原语对外暴露。
+
+## 它的位置
+
+`barracuda-runtime-utils` 没有平台依赖，因此它在设备和主机上的编译与测试完全相同。`barracuda_agent_runtime` 等更高层的 crate 用 `define_prefixed_id!` 构建它们的领域 ID（`IterationId`、`TaskId`、`StepId`、`WorkerId`、`SessionId`）。

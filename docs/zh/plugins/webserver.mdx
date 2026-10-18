@@ -1,0 +1,48 @@
+---
+title: "WebServer 插件"
+sidebarTitle: "WebServer"
+description: "通过 HTTP 和 WebSocket 提供设备的网页和 API。"
+---
+
+WebServer 插件拥有可移植的 HTTP 和 WebSocket 服务器，并让依赖它的插件通过类型化的 `WebServer` 能力在上面托管路由。
+
+- 插件 ID：`webserver`
+- 依赖：无
+- 设置：无
+- 上下文资源：`ip_stack`
+- 提供的能力：`WebServer`
+- 所需能力：无
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：无
+- 任务：一个服务器任务（`web_server`，池大小 1），带四个连接工作者；当依赖它的插件调用 `listen_on_stack` 时，还有一个额外的监听任务（`additional_web_server`，池大小 1），带一个连接工作者
+- 存储：无
+
+WebServer 插件拥有一个可移植的 picoserve 服务器和一个 Embassy 服务器任务。它的构造函数接收通用的 `PluginContext`，并复制公开的 `ip_stack` 句柄；任务创建 `TcpSocket` 值，并直接调用 `TcpSocket::accept(8787)`。macOS 和 Linux 平台给协议栈分配 `10.42.0.2`，所以它的端点是 `10.42.0.2:8787`。
+
+它提供类型化的 `WebServer` 能力，让依赖它的插件可以用 `serve` 注册资源提供者，用 `serve_websocket` 注册 WebSocket 路由，用 `serve_http` 注册普通 HTTP 路由，用 `serve_upload` 注册流式请求体。它们都返回有作用域的注册，依赖它的插件在整个生命周期内保留这些注册。注册阶段会发布这个能力，并在启动前安装所有路由。随后 WebServer 的启动钩子获取由 System 拥有的 Embassy spawner，并启动服务器任务。插件卸载或启动回滚会取消该任务，并丢弃所有挂起的 accept/连接 future。
+
+常规的平台初始化会单独启动 Embassy Net 运行器。WebServer 任务并发轮询四个固定的连接工作者，每个都有自己的 TCP 和 HTTP 缓冲区。因此，一个长期存在的 WebSocket 只占用一个工作者，不会阻塞其余工作者中的普通 HTTP 请求。
+
+`WebServer::listen_on_stack` 让依赖它的、拥有网络的插件在注册期间把同一张路由表注册到另一个平台协议栈和端口上。由此产生的监听任务仍由 WebServer 插件拥有和取消；依赖它的插件保留一个 `WebListenerRegistration`，它被释放时会停止该监听器。容量是一个额外的接口，带一个连接工作者；再次注册会在插件注册期间失败。Wi-Fi 插件用这个契约在它的接入点协议栈上提供强制门户 HTTP。
+
+每个工作者的 4 KiB 接收缓冲区、4 KiB 发送缓冲区和 8 KiB HTTP 缓冲区都是只含 POD 的 `BulkBox<[u8]>` 分配。拥有独立大块内存域的平台可以把这些缓冲区放在外部内存中，而套接字状态、future、同步原语和其他控制数据仍留在常规分配器中。
+
+HTTP 使用方还可以用 `serve_http_prefix` 注册一棵子树。精确的 HTTP 和 WebSocket 路由优先，然后是最长匹配的前缀。前缀遵循路径分段：`/assets` 匹配 `/assets` 和 `/assets/file.js`，但不匹配 `/assets-other`；`/assets/` 只匹配其后代路径。`/` 提供 HTTP 兜底。同一路径上的精确注册和前缀注册可以共存；丢弃其中一个守卫只会移除那一项注册。每个新请求，包括现有 keep-alive 连接上的请求，都使用当前的路由表。已经在执行的处理函数或 WebSocket 可以用它保留的端点继续完成；移除它的注册不会取消它。`WebServer::new` 保留 picoserve 响应后关闭连接的默认行为；`WebServer::from(config)` 接受显式的 picoserve 连接策略。
+
+对于资源，使用 `webserver.serve("/assets/*", provider)`。把 `HttpProvider::serve(&self, path: &str)` 实现为返回 `HttpResponse` 的异步函数；流式传输时返回 `HttpResponse::stream(200, mime, length, reader)`。读取器实现 `embedded_io_async::Read`（0.7），无论它的来源是文件、Flash 字节还是生成的内容。WebServer 不会因此增加文件系统依赖。提供者只打开一次它的来源，并把所有权转移给响应；连接工作者在套接字背压下读取它。缺失的资源可以返回普通的 404 响应。
+
+`serve` 接受精确路径，或者以单个 `/*` 结尾的路径。`/assets/*` 匹配 `/assets/` 及其后代路径，不匹配 `/assets` 或 `/assets-other`。`/*` 是根兜底。这种资源入口只接受 GET（其他方法收到 405），以引用方式传递不带查询串的编码路径，并且不收集请求体。`serve_http` 接口是缓冲且拥有所有权的。
+
+大于 8 KiB HTTP 缓冲区的请求体需要用 `serve_upload`，它像 `serve_http_prefix` 一样注册一个前缀路由，并把一个 `HttpUpload` 交给端点：包括方法、不带查询串的编码路径、声明的 Content-Length，以及作为 `embedded_io_async::Read`（0.7）来源、直接从套接字读取的请求体。端点可以在任何时候停止读取并应答；服务器会在写出响应之前丢弃未读的剩余部分，所以连接仍然可用。上传端点接受所有方法，并自行选择状态码。
+
+`HttpRequest::path()` 暴露不带查询串的原始编码路径。服务器不解码路径，也不赋予它们任何文件系统含义。实现 URL 到资源映射的使用方必须校验该映射，并执行它自己的资源范围限制。`HttpRequest::new` 用于创建不带路径的合成请求；`with_path` 显式提供路径。`HttpRequest::local_address()` 是接受该连接的设备地址，它告诉路由客户端所在的网络，例如配置热点的网络；对于合成请求它是 `None`，`serve_connection_at` 用它来服务一个连接。
+
+`HttpResponse::new` 返回缓冲的字节。`HttpResponse::stream` 接受一个拥有所有权的 `embedded_io_async::Read`（0.7）来源和一个精确的字节长度。服务器写出 Content-Type 和 Content-Length，每次最多复制 1024 字节，并且从不读取超过声明长度的数据。来源不必是文件，服务器也不依赖任何文件系统实现。空流不会读取它的来源。`HttpResponse::body()` 返回 `Option<&[u8]>`：缓冲的响应体为 `Some`，流为 `None`。
+
+流式适配器使用内联存储，而不是装箱的读取器或装箱的读取 future。它的容量是：读取器 16 个机器字，读取 future 64 个字，提供者 future 256 个字，按机器字对齐。过大或对齐要求过高的实现会在编译时失败；没有堆分配的兜底。在 32 位目标上，这些容量分别是 64、256 和 1024 字节。复制缓冲区是每个活动流另外的 1024 字节。这些是存储容量，不是整个 Embassy 工作者内存占用的测量值。聚合者可以为它的叶子提供者保留 `HttpProviderHandle` 值：这些 future 有 128 个字的内联预算，在 256 个字的外层处理函数中为提供者的选择和所有权留出空间。这个句柄只在构造时分配，不会注册额外的 HTTP 端点。流式连接不会创建额外的通道或任务。注册仍然会为路由表和提供者所有权分配内存。
+
+`stream_allocations.rs` 使用一个 40,000 字节的生成资源、一个会让出执行的读取器和一个有界的短写测试套接字，统计出完整的 picoserve 请求/响应路径上零次分配。这并不是说任意提供者或实际的网络栈都不分配内存。特别是当前的 VFS `BackendFuture` 是装箱的，所以基于 VFS 的提供者仍然会产生由 VFS 拥有的分配。
+
+如果来源返回 I/O 错误、过早的 EOF 或无效的读取长度，`serve_connection` 会返回 `ServeConnectionError::ResponseSource`，并丢弃响应和套接字。已部分发送的响应不会被另一个 HTTP 响应替换，也不会被后续请求复用。套接字写入错误继续作为连接错误向上传播。流式传输由现有的连接工作者驱动，不会引入额外的任务。

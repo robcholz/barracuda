@@ -1,0 +1,18 @@
+---
+title: "信任根"
+sidebarTitle: "信任根"
+description: "了解每个平台信任哪些 CA 根证书、它们如何打包，以及如何更新它们。"
+---
+
+`cacert.pem` 是由 curl 提取的 Mozilla CA 证书库，与 ESP-IDF 证书包使用的来源相同。每个平台都恰好信任这些根证书；没有任何平台读取其操作系统的证书库。
+
+`build.rs` 把它们编译成一个紧凑的证书包：在证书库的日期之前尚未过期的每个根证书，精简为它的主题名称和公钥（均为 DER）。
+
+| 字段 | 值 |
+| --- | --- |
+| 来源 | [https://curl.se/ca/cacert.pem](https://curl.se/ca/cacert.pem) |
+| Mozilla 数据日期 | Fri Sep 25 03:12:01 2026 GMT |
+| 证书数量 | 121 |
+| SHA-256 | `a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505` |
+
+要更新时，用上述来源的当前文件替换 `cacert.pem`，对照发布的 `cacert.pem.sha256` 进行校验，然后更新此表。

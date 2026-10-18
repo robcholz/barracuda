@@ -1,0 +1,13 @@
+---
+title: "为 Barracuda 打过补丁的 mbedtls-rs"
+sidebarTitle: "mbedtls-rs 补丁"
+description: "查看 Barracuda 对已发布的 mbedtls-rs crate 所做的修改，以及原因。"
+---
+
+这是 crates.io 上发布的 [mbedtls-rs](https://github.com/esp-rs/mbedtls-rs) 0.1.0（上游提交 `3b90d296aa4e28a1df22c9aaacc74b3d6bef859f`，`mbedtls-rs/`），通过工作区清单中的 `[patch.crates-io]` 使用。上游的测试及其 `[[test]]` 和 `[dev-dependencies]` 条目已被删除；其余部分就是已发布的 crate 加上下面的修改。这些修改都可以提交给上游。
+
+| 修改 | 文件 | 原因 |
+| --- | --- | --- |
+| `Certificate::verified_by(VerifyCallback)`：一个空的 CA 链，加上一个由 `Session` 通过 `mbedtls_ssl_conf_verify` 安装的回调 | `src/cert.rs`、`src/session.rs` | `shared/tls` 像 ESP-IDF 的证书包那样，通过颁发者查找在一个紧凑的根证书包中进行验证，而不是把每个根证书都解析到 RAM 中 |
+| `TlsRng` 和 `RngFailure`：`Tls::new` 接受一个可能失败的随机源；每个 `CryptoRng` 仍然都是这样的随机源 | `src/lib.rs` | 平台的熵源可能失败；这时 MbedTLS 看到的是熵错误，而不是弱随机字节或 panic |
+| `VerifyScratch`：每个会话一个清零的字，作为上下文传给验证回调 | `src/cert.rs`、`src/session.rs` | 回调每次调用只看到一个证书；`shared/tls` 在同一条链的多次调用之间保存状态（不受信任的顶层证书之下的一个打包根证书），而不使用两次握手可能共享的进程范围变量 |

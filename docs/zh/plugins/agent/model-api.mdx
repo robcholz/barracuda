@@ -1,0 +1,68 @@
+---
+title: "barracuda-model-api"
+sidebarTitle: "Model API"
+description: "调用 OpenAI 和 Anthropic 兼容的模型，进行聊天、流式输出和结构化 JSON 输出。"
+---
+
+LLM 客户端：在一个由 Agent 拥有的持久 HTTP 传输上，提供 OpenAI 和 Anthropic 兼容的聊天以及结构化 JSON 输出，并把对话引用的图片和 PDF
+附件内联进每个请求。
+
+这套独立的 LLM 接口可以脱离 Agent 执行单独复用。
+
+## 入口
+
+`ModelApi` 拥有一个 Agent HTTP 客户端：
+
+| 方法 | 请求 | 返回 |
+|---|---|---|
+| `ModelApi::chat` | `ChatRequest` | `LlmResponse`（文本 + 推理 + 工具调用） |
+| `ModelApi::chat_json` | `ChatRequest` + `StaticOutputSchema` | `ChatJsonResponse`（解析出的 `T` + 工具调用） |
+| `ModelApi::chat_stream` | `ChatRequest` | 由包含 `barracuda_runtime_utils::stream::StreamPart` 的 `ChatStreamEvent` 值组成的 `ChatStream`；该流在被 Drop 之前独占借用 HTTP 传输 |
+
+`openai_compatible` 和 `anthropic_compatible` 两种后端都受支持；这个 crate 把统一的请求形状（以及工具定义、工具调用/工具结果角色、结构化输出配置）转换为各服务商的线上格式。
+
+## 附件
+
+用户消息和工具消息通过 `media` 内容部分
+（`barracuda_agent_message::attachment`）引用文件，从不直接携带字节。每次调用在第一次尝试之前，从
+`ChatRequest::files` 读取一次它可以内联的最新附件：`input_modalities.image` 开启时为 JPEG、PNG、GIF 和 WebP 图片（根据字节识别），在
+Anthropic 兼容后端上且 `input_modalities.pdf` 开启时为 PDF，最多
+`max_images_in_context` 个文件，每个最多 `image_max_bytes` 字节。请求体编码器把它们 base64 编码后原地放入请求体。其他所有附件以文本占位符的形式发送，写明文件、类型、大小和路径（文件不存在后则为 `… no longer available`）。
+
+## HTTP 是注入的
+
+System 提供 `http_client::ClientFactory`，其中只包含 TCP、DNS
+和 TLS 的构造资源。这个 crate 在其之上构建 reqwless，并负责持久连接、请求/响应表示、可复用缓冲区和流式行为。服务器允许时，同一个 `ModelApi` 上的连续调用会复用它的连接。
+
+## 取消
+
+调用接受 `Cancel`，一个借用的原子取消令牌。对于流式调用，该令牌覆盖请求发送、响应头和响应体读取；丢弃 `ChatStream` 也会取消响应体传输。取消不可重试，并以 `Error::Cancelled` 的形式表现出来。
+
+## 重试
+
+重试通过请求上的 `RetryPolicy` **按调用**配置（而不是在客户端上）。新建的请求带有 `RetryPolicy::default()`（重试 2 次，初始间隔 500 ms，指数增长，上限 8 s）；用 `.with_retry(..)` 覆盖，或用 `RetryPolicy::none()` 禁用。只有暂时性的传输失败才会重试（网络错误以及 HTTP 408/429/5xx）；中止、错误的 URL/请求体以及其他 4xx 从不重试。分类方式参见 `Error::is_retryable`。
+
+## 公开 API
+
+精选的重新导出（实现模块——后端注册表、附件解析、重试循环——是私有的）：
+
+- 客户端：`ModelApi`、`ModelApiFactory`
+- 配置 / 请求：`ModelApiConfig`、`InputModalities`、`BackendKind`、
+  `ChatRequest`、`RetryPolicy`、`StaticOutputSchema`
+- 响应 / 值：`LlmResponse`、`ChatJsonResponse`、`ChatStream`、
+  `ChatStreamEvent`、`ToolCall`
+- 错误：`Error`、`InitError`、`ParseBackendKindError`
+
+## 示例
+
+```bash
+cargo run -p barracuda-model-api --example client
+```
+
+在一个脚本化的网络工厂上构建同样的持久传输，并运行一次聊天。
+
+## 所处的位置
+
+一个 no_std 核心 crate，依赖 `http-client`、`embassy-time`、
+`barracuda-runtime-utils`、`barracuda-vfs`、`serde`/`serde_json`、`base64` 和
+`thiserror`。它由 `barracuda-agent-runtime` 和记忆侧的 LLM 提供者使用。

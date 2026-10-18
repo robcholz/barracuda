@@ -1,0 +1,135 @@
+---
+title: "Lua 执行环境"
+sidebarTitle: "Lua 环境"
+description: "了解 Lua 代码运行时可以使用什么：全局变量、模块、限制和隔离。"
+---
+
+本文描述的是目前已经存在的环境。它是当前实现的契约，不是计划中的库的清单。
+
+## 生命周期与隔离
+
+每次 `vm.run` 调用都会创建一个新的 Lua 状态。该状态、它的全局变量、已加载的模块、输入队列和输出队列都属于这次调用，并在脚本完成、失败或被取消时丢弃。Lua 值从不在调用之间共享。能力插件可以在 Lua 之外拥有状态：特别是 `vm-filesystem` 把文件保存在该插件的作用域 VFS 中，其 `/data` 和 `/media` 挂载点遵循常规的 VFS 持久化生命周期。
+
+`Lua::new()` 只有一种构造模式：白名单沙箱。没有完整标准库模式，没有禁用沙箱的 feature 开关，也没有替换它的主机工厂。每个加载的代码块都以沙箱表作为它的 `_ENV`；`_G` 指向同一张表。
+
+脚本可以在它自己的 `_ENV` 中创建或替换全局变量。这些修改只在那一个 Lua 状态中有效。
+
+## `Lua::new()` 之后可用的全局变量
+
+| 全局变量 | 用途 |
+| --- | --- |
+| `_G` | 沙箱环境本身。 |
+| `_VERSION` | Lua 版本字符串。 |
+| `assert`、`error` | 引发 Lua 错误。 |
+| `pcall`、`xpcall` | 运行一个函数并捕获 Lua 错误。 |
+| `pairs`、`ipairs`、`next` | 遍历表。 |
+| `select` | 选择可变参数。 |
+| `tonumber`、`tostring`、`type` | 基本的值转换和检查。 |
+| `getmetatable`、`setmetatable` | 检查和设置普通的 Lua 元表。原生 userdata 的元表受到保护。 |
+| `rawequal`、`rawget`、`rawlen`、`rawset` | 在表操作中绕过普通的 Lua 元方法分派。 |
+| `require` | 加载安装到这个 Lua 状态中的原生包。 |
+| `string` | Lua 的标准字符串操作库。 |
+| `table` | Lua 的标准表操作库。 |
+| `math` | Lua 的标准数学库，由 VM 安装（见下文）。 |
+| `utf8` | Lua 的标准 UTF-8 库。 |
+
+Lua 的语法和语言原语依然可用：值、表、函数、闭包、条件语句、循环、运算符和多返回值都不来自标准库表。
+
+`math` 是一个用 Rust 编写的 VM 内置库，参照 Lua 5.4.8 的 `lmathlib.c`；Lua 源码在构建时不带它自己的 `math`、`io`、`os`、`debug`、`coroutine` 和 `package` 库。`math.random` 使用 Lua 的 xoshiro256** 生成器，所以同一个种子给出与标准 Lua 相同的序列。它的种子来自平台的熵源，从不来自时钟或地址：在脚本调用 `math.randomseed(n)` 之前，第一次 `math.random` 会抽取一个种子，不带参数的 `math.randomseed()` 也一样；在没有熵源的平台上，两者都会引发错误。每次执行都有自己的生成器。
+
+## 执行数据流
+
+创建沙箱和安装执行环境是两个独立的操作：
+
+```rust,ignore
+let mut lua = Lua::new()?;
+let packages = barracuda_vm_builtin_packages::BuiltinPackages::new(seeds);
+let (input, output) = packages.install(&mut lua)?.into_io();
+lua_package_registry.install(&mut lua)?;
+let completion = lua.run(source);
+```
+
+在插件注册期间，VM 从 `barracuda-vm-builtin-packages` 选择完整的内置包方案。每次 `vm.run` 调用都把这个不可变的方案应用到它自己的 Lua 状态上。VM 插件还提供 `LuaPackageRegistry`；依赖它的插件在同一个统一的插件注册阶段把它们的包注册进去，每个新的 Lua 状态都会安装这些已注册的包。内置方案安装了一个基于消息的实现，它具有 Lua 标准流 I/O 的形式：
+
+- `io.stdin`、`io.stdout` 和 `io.stderr` 是虚拟的流句柄。它们不暴露主机文件描述符。
+- `io.read(...)` 和 `io.stdin:read(...)` 支持标准的行（`l`/`*l`）、带换行的行（`L`/`*L`）、全部（`a`/`*a`）、数字（`n`/`*n`）、字节数以及多格式形式。需要更多输入时，读取会异步等待；EOF 之后返回 `nil`。
+- `io.lines(...)` 和 `io.stdin:lines(...)` 遍历虚拟输入流。
+- `io.write(...)`、`io.stdout:write(...)` 和 `io.stderr:write(...)` 追加到运行的输出流；对于虚拟输出，`io.flush()` 是一个总是成功的空操作。
+- `io.input()` 和 `io.output()` 返回当前的默认流。内置环境作为设置函数时只接受它原始的标准句柄。
+- `print(...)` 用 `tostring` 转换参数，用制表符连接，并在末尾写一个换行。
+
+与标准 Lua 一样，`io` 和 `print` 是全局变量，`require("io")` 返回同一个 `io` 表。
+
+这些函数是消息流，不是进程的标准输入或标准输出。它们不读取终端，不写控制台，也不授予对主机文件描述符的访问。内部的输入和输出队列各容纳一条完整的消息，满时会施加背压。
+
+`Lua::run()` 只执行已经配置好的沙箱。它不安装 Environment、包或任何全局变量。
+
+类型化的 `Vm` 能力接受拥有所有权的源代码和输入字符串。它不施加由传输方式决定的长度限制。启动一次运行会返回 `VmRun`：它的 `run_id` 可以立即用于输入和取消。`VmRun::next_update()` 在等待输入之前报告 `VmRunProgress::InputRequired`，之后返回 `VmRunUpdate::Completed`；直接等待句柄会返回 `VmRunCompletion`，其中包含有序的输出和终止结果。Workflow 中的行为参见 [VM Action](/zh/plugins/vm/action)。丢弃一个未完成的 `VmRun` 会请求取消，并唤醒正在等待输入的执行。运行时会保留该任务，直到协作式取消完成，然后释放它的执行槽和内存池槽位。
+
+`Vm::list()` 按固定的运行时槽位顺序返回活动的执行。每个条目只包含它的 `run_id` 以及 `running` 或 `input_required` 状态；已完成、失败和被取消的执行会被省略。
+
+## 原生模块
+
+`require` 先解析已经加载的 `string`、`table`、`math` 和 `utf8` 标准库，然后只搜索通过 Rust `register_lib` 填充的内部预加载表。它是 Barracuda 自己的实现（`crates/lua/c/require.c`）：Lua 的 `package` 库及其文件系统搜索器和原生共享库都不会被构建，也不存在 `package` 表。`_G` 的引导条目会从已加载模块缓存中移除，所以 `require("_G")` 和 `require("package")` 会失败。
+
+VM 组合了三个内置原生包：`io`、`math` 和一个最初为空的 `os` 表。`io` 基于 VM 消息实现虚拟标准流，并安装标准的全局名称 `io` 和 `print`。空的 `os` 表给能力插件提供了一个可以扩展的统一标准表。这些内置包都不拥有文件系统、时钟或进程权限。
+
+单独的 `vm-filesystem` 插件用 `io.open`、`io.tmpfile`、文件句柄、支持文件名的 `io.lines` 以及基于文件的默认输入/输出扩展同一个 `io` 表。它还只安装与文件系统相关的 `os.remove`、`os.rename` 和 `os.tmpname` 函数。所有路径都直接经过该插件私有的 `ScopedVfs`，vm-filesystem 不做路径改写。路径仍然受 VFS 命名空间约束，挂载点权限依然适用。
+
+`gpio`、`i2c`、`spi`、`vm-http` 和 `vm-webserver` 插件通过 `LuaPackageRegistry` 注册只能 require 的模块。`vm-http` 提供有界的高层操作 `require("http").request`，不暴露套接字或平台网络栈。`vm-webserver` 提供 `/vm` 下有界的入站 HTTP 处理函数，并且可以把一个已存在的、可读的 `io.open` 文件转移到流式响应中，而无需重新打开它的路径。硬件模块只暴露所选开发板显式的可用 I/O 配置中的逻辑资源名称。其他模块名称仍然会失败，除非另一个已启用的插件注册了它们。由 VM 拥有的内置包放在 `plugins/vm/crates/builtin-packages` 中；可选的、由插件拥有的包放在所属插件中，并通过 VM 能力注册。
+
+对已注册模块重复调用 `require` 会返回该 Lua 状态中缓存的模块表。
+
+## 原生函数
+
+注册的 Rust 函数可以是同步的，也可以是异步的。异步的原生函数会在内部挂起并恢复 Lua 执行；Lua 代码不会拿到执行器或协程句柄。
+
+Rust 的返回契约是：
+
+| Rust 返回值 | Lua 结果 |
+| --- | --- |
+| `None` | 不返回任何值。 |
+| `Some(Ok(values))` | 转换后的 Lua 值。 |
+| `Some(Err(error))` | `nil, error`。 |
+
+## 不提供的能力
+
+以下 Lua 标准库接口不可用：
+
+- `package` 和 `coroutine`；
+- `io.popen` 以及所有主机进程或终端句柄；
+- `os.clock`、`os.execute`、`os.exit`、`os.getenv` 和 `os.setlocale`；
+- `debug` 库；
+- `load`、`loadfile` 和 `dofile`；
+- `collectgarbage` 和 `warn`。
+
+因此，脚本没有任何隐式的主机文件系统、原始网络栈、进程、终端、动态代码加载、硬件注册表或调试反射能力。只有启用 `vm-filesystem` 时才有文件系统访问，并且限制在该插件的作用域 VFS 内。UTC 日历访问只能通过 `vm-time`；有界的出站 HTTP 只能通过 `vm-http`；有界的入站 HTTP 服务只能通过 `vm-webserver`。硬件访问仅限于通过已注册的 `gpio`、`i2c` 和 `spi` 模块显式暴露的逻辑资源。任何其他访问都必须通过显式注册的 Rust 模块提供。
+
+完整的 `debug` 库被有意排除，因为它可能暴露 Lua 注册表，恢复诸如 `require` 的包状态之类的私有 upvalue，替换函数的 `_ENV`，修改受保护的元表，并干扰 VM 的执行钩子。将来的 traceback API 应该只暴露格式化后的诊断文本，而不是 `debug` 表。
+
+## 协作式指令让出
+
+常规的 `VmPlugin` 执行运行在静态分配的 Embassy 任务池中。Lua 的计数钩子在每个配置的指令间隔之后让出；该钩子不运行定时器，也不向 Lua 暴露定时器。观察到让出后，VM 执行器任务执行 `Timer::after_millis(100).await`，然后继续轮询同一个 Lua 执行。默认间隔是 10,000 条指令，任务池支持四个并发执行。
+
+`Vm` 能力使用 `VmRuntime` 和由任务拥有的指令调度器。常规的系统组合通过 `VmPlugin` 构造这两者。
+
+## Lua 内存池
+
+`VmRuntime` 有四个执行槽，对应四个 Embassy VM 任务槽。启动一次执行会占用一个槽，并从平台大块内存（ESP32-S3 上为 PSRAM）分配一个 1 MiB 的 Lua 堆，这个堆由 `embedded_alloc::TlsfHeap` 管理，并通过 `Lua::new_with_allocator` 传给 Lua。Lua 的分配、重新分配、垃圾回收和状态销毁都使用这个分配器；执行结束时堆会被释放。空闲的槽不占用内存。
+
+Lua 在这个堆中只保存普通数据。原生 userdata、回调和 future 都在常规分配器中装箱，所以原子量和其他控制状态永远不会进入大块内存。
+
+如果大块内存无法提供这个堆，或者脚本超出了它，执行会以 `outcome: "error"` 和 `error: "lua_memory"` 结束。Lua 堆的限制不包括拥有所有权的源代码和输入字符串、原生回调对象或 Embassy 任务存储。
+
+运行输出上限为 64 KiB 和 1,024 行。文件读取和单次文件写入上限为 32 KiB，`vm-filesystem` 每个已注册的包最多允许同时打开 16 个句柄。HTTP 请求的限制是：URL 最长 2 KiB，最多 32 个请求头且总计 16 KiB，请求体 32 KiB，响应体 64 KiB，两个并发工作区，以及 30 秒的截止时间。这些原生限制独立于 Lua 堆。
+
+`vm.cancel` 会被阻塞的输入立即观察到；对于 CPU 密集的 Lua，会在指令钩子边界或当前 100 ms 的任务延迟之后被观察到。
+
+## 尚未实现的资源限制
+
+当前的环境是一个带有有界 Lua 堆的能力沙箱。它目前不强制执行：
+
+- 指令数或 CPU 时间预算；
+- 挂钟截止时间；
+
+指令让出是调度，而不是硬性预算：循环的脚本会被周期性地挂起和恢复，但不会被自动终止。VM 仍然没有总指令数上限、CPU 配额或挂钟超时。

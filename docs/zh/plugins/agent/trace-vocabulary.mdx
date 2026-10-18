@@ -1,0 +1,476 @@
+---
+title: "barracuda-agent 跟踪"
+sidebarTitle: "跟踪词汇"
+description: "Agent 运行时在跟踪中输出的 span 名称、事件名称和字段。"
+---
+
+本文在 `barracuda-agent-trace` 的扁平树跟踪格式之上定义 Agent 运行时的跟踪词汇。`barracuda-agent-trace` 负责行语法
+（`tracing-context`、`incremental-context` 和 `custom-context`）；本文负责由 `barracuda-agent`、它的
+`barracuda-model-api` LLM 请求路径和 `barracuda-agent-tool` 执行路径输出的第一方运行时 span 名称和事件名称，以及增量 `run.*` 键和自定义上下文字段。
+
+`run` 上下文按以下顺序前缀闭合：
+`system → session → turn → agent → iteration`。`run.system` 是最外层的运行时作用域，在会话存在之前就已存在。它是一个语义标签，而不是另一个运行时标识符。
+
+按形状而不是按内容跟踪用户数据。不要输出原始用户文本、说明文字、附件文件路径、文件内容、工具参数或模型输出文本。对于消息和附件，优先使用 `has_text`、`text_bytes`、
+`attachment_count` 和 `attachment_kinds` 这样的字段。
+
+数值型的生命周期字段是事件属性，而不是采样指标。它们保留在 Chrome 即时事件的 `args` 中，不会创建计数器轨道。真正的采样指标必须通过 `barracuda-agent-trace` 定义的 `counter.<series>=<number>` 字段约定显式启用；不要把一次性的字节数或计数属性标记为计数器。
+
+## 级别
+
+运行时跟踪词汇只使用 `info`、`warn` 和 `error`。
+
+`info`：预期的生命周期、进展和成功的状态转换。
+`warn`：请求被拒绝、可选能力降级、工作被取消或被抢占，或者策略、模型、工具问题已被处理而没有让运行时崩溃。
+`error`：当前操作失败、返回或报告了错误，或者请求的工作因无法构建或驱动而被丢弃。
+
+携带上下文的 span（`session`、`turn`、`agent`、`iteration_loop`、
+`toolcall` 等）使用 `info_span!`，这样在运行时级别为 `Info` 时，`info`/`warn`/`error` 事件仍保留它们的增量上下文。
+
+## Agent 运行时
+
+### 跟踪上下文
+
+span-name：`agent.runtime`
+
+`AgentRuntime` 是由 `AgentRuntime` 拥有的运行时根。它长期存在的 worker span 携带固定的 `run.system=agent-system` 语义作用域，并打开固定的 `trace.task=agent-runtime` 逻辑通道。不会分配或持久化任何 system id。
+
+根覆盖 worker 的构建、检查点恢复和 worker 循环。因此，`agent.manager` 和 `skill.catalog` 这样的系统级启动 span 会继承系统上下文，而不会落入未知的会话分组。调用方线程上的同步句柄操作会显式携带同样的 `run.system`；它们的任务标签仍回退为物理线程，因为它们不是独立调度的异步 future。
+
+### 增量上下文
+
+`run.system`：固定的 `agent-system` 语义作用域。
+
+### 关闭
+
+span-name：`agent.runtime.shutdown`
+
+句柄一侧的关闭和 worker 汇合。它携带 `run.system`；关闭期间输出的检查点错误会继承该作用域。
+
+## 会话
+
+### 跟踪上下文
+
+span-name：`session`
+
+由 worker 拥有、长期存在的会话 actor 根把 `trace.task` 设为会话 id。因此，即使由一个执行器线程轮询所有并发的会话 actor future，它们也有各自不同的逻辑通道。短暂的同步 `session` 句柄 span 不会打开逻辑任务。
+
+### 增量上下文
+
+`run.system`：继承的 `agent-system` 作用域。
+`run.session`：会话 id。
+
+### 事件
+
+`opened`：会话已打开。事件流已连接，可以接收会话事件。
+`open_rejected`：打开会话失败，因为会话不存在、已经打开，或 worker 已停止。
+`submit_accepted`：用户输入已被接受，并为某一轮排队。
+`submit_rejected`：用户输入被拒绝，因为会话已关闭或正忙。
+`control_requested`：会话的中断或取消已被接受。
+`control_rejected`：中断或取消被拒绝，因为会话已关闭。
+`close_requested`：关闭已被接受。如果有工作正在进行，引擎会开始关闭流并取消工作。
+`close_rejected`：关闭失败，因为会话不存在或未打开。
+`closed`：会话流已关闭完成。事件流收到 `Closed`；除非删除请求要求移除，否则会话 id 仍然有效。
+
+### 事件字段
+
+`open_rejected`：`reason`。
+`submit_accepted`：`has_text`、`text_bytes`、`attachment_count`、`attachment_kinds`。
+`submit_rejected`：`reason`、`has_text`、`text_bytes`、`attachment_count`、`attachment_kinds`。
+`control_requested`：`op`。
+`control_rejected`：`op`、`reason`。
+`close_rejected`：`reason`。
+
+## 创建会话
+
+### 跟踪上下文
+
+span-name：`session.create`
+
+会话 id 在打开此 span 之前分配，所以创建过程以及任何注册表检查点诊断都携带这两个上下文键。
+
+### 增量上下文
+
+`run.system`：`agent-system` 作用域。
+`run.session`：新分配的会话 id。
+
+### 事件
+
+`created`：会话 id 已创建。
+
+### 事件字段
+
+`created`：`persistence`。
+
+## 恢复会话
+
+### 跟踪上下文
+
+span-name：`session.restore`
+
+构建 worker 时，每恢复一个已持久化的会话运行时，就有一个启动 span。（只存在于注册表中、没有运行时检查点的会话无需恢复。）它是 `agent.runtime` 的子 span；恢复出的 `agent.create` span 是此 span 的子 span，而不是无归属的启动工作。
+
+### 增量上下文
+
+`run.system`：继承的 `agent-system` 作用域。
+`run.session`：恢复的会话 id。
+
+## 删除会话
+
+### 跟踪上下文
+
+span-name：`session.delete`
+
+### 增量上下文
+
+`run.system`：`agent-system` 作用域。
+`run.session`：正在移除的会话 id。
+
+### 事件
+
+`registry_removed`：会话 id 已从注册表中移除。
+`runtime_state_removed`：会话驱动和 Agent 实例状态已移除。
+`delete_requested`：删除已被接受。
+`delete_rejected`：删除时没有找到可移除的有效会话。
+
+### 事件字段
+
+`delete_rejected`：`reason`。
+
+## 轮次
+
+### 跟踪上下文
+
+span-name：`turn`
+
+轮次是根可见的单元，由公开的用户消息或在上一轮结束后送达的后台工具更新发起。普通的工具调用、Agent 迭代和子 Agent 工作继承当前活动的轮次；它们不会打开自己的轮次。
+
+### 增量上下文
+
+`run.turn`：会话内的轮次 id。
+
+### Span 字段
+
+`cause`：`user` 或 `background_tool`。
+
+### 事件
+
+`input_delivered`：用户输入已送达根 Agent。
+`background_result`：后台子 Agent 的工作让根 Agent 重新就绪。
+`approval_resolved`：用户的回复解决了一个待处理的审批。
+`output`：根可见的文本已输出到会话流。
+`error`：轮次驱动失败，并输出了会话错误。
+`cancelled_cleanup`：被取消的轮次在结束前运行了清理。
+
+### 事件字段
+
+`input_delivered`：`has_text`、`text_bytes`、`attachment_count`、`attachment_kinds`。
+`approval_resolved`：`decision`，可选 `approval`。
+`output`：`text_bytes`。
+`error`：`kind`。
+
+## AgentManager
+
+### 跟踪上下文
+
+span-name：`agent.manager`
+
+管理器的构建是系统级的启动工作。它是 `agent.runtime` 的子 span，继承 `run.system`；它有意不带
+`run.session`。
+
+### 事件
+
+`missing_persistence_dir`：管理器构建时拒绝了空的持久化根目录。
+`extraction_llm_init_failed`：内部提取用的 LLM 客户端初始化失败。
+`long_term_memory_init_failed`：长期记忆初始化失败。
+
+### 事件字段
+
+`missing_persistence_dir`：`reason`。
+`extraction_llm_init_failed`：`kind`。
+`long_term_memory_init_failed`：`kind`。
+
+## 创建 Agent
+
+### 跟踪上下文
+
+span-name：`agent.create`
+
+### 事件
+
+`unknown_kind`：Agent 类型没有内置的清单。
+`unknown_tool`：清单引用了一个不可用的工具。
+`transcript_open_failed`：无法打开 Agent 的对话记录存储。
+`agent_build_failed`：无法构建 Agent 对象。
+`context_provider_attach_failed`：无法挂载 profile 或长期记忆上下文提供者。
+`goal_seed_failed`：无法把初始目标追加到 Agent。
+`created`：Agent 已构建并返回给实例。
+
+### 事件字段
+
+`unknown_kind`：`kind`。
+`unknown_tool`：`kind`、`tool`。
+`transcript_open_failed`：`agent`、`kind`。
+`agent_build_failed`：`agent`、`kind`。
+`context_provider_attach_failed`：`agent`、`provider`、`kind`。
+`goal_seed_failed`：`agent`、`kind`。
+`created`：`agent`、`kind`。
+
+## Agent
+
+### 跟踪上下文
+
+span-name：`agent`
+
+`trace.task`：Agent id。这个保留的 `barracuda-agent-trace` 字段为每个进行中的 Agent future 打开一条稳定的逻辑异步任务通道；它由订阅者消费，不会作为自定义上下文出现。子 span 和事件会跨执行器线程切换继承这条通道。`AgentSlots` 对同一个 Agent id 只允许一个进行中的 future，所以重叠的 Agent 任务有各自不同的标签。
+
+### 增量上下文
+
+`run.agent`：此子树的 Agent id。
+
+### Span 字段
+
+`kind`：Agent 类型。
+`depth`：相对于根 Agent 的 Agent 深度。
+
+### 事件
+
+`awaiting_approval`：Agent 因等待人工审批请求而暂停。
+`spawn_materialized`：请求的子 Agent 已构建并插入图中。
+`spawn_dropped`：请求的子 Agent 无法构建，或其父 Agent 已不存在。
+`delete_ignored`：Agent 删除请求针对的不是后代，因此被忽略。
+`result_to_parent`：子 Agent 的结果已送达或排队等待其父 Agent。
+`root_cancelled`：根任务已取消。
+`subagent_cancelled`：子 Agent 任务已取消并移除。
+`subtree_deleted`：Agent 子树已从注册表、图、队列和审批中移除。
+`tool_gate_blocked`：工具闸门阻止了一个或多个工具调用。
+`task_failed`：Agent 任务失败并回到空闲状态。
+`preempt_patch_dropped`：被抢占的部分补丁含有不匹配的工具调用，已被丢弃。
+
+### 事件字段
+
+`awaiting_approval`：`approval`。
+`spawn_materialized`：`parent_agent`、`child_agent`、`kind`。
+`spawn_dropped`：`parent_agent`、`kind`、`reason`。
+`delete_ignored`：`target_agent`、`reason`。
+`result_to_parent`：`parent_agent`、`child_agent`、`queued`。
+`root_cancelled`：`reason`。
+`subagent_cancelled`：`agent`、`reason`。
+`subtree_deleted`：`root_agent`、`count`。
+`tool_gate_blocked`：`count`。
+`preempt_patch_dropped`：`tool_call_count`。
+
+## 迭代准备
+
+### 跟踪上下文
+
+span-name：`iteration.prepare`
+
+### 增量上下文
+
+`run.iteration`：正在准备的迭代 id。它与随后由同级 `iteration_loop` span 打开的 id 相同。
+
+### Span 字段
+
+`provider_count`：为请求准备并渲染的上下文提供者数量。
+
+此 span 涵盖 `iteration_loop` 开始之前必须完成的所有工作，包括异步上下文提供者、工具策略投影和请求上下文渲染。
+
+## 上下文压缩
+
+### 跟踪上下文
+
+span-name：`context.compact`
+
+只有当滚动摘要策略选中了一个要压缩的窗口时，才会输出此 span。它是 `iteration.prepare` 的子 span。
+
+### Span 字段
+
+`message_count`：传给压缩器的历史消息数量。
+`estimated_tokens`：所选窗口的启发式 token 数。
+
+### 事件
+
+`completed`：压缩器生成了一个摘要片段。
+`failed`：压缩失败，但没有让面向用户的迭代失败。
+
+### 事件字段
+
+`completed`：`summary_count`。
+`failed`：`kind`（`backend` 或 `empty_summary`）。
+
+## 上下文提取
+
+### 跟踪上下文
+
+span-name：`context.extract`
+
+只有当长期记忆提取的节流触发时，才会输出此 span。
+它是 `iteration.prepare` 的子 span。
+
+### Span 字段
+
+`transcript_turn_version`：为提取选定的已提交轮次版本。
+`turn_version_delta`：自上一个提取游标以来已提交的轮次数。
+`transcript_bytes`：展平后对话记录的字节长度；从不包含其文本。
+`existing_count`：为对账提供的现有记忆条目数量。
+
+### 事件
+
+`completed`：提取返回了零个或多个记忆操作。
+`failed`：提取失败，但没有让面向用户的迭代失败。
+
+### 事件字段
+
+`completed`：`operation_count`、`add_count`、`replace_count`、`forget_count`。
+`failed`：`kind`（`backend` 或 `empty_output`）。
+
+## 上下文渲染
+
+### 跟踪上下文
+
+span-name：`context.render`
+
+`iteration.prepare` 的这个同步子 span 涵盖提供者的贡献、上下文缓存更新，以及面向模型的请求视图的构建。
+
+### Span 字段
+
+`provider_count`：渲染进请求的上下文提供者数量。
+
+## LLM 对话
+
+### 跟踪上下文
+
+span-name：`api.chat`
+
+### Span 字段
+
+`purpose`：`iteration`、`conversation_compaction` 或
+`memory_extraction` 之一。辅助用途包括等待租用它们共享的 LLM 客户端的时间。
+`max_attempts`：请求重试策略允许的最大 HTTP 尝试次数，包括首次尝试。
+
+## LLM 尝试
+
+### 跟踪上下文
+
+span-name：`api.attempt`
+
+### Span 字段
+
+`attempt`：从 1 开始的 HTTP 尝试序号。
+`max_attempts`：此对话请求允许的最大尝试次数。
+
+### 事件
+
+`completed`：这次尝试产生了有效的 LLM 响应。
+`failed`：这次尝试失败。
+
+### 事件字段
+
+`failed`：`kind`、`retryable`、`final`。
+
+`kind` 是一个只描述形状的稳定分类：`invalid_tools_json`、
+`transport`、`transient_transport`、`parse`、`empty_response`、
+`malformed_response` 或 `api`。动态的传输错误文本从不被跟踪。
+
+## LLM 重试
+
+### 跟踪上下文
+
+span-name：`api.retry`
+
+此 span 涵盖两个 `api.attempt` span 之间实际的重试退避。
+
+### Span 字段
+
+`failed_attempt`：导致重试的那次尝试。
+`next_attempt`：退避之后的那次尝试。
+`backoff_ms`：请求的重试延迟，单位为毫秒。
+`error_kind`：失败尝试的稳定错误分类。
+
+### 事件
+
+`completed`：退避已结束，可以开始下一次尝试。
+`cancelled`：取消中断了退避。
+
+## 迭代循环
+
+### 跟踪上下文
+
+span-name：`iteration_loop`
+
+### 增量上下文
+
+`run.iteration`：迭代 id。
+
+### 事件
+
+`completed`：LLM 生成了最终文本，没有工具调用。
+`context_cache_hit_rate`：对于非空的提示，提供者的用量同时报告了输入 token 和缓存读取 token。该事件还会投影为 Chrome 计数器采样，以便随时间绘制缓存效果图。
+`preempted`：迭代在一个中断检查点停止。
+`cancelled`：请求取消后，迭代停止。
+`chat_failed`：LLM 对话因中断以外的原因失败。
+`tool_calls`：LLM 请求了一个或多个工具调用。
+`assistant_tool_calls_invalid`：助手的工具调用消息缺失、格式错误或无法追加。
+
+### 事件字段
+
+`completed`：`output_bytes`。
+`context_cache_hit_rate`：`input_tokens`、`cache_read_tokens` 和
+`counter.value`（`cache_read_tokens / input_tokens * 100`，以百分比表示）。
+`preempted`：`checkpoint`。
+`cancelled`：`checkpoint`。
+`chat_failed`：`kind`。
+`tool_calls`：`count`。
+`assistant_tool_calls_invalid`：`kind`。
+
+## Skill 相关
+
+### 跟踪上下文
+
+span-name：`skill.catalog`
+
+### 事件
+
+`root_missing`：skill 根目录不存在，已跳过。
+`scan_failed`：扫描 skill 根目录失败，文件系统 skill 已禁用。
+
+### 事件字段
+
+`scan_failed`：`kind`。
+
+## 工具相关
+
+### 跟踪上下文
+
+span-name：`toolcall`
+
+普通调用和后台调用在授权之后、于 `barracuda-agent-tool` 运行器边界处被跟踪。每个由运行器拥有的调用都会打开一条唯一的 `trace.task` 逻辑通道，因为同一批次中的调用可能重叠，后台工作也可能比发起它的 `iteration_loop` 存在得更久。打开通道时会重复完整的继承 `run` 上下文，包括发起它的迭代。
+
+span 在已授权的调用被分派时开始。对于普通调用，它随面向模型的结果结束。对于后台调用，只要调用还在 Agent 的后台池中，它就保持打开：已接受的结果不会关闭 span，也不会输出 `result`；真正完成时输出 `result`，而 `background_cancel` 则改为输出 `cancelled`。在分派前就被拒绝的调用，使用 Agent 通道上的同步 `toolcall` span。
+
+### Span 字段
+
+`tool`：工具名称。没有调用工具时用 `none` 作为占位符。
+
+### 事件
+
+`arguments`：已记录工具参数的元数据。
+`parse_failed`：无法从模型调用中解析出工具调用。
+`result`：工具已完成，或在执行前被拒绝。
+`cancelled`：`background_cancel` 丢弃了一个正在运行的后台调用。
+`flow_link`：一个子 Agent 创建工具使用通用的 `barracuda-agent-trace` 跨任务流协议，把这次工具调用链接到所创建子 Agent 的初始 `agent`
+span。领域特定的子 Agent id 作为导出的流参数携带。
+`spawn_kind_rejected`：子 Agent 创建工具拒绝了调用方允许范围之外的类型。
+`spawn_unknown_kind_rejected`：子 Agent 创建工具拒绝了一个没有内置清单的类型。
+
+### 事件字段
+
+`arguments`：`argument_bytes`。
+`parse_failed`：`kind`。
+`result`：`ok`、`blocked`。
+`cancelled`：`checkpoint`，始终为 `background_cancel`。
+`flow_link`：`flow.name`、`flow.target_task`、`flow.target_span`、
+`flow.arg.child_agent`。
+`spawn_kind_rejected`：`kind`。
+`spawn_unknown_kind_rejected`：`kind`。

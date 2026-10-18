@@ -1,0 +1,59 @@
+---
+title: "barracuda-agent-memory"
+sidebarTitle: "记忆"
+description: "用 memory crate 存储 Agent 的对话记录、profile 文档和长期记忆。"
+---
+
+Agent 的记忆子系统。
+
+这里有三个相互独立的部分：**`TranscriptStore`**——一份纯粹的、只追加的对话轮次逐字记录；用于可编辑全局 profile 文档（`soul.md`、`identity.md`、`user.md`）的 **`ProfileStore`**；以及
+**长期记忆**（持久的事实）。这些存储对提示组装、摘要、token 预算或 Agent 工具一无所知。组装 LLM
+上下文窗口是 *Agent 层*的工作，它通过 `barracuda-agent` 中的上下文提供者建立在这些存储之上。
+
+这个 crate 只定义 `Compactor` **接缝**——把一段较旧的消息窗口折叠成更短摘要的契约。它不带任何 LLM 依赖；现成的基于 LLM 的压缩器（`LlmCompactor`）和驱动它的滚动摘要提供者都位于 `barracuda_agent` 中（拥有 LLM
+客户端的那一层）。存储从不会被要求进行压缩。
+
+作为核心 crate，它只依赖 `barracuda_vfs::ScopedVfs`，从不依赖某个具体的平台或文件系统后端。设备固件从 System 获得一个私有的插件命名空间；主机测试通过 `vfs-memfs` 使用同一套 API。
+
+## 公开 API
+
+| 项 | 作用 |
+|---|---|
+| `Transcript` | Agent 运行时使用的唯一类型擦除的对话记录接口。它隐藏了具体的、由文件系统支撑的存储类型：`open_turn()`、`turns()` 和两个版本计数器。 |
+| `TranscriptStore` | 基于一个作用域 VFS 的、每个对话一份的具体逐字存储。丢弃一个非空轮次会在内存中提交它；`flush().await` 持久化排队的轮次。 |
+| `Turn` / `TurnId` | 由 `turns()` 产出的一个轮次（`id: Option<TurnId>` + `messages`），以及它单调递增的逻辑 id。已提交的轮次带 `Some(id)`；末尾打开的轮次带 `None`。 |
+| `TurnHandle` | `open_turn()` 返回的非泛型 RAII 作用域。它打开特定角色的子句柄，并在被丢弃时提交并持久化该轮次。 |
+| `UserHandle` / `AssistantHandle` / `ToolHandle` | 嵌套的消息作用域。它们唯一的修改操作是 `append()`；丢弃一个句柄即完成它的消息。 |
+| `Compactor` / `CompactError` | 摘要接缝：把一段较旧的消息窗口折叠成更短的摘要。由 Agent 层驱动，**而不是**由存储驱动。 |
+| `ProfileStore` 及相关类型 | 可编辑的全局 profile 文档：`Soul`、助手身份和用户 profile。基于作用域 VFS 的纯整文件存储；由 `barracuda-agent` 投射到上下文中。 |
+| `LongTermMemory` 及相关类型 | 按 Agent / 全局的持久事实存储。 |
+
+### 一个轮次如何流转
+
+1. 调用 `store.open_turn()`，然后打开 `user()`、`assistant()` 或 `tool()` 子作用域，并追加特定角色的片段。
+2. 追加的片段通过 `turns()` 以末尾打开的轮次（`id == None`）的形式可见。丢弃一个子句柄即完成它的消息；丢弃该轮次会提交它并推进 `turn_version`。在异步持久化边界调用 `flush().await` 写入排队的记录。
+3. `store.turns()` 是唯一的读取入口：已提交的轮次（`id == Some(_)`），后面跟着任何打开的轮次。你交给模型的完整逐字对话记录就是 `turns().iter().flat_map(|t| &t.messages)`——中间不插入任何摘要；存储保留全部内容。
+4. 轮次提交是同步的；持久的 VFS I/O 通过
+   `flush().await` 显式进行。
+
+**压缩不是存储关心的事。**在 `barracuda-agent` 中，一个
+`RollingSummaryContextProvider` 通过 `turns()` 读取较旧的轮次，通过注入的 `Compactor` 对它们做摘要，再由一个
+`RecentMessagesContextProvider` 渲染逐字的尾部。两者通过一个共享游标协调，该游标标记已摘要前缀和逐字尾部之间的边界。限制磁盘上的增长（保留策略）同样是一个独立的、未来的关注点——不归存储负责。
+
+## 特性
+
+| 特性 | 默认 | 效果 |
+|---|---|---|
+
+## 示例
+
+```bash
+cargo run -p barracuda-agent-memory --example conversation --target x86_64-unknown-linux-gnu
+```
+
+在内存 VFS 上让一个 `TranscriptStore` 经过几个轮次，然后打印模型将会收到的逐字消息列表。crate 级的 rustdoc 中有同样的流程，并附有行内说明。
+
+## 所处的位置
+
+一个纯 Rust 的核心 crate（没有平台/FFI）。它通过注入的
+`ScopedVfs` 进行持久化，所以同一份代码在设备上运行于 LittleFS，在测试中运行于 MemFS。

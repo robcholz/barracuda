@@ -1,0 +1,101 @@
+---
+title: "llm-tape"
+description: "通过反向代理录制原始的 LLM API 响应，并按原始时序回放它们。"
+---
+
+`llm-tape` 录制本地反向代理观察到的原始响应体字节块及其时序，然后通过相同形式的 LLM API URL 把这些字节提供回给 Agent。它不解析 SSE、JSON、模型输出或服务商的事件类型。
+
+当前的范围有意保持狭窄：
+
+- 通过可配置的 LLM 基础 URL 进行反向代理录制；
+- 每次运行一个只追加的 JSONL 录制带；
+- 按 HTTP 方法和路径顺序匹配请求；
+- 只按原始录制的时序回放；
+- 回放模式下不回退到真实网络。
+
+## 安装
+
+在 `agent-framework` 根目录下，把每个 Python 工具和开发依赖安装到共享的工作区环境中：
+
+```bash
+uv sync --all-packages --all-groups
+```
+
+## 录制
+
+以真实的服务商作为上游启动录制器：
+
+```bash
+uv run --package llm-tape llm-tape record \
+  --listen 0.0.0.0:8787 \
+  --upstream https://api.anthropic.com \
+  --output bench/tapes/run.jsonl
+```
+
+让 Agent 指向录制器。运行在另一台机器或设备上的 Agent 必须使用录制器主机的局域网地址，而不是 `127.0.0.1`：
+
+```bash
+export ANTHROPIC_BASE_URL=http://192.168.1.10:8787
+```
+
+对于配置的基础 URL 包含 `/v1` 的 OpenAI 兼容客户端：
+
+```bash
+export OPENAI_BASE_URL=http://192.168.1.10:8787/v1
+```
+
+录制器把每个非控制路径转发到配置的上游。它存储请求元数据和请求体的 SHA-256 用于诊断，但从不存储请求体或认证请求头的值。
+
+## 回放
+
+```bash
+uv run --package llm-tape llm-tape replay \
+  --listen 0.0.0.0:8787 \
+  bench/tapes/run.jsonl
+```
+
+使用相同的基础 URL 让 Agent 指向回放服务器。传入的请求按顺序消耗录制的交互。方法或路径不匹配时返回 HTTP 409，且不消耗该交互。录制带耗尽时同样返回 409。
+
+录制时会给每个聊天请求打上一个 `match_key`，即其第一条用户消息的哈希，以便区分并发的对话（一个 Agent 及其子 Agent）。带键的录制带按每个键分别顺序消耗：请求会收到为其对话录制的、最早一条尚未消耗的交互，而对话已没有剩余交互的请求会得到 409。不带键的录制带仍像以前一样严格按顺序消耗。
+
+回放没有速度选项：响应头和数据块总是按它们相对于匹配请求开始时的原始单调偏移进行调度。
+
+## 日志
+
+`llm-tape` 使用 [Loguru](https://loguru.readthedocs.io/)。当 stderr 是交互式终端时日志带颜色，重定向时自动变为纯文本。`INFO` 是默认级别，报告服务器启动、请求匹配、响应状态、数据块/字节总数、耗时、流的结果以及失败。它从不记录请求体、响应内容或认证请求头的值。
+
+使用 `DEBUG` 可以额外报告每个录制或回放的字节块的序号、字节数和原始时间戳：
+
+```bash
+uv run --package llm-tape llm-tape replay \
+  --log-level DEBUG \
+  --listen 0.0.0.0:8787 \
+  bench/tapes/run.jsonl
+```
+
+## 录制带格式
+
+录制带是只追加的 JSONL。响应数据经过 base64 编码，因此任意字节，包括在 JSON 词法单元或 UTF-8 码点内部被切开的情况，都能原样往返，而无需解释。
+
+```jsonl
+{"kind":"tape_start","version":1,"created_at":"2026-08-03T08:00:00+00:00"}
+{"kind":"request","interaction_id":"call-000000","call_index":0,"method":"POST","path":"/v1/messages","path_qs":"/v1/messages","headers":[["content-type","application/json"]],"body_sha256":"...","body_size":123}
+{"kind":"response_start","interaction_id":"call-000000","at_us":120000,"status":200,"reason":"OK","headers":[["content-type","text/event-stream"]]}
+{"kind":"response_chunk","interaction_id":"call-000000","seq":0,"at_us":135000,"data_b64":"ZGF0YToge30K..."}
+{"kind":"response_end","interaction_id":"call-000000","at_us":180000,"outcome":"eof"}
+```
+
+把录制带视为敏感数据。请求凭据会被脱敏，但服务商的响应是原样录制的，可能包含私密的模型上下文。
+
+## 控制端点
+
+两种模式都暴露 `GET /_llm_tape/health`。这个端点从不被录制，也不消耗回放交互。
+
+## 验证
+
+```bash
+uv run --package llm-tape ruff check tools/llm-tape
+uv run --package llm-tape ruff format --check tools/llm-tape
+uv run --package llm-tape \
+  pytest -c tools/llm-tape/pyproject.toml tools/llm-tape/tests
+```

@@ -1,0 +1,46 @@
+---
+title: "http-client"
+sidebarTitle: "HTTP 客户端"
+description: "用 `ClientFactory` 在 Embassy 网络和可选的 TLS 之上创建 `reqwless` HTTP 客户端。"
+---
+
+Embassy 网络与 `reqwless` 之间的一层薄边界。它是一个库：拥有 HTTP 的插件构建工厂，并把客户端交给其他插件。
+
+`ClientFactory` 拥有或借用一个 TCP 连接器、一个 DNS 解析器，以及可选的 `barracuda_tls::Tls`。调用 `ClientFactory::create()` 会创建一个原始的 `reqwless::HttpClient`。这个 crate 不定义请求或响应模型，不缓冲响应，不管理持久连接，不流式传输请求体或响应体，不重试请求，也不暴露 HTTP 后端 trait。
+
+所有者构造默认的、基于 Embassy 的资源：
+
+```rust,ignore
+let tls = barracuda_tls::Tls::new(entropy).ok();
+let http_clients = http_client::ClientFactory::new(ip_stack, tls);
+```
+
+已经拥有另一对 `embedded-nal-async` TCP/DNS 的子系统使用同一个生产 API：
+
+```rust,ignore
+let http_clients = http_client::ClientFactory::from_network(&tcp, &dns);
+let (mut client, tls_configured) = http_clients.create();
+```
+
+与协议相关的策略，例如持久连接、流式传输或 multipart 请求体，属于需要它的使用方。
+
+## 接收槽位
+
+长期运行的接收循环使用一个单独的池，因此它们从不从请求池中拿走连接。这些槽位的套接字缓冲区是静态的，由其所有者在构建时确定大小；所有者声明一个 `ReceiveBuffers`，并基于请求工厂构建这个池，共用其 DNS 和 TLS：
+
+```rust,ignore
+static RECEIVE_BUFFERS: http_client::ReceiveBuffers<SLOTS> = http_client::ReceiveBuffers::new();
+let slots = http_client::ReceiveSlots::new(stack, &http_clients, RECEIVE_BUFFERS.take());
+```
+
+不需要槽位的所有者不声明任何槽位，也不链接任何接收缓冲区。接收循环在接收期间租用一个槽位：
+
+```rust,ignore
+let lease = slots.acquire().ok_or(NoSlot)?;      // or slots.acquire_when_free().await
+let (mut client, _tls) = lease.client_factory().create();
+// ...or a raw stream for a protocol such as WebSocket:
+let mut stream = lease.connect_stream("wss://example.com/gateway").await?;
+let (mut reader, mut writer) = stream.split().await?; // reader.read is cancel-safe
+```
+
+`capacity()` 和 `in_use()` 报告上限及其使用情况；当丢弃的租约释放一个槽位时，`wait_available()` 完成。每个槽位一次持有一个连接，在静态内存中有 1 KiB 的发送缓冲区和 4 KiB 的接收缓冲区，空闲 30 s 后启用 TCP keep-alive，并有 60 s 的对端失效超时。丢弃连接会重置它。

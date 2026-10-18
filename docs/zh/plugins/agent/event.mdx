@@ -1,0 +1,76 @@
+---
+title: "Agent JSON Event"
+sidebarTitle: "Workflow Event"
+description: "Agent 插件发出的 Workflow Event：`session.event` 信封及其事件类型。"
+---
+
+## `session.event`
+
+`session.open` 建立一个事件订阅。每条发出的记录都有一个小而稳定的信封：
+
+```json
+{
+  "session": "session-1",
+  "sequence": 3,
+  "type": "output_delta",
+  "payload": { "text": "hello" }
+}
+```
+
+- `session` 标识来源会话。
+- `sequence` 是 Agent Workflow 适配器单调递增的输出顺序。
+  当不同的 Workflow 执行相互重叠时，使用方用它恢复顺序。
+- `type` 标识语义事件。
+- `payload` 是特定于事件的对象。标记事件使用 `{}`。
+
+没有单独的运行、字段、分块索引、完成或终止元数据。
+这些边界由显式的语义事件承载：`reasoning_ended`、
+`output_ended`、`tool_result_ended`、`turn_ended`、`closed` 和
+`stream_error`。
+
+### 事件类型
+
+轮次和迭代生命周期记录有：
+
+- `turn_started`：`{ "turn", "origin" }`，其中 origin 为 `user` 或
+  `tool_call`。
+- `turn_origin_tool_call_id_delta`、`turn_origin_tool_name_delta` 和
+  `turn_origin_arguments_delta`：由工具创建的轮次的 `{ "text" }` 片段，之后是带 `{}` 的 `turn_origin_ended`。
+- `iteration_started`：`{ "iteration" }`。
+- `iteration_ended`：`{}`。
+- `turn_ended`：`{ "turn", "outcome" }`，其中 outcome 为 `completed`、
+  `interrupted`（`session.interrupt`）、`cancelled`（`session.cancel`，或轮次运行期间会话停止）或 `failed`（先出现了 `turn_error`）。
+
+模型和效果输出记录有：
+
+- `reasoning_delta`、`output_delta` 和 `effect_output_delta`：
+  `{ "text" }`。
+- `reasoning_ended`、`output_ended` 和 `effect_output_ended`：`{}`。
+- `usage`：服务商报告的任意计数器，以数值属性
+  `input_tokens`、`output_tokens`、`cache_read_tokens` 和
+  `cache_write_tokens` 表示。
+
+一个工具结果表示为 `tool_result_started`，零条或多条
+`tool_call_id_delta`、`tool_name_delta`、`tool_arguments_delta` 和
+`tool_output_delta` 记录，然后是带 `{ "ok": boolean }` 的 `tool_result_ended`。
+`tool_results_ended` 标志本次迭代所有工具结果的结束。
+
+一个权限请求表示为带
+`{ "request", "kind": "permission_approval" }` 的 `input_request_started`，它的
+`input_request_tool_call_id_delta`、`input_request_tool_name_delta`、
+`input_request_arguments_delta` 和 `input_request_reason_delta` 文本记录，
+然后在可以响应时发出带 `{ "request" }` 的 `input_requested`。
+
+错误和关闭记录有：
+
+- `turn_error` 和 `session_error`：`{ "message", "message_truncated" }`。
+- `closed`：`{ "reason" }`。
+- `stream_error`：`{ "error" }`。
+
+### 直接增量
+
+适配器把每个运行时增量直接作为一个 Workflow Event 转发。它不会为了适应传输帧而拆分文本，也不会截断错误文本。
+使用方仍然需要拼接连续的语义增量记录，因为模型运行时本身可能以增量方式产生输出。
+
+权威的 schema 是 `schemas/event/session.event.json`。它固定了信封的四个属性，同时有意把每个 payload 的内容留给各自的事件类型决定，所以添加新的语义事件不需要改动
+Workflow 的连接。

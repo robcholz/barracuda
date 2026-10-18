@@ -1,0 +1,48 @@
+---
+title: "Wi-Fi 插件"
+sidebarTitle: "Wi-Fi"
+description: "加入 Wi-Fi 网络、运行配置热点，并通过网页配置凭据。"
+---
+
+拥有 Wi-Fi 策略：站点（station）和配置接入点的生命周期、持久保存的站点凭据，以及配网页面和 API。
+
+- 插件 ID：`wifi`
+- 依赖：`webserver`、`captive-portal`
+- 设置：无
+- 上下文资源：`wifi`（对所选平台的 `WifiDevice` 调用 `take()`）、`ip_stack`（没有无线电时的接入点协议栈）
+- 提供的能力：`WifiControl`
+- 所需能力：来自 `webserver` 的 `WebServer`，来自 `captive-portal` 的 `CaptivePortal`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：无
+- Web：带状态的门户入口 `wifi`；`GET /api/wifi/status`、`GET /api/wifi/scan`、`PUT /api/wifi`、`DELETE /api/wifi`；强制门户检测路径 `/`、`/generate_204`、`/gen_204`、`/hotspot-detect.html`、`/library/test/success.html`、`/ncsi.txt`、`/connecttest.txt` 和 `/fwlink`，用 `CaptivePortal::landing()` 应答；以及在无线电支持接入点时，接入点协议栈 80 端口上的一个 WebServer 监听器
+- 任务：当平台支持站点配置时，`run_wifi_runtime` 池（大小 3）中的三个任务：站点/AP 策略任务、DHCP 服务器任务和强制门户 DNS 任务
+- 存储：站点凭据保存在插件作用域的 KV 键 `station` 下；门户文件 `/resources/entry.js`、`/resources/figure.js` 和 `/resources/icon.svg`
+
+本插件声明一个私有文件系统，它的门户入口从中提供这些打包好的文件。
+
+依赖它的插件可以从 `wifi` 获取 `WifiControl`，用来查看支持情况和状态、扫描网络、启动或停止接入点、配置一个持久保存的站点连接，或者忘记该连接并回到配置 AP。这个能力拥有这些策略状态转换，擦除所选平台具体的 `WifiDevice` 类型，并把存储和无线电操作串行化。HTTP 路由是基于同一个能力的适配器，而不是一条单独的策略路径。
+
+本插件拥有的是 Wi-Fi 策略，而不是某个具体的无线电驱动。在受管理的嵌入式平台上，它在启动时恢复持久保存的站点凭据。恢复成功后，设备处于站点模式。凭据缺失或不可用时，会在 `192.168.4.1/24` 上启动开放的 `Barracuda Setup` 接入点；本插件把这个地址分配给无线电的接入点协议栈，该协议栈由平台创建但未配置。随后本插件提供 DHCP 和强制门户 DNS，而 WebServer 插件用一个连接工作者在 AP 的 80 端口上提供共享的路由表。
+
+`GET /api/wifi/status` 返回能力以及当前的站点和接入点状态。`GET /api/wifi/scan` 返回附近的网络。`PUT /api/wifi` 先校验、再连接，成功后才持久保存 `{ "ssid", "password" }`；响应之后，配置 AP 停止。连接失败时会保持或恢复配置 AP，以便调用方重试。`DELETE /api/wifi` 删除持久保存的凭据，断开站点模式，并启动配置 AP。`/api/wifi` 只接受修改（`PUT`、`DELETE`）；其他方法，包括 `GET`，都返回 `405`；`/status` 和 `/scan` 上除 `GET` 之外的方法也一样。
+
+门户注册一个 Wi-Fi 模块，以及常见的 Android、Apple 和 Windows 客户端所用的精确强制门户检测路径，这些路径用 `CaptivePortal::landing()` 应答。该入口通过 `CaptivePortal::register_with_status` 注册；它的 `GET /portal/status` 记录映射 `WifiControl::status` 最后观测到的状态，不会查询无线电：
+
+| 最后观测到的状态 | `state` | `label` | `detail` |
+| --- | --- | --- | --- |
+| 站点已连接 | `ready` | “已连接” | 站点 SSID（如果已知） |
+| 站点正在连接 | `attention` | “正在连接…” | 无 |
+| 未连接，AP 已启动 | `attention` | “配置热点” | AP SSID |
+| 未连接，AP 正在启动 | `attention` | “配置热点” | 无 |
+| 未连接，AP 已停止 | `off` | “未连接” | 无 |
+
+由平台管理的网络报告主机的连接：`ready`“已连接”，不带网络名称。凭据永远不会由状态 API 返回，也不会被记录到日志。配网 API 目前没有身份验证或传输加密；配置接入点是有意开放的，所以只在可信的物理环境中配网。
+
+主机平台使用 `HostWifiDevice`：AP 和配置操作是不受支持的空操作，站点状态已经是已连接，因为网络由主机操作系统管理。没有 Wi-Fi 实现的平台报告一个未连接的 `UnavailableWifiDevice`，而不是声称拥有主机的网络连接。
+
+所选的 ESP32-S3 实现拥有 ESP 无线电控制器和两个 Embassy 网络接口。平台拥有的运行器驱动站点 DHCP 和 AP 协议栈。Wi-Fi 插件拥有策略、配网服务和 AP 地址。无线电状态、套接字状态、future、锁和原子量都留在内部 RAM 中。WebServer 的 TCP 和 HTTP 字节缓冲区使用 `BulkBox<[u8]>`，让所选平台可以安全地把这些 POD 缓冲区放在 PSRAM 中。
+
+门户页面：`wifi` 入口（分组“设备”，排序 10）基于门户 UI 套件，由 `resources/web/entry.ts` 构建。它的页头显示来自 `GET /api/wifi/status` 的站点状态、网络和配置热点状态，旁边是 `router` 插图（`resources/web/figure.js`），在 `GET /api/wifi/scan` 运行时它的天线会扫动。页面在打开时和点击“重新扫描”时进行扫描，按信号从强到弱列出附近的网络，显示信号格，加密网络带锁形图标；用 `PUT /api/wifi` 加入列表中的网络或手动输入名称的网络，并为已连接的网络提供 `DELETE /api/wifi`。加入或忘记被接受后，它会调用 `context.refreshStatus()`，让门户顶栏的徽标、侧边栏和概览随之更新。手机上使用设计中的列表布局。结果以门户提示（toast）的形式报告，使用中文或英文。
+
+Cargo 会在编译本插件之前自动运行声明的 `build` 任务。如果只想重新构建门户资源，在仓库根目录运行 `cargo plugin run --plugin wifi build`。它会写出 `filesystem/resources/entry.js`、`figure.js` 和 `icon.svg`（Lucide 的 `wifi` 图标），作为本插件私有的 `/resources/` 文件打包。
