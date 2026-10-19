@@ -1,0 +1,366 @@
+From 641eaeed0b8c5ccc6470bc9d905c0c0ad6a283b5 Mon Sep 17 00:00:00 2001
+From: Finn Sheng <yupbrokendream@gmail.com>
+Date: Wed, 9 Sep 2026 22:02:02 -0400
+Subject: [PATCH 1/3] feat(esp-rom-sys): select pre-v3 ESP32-P4 ROM maps
+
+---
+ esp-rom-sys/Cargo.toml                      | 1 +
+ esp-rom-sys/build.rs                        | 6 ++++++
+ esp-rom-sys/ld/esp32p4/rom-functions-rev1.x | 8 ++++++++
+ 3 files changed, 15 insertions(+)
+ create mode 100644 esp-rom-sys/ld/esp32p4/rom-functions-rev1.x
+
+diff --git a/esp-rom-sys/Cargo.toml b/esp-rom-sys/Cargo.toml
+index a8f48a1aa..812ea8c20 100644
+--- a/esp-rom-sys/Cargo.toml
++++ b/esp-rom-sys/Cargo.toml
+@@ -46,6 +46,7 @@ esp-metadata-generated = { version = "0.5.0", path = "../esp-metadata-generated"
+ 
+ [features]
+ __internal_rom_symbols = []
++esp32p4-rev1 = []
+ 
+ #! ### Chip selection
+ #! One of the following features must be enabled to select the target chip:
+diff --git a/esp-rom-sys/build.rs b/esp-rom-sys/build.rs
+index c23283d20..ec8d2b749 100644
+--- a/esp-rom-sys/build.rs
++++ b/esp-rom-sys/build.rs
+@@ -16,6 +16,12 @@ fn main() -> Result<(), Box<dyn Error>> {
+     println!("cargo:rustc-link-search={}", out.display());
+ 
+     copy_dir_all(format!("./ld/{}/", chip.name()), &out)?;
++    if chip.name() == "esp32p4" && cfg!(feature = "esp32p4-rev1") {
++        std::fs::copy(
++            "./ld/esp32p4/rom-functions-rev1.x",
++            out.join("rom-functions.x"),
++        )?;
++    }
+     copy_dir_all(format!("./libs/{}/", chip.name()), &out)?;
+ 
+     include_libs(format!("./libs/{}/", chip.name()))?;
+diff --git a/esp-rom-sys/ld/esp32p4/rom-functions-rev1.x b/esp-rom-sys/ld/esp32p4/rom-functions-rev1.x
+new file mode 100644
+index 000000000..812813f1a
+--- /dev/null
++++ b/esp-rom-sys/ld/esp32p4/rom-functions-rev1.x
+@@ -0,0 +1,8 @@
++/* ESP32-P4 ECO0-ECO4 ROM profile (chip revisions below v3.0). */
++INCLUDE "rom/esp32p4.rom.api.ld"
++INCLUDE "rom/esp32p4.rom.ld"
++INCLUDE "rom/esp32p4.rom.libgcc.ld"
++INCLUDE "rom/esp32p4.rom.rvfp.ld"
++INCLUDE "rom/esp32p4.rom.version.ld"
++
++INCLUDE "rom/additional.ld"
+-- 
+2.50.1 (Apple Git-155)
+
+
+From e7148103faa1eaf51b582350e4eb33a5be05d7c2 Mon Sep 17 00:00:00 2001
+From: Finn Sheng <yupbrokendream@gmail.com>
+Date: Wed, 9 Sep 2026 22:02:08 -0400
+Subject: [PATCH 2/3] fix(esp-sync): gate P4 Zcmp workaround by revision family
+
+---
+ esp-sync/Cargo.toml | 1 +
+ esp-sync/src/raw.rs | 4 ++--
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/esp-sync/Cargo.toml b/esp-sync/Cargo.toml
+index 32117fc5c..5c953fc34 100644
+--- a/esp-sync/Cargo.toml
++++ b/esp-sync/Cargo.toml
+@@ -39,6 +39,7 @@ xtensa-lx        = { version = "0.13.0", path = "../xtensa-lx" }
+ esp-metadata-generated = { version = "0.5.0", path = "../esp-metadata-generated", features = ["build-script"] }
+ 
+ [features]
++esp32p4-rev1 = []
+ #! ### Chip Support Feature Flags
+ ## Target the ESP32.
+ esp32   = ["esp-metadata-generated/esp32"]
+diff --git a/esp-sync/src/raw.rs b/esp-sync/src/raw.rs
+index f6c6cae48..184d706b2 100644
+--- a/esp-sync/src/raw.rs
++++ b/esp-sync/src/raw.rs
+@@ -35,7 +35,7 @@ impl RawLock for SingleCoreInterruptLock {
+     #[inline]
+     unsafe fn enter(&self) -> RestoreState {
+         cfg_select! {
+-            esp32p4 => {
++            all(esp32p4, not(feature = "esp32p4-rev1")) => {
+                 // TODO: any with zcmp
+                 // ESP32-P4 (v3.2/ECO7 etc.) Zcmp hardware bug workaround (IDF-14279 / DIG-661):
+                 // Clearing mstatus.mie alone does not fully mask CLIC interrupts -- an
+@@ -96,7 +96,7 @@ impl RawLock for SingleCoreInterruptLock {
+         let token = token.inner();
+ 
+         cfg_select! {
+-            esp32p4 => {
++            all(esp32p4, not(feature = "esp32p4-rev1")) => {
+                 if (token & 0b1000) != 0 {
+                     unsafe {
+                         riscv::interrupt::enable();
+-- 
+2.50.1 (Apple Git-155)
+
+
+From 55c9f686976aa3474d1301366c8941aff81ac7b2 Mon Sep 17 00:00:00 2001
+From: Finn Sheng <yupbrokendream@gmail.com>
+Date: Wed, 9 Sep 2026 22:02:15 -0400
+Subject: [PATCH 3/3] feat(esp-hal): bootstrap pre-v3 ESP32-P4 support
+
+---
+ esp-hal/Cargo.toml                |  7 ++++
+ esp-hal/build.rs                  | 13 ++++++
+ esp-hal/ld/esp32p4/memory.x       | 16 ++++++++
+ esp-hal/src/clock/mod.rs          |  7 +++-
+ esp-hal/src/lib.rs                |  3 ++
+ esp-hal/src/soc/esp32p4/clocks.rs | 66 ++++++++++++++++++++++++++++++-
+ examples/hello_world/Cargo.toml   |  4 ++
+ 7 files changed, 114 insertions(+), 2 deletions(-)
+
+diff --git a/esp-hal/Cargo.toml b/esp-hal/Cargo.toml
+index 4b7596425..ac3259e4c 100644
+--- a/esp-hal/Cargo.toml
++++ b/esp-hal/Cargo.toml
+@@ -141,6 +141,13 @@ crypto-bigint = { version = "0.7.5", default-features = false }
+ jiff = { version = "0.2", default-features = false, features = ["static"] }
+ 
+ [features]
++## Enable experimental support for pre-v3 ESP32-P4 engineering silicon.
++##
++## This is a revision-family selector, not a separate chip. It must be used
++## together with the `esp32p4` chip feature. PMP and stack-guard monitoring
++## default to off because their v3 register paths do not apply to this family.
++esp32p4-rev1 = ["esp-rom-sys/esp32p4-rev1", "esp-sync/esp32p4-rev1"]
++
+ default = ["rt", "exception-handler", "float-save-restore"]
+ 
+ # These features are considered private and unstable. They are not covered by
+diff --git a/esp-hal/build.rs b/esp-hal/build.rs
+index ed354f583..cb09f342d 100644
+--- a/esp-hal/build.rs
++++ b/esp-hal/build.rs
+@@ -33,6 +33,19 @@ fn main() {
+ fn try_main() -> Result<(), Box<dyn Error>> {
+     generate_version_macro()?;
+ 
++    if cfg!(feature = "esp32p4-rev1") {
++        for (name, value) in [
++            ("ESP_HAL_CONFIG_MIN_CHIP_REVISION", "100"),
++            ("ESP_HAL_CONFIG_ENABLE_PMP", "false"),
++            ("ESP_HAL_CONFIG_STACK_GUARD_MONITORING", "false"),
++        ] {
++            if std::env::var_os(name).is_none() {
++                // The build script is single-threaded at this point.
++                unsafe { std::env::set_var(name, value) };
++            }
++        }
++    }
++
+     // if using '"rust-analyzer.cargo.buildScripts.useRustcWrapper": true' we can detect this
+     let suppress_panics = std::env::var("RUSTC_WRAPPER")
+         .unwrap_or_default()
+diff --git a/esp-hal/ld/esp32p4/memory.x b/esp-hal/ld/esp32p4/memory.x
+index ee756561d..5ca8a573e 100644
+--- a/esp-hal/ld/esp32p4/memory.x
++++ b/esp-hal/ld/esp32p4/memory.x
+@@ -26,7 +26,17 @@ RESERVED_L2_CACHE = 0;
+ 
+ MEMORY
+ {
++#IF CARGO_FEATURE("esp32p4-rev1")
++    /*
++       ECO0-ECO4 has a ROM-owned hole in the middle of L2 SRAM. Keep the
++       ordinary Rust sections in the lower bank for now. A later linker
++       section exposes the upper bank without pretending the range is
++       contiguous.
++    */
++    RAM : ORIGIN = 0x4FF00000, LENGTH = 0x4FF2BBD0 - 0x4FF00000
++#ELSE
+     RAM : ORIGIN = 0x4FF00000 + RESERVED_L2_CACHE, LENGTH = 0x4FFAE000 - RESERVED_L2_CACHE - 0x4FF00000
++#ENDIF
+ 
+     /* External flash (XIP via cache); +0x20 skips the IDF app image header. */
+     ROM : ORIGIN = 0x40000000 + 0x20, LENGTH = 0x400000 - 0x20
+@@ -38,5 +48,11 @@ MEMORY
+        (LP_CLKRST hpcore0_stat_vector_sel = 0) to run the MSPI-crash-after-
+        power-up workaround stub before jumping to HP ROM. The stub is copied
+        there at deep-sleep entry, so nothing else may be linked into it. */
++#IF CARGO_FEATURE("esp32p4-rev1")
++    /* ECO0-ECO4 does not need the rev3 MSPI wake stub. The LP ROM owns the
++       upper 0x580 bytes for data and stack. */
++    RTC_FAST : ORIGIN = 0x50108000, LENGTH = 0x5010FA80 - 0x50108000
++#ELSE
+     RTC_FAST : ORIGIN = 0x50108000 + 0x100, LENGTH = 32K - 0x100
++#ENDIF
+ }
+diff --git a/esp-hal/src/clock/mod.rs b/esp-hal/src/clock/mod.rs
+index d25cee453..b357810f3 100644
+--- a/esp-hal/src/clock/mod.rs
++++ b/esp-hal/src/clock/mod.rs
+@@ -115,7 +115,12 @@ impl CpuClock {
+             esp32c2 => Self::_120MHz,
+             any(esp32c3, esp32c6, esp32c61) => Self::_160MHz,
+             esp32h2 => Self::_96MHz,
+-            esp32p4 => Self::_400MHz,
++            esp32p4 => {
++                #[cfg(feature = "esp32p4-rev1")]
++                { Self::_360MHz }
++                #[cfg(not(feature = "esp32p4-rev1"))]
++                { Self::_400MHz }
++            },
+             esp32s31 => Self::_320MHz,
+             _ => Self::_240MHz,
+         }
+diff --git a/esp-hal/src/lib.rs b/esp-hal/src/lib.rs
+index 01544ddb2..376959ef5 100644
+--- a/esp-hal/src/lib.rs
++++ b/esp-hal/src/lib.rs
+@@ -757,6 +757,9 @@ pub fn init(config: Config) -> Peripherals {
+     #[cfg(all(feature = "rt", enable_pmp, riscv))]
+     crate::soc::enable_pmp();
+ 
++    // The pre-v3 clock/reset gate map is not identical to v3. Keep the
++    // bootloader state until the revision-specific table is generated.
++    #[cfg(not(feature = "esp32p4-rev1"))]
+     system::disable_peripherals();
+ 
+     let mut peripherals = Peripherals::take();
+diff --git a/esp-hal/src/soc/esp32p4/clocks.rs b/esp-hal/src/soc/esp32p4/clocks.rs
+index cdd6abafa..05eda5b4a 100644
+--- a/esp-hal/src/soc/esp32p4/clocks.rs
++++ b/esp-hal/src/soc/esp32p4/clocks.rs
+@@ -1,4 +1,4 @@
+-//! Clock tree for ESP32-P4X (chip revision v3.x / eco5).
++//! Clock tree for ESP32-P4.
+ //!
+ //! CPLL: 400 MHz (eco5 default), 360 MHz (conservative)
+ //! SPLL: 480 MHz (peripheral clocks)
+@@ -34,18 +34,34 @@ define_clock_tree_types!();
+ #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+ #[non_exhaustive]
+ pub enum CpuClock {
++    #[cfg(not(feature = "esp32p4-rev1"))]
+     /// 400 MHz CPU clock (eco5 / v3.x maximum)
+     /// CPLL -> CPU_ROOT -> CPU/1, APB divider /4 = 100MHz
+     _400MHz = 400,
+ 
++    #[cfg(not(feature = "esp32p4-rev1"))]
+     /// 200 MHz CPU clock (low power)
+     /// CPLL -> CPU_ROOT -> CPU/2, APB /2 = 100MHz
+     _200MHz = 200,
+ 
++    #[cfg(not(feature = "esp32p4-rev1"))]
+     /// 100 MHz CPU clock (ultra low power)
+     /// CPLL -> CPU_ROOT -> CPU/4, APB /1 = 100MHz
+     #[default]
+     _100MHz = 100,
++
++    /// 360 MHz CPU clock (pre-v3 maximum).
++    #[cfg(feature = "esp32p4-rev1")]
++    _360MHz = 360,
++
++    /// 180 MHz CPU clock (pre-v3 low-power preset).
++    #[cfg(feature = "esp32p4-rev1")]
++    _180MHz = 180,
++
++    /// 90 MHz CPU clock (pre-v3 low-power preset).
++    #[cfg(feature = "esp32p4-rev1")]
++    #[default]
++    _90MHz = 90,
+ }
+ 
+ impl CpuClock {
+@@ -102,14 +118,53 @@ impl CpuClock {
+         lp_slow_clk: Some(LpSlowClkConfig::RcSlow),
+         timg_calibration_clock: None,
+     };
++
++    #[cfg(feature = "esp32p4-rev1")]
++    const PRESET_360: ClockConfig = ClockConfig {
++        cpll_clk: Some(CpllClkConfig::_360),
++        cpu_clk: Some(CpuClkConfig::new(0)),
++        mem_clk: Some(MemClkConfig::new(1)),
++        sys_clk: Some(SysClkConfig::new(0)),
++        apb_clk: Some(ApbClkConfig::new(1)),
++        ..Self::PRESET_100
++    };
++
++    #[cfg(feature = "esp32p4-rev1")]
++    const PRESET_180: ClockConfig = ClockConfig {
++        cpll_clk: Some(CpllClkConfig::_360),
++        cpu_clk: Some(CpuClkConfig::new(1)),
++        mem_clk: Some(MemClkConfig::new(0)),
++        sys_clk: Some(SysClkConfig::new(0)),
++        apb_clk: Some(ApbClkConfig::new(1)),
++        ..Self::PRESET_100
++    };
++
++    #[cfg(feature = "esp32p4-rev1")]
++    const PRESET_90: ClockConfig = ClockConfig {
++        cpll_clk: Some(CpllClkConfig::_360),
++        cpu_clk: Some(CpuClkConfig::new(3)),
++        mem_clk: Some(MemClkConfig::new(0)),
++        sys_clk: Some(SysClkConfig::new(0)),
++        apb_clk: Some(ApbClkConfig::new(0)),
++        ..Self::PRESET_100
++    };
+ }
+ 
+ impl From<CpuClock> for ClockConfig {
+     fn from(value: CpuClock) -> ClockConfig {
+         match value {
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             CpuClock::_400MHz => CpuClock::PRESET_400,
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             CpuClock::_200MHz => CpuClock::PRESET_200,
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             CpuClock::_100MHz => CpuClock::PRESET_100,
++            #[cfg(feature = "esp32p4-rev1")]
++            CpuClock::_360MHz => CpuClock::PRESET_360,
++            #[cfg(feature = "esp32p4-rev1")]
++            CpuClock::_180MHz => CpuClock::PRESET_180,
++            #[cfg(feature = "esp32p4-rev1")]
++            CpuClock::_90MHz => CpuClock::PRESET_90,
+         }
+     }
+ }
+@@ -123,9 +178,18 @@ impl Default for ClockConfig {
+ impl ClockConfig {
+     pub(crate) fn try_get_preset(self) -> Option<CpuClock> {
+         match self {
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             v if v == CpuClock::PRESET_400 => Some(CpuClock::_400MHz),
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             v if v == CpuClock::PRESET_200 => Some(CpuClock::_200MHz),
++            #[cfg(not(feature = "esp32p4-rev1"))]
+             v if v == CpuClock::PRESET_100 => Some(CpuClock::_100MHz),
++            #[cfg(feature = "esp32p4-rev1")]
++            v if v == CpuClock::PRESET_360 => Some(CpuClock::_360MHz),
++            #[cfg(feature = "esp32p4-rev1")]
++            v if v == CpuClock::PRESET_180 => Some(CpuClock::_180MHz),
++            #[cfg(feature = "esp32p4-rev1")]
++            v if v == CpuClock::PRESET_90 => Some(CpuClock::_90MHz),
+             _ => None,
+         }
+     }
+diff --git a/examples/hello_world/Cargo.toml b/examples/hello_world/Cargo.toml
+index d8a22866d..490c0ea3d 100644
+--- a/examples/hello_world/Cargo.toml
++++ b/examples/hello_world/Cargo.toml
+@@ -54,6 +54,10 @@ esp32p4 = [
+     "esp-bootloader-esp-idf/esp32p4",
+     "esp-hal/esp32p4",
+ ]
++esp32p4-rev1 = [
++    "esp32p4",
++    "esp-hal/esp32p4-rev1",
++]
+ esp32s2 = [
+     "esp-backtrace/esp32s2",
+     "esp-bootloader-esp-idf/esp32s2",
+-- 
+2.50.1 (Apple Git-155)
+
