@@ -249,6 +249,7 @@
                   "architecture/codestyle",
                   "architecture/agent-oriented-api-design",
                   "architecture/execution-ownership",
+                  "tools/live-editor",
                   {
                     "group": "Testing and bench",
                     "pages": [
@@ -735,6 +736,7 @@
                   "zh/architecture/codestyle",
                   "zh/architecture/agent-oriented-api-design",
                   "zh/architecture/execution-ownership",
+                  "zh/tools/live-editor",
                   {
                     "group": "测试与基准",
                     "pages": [

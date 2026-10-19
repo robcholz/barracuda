@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-live-editor-compiler"
+version = "0.1.0"
+edition = "2024"
+description = "Live Editor's in-browser compiler: links MicroTS views as ui-link does, built to WebAssembly"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+# `cdylib` is the WebAssembly module the web app loads; `rlib` serves the host tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+barracuda-ui-runtime = { path = "../../../plugins/app-manager/crates/runtime", features = ["compiler"] }
+
+[lints.rust]
+# The WebAssembly exports need `#[unsafe(no_mangle)]`; only that module allows it.
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

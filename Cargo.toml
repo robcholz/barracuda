@@ -23,6 +23,7 @@ members = [
     "tools/system-image",
     "apps/barracuda-cli",
     "apps/barracuda-system",
+    "apps/live-editor/compiler",
 ]
 default-members = [
     "apps/barracuda-system",

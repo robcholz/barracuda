@@ -1,0 +1,76 @@
+---
+title: "Live Editor"
+description: "Build and pack an app's view in the browser with the same compiler and linker the toolchain uses."
+---
+
+Live Editor writes, builds and installs Barracuda apps in the browser. It lives
+in `apps/live-editor`: `compiler/` is a Rust crate built to WebAssembly, and
+`web/` is the TypeScript that runs in the page. This page covers the build
+pipeline it has so far; the editor's interface is still to come.
+
+## Build an app in the browser
+
+An app builds in the browser the way `build-app.ts` builds it on disk, so the
+package Live Editor makes is the one the toolchain would make:
+
+| Step | In the browser | On disk |
+| --- | --- | --- |
+| Compile `app.tsx` against `app.d.ts` | PocketJS's MicroTS compiler over an in-memory file system (`web/src/microts.ts`) | PocketJS's `buildAot` |
+| Link View IR into `view.bvir` | `barracuda-live-editor-compiler` as WebAssembly (`web/src/linker.ts`) | `ui-link` |
+| Fill in the manifest's `view` | `web/src/container.ts` | `build-app.ts` |
+| Pack, and sign, a `.bapp` | `web/src/package.ts`, with WebCrypto | `pack-app.ts` |
+
+Both link with `barracuda_ui_runtime::compiler::link`, and both pack with the
+layout in [App format](/plugins/app-manager/app-format#packages). A signed
+package's signer has the name a device shows: the first 8 bytes of the key's
+SHA-256. Font atlases are not baked yet, so a view built in the browser draws
+with the device's system fonts.
+
+## Build the compiler
+
+The MicroTS compiler is not part of this repository. Point `POCKETJS_ROOT` at a
+PocketJS checkout at the commit
+[Vendored PocketJS](/plugins/app-manager/pocketjs) names, as `build-app.ts`
+needs it, and install the `wasm32-unknown-unknown` target:
+
+```sh
+rustup target add wasm32-unknown-unknown
+POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+```
+
+It writes `apps/live-editor/web/dist/`:
+
+- `compiler.wasm`: the linker, built with
+  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-compiler`.
+- `microts.js`: the MicroTS compiler and TypeScript, bundled for the browser,
+  with `node:fs` resolved to the in-memory file system.
+- `microts-files.json`: the files the compiler reads. The script compiles every
+  app in the repository on disk and records each file it reads; an app that
+  imports a PocketJS module none of them use does not find it in the browser.
+
+## The linker's interface
+
+The WebAssembly module exports `memory` and four functions:
+
+| Export | Does |
+| --- | --- |
+| `input(len)` | makes the input buffer `len` bytes and answers its address |
+| `link()` | links the View IR JSON in the input: `0` with the BVIR as output, or `1` with the reason as output |
+| `output()`, `output_len()` | the last output's address and length |
+
+Call `input` before taking a view of `memory`: it may grow memory, which
+detaches any earlier view. `web/src/linker.ts` wraps this as
+`link(json) → Uint8Array`.
+
+## Tests
+
+```sh
+cargo test --package barracuda-live-editor-compiler
+bun test ./apps/live-editor/web
+```
+
+The Rust tests link the counter fixture and compare it with the committed
+`counter.bvir`. The web tests compare packages with `pack-app.ts`'s, signed and
+unsigned, and check the container against `build-app.ts`'s rules. Once `dist/`
+is built, they also compile the system view in memory and compare it with the
+committed `view.bvir` and `styles.bin`.

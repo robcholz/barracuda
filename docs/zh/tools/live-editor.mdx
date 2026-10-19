@@ -1,0 +1,59 @@
+---
+title: "Live Editor"
+description: "在浏览器里用与工具链相同的编译器和链接器构建并打包应用的视图。"
+---
+
+Live Editor 在浏览器里编写、构建并安装 Barracuda 应用。它位于
+`apps/live-editor`：`compiler/` 是一个构建成 WebAssembly 的 Rust crate，`web/`
+是在页面里运行的 TypeScript。本页介绍目前已有的构建流程；编辑器界面还在后面。
+
+## 在浏览器里构建应用
+
+应用在浏览器里的构建方式与 `build-app.ts` 在磁盘上的构建方式相同，所以 Live
+Editor 生成的应用包就是工具链会生成的那个：
+
+| 步骤 | 在浏览器里 | 在磁盘上 |
+| --- | --- | --- |
+| 按 `app.d.ts` 编译 `app.tsx` | PocketJS 的 MicroTS 编译器，运行在内存文件系统上（`web/src/microts.ts`） | PocketJS 的 `buildAot` |
+| 把 View IR 链接为 `view.bvir` | 构建成 WebAssembly 的 `barracuda-live-editor-compiler`（`web/src/linker.ts`） | `ui-link` |
+| 填写清单的 `view` | `web/src/container.ts` | `build-app.ts` |
+| 打包并签名 `.bapp` | `web/src/package.ts`，使用 WebCrypto | `pack-app.ts` |
+
+两者都用 `barracuda_ui_runtime::compiler::link` 链接，都按[应用格式](/zh/plugins/app-manager/app-format)中的布局打包。签名应用包的签名者名称与设备显示的一致：密钥 SHA-256 的前 8 个字节。字体图集还不会烘焙，所以在浏览器里构建的视图使用设备的系统字体。
+
+## 构建编译器
+
+MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 检出，提交与[内置的 PocketJS](/zh/plugins/app-manager/pocketjs) 中写明的一致（`build-app.ts` 也需要它），并安装 `wasm32-unknown-unknown` 目标：
+
+```sh
+rustup target add wasm32-unknown-unknown
+POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+```
+
+它写入 `apps/live-editor/web/dist/`：
+
+- `compiler.wasm`：链接器，用
+  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-compiler` 构建。
+- `microts.js`：为浏览器打包的 MicroTS 编译器和 TypeScript，其中 `node:fs` 指向内存文件系统。
+- `microts-files.json`：编译器读取的文件。脚本先在磁盘上编译仓库里的每个应用，并记录它读取的每个文件；如果某个应用导入了这些应用都没有用到的 PocketJS 模块，在浏览器里会找不到它。
+
+## 链接器的接口
+
+WebAssembly 模块导出 `memory` 和四个函数：
+
+| 导出 | 作用 |
+| --- | --- |
+| `input(len)` | 把输入缓冲区设为 `len` 字节并返回它的地址 |
+| `link()` | 链接输入中的 View IR JSON：成功返回 `0`，输出为 BVIR；失败返回 `1`，输出为原因 |
+| `output()`、`output_len()` | 上一次输出的地址和长度 |
+
+先调用 `input` 再取 `memory` 的视图：它可能扩大内存，这会使之前取得的视图失效。`web/src/linker.ts` 把这些封装为 `link(json) → Uint8Array`。
+
+## 测试
+
+```sh
+cargo test --package barracuda-live-editor-compiler
+bun test ./apps/live-editor/web
+```
+
+Rust 测试链接 counter 夹具，并与提交的 `counter.bvir` 比较。Web 测试把应用包与 `pack-app.ts` 生成的（签名和未签名）比较，并按 `build-app.ts` 的规则检查容器。构建好 `dist/` 之后，测试还会在内存中编译系统视图，并与提交的 `view.bvir` 和 `styles.bin` 比较。
