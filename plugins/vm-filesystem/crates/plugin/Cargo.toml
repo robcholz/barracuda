@@ -3,7 +3,7 @@ name = "barracuda-vm-filesystem-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Barracuda Plugin adapting its scoped VFS to Lua filesystem APIs"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [features]
 default = []

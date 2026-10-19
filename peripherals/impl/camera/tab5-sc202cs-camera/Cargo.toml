@@ -3,7 +3,7 @@ name = "barracuda-tab5-sc202cs-camera"
 version = "0.1.0"
 edition = "2024"
 description = "M5Stack Tab5 SC202CS MIPI-CSI camera implementation"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-pi4ioe5v6408.workspace = true

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 description = "Lua-backed script VM capability for Barracuda"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [features]
 default = []

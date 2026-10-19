@@ -3,7 +3,7 @@ name = "barracuda-bmi270-imu"
 version = "0.1.0"
 edition = "2024"
 description = "BMI270 six-axis IMU implementation over embedded-hal I2C"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-peripheral.workspace = true

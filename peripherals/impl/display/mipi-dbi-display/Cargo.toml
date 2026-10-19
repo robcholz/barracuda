@@ -3,7 +3,7 @@ name = "barracuda-mipi-dbi-display"
 version = "0.1.0"
 edition = "2024"
 description = "Barracuda display implementation for MIPI DBI/DCS panels supported by mipidsi"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-peripheral.workspace = true

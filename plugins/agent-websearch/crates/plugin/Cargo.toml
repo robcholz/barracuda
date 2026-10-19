@@ -3,7 +3,7 @@ name = "barracuda-agent-websearch-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Tavily-backed Web Search Tool for the Barracuda Agent"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [build-dependencies]
 barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }

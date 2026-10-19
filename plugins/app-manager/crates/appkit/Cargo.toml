@@ -3,7 +3,7 @@ name = "barracuda-appkit"
 version = "0.1.0"
 edition = "2024"
 description = "Lists, launches, and supervises Lua apps and their views"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 async-channel.workspace = true

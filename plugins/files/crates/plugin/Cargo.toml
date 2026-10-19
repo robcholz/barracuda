@@ -3,7 +3,7 @@ name = "barracuda-files-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Portal file browser Plugin for Barracuda"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [build-dependencies]
 barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }

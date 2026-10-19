@@ -3,7 +3,7 @@ name = "barracuda-bulk-memory"
 version = "0.1.0"
 edition = "2024"
 description = "POD-only containers backed by Platform-selected bulk memory"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 portable-atomic.workspace = true
