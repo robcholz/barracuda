@@ -14,11 +14,14 @@ import {
 import { zip } from "../install/zip";
 import { manifestOf } from "../state/project";
 import { button, fill, h, icon, size } from "./dom";
+import { lang, t } from "../i18n";
 import {
+  languageMenu,
   phoneBack,
   resolvedTheme,
   themeToggle,
   topbar,
+  type Menus,
   type Page,
 } from "./shell";
 
@@ -39,25 +42,13 @@ function failureText(
 ): { title: string; text: string } {
   switch (failure.kind) {
     case "blocked":
-      return {
-        title: "The portal window did not open",
-        text: "Allow pop-ups for this site, then open the portal again.",
-      };
+      return t.blocked;
     case "silent":
-      return {
-        title: "The portal did not answer",
-        text: "Check the address, and that this computer is on the same network as the device.",
-      };
+      return t.silent;
     case "refused":
-      return {
-        title: `${name} was not installed`,
-        text: "It was not installed from the portal window. Open the portal again to install it.",
-      };
+      return { title: t.refused.title(name), text: t.refused.text };
     case "device":
-      return {
-        title: "The device could not write the app",
-        text: failure.message,
-      };
+      return { title: t.deviceFailed, text: failure.message ?? "" };
   }
 }
 
@@ -71,10 +62,8 @@ export class InstallPage implements Page {
   readonly el: HTMLElement;
   private readonly bar = h("div", { style: { display: "contents" } });
   private readonly header = h("div", { style: { display: "contents" } });
-  private readonly form = h("form", {
-    class: "bc-form",
-    "aria-label": "Install",
-  });
+  readonly relabels = true;
+  private readonly form = h("form", { class: "bc-form" });
   private readonly handoff: Handoff;
   private address: string;
   private addressError = "";
@@ -83,7 +72,10 @@ export class InstallPage implements Page {
   private preparing = true;
   private key = "";
 
-  constructor(private readonly app: App) {
+  constructor(
+    private readonly app: App,
+    private readonly menus: Menus,
+  ) {
     this.address = app.settings.portal;
     this.handoff = new Handoff(browserHost, () => this.changed());
     this.form.addEventListener("submit", (event) => event.preventDefault());
@@ -115,8 +107,7 @@ export class InstallPage implements Page {
     if (!project) return;
     this.preparing = true;
     const reply = await this.app.buildFiles(project.files);
-    if (!reply.ok)
-      this.pkgError = `It does not build: ${reply.problem.message}`;
+    if (!reply.ok) this.pkgError = t.doesNotBuild(reply.problem.message);
     else
       this.pkg = {
         files: new Map(Object.entries(reply.files)),
@@ -130,9 +121,7 @@ export class InstallPage implements Page {
     const project = this.app.project();
     if (!project || !this.pkg) return;
     const origin = portalOrigin(this.address);
-    this.addressError = origin
-      ? ""
-      : "Enter the device's address, like 192.168.1.42:8787";
+    this.addressError = origin ? "" : t.addressError;
     if (!origin) return this.changed();
     if (this.address !== this.app.settings.portal)
       void this.app.saveSettings({
@@ -159,8 +148,8 @@ export class InstallPage implements Page {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     this.app.notify({
       tone: "success",
-      title: `${folder}.zip downloaded`,
-      text: `Unzip it, then in the device portal under Files make the folder media/apps/${folder} and upload its files there.`,
+      title: t.downloaded(folder),
+      text: t.downloadedText(folder),
     });
   }
 
@@ -171,6 +160,8 @@ export class InstallPage implements Page {
     const theme = resolvedTheme(app.theme);
     const phase = this.handoff.phase;
     const key = JSON.stringify([
+      lang,
+      this.menus.open,
       theme,
       app.theme,
       app.sidebar,
@@ -184,6 +175,7 @@ export class InstallPage implements Page {
     if (key === this.key) return;
     this.key = key;
     const linked = ["ready", "writing", "done"].includes(phase);
+    this.form.setAttribute("aria-label", t.install);
     fill(
       this.bar,
       topbar(
@@ -201,16 +193,17 @@ export class InstallPage implements Page {
           project.name,
         ),
         h("span", { class: "bc-crumb le-desk" }, "/"),
-        h("span", { class: "bc-crumb--current le-desk" }, "Install on device"),
+        h("span", { class: "bc-crumb--current le-desk" }, t.installOnDevice),
         h("span", { class: "le-grow" }),
         ["ready", "writing"].includes(phase) &&
-          h("span", { class: "bc-badge bc-badge--signal" }, "Portal open"),
+          h("span", { class: "bc-badge bc-badge--signal" }, t.portalOpen),
         phase === "closed" &&
           h(
             "span",
             { class: "bc-badge bc-badge--destructive" },
-            "Portal closed",
+            t.portalClosed,
           ),
+        languageMenu(app, this.menus),
         themeToggle(app),
       ),
     );
@@ -222,12 +215,8 @@ export class InstallPage implements Page {
         h(
           "div",
           { class: "bc-header__text" },
-          h("h1", { class: "bc-page-title" }, "Install on device"),
-          h(
-            "p",
-            { class: "bc-lead" },
-            `${project.name} goes to the device through its portal, in a window next to this one. You install it from there.`,
-          ),
+          h("h1", { class: "bc-page-title" }, t.installOnDevice),
+          h("p", { class: "bc-lead" }, t.installLead(project.name)),
         ),
         h(
           "div",
@@ -262,11 +251,7 @@ export class InstallPage implements Page {
         ),
         h("div", { class: "bc-row__body" }, ...(body as never[])),
       );
-    const steps = [
-      "Open the device portal",
-      `Install ${project.name} from the portal window`,
-      "The device writes it with its apps",
-    ];
+    const steps = t.steps(project.name);
     const manifest = manifestOf(project.files);
     const folder = `${project.id}.bapp`;
     const busy = ["opening", "ready", "writing"].includes(phase);
@@ -279,16 +264,12 @@ export class InstallPage implements Page {
     fill(
       this.form,
       row(
-        "Device",
-        "A Barracuda on this computer's network",
+        t.device,
+        t.deviceText,
         h(
           "div",
           { class: "bc-field" },
-          h(
-            "label",
-            { class: "bc-label", for: "le-address" },
-            "Device address",
-          ),
+          h("label", { class: "bc-label", for: "le-address" }, t.deviceAddress),
           h("input", {
             id: "le-address",
             class: "bc-input bc-input--mono",
@@ -309,7 +290,7 @@ export class InstallPage implements Page {
                 h(
                   "span",
                   { class: "bc-hint" },
-                  "The address the device portal opens at, like ",
+                  t.addressHint,
                   h("span", { class: "bc-mono" }, "192.168.1.42:8787"),
                 ),
         ),
@@ -318,13 +299,13 @@ export class InstallPage implements Page {
             "span",
             { class: "bc-status bc-muted", role: "status" },
             icon("loader-circle", "bc-spinner"),
-            h("span", { class: "bc-shimmer" }, "Waiting for the portal window"),
+            h("span", { class: "bc-shimmer" }, t.waitingForPortal),
           ),
         linked &&
           h(
             "dl",
             { class: "bc-kv" },
-            h("dt", null, "Portal"),
+            h("dt", null, t.portal),
             h(
               "dd",
               null,
@@ -337,14 +318,14 @@ export class InstallPage implements Page {
           ),
       ),
       row(
-        "App",
-        "Built in this browser",
+        t.app,
+        t.builtHere,
         this.preparing
           ? h(
               "span",
               { class: "bc-status bc-muted", role: "status" },
               icon("loader-circle", "bc-spinner"),
-              `Building ${project.name}`,
+              t.buildingApp(project.name),
             )
           : this.pkgError
             ? h(
@@ -357,7 +338,7 @@ export class InstallPage implements Page {
                   h(
                     "div",
                     { class: "bc-alert__title" },
-                    `${project.name} cannot be installed`,
+                    t.cannotInstall(project.name),
                   ),
                   h("div", { class: "bc-small" }, this.pkgError),
                 ),
@@ -366,13 +347,13 @@ export class InstallPage implements Page {
               h(
                 "dl",
                 { class: "bc-kv" },
-                h("dt", null, "Folder"),
+                h("dt", null, t.folder),
                 h(
                   "dd",
                   null,
                   h("span", { class: "bc-mono" }, `media/apps/${folder}`),
                 ),
-                h("dt", null, "Files"),
+                h("dt", null, t.filesLabel),
                 h(
                   "dd",
                   null,
@@ -380,7 +361,7 @@ export class InstallPage implements Page {
                   " · ",
                   h("span", { class: "bc-mono" }, size(total)),
                 ),
-                h("dt", null, "Version"),
+                h("dt", null, t.version),
                 h(
                   "dd",
                   null,
@@ -393,8 +374,8 @@ export class InstallPage implements Page {
               ),
       ),
       row(
-        "Install",
-        "You choose Install in the portal window",
+        t.install,
+        t.installText,
         h(
           "ol",
           { class: "bc-steps" },
@@ -424,12 +405,7 @@ export class InstallPage implements Page {
             ),
           ),
         ),
-        phase === "ready" &&
-          h(
-            "span",
-            { class: "bc-hint" },
-            "The portal window shows what it received. Choose 安装到设备 (Install on device) there.",
-          ),
+        phase === "ready" && h("span", { class: "bc-hint" }, t.chooseInstall),
         phase === "writing" &&
           h(
             "div",
@@ -441,7 +417,7 @@ export class InstallPage implements Page {
               h(
                 "span",
                 { class: "bc-option-title le-grow" },
-                "Writing ",
+                t.writing,
                 h("span", { class: "bc-mono" }, `media/apps/${folder}`),
               ),
             ),
@@ -457,13 +433,9 @@ export class InstallPage implements Page {
                 "span",
                 { class: "bc-option-title" },
                 icon("circle-check", "bc-success"),
-                `${project.name} is on the device`,
+                t.onDevice(project.name),
               ),
-              h(
-                "span",
-                { class: "bc-small bc-muted" },
-                "Open it from the device's launcher.",
-              ),
+              h("span", { class: "bc-small bc-muted" }, t.openFromLauncher),
             ),
           ),
         failure &&
@@ -475,7 +447,7 @@ export class InstallPage implements Page {
               "div",
               { class: "bc-alert__body" },
               h("div", { class: "bc-alert__title" }, failure.title),
-              h("div", { class: "bc-small" }, failure.text),
+              failure.text && h("div", { class: "bc-small" }, failure.text),
             ),
           ),
       ),
@@ -484,20 +456,20 @@ export class InstallPage implements Page {
         { class: "bc-form__footer" },
         this.pkg &&
           (phase === "failed" || phase === "idle" || phase === "closed") &&
-          button(`Download ${folder}.zip`, () => this.download(), {
+          button(t.download(folder), () => this.download(), {
             kind: "outline",
           }),
         busy &&
-          button("Cancel", () => this.handoff.cancel(), { kind: "outline" }),
+          button(t.cancel, () => this.handoff.cancel(), { kind: "outline" }),
         phase === "done" &&
           h(
             "a",
             { class: "bc-button", href: `#/app/${project.id}` },
-            `Back to ${project.name}`,
+            t.backTo(project.name),
           ),
         ["idle", "failed", "closed"].includes(phase) &&
           button(
-            phase === "idle" ? "Open device portal" : "Open the portal again",
+            phase === "idle" ? t.openPortal : t.openPortalAgain,
             () => this.open(),
             {
               disabled: !this.pkg,

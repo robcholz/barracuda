@@ -79,12 +79,12 @@ MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 
 | `write_file`、`edit_file`、`delete_file` | 修改提议，从不直接修改源文件 |
 | `build` | 构建提议，并用它重启预览 |
 | `look` | 屏幕的 PNG、屏幕上的文字、视图的契约和运行状态 |
-| `tap` | 点按屏幕后再查看；只在 **Let Barracuda tap the preview** 打开时可用 |
+| `tap` | 点按屏幕后再查看；只在 **允许 Barracuda 点按预览** 打开时可用 |
 | `read_console`、`restart` | 控制台的最新几行；重新运行 |
 
 模型服务有两个：`src/agent/anthropic.ts` 通过 Anthropic SDK 调用，使用流式响应、带摘要的自适应思考、`effort: "high"`、提示缓存，并在支持的模型上使用 `fallbacks: "default"`；`src/agent/openai.ts` 通过 `fetch` 调用 Chat Completions API。工具输入在生成时以流式传输，运行前按其模式检查。系统提示（`src/agent/prompt.ts`）在对话中从不改变。
 
-完成的一轮会以其服务自己的格式保留它发送和收到的消息（包括思考块），下一次请求原样重放：历史只会增长，这正是保留思考和提示缓存所需要的。停止或失败的一轮，或来自另一个服务的一轮，以其回复的文字发回。一轮结束时，它的提议直接应用；或在 **Review before applying** 打开时在 Changes 中等待；应用时会生成一个版本。
+完成的一轮会以其服务自己的格式保留它发送和收到的消息（包括思考块），下一次请求原样重放：历史只会增长，这正是保留思考和提示缓存所需要的。停止或失败的一轮，或来自另一个服务的一轮，以其回复的文字发回。一轮结束时，它的提议直接应用；或在 **应用前审阅** 打开时在“修改”视图中等待；应用时会生成一个版本。
 
 ## 安装到设备
 
@@ -104,6 +104,12 @@ Live Editor 对托管没有其他要求：路由在 URL 的 hash 中，所有文
 
 `src/state/db.ts` 把一切保存在 IndexedDB 中：应用（`src/state/project.ts`：源文件、版本、对话、提议和预览的存储）、设置，以及每个应用的智能体记录；记录因为含有截图而较大，所以单独保存。
 
+## 界面语言
+
+`src/i18n.ts` 存放页面显示的每一处文字，有英文和简体中文两种。编辑器启动时，先用官网链接通过 `?lang=` 传入的语言，其次是在语言菜单里选过的语言（`localStorage` 中的 `le-lang`），再次是浏览器首选的英文或中文。换语言时页面会用新语言重新挂载；安装页则就地更新文字，所以已打开的门户窗口不会断开。
+
+发给模型的内容保持英文：工具结果，以及对话发给它的备注，例如 “You edited app.tsx”。编辑器保存的标题也保持英文，例如 “New chat” 和 “First version”；`t.stored` 把它们显示成读者的语言。
+
 ## 测试
 
 ```sh
@@ -111,4 +117,4 @@ cargo test --manifest-path apps/live-editor/wasm/Cargo.toml
 bun test ./apps/live-editor/web
 ```
 
-Rust 测试链接计数器示例并与已提交的 `counter.bvir` 比较，检查 `view:set` 的转换和消息，并绘制、点按计数器。Web 测试覆盖与 `build-app.ts` 一致的容器和清单规则、差异、版本和提议、使用替身窗口的门户交接、zip，以及智能体的工具和历史。构建 `dist/` 之后，它们还会在内存中编译系统视图和计数器示例，与已提交的 `view.bvir` 和 `styles.bin` 比较，并在预览中运行计数器应用：点按、保存的状态、`view:set` 错误，以及对忙碌程序和错过宽限期的停止。
+Rust 测试链接计数器示例并与已提交的 `counter.bvir` 比较，检查 `view:set` 的转换和消息，并绘制、点按计数器。Web 测试覆盖与 `build-app.ts` 一致的容器和清单规则、差异、版本和提议、使用替身窗口的门户交接、zip、智能体的工具和历史，以及两种界面语言。构建 `dist/` 之后，它们还会在内存中编译系统视图和计数器示例，与已提交的 `view.bvir` 和 `styles.bin` 比较，并在预览中运行计数器应用：点按、保存的状态、`view:set` 错误，以及对忙碌程序和错过宽限期的停止。

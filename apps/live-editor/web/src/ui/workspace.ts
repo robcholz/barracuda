@@ -9,8 +9,10 @@ import { ago, fill, h, icon, iconButton, status, tooltip } from "./dom";
 import { ChatColumn } from "./chat";
 import { CodePane } from "./code";
 import { ChangesPane, ConsolePane, PreviewPane, type Pane } from "./panes";
+import { t } from "../i18n";
 import {
   collapsed,
+  languageMenu,
   phoneBack,
   themeToggle,
   topbar,
@@ -18,13 +20,12 @@ import {
   type Page,
 } from "./shell";
 
-const VIEWS: { id: ViewId; icon: Parameters<typeof icon>[0]; label: string }[] =
-  [
-    { id: "preview", icon: "smartphone", label: "Preview" },
-    { id: "code", icon: "code-xml", label: "Code" },
-    { id: "changes", icon: "git-compare", label: "Changes" },
-    { id: "console", icon: "square-terminal", label: "Console" },
-  ];
+const VIEWS: { id: ViewId; icon: Parameters<typeof icon>[0] }[] = [
+  { id: "preview", icon: "smartphone" },
+  { id: "code", icon: "code-xml" },
+  { id: "changes", icon: "git-compare" },
+  { id: "console", icon: "square-terminal" },
+];
 
 export class Workspace implements Page {
   readonly el: HTMLElement;
@@ -48,7 +49,7 @@ export class Workspace implements Page {
         class: "le-handle",
         role: "separator",
         "aria-orientation": "vertical",
-        "aria-label": "Resize the views",
+        "aria-label": t.resizeViews,
         onMouseDown: (event: Event) => this.resize(event as MouseEvent),
       },
       h(
@@ -171,7 +172,7 @@ export class Workspace implements Page {
       app.build.status,
       app.views,
       app.theme,
-      this.menus.open === "versions",
+      this.menus.open,
       proposalCount,
       app.run.logs.filter((entry) => entry.level === "error").length,
       collapsed(app, this),
@@ -181,12 +182,12 @@ export class Workspace implements Page {
     const errors = app.run.logs.filter(
       (entry) => entry.level === "error",
     ).length;
-    const label = (id: ViewId, base: string) =>
+    const label = (id: ViewId) =>
       id === "changes" && proposalCount
-        ? `${base} · ${proposalCount} to review`
+        ? t.toReview(t.views[id], proposalCount)
         : id === "console" && errors
-          ? `${base} · ${errors} error${errors === 1 ? "" : "s"}`
-          : base;
+          ? t.errorCount(t.views[id], errors)
+          : t.views[id];
     const built = app.build.status === "ok";
     const failed = app.build.status === "failed";
     fill(
@@ -194,14 +195,14 @@ export class Workspace implements Page {
       topbar(
         app,
         this,
-        phoneBack("Apps", "#/new"),
+        phoneBack(t.apps, "#/new"),
         h("span", { class: "bc-topbar__divider le-desk" }),
         h("span", { class: "bc-crumb le-wide" }, project.name),
         h("span", { class: "bc-crumb le-wide" }, "/"),
         h(
           "span",
           { class: "bc-crumb--current le-desk le-crumb" },
-          activeChat(project).title,
+          t.stored(activeChat(project).title),
         ),
         h("span", { class: "le-grow le-phone" }),
         built &&
@@ -211,20 +212,20 @@ export class Workspace implements Page {
             status(
               "success",
               "check",
-              h("span", { class: "le-wide" }, "Built"),
+              h("span", { class: "le-wide" }, t.built),
             ),
           ),
         failed &&
           status(
             "destructive",
             "circle-x",
-            h("span", { class: "le-wide" }, "Build failed"),
+            h("span", { class: "le-wide" }, t.buildFailed),
           ),
         app.build.status === "building" &&
           status(
             "muted",
             "loader-circle",
-            h("span", { class: "le-wide" }, "Building"),
+            h("span", { class: "le-wide" }, t.building),
           ),
         h("span", { class: "bc-topbar__divider le-desk" }),
         h(
@@ -232,12 +233,12 @@ export class Workspace implements Page {
           {
             class: "le-row le-views-toggle",
             role: "group",
-            "aria-label": "Views",
+            "aria-label": t.viewsLabel,
           },
           VIEWS.map((view) =>
             iconButton(
               view.icon,
-              label(view.id, view.label),
+              label(view.id),
               () => app.toggleView(view.id),
               {
                 ghost: true,
@@ -251,7 +252,7 @@ export class Workspace implements Page {
           { class: "bc-menu-anchor le-desk" },
           iconButton(
             "history",
-            "Versions",
+            t.versions,
             (event) => this.menus.toggle("versions", event, 280),
             {
               ghost: true,
@@ -264,7 +265,7 @@ export class Workspace implements Page {
               {
                 class: "bc-menu le-menu",
                 role: "menu",
-                "aria-label": "Versions",
+                "aria-label": t.versions,
                 style: { ...this.menus.side(), width: "280px" },
               },
               [...project.versions].reverse().map((item) =>
@@ -286,7 +287,7 @@ export class Workspace implements Page {
                       class: "le-grow",
                       style: { overflow: "hidden", textOverflow: "ellipsis" },
                     },
-                    item.title,
+                    t.stored(item.title),
                   ),
                   h(
                     "span",
@@ -295,25 +296,22 @@ export class Workspace implements Page {
                   ),
                 ),
               ),
-              h(
-                "p",
-                { class: "le-menu-note" },
-                "Restoring keeps the newer versions",
-              ),
+              h("p", { class: "le-menu-note" }, t.restoringKeeps),
             ),
         ),
-        // On a phone the theme stays in Settings and New app; the bar keeps to the views.
+        // On a phone the language and theme stay in Settings and New app; the bar keeps to the views.
+        h("span", { class: "le-desk" }, languageMenu(app, this.menus)),
         h("span", { class: "le-desk" }, themeToggle(app)),
         h(
           "a",
           {
             class: "bc-button bc-button--outline bc-button--sm le-install",
             href: `#/app/${project.id}/install`,
-            "aria-label": "Install on device",
+            "aria-label": t.installOnDevice,
           },
           icon("upload"),
-          h("span", { class: "le-wide" }, "Install"),
-          tooltip("Install on device", "le-install-tip"),
+          h("span", { class: "le-wide" }, t.install),
+          tooltip(t.installOnDevice, "le-install-tip"),
         ),
       ),
     );

@@ -4,17 +4,18 @@ import type { App } from "../app/app";
 import { EXAMPLES } from "../app/templates";
 import { DEVICES, type Attachment, type DeviceId } from "../state/project";
 import { ago, fill, h, icon, size, svg, tooltip } from "./dom";
-import { MARK, SITE } from "./icons";
+import { MARK } from "./icons";
 import { readAttachment } from "./chat";
+import { lang, t } from "../i18n";
 import {
+  languageMenu,
   resolvedTheme,
+  siteLink,
   themeToggle,
   topbar,
   type Menus,
   type Page,
 } from "./shell";
-
-const IDEAS = ["Show the room temperature", "A kitchen timer with big digits"];
 
 export class NewApp implements Page {
   readonly el: HTMLElement;
@@ -38,8 +39,8 @@ export class NewApp implements Page {
       app.settings.device === "none" ? "round" : app.settings.device;
     this.textarea = h("textarea", {
       rows: 1,
-      placeholder: "A kitchen timer: big minutes and seconds, tap to start",
-      "aria-label": "Describe the app",
+      placeholder: t.describePlaceholder,
+      "aria-label": t.describeLabel,
       onInput: () => this.renderActions(),
       onKeyDown: (event: Event) => {
         const key = event as KeyboardEvent;
@@ -55,19 +56,19 @@ export class NewApp implements Page {
       h(
         "div",
         { class: "bc-list-head" },
-        h("span", { class: "bc-list-label" }, "Start from an example"),
+        h("span", { class: "bc-list-label" }, t.startFromExample),
       ),
-      EXAMPLES.map((example) =>
+      EXAMPLES.map((id) =>
         h(
           "button",
           {
             class: "bc-list-row",
             type: "button",
-            onClick: () => void this.start(example.id, ""),
+            onClick: () => void this.start(id, ""),
           },
           icon("app-window", "bc-muted"),
-          h("span", { class: "bc-option-title le-grow" }, example.title),
-          h("span", { class: "bc-small bc-muted" }, example.text),
+          h("span", { class: "bc-option-title le-grow" }, t.examples[id].title),
+          h("span", { class: "bc-small bc-muted" }, t.examples[id].text),
           icon("chevron-right", "bc-muted"),
         ),
       ),
@@ -91,11 +92,11 @@ export class NewApp implements Page {
               {
                 style: { display: "flex", flexDirection: "column", gap: "4px" },
               },
-              h("h1", { class: "bc-title", style: { margin: "0" } }, "New app"),
+              h("h1", { class: "bc-title", style: { margin: "0" } }, t.newApp),
               h(
                 "p",
                 { class: "bc-small bc-muted", style: { margin: "0" } },
-                "Say what the device should do. Barracuda writes the screen and the program, then runs them in the preview.",
+                t.newAppLead,
               ),
             ),
           ),
@@ -137,7 +138,7 @@ export class NewApp implements Page {
     } catch (error) {
       this.app.notify({
         tone: "error",
-        title: "The app could not be created",
+        title: t.createFailed,
         text: String(error),
       });
     } finally {
@@ -173,23 +174,23 @@ export class NewApp implements Page {
         "label",
         {
           class: "bc-button bc-button--ghost bc-button--icon",
-          "aria-label": "Add attachment",
+          "aria-label": t.addAttachment,
         },
         input,
         icon("paperclip"),
-        tooltip("Add attachment"),
+        tooltip(t.addAttachment),
       ),
       h(
         "button",
         {
           class: "bc-button bc-button--icon",
           type: "button",
-          "aria-label": "Send",
+          "aria-label": t.send,
           disabled: !this.textarea.value.trim(),
           onClick: () => void this.send(),
         },
         icon("arrow-up"),
-        tooltip("Send"),
+        tooltip(t.send),
       ),
     );
   }
@@ -221,14 +222,14 @@ export class NewApp implements Page {
                 {
                   class: "bc-icon-button bc-attachment__remove",
                   type: "button",
-                  "aria-label": "Remove attachment",
+                  "aria-label": t.removeAttachment,
                   onClick: () => {
                     this.attachments.splice(index, 1);
                     this.renderAttachments();
                   },
                 },
                 icon("x"),
-                tooltip("Remove attachment"),
+                tooltip(t.removeAttachment),
               ),
             ),
           ),
@@ -240,6 +241,7 @@ export class NewApp implements Page {
     const app = this.app;
     const theme = resolvedTheme(app.theme);
     const key = JSON.stringify([
+      lang,
       theme,
       app.theme,
       this.device,
@@ -258,15 +260,16 @@ export class NewApp implements Page {
           "a",
           {
             class: "bc-brand le-phone",
-            href: SITE,
-            "aria-label": "Barracuda website",
+            href: siteLink(),
+            "aria-label": t.website,
           },
           svg(MARK),
           h("span", { class: "bc-wordmark" }, "Barracuda"),
         ),
         h("span", { class: "bc-topbar__divider le-desk" }),
-        h("span", { class: "bc-crumb--current le-desk" }, "New app"),
+        h("span", { class: "bc-crumb--current le-desk" }, t.newApp),
         h("span", { class: "le-grow" }),
+        languageMenu(app, this.menus),
         themeToggle(app),
       ),
     );
@@ -282,7 +285,6 @@ export class NewApp implements Page {
         style: { maxWidth: "200px" },
       }),
     );
-    const device = DEVICES[this.device];
     fill(
       this.row,
       h(
@@ -294,13 +296,13 @@ export class NewApp implements Page {
             class: "bc-button bc-button--outline bc-button--sm",
             type: "button",
             "aria-haspopup": "menu",
-            "aria-label": "Preview device",
+            "aria-label": t.previewDevice,
             "aria-expanded": String(this.menus.open === "new-device"),
             onClick: (event: Event) =>
               this.menus.toggle("new-device", event, 240),
           },
           icon("cpu"),
-          device.label,
+          t.devices[this.device],
           icon("chevron-down"),
         ),
         this.menus.open === "new-device" &&
@@ -309,7 +311,7 @@ export class NewApp implements Page {
             {
               class: "bc-menu le-menu",
               role: "menu",
-              "aria-label": "Preview device",
+              "aria-label": t.previewDevice,
               style: { left: "0", right: "auto", minWidth: "240px" },
             },
             (["round", "square"] as DeviceId[]).map((id) =>
@@ -325,7 +327,7 @@ export class NewApp implements Page {
                     this.menus.close();
                   },
                 },
-                h("span", { class: "le-grow" }, DEVICES[id].label),
+                h("span", { class: "le-grow" }, t.devices[id]),
                 h(
                   "span",
                   { class: "bc-caption bc-muted bc-mono" },
@@ -335,7 +337,7 @@ export class NewApp implements Page {
             ),
           ),
       ),
-      IDEAS.map((idea) =>
+      t.ideas.map((idea) =>
         h(
           "button",
           {
@@ -357,7 +359,7 @@ export class NewApp implements Page {
       h(
         "div",
         { class: "bc-list-head" },
-        h("span", { class: "bc-list-label" }, "Your apps"),
+        h("span", { class: "bc-list-label" }, t.yourApps),
       ),
       apps.map((item) =>
         h(
@@ -373,7 +375,7 @@ export class NewApp implements Page {
         "a",
         { class: "bc-list-row", href: "#/settings" },
         icon("settings", "bc-muted"),
-        h("span", { class: "bc-option-title le-grow" }, "Settings"),
+        h("span", { class: "bc-option-title le-grow" }, t.settings),
         icon("chevron-right", "bc-muted"),
       ),
     );

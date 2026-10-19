@@ -1,6 +1,7 @@
 /** Builds DOM: the few helpers every Live Editor page uses. */
 
 import { ICONS, type IconName } from "./icons";
+import { t } from "../i18n";
 
 export type Child = Node | string | number | null | undefined | false;
 /** Children may nest arrays, as `map` produces them. */
@@ -181,10 +182,10 @@ export function size(bytes: number): string {
 /** How long ago `at` was, in the words a list shows. */
 export function ago(at: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 45) return "just now";
+  if (s < 45) return t.justNow;
   const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
+  if (m < 60) return t.minAgo(m);
   const hours = Math.round(m / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return new Date(at).toLocaleDateString();
+  if (hours < 24) return t.hoursAgo(hours);
+  return new Date(at).toLocaleDateString(t.tag);
 }

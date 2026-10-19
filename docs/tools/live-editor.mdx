@@ -172,6 +172,20 @@ sources, versions, chats, the proposal and the preview's storage), the
 settings, and each app's agent transcripts, kept apart because
 screenshots make them large.
 
+## Languages
+
+`src/i18n.ts` holds every word the page shows, in English and Simplified
+Chinese. The editor starts in the language the website's link passes as
+`?lang=`, else the one picked in its language menu (`le-lang` in
+`localStorage`), else the browser's first preferred English or Chinese. A new
+language mounts the page again in its words; the Install page instead relabels
+itself, so an open portal window stays linked.
+
+What goes to the model stays in English: tool results, and the notes the chat
+sends it, such as "You edited app.tsx". So do the titles the editor stores,
+such as "New chat" and "First version"; `t.stored` shows them in the reader's
+language.
+
 ## Tests
 
 ```sh
@@ -183,7 +197,8 @@ The Rust tests link the counter fixture and compare it with the committed
 `counter.bvir`, check `view:set`'s conversions and messages, and draw and tap
 the counter. The web tests cover the container and manifest rules against
 `build-app.ts`, the diff, versions and proposals, the portal handoff with a
-stand-in window, the zip, and the agent's tools and history. Once `dist/` is built, they
+stand-in window, the zip, the agent's tools and history, and the two
+languages. Once `dist/` is built, they
 also compile the system view and the counter example in memory, compare them
 with the committed `view.bvir` and `styles.bin`, and run the counter app in the preview: taps,
 saved state, `view:set` errors, and the stops for a busy program and a missed

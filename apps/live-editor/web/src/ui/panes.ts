@@ -4,6 +4,7 @@ import type { App } from "../app/app";
 import { hunks, type DiffRow } from "../state/diff";
 import { DEVICES, type DeviceId } from "../state/project";
 import { button, fill, h, icon, iconButton, status, type Child } from "./dom";
+import { t } from "../i18n";
 import type { Menus } from "./shell";
 
 /** A pane's frame: its bar and its body; the workspace places it and marks the first. */
@@ -44,7 +45,7 @@ export class PreviewPane implements Pane {
     private readonly app: App,
     private readonly menus: Menus,
   ) {
-    const parts = frame("Preview");
+    const parts = frame(t.views.preview);
     this.el = parts.el;
     this.bar = parts.bar;
     this.body = parts.body;
@@ -115,17 +116,17 @@ export class PreviewPane implements Pane {
     this.key = key;
 
     const badge = failed
-      ? h("span", { class: "bc-badge" }, "Last build")
+      ? h("span", { class: "bc-badge" }, t.lastBuild)
       : run.state === "active"
-        ? h("span", { class: "bc-badge bc-badge--signal" }, "Running")
+        ? h("span", { class: "bc-badge bc-badge--signal" }, t.badgeRunning)
         : run.state === "background"
-          ? h("span", { class: "bc-badge" }, "Background")
+          ? h("span", { class: "bc-badge" }, t.background)
           : run.state === "starting" || run.state === "idle"
-            ? h("span", { class: "bc-badge" }, "Starting")
-            : h("span", { class: "bc-badge" }, "Ended");
+            ? h("span", { class: "bc-badge" }, t.starting)
+            : h("span", { class: "bc-badge" }, t.ended);
     fill(
       this.bar,
-      h("span", { class: "bc-title le-pane-title" }, "Preview"),
+      h("span", { class: "bc-title le-pane-title" }, t.views.preview),
       device.display && badge,
       h("span", { class: "le-grow" }),
       h(
@@ -136,13 +137,13 @@ export class PreviewPane implements Pane {
           {
             class: "bc-button bc-button--outline bc-button--sm",
             type: "button",
-            "aria-label": "Preview device",
+            "aria-label": t.previewDevice,
             "aria-haspopup": "menu",
             "aria-expanded": String(this.menus.open === "device"),
             onClick: (event: Event) => this.menus.toggle("device", event, 240),
           },
           icon("cpu"),
-          h("span", { class: "le-wide" }, device.label),
+          h("span", { class: "le-wide" }, t.devices[project.device]),
           icon("chevron-down"),
         ),
         this.menus.open === "device" &&
@@ -151,7 +152,7 @@ export class PreviewPane implements Pane {
             {
               class: "bc-menu le-menu",
               role: "menu",
-              "aria-label": "Preview device",
+              "aria-label": t.previewDevice,
               style: { ...this.menus.side(), minWidth: "240px" },
             },
             (Object.keys(DEVICES) as DeviceId[]).map((id) =>
@@ -167,11 +168,11 @@ export class PreviewPane implements Pane {
                     app.setDevice(id);
                   },
                 },
-                h("span", { class: "le-grow" }, DEVICES[id].label),
+                h("span", { class: "le-grow" }, t.devices[id]),
                 h(
                   "span",
                   { class: "bc-mono bc-caption bc-muted" },
-                  DEVICES[id].size,
+                  id === "none" ? t.headless : DEVICES[id].size,
                 ),
               ),
             ),
@@ -183,7 +184,7 @@ export class PreviewPane implements Pane {
           {
             class: "bc-segmented bc-segmented--text",
             role: "group",
-            "aria-label": "Version",
+            "aria-label": t.versionLabel,
           },
           h(
             "button",
@@ -192,7 +193,7 @@ export class PreviewPane implements Pane {
               "aria-pressed": String(app.version === "before"),
               onClick: () => app.pickVersion("before"),
             },
-            "Before",
+            t.before,
           ),
           h(
             "button",
@@ -201,11 +202,13 @@ export class PreviewPane implements Pane {
               "aria-pressed": String(app.version === "after"),
               onClick: () => app.pickVersion("after"),
             },
-            "After",
+            t.after,
           ),
         ),
-      iconButton("rotate-ccw", "Restart app", () => app.restartApp()),
-      iconButton("x", "Close Preview", () => app.closeView("preview")),
+      iconButton("rotate-ccw", t.restartApp, () => app.restartApp()),
+      iconButton("x", t.closeView(t.views.preview), () =>
+        app.closeView("preview"),
+      ),
     );
 
     fill(
@@ -224,11 +227,11 @@ export class PreviewPane implements Pane {
             h(
               "span",
               { class: "bc-small le-grow" },
-              h("span", { class: "bc-alert__title" }, "Build failed"),
-              app.build.last ? " · running the last build" : "",
+              h("span", { class: "bc-alert__title" }, t.buildFailed),
+              app.build.last ? t.runningLastBuild : "",
             ),
             button(
-              "Show problem",
+              t.showProblem,
               () => {
                 const problem = app.build.problem;
                 app.openFile(problem?.file ?? "app.tsx", problem?.line);
@@ -246,13 +249,13 @@ export class PreviewPane implements Pane {
         h(
           "div",
           { class: "bc-empty" },
-          h("span", { class: "bc-title" }, "Needs a display"),
+          h("span", { class: "bc-title" }, t.needsDisplay),
           h(
             "span",
             { class: "bc-small bc-muted" },
-            `${project.name} has a view. Pick a device with a display to see it.`,
+            t.needsDisplayText(project.name),
           ),
-          button("Use Round 360", () => app.setDevice("round"), {
+          button(t.useRound, () => app.setDevice("round"), {
             kind: "outline",
             sm: true,
           }),
@@ -268,15 +271,11 @@ export class PreviewPane implements Pane {
             "span",
             { class: "bc-title" },
             run.state === "ended"
-              ? `${project.name} ended`
-              : `${project.name} runs headless`,
+              ? t.appEnded(project.name)
+              : t.runsHeadless(project.name),
           ),
-          h(
-            "span",
-            { class: "bc-small bc-muted" },
-            "It has no view. Its output is in the Console.",
-          ),
-          button("Open Console", () => app.show("console"), {
+          h("span", { class: "bc-small bc-muted" }, t.headlessText),
+          button(t.openConsole, () => app.show("console"), {
             kind: "outline",
             sm: true,
           }),
@@ -284,10 +283,7 @@ export class PreviewPane implements Pane {
       );
     } else {
       this.bezel.className = `le-bezel${device.display.round ? "" : " le-bezel--square"}`;
-      this.screen.setAttribute(
-        "aria-label",
-        `${project.name} on the preview device`,
-      );
+      this.screen.setAttribute("aria-label", t.onPreviewDevice(project.name));
       const away = run.state === "background" || run.state === "ended";
       this.canvas.style.visibility =
         run.state === "active" || (run.state === "starting" && app.frame)
@@ -301,8 +297,8 @@ export class PreviewPane implements Pane {
             "span",
             { class: "le-screen-text" },
             app.build.status === "failed" && !app.build.last
-              ? "Build failed"
-              : "Starting",
+              ? t.buildFailed
+              : t.starting,
           ),
         ],
         away && [
@@ -310,8 +306,8 @@ export class PreviewPane implements Pane {
             "span",
             { class: "le-screen-text" },
             run.state === "background"
-              ? `${project.name} is in the background`
-              : (run.reason ?? `${project.name} ended`),
+              ? t.inBackground(project.name)
+              : (run.reason ?? t.appEnded(project.name)),
           ),
           h(
             "button",
@@ -323,7 +319,7 @@ export class PreviewPane implements Pane {
                   ? app.lifecycle("foreground")
                   : app.restartApp(),
             },
-            run.state === "background" ? "Open" : "Start",
+            run.state === "background" ? t.open : t.start,
           ),
         ],
         run.question &&
@@ -347,7 +343,7 @@ export class PreviewPane implements Pane {
                   type: "button",
                   onClick: () => app.answer(false),
                 },
-                run.question.deny || "Deny",
+                run.question.deny || t.deny,
               ),
               h(
                 "button",
@@ -356,7 +352,7 @@ export class PreviewPane implements Pane {
                   type: "button",
                   onClick: () => app.answer(true),
                 },
-                run.question.allow || "Allow",
+                run.question.allow || t.allow,
               ),
             ),
           ),
@@ -368,23 +364,23 @@ export class PreviewPane implements Pane {
     const live = run.state === "active" && !!device.display;
     fill(
       this.footer,
-      button("Back", () => app.lifecycle("back"), {
+      button(t.back, () => app.lifecycle("back"), {
         kind: "outline",
         sm: true,
         disabled: !live || run.depth === 0,
       }),
-      button("Background", () => app.lifecycle("background"), {
+      button(t.background, () => app.lifecycle("background"), {
         kind: "outline",
         sm: true,
         disabled: !live,
       }),
-      button("Terminate", () => app.lifecycle("terminate"), {
+      button(t.terminate, () => app.lifecycle("terminate"), {
         kind: "outline",
         sm: true,
         disabled: run.state === "ended" || run.state === "idle",
       }),
       h("span", { class: "le-grow" }),
-      button("Reset storage", () => app.resetStorage(), {
+      button(t.resetStorage, () => app.resetStorage(), {
         kind: "ghost",
         sm: true,
       }),
@@ -418,7 +414,7 @@ export class ChangesPane implements Pane {
   private key = "";
 
   constructor(private readonly app: App) {
-    const parts = frame("Changes");
+    const parts = frame(t.views.changes);
     this.el = parts.el;
     this.bar = parts.bar;
     this.body = parts.body;
@@ -440,26 +436,28 @@ export class ChangesPane implements Pane {
       h(
         "span",
         { class: "le-bar-text le-pane-title" },
-        h("span", { class: "bc-title" }, "Changes"),
+        h("span", { class: "bc-title" }, t.views.changes),
         proposal &&
           h(
             "span",
             { class: "bc-caption bc-muted" },
             h("span", { class: "bc-mono" }, String(summary.length)),
-            ` file${summary.length === 1 ? "" : "s"} · `,
+            t.files(summary.length),
             h("span", { class: "bc-mono bc-success" }, `+${add}`),
             " ",
             h("span", { class: "bc-mono bc-destructive" }, `−${del}`),
           ),
       ),
       proposal &&
-        button("Discard", () => app.discardChanges(), {
+        button(t.discard, () => app.discardChanges(), {
           kind: "outline",
           sm: true,
         }),
       proposal &&
-        button("Apply", () => app.applyChanges(), { sm: true, icon: "check" }),
-      iconButton("x", "Close Changes", () => app.closeView("changes")),
+        button(t.apply, () => app.applyChanges(), { sm: true, icon: "check" }),
+      iconButton("x", t.closeView(t.views.changes), () =>
+        app.closeView("changes"),
+      ),
     );
     if (!proposal) {
       fill(
@@ -470,12 +468,8 @@ export class ChangesPane implements Pane {
             class: "bc-empty",
             style: { flex: "1 1 auto", justifyContent: "center" },
           },
-          h("span", { class: "bc-title" }, "Nothing to review"),
-          h(
-            "span",
-            { class: "bc-small bc-muted" },
-            "Changes Barracuda proposes wait here until you apply them.",
-          ),
+          h("span", { class: "bc-title" }, t.nothingToReview),
+          h("span", { class: "bc-small bc-muted" }, t.nothingToReviewText),
         ),
       );
       return;
@@ -509,9 +503,9 @@ export class ChangesPane implements Pane {
                 { class: "bc-tool__name le-grow" },
                 file.name,
                 after === null
-                  ? " (deleted)"
+                  ? t.deleted
                   : !(file.name in project.files)
-                    ? " (new)"
+                    ? t.added
                     : "",
               ),
               file.add > 0 &&
@@ -560,7 +554,7 @@ export class ConsolePane implements Pane {
   private key = "";
 
   constructor(private readonly app: App) {
-    const parts = frame("Console");
+    const parts = frame(t.views.console);
     this.el = parts.el;
     this.bar = parts.bar;
     this.body = parts.body;
@@ -585,23 +579,19 @@ export class ConsolePane implements Pane {
     const shown = logs.filter(
       (entry) => this.level === "all" || entry.level === this.level,
     );
-    const levels: [typeof this.level, string][] = [
-      ["all", "All"],
-      ["warn", "Warnings"],
-      ["error", "Errors"],
-    ];
+    const levels = ["all", "warn", "error"] as const;
     fill(
       this.bar,
-      h("span", { class: "bc-title le-pane-title" }, "Console"),
+      h("span", { class: "bc-title le-pane-title" }, t.views.console),
       h("span", { class: "le-grow" }),
       h(
         "div",
         {
           class: "bc-segmented bc-segmented--text",
           role: "group",
-          "aria-label": "Level",
+          "aria-label": t.level,
         },
-        levels.map(([id, label]) =>
+        levels.map((id) =>
           h(
             "button",
             {
@@ -612,7 +602,7 @@ export class ConsolePane implements Pane {
                 this.update();
               },
             },
-            label,
+            t.levels[id],
             h(
               "span",
               { class: "bc-mono bc-muted", style: { marginLeft: "6px" } },
@@ -621,15 +611,17 @@ export class ConsolePane implements Pane {
           ),
         ),
       ),
-      iconButton("ban", "Clear console", () => app.clearLog()),
-      iconButton("x", "Close Console", () => app.closeView("console")),
+      iconButton("ban", t.clearConsole, () => app.clearLog()),
+      iconButton("x", t.closeView(t.views.console), () =>
+        app.closeView("console"),
+      ),
     );
     const entry = project.files["app.json"]
       ? (JSON.parse(project.files["app.json"]) as { entry?: string }).entry
       : undefined;
     const log = h(
       "ol",
-      { class: "le-logs", "aria-label": "Console output" },
+      { class: "le-logs", "aria-label": t.consoleOutput },
       shown.map((item) =>
         h(
           "li",
@@ -642,7 +634,7 @@ export class ConsolePane implements Pane {
         ),
       ),
     );
-    const copyLabel = this.copied ? "Copied" : "Copy output";
+    const copyLabel = this.copied ? t.copied : t.copyOutput;
     fill(
       this.body,
       h(
@@ -675,11 +667,7 @@ export class ConsolePane implements Pane {
           ),
           shown.length
             ? log
-            : h(
-                "pre",
-                { class: "bc-window__code bc-muted" },
-                "No console output.",
-              ),
+            : h("pre", { class: "bc-window__code bc-muted" }, t.noOutput),
         ),
         h(
           "div",

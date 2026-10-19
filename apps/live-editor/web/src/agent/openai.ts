@@ -6,6 +6,7 @@
 
 import type { Attachment } from "../state/project";
 import type { Service, StepResult } from "./service";
+import { t } from "../i18n";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -224,16 +225,12 @@ export function openai(
 
     describe(error) {
       if (error instanceof ServiceError) {
-        if (error.status === 401 || error.status === 403)
-          return "The model service did not accept the API key. Check it in Settings.";
-        if (error.status === 404)
-          return `The model service has no ${url}, or no model ${model}. Check Settings.`;
-        if (error.status === 429)
-          return "The model service is rate limiting this key. Wait a moment and send again.";
-        return `The model service failed (${error.status}): ${error.message}`;
+        if (error.status === 401 || error.status === 403) return t.openai.auth;
+        if (error.status === 404) return t.openai.notFound(url, model);
+        if (error.status === 429) return t.openai.rateLimit;
+        return t.openai.failed(error.status, error.message);
       }
-      if (error instanceof TypeError)
-        return "Could not reach the model service. Check the base URL, and that it allows requests from this page.";
+      if (error instanceof TypeError) return t.openai.connection;
       return error instanceof Error ? error.message : String(error);
     },
   };

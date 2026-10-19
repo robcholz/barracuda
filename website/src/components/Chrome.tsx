@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Copy } from "@/content/en";
-import { EDITOR, GITHUB, docs, install, page } from "@/lib/links";
+import { GITHUB, docs, editor, install, page } from "@/lib/links";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
 
@@ -102,7 +102,7 @@ export function Chrome({
           >
             {copy.nav.boards}
           </a>
-          <a className="bc-button bc-button--ghost bc-button--sm" href={EDITOR}>
+          <a className="bc-button bc-button--ghost bc-button--sm" href={editor(lang)}>
             {copy.nav.editor}
           </a>
           <a

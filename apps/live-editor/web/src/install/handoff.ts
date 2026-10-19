@@ -15,7 +15,8 @@ export type Failure =
   | { kind: "blocked" }
   | { kind: "silent" }
   | { kind: "refused" }
-  | { kind: "device"; message: string };
+  /** The device's own words, when it gave any. */
+  | { kind: "device"; message?: string };
 
 /** An app as the portal takes it: its manifest's fields and its container's files. */
 export interface Offer {
@@ -169,10 +170,7 @@ export class Handoff {
       case "failed":
         return this.set("failed", {
           kind: "device",
-          message:
-            typeof data.message === "string"
-              ? data.message
-              : "The device could not write the app",
+          message: typeof data.message === "string" ? data.message : undefined,
         });
     }
   }

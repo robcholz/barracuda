@@ -8,6 +8,9 @@ import { SettingsPage } from "./ui/settings";
 import { Workspace } from "./ui/workspace";
 import { floatTooltips } from "./ui/tooltips";
 import { attachAgent } from "./agent/agent";
+import { startLang } from "./i18n";
+
+startLang();
 
 const base = new URL("./", import.meta.url);
 const app = new App(base);
@@ -19,9 +22,9 @@ new Shell(app, root, (shell) => {
     case "app":
       return new Workspace(app, shell.menus);
     case "install":
-      return new InstallPage(app);
+      return new InstallPage(app, shell.menus);
     case "settings":
-      return new SettingsPage(app);
+      return new SettingsPage(app, shell.menus);
     default:
       return new NewApp(app, shell.menus);
   }

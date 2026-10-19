@@ -58,6 +58,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { App } from "../app/app";
+import { t } from "../i18n";
 import { required } from "../state/project";
 import { button, fill, h, icon, iconButton, status } from "./dom";
 import type { Pane } from "./panes";
@@ -152,7 +153,7 @@ export class CodePane implements Pane {
     this.view = new EditorView({ parent: this.host });
     this.el = h(
       "section",
-      { class: "bc-pane le-view", "aria-label": "Code" },
+      { class: "bc-pane le-view", "aria-label": t.views.code },
       this.bar,
       this.rename,
       this.find,
@@ -199,7 +200,7 @@ export class CodePane implements Pane {
           if (!update.docChanged || this.applying) return;
           this.app.edit(this.file, update.state.doc.toString());
         }),
-        EditorView.contentAttributes.of({ "aria-label": `Code of ${name}` }),
+        EditorView.contentAttributes.of({ "aria-label": t.codeOf(name) }),
       ],
     });
   }
@@ -333,7 +334,7 @@ export class CodePane implements Pane {
           {
             class: "bc-button bc-button--outline bc-button--sm",
             type: "button",
-            "aria-label": `File: ${file}`,
+            "aria-label": t.fileLabel(file),
             "aria-haspopup": "menu",
             "aria-expanded": String(this.menus.open === "code-files"),
             onClick: (event: Event) =>
@@ -349,7 +350,7 @@ export class CodePane implements Pane {
             {
               class: "bc-menu le-menu",
               role: "menu",
-              "aria-label": "Files",
+              "aria-label": t.filesLabel,
               style: { ...this.menus.side(), minWidth: "220px" },
             },
             names.map((name) =>
@@ -370,7 +371,7 @@ export class CodePane implements Pane {
                   h(
                     "span",
                     { class: "bc-caption bc-destructive" },
-                    "1 problem",
+                    t.oneProblem,
                   ),
               ),
             ),
@@ -383,23 +384,23 @@ export class CodePane implements Pane {
           ? status(
               "destructive",
               "circle-alert",
-              h("span", { class: "le-wide" }, "1 problem"),
+              h("span", { class: "le-wide" }, t.oneProblem),
             )
           : app.build.status === "building"
             ? status(
                 "muted",
                 "loader-circle",
-                h("span", { class: "le-wide" }, "Building"),
+                h("span", { class: "le-wide" }, t.building),
               )
             : status(
                 "success",
                 "check",
-                h("span", { class: "le-wide" }, "No problems"),
+                h("span", { class: "le-wide" }, t.noProblems),
               ),
       ),
       iconButton(
         "search",
-        "Find in file",
+        t.findInFile,
         () => (this.finding ? this.closeFind() : this.openFind()),
         { pressed: this.finding },
       ),
@@ -408,7 +409,7 @@ export class CodePane implements Pane {
         { class: "bc-menu-anchor" },
         iconButton(
           "ellipsis",
-          "More actions",
+          t.moreActions,
           (event) => this.menus.toggle("code-more", event, 200),
           { expanded: this.menus.open === "code-more" },
         ),
@@ -418,7 +419,7 @@ export class CodePane implements Pane {
             {
               class: "bc-menu le-menu",
               role: "menu",
-              "aria-label": "File actions",
+              "aria-label": t.fileActions,
               style: { ...this.menus.side(), minWidth: "200px" },
             },
             h(
@@ -436,7 +437,7 @@ export class CodePane implements Pane {
                 },
               },
               icon("file-plus"),
-              "New file",
+              t.newFile,
             ),
             h(
               "button",
@@ -454,7 +455,7 @@ export class CodePane implements Pane {
                 },
               },
               icon("pencil"),
-              "Rename",
+              t.rename,
             ),
             h(
               "button",
@@ -468,14 +469,13 @@ export class CodePane implements Pane {
                 },
               },
               icon("trash-2"),
-              "Delete file",
+              t.deleteFile,
             ),
             locked &&
               h(
                 "p",
                 { class: "le-menu-note" },
-                `${project.name} needs `,
-                h("span", { class: "bc-mono" }, file),
+                t.needs(project.name, h("span", { class: "bc-mono" }, file)),
               ),
           ),
         this.menus.open === "code-delete" &&
@@ -495,13 +495,12 @@ export class CodePane implements Pane {
               h(
                 "span",
                 { id: "le-delete-title", class: "bc-option-title" },
-                "Delete this file?",
+                t.deleteTitle,
               ),
               h(
                 "span",
                 { class: "bc-small bc-muted" },
-                h("span", { class: "bc-mono" }, file),
-                " leaves the app. Versions keep a copy.",
+                t.deleteText(h("span", { class: "bc-mono" }, file)),
               ),
             ),
             h(
@@ -513,12 +512,12 @@ export class CodePane implements Pane {
                   gap: "8px",
                 },
               },
-              button("Cancel", () => this.menus.close(), {
+              button(t.cancel, () => this.menus.close(), {
                 kind: "outline",
                 sm: true,
               }),
               button(
-                "Delete file",
+                t.deleteFile,
                 () => {
                   this.menus.close();
                   this.states.delete(file);
@@ -530,7 +529,7 @@ export class CodePane implements Pane {
             ),
           ),
       ),
-      iconButton("x", "Close Code", () => app.closeView("code")),
+      iconButton("x", t.closeView(t.views.code), () => app.closeView("code")),
     );
 
     fill(
@@ -567,7 +566,7 @@ export class CodePane implements Pane {
               h(
                 "span",
                 { class: "bc-label" },
-                this.newFile ? "File name" : "New name",
+                this.newFile ? t.fileName : t.newName,
               ),
               h("input", {
                 class: "bc-input bc-input--mono",
@@ -593,7 +592,7 @@ export class CodePane implements Pane {
               "span",
               { class: "le-row" },
               button(
-                "Cancel",
+                t.cancel,
                 () => {
                   this.renaming = null;
                   this.key = "";
@@ -601,7 +600,7 @@ export class CodePane implements Pane {
                 },
                 { kind: "outline" },
               ),
-              button(this.newFile ? "Add file" : "Rename", () => {}, {
+              button(this.newFile ? t.addFile : t.rename, () => {}, {
                 type: "submit",
               }),
             ),
@@ -622,7 +621,7 @@ export class CodePane implements Pane {
             h("input", {
               class: "bc-input bc-input--mono",
               type: "text",
-              "aria-label": "Find in file",
+              "aria-label": t.findInFile,
               value: this.query,
               onInput: (event: Event) => {
                 this.query = (event.target as HTMLInputElement).value;
@@ -650,11 +649,11 @@ export class CodePane implements Pane {
             { class: "bc-mono bc-caption bc-muted le-find-count" },
             this.findLabel(this.matches()),
           ),
-          iconButton("chevron-up", "Previous match", () => {
+          iconButton("chevron-up", t.previousMatch, () => {
             findPrevious(this.view);
             this.refreshFind();
           }),
-          iconButton("chevron-down", "Next match", () => {
+          iconButton("chevron-down", t.nextMatch, () => {
             findNext(this.view);
             this.refreshFind();
           }),
@@ -669,12 +668,12 @@ export class CodePane implements Pane {
           { class: "bc-pane__section le-pad" },
           h(
             "section",
-            { class: "bc-card", "aria-label": "Problem" },
+            { class: "bc-card", "aria-label": t.problem },
             h(
               "div",
               { class: "bc-card__head" },
               icon("circle-alert", "bc-destructive"),
-              h("h3", { class: "bc-title le-grow" }, "Build failed"),
+              h("h3", { class: "bc-title le-grow" }, t.buildFailed),
               problem.file &&
                 h(
                   "button",
@@ -694,8 +693,8 @@ export class CodePane implements Pane {
               "div",
               { class: "bc-card__foot" },
               button(
-                "Ask Barracuda to fix",
-                () => this.onAsk(`Fix the build: ${problem.message}`),
+                t.askToFix,
+                () => this.onAsk(t.fixTheBuild(problem.message)),
                 { kind: "outline", sm: true },
               ),
             ),
@@ -708,7 +707,7 @@ export class CodePane implements Pane {
 
   private findLabel(found: { count: number; index: number }) {
     if (!this.query) return "";
-    return found.count ? `${found.index || 1} of ${found.count}` : "No matches";
+    return found.count ? t.matchOf(found.index || 1, found.count) : t.noMatches;
   }
 
   private refreshFind() {
